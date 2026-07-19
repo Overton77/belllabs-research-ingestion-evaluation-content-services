@@ -258,6 +258,7 @@ class TerminalizationProposal(Contract):
     accepted_obligation_evidence_digest: str = Field(pattern=DIGEST_PATTERN)
     proposing_execution_binding_ref: str = Field(min_length=1)
     required_obligations_accepted: bool
+    execution_failure_refs: tuple[str, ...] = ()
     degradable_failures: tuple[str, ...] = ()
     valid_output_refs: tuple[str, ...] = ()
     cancellation_settled: bool = False
