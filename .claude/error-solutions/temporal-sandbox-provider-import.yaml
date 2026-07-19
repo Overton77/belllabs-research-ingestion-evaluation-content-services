@@ -1,0 +1,22 @@
+id: temporal-sandbox-provider-public-import
+created: "2026-07-18"
+updated: "2026-07-18"
+error:
+  type: dependency
+  category: import-error
+  pattern: "cannot import name SandboxClientProvider from temporalio.contrib.openai_agents.sandbox"
+  context: "Temporal OpenAI Agents worker"
+diagnosis:
+  root_cause: "The public symbol is re-exported from temporalio.contrib.openai_agents, not its sandbox package."
+solution:
+  immediate:
+    - "Import SandboxClientProvider from temporalio.contrib.openai_agents."
+verification:
+  - "python -m app.temporal.worker"
+prevention:
+  - "Use public package exports instead of private or empty subpackage namespaces."
+metadata:
+  occurrences: 1
+  last_resolved: "2026-07-18"
+  success_rate: 1.0
+  tags: [python, temporal, openai-agents, sandbox]

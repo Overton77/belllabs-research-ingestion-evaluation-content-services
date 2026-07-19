@@ -1,0 +1,25 @@
+id: openai-agents-openai-client-usage-schema
+created: "2026-07-18"
+updated: "2026-07-18"
+error:
+  type: dependency
+  category: validation-error
+  pattern: "InputTokensDetails cache_write_tokens Field required"
+  context: "openai-agents 0.17.8 with openai 2.46.0"
+diagnosis:
+  root_cause: "The OpenAI client added a required usage field before the Agents SDK default factory adapted."
+solution:
+  immediate:
+    - "Pin openai>=2.36,<2.45; openai 2.44.0 is the newest tested compatible version."
+  proper:
+    - "Remove the upper pin after upgrading to an Agents SDK release that supplies cache_write_tokens."
+verification:
+  - "Construct agents.RunContextWrapper in a unit test."
+  - "Run one bounded Temporal Agents SDK workflow."
+prevention:
+  - "Keep a zero-network construction test for the usage context."
+metadata:
+  occurrences: 1
+  last_resolved: "2026-07-18"
+  success_rate: 1.0
+  tags: [openai, agents-sdk, pydantic, temporal]

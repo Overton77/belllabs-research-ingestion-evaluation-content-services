@@ -1,0 +1,22 @@
+id: python-inline-async-def-syntax
+created: "2026-07-18"
+updated: "2026-07-18"
+error:
+  type: syntax
+  category: python-inline-command
+  pattern: "SyntaxError at async def after semicolon"
+  context: "Socket.IO smoke check"
+diagnosis:
+  root_cause: "Python compound statements cannot follow a semicolon in a one-line -c command."
+solution:
+  immediate:
+    - "Move the async smoke test into a normal Python module."
+verification:
+  - "python scripts/socketio_smoke.py"
+prevention:
+  - "Use checked-in scripts for multi-line asynchronous smoke tests."
+metadata:
+  occurrences: 1
+  last_resolved: "2026-07-18"
+  success_rate: 1.0
+  tags: [python, asyncio, socketio]

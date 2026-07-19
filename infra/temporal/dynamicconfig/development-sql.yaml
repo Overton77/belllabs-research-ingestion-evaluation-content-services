@@ -1,0 +1,4 @@
+# PRE-EMPTIVE SETUP: small local-development defaults from Temporal's SQL examples.
+system.forceSearchAttributesCacheRefreshOnRead:
+  - value: true
+    constraints: {}

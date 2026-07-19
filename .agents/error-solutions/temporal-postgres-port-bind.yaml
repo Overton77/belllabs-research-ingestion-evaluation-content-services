@@ -1,0 +1,23 @@
+id: temporal-postgres-host-port-bind-windows
+created: "2026-07-18"
+updated: "2026-07-18"
+error:
+  type: configuration
+  category: port-bind
+  pattern: "ports are not available: exposing port TCP 127.0.0.1:{port}"
+  context: "Temporal-only PostgreSQL in Docker Desktop on Windows"
+diagnosis:
+  root_cause: "The chosen host port was unavailable and no host process required it."
+solution:
+  immediate:
+    - "Remove the host port mapping and expose PostgreSQL only to the Compose network."
+verification:
+  - "docker compose up -d"
+  - "docker compose ps"
+prevention:
+  - "Do not publish infrastructure database ports unless a host client needs them."
+metadata:
+  occurrences: 1
+  last_resolved: "2026-07-18"
+  success_rate: 1.0
+  tags: [docker, postgres, windows, security]

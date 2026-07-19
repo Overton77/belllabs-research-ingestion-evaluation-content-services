@@ -1,0 +1,25 @@
+id: temporal-agents-max-turns-workflow-task-retry
+created: "2026-07-18"
+updated: "2026-07-18"
+error:
+  type: runtime
+  category: durable-workflow-retry
+  pattern: "agents.exceptions.MaxTurnsExceeded causes repeated Temporal workflow task failure"
+  context: "Bounded Agents SDK sandbox probe"
+diagnosis:
+  root_cause: "An uncaught agent budget exception failed the workflow task instead of the workflow."
+solution:
+  immediate:
+    - "Terminate the exact bootstrap workflow."
+  proper:
+    - "Catch MaxTurnsExceeded and raise a non-retryable Temporal application failure."
+verification:
+  - "Unit/lint validation of the workflow module."
+  - "A later explicit probe should fail once rather than remain Running."
+prevention:
+  - "Translate bounded agent-loop exceptions at the durable workflow boundary."
+metadata:
+  occurrences: 1
+  last_resolved: "2026-07-18"
+  success_rate: 1.0
+  tags: [temporal, openai-agents, retry, budget]

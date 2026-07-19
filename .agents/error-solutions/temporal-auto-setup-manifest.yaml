@@ -1,0 +1,27 @@
+id: temporal-auto-setup-manifest-unknown
+created: "2026-07-18"
+updated: "2026-07-18"
+error:
+  type: dependency
+  category: container-image
+  pattern: "manifest for temporalio/auto-setup:{patch-version} not found"
+  context: "Temporal Docker Compose local bootstrap"
+diagnosis:
+  root_cause: "Temporal server GitHub releases and auto-setup Docker tags are not published in lockstep."
+  factors:
+    - "The server release existed, but its auto-setup image tag did not."
+solution:
+  immediate:
+    - "Replace removed auto-setup with server plus the official explicit schema-setup job."
+  proper:
+    - "Follow temporalio/samples-server: admin-tools initializes schemas, then temporalio/server starts."
+verification:
+  - "docker compose pull"
+  - "docker compose up -d"
+prevention:
+  - "Keep the official samples-server Compose versions together as a tested set."
+metadata:
+  occurrences: 2
+  last_resolved: "2026-07-18"
+  success_rate: 1.0
+  tags: [docker, temporal, dependency]
