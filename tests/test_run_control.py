@@ -496,6 +496,50 @@ async def test_budget_dimensions_enforce_hard_caps_and_cancellation_waits_for_se
 
 
 @pytest.mark.asyncio
+async def test_typed_execution_failure_terminalizes_as_failed() -> None:
+    run_service, _repository = service()
+    admitted = await run_service.admit(request(request_id="execution-failure"))
+    assert admitted.run_id is not None
+    run_id = admitted.run_id
+    await run_service.execute(command(run_id, 1, "start-failure-run", StartAction()))
+    await run_service.execute(
+        command(
+            run_id,
+            2,
+            "release-failure-baseline",
+            RecordUsageAction(
+                usage_id="failure-baseline-release",
+                reservation_id="baseline",
+                actual_amounts={},
+                release_amounts={"tokens.total": 20},
+            ),
+        )
+    )
+    terminal = await run_service.execute(
+        command(
+            run_id,
+            3,
+            "terminalize-execution-failure",
+            TerminalizeAction(
+                proposal=TerminalizationProposal(
+                    proposal_id="terminal-execution-failure",
+                    obligation_revision="obligations:1",
+                    evidence_frontier_digest=INITIAL_EVIDENCE_FRONTIER,
+                    accepted_obligation_evidence_digest=EMPTY_EVIDENCE_DIGEST,
+                    proposing_execution_binding_ref="execution:stagegraph",
+                    required_obligations_accepted=True,
+                    execution_failure_refs=("evaluation:workflow:failed",),
+                    budget_settled=True,
+                    proposed_at=NOW,
+                )
+            ),
+        )
+    )
+    assert terminal.status == CommandStatus.ACCEPTED
+    assert terminal.terminal_outcome == RunOutcome.FAILED
+
+
+@pytest.mark.asyncio
 async def test_outbox_consumers_deduplicate_detect_gaps_and_recover_in_order() -> None:
     run_service, _repository = service()
     admitted = await run_service.admit(request())

@@ -181,11 +181,77 @@ class WorkflowWorkspaceContract(Contract):
         return self
 
 
+class StageCyclePolicy(Contract):
+    """Application-authored bounds for semantic rework of one stage."""
+
+    max_cycles: int = Field(ge=1)
+    evaluation_contract_ref: str = Field(min_length=1)
+    objective_contract_ref: str = Field(min_length=1)
+    reservation: dict[str, int] = Field(default_factory=dict)
+
+    @field_validator("reservation")
+    @classmethod
+    def validate_reservation(cls, value: dict[str, int]) -> dict[str, int]:
+        if any(not dimension or amount < 0 for dimension, amount in value.items()):
+            raise ValueError("stage cycle reservations require names and non-negative amounts")
+        if value.get("stage.cycles", 0) < 1:
+            raise ValueError("stage cycle reservations require at least one stage.cycles unit")
+        return value
+
+
+class WorkflowCyclePolicy(Contract):
+    """Bounds whole-workflow evaluation without adding dependency back-edges."""
+
+    max_cycles: int = Field(ge=1)
+    evaluation_contract_ref: str = Field(min_length=1)
+    objective_contract_ref: str = Field(min_length=1)
+    reservation: dict[str, int] = Field(default_factory=dict)
+
+    @field_validator("reservation")
+    @classmethod
+    def validate_reservation(cls, value: dict[str, int]) -> dict[str, int]:
+        if any(not dimension or amount < 0 for dimension, amount in value.items()):
+            raise ValueError("workflow cycle reservations require names and non-negative amounts")
+        if value.get("workflow.cycles", 0) < 1:
+            raise ValueError(
+                "workflow cycle reservations require at least one workflow.cycles unit"
+            )
+        return value
+
+
 class StageNode(Contract):
     stage_id: str = Field(pattern=r"^[a-z][a-z0-9_-]*$")
     depends_on: frozenset[str] = Field(default_factory=frozenset)
+    dependency_classes: dict[str, Literal["required", "degradable", "optional", "advisory"]] = (
+        Field(default_factory=dict)
+    )
+    join_policy: Literal["all", "any", "minimum"] = "all"
+    minimum_dependencies: int | None = Field(default=None, ge=1)
+    completion_class: Literal["required", "degradable", "optional", "advisory"] = "required"
+    skip_policy: Literal["never", "when_dependencies_unsatisfied"] = "never"
+    fairness_group: str = Field(default="default", pattern=r"^[a-z][a-z0-9_-]*$")
+    fairness_priority: int = Field(default=0, ge=0)
+    concurrency_slots: int = Field(default=1, ge=1)
+    reservation: dict[str, int] = Field(default_factory=dict)
+    stage_cycle_policy: StageCyclePolicy | None = None
+    obligation_refs: frozenset[str] = Field(default_factory=frozenset)
     output_slots: frozenset[str] = Field(default_factory=frozenset)
     variant_names: frozenset[str] = Field(default_factory=frozenset)
+
+    @model_validator(mode="after")
+    def validate_execution_policy(self) -> StageNode:
+        if not set(self.dependency_classes) <= self.depends_on:
+            raise ValueError("dependency classes may reference only declared dependencies")
+        if self.join_policy == "minimum":
+            if self.minimum_dependencies is None:
+                raise ValueError("minimum joins require minimum_dependencies")
+            if self.minimum_dependencies > len(self.depends_on):
+                raise ValueError("minimum_dependencies exceeds declared dependencies")
+        elif self.minimum_dependencies is not None:
+            raise ValueError("minimum_dependencies is valid only for minimum joins")
+        if any(not dimension or amount < 0 for dimension, amount in self.reservation.items()):
+            raise ValueError("stage reservations require names and non-negative amounts")
+        return self
 
 
 class StageGraphBlueprint(DefinitionBase):
@@ -193,6 +259,9 @@ class StageGraphBlueprint(DefinitionBase):
     family: Literal["StageGraph"] = "StageGraph"
     stages: tuple[StageNode, ...] = Field(min_length=1)
     declared_output_slots: frozenset[str] = Field(default_factory=frozenset)
+    max_parallel_stages: int = Field(default=1, ge=1)
+    workflow_evaluation_contract_ref: str | None = Field(default=None, min_length=1)
+    workflow_cycle_policy: WorkflowCyclePolicy | None = None
 
     @model_validator(mode="after")
     def validate_graph(self) -> StageGraphBlueprint:
@@ -203,6 +272,10 @@ class StageGraphBlueprint(DefinitionBase):
         for stage in self.stages:
             if stage.stage_id in stage.depends_on or not stage.depends_on <= known:
                 raise ValueError(f"stage {stage.stage_id} has an invalid dependency")
+            if stage.concurrency_slots > self.max_parallel_stages:
+                raise ValueError(
+                    f"stage {stage.stage_id} concurrency slots exceed the graph ceiling"
+                )
             if not stage.output_slots <= self.declared_output_slots:
                 raise ValueError(f"stage {stage.stage_id} uses an undeclared output slot")
         visiting: set[str] = set()
@@ -222,6 +295,15 @@ class StageGraphBlueprint(DefinitionBase):
 
         for stage_id in ids:
             visit(stage_id)
+        if (
+            self.workflow_cycle_policy is not None
+            and self.workflow_evaluation_contract_ref is not None
+            and self.workflow_cycle_policy.evaluation_contract_ref
+            != self.workflow_evaluation_contract_ref
+        ):
+            raise ValueError(
+                "workflow cycle policy must use the frozen workflow evaluation contract"
+            )
         return self
 
 

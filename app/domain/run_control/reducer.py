@@ -697,6 +697,8 @@ def _terminal_outcome(
         if not proposal.cancellation_settled:
             raise ReductionRejected("cancellation_not_settled", "cancellation effects remain")
         return RunOutcome.CANCELLED
+    if proposal.execution_failure_refs:
+        return RunOutcome.FAILED
     if not proposal.required_obligations_accepted:
         return RunOutcome.FAILED
     if proposal.degradable_failures:
