@@ -1,10 +1,176 @@
+# -------------------------------
+# Python & FastAPI Backend Ignore
+# -------------------------------
+
+# Environment variables
 .env
 .env.*
 !.env.example
+.supabase.env
+supabase/.env
+aws.env
+openai.env
+.temporal.env
+
+# Python virtualenvs & tools
 .venv/
+venv/
+ENV/
+env/
+.uv/
 .uv-cache/
+pip-wheel-metadata/
+pip-log.txt
+
+# Compiled python files
 __pycache__/
 .pytest_cache/
 .ruff_cache/
+.pyre/
+.pytype/
+.coverage
+.tox/
+.mypy_cache/
+.cache/
 *.py[cod]
+*.pyo
+
+# Logs
 *.log
+*.out
+*.pid
+
+# Test & Coverage outputs
+htmlcov/
+.coverage.*
+.nox/
+.cache/
+*.cover
+coverage.*
+site/
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# pytest
+.cache/
+.pytest_cache/
+.vscode/
+.idea/
+
+# Jupyter/IPython notebooks
+.ipynb_checkpoints
+*.ipynb
+
+# C extensions
+*.so
+
+# Editor/IDE specific files
+*.swp
+*.swo
+*.orig
+*.bak
+*.tmp
+*.DS_Store
+*.sublime-workspace
+*.sublime-project
+
+# macOS, Windows, Linux system files
+.DS_Store
+._*
+Thumbs.db
+ehthumbs.db
+Icon?
+Desktop.ini
+$RECYCLE.BIN/
+Trash-*
+
+# node (in case of fullstack or agent UI sandboxes)
+node_modules/
+npm-debug.log*
+yarn-error.log
+yarn-debug.log*
+.pnpm-debug.log*
+package-lock.json
+yarn.lock
+
+# Temporal (local/cadence) ignore
+temporal-data/
+temporal/.local/
+.temporal/
+cadence-data/
+cadence/.local/
+
+# OpenAI Agents SDK/Cache
+openai_cache/
+openai_agents_cache/
+openai_settings.json
+
+# Supabase
+supabase/.temp/
+.supabase/
+.supabase_remote/
+.supabase/functions/.next/
+
+# AWS, serverless, sam, cdk etc.
+.aws/
+.aws-sam/
+aws-lambda-tools-defaults.json
+cdk.out/
+serverless/
+serverless-output/
+lambda-build/
+*.aws-debug.log
+.aws-config/
+
+# Docker ignore for dev tools
+docker-compose.override.yml
+docker-compose.local.yml
+*.dockerfile.env
+*.docker.env
+*.docker-compose*
+
+# Misc sandbox artifacts
+tmp/
+temp/
+sandbox/
+.sandbox/
+agent-sandbox/
+# Do not ignore intentionally tracked example configs
+!.env.example
+
+# Pydantic/migration cache
+alembic/
+migrations/
+
+# VSCode
+.vscode/
+.history/
+
+# Local SQLite DB files
+*.db
+*.sqlite3
+
+# Security & secrets (just in case)
+secrets.json
+*.key
+*.crt
+certs/
+
+# Coverage outputs
+coverage.xml
+
+# Lock files
+poetry.lock
+
+# Misc user files
+*.tgz
+*.tar.gz
+*.zip
+*.bak
+*.old
+
+# Override: Keep example & template config files
+!.env.example
+!.env.template
