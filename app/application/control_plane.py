@@ -196,6 +196,13 @@ class ControlPlaneService:
             )
         return erc
 
+    async def retrieve_for_admission(self, digest: str) -> EffectiveRunConfiguration:
+        """Verify an immutable ERC and that every exact source remains admissible."""
+        erc = await self.retrieve(digest)
+        for ref in erc.source_refs:
+            await self._selectable(ref)
+        return erc
+
     async def _validate_publication(self, definition: Definition) -> None:
         await self._validate_definition_shape(definition)
         if isinstance(definition, WorkflowTypeDefinition):

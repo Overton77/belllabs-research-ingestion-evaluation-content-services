@@ -21,6 +21,9 @@ class Settings(BaseSettings):
 
     database_direct: SecretStr | None = None
     database_url: SecretStr | None = None
+    application_database_direct: SecretStr | None = None
+    application_database_url: SecretStr | None = None
+    application_migration_database_direct: SecretStr | None = None
 
     supabase_url: str
     supabase_publishable_key: SecretStr
@@ -55,6 +58,26 @@ class Settings(BaseSettings):
         if value is None:
             raise ValueError("DATABASE_DIRECT or DATABASE_URL is required")
         return value.get_secret_value()
+
+    @property
+    def application_postgres_dsn(self) -> str:
+        value = self.application_database_direct or self.application_database_url
+        if value is None:
+            raise ValueError("APPLICATION_DATABASE_DIRECT or APPLICATION_DATABASE_URL is required")
+        return value.get_secret_value()
+
+    @property
+    def has_application_postgres(self) -> bool:
+        return (
+            self.application_database_direct is not None
+            or self.application_database_url is not None
+        )
+
+    @property
+    def application_migration_postgres_dsn(self) -> str:
+        if self.application_migration_database_direct is not None:
+            return self.application_migration_database_direct.get_secret_value()
+        return self.application_postgres_dsn
 
     @property
     def cors_origins(self) -> list[str]:

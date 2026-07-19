@@ -25,3 +25,11 @@ def test_mongodb_uri() -> str:
     if not uri:
         pytest.skip("TEST_MONGODB_URI is not configured")
     return uri
+
+
+@pytest.fixture
+def test_application_postgres_dsn() -> str:
+    dsn = os.getenv("TEST_APPLICATION_POSTGRES_DSN")
+    if not dsn:
+        pytest.skip("TEST_APPLICATION_POSTGRES_DSN is not configured")
+    return dsn

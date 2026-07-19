@@ -410,6 +410,8 @@ class CompilationContext(Contract):
     compilation_id: str = Field(min_length=1)
     compiled_at: AwareDatetime
     actor_id: str = Field(min_length=1)
+    authority_subject_id: str = Field(min_length=1)
+    authority_scope: str = Field(min_length=1)
 
 
 class CompilationRequest(Contract):

@@ -14,6 +14,7 @@ from app.domain.control_plane.contracts import (
     AliasBinding,
     AliasRef,
     AuthoringHead,
+    AuthorityCeiling,
     CompileInvocation,
     Definition,
     DefinitionKind,
@@ -79,6 +80,11 @@ class ControlPlanePrincipal(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     actor_id: str
     roles: frozenset[str]
+    tenant_scopes: frozenset[str] = frozenset()
+    authority_refs: frozenset[str] = frozenset()
+    sponsorship_refs: frozenset[str] = frozenset()
+    approval_refs: frozenset[str] = frozenset()
+    compilation_authority: AuthorityCeiling | None = None
 
 
 async def get_control_plane_principal() -> ControlPlanePrincipal:
@@ -161,8 +167,17 @@ async def compile_configuration(
         invocation.context.actor_id,
         frozenset({"compiler", "operator"}),
     )
+    if invocation.context.authority_scope not in principal.tenant_scopes:
+        raise HTTPException(status_code=403, detail="compilation authority scope was not granted")
+    if invocation.context.authority_subject_id != principal.actor_id:
+        raise HTTPException(status_code=403, detail="compilation authority subject mismatch")
+    if principal.compilation_authority is None:
+        raise HTTPException(status_code=403, detail="compilation authority is not configured")
     invocation = invocation.model_copy(
-        update={"context": invocation.context.model_copy(update={"compiled_at": datetime.now(UTC)})}
+        update={
+            "caller_authority": principal.compilation_authority,
+            "context": invocation.context.model_copy(update={"compiled_at": datetime.now(UTC)}),
+        }
     )
     return await service.compile(invocation)
 

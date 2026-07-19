@@ -1,8 +1,25 @@
 name: biotech-research-ingestion-evaluation-system
 
-# PRE-EMPTIVE SETUP: this stack intentionally contains only Temporal's SQL storage.
-# Supabase remains external and no application tables/migrations are created here.
+# Temporal persistence and application authority are intentionally separate PostgreSQL services.
 services:
+  application-postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: belllabs
+      POSTGRES_USER: belllabs
+      POSTGRES_PASSWORD: belllabs-local
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U belllabs -d belllabs"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    ports:
+      - "127.0.0.1:${APPLICATION_POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - application-postgres-data:/var/lib/postgresql/data
+      - ./infra/application-postgres/init:/docker-entrypoint-initdb.d:ro
+    restart: unless-stopped
+
   temporal-postgres:
     image: postgres:16
     environment:
@@ -102,4 +119,5 @@ services:
     profiles: ["tools"]
 
 volumes:
+  application-postgres-data:
   temporal-postgres-data:

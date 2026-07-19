@@ -231,7 +231,11 @@ def invocation(
             runtime_bindings=frozenset({"python-3.12"}),
         ),
         context=CompilationContext(
-            compilation_id="compilation-1", compiled_at=NOW, actor_id="caller"
+            compilation_id="compilation-1",
+            compiled_at=NOW,
+            actor_id="caller",
+            authority_subject_id="caller",
+            authority_scope="tenant-1",
         ),
     )
 
@@ -294,6 +298,8 @@ def test_compilation_context_rejects_naive_time() -> None:
             compilation_id="naive-time",
             compiled_at=datetime(2026, 1, 2, 3, 4),
             actor_id="caller",
+            authority_subject_id="caller",
+            authority_scope="tenant-1",
         )
 
 
