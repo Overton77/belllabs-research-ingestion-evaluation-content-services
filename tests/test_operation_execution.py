@@ -35,6 +35,9 @@ from app.domain.operation_execution.contracts import (
     PromptTrustClass,
     RuntimeUsage,
     WorkspaceContract,
+    WorkspaceOwner,
+    WorkspaceOwnerKind,
+    WorkspaceSlotBinding,
 )
 from app.domain.run_control.contracts import (
     ActorContext,
@@ -184,9 +187,7 @@ def service_fixture(
         sandbox=ConformanceSandbox(),
         assets=asset_verifier,
         mcp=asset_verifier,
-        secrets=ConformanceSecretResolver(
-            {"environment:OPENAI_API_KEY": SECRET_VALUE}
-        ),
+        secrets=ConformanceSecretResolver({"environment:OPENAI_API_KEY": SECRET_VALUE}),
         events=events,
         budget=budget,
     )
@@ -237,7 +238,39 @@ async def test_preparation_failure_is_recorded_without_runtime_invocation() -> N
 
 @pytest.mark.asyncio
 async def test_run_control_authority_validates_exact_run_workspace_and_reservation() -> None:
+    workspace_contract = WorkflowWorkspaceContract(
+        slots=(
+            WorkspaceSlot(
+                name="output",
+                path="/workspace/output",
+                access="exclusive_write",
+                purpose="operation output",
+            ),
+        )
+    )
     request = operation_request()
+    request = request.model_copy(
+        update={
+            "workspace": request.workspace.model_copy(
+                update={
+                    "workflow_contract_digest": sha256_digest(
+                        workspace_contract.model_dump(mode="json")
+                    ),
+                    "slot_bindings": (
+                        WorkspaceSlotBinding(
+                            slot_name="output",
+                            logical_path="/workspace/output",
+                            access="exclusive_write",
+                            owner=WorkspaceOwner(
+                                kind=WorkspaceOwnerKind.STAGE,
+                                owner_id="stage:operation",
+                            ),
+                        ),
+                    ),
+                }
+            )
+        }
+    )
 
     class FakeRunControl:
         async def get_run(self, _scope: str, _run_id: str) -> SimpleNamespace:
@@ -249,9 +282,7 @@ async def test_run_control_authority_validates_exact_run_workspace_and_reservati
 
         async def get_budget(self, _scope: str, _run_id: str) -> SimpleNamespace:
             return SimpleNamespace(
-                reservations={
-                    request.budget_reservation_id: dict(request.budget_limits)
-                }
+                reservations={request.budget_reservation_id: dict(request.budget_limits)}
             )
 
     class FakeControlPlane:
@@ -261,16 +292,7 @@ async def test_run_control_authority_validates_exact_run_workspace_and_reservati
                     capabilities=request.capability_grant.capabilities
                 ),
                 source_refs=(request.workspace.template_ref,),
-                workflow_workspace_contract=WorkflowWorkspaceContract(
-                    slots=(
-                        WorkspaceSlot(
-                            name="output",
-                            path="/workspace/output",
-                            access="exclusive_write",
-                            purpose="operation output",
-                        ),
-                    )
-                ),
+                workflow_workspace_contract=workspace_contract,
             )
 
     authority = RunControlOperationAuthority(
@@ -281,9 +303,7 @@ async def test_run_control_authority_validates_exact_run_workspace_and_reservati
 
     with pytest.raises(ValueError, match="Run Control revision"):
         await authority.verify(
-            request.model_copy(
-                update={"run_control_revision": request.run_control_revision + 1}
-            )
+            request.model_copy(update={"run_control_revision": request.run_control_revision + 1})
         )
 
     with pytest.raises(ValueError, match="outside the reservation"):
@@ -304,13 +324,9 @@ async def test_runtime_budget_violation_fails_before_completed_settlement() -> N
     class ExcessRuntime(ConformanceRuntime):
         async def execute(self, invocation, resolved_secrets):  # type: ignore[no-untyped-def]
             result = await super().execute(invocation, resolved_secrets)
-            return result.model_copy(
-                update={"usage": RuntimeUsage(amounts={"tokens.total": 21})}
-            )
+            return result.model_copy(update={"usage": RuntimeUsage(amounts={"tokens.total": 21})})
 
-    service, bindings, runtime, events, budget = service_fixture(
-        runtime=ExcessRuntime()
-    )
+    service, bindings, runtime, events, budget = service_fixture(runtime=ExcessRuntime())
     request = operation_request()
 
     result = await service.execute(request)
@@ -541,9 +557,7 @@ async def test_activity_redelivery_never_repeats_claimed_unsettled_provider_work
         sandbox=ConformanceSandbox(),
         assets=asset_verifier,
         mcp=asset_verifier,
-        secrets=ConformanceSecretResolver(
-            {"environment:OPENAI_API_KEY": SECRET_VALUE}
-        ),
+        secrets=ConformanceSecretResolver({"environment:OPENAI_API_KEY": SECRET_VALUE}),
         events=events,
         budget=budget,
     )
@@ -598,9 +612,7 @@ async def test_post_settlement_retry_completes_events_without_provider_reexecuti
         sandbox=ConformanceSandbox(),
         assets=asset_verifier,
         mcp=asset_verifier,
-        secrets=ConformanceSecretResolver(
-            {"environment:OPENAI_API_KEY": SECRET_VALUE}
-        ),
+        secrets=ConformanceSecretResolver({"environment:OPENAI_API_KEY": SECRET_VALUE}),
         events=events,
         budget=budget,
     )

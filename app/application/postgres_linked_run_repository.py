@@ -34,9 +34,7 @@ class PostgresLinkedRunRepository:
             )
         return RunCompositionLink.model_validate(_json(payload)) if payload else None
 
-    async def get_link_by_id(
-        self, request_scope: str, link_id: str
-    ) -> RunCompositionLink:
+    async def get_link_by_id(self, request_scope: str, link_id: str) -> RunCompositionLink:
         async with self._pool.acquire() as connection, connection.transaction():
             await _set_scope(connection, request_scope)
             payload = await connection.fetchval(
@@ -110,9 +108,7 @@ class PostgresLinkedRunRepository:
                 revision.link_id,
             )
             if link_payload is None:
-                raise RunControlNotFound(
-                    f"run composition link not found: {revision.link_id}"
-                )
+                raise RunControlNotFound(f"run composition link not found: {revision.link_id}")
             prior = await connection.fetchrow(
                 """
                 SELECT decision FROM belllabs_control.run_dependency_revisions
@@ -127,15 +123,13 @@ class PostgresLinkedRunRepository:
                         "dependency revision identity has conflicting content"
                     )
                 return value
-            expected = (
-                await connection.fetchval(
-                    """
+            expected = await connection.fetchval(
+                """
                     SELECT COALESCE(MAX(revision), 1) + 1
                     FROM belllabs_control.run_dependency_revisions
                     WHERE link_id = $1
                     """,
-                    revision.link_id,
-                )
+                revision.link_id,
             )
             if revision.revision != expected:
                 raise ValueError(f"expected dependency revision {expected}")
@@ -165,9 +159,7 @@ class PostgresLinkedRunRepository:
                 """,
                 link_id,
             )
-        return tuple(
-            RunDependencyRevision.model_validate(_json(row["decision"])) for row in rows
-        )
+        return tuple(RunDependencyRevision.model_validate(_json(row["decision"])) for row in rows)
 
     async def commit_result_decision(
         self, request_scope: str, decision: LinkedRunResultAdmissionDecision
@@ -180,9 +172,7 @@ class PostgresLinkedRunRepository:
                 decision.link_id,
             )
             if link_payload is None:
-                raise RunControlNotFound(
-                    f"run composition link not found: {decision.link_id}"
-                )
+                raise RunControlNotFound(f"run composition link not found: {decision.link_id}")
             link = RunCompositionLink.model_validate(_json(link_payload))
             if (
                 decision.parent_run_id != link.parent_run_id
@@ -201,9 +191,7 @@ class PostgresLinkedRunRepository:
                 decision.exact_output_ref,
             )
             if prior is not None:
-                value = LinkedRunResultAdmissionDecision.model_validate(
-                    _json(prior["decision"])
-                )
+                value = LinkedRunResultAdmissionDecision.model_validate(_json(prior["decision"]))
                 if value != decision:
                     raise IdempotencyConflict(
                         "exact child output already has a conflicting admission decision"
@@ -239,8 +227,7 @@ class PostgresLinkedRunRepository:
                 link_id,
             )
         return tuple(
-            LinkedRunResultAdmissionDecision.model_validate(_json(row["decision"]))
-            for row in rows
+            LinkedRunResultAdmissionDecision.model_validate(_json(row["decision"])) for row in rows
         )
 
     async def commit_terminal_record(

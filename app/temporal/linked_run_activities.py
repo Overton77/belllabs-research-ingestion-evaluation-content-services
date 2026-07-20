@@ -26,9 +26,7 @@ class LinkedRunDecisionPort(Protocol):
         dependency_revision_id: str | None,
     ) -> LinkedRunExecutionBinding: ...
 
-    async def resolve(
-        self, observation: LinkedChildResultObservation
-    ) -> LinkedChildResolution: ...
+    async def resolve(self, observation: LinkedChildResultObservation) -> LinkedChildResolution: ...
 
 
 class LinkedResultAssessmentPort(Protocol):
@@ -92,9 +90,7 @@ class LinkedRunDecisionGateway:
             )
         return binding
 
-    async def resolve(
-        self, observation: LinkedChildResultObservation
-    ) -> LinkedChildResolution:
+    async def resolve(self, observation: LinkedChildResultObservation) -> LinkedChildResolution:
         await self._service.record_child_terminal(observation)
         if observation.status != "completed":
             disposition = await self._service.dependency_disposition(
@@ -108,15 +104,12 @@ class LinkedRunDecisionGateway:
                 child_status=observation.status,
                 failure_ref=observation.failure_ref,
                 disposition=(
-                    "degraded"
-                    if disposition.degradation_required_on_failure
-                    else "failed"
+                    "degraded" if disposition.degradation_required_on_failure else "failed"
                 ),
                 reason=(
                     f"governed dependency policy degraded child {observation.status}"
                     if disposition.degradation_required_on_failure
-                    else f"governed dependency policy did not admit child "
-                    f"{observation.status}"
+                    else f"governed dependency policy did not admit child {observation.status}"
                 ),
             )
 
@@ -168,9 +161,7 @@ class LinkedRunActivities:
         self._decisions = decisions
 
     @activity.defn(name="linked_run.resolve_execution_binding")
-    async def resolve_execution_binding(
-        self, payload: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def resolve_execution_binding(self, payload: dict[str, Any]) -> dict[str, Any]:
         binding = await self._decisions.execution_binding(
             str(payload["request_scope"]),
             str(payload["link_id"]),
@@ -183,9 +174,7 @@ class LinkedRunActivities:
         return binding.model_dump(mode="json")
 
     @activity.defn(name="linked_run.resolve_child_observation")
-    async def resolve_child_observation(
-        self, payload: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def resolve_child_observation(self, payload: dict[str, Any]) -> dict[str, Any]:
         observation = LinkedChildResultObservation.model_validate(payload)
         resolution = await self._decisions.resolve(observation)
         return resolution.model_dump(mode="json")

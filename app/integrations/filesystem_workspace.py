@@ -48,7 +48,7 @@ class FilesystemWorkspaceProvisioner:
                 host_path.write_bytes(content)
                 host_path.chmod(0o444)
             else:
-                host_path.parent.mkdir(parents=True, exist_ok=True)
+                host_path.mkdir(parents=True, exist_ok=True)
         return MaterializedWorkspace(
             workspace_id=request.workspace_id,
             namespace_id=request.namespace_id,
@@ -64,7 +64,15 @@ class FilesystemWorkspaceProvisioner:
         manifest: WorkspaceMaterializationManifest,
         logical_path: str,
     ) -> Path:
-        if logical_path not in {slot.logical_path for slot in manifest.slots}:
+        governed = any(
+            logical_path == slot.logical_path
+            or (
+                slot.access == "exclusive_write"
+                and _path_within_slot(logical_path, slot.logical_path)
+            )
+            for slot in manifest.slots
+        )
+        if not governed:
             raise UndeclaredWorkspacePath(f"path is not governed: {logical_path}")
         try:
             workspace_root = self._roots[(manifest.namespace_id, manifest.workspace_id)]
@@ -79,7 +87,12 @@ class FilesystemWorkspaceProvisioner:
         content: bytes,
     ) -> Path:
         slot = next(
-            (item for item in manifest.slots if item.logical_path == logical_path),
+            (
+                item
+                for item in manifest.slots
+                if item.access == "exclusive_write"
+                and _path_within_slot(logical_path, item.logical_path)
+            ),
             None,
         )
         if slot is None or slot.access != "exclusive_write":
@@ -105,3 +118,8 @@ class FilesystemWorkspaceProvisioner:
 
 def is_read_only(path: Path) -> bool:
     return not bool(path.stat().st_mode & stat.S_IWUSR)
+
+
+def _path_within_slot(logical_path: str, slot_path: str) -> bool:
+    normalized_slot = slot_path.rstrip("/")
+    return logical_path == normalized_slot or logical_path.startswith(normalized_slot + "/")

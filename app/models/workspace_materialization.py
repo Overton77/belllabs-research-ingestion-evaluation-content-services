@@ -12,6 +12,7 @@ class WorkspaceSlotReservationDocument(Document):
     workspace_id: str
     logical_path: str
     owner_id: str
+    reservation_token: str
     reserved_at: datetime
 
     class Settings:

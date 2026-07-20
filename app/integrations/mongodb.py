@@ -9,6 +9,7 @@ from pymongo.asynchronous.database import AsyncDatabase
 
 from app.config import Settings
 from app.models import (
+    ArtifactMetadataRevisionDocument,
     DefinitionAliasDocument,
     DefinitionAliasMovementDocument,
     DefinitionHeadDocument,
@@ -24,6 +25,7 @@ from app.models import (
 )
 
 BEANIE_MODELS = [
+    ArtifactMetadataRevisionDocument,
     InfrastructureMarker,
     DefinitionHeadDocument,
     DefinitionAliasDocument,

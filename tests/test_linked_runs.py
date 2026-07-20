@@ -455,9 +455,7 @@ async def test_revised_dependency_controls_cancellation_and_decisions_are_link_b
     service, _control, _run_control, repository = service_fixture(
         RunDependencyClass.DEGRADABLE_BLOCKING
     )
-    link = await service.request_child(
-        linked_request(RunDependencyClass.DEGRADABLE_BLOCKING)
-    )
+    link = await service.request_child(linked_request(RunDependencyClass.DEGRADABLE_BLOCKING))
     await service.revise_dependency(
         "tenant-1",
         link.link_id,
@@ -646,9 +644,7 @@ async def test_temporal_mapping_executes_admitted_child_as_distinct_workflow(
             )
             if effective_dependency == RunDependencyClass.DEGRADABLE_NONBLOCKING:
                 assert result["disposition"] == "launched_nonblocking"
-                observer = environment.client.get_workflow_handle(
-                    result["observer_workflow_id"]
-                )
+                observer = environment.client.get_workflow_handle(result["observer_workflow_id"])
                 result = await observer.result()
 
     assert result["child_status"] == expected_child_status
@@ -658,9 +654,7 @@ async def test_temporal_mapping_executes_admitted_child_as_distinct_workflow(
     assert result["execution_epoch"] == 2
     assert LinkedRunContinuationState.model_validate(result["continuation_state"]) == continuation
     assert result["child_run_id"] == link.child_run_id
-    expected_outputs = (
-        ["artifact:child:exact-v1"] if expected_child_status == "completed" else []
-    )
+    expected_outputs = ["artifact:child:exact-v1"] if expected_child_status == "completed" else []
     assert result["admitted_output_refs"] == expected_outputs
     assert assessor.assessed_refs == expected_outputs
     assert len(await repository.list_result_decisions("tenant-1", link.link_id)) == (

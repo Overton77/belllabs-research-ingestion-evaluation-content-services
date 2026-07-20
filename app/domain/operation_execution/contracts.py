@@ -107,10 +107,15 @@ class WorkspaceContract(Contract):
     def compiled_slots_match_legacy_projection(self) -> WorkspaceContract:
         if not self.slot_bindings:
             return self
+        paths = [slot.logical_path for slot in self.slot_bindings]
+        if any(
+            _workspace_paths_overlap(left, right)
+            for index, left in enumerate(paths)
+            for right in paths[index + 1 :]
+        ):
+            raise ValueError("compiled workspace slot paths cannot overlap")
         writable = tuple(
-            slot.logical_path
-            for slot in self.slot_bindings
-            if slot.access == "exclusive_write"
+            slot.logical_path for slot in self.slot_bindings if slot.access == "exclusive_write"
         )
         if set(writable) != set(self.exclusive_write_paths):
             raise ValueError("compiled workspace slots do not match writable path projection")
@@ -217,6 +222,7 @@ class MaterializedWorkspace(Contract):
     mount_manifest_digest: str = Field(pattern=DIGEST_PATTERN)
     namespace_id: str | None = None
     manifest_revision: int | None = Field(default=None, ge=1)
+    materialization_manifest: WorkspaceMaterializationManifest | None = None
 
 
 class RuntimeInvocation(Contract):
@@ -267,13 +273,88 @@ class OperationExecutionResult(Contract):
     failure_message: str | None = None
 
 
-class ArtifactPromotionRequest(Contract):
-    binding_id: str
+class ArtifactCheckEvidence(Contract):
+    check_id: str = Field(min_length=1)
+    required: bool = True
+    outcome: Literal["passed", "failed", "not_applicable"]
+    evidence_ref: str = Field(min_length=1)
+
+
+class ArtifactPromotionDeclaration(Contract):
+    namespace_id: str = Field(min_length=1)
+    workspace_id: str = Field(min_length=1)
     output_slot: str = Field(min_length=1)
+    logical_path: str = Field(min_length=1)
+    owner: WorkspaceOwner
     candidate_id: str = Field(min_length=1)
     content_digest: str = Field(pattern=DIGEST_PATTERN)
     media_type: str = Field(min_length=1)
     size_bytes: int = Field(ge=0)
+    permission_ref: str = Field(min_length=1)
+    permission_outcome: Literal[
+        "allowed", "allowed_with_conditions", "requires_review", "unknown", "prohibited"
+    ]
+    output_contract_ref: str = Field(min_length=1)
+    checks: tuple[ArtifactCheckEvidence, ...] = ()
+    requested_at: AwareDatetime
+
+    @field_validator("checks")
+    @classmethod
+    def check_identities_are_unique(
+        cls, value: tuple[ArtifactCheckEvidence, ...]
+    ) -> tuple[ArtifactCheckEvidence, ...]:
+        identities = [item.check_id for item in value]
+        if len(identities) != len(set(identities)):
+            raise ValueError("artifact check identities must be unique")
+        return value
+
+
+class ArtifactPromotionRequest(ArtifactPromotionDeclaration):
+    request_scope: str = Field(min_length=1)
+    binding_id: str = Field(min_length=1)
+    requested_at: AwareDatetime
+
+
+class ArtifactPromotionState(StrEnum):
+    CANDIDATE = "candidate"
+    PAYLOAD_STAGED = "payload_staged"
+    METADATA_COMMITTED = "metadata_committed"
+    ADMITTED = "admitted"
+    REJECTED = "rejected"
+    RECONCILIATION_REQUIRED = "reconciliation_required"
+
+
+class ArtifactMetadataRevision(Contract):
+    promotion_id: str = Field(min_length=1)
+    artifact_id: str = Field(min_length=1)
+    intent_key: str = Field(min_length=1)
+    promotion_identity: str = Field(pattern=DIGEST_PATTERN)
+    revision: int = Field(ge=1)
+    state: ArtifactPromotionState
+    request_scope: str = Field(min_length=1)
+    run_id: str = Field(min_length=1)
+    semantic_attempt_key: str = Field(min_length=1)
+    producer_binding_id: str = Field(min_length=1)
+    namespace_id: str = Field(min_length=1)
+    workspace_id: str = Field(min_length=1)
+    output_slot: str = Field(min_length=1)
+    logical_path: str = Field(min_length=1)
+    owner: WorkspaceOwner
+    candidate_id: str = Field(min_length=1)
+    content_digest: str = Field(pattern=DIGEST_PATTERN)
+    media_type: str = Field(min_length=1)
+    size_bytes: int = Field(ge=0)
+    permission_ref: str = Field(min_length=1)
+    permission_outcome: Literal[
+        "allowed", "allowed_with_conditions", "requires_review", "unknown", "prohibited"
+    ]
+    output_contract_ref: str = Field(min_length=1)
+    checks: tuple[ArtifactCheckEvidence, ...] = ()
+    object_ref: str | None = None
+    manifest_revision: int | None = Field(default=None, ge=1)
+    durable_reference: str | None = None
+    reason: str | None = None
+    recorded_at: AwareDatetime
 
 
 class PromotedArtifact(Contract):
@@ -282,7 +363,60 @@ class PromotedArtifact(Contract):
     object_ref: str
     metadata_revision: int = Field(ge=1)
     manifest_revision: int = Field(ge=1)
+    durable_reference: str = Field(min_length=1)
     status: Literal["admitted"]
+
+
+class ArtifactPromotionPlan(Contract):
+    namespace_id: str = Field(min_length=1)
+    workspace_id: str = Field(min_length=1)
+    output_slot: str = Field(min_length=1)
+    logical_path: str = Field(min_length=1)
+    owner: WorkspaceOwner
+    permission_ref: str = Field(min_length=1)
+    permission_outcome: Literal[
+        "allowed", "allowed_with_conditions", "requires_review", "unknown", "prohibited"
+    ]
+    output_contract_ref: str = Field(min_length=1)
+    checks: tuple[ArtifactCheckEvidence, ...] = ()
+
+
+class CapturedWorkspaceCandidate(Contract):
+    namespace_id: str = Field(min_length=1)
+    workspace_id: str = Field(min_length=1)
+    output_slot: str = Field(min_length=1)
+    logical_path: str = Field(min_length=1)
+    owner: WorkspaceOwner
+    candidate_id: str = Field(min_length=1)
+    content_digest: str = Field(pattern=DIGEST_PATTERN)
+    media_type: str = Field(min_length=1)
+    size_bytes: int = Field(ge=0)
+
+
+class GenericArtifactWorkflowRequest(Contract):
+    request_scope: str = Field(min_length=1)
+    run_id: str = Field(min_length=1)
+    operation: OperationExecutionRequest
+    promotion: ArtifactPromotionPlan
+
+    @model_validator(mode="after")
+    def operation_and_promotion_share_run_workspace(
+        self,
+    ) -> GenericArtifactWorkflowRequest:
+        if (
+            self.operation.request_scope != self.request_scope
+            or self.operation.identity.run_id != self.run_id
+            or self.operation.workspace.namespace_id != self.promotion.namespace_id
+            or self.operation.workspace.workspace_id != self.promotion.workspace_id
+        ):
+            raise ValueError("generic artifact workflow inputs do not share one run workspace")
+        return self
+
+
+class GenericArtifactWorkflowResult(Contract):
+    workflow_id: str = Field(min_length=1)
+    operation: OperationExecutionResult
+    artifact: PromotedArtifact
 
 
 class WorkspaceOwnerKind(StrEnum):
@@ -419,6 +553,12 @@ class WorkspaceMaterializationRequest(Contract):
         paths = [slot.logical_path for slot in self.slots]
         if len(names) != len(set(names)) or len(paths) != len(set(paths)):
             raise ValueError("workspace slot names and logical paths must be unique")
+        if any(
+            _workspace_paths_overlap(left, right)
+            for index, left in enumerate(paths)
+            for right in paths[index + 1 :]
+        ):
+            raise ValueError("workspace slot paths cannot overlap")
         writable_owners = [
             (slot.logical_path, slot.owner.owner_id)
             for slot in self.slots
@@ -427,6 +567,16 @@ class WorkspaceMaterializationRequest(Contract):
         if len(writable_owners) != len(set(writable_owners)):
             raise ValueError("writable workspace slots require one owner")
         return self
+
+
+def _workspace_paths_overlap(left: str, right: str) -> bool:
+    normalized_left = left.rstrip("/")
+    normalized_right = right.rstrip("/")
+    return (
+        normalized_left == normalized_right
+        or normalized_left.startswith(normalized_right + "/")
+        or normalized_right.startswith(normalized_left + "/")
+    )
 
 
 class SnapshotCloneRequest(Contract):

@@ -140,10 +140,7 @@ async def test_postgres_atomic_rollback_and_concurrent_version_conflict(
             decided_by="integration-test",
             decided_at=request().requested_at,
         )
-        assert (
-            await composition.commit_dependency_revision("tenant-1", revision)
-            == revision
-        )
+        assert await composition.commit_dependency_revision("tenant-1", revision) == revision
         result_decision = LinkedRunResultAdmissionDecision(
             decision_id="postgres-linked-result-1",
             link_id=link.link_id,
@@ -165,12 +162,9 @@ async def test_postgres_atomic_rollback_and_concurrent_version_conflict(
             reason="integration result admission",
         )
         assert (
-            await composition.commit_result_decision("tenant-1", result_decision)
-            == result_decision
+            await composition.commit_result_decision("tenant-1", result_decision) == result_decision
         )
-        assert await composition.list_parent_links("tenant-1", admitted.run_id) == (
-            link,
-        )
+        assert await composition.list_parent_links("tenant-1", admitted.run_id) == (link,)
         over_cap = request(request_id="postgres-child-over-cap")
         over_cap = over_cap.model_copy(
             update={

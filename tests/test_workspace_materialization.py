@@ -24,6 +24,9 @@ from app.domain.operation_execution.errors import (
     WorkspaceDigestMismatch,
     WorkspaceSlotConflict,
 )
+from app.domain.operation_execution.materialization import (
+    verify_workspace_manifest,
+)
 from app.integrations.filesystem_workspace import (
     FilesystemWorkspaceProvisioner,
     is_read_only,
@@ -92,7 +95,7 @@ def request(
             ),
             WorkspaceSlotBinding(
                 slot_name="output",
-                logical_path="/workspace/output/report.md",
+                logical_path="/workspace/output",
                 access="exclusive_write",
                 owner=write_owner or owner(),
             ),
@@ -145,6 +148,20 @@ async def test_parallel_workspaces_cannot_claim_the_same_writable_slot() -> None
         await second.materialize(
             request(workspace_id="workspace-2", write_owner=owner("agent:other"))
         )
+    nested = request(
+        workspace_id="workspace-3",
+        write_owner=owner("agent:nested"),
+    )
+    nested = nested.model_copy(
+        update={
+            "slots": (
+                nested.slots[0],
+                nested.slots[1].model_copy(update={"logical_path": "/workspace/output/child"}),
+            )
+        }
+    )
+    with pytest.raises(WorkspaceSlotConflict):
+        await second.materialize(nested)
 
 
 async def test_delegate_requires_parent_and_receives_private_owner() -> None:
@@ -211,10 +228,16 @@ async def test_candidate_registration_is_digest_verified_and_retry_safe() -> Non
         content_digest=digest,
         media_type="text/markdown",
     )
+    rematerialized = await materializer.materialize(request())
 
     assert manifest == replayed
     assert manifest.revision == 2
     assert manifest.entries[-1].kind == "local_candidate"
+    assert rematerialized.manifest_revision == 2
+    with pytest.raises(WorkspaceDigestMismatch):
+        verify_workspace_manifest(
+            manifest.model_copy(update={"manifest_digest": "sha256:" + "0" * 64})
+        )
 
 
 async def test_real_filesystem_mounts_inputs_read_only_and_hides_host_identity(
@@ -228,12 +251,8 @@ async def test_real_filesystem_mounts_inputs_read_only_and_hides_host_identity(
     )
     workspace = await materializer.materialize(request())
     manifest = await materializer.current_manifest("run-workspace:run-1", "workspace-1")
-    mounted = provisioner.governed_host_path(
-        manifest, "/workspace/input/source.md"
-    )
-    output = provisioner.write_candidate(
-        manifest, "/workspace/output/report.md", b"first draft"
-    )
+    mounted = provisioner.governed_host_path(manifest, "/workspace/input/source.md")
+    output = provisioner.write_candidate(manifest, "/workspace/output/report.md", b"first draft")
 
     assert mounted.read_bytes() == INPUT
     assert is_read_only(mounted)

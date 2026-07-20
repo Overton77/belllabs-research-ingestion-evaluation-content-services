@@ -54,9 +54,7 @@ class OperationAuthorityPort(Protocol):
 class RunControlOperationAuthority:
     """Verifies F1/F2 authority without allowing execution records to mutate it."""
 
-    def __init__(
-        self, run_control: RunControlService, control_plane: ControlPlaneService
-    ) -> None:
+    def __init__(self, run_control: RunControlService, control_plane: ControlPlaneService) -> None:
         self._run_control = run_control
         self._control_plane = control_plane
 
@@ -72,8 +70,7 @@ class RunControlOperationAuthority:
             request.effective_configuration_digest
         )
         if not (
-            request.capability_grant.capabilities
-            <= configuration.effective_authority.capabilities
+            request.capability_grant.capabilities <= configuration.effective_authority.capabilities
         ):
             raise ValueError("operation capabilities exceed effective run authority")
         workspace_ref = next(
@@ -86,16 +83,27 @@ class RunControlOperationAuthority:
         )
         if workspace_ref != request.workspace.template_ref:
             raise ValueError("operation workspace does not match the frozen template")
-        allowed_write_paths = {
-            slot.path
+        configured_slots = {
+            (slot.name, slot.path, slot.access)
             for slot in configuration.workflow_workspace_contract.slots
-            if slot.access == "exclusive_write"
         }
-        if not set(request.workspace.exclusive_write_paths) <= allowed_write_paths:
-            raise ValueError("operation requests writable paths outside its workspace contract")
-        budget = await self._run_control.get_budget(
-            request.request_scope, request.identity.run_id
+        bound_slots = {
+            (slot.slot_name, slot.logical_path, slot.access)
+            for slot in request.workspace.slot_bindings
+        }
+        if configured_slots != bound_slots:
+            raise ValueError("operation workspace slots do not exactly match the compiled contract")
+        contract_digest = sha256_digest(
+            configuration.workflow_workspace_contract.model_dump(mode="json")
         )
+        if request.workspace.workflow_contract_digest != contract_digest:
+            raise ValueError("operation workspace contract digest is not authoritative")
+        allowed_write_paths = {
+            path for _name, path, access in configured_slots if access == "exclusive_write"
+        }
+        if set(request.workspace.exclusive_write_paths) != allowed_write_paths:
+            raise ValueError("operation writable paths do not exactly match its workspace contract")
+        budget = await self._run_control.get_budget(request.request_scope, request.identity.run_id)
         reservation = budget.reservations.get(request.budget_reservation_id)
         if reservation is None:
             raise ValueError("operation budget reservation is not authoritative")
@@ -136,18 +144,14 @@ class RunControlOperationBudgetAuthority:
             dimension: limit
             - min(
                 limit,
-                usage.amounts.get(dimension, 0)
-                + usage.pending_external_amounts.get(dimension, 0),
+                usage.amounts.get(dimension, 0) + usage.pending_external_amounts.get(dimension, 0),
             )
             for dimension, limit in binding.budget_limits.items()
             if limit
-            > usage.amounts.get(dimension, 0)
-            + usage.pending_external_amounts.get(dimension, 0)
+            > usage.amounts.get(dimension, 0) + usage.pending_external_amounts.get(dimension, 0)
         }
         for _attempt in range(5):
-            budget = await self._run_control.get_budget(
-                binding.request_scope, binding.run_id
-            )
+            budget = await self._run_control.get_budget(binding.request_scope, binding.run_id)
             if settlement_id in budget.usage_ids:
                 return
             run = await self._run_control.get_run(binding.request_scope, binding.run_id)
@@ -183,18 +187,16 @@ class RunControlOperationBudgetAuthority:
                 )
                 if settlement_id in current_budget.usage_ids:
                     return
-            raise ValueError(
-                f"operation budget settlement was not accepted: {result.reason_code}"
-            )
+            raise ValueError(f"operation budget settlement was not accepted: {result.reason_code}")
         raise OperationBudgetReconciliationInProgress(
             "operation budget settlement remained stale after retries"
         )
 
 
 class OperationBindingRepository(Protocol):
-    async def get_binding(
-        self, semantic_attempt_key: str
-    ) -> OperationExecutionBinding | None: ...
+    async def get_binding(self, semantic_attempt_key: str) -> OperationExecutionBinding | None: ...
+
+    async def get_binding_by_id(self, binding_id: str) -> OperationExecutionBinding | None: ...
 
     async def create_binding(
         self, binding: OperationExecutionBinding
@@ -216,9 +218,7 @@ class RuntimePort(Protocol):
 
 
 class SandboxPort(Protocol):
-    async def materialize(
-        self, binding: OperationExecutionBinding
-    ) -> MaterializedWorkspace: ...
+    async def materialize(self, binding: OperationExecutionBinding) -> MaterializedWorkspace: ...
 
 
 class CapabilityAssetPort(Protocol):
@@ -287,9 +287,7 @@ class OperationExecutionService:
         self._budget = budget
 
     async def execute(self, request: OperationExecutionRequest) -> OperationExecutionResult:
-        fingerprint = sha256_digest(
-            request.model_dump(mode="json", exclude={"requested_at"})
-        )
+        fingerprint = sha256_digest(request.model_dump(mode="json", exclude={"requested_at"}))
         prior = await self._bindings.get_binding(request.identity.semantic_key)
         if prior is not None:
             if prior.request_fingerprint != fingerprint:
@@ -407,14 +405,17 @@ class InMemoryOperationBindingRepository:
         self._settlements: dict[str, OperationSettlement] = {}
         self._claims: dict[str, str] = {}
 
-    async def get_binding(
-        self, semantic_attempt_key: str
-    ) -> OperationExecutionBinding | None:
+    async def get_binding(self, semantic_attempt_key: str) -> OperationExecutionBinding | None:
         return deepcopy(self._bindings.get(semantic_attempt_key))
 
-    async def create_binding(
-        self, binding: OperationExecutionBinding
-    ) -> OperationExecutionBinding:
+    async def get_binding_by_id(self, binding_id: str) -> OperationExecutionBinding | None:
+        binding = next(
+            (item for item in self._bindings.values() if item.binding_id == binding_id),
+            None,
+        )
+        return deepcopy(binding)
+
+    async def create_binding(self, binding: OperationExecutionBinding) -> OperationExecutionBinding:
         async with self._lock:
             prior = self._bindings.get(binding.semantic_attempt_key)
             if prior is not None:
@@ -460,9 +461,7 @@ class InMemoryOperationBindingRepository:
             return deepcopy(settlement)
 
 
-def _binding_for(
-    request: OperationExecutionRequest, fingerprint: str
-) -> OperationExecutionBinding:
+def _binding_for(request: OperationExecutionRequest, fingerprint: str) -> OperationExecutionBinding:
     binding_id = _stable_id("operation-binding", request.identity.semantic_key)
     return OperationExecutionBinding(
         binding_id=binding_id,
@@ -525,29 +524,24 @@ def _public_result(
     )
 
 
-def _validate_bound_usage(
-    binding: OperationExecutionBinding, usage: RuntimeUsage
-) -> None:
+def _validate_bound_usage(binding: OperationExecutionBinding, usage: RuntimeUsage) -> None:
     usage_dimensions = usage.amounts.keys() | usage.pending_external_amounts.keys()
     unbound_dimensions = usage_dimensions - binding.budget_limits.keys()
     if unbound_dimensions:
         raise OperationBudgetViolation(
-            "runtime reported unbound budget dimensions: "
-            + ", ".join(sorted(unbound_dimensions))
+            "runtime reported unbound budget dimensions: " + ", ".join(sorted(unbound_dimensions))
         )
     exceeded = {
         dimension
         for dimension in usage_dimensions
         if (
-            usage.amounts.get(dimension, 0)
-            + usage.pending_external_amounts.get(dimension, 0)
+            usage.amounts.get(dimension, 0) + usage.pending_external_amounts.get(dimension, 0)
             > binding.budget_limits[dimension]
         )
     }
     if exceeded:
         raise OperationBudgetViolation(
-            "runtime usage exceeds immutable operation budget: "
-            + ", ".join(sorted(exceeded))
+            "runtime usage exceeds immutable operation budget: " + ", ".join(sorted(exceeded))
         )
 
 

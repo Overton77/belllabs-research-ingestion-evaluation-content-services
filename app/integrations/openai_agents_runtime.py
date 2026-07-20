@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from hashlib import sha256
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Protocol
 from urllib.parse import urlparse
 
 import docker
@@ -16,23 +17,38 @@ from agents.sandbox.capabilities import (
     Shell,
     ShellToolSet,
 )
-from agents.sandbox.entries import File
+from agents.sandbox.entries import Dir, File
 from agents.sandbox.manifest import Environment
 from agents.sandbox.sandboxes import DockerSandboxClient, DockerSandboxClientOptions
+from agents.sandbox.types import Permissions
 from openai import AsyncOpenAI
 from openai.types.shared.reasoning import Reasoning
 
 from app.domain.operation_execution.contracts import (
+    CapturedWorkspaceCandidate,
     MCPServerBinding,
+    OperationExecutionBinding,
     PromptTrustClass,
     RuntimeInvocation,
     RuntimeResult,
     RuntimeUsage,
     ToolBinding,
 )
+from app.domain.operation_execution.materialization import (
+    verify_workspace_manifest,
+)
 
 _FILESYSTEM_TOOL_ID = "sandbox.filesystem"
 _SHELL_TOOL_ID = "sandbox.shell"
+
+
+class WorkspaceCandidateSink(Protocol):
+    async def capture(
+        self,
+        binding: OperationExecutionBinding,
+        logical_path: str,
+        content: bytes,
+    ) -> CapturedWorkspaceCandidate: ...
 
 
 class OpenAIAgentsSandboxRuntime:
@@ -43,11 +59,15 @@ class OpenAIAgentsSandboxRuntime:
         *,
         fixture_asset_contents: Mapping[str, bytes] | None = None,
         required_sandbox_tools: frozenset[str] = frozenset(),
+        required_sandbox_tool_counts: Mapping[str, int] | None = None,
         required_artifact_paths: tuple[str, ...] = (),
+        candidate_sink: WorkspaceCandidateSink | None = None,
     ) -> None:
         self._fixture_assets = dict(fixture_asset_contents or {})
         self._required_sandbox_tools = required_sandbox_tools
+        self._required_sandbox_tool_counts = dict(required_sandbox_tool_counts or {})
         self._required_artifact_paths = required_artifact_paths
+        self._candidate_sink = candidate_sink
         self.artifacts: dict[str, bytes] = {}
         self._docker_client: DockerSandboxClient | None = None
         self._effects: dict[str, RuntimeResult] = {}
@@ -86,14 +106,72 @@ class OpenAIAgentsSandboxRuntime:
             for key, value in resolved_secrets.items()
             if key.endswith(":TAVILY_API_KEY")
         }
-        manifest_entries: dict[str, File] = {
-            "binding.txt": File(content=binding.binding_id.encode())
+        manifest_entries: dict[str, File | Dir] = {
+            "binding.txt": File(
+                content=binding.binding_id.encode(),
+                permissions=Permissions(owner=4),
+            )
         }
+        materialization = invocation.workspace.materialization_manifest
+        if binding.workspace.slot_bindings:
+            if materialization is None:
+                raise ValueError(
+                    "compiled workspace slots require a verified materialization manifest"
+                )
+            verify_workspace_manifest(materialization)
+            if (
+                materialization.namespace_id != binding.workspace.namespace_id
+                or materialization.workspace_id != binding.workspace.workspace_id
+                or materialization.slots != binding.workspace.slot_bindings
+                or materialization.manifest_digest != invocation.workspace.mount_manifest_digest
+                or materialization.revision != invocation.workspace.manifest_revision
+            ):
+                raise ValueError("runtime workspace does not match the verified materialization")
+            workspace_slots = materialization.slots
+        else:
+            workspace_slots = ()
+        for slot in workspace_slots:
+            path = slot.logical_path.lstrip("/")
+            if slot.access == "exclusive_write":
+                manifest_entries[path] = Dir(permissions=Permissions(owner=7))
+                continue
+            content = self._fixture_assets.get(slot.content_digest or "")
+            if content is None:
+                raise ValueError(
+                    f"bound read-only workspace input is unavailable: {slot.logical_path}"
+                )
+            if f"sha256:{sha256(content).hexdigest()}" != slot.content_digest:
+                raise ValueError(
+                    f"bound read-only workspace input digest mismatch: {slot.logical_path}"
+                )
+            manifest_entries[path] = File(
+                content=content,
+                permissions=Permissions(owner=4),
+            )
+        for mount in binding.workspace.read_mounts:
+            content = self._fixture_assets.get(mount.content_digest)
+            if content is None:
+                raise ValueError(
+                    f"bound read-only workspace mount is unavailable: {mount.logical_path}"
+                )
+            if f"sha256:{sha256(content).hexdigest()}" != mount.content_digest:
+                raise ValueError(
+                    f"bound read-only workspace mount digest mismatch: {mount.logical_path}"
+                )
+            manifest_entries[mount.logical_path.lstrip("/")] = File(
+                content=content,
+                permissions=Permissions(owner=4),
+            )
         for asset in (*binding.skills, *binding.plugins):
             content = self._fixture_assets.get(asset.manifest_digest)
             if content is None:
                 raise ValueError("bound immutable fixture asset is unavailable")
-            manifest_entries[asset.mount_path.lstrip("/")] = File(content=content)
+            if f"sha256:{sha256(content).hexdigest()}" != asset.manifest_digest:
+                raise ValueError("bound immutable fixture asset digest mismatch")
+            manifest_entries[asset.mount_path.lstrip("/")] = File(
+                content=content,
+                permissions=Permissions(owner=4),
+            )
             if asset.ref.kind.value == "skill":
                 instruction_segments.append(
                     f"Bound immutable skill {asset.ref.logical_id} "
@@ -167,15 +245,48 @@ class OpenAIAgentsSandboxRuntime:
                 }
             )
         )
+        sandbox_tool_counts: dict[str, int] = {}
+        for response in result.raw_responses:
+            for raw_item in response.output:
+                if getattr(raw_item, "type", None) == "apply_patch_call":
+                    sandbox_tool_counts["apply_patch"] = (
+                        sandbox_tool_counts.get("apply_patch", 0) + 1
+                    )
+        for run_item in result.new_items:
+            if isinstance(run_item, ToolCallItem) and run_item.tool_name is not None:
+                sandbox_tool_counts[run_item.tool_name] = (
+                    sandbox_tool_counts.get(run_item.tool_name, 0) + 1
+                )
         missing_required_tools = self._required_sandbox_tools - set(sandbox_tools)
         if missing_required_tools:
             raise RuntimeError(
                 "sandbox run did not invoke required tools: "
                 + ", ".join(sorted(missing_required_tools))
             )
+        insufficient_tools = {
+            tool: (sandbox_tool_counts.get(tool, 0), minimum)
+            for tool, minimum in self._required_sandbox_tool_counts.items()
+            if sandbox_tool_counts.get(tool, 0) < minimum
+        }
+        if insufficient_tools:
+            raise RuntimeError(
+                "sandbox tool invocation counts were below required minimums: "
+                + ", ".join(
+                    f"{tool}={actual}<{minimum}"
+                    for tool, (actual, minimum) in sorted(insufficient_tools.items())
+                )
+            )
         self.artifacts = await self._collect_required_artifacts(result)
+        candidate_refs: tuple[str, ...] = ()
+        if self._candidate_sink is not None:
+            candidates = [
+                await self._candidate_sink.capture(binding, path, content)
+                for path, content in self.artifacts.items()
+            ]
+            candidate_refs = tuple(candidate.candidate_id for candidate in candidates)
         runtime_result = RuntimeResult(
             output_text=str(result.final_output),
+            output_refs=candidate_refs,
             usage=RuntimeUsage(amounts=amounts),
             provider_run_id=result.last_response_id,
             event_payloads=(
@@ -184,9 +295,8 @@ class OpenAIAgentsSandboxRuntime:
                     "model": model,
                     "sandbox_workspace_id": invocation.workspace.workspace_id,
                     "sandbox_tools": sandbox_tools,
-                    "sandbox_item_types": tuple(
-                        type(item).__name__ for item in result.new_items
-                    ),
+                    "sandbox_tool_counts": sandbox_tool_counts,
+                    "sandbox_item_types": tuple(type(item).__name__ for item in result.new_items),
                 },
             ),
         )

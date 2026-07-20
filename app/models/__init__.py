@@ -1,3 +1,4 @@
+from app.models.artifact_promotion import ArtifactMetadataRevisionDocument
 from app.models.control_plane import (
     DefinitionAliasDocument,
     DefinitionAliasMovementDocument,
@@ -18,6 +19,7 @@ from app.models.workspace_materialization import (
 )
 
 __all__ = [
+    "ArtifactMetadataRevisionDocument",
     "DefinitionAliasDocument",
     "DefinitionAliasMovementDocument",
     "DefinitionHeadDocument",

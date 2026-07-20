@@ -14,6 +14,7 @@ from app.domain.operation_execution.contracts import (
     LocalCandidateManifestEntry,
     MaterializedWorkspace,
     OperationExecutionBinding,
+    PromotedArtifactManifestEntry,
     WorkspaceMaterializationManifest,
     WorkspaceMaterializationRequest,
     WorkspaceOwner,
@@ -22,6 +23,9 @@ from app.domain.operation_execution.errors import (
     UndeclaredWorkspacePath,
     WorkspaceDigestMismatch,
     WorkspaceSlotConflict,
+)
+from app.domain.operation_execution.materialization import (
+    verify_workspace_manifest,
 )
 from app.domain.run_control.errors import IdempotencyConflict
 
@@ -66,28 +70,26 @@ class WorkspaceMaterializationService:
     async def materialize(self, request: WorkspaceMaterializationRequest) -> MaterializedWorkspace:
         prior = await self._manifests.get_current(request.namespace_id, request.workspace_id)
         if prior is not None:
-            expected = self._initial_manifest(request)
-            comparable = expected.model_copy(
-                update={
-                    "manifest_id": prior.manifest_id,
-                    "revision": prior.revision,
-                    "manifest_digest": prior.manifest_digest,
-                    "created_at": prior.created_at,
-                }
-            )
-            if comparable.model_dump(exclude={"manifest_digest"}) != prior.model_dump(
-                exclude={"manifest_digest"}
+            verify_workspace_manifest(prior)
+            if (
+                prior.namespace_id != request.namespace_id
+                or prior.workspace_id != request.workspace_id
+                or prior.template_ref != request.template_ref
+                or prior.workflow_contract_digest != request.workflow_contract_digest
+                or prior.slots != request.slots
             ):
                 raise IdempotencyConflict(
                     "workspace identity was reused with different materialization"
                 )
             inputs = await self._load_and_verify_inputs(prior)
-            return await self._provisioner.provision(request, prior, inputs)
+            workspace = await self._provisioner.provision(request, prior, inputs)
+            return workspace.model_copy(update={"materialization_manifest": prior})
 
         await self._manifests.reserve_writable_slots(request)
         manifest = await self._manifests.append(self._initial_manifest(request))
         inputs = await self._load_and_verify_inputs(manifest)
-        return await self._provisioner.provision(request, manifest, inputs)
+        workspace = await self._provisioner.provision(request, manifest, inputs)
+        return workspace.model_copy(update={"materialization_manifest": manifest})
 
     async def register_candidate(
         self,
@@ -108,7 +110,7 @@ class WorkspaceMaterializationService:
         if (
             slot is None
             or slot.access != "exclusive_write"
-            or slot.logical_path != logical_path
+            or not _path_within_slot(logical_path, slot.logical_path)
             or slot.owner != owner
         ):
             raise UndeclaredWorkspacePath(
@@ -153,12 +155,97 @@ class WorkspaceMaterializationService:
     ) -> WorkspaceMaterializationManifest:
         return await self._require_current(namespace_id, workspace_id)
 
+    async def link_promoted_artifact(
+        self,
+        *,
+        namespace_id: str,
+        workspace_id: str,
+        candidate_id: str,
+        artifact_id: str,
+        artifact_metadata_revision: int,
+        content_digest: str,
+        recorded_at: datetime | None = None,
+    ) -> WorkspaceMaterializationManifest:
+        current = await self._require_current(namespace_id, workspace_id)
+        existing = next(
+            (
+                entry
+                for entry in current.entries
+                if entry.kind == "promoted_artifact" and entry.artifact_id == artifact_id
+            ),
+            None,
+        )
+        if existing is not None:
+            if existing.candidate_id != candidate_id or existing.content_digest != content_digest:
+                raise IdempotencyConflict(
+                    "artifact identity conflicts with current manifest linkage"
+                )
+            if existing.artifact_metadata_revision == artifact_metadata_revision:
+                return current
+            relinked = existing.model_copy(
+                update={
+                    "entry_id": _stable_id(
+                        "workspace-promoted",
+                        workspace_id,
+                        artifact_id,
+                        content_digest,
+                        str(artifact_metadata_revision),
+                    ),
+                    "artifact_metadata_revision": artifact_metadata_revision,
+                }
+            )
+            return await self._append_revision(
+                current,
+                entries=tuple(
+                    entry for entry in current.entries if entry.entry_id != existing.entry_id
+                )
+                + (relinked,),
+                created_at=recorded_at or datetime.now(UTC),
+            )
+        candidate = next(
+            (
+                entry
+                for entry in current.entries
+                if entry.kind == "local_candidate" and entry.candidate_id == candidate_id
+            ),
+            None,
+        )
+        if candidate is None or candidate.content_digest != content_digest:
+            raise UndeclaredWorkspacePath(
+                "promotion requires the current digest-matched local candidate"
+            )
+        promoted = PromotedArtifactManifestEntry(
+            entry_id=_stable_id(
+                "workspace-promoted",
+                workspace_id,
+                artifact_id,
+                content_digest,
+                str(artifact_metadata_revision),
+            ),
+            slot_name=candidate.slot_name,
+            logical_path=candidate.logical_path,
+            owner=candidate.owner,
+            candidate_id=candidate.candidate_id,
+            artifact_id=artifact_id,
+            artifact_metadata_revision=artifact_metadata_revision,
+            content_digest=content_digest,
+        )
+        return await self._append_revision(
+            current,
+            entries=tuple(
+                entry for entry in current.entries if entry.entry_id != candidate.entry_id
+            )
+            + (promoted,),
+            created_at=recorded_at or datetime.now(UTC),
+        )
+
     async def _require_current(
         self, namespace_id: str, workspace_id: str
     ) -> WorkspaceMaterializationManifest:
         current = await self._manifests.get_current(namespace_id, workspace_id)
         if current is None:
             raise UndeclaredWorkspacePath("workspace has not been materialized")
+        verify_workspace_manifest(current)
         return current
 
     async def _load_and_verify_inputs(
@@ -264,14 +351,10 @@ class BindingWorkspaceMaterializer:
     def __init__(self, service: WorkspaceMaterializationService) -> None:
         self._service = service
 
-    async def materialize(
-        self, binding: OperationExecutionBinding
-    ) -> MaterializedWorkspace:
+    async def materialize(self, binding: OperationExecutionBinding) -> MaterializedWorkspace:
         workspace = binding.workspace
         if not workspace.slot_bindings or workspace.workflow_contract_digest is None:
-            raise ValueError(
-                "operation binding lacks compiled workspace slots and contract digest"
-            )
+            raise ValueError("operation binding lacks compiled workspace slots and contract digest")
         return await self._service.materialize(
             WorkspaceMaterializationRequest(
                 namespace_id=workspace.namespace_id,
@@ -291,18 +374,27 @@ class InMemoryWorkspaceManifestRepository:
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
         self._manifests: dict[tuple[str, str], list[WorkspaceMaterializationManifest]] = {}
-        self._reservations: dict[tuple[str, str], tuple[str, str]] = {}
+        self._reservations: dict[tuple[str, str], tuple[str, str, str]] = {}
 
     async def reserve_writable_slots(self, request: WorkspaceMaterializationRequest) -> None:
         async with self._lock:
+            reservation_token = sha256_digest(request.model_dump(mode="json"))
             requested = [
-                (request.namespace_id, slot.logical_path, slot.owner.owner_id)
+                (
+                    request.namespace_id,
+                    _ownership_boundary(slot.logical_path),
+                    slot.owner.owner_id,
+                )
                 for slot in request.slots
                 if slot.access == "exclusive_write"
             ]
             for namespace_id, logical_path, owner_id in requested:
                 prior = self._reservations.get((namespace_id, logical_path))
-                if prior is not None and prior != (request.workspace_id, owner_id):
+                if prior is not None and prior != (
+                    request.workspace_id,
+                    owner_id,
+                    reservation_token,
+                ):
                     raise WorkspaceSlotConflict(
                         f"writable slot {logical_path} is owned by another workspace"
                     )
@@ -310,6 +402,7 @@ class InMemoryWorkspaceManifestRepository:
                 self._reservations[(namespace_id, logical_path)] = (
                     request.workspace_id,
                     owner_id,
+                    reservation_token,
                 )
 
     async def get_current(
@@ -361,3 +454,13 @@ def _digest_bytes(value: bytes) -> str:
 
 def _stable_id(*parts: str) -> str:
     return str(uuid5(NAMESPACE_URL, ":".join(parts)))
+
+
+def _path_within_slot(logical_path: str, slot_path: str) -> bool:
+    normalized_slot = slot_path.rstrip("/")
+    return logical_path == normalized_slot or logical_path.startswith(normalized_slot + "/")
+
+
+def _ownership_boundary(logical_path: str) -> str:
+    parts = [part for part in logical_path.split("/") if part]
+    return "/" + "/".join(parts[:2])
