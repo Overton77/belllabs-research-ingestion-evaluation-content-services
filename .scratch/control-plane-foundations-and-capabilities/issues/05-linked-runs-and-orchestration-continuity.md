@@ -3,15 +3,14 @@
 **What to build:** Make every Workflow Type boundary a distinct, idempotently admitted child Workflow Run with explicit parent-side dependency, authority, budget, cancellation, and exact result-admission semantics, while preserving logical execution across Temporal history compaction.
 
 **Blocked by:**
+
 - 01 — Implement versioned Workflow Definitions and Effective Run Configuration compilation
 - 02 — Implement transactional Run admission, lifecycle, budgets, and domain events
 - 03 — Implement durable StageGraph orchestration
-- 04 — Implement durable GoalDirected orchestration
 
 **Status:** ready-for-agent
 
 **GitHub:** https://github.com/Overton77/belllabs-research-ingestion-evaluation-content-services/issues/5
-
 
 **Read first:** [Local control-plane ticket index](INDEX.md)
 

@@ -7,6 +7,11 @@ from app.models.control_plane import (
     PublishedDefinitionDocument,
 )
 from app.models.infrastructure import InfrastructureMarker
+from app.models.operation_execution import (
+    OperationExecutionBindingDocument,
+    OperationExecutionClaimDocument,
+    OperationSettlementDocument,
+)
 
 __all__ = [
     "DefinitionAliasDocument",
@@ -15,5 +20,8 @@ __all__ = [
     "DefinitionRetirementDocument",
     "EffectiveRunConfigurationDocument",
     "InfrastructureMarker",
+    "OperationExecutionBindingDocument",
+    "OperationExecutionClaimDocument",
+    "OperationSettlementDocument",
     "PublishedDefinitionDocument",
 ]
