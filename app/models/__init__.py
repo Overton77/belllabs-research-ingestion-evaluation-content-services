@@ -12,6 +12,10 @@ from app.models.operation_execution import (
     OperationExecutionClaimDocument,
     OperationSettlementDocument,
 )
+from app.models.workspace_materialization import (
+    WorkspaceMaterializationManifestDocument,
+    WorkspaceSlotReservationDocument,
+)
 
 __all__ = [
     "DefinitionAliasDocument",
@@ -24,4 +28,6 @@ __all__ = [
     "OperationExecutionClaimDocument",
     "OperationSettlementDocument",
     "PublishedDefinitionDocument",
+    "WorkspaceMaterializationManifestDocument",
+    "WorkspaceSlotReservationDocument",
 ]

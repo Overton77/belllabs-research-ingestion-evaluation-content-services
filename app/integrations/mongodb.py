@@ -19,6 +19,8 @@ from app.models import (
     OperationExecutionClaimDocument,
     OperationSettlementDocument,
     PublishedDefinitionDocument,
+    WorkspaceMaterializationManifestDocument,
+    WorkspaceSlotReservationDocument,
 )
 
 BEANIE_MODELS = [
@@ -32,6 +34,8 @@ BEANIE_MODELS = [
     OperationExecutionBindingDocument,
     OperationExecutionClaimDocument,
     OperationSettlementDocument,
+    WorkspaceSlotReservationDocument,
+    WorkspaceMaterializationManifestDocument,
 ]
 
 

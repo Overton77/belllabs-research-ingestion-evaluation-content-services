@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -85,6 +85,8 @@ class WorkspaceContract(Contract):
     workspace_id: str = Field(min_length=1)
     provider: str = Field(min_length=1)
     template_ref: ExactDefinitionRef
+    workflow_contract_digest: str | None = Field(default=None, pattern=DIGEST_PATTERN)
+    slot_bindings: tuple[WorkspaceSlotBinding, ...] = ()
     exclusive_write_paths: tuple[str, ...]
     read_mounts: tuple[WorkspaceMount, ...] = ()
     network_policy: Literal["none", "allowlisted"] = "none"
@@ -100,6 +102,21 @@ class WorkspaceContract(Contract):
         if not value or len(value) != len(set(value)):
             raise ValueError("workspace requires unique exclusive writable paths")
         return value
+
+    @model_validator(mode="after")
+    def compiled_slots_match_legacy_projection(self) -> WorkspaceContract:
+        if not self.slot_bindings:
+            return self
+        writable = tuple(
+            slot.logical_path
+            for slot in self.slot_bindings
+            if slot.access == "exclusive_write"
+        )
+        if set(writable) != set(self.exclusive_write_paths):
+            raise ValueError("compiled workspace slots do not match writable path projection")
+        if self.workflow_contract_digest is None:
+            raise ValueError("compiled workspace slots require the workflow contract digest")
+        return self
 
 
 class CapabilityGrant(Contract):
@@ -152,9 +169,10 @@ class OperationExecutionRequest(Contract):
     def capabilities_cover_exact_bindings(self) -> OperationExecutionRequest:
         if not {tool.tool_id for tool in self.tools} <= self.capability_grant.tool_ids:
             raise ValueError("tool binding exceeds the operation capability grant")
-        if not {
-            server.server_id for server in self.mcp_servers
-        } <= self.capability_grant.mcp_server_ids:
+        if (
+            not {server.server_id for server in self.mcp_servers}
+            <= self.capability_grant.mcp_server_ids
+        ):
             raise ValueError("MCP binding exceeds the operation capability grant")
         return self
 
@@ -197,6 +215,8 @@ class MaterializedWorkspace(Contract):
     runtime_digest: str = Field(pattern=DIGEST_PATTERN)
     image_digest: str = Field(pattern=DIGEST_PATTERN)
     mount_manifest_digest: str = Field(pattern=DIGEST_PATTERN)
+    namespace_id: str | None = None
+    manifest_revision: int | None = Field(default=None, ge=1)
 
 
 class RuntimeInvocation(Contract):
@@ -263,6 +283,150 @@ class PromotedArtifact(Contract):
     metadata_revision: int = Field(ge=1)
     manifest_revision: int = Field(ge=1)
     status: Literal["admitted"]
+
+
+class WorkspaceOwnerKind(StrEnum):
+    RUN = "run"
+    STAGE = "stage"
+    CYCLE = "cycle"
+    ITERATION = "iteration"
+    EVALUATOR = "evaluator"
+    AGENT = "agent"
+    DELEGATE = "delegate"
+
+
+class WorkspaceOwner(Contract):
+    kind: WorkspaceOwnerKind
+    owner_id: str = Field(min_length=1)
+    parent_owner_id: str | None = None
+
+    @model_validator(mode="after")
+    def delegates_require_parent(self) -> WorkspaceOwner:
+        if self.kind == WorkspaceOwnerKind.DELEGATE and self.parent_owner_id is None:
+            raise ValueError("delegate workspace owners require an explicit parent")
+        return self
+
+
+class WorkspaceSlotBinding(Contract):
+    slot_name: str = Field(pattern=r"^[a-z][a-z0-9_-]*$")
+    logical_path: str = Field(pattern=r"^/[A-Za-z0-9._/-]+$")
+    access: Literal["read_only", "exclusive_write"]
+    owner: WorkspaceOwner
+    durable_ref: str | None = None
+    content_digest: str | None = Field(default=None, pattern=DIGEST_PATTERN)
+
+    @model_validator(mode="after")
+    def mounted_inputs_are_complete(self) -> WorkspaceSlotBinding:
+        if self.access == "read_only":
+            if self.durable_ref is None or self.content_digest is None:
+                raise ValueError("read-only slots require a durable reference and digest")
+        elif self.durable_ref is not None or self.content_digest is not None:
+            raise ValueError("writable slots cannot declare a durable input")
+        if ".." in self.logical_path.split("/"):
+            raise ValueError("logical workspace paths cannot traverse parents")
+        return self
+
+
+class DurableInputManifestEntry(Contract):
+    kind: Literal["durable_input"] = "durable_input"
+    entry_id: str = Field(min_length=1)
+    slot_name: str = Field(min_length=1)
+    logical_path: str = Field(min_length=1)
+    owner: WorkspaceOwner
+    durable_ref: str = Field(min_length=1)
+    content_digest: str = Field(pattern=DIGEST_PATTERN)
+    read_only: Literal[True] = True
+
+
+class LocalCandidateManifestEntry(Contract):
+    kind: Literal["local_candidate"] = "local_candidate"
+    entry_id: str = Field(min_length=1)
+    slot_name: str = Field(min_length=1)
+    logical_path: str = Field(min_length=1)
+    owner: WorkspaceOwner
+    candidate_id: str = Field(min_length=1)
+    content_digest: str = Field(pattern=DIGEST_PATTERN)
+    media_type: str = Field(min_length=1)
+    size_bytes: int = Field(ge=0)
+
+
+class PromotedArtifactManifestEntry(Contract):
+    kind: Literal["promoted_artifact"] = "promoted_artifact"
+    entry_id: str = Field(min_length=1)
+    slot_name: str = Field(min_length=1)
+    logical_path: str = Field(min_length=1)
+    owner: WorkspaceOwner
+    candidate_id: str = Field(min_length=1)
+    artifact_id: str = Field(min_length=1)
+    artifact_metadata_revision: int = Field(ge=1)
+    content_digest: str = Field(pattern=DIGEST_PATTERN)
+
+
+class StaleManifestEntry(Contract):
+    kind: Literal["stale"] = "stale"
+    entry_id: str = Field(min_length=1)
+    slot_name: str = Field(min_length=1)
+    logical_path: str = Field(min_length=1)
+    owner: WorkspaceOwner
+    superseded_entry_id: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+
+
+WorkspaceMaterializationEntry = Annotated[
+    DurableInputManifestEntry
+    | LocalCandidateManifestEntry
+    | PromotedArtifactManifestEntry
+    | StaleManifestEntry,
+    Field(discriminator="kind"),
+]
+
+
+class WorkspaceMaterializationManifest(Contract):
+    manifest_id: str = Field(min_length=1)
+    namespace_id: str = Field(min_length=1)
+    workspace_id: str = Field(min_length=1)
+    revision: int = Field(ge=1)
+    template_ref: ExactDefinitionRef
+    workflow_contract_digest: str = Field(pattern=DIGEST_PATTERN)
+    slots: tuple[WorkspaceSlotBinding, ...] = Field(min_length=1)
+    entries: tuple[WorkspaceMaterializationEntry, ...]
+    prior_manifest_digest: str | None = Field(default=None, pattern=DIGEST_PATTERN)
+    manifest_digest: str = Field(pattern=DIGEST_PATTERN)
+    created_at: AwareDatetime
+
+    @model_validator(mode="after")
+    def governed_paths_are_unique(self) -> WorkspaceMaterializationManifest:
+        paths = [entry.logical_path for entry in self.entries if entry.kind != "stale"]
+        if len(paths) != len(set(paths)):
+            raise ValueError("current manifest entries require unique logical paths")
+        return self
+
+
+class WorkspaceMaterializationRequest(Contract):
+    namespace_id: str = Field(min_length=1)
+    workspace_id: str = Field(min_length=1)
+    provider: str = Field(min_length=1)
+    template_ref: ExactDefinitionRef
+    workflow_contract_digest: str = Field(pattern=DIGEST_PATTERN)
+    slots: tuple[WorkspaceSlotBinding, ...] = Field(min_length=1)
+    runtime_digest: str = Field(pattern=DIGEST_PATTERN)
+    image_digest: str = Field(pattern=DIGEST_PATTERN)
+    created_at: AwareDatetime
+
+    @model_validator(mode="after")
+    def slots_are_unique_and_exclusive(self) -> WorkspaceMaterializationRequest:
+        names = [slot.slot_name for slot in self.slots]
+        paths = [slot.logical_path for slot in self.slots]
+        if len(names) != len(set(names)) or len(paths) != len(set(paths)):
+            raise ValueError("workspace slot names and logical paths must be unique")
+        writable_owners = [
+            (slot.logical_path, slot.owner.owner_id)
+            for slot in self.slots
+            if slot.access == "exclusive_write"
+        ]
+        if len(writable_owners) != len(set(writable_owners)):
+            raise ValueError("writable workspace slots require one owner")
+        return self
 
 
 class SnapshotCloneRequest(Contract):
