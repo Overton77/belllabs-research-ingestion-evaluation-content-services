@@ -9,10 +9,16 @@ Current boundaries:
   budgets, command results, outbox events, and durable consumer cursors.
 - Temporal uses a separate PostgreSQL service and owns execution mechanics only.
 - MongoDB owns immutable definitions and Effective Run Configuration payloads.
+- PostgreSQL owns parent/child Run Composition Links, dependency revisions, linked-result
+  admission decisions, and linked budget rollups.
+- MongoDB owns immutable Operation Execution Bindings and settlements; provider SDK, MCP,
+  skill, workspace, secret, artifact, and snapshot types remain behind application ports.
 - MongoDB uses Beanie with PyMongo's `AsyncMongoClient` (not Motor) and the database name `belllabsbiotech`.
 - Neo4j uses `AsyncGraphDatabase`.
 - AWS uses an `aioboto3` async S3 client and the existing AWS profile/credential chain.
-- The Agents SDK sandbox probe is one durable Temporal workflow invocation using a Docker sandbox and the low-cost `gpt-5.4-nano` default.
+- The governed operation tracer invokes the OpenAI Agents SDK through a bound Temporal
+  activity and an isolated Docker sandbox. The old direct workflow probe is diagnostic only
+  and cannot produce control-plane domain state.
 
 ## Local setup
 
@@ -32,10 +38,17 @@ Run the worker in a second terminal:
 uv run python -m app.temporal.worker
 ```
 
-Then invoke the single sandbox-backed Agents SDK probe:
+Then invoke the legacy bootstrap diagnostic:
 
 ```powershell
 uv run python -m app.temporal.run_probe
+```
+
+The issue-06 governed tracer starts its own operation worker, uses `gpt-5-mini`, verifies an
+immutable skill fixture, and executes one bounded command in a Docker sandbox:
+
+```powershell
+uv run python -m app.temporal.run_operation_probe
 ```
 
 The worker runs on the host and talks to Docker Desktop for isolated sandbox containers. Do not treat this local Compose topology as a production deployment.

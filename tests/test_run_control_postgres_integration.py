@@ -5,7 +5,16 @@ import asyncio
 import asyncpg
 import pytest
 
+from app.application.postgres_linked_run_repository import PostgresLinkedRunRepository
 from app.application.postgres_run_control_repository import PostgresRunControlRepository
+from app.domain.composition.contracts import (
+    DependencyAssessment,
+    LinkedRunResultAdmissionDecision,
+    ResultEvidenceAssessment,
+    RunCompositionLink,
+    RunDependencyClass,
+    RunDependencyRevision,
+)
 from app.domain.run_control.contracts import CancelAction, CommandStatus, DecisionStatus
 from app.integrations.postgres import apply_application_migrations
 from tests.test_run_control import command, request, service
@@ -65,6 +74,7 @@ async def test_postgres_atomic_rollback_and_concurrent_version_conflict(
             )
 
         parent_budget = await run_service.get_budget("tenant-1", admitted.run_id)
+        first_child_run_id: str | None = None
         for index in range(4):
             child_request = request(request_id=f"postgres-child-{index}")
             child_request = child_request.model_copy(
@@ -81,7 +91,86 @@ async def test_postgres_atomic_rollback_and_concurrent_version_conflict(
                     ),
                 }
             )
-            assert (await run_service.admit(child_request)).status == DecisionStatus.ACCEPTED
+            child_decision = await run_service.admit(child_request)
+            assert child_decision.status == DecisionStatus.ACCEPTED
+            first_child_run_id = first_child_run_id or child_decision.run_id
+        assert first_child_run_id is not None
+        child_budget = await run_service.get_budget("tenant-1", first_child_run_id)
+        composition = PostgresLinkedRunRepository(pool)
+        link = RunCompositionLink(
+            link_id="postgres-link-1",
+            request_identity="postgres-linked-request-1",
+            request_fingerprint="sha256:" + "a" * 64,
+            request_scope="tenant-1",
+            parent_run_id=admitted.run_id,
+            child_run_id=first_child_run_id,
+            slot_id="child_work",
+            request_revision=1,
+            target_workflow_type_ref=request().workflow_type_ref,
+            child_effective_configuration_digest=request().effective_configuration_digest,
+            dependency_class=RunDependencyClass.REQUIRED_BLOCKING,
+            linked_budget_account_id=child_budget.account_id,
+            result_admission_policy="linked-result:exact@1",
+            cancellation_policy="request_cancel",
+            created_at=request().requested_at,
+        )
+        assert await composition.commit_link(link) == link
+        assert await composition.commit_link(link) == link
+        assert tenant_two.run_id is not None
+        cross_tenant_link = link.model_copy(
+            update={
+                "link_id": "postgres-link-cross-tenant",
+                "request_identity": "postgres-linked-request-cross-tenant",
+                "child_run_id": tenant_two.run_id,
+            }
+        )
+        with pytest.raises(asyncpg.ForeignKeyViolationError):
+            await composition.commit_link(cross_tenant_link)
+        revision = RunDependencyRevision(
+            revision_id="postgres-dependency-revision-2",
+            link_id=link.link_id,
+            revision=2,
+            prior_dependency_class=RunDependencyClass.REQUIRED_BLOCKING,
+            dependency_class=RunDependencyClass.DEGRADABLE_NONBLOCKING,
+            assessment=DependencyAssessment(
+                readiness_reassessment_required=True,
+                reason="integration revision",
+            ),
+            authority_ref="authority:integration",
+            decided_by="integration-test",
+            decided_at=request().requested_at,
+        )
+        assert (
+            await composition.commit_dependency_revision("tenant-1", revision)
+            == revision
+        )
+        result_decision = LinkedRunResultAdmissionDecision(
+            decision_id="postgres-linked-result-1",
+            link_id=link.link_id,
+            parent_run_id=link.parent_run_id,
+            child_run_id=link.child_run_id,
+            exact_output_ref="artifact:child:exact-v1",
+            outcome="admit",
+            assessment=ResultEvidenceAssessment(
+                intended_purpose_satisfied=True,
+                exact_version_compatible=True,
+                ready=True,
+                provenance_valid=True,
+                permissions_valid=True,
+                evaluation_evidence_valid=True,
+            ),
+            authority_ref="authority:integration",
+            decided_by="integration-test",
+            decided_at=request().requested_at,
+            reason="integration result admission",
+        )
+        assert (
+            await composition.commit_result_decision("tenant-1", result_decision)
+            == result_decision
+        )
+        assert await composition.list_parent_links("tenant-1", admitted.run_id) == (
+            link,
+        )
         over_cap = request(request_id="postgres-child-over-cap")
         over_cap = over_cap.model_copy(
             update={

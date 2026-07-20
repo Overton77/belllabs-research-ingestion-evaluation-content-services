@@ -15,6 +15,9 @@ from app.models import (
     DefinitionRetirementDocument,
     EffectiveRunConfigurationDocument,
     InfrastructureMarker,
+    OperationExecutionBindingDocument,
+    OperationExecutionClaimDocument,
+    OperationSettlementDocument,
     PublishedDefinitionDocument,
 )
 
@@ -26,6 +29,9 @@ BEANIE_MODELS = [
     PublishedDefinitionDocument,
     DefinitionRetirementDocument,
     EffectiveRunConfigurationDocument,
+    OperationExecutionBindingDocument,
+    OperationExecutionClaimDocument,
+    OperationSettlementDocument,
 ]
 
 
