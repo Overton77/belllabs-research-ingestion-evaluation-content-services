@@ -1,0 +1,27 @@
+---
+alwaysApply: false
+---
+
+# Graphify (optional)
+
+This repo has an optional [graphify](https://github.com/Graphify-Labs/graphify) knowledge graph for `app/` at `graphify-out/` (repo root, not under `app/`). Prefer Cursor’s normal Read / Grep / Glob when those are enough. Use graphify when a cross-file map, god-node view, or symbol-to-symbol path would help — it is not required before exploring code.
+
+## When it may help
+
+- “What connects X to Y?” / dependency path between symbols
+- Broad architecture orientation (hubs, communities) without reading many files
+- Checking whether a change sits near a high-degree hub (`RunControlService`, `ControlPlaneService`, etc.)
+
+## Commands
+
+Graph root: `graphify-out/graph.json` (from repo root).
+
+```bash
+graphify query "<question>" --graph graphify-out/graph.json
+graphify path "<A>" "<B>" --graph graphify-out/graph.json
+graphify explain "<concept>" --graph graphify-out/graph.json
+```
+
+- `graphify-out/graph.html` — interactive browser view
+- `graphify-out/GRAPH_REPORT.md` — god nodes, communities, suggested questions
+- After substantial `app/` edits, optionally refresh with `graphify extract ./app --out . --code-only` (AST-only, no API cost)

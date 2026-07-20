@@ -1,0 +1,27 @@
+---
+description: Current stack roles and data-authority boundaries (evolving snapshot)
+alwaysApply: true
+---
+
+# Tech stack & data authority
+
+**Evolving snapshot** (~5–10% of backend built). Update this rule when stack roles change. Do not invent new stores in code without a spec/ticket. Local wiring: `README.md` / `.env.example`.
+
+| System | Used for | Authority |
+|--------|----------|-----------|
+| **FastAPI** | HTTP API, startup migrations hook, docs | Entry surface only |
+| **uv / Python** | Project env, `uv run`, lockfile | Standard invoke path |
+| **Postgres (application)** | Run lifecycle, commands, transitions, budgets, outbox, cursors, authz projections, linked-run rollups | **Authoritative** control-plane transactional state (local port `55432`) |
+| **Postgres (Temporal)** | Temporal persistence only | Separate DB — **not** domain authority |
+| **Supabase** | Hosted Postgres + vector for memory-related retrieval | Memory/vector when wired; do not confuse with Temporal DB |
+| **MongoDB + Beanie** | Immutable definitions, Effective Run Config, operation bindings, workflow-shaped docs, findings/plans/evals metadata | **Authoritative** for those document payloads (`AsyncMongoClient`, DB `belllabsbiotech`) |
+| **Temporal** | Durable workflows/activities, retries, sandbox-bound agent work | Execution mechanics only |
+| **Neo4j** | Approved canonical graph knowledge | Graph authority; preflight/refinement read-only unless a later spec says otherwise |
+| **Object storage (S3/aioboto3)** | Large immutable payloads, artifacts, reports, snapshots | Blob authority |
+| **OpenAI Agents SDK** | Governed agent runs, tools, Docker and/or Temporal sandboxes, Temporal durable-workflow plugin | Bound through ports/bindings; never invents control-plane state by existing |
+
+## Hard rules
+
+- Temporal must **not** be the system of record for run lifecycle or budgets.
+- Prompts, skills, MCP tools, plugins, memory packs, and model output are **never** authority merely because they exist (catalog + exact bindings required where specs say so).
+- When unsure where state lives, check the matching `F*`/`C*` spec in `../biotech-meta/docs/specs/pre-research/` before coding.

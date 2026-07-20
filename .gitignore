@@ -10,7 +10,10 @@
 supabase/.env
 aws.env
 openai.env
-.temporal.env
+.temporal.env   
+
+graphify-out  
+/graphify-out 
 
 # Python virtualenvs & tools
 .venv/
@@ -137,6 +140,7 @@ temp/
 sandbox/
 .sandbox/
 agent-sandbox/
+sandbox-work/agentic-capability-probe/
 # Do not ignore intentionally tracked example configs
 !.env.example
 

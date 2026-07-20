@@ -1,0 +1,6 @@
+---
+alwaysApply: false
+---
+
+Bell Labs Owner:
+I usually use GPT 5.6 Sol or Claude Fable for the major portion of my architecture and software development work. Please be mindful of my cursor api credit usage. Only use GPT 5.6 sol and large Anthropic models as sub agents where the task difficult and/or scope requires it. Otherwise use Composer, Grok 4.5 or one of the other classes of OpenAI or Anthropic models

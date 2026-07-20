@@ -1,0 +1,52 @@
+---
+alwaysApply: false
+---
+
+# Engineering delivery sequence
+
+One concern: deliver backend work in order. Do not invent domain behavior during coding or skip tickets.
+The Belllabs owner will sometimes re-order , combine or modify issues.
+
+## Required sequence
+
+```
+grill-with-docs + domain-modeling
+  → checkpoints / summaries in biotech-meta
+  → optional handoff (any stage; skill or manual instruction)
+  → to-spec  →  biotech-meta/docs/specs/...
+  → to-tickets → GitHub issues + markdown mirrors under .scratch/.../issues/
+  → implement (+ tests) against a specific issue/spec seam
+```
+
+## Matt Pocock skills (read and follow)
+
+Operator-invoked skills live in `../biotech-meta/.agents/skills/`. When the user runs a stage, open the matching `SKILL.md` and follow it — do not improvise the stage.
+
+| Stage                          | Skill                                                                                                    |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| Interview / design             | `../biotech-meta/.agents/skills/grill-with-docs/SKILL.md` (uses domain-modeling)                         |
+| Domain model / glossary / ADRs | `../biotech-meta/.agents/skills/domain-modeling/SKILL.md`                                                |
+| Session handoff                | `../biotech-meta/.agents/skills/handoff/SKILL.md` — **or** follow the user's manual handoff instructions |
+| Spec synthesis                 | `../biotech-meta/.agents/skills/to-spec/SKILL.md`                                                        |
+| Ticket breakdown               | `../biotech-meta/.agents/skills/to-tickets/SKILL.md`                                                     |
+| Code + tests                   | `../biotech-meta/.agents/skills/implement/SKILL.md` (uses `/tdd`, `/code-review`)                        |
+
+BellLabs adaptations on top of those skills: specs land under `../biotech-meta/docs/specs/` (not only the tracker); tickets also get `.scratch/.../issues/` markdown mirrors; checkpoints sit between interview and `to-spec`; handoffs often land in `.scratch/handoffs/` (or biotech-meta handoffs) when the operator chooses workspace persistence over the skill's default OS temp path.
+
+## Hard rules
+
+- **No implement from interview notes alone.** Require an accepted spec path under `../biotech-meta/docs/specs/` **and** a ticket (GitHub issue and/or `.scratch/.../issues/` mirror). Then follow `implement`.
+- **Specs ≠ tickets.** Specs via `to-spec`; publishing tickets is a separate `to-tickets` step.
+- **Respect the pre-research DAG** (`F* → C* → P*/R*`) in `../biotech-meta/docs/specs/pre-research/README.md`. Do not jump ahead of prerequisites.
+- **Optional handoff (any stage):** use `handoff` when invoked, otherwise follow the user's manual handoff flow; do not invent a handoff format unprompted.
+- **Branch/PR lifecycle:** follow `.scratch/ISSUE_BRANCH_PR_LIFECYCLE.md` — one branch/PR per issue unless deliberately batched.
+
+## BAD / GOOD
+
+- **BAD:** Code a use-case from grill notes or a checkpoint draft with no accepted spec + ticket; or skip the skill `SKILL.md` for the stage in play.
+- **GOOD:** Run the matching Matt Pocock skill, then open the accepted spec + linked issue, and implement (+ tests) only that seam.
+
+## Source of truth
+
+Cite (do not paste):  
+`../biotech-meta/docs/checkpoints/internal_implementation_docs/2026-07-16-belllabs-engineering-delivery-playbook-special-checkpoint.md`
