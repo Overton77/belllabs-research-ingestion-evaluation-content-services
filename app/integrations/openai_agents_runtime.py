@@ -65,6 +65,7 @@ from app.domain.operation_execution.errors import UnsupportedRuntimePolicy
 from app.domain.operation_execution.materialization import (
     verify_workspace_manifest,
 )
+from app.integrations.openai_sandbox_snapshots import OpenAIAgentsSnapshotBridge
 
 _FILESYSTEM_TOOL_ID = "sandbox.filesystem"
 _SHELL_TOOL_ID = "sandbox.shell"
@@ -270,6 +271,7 @@ class OpenAIAgentsSandboxRuntime:
         event_sink: RuntimeEventSink | None = None,
         approval_gateway: RuntimeApprovalGateway | None = None,
         session_factory: RuntimeSessionFactory | None = None,
+        snapshot_bridge: OpenAIAgentsSnapshotBridge | None = None,
         approval_timeout_seconds: int = 900,
     ) -> None:
         self._fixture_assets = dict(fixture_asset_contents or {})
@@ -281,10 +283,17 @@ class OpenAIAgentsSandboxRuntime:
         self._event_sink = event_sink
         self._approval_gateway = approval_gateway
         self._session_factory = session_factory
+        self._snapshot_bridge = snapshot_bridge
         self._approval_timeout_seconds = approval_timeout_seconds
         self.artifacts: dict[str, bytes] = {}
-        self._docker_client: DockerSandboxClient | None = None
+        self._docker_client: DockerSandboxClient | None = (
+            snapshot_bridge.client if snapshot_bridge is not None else None
+        )
         self._effects: dict[str, RuntimeResult] = {}
+
+    async def aclose(self) -> None:
+        if self._snapshot_bridge is not None:
+            await self._snapshot_bridge.aclose()
 
     async def execute(
         self,
@@ -535,10 +544,32 @@ class OpenAIAgentsSandboxRuntime:
                 include_usage=True,
             ),
         )
-        # Own the sandbox session so required artifacts can be read after Runner.run.
-        # Recent Agents SDK releases clear result._sandbox_session during cleanup.
-        session = await self._docker_client.create(manifest=manifest, options=sandbox_options)
+        # Own the sandbox session so required artifacts can be read after Runner.run and
+        # immutable archives can be captured before provider cleanup.
+        restored_session = (
+            await self._snapshot_bridge.take_restored_session(invocation.workspace, binding)
+            if self._snapshot_bridge is not None
+            else None
+        )
+        if binding.workspace.restore_snapshot_id is not None and restored_session is None:
+            raise ValueError(
+                "bound snapshot restore has no admitted cloned sandbox session"
+            )
+        archive = (
+            self._snapshot_bridge.begin_capture(binding, invocation.workspace)
+            if self._snapshot_bridge is not None and restored_session is None
+            else None
+        )
+        session = restored_session or await self._docker_client.create(
+            manifest=manifest,
+            options=sandbox_options,
+            snapshot=archive,
+        )
         try:
+            if restored_session is not None:
+                session.state = session.state.model_copy(update={"manifest": manifest})
+                await session.start()
+                await session.apply_manifest()
             sdk_session = (
                 self._session_factory(binding, binding.session_id)
                 if self._session_factory is not None and binding.session_id is not None
@@ -558,6 +589,11 @@ class OpenAIAgentsSandboxRuntime:
                     client=self._docker_client,
                     options=sandbox_options,
                     session=session,
+                    archive_limits=(
+                        self._snapshot_bridge.archive_limits
+                        if self._snapshot_bridge is not None
+                        else None
+                    ),
                 ),
                 tool_execution=ToolExecutionConfig(
                     max_function_tool_concurrency=binding.delegation_ceiling.max_concurrency or 1
@@ -666,7 +702,21 @@ class OpenAIAgentsSandboxRuntime:
             self._effects[binding.side_effect_key] = runtime_result
             return runtime_result
         finally:
-            await self._docker_client.delete(session)
+            try:
+                await session.aclose()
+                if archive is not None and self._snapshot_bridge is not None:
+                    self._snapshot_bridge.complete_capture(
+                        binding,
+                        invocation.workspace,
+                        archive,
+                        sensitive_values=tuple(
+                            value.encode("utf-8")
+                            for value in resolved_secrets.values()
+                            if value
+                        ),
+                    )
+            finally:
+                await self._docker_client.delete(session)
 
     async def _run_with_streaming_and_approvals(
         self,

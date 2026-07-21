@@ -750,19 +750,138 @@ def _workspace_paths_overlap(left: str, right: str) -> bool:
     )
 
 
-class SnapshotCloneRequest(Contract):
-    snapshot_id: str
-    target_workspace_id: str
-    binding_id: str
+class SnapshotCreationReason(StrEnum):
+    REPRODUCIBILITY = "reproducibility"
+    DEBUGGING = "debugging"
+    RESUMPTION = "resumption"
+    AUDIT = "audit"
+    FAILURE = "failure"
+    CYCLE = "cycle"
+
+
+class SnapshotCapabilityShape(Contract):
+    """Non-secret historical shape; never an authority grant."""
+
+    capabilities: frozenset[str] = frozenset()
+    tool_ids: frozenset[str] = frozenset()
+    mcp_server_ids: frozenset[str] = frozenset()
+    data_scope_refs: frozenset[str] = frozenset()
+    network_hosts: frozenset[str] = frozenset()
+    network_policy: Literal["none", "allowlisted"] = "none"
+
+
+class SnapshotRetention(Contract):
+    policy_ref: str = Field(min_length=1)
+    retain_until: AwareDatetime | None = None
+    deletion_protected: bool = False
+
+
+class SnapshotPayloadAddress(Contract):
+    object_ref: str = Field(min_length=1)
+    content_digest: str = Field(pattern=DIGEST_PATTERN)
+    size_bytes: int = Field(ge=0)
+    media_type: str = Field(min_length=1)
+
+
+class SandboxSnapshotCreateRequest(Contract):
+    snapshot_id: str = Field(min_length=1)
+    idempotency_key: str = Field(min_length=1)
+    request_scope: str = Field(min_length=1)
+    source_namespace_id: str = Field(min_length=1)
+    source_workspace_id: str = Field(min_length=1)
+    parent_snapshot_id: str | None = Field(default=None, min_length=1)
+    provider: str = Field(min_length=1)
+    reason: SnapshotCreationReason
+    producer_binding_id: str = Field(min_length=1)
+    snapshot_policy_ref: str = Field(min_length=1)
     runtime_digest: str = Field(pattern=DIGEST_PATTERN)
     image_digest: str = Field(pattern=DIGEST_PATTERN)
     package_digest: str = Field(pattern=DIGEST_PATTERN)
     environment_digest: str = Field(pattern=DIGEST_PATTERN)
+    workspace_contract_digest: str = Field(pattern=DIGEST_PATTERN)
+    mount_manifest_digest: str = Field(pattern=DIGEST_PATTERN)
+    capability_shape: SnapshotCapabilityShape
+    retention: SnapshotRetention
+    created_at: AwareDatetime
+
+
+class SandboxSnapshotCapture(Contract):
+    provider_snapshot_id: str = Field(min_length=1)
+    filesystem_digest: str = Field(pattern=DIGEST_PATTERN)
+    content_manifest_digest: str = Field(pattern=DIGEST_PATTERN)
+    payload: bytes = Field(repr=False, max_length=268_435_456)
+    media_type: str = Field(default="application/x-tar", min_length=1)
+
+
+class SandboxSnapshot(Contract):
+    snapshot_id: str = Field(min_length=1)
+    creation_identity: str = Field(pattern=DIGEST_PATTERN)
+    request_scope: str = Field(min_length=1)
+    source_namespace_id: str = Field(min_length=1)
+    source_workspace_id: str = Field(min_length=1)
+    parent_snapshot_id: str | None = None
+    provider: str = Field(min_length=1)
+    provider_snapshot_id: str = Field(min_length=1)
+    filesystem_digest: str = Field(pattern=DIGEST_PATTERN)
+    content_manifest_digest: str = Field(pattern=DIGEST_PATTERN)
+    payload: SnapshotPayloadAddress
+    runtime_digest: str = Field(pattern=DIGEST_PATTERN)
+    image_digest: str = Field(pattern=DIGEST_PATTERN)
+    package_digest: str = Field(pattern=DIGEST_PATTERN)
+    environment_digest: str = Field(pattern=DIGEST_PATTERN)
+    workspace_contract_digest: str = Field(pattern=DIGEST_PATTERN)
+    mount_manifest_digest: str = Field(pattern=DIGEST_PATTERN)
+    reason: SnapshotCreationReason
+    producer_binding_id: str = Field(min_length=1)
+    snapshot_policy_ref: str = Field(min_length=1)
+    capability_shape: SnapshotCapabilityShape
+    retention: SnapshotRetention
+    created_at: AwareDatetime
+
+
+class SnapshotCloneRequest(Contract):
+    snapshot_id: str = Field(min_length=1)
+    clone_id: str = Field(min_length=1)
+    request_scope: str = Field(min_length=1)
+    target_namespace_id: str = Field(min_length=1)
+    target_workspace_id: str = Field(min_length=1)
+    binding_id: str = Field(min_length=1)
+    runtime_digest: str = Field(pattern=DIGEST_PATTERN)
+    image_digest: str = Field(pattern=DIGEST_PATTERN)
+    package_digest: str = Field(pattern=DIGEST_PATTERN)
+    environment_digest: str = Field(pattern=DIGEST_PATTERN)
+    workspace_contract_digest: str = Field(pattern=DIGEST_PATTERN)
+    target_mount_manifest_digest: str = Field(pattern=DIGEST_PATTERN)
+    capability_shape: SnapshotCapabilityShape
+    requested_at: AwareDatetime
+
+
+class SnapshotCloneRecord(Contract):
+    clone_id: str = Field(min_length=1)
+    snapshot_id: str = Field(min_length=1)
+    parent_workspace_id: str = Field(min_length=1)
+    target_namespace_id: str = Field(min_length=1)
+    target_workspace_id: str = Field(min_length=1)
+    binding_id: str = Field(min_length=1)
+    resources: ReacquiredRuntimeResources
+    created_at: AwareDatetime
+
+
+class ReacquiredRuntimeResources(Contract):
+    secret_names: tuple[str, ...] = ()
+    credential_names: tuple[str, ...] = ()
+    lease_names: tuple[str, ...] = ()
+    mcp_connection_names: tuple[str, ...] = ()
+    socket_names: tuple[str, ...] = ()
 
 
 class SnapshotCloneResult(Contract):
+    clone_id: str
     workspace: MaterializedWorkspace
     parent_snapshot_id: str
     parent_workspace_id: str
+    resources: ReacquiredRuntimeResources = Field(default_factory=ReacquiredRuntimeResources)
     credentials_reresolved: Literal[True] = True
     external_leases_reresolved: Literal[True] = True
+    live_resources_restored: tuple[()] = ()
+    artifact_promotion_required: Literal[True] = True

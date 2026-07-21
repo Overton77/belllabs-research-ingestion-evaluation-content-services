@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import asyncpg
@@ -32,6 +33,7 @@ class DurableOpenAIAgentsRuntimeFactory:
         )
         self.sessions = PostgresAgentSessionFactory(pool)
         self._approval_timeout_seconds = approval_timeout_seconds
+        self._runtimes: set[OpenAIAgentsSandboxRuntime] = set()
 
     def create(self, **kwargs: Any) -> OpenAIAgentsSandboxRuntime:
         forbidden = {"event_sink", "approval_gateway", "session_factory"} & kwargs.keys()
@@ -40,10 +42,17 @@ class DurableOpenAIAgentsRuntimeFactory:
                 "durable runtime infrastructure cannot be overridden: "
                 + ", ".join(sorted(forbidden))
             )
-        return OpenAIAgentsSandboxRuntime(
+        runtime = OpenAIAgentsSandboxRuntime(
             event_sink=self.events,
             approval_gateway=self.approvals,
             session_factory=self.sessions,
             approval_timeout_seconds=self._approval_timeout_seconds,
             **kwargs,
         )
+        self._runtimes.add(runtime)
+        return runtime
+
+    async def aclose(self) -> None:
+        runtimes = tuple(self._runtimes)
+        self._runtimes.clear()
+        await asyncio.gather(*(runtime.aclose() for runtime in runtimes))
