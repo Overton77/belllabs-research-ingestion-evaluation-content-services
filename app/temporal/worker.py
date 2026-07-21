@@ -70,9 +70,7 @@ async def main() -> None:
             BeanieDefinitionRepository(),
             ExtensionRegistry(),
             payload_store,
-            externalize_above_bytes=(
-                256_000 if settings.s3_bucket else 15_000_000
-            ),
+            externalize_above_bytes=(256_000 if settings.s3_bucket else 15_000_000),
         )
         run_control = RunControlService(
             PostgresRunControlRepository(postgres_pool),

@@ -78,9 +78,7 @@ class LinkedRunWorkflow:
                 "child_task_queue": child_task_queue,
                 "current_execution_epoch": current_epoch,
                 "continuation_state": (
-                    continuation.model_dump(mode="json")
-                    if continuation is not None
-                    else None
+                    continuation.model_dump(mode="json") if continuation is not None else None
                 ),
             },
             id=observer_id,
@@ -98,9 +96,7 @@ class LinkedRunWorkflow:
                 "disposition": "launched_nonblocking",
                 "execution_epoch": current_epoch,
                 "continuation_state": (
-                    continuation.model_dump(mode="json")
-                    if continuation is not None
-                    else None
+                    continuation.model_dump(mode="json") if continuation is not None else None
                 ),
             }
         try:
@@ -127,9 +123,7 @@ class LinkedRunObserverWorkflow:
 
     @workflow.run
     async def run(self, payload: dict[str, Any]) -> dict[str, Any]:
-        execution_binding = LinkedRunExecutionBinding.model_validate(
-            payload["execution_binding"]
-        )
+        execution_binding = LinkedRunExecutionBinding.model_validate(payload["execution_binding"])
         link = execution_binding.link
         current_epoch = int(payload.get("current_execution_epoch", 1))
         continuation_payload = payload.get("continuation_state")

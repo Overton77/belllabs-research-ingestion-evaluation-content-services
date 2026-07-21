@@ -61,9 +61,7 @@ async def test_mongodb_binding_claim_and_settlement_are_immutable_and_idempotent
             sandbox=ConformanceSandbox(),
             assets=assets,
             mcp=assets,
-            secrets=ConformanceSecretResolver(
-                {"environment:OPENAI_API_KEY": SECRET_VALUE}
-            ),
+            secrets=ConformanceSecretResolver({"environment:OPENAI_API_KEY": SECRET_VALUE}),
             events=ConformanceEventSink(),
             budget=ConformanceBudgetAuthority(),
         )

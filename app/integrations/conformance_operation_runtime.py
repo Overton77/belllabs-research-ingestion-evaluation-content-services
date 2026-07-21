@@ -46,9 +46,7 @@ class ConformanceSandbox:
     def __init__(self) -> None:
         self.materializations: dict[str, MaterializedWorkspace] = {}
 
-    async def materialize(
-        self, binding: OperationExecutionBinding
-    ) -> MaterializedWorkspace:
+    async def materialize(self, binding: OperationExecutionBinding) -> MaterializedWorkspace:
         prior = self.materializations.get(binding.binding_id)
         if prior is not None:
             return prior
@@ -158,9 +156,7 @@ class ConformanceEventSink:
     def __init__(self) -> None:
         self.events: dict[str, tuple[str, dict[str, object]]] = {}
 
-    async def publish(
-        self, *, event_key: str, binding_id: str, payload: dict[str, object]
-    ) -> None:
+    async def publish(self, *, event_key: str, binding_id: str, payload: dict[str, object]) -> None:
         prior = self.events.get(event_key)
         value = (binding_id, deepcopy(payload))
         if prior is not None and prior != value:

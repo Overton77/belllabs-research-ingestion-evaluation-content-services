@@ -17,9 +17,7 @@ from app.models.operation_execution import (
 class MongoOperationBindingRepository:
     """Beanie persistence for immutable operation intent and settlement records."""
 
-    async def get_binding(
-        self, semantic_attempt_key: str
-    ) -> OperationExecutionBinding | None:
+    async def get_binding(self, semantic_attempt_key: str) -> OperationExecutionBinding | None:
         document = await OperationExecutionBindingDocument.find_one(
             OperationExecutionBindingDocument.semantic_attempt_key == semantic_attempt_key
         )
@@ -29,9 +27,17 @@ class MongoOperationBindingRepository:
             else None
         )
 
-    async def create_binding(
-        self, binding: OperationExecutionBinding
-    ) -> OperationExecutionBinding:
+    async def get_binding_by_id(self, binding_id: str) -> OperationExecutionBinding | None:
+        document = await OperationExecutionBindingDocument.find_one(
+            OperationExecutionBindingDocument.binding_id == binding_id
+        )
+        return (
+            OperationExecutionBinding.model_validate(document.payload)
+            if document is not None
+            else None
+        )
+
+    async def create_binding(self, binding: OperationExecutionBinding) -> OperationExecutionBinding:
         document = OperationExecutionBindingDocument(
             binding_id=binding.binding_id,
             semantic_attempt_key=binding.semantic_attempt_key,
@@ -58,9 +64,7 @@ class MongoOperationBindingRepository:
             OperationSettlementDocument.binding_id == binding_id
         )
         return (
-            OperationSettlement.model_validate(document.payload)
-            if document is not None
-            else None
+            OperationSettlement.model_validate(document.payload) if document is not None else None
         )
 
     async def claim_execution(self, binding: OperationExecutionBinding) -> bool:
@@ -74,8 +78,7 @@ class MongoOperationBindingRepository:
             return True
         except DuplicateKeyError:
             prior = await OperationExecutionClaimDocument.find_one(
-                OperationExecutionClaimDocument.side_effect_key
-                == binding.side_effect_key
+                OperationExecutionClaimDocument.side_effect_key == binding.side_effect_key
             )
             if prior is None or prior.binding_id != binding.binding_id:
                 raise IdempotencyConflict(

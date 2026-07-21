@@ -13,12 +13,17 @@ from app.api.control_plane import (
     get_control_plane_principal,
     get_control_plane_service,
 )
+from app.application.operation_submission import GenericArtifactSubmissionPort
 from app.application.postgres_run_control_repository import PostgresRunControlRepository
 from app.application.run_control import (
     F1RunConfigurationVerifier,
     RunControlService,
 )
 from app.config import get_settings
+from app.domain.operation_execution.contracts import (
+    GenericArtifactWorkflowRequest,
+    GenericArtifactWorkflowResult,
+)
 from app.domain.run_control.contracts import (
     ActorContext,
     AdmissionDecision,
@@ -27,6 +32,7 @@ from app.domain.run_control.contracts import (
     LifecycleCommand,
     LifecycleTransitionRecord,
     OutboxRecord,
+    RunPhase,
     RunProjection,
     RunRequest,
 )
@@ -60,6 +66,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             "workflow_run.terminalize",
             "workflow_run.decide_readiness",
             "workflow_run.read",
+            "workflow_run.execute_operation",
         }
     ),
     "scheduler": frozenset(
@@ -74,6 +81,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             "workflow_run.record_finalization",
             "workflow_run.terminalize",
             "workflow_run.read",
+            "workflow_run.execute_operation",
         }
     ),
     "auditor": frozenset({"workflow_run.read"}),
@@ -131,6 +139,18 @@ async def get_run_control_service(request: Request) -> RunControlService:
         return service
 
 
+async def get_generic_artifact_submitter(
+    request: Request,
+) -> GenericArtifactSubmissionPort:
+    submitter = getattr(request.app.state, "generic_artifact_submitter", None)
+    if submitter is None:
+        raise HTTPException(
+            status_code=503,
+            detail="generic artifact Temporal submission is not configured",
+        )
+    return submitter
+
+
 async def close_run_control_resources(application: FastAPI) -> None:
     state = application.state
     pool = getattr(state, "run_control_postgres_pool", None)
@@ -177,6 +197,10 @@ def _authorize_read(principal: ControlPlanePrincipal) -> None:
 
 Service = Annotated[RunControlService, Depends(get_run_control_service)]
 Principal = Annotated[ControlPlanePrincipal, Depends(get_control_plane_principal)]
+ArtifactSubmitter = Annotated[
+    GenericArtifactSubmissionPort,
+    Depends(get_generic_artifact_submitter),
+]
 
 
 @router.post("/run-requests", response_model=AdmissionDecision, status_code=201)
@@ -222,6 +246,40 @@ async def execute_command(
     return await service.execute(
         command.model_copy(update={"actor": trusted_actor, "occurred_at": datetime.now(UTC)})
     )
+
+
+@router.post(
+    "/runs/{run_id}/operations",
+    response_model=GenericArtifactWorkflowResult,
+    status_code=201,
+)
+async def submit_generic_artifact_operation(
+    run_id: str,
+    submission: GenericArtifactWorkflowRequest,
+    principal: Principal,
+    service: Service,
+    submitter: ArtifactSubmitter,
+) -> GenericArtifactWorkflowResult:
+    if submission.run_id != run_id:
+        raise HTTPException(status_code=422, detail="path and operation run ids differ")
+    _authorize_scope(principal, submission.request_scope)
+    if "workflow_run.execute_operation" not in _principal_permissions(principal):
+        raise HTTPException(status_code=403, detail="operation execution permission required")
+    run = await service.get_run(submission.request_scope, run_id)
+    if run.phase != RunPhase.ACTIVE:
+        raise HTTPException(status_code=409, detail="operation requires an active workflow run")
+    if (
+        submission.operation.run_control_revision != run.version
+        or submission.operation.effective_configuration_digest != run.effective_configuration_digest
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="operation is not bound to the current accepted run revision",
+        )
+    budget = await service.get_budget(submission.request_scope, run_id)
+    if submission.operation.budget_reservation_id not in budget.reservations:
+        raise HTTPException(status_code=409, detail="operation budget reservation is unavailable")
+    return await submitter.submit(submission)
 
 
 @router.get("/runs/{run_id}", response_model=RunProjection)
@@ -275,5 +333,6 @@ async def run_control_schemas() -> dict[str, object]:
         "budget_state": BudgetState.model_json_schema(),
         "transition": LifecycleTransitionRecord.model_json_schema(),
         "outbox_record": OutboxRecord.model_json_schema(),
+        "generic_artifact_workflow": GenericArtifactWorkflowRequest.model_json_schema(),
         "lifecycle_action": TypeAdapter(LifecycleCommand).json_schema(),
     }

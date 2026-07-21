@@ -147,6 +147,8 @@ sandbox-work/agentic-capability-probe/
 # Pydantic/migration cache
 alembic/
 migrations/
+!app/migrations/
+!app/migrations/*.sql
 
 # VSCode
 .vscode/

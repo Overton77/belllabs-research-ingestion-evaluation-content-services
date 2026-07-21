@@ -33,9 +33,7 @@ class LinkedRunRepository(Protocol):
         self, request_scope: str, request_identity: str
     ) -> RunCompositionLink | None: ...
 
-    async def get_link_by_id(
-        self, request_scope: str, link_id: str
-    ) -> RunCompositionLink: ...
+    async def get_link_by_id(self, request_scope: str, link_id: str) -> RunCompositionLink: ...
 
     async def commit_link(self, link: RunCompositionLink) -> RunCompositionLink: ...
 
@@ -81,9 +79,7 @@ class InMemoryLinkedRunRepository:
         link = self._links.get(request_identity)
         return deepcopy(link) if link is not None and link.request_scope == request_scope else None
 
-    async def get_link_by_id(
-        self, request_scope: str, link_id: str
-    ) -> RunCompositionLink:
+    async def get_link_by_id(self, request_scope: str, link_id: str) -> RunCompositionLink:
         try:
             link = self._links_by_id[link_id]
         except KeyError as error:
@@ -125,11 +121,7 @@ class InMemoryLinkedRunRepository:
         async with self._lock:
             revisions = self._revisions[revision.link_id]
             prior = next(
-                (
-                    item
-                    for item in revisions
-                    if item.revision_id == revision.revision_id
-                ),
+                (item for item in revisions if item.revision_id == revision.revision_id),
                 None,
             )
             if prior is not None:
@@ -192,9 +184,7 @@ class InMemoryLinkedRunRepository:
         prior = self._terminal_records.get(record.link_id)
         if prior is not None:
             if prior != record:
-                raise IdempotencyConflict(
-                    "linked child already has a conflicting terminal record"
-                )
+                raise IdempotencyConflict("linked child already has a conflicting terminal record")
             return deepcopy(prior)
         self._terminal_records[record.link_id] = deepcopy(record)
         return deepcopy(record)
@@ -213,9 +203,7 @@ class LinkedRunService:
 
     async def request_child(self, request: LinkedRunRequest) -> RunCompositionLink:
         identity = self._request_identity(request)
-        fingerprint = sha256_digest(
-            request.model_dump(mode="json", exclude={"requested_at"})
-        )
+        fingerprint = sha256_digest(request.model_dump(mode="json", exclude={"requested_at"}))
         prior = await self._repository.get_link(request.request_scope, identity)
         if prior is not None:
             if prior.request_fingerprint != fingerprint:
@@ -436,36 +424,30 @@ class LinkedRunService:
                 and child_terminal
                 and unresolved
             ),
-            parent_may_complete=(not blocking) or acceptable_result_admitted or (
-                dependency == RunDependencyClass.DEGRADABLE_BLOCKING and child_terminal
-            ),
+            parent_may_complete=(not blocking)
+            or acceptable_result_admitted
+            or (dependency == RunDependencyClass.DEGRADABLE_BLOCKING and child_terminal),
         )
 
     async def execution_binding(
         self, request_scope: str, link_id: str
     ) -> LinkedRunExecutionBinding:
         link = await self._repository.get_link_by_id(request_scope, link_id)
-        revisions = await self._repository.list_dependency_revisions(
-            request_scope, link_id
-        )
+        revisions = await self._repository.list_dependency_revisions(request_scope, link_id)
         latest = revisions[-1] if revisions else None
         return LinkedRunExecutionBinding(
             link=link,
             effective_dependency_class=(
                 latest.dependency_class if latest is not None else link.dependency_class
             ),
-            dependency_revision_id=(
-                latest.revision_id if latest is not None else None
-            ),
+            dependency_revision_id=(latest.revision_id if latest is not None else None),
         )
 
     async def record_child_terminal(
         self, observation: LinkedChildResultObservation
     ) -> LinkedChildTerminalRecord:
         record = LinkedChildTerminalRecord(
-            terminal_record_id=_stable_id(
-                "linked-terminal", observation.link.link_id
-            ),
+            terminal_record_id=_stable_id("linked-terminal", observation.link.link_id),
             link_id=observation.link.link_id,
             child_run_id=observation.link.child_run_id,
             status=observation.status,
@@ -473,9 +455,7 @@ class LinkedRunService:
             failure_ref=observation.failure_ref,
             observed_at=observation.observed_at,
         )
-        return await self._repository.commit_terminal_record(
-            observation.link.request_scope, record
-        )
+        return await self._repository.commit_terminal_record(observation.link.request_scope, record)
 
     async def cancellation_requests(
         self, request_scope: str, parent_run_id: str
@@ -486,9 +466,7 @@ class LinkedRunService:
             revisions = await self._repository.list_dependency_revisions(
                 request_scope, link.link_id
             )
-            dependency = (
-                revisions[-1].dependency_class if revisions else link.dependency_class
-            )
+            dependency = revisions[-1].dependency_class if revisions else link.dependency_class
             blocking = dependency in {
                 RunDependencyClass.REQUIRED_BLOCKING,
                 RunDependencyClass.DEGRADABLE_BLOCKING,

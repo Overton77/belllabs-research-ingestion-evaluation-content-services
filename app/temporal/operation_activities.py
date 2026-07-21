@@ -29,9 +29,7 @@ class OperationExecutionActivities:
             request = OperationExecutionRequest.model_validate(payload)
             result = await self._service.execute(request)
         except OperationExecutionInProgress as error:
-            raise ApplicationError(
-                str(error), type="operation_execution_in_progress"
-            ) from error
+            raise ApplicationError(str(error), type="operation_execution_in_progress") from error
         except (IdempotencyConflict, ValueError) as error:
             raise ApplicationError(
                 str(error),
