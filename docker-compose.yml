@@ -20,6 +20,20 @@ services:
       - ./infra/application-postgres/init:/docker-entrypoint-initdb.d:ro
     restart: unless-stopped
 
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+
   temporal-postgres:
     image: postgres:16
     environment:
@@ -120,4 +134,5 @@ services:
 
 volumes:
   application-postgres-data:
+  redis-data:
   temporal-postgres-data:

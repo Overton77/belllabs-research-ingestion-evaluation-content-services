@@ -22,7 +22,9 @@ from app.domain.run_control.contracts import (
     DomainEventEnvelope,
     LifecycleCommand,
     LifecycleTransitionRecord,
+    OutputReadinessDecision,
     PauseAction,
+    PauseDecision,
     ProposeContinuationAction,
     RecordFinalizationResultAction,
     RecordObligationEvidenceAction,
@@ -31,6 +33,7 @@ from app.domain.run_control.contracts import (
     RecordUsageAction,
     ReserveBudgetAction,
     ResumeAction,
+    ResumeDecision,
     RunOutcome,
     RunPhase,
     RunProjection,
@@ -39,6 +42,7 @@ from app.domain.run_control.contracts import (
     SetWaitAction,
     StartAction,
     TerminalizeAction,
+    WaitCondition,
 )
 
 
@@ -104,18 +108,18 @@ def reduce_lifecycle(
 
     action = command.action
     phase = projection.phase
-    waits = list(projection.active_waits)
-    pauses = list(projection.active_pauses)
-    resumes = list(projection.resume_decisions)
+    waits = list[WaitCondition](projection.active_waits)
+    pauses = list[PauseDecision](projection.active_pauses)
+    resumes = list[ResumeDecision](projection.resume_decisions)
     outcome = projection.terminal_outcome
-    readiness = list(projection.readiness)
-    pending_proposals = list(projection.pending_continuation_proposals)
-    accepted_proposals = set(projection.accepted_continuation_proposals)
+    readiness = list[OutputReadinessDecision](projection.readiness)
+    pending_proposals = list[ContinuationProposal](projection.pending_continuation_proposals)
+    accepted_proposals = set[str](projection.accepted_continuation_proposals)
     finalization_plan = projection.finalization_plan
     finalization_output_refs = projection.finalization_output_refs
     finalization_omission_reason = projection.finalization_omission_reason
-    obligation_evidence = list(projection.accepted_obligation_evidence)
-    output_evidence = list(projection.accepted_output_evidence)
+    obligation_evidence = list[AcceptedObligationEvidence](projection.accepted_obligation_evidence)
+    output_evidence = list[AcceptedOutputEvidence](projection.accepted_output_evidence)
     evidence_frontier_digest = projection.evidence_frontier_digest
     next_budget = budget
     ledger: list[BudgetLedgerEntry] = []

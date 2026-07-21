@@ -34,6 +34,10 @@ class Settings(BaseSettings):
 
     mongodb_uri: SecretStr
     mongodb_database: str = "belllabsbiotech"
+    redis_url: SecretStr = SecretStr("redis://localhost:6379/0")
+    runtime_realtime_required: bool = False
+    runtime_approval_timeout_seconds: int = Field(default=900, ge=30, le=86_400)
+    runtime_checkpoint_signing_key: SecretStr | None = None
 
     neo4j_uri: str = Field(validation_alias=AliasChoices("NEO4J_URI", "NEO$J_URI"))
     neo4j_aura_username: str
@@ -84,6 +88,11 @@ class Settings(BaseSettings):
         return [
             origin.strip() for origin in self.socketio_cors_origins.split(",") if origin.strip()
         ]
+
+    @property
+    def checkpoint_signing_key(self) -> bytes:
+        secret = self.runtime_checkpoint_signing_key or self.supabase_secret_key
+        return secret.get_secret_value().encode()
 
 
 @lru_cache

@@ -22,6 +22,7 @@ dependencies = [
   "pydantic-settings>=2.10,<3",
   "pymongo>=4.11,<5",
   "python-socketio>=5.13,<6",
+  "redis>=6,<7",
   "supabase>=2.18,<3",
   "temporalio[openai-agents,opentelemetry]>=1.30,<2",
   "uvicorn[standard]>=0.35,<1",

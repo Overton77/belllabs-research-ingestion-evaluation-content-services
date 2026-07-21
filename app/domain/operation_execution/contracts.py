@@ -5,6 +5,7 @@ from typing import Annotated, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import ExactDefinitionRef, SecretRef
 
 DIGEST_PATTERN = r"^sha256:[0-9a-f]{64}$"
@@ -38,6 +39,12 @@ class PromptSegment(Contract):
     content: str = Field(max_length=100_000)
     rendered_digest: str = Field(pattern=DIGEST_PATTERN)
 
+    @model_validator(mode="after")
+    def rendered_content_matches_digest(self) -> PromptSegment:
+        if sha256_digest(self.content) != self.rendered_digest:
+            raise ValueError("prompt segment content does not match its rendered digest")
+        return self
+
 
 class ModelPolicy(Contract):
     provider: str = Field(min_length=1)
@@ -53,6 +60,21 @@ class ToolBinding(Contract):
     revision: int = Field(ge=1)
     schema_digest: str = Field(pattern=DIGEST_PATTERN)
     approval_policy: Literal["never", "always", "policy"] = "policy"
+    configuration: dict[str, object] = Field(default_factory=dict)
+
+
+class GuardrailBinding(Contract):
+    guardrail_id: str = Field(min_length=1)
+    revision: int = Field(ge=1)
+    implementation_digest: str = Field(pattern=DIGEST_PATTERN)
+    stage: Literal["input", "output"]
+
+
+class StructuredOutputBinding(Contract):
+    schema_id: str = Field(min_length=1)
+    revision: int = Field(ge=1)
+    schema_digest: str = Field(pattern=DIGEST_PATTERN)
+    strict: bool = True
 
 
 class MCPServerBinding(Contract):
@@ -132,6 +154,71 @@ class CapabilityGrant(Contract):
     network_hosts: frozenset[str] = Field(default_factory=frozenset)
 
 
+class AgentDefinition(Contract):
+    definition_id: str = Field(min_length=1)
+    revision: int = Field(ge=1)
+    name: str = Field(min_length=1, max_length=128)
+    description: str = Field(min_length=1, max_length=2_000)
+    instructions: str = Field(min_length=1, max_length=100_000)
+    model_policy: ModelPolicy
+    tools: tuple[ToolBinding, ...] = ()
+    mcp_servers: tuple[MCPServerBinding, ...] = ()
+    skills: tuple[ImmutableAssetBinding, ...] = ()
+    plugins: tuple[ImmutableAssetBinding, ...] = ()
+    capability_grant: CapabilityGrant
+    output_schema: StructuredOutputBinding | None = None
+    guardrails: tuple[GuardrailBinding, ...] = ()
+    requested_workflow_type_ref: ExactDefinitionRef | None = None
+
+    @model_validator(mode="after")
+    def capabilities_cover_agent_bindings(self) -> AgentDefinition:
+        if not {tool.tool_id for tool in self.tools} <= self.capability_grant.tool_ids:
+            raise ValueError("agent tool binding exceeds its capability grant")
+        if (
+            not {server.server_id for server in self.mcp_servers}
+            <= self.capability_grant.mcp_server_ids
+        ):
+            raise ValueError("agent MCP binding exceeds its capability grant")
+        return self
+
+
+class DelegationBinding(Contract):
+    mode: Literal["handoff", "task_subagent"]
+    agent: AgentDefinition
+    tool_name: str | None = Field(default=None, pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
+    tool_description: str | None = Field(default=None, max_length=2_000)
+    needs_approval: bool = False
+    budget_limits: dict[str, int] = Field(default_factory=dict)
+    child_workspace_id: str = Field(min_length=1)
+    child_namespace_id: str = Field(min_length=1)
+    read_mounts: tuple[WorkspaceMount, ...] = ()
+
+    @model_validator(mode="after")
+    def task_subagent_has_tool_identity(self) -> DelegationBinding:
+        if self.mode == "task_subagent" and (
+            self.tool_name is None or self.tool_description is None
+        ):
+            raise ValueError("task subagents require an exact tool name and description")
+        if self.mode == "handoff" and (
+            self.tool_name is not None or self.tool_description is not None
+        ):
+            raise ValueError("handoffs cannot declare an agent-tool identity")
+        return self
+
+
+class DelegationCeiling(Contract):
+    allowed_modes: frozenset[Literal["handoff", "task_subagent"]] = frozenset()
+    max_depth: int = Field(default=0, ge=0, le=10)
+    max_concurrency: int = Field(default=0, ge=0, le=100)
+    max_delegations: int = Field(default=0, ge=0, le=1_000)
+    allowed_models: frozenset[str] = frozenset()
+    tool_ids: frozenset[str] = frozenset()
+    mcp_server_ids: frozenset[str] = frozenset()
+    data_scope_refs: frozenset[str] = frozenset()
+    network_hosts: frozenset[str] = frozenset()
+    budget_limits: dict[str, int] = Field(default_factory=dict)
+
+
 class UnsupportedPolicy(Contract):
     policy: str = Field(min_length=1)
     required: bool = True
@@ -156,6 +243,11 @@ class OperationExecutionRequest(Contract):
     mcp_servers: tuple[MCPServerBinding, ...] = ()
     skills: tuple[ImmutableAssetBinding, ...] = ()
     plugins: tuple[ImmutableAssetBinding, ...] = ()
+    output_schema: StructuredOutputBinding | None = None
+    guardrails: tuple[GuardrailBinding, ...] = ()
+    delegations: tuple[DelegationBinding, ...] = ()
+    delegation_ceiling: DelegationCeiling = Field(default_factory=DelegationCeiling)
+    session_id: str | None = Field(default=None, min_length=1, max_length=256)
     agent_profile_ref: ExactDefinitionRef
     capability_grant: CapabilityGrant
     workspace: WorkspaceContract
@@ -179,6 +271,43 @@ class OperationExecutionRequest(Contract):
             <= self.capability_grant.mcp_server_ids
         ):
             raise ValueError("MCP binding exceeds the operation capability grant")
+        ceiling = self.delegation_ceiling
+        if len(self.delegations) > ceiling.max_delegations:
+            raise ValueError("delegations exceed the operation delegation count ceiling")
+        if self.delegations and ceiling.max_depth < 1:
+            raise ValueError("delegations exceed the operation delegation depth ceiling")
+        if self.delegations and ceiling.max_concurrency < 1:
+            raise ValueError("delegations exceed the operation concurrency ceiling")
+        for delegation in self.delegations:
+            agent = delegation.agent
+            if delegation.mode not in ceiling.allowed_modes:
+                raise ValueError("delegation mode exceeds the operation delegation ceiling")
+            if agent.model_policy.model not in ceiling.allowed_models:
+                raise ValueError("delegate model exceeds the operation delegation ceiling")
+            if not agent.capability_grant.capabilities <= self.capability_grant.capabilities:
+                raise ValueError("delegate capabilities exceed operation authority")
+            if not agent.capability_grant.tool_ids <= (
+                self.capability_grant.tool_ids & ceiling.tool_ids
+            ):
+                raise ValueError("delegate tools exceed intersected delegation authority")
+            if not agent.capability_grant.mcp_server_ids <= (
+                self.capability_grant.mcp_server_ids & ceiling.mcp_server_ids
+            ):
+                raise ValueError("delegate MCP servers exceed intersected delegation authority")
+            if not agent.capability_grant.data_scope_refs <= (
+                self.capability_grant.data_scope_refs & ceiling.data_scope_refs
+            ):
+                raise ValueError("delegate data scope exceeds intersected delegation authority")
+            if not agent.capability_grant.network_hosts <= (
+                self.capability_grant.network_hosts & ceiling.network_hosts
+            ):
+                raise ValueError("delegate network access exceeds intersected delegation authority")
+            if any(
+                amount > self.budget_limits.get(dimension, 0)
+                or amount > ceiling.budget_limits.get(dimension, 0)
+                for dimension, amount in delegation.budget_limits.items()
+            ):
+                raise ValueError("delegate budget exceeds intersected delegation authority")
         return self
 
 
@@ -200,6 +329,11 @@ class OperationExecutionBinding(Contract):
     mcp_servers: tuple[MCPServerBinding, ...]
     skills: tuple[ImmutableAssetBinding, ...]
     plugins: tuple[ImmutableAssetBinding, ...]
+    output_schema: StructuredOutputBinding | None = None
+    guardrails: tuple[GuardrailBinding, ...] = ()
+    delegations: tuple[DelegationBinding, ...] = ()
+    delegation_ceiling: DelegationCeiling = Field(default_factory=DelegationCeiling)
+    session_id: str | None = None
     agent_profile_ref: ExactDefinitionRef
     capability_grant: CapabilityGrant
     workspace: WorkspaceContract
@@ -244,6 +378,43 @@ class RuntimeResult(Contract):
     usage: RuntimeUsage = Field(default_factory=RuntimeUsage)
     provider_run_id: str | None = None
     event_payloads: tuple[dict[str, object], ...] = ()
+
+
+class RuntimeEventEnvelope(Contract):
+    schema_version: Literal["1"] = "1"
+    event_id: str = Field(min_length=1)
+    event_type: str = Field(min_length=1)
+    request_scope: str = Field(min_length=1)
+    binding_id: str = Field(min_length=1)
+    run_id: str = Field(min_length=1)
+    operation_id: str = Field(min_length=1)
+    sequence: int = Field(ge=1)
+    occurred_at: AwareDatetime
+    durable: bool = True
+    payload: dict[str, object] = Field(default_factory=dict)
+
+
+class RuntimeApprovalRequest(Contract):
+    approval_id: str = Field(min_length=1)
+    request_scope: str = Field(min_length=1)
+    binding_id: str = Field(min_length=1)
+    run_id: str = Field(min_length=1)
+    operation_id: str = Field(min_length=1)
+    tool_name: str = Field(min_length=1)
+    arguments_digest: str = Field(pattern=DIGEST_PATTERN)
+    argument_names: tuple[str, ...] = ()
+    requested_at: AwareDatetime
+    expires_at: AwareDatetime
+
+
+class RuntimeApprovalDecision(Contract):
+    approval_id: str = Field(min_length=1)
+    request_scope: str = Field(min_length=1)
+    binding_id: str = Field(min_length=1)
+    actor_id: str = Field(min_length=1)
+    decision: Literal["approved", "rejected"]
+    reason: str | None = Field(default=None, max_length=2_000)
+    decided_at: AwareDatetime
 
 
 class OperationSettlement(Contract):

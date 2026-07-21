@@ -16,3 +16,7 @@ class UndeclaredWorkspacePath(WorkspaceMaterializationError):
 
 class UnsupportedWorkspaceRequirement(WorkspaceMaterializationError):
     """The selected sandbox provider cannot enforce a required control."""
+
+
+class UnsupportedRuntimePolicy(ValueError):
+    """The selected agent runtime cannot faithfully enforce a bound policy."""

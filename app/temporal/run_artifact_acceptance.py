@@ -123,19 +123,30 @@ from app.temporal.operation_activities import OperationExecutionActivities
 EXPECTED = "BELL-LABS-ARTIFACT-PROMOTION-OK"
 PROBE_IMAGE = "belllabs-agentic-probe:local"
 REPORT_PATH = "/workspace/output/senescence-research.md"
-CREATE_AND_PATCH_SKILL = b"""\
+CREATE_AND_PATCH_SKILL = (
+    b"""\
 ---
 name: create-and-patch-report
 description: Create and then revise the declared research report.
 ---
-Research cellular senescence using `tvly search`. Use `agent-browser` to open one
-public source returned by the search. Save brief raw evidence under
-`/workspace/output/evidence.txt` with shell commands. Then use the sandbox-native
-`apply_patch` tool to create `/workspace/output/senescence-research.md` containing
-the marker DRAFT_CREATED. Use `apply_patch` a second time to replace that marker
-with PATCH_CONFIRMED and add source URLs plus a concise synthesis. Never write
-credentials. The final response must include BELL-LABS-ARTIFACT-PROMOTION-OK.
+Do these six steps only. Do not invent flags. Do not retry a command more than once.
+
+1) """
+    b'`tvly search "cellular senescence" --max-results 3 --json '
+    b"-o /workspace/output/tavily-search.json`\n"
+    b"""\
+2) `agent-browser open https://www.nia.nih.gov/` then save a short snapshot with shell to
+   `/workspace/output/browser-capture.txt`
+3) `printf 'evidence from tavily+browser\\n' > /workspace/output/evidence.txt`
+4) Use `apply_patch` to CREATE `/workspace/output/senescence-research.md` containing only:
+   DRAFT_CREATED
+5) Use `apply_patch` a second time to REPLACE `DRAFT_CREATED` with `PATCH_CONFIRMED` and add
+   one source URL plus one sentence.
+6) Final response must include exactly: BELL-LABS-ARTIFACT-PROMOTION-OK
+
+Never write credentials.
 """
+)
 
 
 class LiveConfigurationVerifier:
@@ -145,10 +156,10 @@ class LiveConfigurationVerifier:
             workflow_type_ref=request.workflow_type_ref,
             input_manifest=request.input_manifest,
             effective_budget_ceilings={
-                "tokens.input": 100_000,
-                "tokens.output": 20_000,
-                "tokens.total": 120_000,
-                "model.turns": 8,
+                "tokens.input": 200_000,
+                "tokens.output": 40_000,
+                "tokens.total": 240_000,
+                "model.turns": 24,
             },
             max_concurrency=1,
             input_admission_contract="contract:live-artifact-input@1",
@@ -181,28 +192,54 @@ def _actor(*permissions: str) -> ActorContext:
 def _run_request(configuration_digest: str, request_id: str) -> RunRequest:
     workflow_digest = sha256_digest("generic-artifact-workflow@1")
     manifest_digest = sha256_digest("generic-artifact-input@1")
-    dimensions = (
+    bounded = (
         BudgetDimensionLimit(
             dimension="tokens.input",
             applicability=BudgetApplicability.BOUNDED,
-            hard_cap=100_000,
+            hard_cap=200_000,
         ),
         BudgetDimensionLimit(
             dimension="tokens.output",
             applicability=BudgetApplicability.BOUNDED,
-            hard_cap=20_000,
+            hard_cap=40_000,
         ),
         BudgetDimensionLimit(
             dimension="tokens.total",
             applicability=BudgetApplicability.BOUNDED,
-            hard_cap=120_000,
+            hard_cap=240_000,
         ),
         BudgetDimensionLimit(
             dimension="model.turns",
             applicability=BudgetApplicability.BOUNDED,
-            hard_cap=8,
+            hard_cap=24,
+        ),
+        BudgetDimensionLimit(
+            dimension="concurrency.slots",
+            applicability=BudgetApplicability.BOUNDED,
+            hard_cap=1,
         ),
     )
+    not_applicable = tuple(
+        BudgetDimensionLimit(
+            dimension=dimension,
+            applicability=BudgetApplicability.NOT_APPLICABLE,
+        )
+        for dimension in (
+            "currency.estimated_micros",
+            "currency.actual_micros",
+            "time.elapsed_ms",
+            "time.active_compute_ms",
+            "tool.calls.total",
+            "mcp.calls.total",
+            "external.quotas.total",
+            "stage.cycles",
+            "workflow.cycles",
+            "goal.iterations",
+            "operation.attempts",
+            "subagent.spawns",
+        )
+    )
+    dimensions = (*bounded, *not_applicable)
     return RunRequest(
         request_scope="local-artifact-acceptance",
         idempotency_issuer="artifact-acceptance-operator",
@@ -268,8 +305,9 @@ def _operation(
     )
     instruction = (
         "Use every bound skill. Perform the declared web research in the Docker sandbox, "
-        "create the report, and patch the same report afterward. The report is a local "
-        "candidate until the workflow explicitly promotes it."
+        "create the report, and patch the same report afterward. Prefer the exact shell "
+        "commands from the create-and-patch skill; do not invent unsupported tvly flags. "
+        "The report is a local candidate until the workflow explicitly promotes it."
     )
     task = "Complete the create-and-patch report skill exactly."
     return OperationExecutionRequest(
@@ -303,7 +341,7 @@ def _operation(
             model="gpt-5-mini",
             reasoning_effort="minimal",
             verbosity="low",
-            max_turns=8,
+            max_turns=24,
         ),
         tools=(
             ToolBinding(
@@ -377,6 +415,8 @@ def _operation(
                     "nia.nih.gov",
                     "www.nature.com",
                     "nature.com",
+                    "en.wikipedia.org",
+                    "wikipedia.org",
                 }
             ),
         ),
@@ -404,10 +444,10 @@ def _operation(
         ),
         budget_reservation_id="artifact-acceptance-operation",
         budget_limits={
-            "tokens.input": 100_000,
-            "tokens.output": 20_000,
-            "tokens.total": 120_000,
-            "model.turns": 8,
+            "tokens.input": 200_000,
+            "tokens.output": 40_000,
+            "tokens.total": 240_000,
+            "model.turns": 24,
         },
         tracing_policy_ref="tracing:acceptance-no-sensitive@1",
         sensitive_data_policy_ref="sensitive:acceptance-redact@1",
@@ -603,10 +643,10 @@ async def main() -> None:
                                 ReserveBudgetAction(
                                     reservation_id="artifact-acceptance-operation",
                                     amounts={
-                                        "tokens.input": 100_000,
-                                        "tokens.output": 20_000,
-                                        "tokens.total": 120_000,
-                                        "model.turns": 8,
+                                        "tokens.input": 200_000,
+                                        "tokens.output": 40_000,
+                                        "tokens.total": 240_000,
+                                        "model.turns": 24,
                                     },
                                 ),
                                 "workflow_run.reserve_budget",
@@ -659,15 +699,13 @@ async def main() -> None:
             visible = await artifact_service.get_visible(artifact_id)
             if visible is None:
                 raise RuntimeError("live promoted artifact is not publicly visible")
-            _candidate, captured_content = await candidates.get_for_path(
-                operation.workspace.namespace_id,
-                operation.workspace.workspace_id,
-                REPORT_PATH,
-            )
+            metadata = await MongoArtifactMetadataRepository().get_by_artifact(artifact_id)
+            if metadata is None:
+                raise RuntimeError("promoted artifact metadata is missing")
             address = ArtifactPayloadAddress(
                 object_ref=visible.object_ref,
                 content_digest=visible.content_digest,
-                size_bytes=len(captured_content),
+                size_bytes=metadata.size_bytes,
             )
             report = (await artifact_payloads.retrieve(address)).decode("utf-8")
             if (
@@ -680,6 +718,9 @@ async def main() -> None:
             if not any(event["payload"]["artifact_id"] == artifact_id for event in events):
                 raise RuntimeError("artifact admission event was not committed")
             print(EXPECTED)
+            print(f"workflow_id={result['workflow_id']}")
+            print(f"artifact_id={artifact_id}")
+            print(f"run_id={operation.identity.run_id}")
     finally:
         await mongo_client.close()
         await postgres_pool.close()

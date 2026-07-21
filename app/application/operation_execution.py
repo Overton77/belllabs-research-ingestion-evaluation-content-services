@@ -19,12 +19,14 @@ from app.domain.operation_execution.contracts import (
     OperationExecutionResult,
     OperationSettlement,
     PromotedArtifact,
+    PromptTrustClass,
     RuntimeInvocation,
     RuntimeResult,
     RuntimeUsage,
     SnapshotCloneRequest,
     SnapshotCloneResult,
 )
+from app.domain.operation_execution.errors import UnsupportedRuntimePolicy
 from app.domain.run_control.contracts import (
     ActorContext,
     CommandStatus,
@@ -73,6 +75,24 @@ class RunControlOperationAuthority:
             request.capability_grant.capabilities <= configuration.effective_authority.capabilities
         ):
             raise ValueError("operation capabilities exceed effective run authority")
+        authoritative_prompts = {
+            f"prompt:{ref.logical_id}@{ref.revision}"
+            for ref in configuration.source_refs
+            if ref.kind == DefinitionKind.PROMPT
+        }
+        privileged_prompt_sources = {
+            segment.source_ref
+            for segment in request.prompt_segments
+            if segment.trust_class
+            in {
+                PromptTrustClass.SYSTEM_AUTHORITY,
+                PromptTrustClass.AUTHORED_INSTRUCTION,
+            }
+        }
+        if not privileged_prompt_sources <= authoritative_prompts:
+            raise ValueError(
+                "privileged prompt segments are not exact accepted configuration sources"
+            )
         workspace_ref = next(
             (
                 ref
@@ -356,6 +376,8 @@ class OperationExecutionService:
                 failure_code=(
                     "budget_exceeded"
                     if isinstance(error, OperationBudgetViolation)
+                    else "unsupported_runtime_policy"
+                    if isinstance(error, UnsupportedRuntimePolicy)
                     else "runtime_failed"
                     if runtime_invoked
                     else "preparation_failed"
@@ -489,6 +511,11 @@ def _binding_for(request: OperationExecutionRequest, fingerprint: str) -> Operat
         mcp_servers=request.mcp_servers,
         skills=request.skills,
         plugins=request.plugins,
+        output_schema=request.output_schema,
+        guardrails=request.guardrails,
+        delegations=request.delegations,
+        delegation_ceiling=request.delegation_ceiling,
+        session_id=request.session_id,
         agent_profile_ref=request.agent_profile_ref,
         capability_grant=request.capability_grant,
         workspace=request.workspace,

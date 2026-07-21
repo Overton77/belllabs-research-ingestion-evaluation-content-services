@@ -291,7 +291,10 @@ async def test_run_control_authority_validates_exact_run_workspace_and_reservati
                 effective_authority=SimpleNamespace(
                     capabilities=request.capability_grant.capabilities
                 ),
-                source_refs=(request.workspace.template_ref,),
+                source_refs=(
+                    request.workspace.template_ref,
+                    exact(DefinitionKind.PROMPT, "system"),
+                ),
                 workflow_workspace_contract=workspace_contract,
             )
 
