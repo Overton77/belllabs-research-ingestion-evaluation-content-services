@@ -34,7 +34,7 @@ class Settings(BaseSettings):
 
     mongodb_uri: SecretStr
     mongodb_database: str = "belllabsbiotech"
-    redis_url: SecretStr = SecretStr("redis://localhost:6379/0")
+    redis_url: SecretStr = SecretStr("redis://localhost:56379/0")
     runtime_realtime_required: bool = False
     runtime_approval_timeout_seconds: int = Field(default=900, ge=30, le=86_400)
     runtime_checkpoint_signing_key: SecretStr | None = None

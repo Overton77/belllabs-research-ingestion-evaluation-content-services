@@ -1,34 +1,37 @@
 ---
-description: App layout, layering, and where specs/issues/scratch live for this backend
+description: App layout, layering, and where specs/issues/scratch live (control-plane phase)
 alwaysApply: true
 ---
 
 # Project organization
 
-Prefer extending existing packages over new top-level folders. Domain authority lives in `domain` / `application`; Temporal, Docker, and Agents SDK are mechanics, not truth. Specs and vocabulary: prefer `biotech-meta` over inventing names.
+**Phase focus:** control-plane foundations + capabilities (`F*` / `C*`). Prefer extending existing packages over new top-level folders. Domain authority lives in `domain` / `application`; Temporal, Docker, Redis fan-out, and Agents SDK are mechanics, not truth. Vocabulary/specs: prefer `biotech-meta` over inventing names.
 
 ## Layout
 
 | Path | Role |
 |------|------|
-| `app/domain/` | Pure domain contracts / types / invariants (no I/O) |
-| `app/application/` | Use-cases, orchestration ports, repository interfaces + adapters used by control plane |
-| `app/api/` | FastAPI HTTP surface |
-| `app/models/` | Persistence-facing models (Beanie/docs, shared shapes) |
-| `app/integrations/` | External system adapters (Neo4j, S3, Agents SDK, etc.) |
+| `app/domain/` | Pure contracts / invariants (no I/O). Current packages: `control_plane`, `run_control`, `composition`, `orchestration`, `operation_execution` |
+| `app/application/` | Use-cases, ports, Postgres/Mongo adapters for control plane |
+| `app/api/` | FastAPI surfaces (`control_plane`, `run_control`) |
+| `app/models/` | Persistence-facing Beanie/docs shapes |
+| `app/integrations/` | Vendor adapters (Mongo, Postgres, Neo4j, S3, Temporal, Agents SDK, realtime) |
 | `app/temporal/` | Workflows, activities, workers, probes |
 | `app/migrations/` | Application Postgres schema migrations |
 | `app/middleware/` | ASGI/HTTP middleware |
 | `tests/` | Unit + integration tests |
-| `infra/` | Deploy / compose-adjacent infra (not domain) |
-| `sandbox-work/` | Disposable sandbox experiments — not product authority |
+| `infra/` | Compose-adjacent init/scripts (not domain) |
+| `docs/` | Local diagrams / operator notes — not product authority |
+| `sandbox-work/` | Disposable experiments — not product authority |
 | `scripts/` | Operator/dev scripts |
-| `.scratch/` | Working issues, handoffs, lifecycle notes — NOT durable product docs |
+| `.scratch/` | Working issues, handoffs, lifecycle — NOT durable product docs |
+| `.scratch/control-plane-foundations-and-capabilities/issues/` | Active control-plane ticket mirrors |
 | `../biotech-meta/docs/specs/` | Accepted specifications |
 | `../biotech-meta/docs/checkpoints/` | Interview/architecture checkpoints |
 
 ## Hard rules
 
-- Do not treat `.scratch/` or `sandbox-work/` as production contracts.
+- Do not treat `.scratch/`, `sandbox-work/`, or `docs/` as production contracts.
 - Put business truth in `app/domain/` and `app/application/`; keep I/O and vendors in `integrations` / `temporal` / `api`.
 - When naming or deciding scope, check `biotech-meta` specs/checkpoints before inventing terms or new top-level structure.
+- Do not invent Workflow Type or dashboard behavior ahead of accepted tickets; build seams the later types will consume.

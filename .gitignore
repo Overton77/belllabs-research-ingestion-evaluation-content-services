@@ -179,4 +179,8 @@ poetry.lock
 
 # Override: Keep example & template config files
 !.env.example
-!.env.template
+!.env.template 
+
+
+app/personal_code 
+

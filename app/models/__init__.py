@@ -13,6 +13,11 @@ from app.models.operation_execution import (
     OperationExecutionClaimDocument,
     OperationSettlementDocument,
 )
+from app.models.sandbox_snapshot import (
+    SandboxSnapshotClaimDocument,
+    SandboxSnapshotCloneDocument,
+    SandboxSnapshotDocument,
+)
 from app.models.workspace_materialization import (
     WorkspaceMaterializationManifestDocument,
     WorkspaceSlotReservationDocument,
@@ -30,6 +35,9 @@ __all__ = [
     "OperationExecutionClaimDocument",
     "OperationSettlementDocument",
     "PublishedDefinitionDocument",
+    "SandboxSnapshotClaimDocument",
+    "SandboxSnapshotCloneDocument",
+    "SandboxSnapshotDocument",
     "WorkspaceMaterializationManifestDocument",
     "WorkspaceSlotReservationDocument",
 ]

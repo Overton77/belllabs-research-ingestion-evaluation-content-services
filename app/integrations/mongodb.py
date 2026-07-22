@@ -20,6 +20,9 @@ from app.models import (
     OperationExecutionClaimDocument,
     OperationSettlementDocument,
     PublishedDefinitionDocument,
+    SandboxSnapshotClaimDocument,
+    SandboxSnapshotCloneDocument,
+    SandboxSnapshotDocument,
     WorkspaceMaterializationManifestDocument,
     WorkspaceSlotReservationDocument,
 )
@@ -36,6 +39,9 @@ BEANIE_MODELS = [
     OperationExecutionBindingDocument,
     OperationExecutionClaimDocument,
     OperationSettlementDocument,
+    SandboxSnapshotClaimDocument,
+    SandboxSnapshotDocument,
+    SandboxSnapshotCloneDocument,
     WorkspaceSlotReservationDocument,
     WorkspaceMaterializationManifestDocument,
 ]
