@@ -1,8 +1,7 @@
 {
   "name": "Biotech backend (Docker Compose)",
   "build": {
-    "dockerfile": "Dockerfile",
-    "context": "."
+    "dockerfile": "Dockerfile"
   },
   "user": "ubuntu",
   "install": ".cursor/scripts/cloud-install.sh",
