@@ -1,0 +1,23 @@
+{
+  "name": "Biotech backend (Docker Compose)",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": "."
+  },
+  "user": "ubuntu",
+  "install": ".cursor/scripts/cloud-install.sh",
+  "start": ".cursor/scripts/cloud-start.sh",
+  "repositoryDependencies": [
+    "https://github.com/Overton77/biotech-meta"
+  ],
+  "ports": [
+    {
+      "name": "FastAPI",
+      "port": 8000
+    },
+    {
+      "name": "Temporal UI",
+      "port": 8080
+    }
+  ]
+}
