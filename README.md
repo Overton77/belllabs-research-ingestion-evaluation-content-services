@@ -38,6 +38,32 @@ Run the worker in a second terminal:
 uv run python -m app.temporal.worker
 ```
 
+## Cursor Cloud setup
+
+The committed `.cursor/environment.json` builds an Ubuntu 24.04 environment
+with Python 3.12, `uv`, Docker Engine, Compose v2, and nested-Docker support.
+On each Cloud Agent start it:
+
+1. syncs the locked Python dependencies;
+2. checks out the accepted specifications at `../biotech-meta`;
+3. starts Docker; and
+4. starts and waits for the default Compose infrastructure.
+
+The Compose services do not require external credentials. Confirm them with:
+
+```bash
+docker compose ps --all
+```
+
+The two one-shot Temporal setup services should show exit code 0; the remaining
+default services should be running (and healthy where a health check exists).
+
+Application and external integration processes are intentionally not
+auto-started until their credentials exist. Add real values from `.env.example`
+as environment-scoped secrets in Cursor's Cloud Agents settings. Do not commit
+a `.env` file. `app.preflight` requires all configured external systems, while
+the Compose stack and most unit tests can run before those secrets are added.
+
 Then invoke the legacy bootstrap diagnostic:
 
 ```powershell
