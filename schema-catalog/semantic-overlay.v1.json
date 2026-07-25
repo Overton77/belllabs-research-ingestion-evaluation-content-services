@@ -1,0 +1,151 @@
+{
+  "overlay_version": "1",
+  "modules": [
+    {
+      "name": "organizations-and-people",
+      "purpose": "Identify organizations and people while separating durable identity from time-bounded claims about them.",
+      "seed_elements": ["node:Organization", "node:OrganizationSnapshot", "node:Person"],
+      "closure_policy": "incident-relationships"
+    },
+    {
+      "name": "products-and-commerce",
+      "purpose": "Represent named commercial offerings and their time-varying product facts.",
+      "seed_elements": ["node:Product", "node:ProductSnapshot"],
+      "closure_policy": "incident-relationships"
+    },
+    {
+      "name": "diagnostics-and-biomarkers",
+      "purpose": "Represent laboratory tests, panels, measured biomarkers, reported metrics, and enabling assay platforms.",
+      "seed_elements": ["node:LabTest", "node:PanelDefinition", "node:Biomarker", "node:Metric", "node:TechnologyPlatform"],
+      "closure_policy": "incident-relationships"
+    },
+    {
+      "name": "studies-and-evidence",
+      "purpose": "Represent research studies and bounded evidence-bearing claims.",
+      "seed_elements": ["node:Study", "node:Claim"],
+      "closure_policy": "incident-relationships"
+    },
+    {
+      "name": "documents-and-provenance",
+      "purpose": "Preserve source documents and addressable source excerpts used to support extracted knowledge.",
+      "seed_elements": ["node:Document", "node:Chunk"],
+      "closure_policy": "incident-relationships"
+    }
+  ],
+  "elements": {
+    "node:Organization": {
+      "description": "A durable legal, commercial, academic, or other organized actor, such as TruDiagnostic.",
+      "aliases": ["company", "institution", "provider"],
+      "synonyms": ["organization", "organisation"],
+      "archetypes": ["entity"],
+      "modules": ["organizations-and-people"],
+      "identity_semantics": "Use for the durable actor identity; place changing descriptions and business facts on OrganizationSnapshot.",
+      "task_cues": ["company", "laboratory provider", "research organization"],
+      "common_confusions": ["Do not model a branded test sold by the organization as the Organization itself."]
+    },
+    "node:OrganizationSnapshot": {
+      "description": "A time-bounded description of an organization, including changing business, positioning, and operational facts.",
+      "aliases": ["company snapshot", "organization state"],
+      "archetypes": ["state-or-snapshot"],
+      "modules": ["organizations-and-people"],
+      "temporal_role": "Use the snapshot validity interval for claims that may change while retaining Organization as stable identity.",
+      "task_cues": ["current company description", "historical company status"]
+    },
+    "node:Person": {
+      "description": "A durable human identity, such as a founder, executive, investigator, or author.",
+      "aliases": ["individual", "researcher", "executive"],
+      "archetypes": ["entity"],
+      "modules": ["organizations-and-people"],
+      "identity_semantics": "Resolve a person independently of their changing roles and affiliations.",
+      "task_cues": ["founder", "CEO", "study author"]
+    },
+    "node:Product": {
+      "description": "A durable named product or commercial offering identity, including a branded diagnostic product.",
+      "aliases": ["commercial product", "branded offering"],
+      "archetypes": ["entity"],
+      "modules": ["products-and-commerce"],
+      "identity_semantics": "Use for TruAge, TruHealth, and other stable branded product identities; use LabTest for the laboratory test delivered by a product.",
+      "task_cues": ["sold product", "branded test kit", "commercial offering"],
+      "common_confusions": ["A Product can deliver a LabTest but is not interchangeable with that test definition."]
+    },
+    "node:ProductSnapshot": {
+      "description": "A time-bounded state of a product, such as current description, availability, formulation, or commercial positioning.",
+      "aliases": ["product state", "offering snapshot"],
+      "archetypes": ["state-or-snapshot"],
+      "modules": ["products-and-commerce"],
+      "temporal_role": "Capture mutable product facts without changing the durable Product identity.",
+      "task_cues": ["current product details", "historical availability"]
+    },
+    "node:LabTest": {
+      "description": "A laboratory analysis that accepts specimens and produces one or more measured or computed results.",
+      "aliases": ["laboratory test", "diagnostic assay", "test definition"],
+      "archetypes": ["entity"],
+      "modules": ["diagnostics-and-biomarkers"],
+      "identity_semantics": "Model the analytical test independently from the commercial Product that delivers it.",
+      "task_cues": ["methylation test", "immune cell deconvolution test", "epigenetic age test"],
+      "common_confusions": ["Do not substitute Product when the report describes the underlying laboratory analysis."]
+    },
+    "node:PanelDefinition": {
+      "description": "A named, reusable grouping that defines which lab tests or biomarkers belong to a diagnostic panel.",
+      "aliases": ["panel", "assay panel", "biomarker panel"],
+      "archetypes": ["information-artifact"],
+      "modules": ["diagnostics-and-biomarkers"],
+      "identity_semantics": "Use for panel composition, not for an individual observed result.",
+      "task_cues": ["Aging Panel", "Organ Systems Panel", "panel includes"]
+    },
+    "node:Biomarker": {
+      "description": "A biological characteristic or signal that a test measures, derives, or interprets.",
+      "aliases": ["biological marker", "marker"],
+      "archetypes": ["measurement-or-value"],
+      "modules": ["diagnostics-and-biomarkers"],
+      "task_cues": ["DNA methylation marker", "biomarker proxy", "measures"]
+    },
+    "node:Metric": {
+      "description": "A defined reported measure or score, including computed aging-clock outputs such as DunedinPACE.",
+      "aliases": ["score", "reported measure", "clock output"],
+      "archetypes": ["measurement-or-value"],
+      "modules": ["diagnostics-and-biomarkers"],
+      "identity_semantics": "Use for a reusable metric definition, not a subject-specific observed value.",
+      "task_cues": ["DunedinPACE", "OMICmAge", "SymphonyAge", "biological age score"]
+    },
+    "node:TechnologyPlatform": {
+      "description": "An analytical or computational platform used to perform, implement, or support a test.",
+      "aliases": ["assay platform", "technology stack", "analysis platform"],
+      "archetypes": ["entity"],
+      "modules": ["diagnostics-and-biomarkers"],
+      "task_cues": ["methylation array", "sequencing platform", "implements platform"],
+      "common_confusions": ["A platform enables a test but is not the LabTest or Product."]
+    },
+    "node:Study": {
+      "description": "A bounded research investigation, validation study, clinical study, or other systematic inquiry.",
+      "aliases": ["research study", "validation study", "investigation"],
+      "archetypes": ["event-or-occurrence", "information-artifact"],
+      "modules": ["studies-and-evidence"],
+      "task_cues": ["validation", "cohort", "published study", "clinical evidence"]
+    },
+    "node:Claim": {
+      "description": "A bounded proposition extracted from or supported by evidence, kept distinct from established graph identity facts.",
+      "aliases": ["assertion", "evidence claim"],
+      "archetypes": ["assertion-or-evidence"],
+      "modules": ["studies-and-evidence", "documents-and-provenance"],
+      "provenance_role": "Connect the proposition to its supporting source locations and preserve qualification or uncertainty.",
+      "task_cues": ["company claims", "reported finding", "evidence supports"]
+    },
+    "node:Document": {
+      "description": "A source artifact such as a webpage, paper, report, or product page from which evidence was acquired.",
+      "aliases": ["source document", "webpage", "paper"],
+      "archetypes": ["information-artifact"],
+      "modules": ["documents-and-provenance"],
+      "provenance_role": "Retain source identity, URL, and acquisition-level metadata; use Chunk for addressable excerpts.",
+      "task_cues": ["source page", "publication", "citation provenance"]
+    },
+    "node:Chunk": {
+      "description": "An addressable excerpt or segment of a source Document used for retrieval and evidence localization.",
+      "aliases": ["document chunk", "source excerpt", "passage"],
+      "archetypes": ["information-artifact"],
+      "modules": ["documents-and-provenance"],
+      "provenance_role": "Provide fine-grained evidence location beneath a Document; do not treat the excerpt as a durable domain entity.",
+      "task_cues": ["evidence excerpt", "supporting passage", "retrieval chunk"]
+    }
+  }
+}

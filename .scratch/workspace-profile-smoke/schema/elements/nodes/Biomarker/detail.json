@@ -1,0 +1,638 @@
+{
+  "aliases": [],
+  "catalog_digest": "sha256:cfba1f9b099fdd453e806b8c8eeccfa77435b778a6bdaa7e619b268d5dc89a11",
+  "description": null,
+  "directives": [
+    {
+      "arguments": {},
+      "name": "node"
+    },
+    {
+      "arguments": {
+        "indexes": [
+          {
+            "fields": [
+              "name",
+              "description",
+              "searchText"
+            ],
+            "indexName": "BiomarkerSearch",
+            "queryName": "searchBiomarkers"
+          }
+        ]
+      },
+      "name": "fulltext"
+    }
+  ],
+  "fields": [
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {},
+          "name": "id"
+        }
+      ],
+      "list": false,
+      "name": "id",
+      "named_type": "ID",
+      "nullable": false,
+      "type": "ID!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "name",
+      "named_type": "String",
+      "nullable": false,
+      "type": "String!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "description",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "mongoResearchRunId",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "operations": [
+              "CREATE"
+            ]
+          },
+          "name": "timestamp"
+        }
+      ],
+      "list": false,
+      "name": "createdAt",
+      "named_type": "DateTime",
+      "nullable": false,
+      "type": "DateTime!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "operations": [
+              "CREATE",
+              "UPDATE"
+            ]
+          },
+          "name": "timestamp"
+        }
+      ],
+      "list": false,
+      "name": "updatedAt",
+      "named_type": "DateTime",
+      "nullable": false,
+      "type": "DateTime!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "searchText",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": true,
+      "name": "searchFields",
+      "named_type": "String",
+      "nullable": true,
+      "type": "[String!]"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "embeddingModel",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "embeddingDimensions",
+      "named_type": "Int",
+      "nullable": true,
+      "type": "Int"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "biomarkerType",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "specimenMatrix",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "moleculeClass",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "measurementDirectness",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "clinicalSignificance",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": true,
+      "name": "commonUnits",
+      "named_type": "String",
+      "nullable": true,
+      "type": "[String!]"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "agingHallmark",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": true,
+      "name": "searchEmbedding",
+      "named_type": "Float",
+      "nullable": true,
+      "type": "[Float!]"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "AssociationMetadata",
+            "type": "INDICATES"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "indicatesConditions",
+      "named_type": "Condition",
+      "nullable": false,
+      "type": "[Condition!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "MechanismLinkMetadata",
+            "type": "REFLECTS_MECHANISM"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "reflectsMechanisms",
+      "named_type": "Mechanism",
+      "nullable": false,
+      "type": "[Mechanism!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "AssociationMetadata",
+            "type": "IN_PATHWAY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "inPathways",
+      "named_type": "Pathway",
+      "nullable": false,
+      "type": "[Pathway!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "AssociationMetadata",
+            "type": "EXPRESSED_IN"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "expressedInOrgans",
+      "named_type": "Organ",
+      "nullable": false,
+      "type": "[Organ!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "AssociationMetadata",
+            "type": "EXPRESSED_IN_CONTEXT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "expressedInContexts",
+      "named_type": "AnatomicalContext",
+      "nullable": false,
+      "type": "[AnatomicalContext!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "IN",
+            "properties": "AssociationMetadata",
+            "type": "ENCODES"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "encodedByGenes",
+      "named_type": "MolecularEntity",
+      "nullable": false,
+      "type": "[MolecularEntity!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "AssociationMetadata",
+            "type": "HAS_REFERENCE_RANGE"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "hasReferenceRanges",
+      "named_type": "ReferenceRange",
+      "nullable": false,
+      "type": "[ReferenceRange!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "supportedBy",
+      "named_type": "Chunk",
+      "nullable": false,
+      "type": "[Chunk!]!"
+    }
+  ],
+  "identity_candidates": [
+    "id"
+  ],
+  "incoming_relationships": [
+    {
+      "direction": "IN",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "IN",
+            "properties": "AssociationMetadata",
+            "type": "ENCODES"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "encodedByGenes",
+      "field_type": "[MolecularEntity!]!",
+      "properties_type": "AssociationMetadata",
+      "relationship_type": "ENCODES",
+      "source": "Biomarker",
+      "target": "MolecularEntity"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "AssociationMetadata",
+            "type": "ENCODES"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "encodesBiomarkers",
+      "field_type": "[Biomarker!]!",
+      "properties_type": "AssociationMetadata",
+      "relationship_type": "ENCODES",
+      "source": "MolecularEntity",
+      "target": "Biomarker"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "INCLUDES_BIOMARKER"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "includesBiomarkers",
+      "field_type": "[Biomarker!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "INCLUDES_BIOMARKER",
+      "source": "PanelDefinition",
+      "target": "Biomarker"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "MeasurementMetadata",
+            "type": "MEASURES"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "measuresBiomarkers",
+      "field_type": "[Biomarker!]!",
+      "properties_type": "MeasurementMetadata",
+      "relationship_type": "MEASURES",
+      "source": "LabTest",
+      "target": "Biomarker"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "AssociationMetadata",
+            "type": "QUANTIFIES"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "quantifiesBiomarkers",
+      "field_type": "[Biomarker!]!",
+      "properties_type": "AssociationMetadata",
+      "relationship_type": "QUANTIFIES",
+      "source": "Metric",
+      "target": "Biomarker"
+    }
+  ],
+  "interfaces": [
+    "Entity",
+    "SearchIndexable"
+  ],
+  "name": "Biomarker",
+  "outgoing_relationships": [
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "AssociationMetadata",
+            "type": "EXPRESSED_IN"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "expressedInOrgans",
+      "field_type": "[Organ!]!",
+      "properties_type": "AssociationMetadata",
+      "relationship_type": "EXPRESSED_IN",
+      "source": "Biomarker",
+      "target": "Organ"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "AssociationMetadata",
+            "type": "EXPRESSED_IN_CONTEXT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "expressedInContexts",
+      "field_type": "[AnatomicalContext!]!",
+      "properties_type": "AssociationMetadata",
+      "relationship_type": "EXPRESSED_IN_CONTEXT",
+      "source": "Biomarker",
+      "target": "AnatomicalContext"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "AssociationMetadata",
+            "type": "HAS_REFERENCE_RANGE"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "hasReferenceRanges",
+      "field_type": "[ReferenceRange!]!",
+      "properties_type": "AssociationMetadata",
+      "relationship_type": "HAS_REFERENCE_RANGE",
+      "source": "Biomarker",
+      "target": "ReferenceRange"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "AssociationMetadata",
+            "type": "INDICATES"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "indicatesConditions",
+      "field_type": "[Condition!]!",
+      "properties_type": "AssociationMetadata",
+      "relationship_type": "INDICATES",
+      "source": "Biomarker",
+      "target": "Condition"
+    },
+    {
+      "direction": "IN",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "IN",
+            "properties": "AssociationMetadata",
+            "type": "INDICATES"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "indicatedByBiomarkers",
+      "field_type": "[Biomarker!]!",
+      "properties_type": "AssociationMetadata",
+      "relationship_type": "INDICATES",
+      "source": "Condition",
+      "target": "Biomarker"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "AssociationMetadata",
+            "type": "IN_PATHWAY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "inPathways",
+      "field_type": "[Pathway!]!",
+      "properties_type": "AssociationMetadata",
+      "relationship_type": "IN_PATHWAY",
+      "source": "Biomarker",
+      "target": "Pathway"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "MechanismLinkMetadata",
+            "type": "REFLECTS_MECHANISM"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "reflectsMechanisms",
+      "field_type": "[Mechanism!]!",
+      "properties_type": "MechanismLinkMetadata",
+      "relationship_type": "REFLECTS_MECHANISM",
+      "source": "Biomarker",
+      "target": "Mechanism"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedBy",
+      "field_type": "[Chunk!]!",
+      "properties_type": "ExtractionMetadata",
+      "relationship_type": "SUPPORTED_BY",
+      "source": "Biomarker",
+      "target": "Chunk"
+    }
+  ],
+  "relationship_properties": false,
+  "sdl": "type Biomarker implements Entity & SearchIndexable @node @fulltext(indexes: [{indexName: \"BiomarkerSearch\", fields: [\"name\", \"description\", \"searchText\"], queryName: \"searchBiomarkers\"}]) {\n  id: ID! @id\n  name: String!\n  description: String\n  mongoResearchRunId: String\n  createdAt: DateTime! @timestamp(operations: [CREATE])\n  updatedAt: DateTime! @timestamp(operations: [CREATE, UPDATE])\n  searchText: String\n  searchFields: [String!]\n  embeddingModel: String\n  embeddingDimensions: Int\n  biomarkerType: String\n  specimenMatrix: String\n  moleculeClass: String\n  measurementDirectness: String\n  clinicalSignificance: String\n  commonUnits: [String!]\n  agingHallmark: String\n  searchEmbedding: [Float!]\n  indicatesConditions: [Condition!]! @relationship(type: \"INDICATES\", direction: OUT, properties: \"AssociationMetadata\")\n  reflectsMechanisms: [Mechanism!]! @relationship(type: \"REFLECTS_MECHANISM\", direction: OUT, properties: \"MechanismLinkMetadata\")\n  inPathways: [Pathway!]! @relationship(type: \"IN_PATHWAY\", direction: OUT, properties: \"AssociationMetadata\")\n  expressedInOrgans: [Organ!]! @relationship(type: \"EXPRESSED_IN\", direction: OUT, properties: \"AssociationMetadata\")\n  expressedInContexts: [AnatomicalContext!]! @relationship(type: \"EXPRESSED_IN_CONTEXT\", direction: OUT, properties: \"AssociationMetadata\")\n  encodedByGenes: [MolecularEntity!]! @relationship(type: \"ENCODES\", direction: IN, properties: \"AssociationMetadata\")\n  hasReferenceRanges: [ReferenceRange!]! @relationship(type: \"HAS_REFERENCE_RANGE\", direction: OUT, properties: \"AssociationMetadata\")\n  supportedBy: [Chunk!]! @relationship(type: \"SUPPORTED_BY\", direction: OUT, properties: \"ExtractionMetadata\")\n}",
+  "search_candidates": [
+    "agingHallmark",
+    "biomarkerType",
+    "clinicalSignificance",
+    "createdAt",
+    "description",
+    "embeddingDimensions",
+    "embeddingModel",
+    "id",
+    "measurementDirectness",
+    "moleculeClass",
+    "mongoResearchRunId",
+    "name",
+    "searchText",
+    "specimenMatrix",
+    "updatedAt"
+  ],
+  "source_schema_digest": "sha256:86b5e0b5d11d203bd75b69b4507b0aad97d5df2495d3897ca64272068ea5f112"
+}

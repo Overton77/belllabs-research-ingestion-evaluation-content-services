@@ -1,0 +1,245 @@
+{
+  "aliases": [],
+  "catalog_digest": "sha256:cfba1f9b099fdd453e806b8c8eeccfa77435b778a6bdaa7e619b268d5dc89a11",
+  "description": null,
+  "directives": [
+    {
+      "arguments": {},
+      "name": "node"
+    }
+  ],
+  "fields": [
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {},
+          "name": "id"
+        }
+      ],
+      "list": false,
+      "name": "id",
+      "named_type": "ID",
+      "nullable": false,
+      "type": "ID!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "name",
+      "named_type": "String",
+      "nullable": false,
+      "type": "String!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "description",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "mongoResearchRunId",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "operations": [
+              "CREATE"
+            ]
+          },
+          "name": "timestamp"
+        }
+      ],
+      "list": false,
+      "name": "createdAt",
+      "named_type": "DateTime",
+      "nullable": false,
+      "type": "DateTime!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "operations": [
+              "CREATE",
+              "UPDATE"
+            ]
+          },
+          "name": "timestamp"
+        }
+      ],
+      "list": false,
+      "name": "updatedAt",
+      "named_type": "DateTime",
+      "nullable": false,
+      "type": "DateTime!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "panelType",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "versionLabel",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "INCLUDES_LABTEST"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "includesLabTests",
+      "named_type": "LabTest",
+      "nullable": false,
+      "type": "[LabTest!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "INCLUDES_BIOMARKER"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "includesBiomarkers",
+      "named_type": "Biomarker",
+      "nullable": false,
+      "type": "[Biomarker!]!"
+    }
+  ],
+  "identity_candidates": [
+    "id"
+  ],
+  "incoming_relationships": [
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "IMPLEMENTS_PANEL"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "implementsPanels",
+      "field_type": "[PanelDefinition!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "IMPLEMENTS_PANEL",
+      "source": "Listing",
+      "target": "PanelDefinition"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "IMPLEMENTS_PANEL"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "implementsPanels",
+      "field_type": "[PanelDefinition!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "IMPLEMENTS_PANEL",
+      "source": "Product",
+      "target": "PanelDefinition"
+    }
+  ],
+  "interfaces": [
+    "Entity"
+  ],
+  "name": "PanelDefinition",
+  "outgoing_relationships": [
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "INCLUDES_BIOMARKER"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "includesBiomarkers",
+      "field_type": "[Biomarker!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "INCLUDES_BIOMARKER",
+      "source": "PanelDefinition",
+      "target": "Biomarker"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "INCLUDES_LABTEST"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "includesLabTests",
+      "field_type": "[LabTest!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "INCLUDES_LABTEST",
+      "source": "PanelDefinition",
+      "target": "LabTest"
+    }
+  ],
+  "relationship_properties": false,
+  "sdl": "type PanelDefinition implements Entity @node {\n  id: ID! @id\n  name: String!\n  description: String\n  mongoResearchRunId: String\n  createdAt: DateTime! @timestamp(operations: [CREATE])\n  updatedAt: DateTime! @timestamp(operations: [CREATE, UPDATE])\n  panelType: String\n  versionLabel: String\n  includesLabTests: [LabTest!]! @relationship(type: \"INCLUDES_LABTEST\", direction: OUT, properties: \"RoleMetadata\")\n  includesBiomarkers: [Biomarker!]! @relationship(type: \"INCLUDES_BIOMARKER\", direction: OUT, properties: \"RoleMetadata\")\n}",
+  "search_candidates": [
+    "createdAt",
+    "description",
+    "id",
+    "mongoResearchRunId",
+    "name",
+    "panelType",
+    "updatedAt",
+    "versionLabel"
+  ],
+  "source_schema_digest": "sha256:86b5e0b5d11d203bd75b69b4507b0aad97d5df2495d3897ca64272068ea5f112"
+}

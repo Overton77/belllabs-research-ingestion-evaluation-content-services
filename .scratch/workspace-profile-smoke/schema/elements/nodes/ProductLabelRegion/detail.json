@@ -1,0 +1,289 @@
+{
+  "aliases": [],
+  "catalog_digest": "sha256:cfba1f9b099fdd453e806b8c8eeccfa77435b778a6bdaa7e619b268d5dc89a11",
+  "description": null,
+  "directives": [
+    {
+      "arguments": {},
+      "name": "node"
+    }
+  ],
+  "fields": [
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {},
+          "name": "id"
+        }
+      ],
+      "list": false,
+      "name": "id",
+      "named_type": "ID",
+      "nullable": false,
+      "type": "ID!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "name",
+      "named_type": "String",
+      "nullable": false,
+      "type": "String!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "description",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "mongoResearchRunId",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "operations": [
+              "CREATE"
+            ]
+          },
+          "name": "timestamp"
+        }
+      ],
+      "list": false,
+      "name": "createdAt",
+      "named_type": "DateTime",
+      "nullable": false,
+      "type": "DateTime!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "operations": [
+              "CREATE",
+              "UPDATE"
+            ]
+          },
+          "name": "timestamp"
+        }
+      ],
+      "list": false,
+      "name": "updatedAt",
+      "named_type": "DateTime",
+      "nullable": false,
+      "type": "DateTime!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "labelRegionType",
+      "named_type": "LabelRegionType",
+      "nullable": true,
+      "type": "LabelRegionType"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "extractedText",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "confidence",
+      "named_type": "Float",
+      "nullable": true,
+      "type": "Float"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "AnnotationMetadata",
+            "type": "FROM_ANNOTATION"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "fromAnnotation",
+      "named_type": "MediaAnnotation",
+      "nullable": false,
+      "type": "[MediaAnnotation!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "ABOUT_PRODUCT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "aboutProduct",
+      "named_type": "Product",
+      "nullable": false,
+      "type": "[Product!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "MENTIONS"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "mentions",
+      "named_type": "ProductLabelMention",
+      "nullable": false,
+      "type": "[ProductLabelMention!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "ASSERTS"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "assertsClaims",
+      "named_type": "Claim",
+      "nullable": false,
+      "type": "[Claim!]!"
+    }
+  ],
+  "identity_candidates": [
+    "id"
+  ],
+  "incoming_relationships": [],
+  "interfaces": [
+    "Entity"
+  ],
+  "name": "ProductLabelRegion",
+  "outgoing_relationships": [
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "ABOUT_PRODUCT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "aboutProduct",
+      "field_type": "[Product!]!",
+      "properties_type": "ExtractionMetadata",
+      "relationship_type": "ABOUT_PRODUCT",
+      "source": "ProductLabelRegion",
+      "target": "Product"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "ASSERTS"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "assertsClaims",
+      "field_type": "[Claim!]!",
+      "properties_type": "ExtractionMetadata",
+      "relationship_type": "ASSERTS",
+      "source": "ProductLabelRegion",
+      "target": "Claim"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "AnnotationMetadata",
+            "type": "FROM_ANNOTATION"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "fromAnnotation",
+      "field_type": "[MediaAnnotation!]!",
+      "properties_type": "AnnotationMetadata",
+      "relationship_type": "FROM_ANNOTATION",
+      "source": "ProductLabelRegion",
+      "target": "MediaAnnotation"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "MENTIONS"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "mentions",
+      "field_type": "[ProductLabelMention!]!",
+      "properties_type": "ExtractionMetadata",
+      "relationship_type": "MENTIONS",
+      "source": "ProductLabelRegion",
+      "target": "ProductLabelMention"
+    }
+  ],
+  "relationship_properties": false,
+  "sdl": "type ProductLabelRegion implements Entity @node {\n  id: ID! @id\n  name: String!\n  description: String\n  mongoResearchRunId: String\n  createdAt: DateTime! @timestamp(operations: [CREATE])\n  updatedAt: DateTime! @timestamp(operations: [CREATE, UPDATE])\n  labelRegionType: LabelRegionType\n  extractedText: String\n  confidence: Float\n  fromAnnotation: [MediaAnnotation!]! @relationship(type: \"FROM_ANNOTATION\", direction: OUT, properties: \"AnnotationMetadata\")\n  aboutProduct: [Product!]! @relationship(type: \"ABOUT_PRODUCT\", direction: OUT, properties: \"ExtractionMetadata\")\n  mentions: [ProductLabelMention!]! @relationship(type: \"MENTIONS\", direction: OUT, properties: \"ExtractionMetadata\")\n  assertsClaims: [Claim!]! @relationship(type: \"ASSERTS\", direction: OUT, properties: \"ExtractionMetadata\")\n}",
+  "search_candidates": [
+    "confidence",
+    "createdAt",
+    "description",
+    "extractedText",
+    "id",
+    "mongoResearchRunId",
+    "name",
+    "updatedAt"
+  ],
+  "source_schema_digest": "sha256:86b5e0b5d11d203bd75b69b4507b0aad97d5df2495d3897ca64272068ea5f112"
+}

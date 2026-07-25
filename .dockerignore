@@ -1,0 +1,12 @@
+.env
+.git
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.scratch
+.uv-cache
+.venv
+__pycache__
+graphify-out
+sandbox-work
+tests

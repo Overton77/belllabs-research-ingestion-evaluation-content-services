@@ -1,0 +1,46 @@
+{
+  "catalog_digest": "sha256:cfba1f9b099fdd453e806b8c8eeccfa77435b778a6bdaa7e619b268d5dc89a11",
+  "endpoints": [
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "ON_PLATFORM"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "onPlatforms",
+      "field_type": "[Platform!]!",
+      "properties_type": "RoleMetadata",
+      "source": "Episode",
+      "target": "Platform"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "ON_PLATFORM"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "onPlatforms",
+      "field_type": "[Platform!]!",
+      "properties_type": "RoleMetadata",
+      "source": "PseudonymousActor",
+      "target": "Platform"
+    }
+  ],
+  "property_types": [
+    "RoleMetadata"
+  ],
+  "source_schema_digest": "sha256:86b5e0b5d11d203bd75b69b4507b0aad97d5df2495d3897ca64272068ea5f112",
+  "type": "ON_PLATFORM"
+}

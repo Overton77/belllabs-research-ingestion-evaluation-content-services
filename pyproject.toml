@@ -13,6 +13,7 @@ dependencies = [
   "beanie>=2,<3",
   "docker>=7,<8",
   "fastapi>=0.116,<1",
+  "graphql-core>=3.2,<4",
   "neo4j>=5.28,<7",
   # openai 2.46 added a required usage field before openai-agents 0.17.8 adapted.
   "openai>=2.36,<2.45",

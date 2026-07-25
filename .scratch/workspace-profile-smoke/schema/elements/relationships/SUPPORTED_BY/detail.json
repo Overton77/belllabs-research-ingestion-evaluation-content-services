@@ -1,0 +1,352 @@
+{
+  "catalog_digest": "sha256:cfba1f9b099fdd453e806b8c8eeccfa77435b778a6bdaa7e619b268d5dc89a11",
+  "endpoints": [
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedBy",
+      "field_type": "[Chunk!]!",
+      "properties_type": "ExtractionMetadata",
+      "source": "AnatomicalContext",
+      "target": "Chunk"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedBy",
+      "field_type": "[Chunk!]!",
+      "properties_type": "ExtractionMetadata",
+      "source": "Biomarker",
+      "target": "Chunk"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedBy",
+      "field_type": "[Chunk!]!",
+      "properties_type": "ExtractionMetadata",
+      "source": "Claim",
+      "target": "Chunk"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedBy",
+      "field_type": "[Chunk!]!",
+      "properties_type": "ExtractionMetadata",
+      "source": "ClaimOccurrence",
+      "target": "Chunk"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedBy",
+      "field_type": "[Chunk!]!",
+      "properties_type": "ExtractionMetadata",
+      "source": "Condition",
+      "target": "Chunk"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedBy",
+      "field_type": "[Chunk!]!",
+      "properties_type": "ExtractionMetadata",
+      "source": "Event",
+      "target": "Chunk"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedBy",
+      "field_type": "[Chunk!]!",
+      "properties_type": "ExtractionMetadata",
+      "source": "ExperienceReport",
+      "target": "Chunk"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedBy",
+      "field_type": "[Chunk!]!",
+      "properties_type": "ExtractionMetadata",
+      "source": "ManufacturingProcess",
+      "target": "Chunk"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedBy",
+      "field_type": "[Chunk!]!",
+      "properties_type": "ExtractionMetadata",
+      "source": "ManufacturingStep",
+      "target": "Chunk"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedBy",
+      "field_type": "[Chunk!]!",
+      "properties_type": "ExtractionMetadata",
+      "source": "Material",
+      "target": "Chunk"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedBy",
+      "field_type": "[Chunk!]!",
+      "properties_type": "ExtractionMetadata",
+      "source": "Mechanism",
+      "target": "Chunk"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedBy",
+      "field_type": "[Chunk!]!",
+      "properties_type": "ExtractionMetadata",
+      "source": "Metric",
+      "target": "Chunk"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedBy",
+      "field_type": "[Chunk!]!",
+      "properties_type": "ExtractionMetadata",
+      "source": "MolecularEntity",
+      "target": "Chunk"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedBy",
+      "field_type": "[Chunk!]!",
+      "properties_type": "ExtractionMetadata",
+      "source": "NarrativeArc",
+      "target": "Chunk"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedBy",
+      "field_type": "[Chunk!]!",
+      "properties_type": "ExtractionMetadata",
+      "source": "Organ",
+      "target": "Chunk"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedBy",
+      "field_type": "[Chunk!]!",
+      "properties_type": "ExtractionMetadata",
+      "source": "Pathway",
+      "target": "Chunk"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedBy",
+      "field_type": "[ProvenanceSource!]!",
+      "properties_type": "ExtractionMetadata",
+      "source": "ProtocolResult",
+      "target": "ProvenanceSource"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedBy",
+      "field_type": "[Chunk!]!",
+      "properties_type": "ExtractionMetadata",
+      "source": "RiskFactor",
+      "target": "Chunk"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedBy",
+      "field_type": "[Chunk!]!",
+      "properties_type": "ExtractionMetadata",
+      "source": "Species",
+      "target": "Chunk"
+    }
+  ],
+  "property_types": [
+    "ExtractionMetadata"
+  ],
+  "source_schema_digest": "sha256:86b5e0b5d11d203bd75b69b4507b0aad97d5df2495d3897ca64272068ea5f112",
+  "type": "SUPPORTED_BY"
+}

@@ -1,0 +1,46 @@
+{
+  "catalog_digest": "sha256:cfba1f9b099fdd453e806b8c8eeccfa77435b778a6bdaa7e619b268d5dc89a11",
+  "endpoints": [
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "MANUFACTURES"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "manufactures",
+      "field_type": "[Producible!]!",
+      "properties_type": "RoleMetadata",
+      "source": "Organization",
+      "target": "Producible"
+    },
+    {
+      "direction": "IN",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "IN",
+            "properties": "RoleMetadata",
+            "type": "MANUFACTURES"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "manufacturedBy",
+      "field_type": "[Organization!]!",
+      "properties_type": "RoleMetadata",
+      "source": "Product",
+      "target": "Organization"
+    }
+  ],
+  "property_types": [
+    "RoleMetadata"
+  ],
+  "source_schema_digest": "sha256:86b5e0b5d11d203bd75b69b4507b0aad97d5df2495d3897ca64272068ea5f112",
+  "type": "MANUFACTURES"
+}

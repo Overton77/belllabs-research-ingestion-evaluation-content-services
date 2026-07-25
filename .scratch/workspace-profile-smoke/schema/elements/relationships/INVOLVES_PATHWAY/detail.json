@@ -1,0 +1,46 @@
+{
+  "catalog_digest": "sha256:cfba1f9b099fdd453e806b8c8eeccfa77435b778a6bdaa7e619b268d5dc89a11",
+  "endpoints": [
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "MechanismLinkMetadata",
+            "type": "INVOLVES_PATHWAY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "involvesPathways",
+      "field_type": "[Pathway!]!",
+      "properties_type": "MechanismLinkMetadata",
+      "source": "Condition",
+      "target": "Pathway"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "MechanismLinkMetadata",
+            "type": "INVOLVES_PATHWAY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "involvesPathways",
+      "field_type": "[Pathway!]!",
+      "properties_type": "MechanismLinkMetadata",
+      "source": "Mechanism",
+      "target": "Pathway"
+    }
+  ],
+  "property_types": [
+    "MechanismLinkMetadata"
+  ],
+  "source_schema_digest": "sha256:86b5e0b5d11d203bd75b69b4507b0aad97d5df2495d3897ca64272068ea5f112",
+  "type": "INVOLVES_PATHWAY"
+}

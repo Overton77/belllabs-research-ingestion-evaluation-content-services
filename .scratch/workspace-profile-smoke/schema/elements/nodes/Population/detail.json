@@ -1,0 +1,190 @@
+{
+  "aliases": [],
+  "catalog_digest": "sha256:cfba1f9b099fdd453e806b8c8eeccfa77435b778a6bdaa7e619b268d5dc89a11",
+  "description": null,
+  "directives": [
+    {
+      "arguments": {},
+      "name": "node"
+    }
+  ],
+  "fields": [
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {},
+          "name": "id"
+        }
+      ],
+      "list": false,
+      "name": "id",
+      "named_type": "ID",
+      "nullable": false,
+      "type": "ID!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "name",
+      "named_type": "String",
+      "nullable": false,
+      "type": "String!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "description",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "mongoResearchRunId",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "operations": [
+              "CREATE"
+            ]
+          },
+          "name": "timestamp"
+        }
+      ],
+      "list": false,
+      "name": "createdAt",
+      "named_type": "DateTime",
+      "nullable": false,
+      "type": "DateTime!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "operations": [
+              "CREATE",
+              "UPDATE"
+            ]
+          },
+          "name": "timestamp"
+        }
+      ],
+      "list": false,
+      "name": "updatedAt",
+      "named_type": "DateTime",
+      "nullable": false,
+      "type": "DateTime!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "populationType",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "sampleSize",
+      "named_type": "Int",
+      "nullable": true,
+      "type": "Int"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "sexEligibility",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "minAge",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "maxAge",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "healthyVolunteers",
+      "named_type": "Boolean",
+      "nullable": true,
+      "type": "Boolean"
+    }
+  ],
+  "identity_candidates": [
+    "id"
+  ],
+  "incoming_relationships": [
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "STUDIES"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "studiesPopulations",
+      "field_type": "[Population!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "STUDIES",
+      "source": "Study",
+      "target": "Population"
+    }
+  ],
+  "interfaces": [
+    "Entity"
+  ],
+  "name": "Population",
+  "outgoing_relationships": [],
+  "relationship_properties": false,
+  "sdl": "type Population implements Entity @node {\n  id: ID! @id\n  name: String!\n  description: String\n  mongoResearchRunId: String\n  createdAt: DateTime! @timestamp(operations: [CREATE])\n  updatedAt: DateTime! @timestamp(operations: [CREATE, UPDATE])\n  populationType: String\n  sampleSize: Int\n  sexEligibility: String\n  minAge: String\n  maxAge: String\n  healthyVolunteers: Boolean\n}",
+  "search_candidates": [
+    "createdAt",
+    "description",
+    "id",
+    "maxAge",
+    "minAge",
+    "mongoResearchRunId",
+    "name",
+    "populationType",
+    "sampleSize",
+    "sexEligibility",
+    "updatedAt"
+  ],
+  "source_schema_digest": "sha256:86b5e0b5d11d203bd75b69b4507b0aad97d5df2495d3897ca64272068ea5f112"
+}

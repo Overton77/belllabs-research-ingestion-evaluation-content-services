@@ -1,0 +1,1599 @@
+{
+  "aliases": [],
+  "catalog_digest": "sha256:cfba1f9b099fdd453e806b8c8eeccfa77435b778a6bdaa7e619b268d5dc89a11",
+  "description": null,
+  "directives": [
+    {
+      "arguments": {},
+      "name": "node"
+    },
+    {
+      "arguments": {
+        "indexes": [
+          {
+            "fields": [
+              "name",
+              "searchText",
+              "legalName",
+              "displayName",
+              "canonicalTicker"
+            ],
+            "indexName": "OrganizationName",
+            "queryName": "searchOrganizationsByName"
+          }
+        ]
+      },
+      "name": "fulltext"
+    },
+    {
+      "arguments": {
+        "indexes": [
+          {
+            "embeddingProperty": "searchEmbedding",
+            "indexName": "OrganizationSearchEmbedding",
+            "provider": "OPEN_AI",
+            "queryName": "searchOrganizationsBySemanticText"
+          }
+        ]
+      },
+      "name": "vector"
+    }
+  ],
+  "fields": [
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {},
+          "name": "id"
+        }
+      ],
+      "list": false,
+      "name": "id",
+      "named_type": "ID",
+      "nullable": false,
+      "type": "ID!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "name",
+      "named_type": "String",
+      "nullable": false,
+      "type": "String!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "description",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "mongoResearchRunId",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "operations": [
+              "CREATE"
+            ]
+          },
+          "name": "timestamp"
+        }
+      ],
+      "list": false,
+      "name": "createdAt",
+      "named_type": "DateTime",
+      "nullable": false,
+      "type": "DateTime!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "operations": [
+              "CREATE",
+              "UPDATE"
+            ]
+          },
+          "name": "timestamp"
+        }
+      ],
+      "list": false,
+      "name": "updatedAt",
+      "named_type": "DateTime",
+      "nullable": false,
+      "type": "DateTime!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "searchText",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": true,
+      "name": "searchFields",
+      "named_type": "String",
+      "nullable": true,
+      "type": "[String!]"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "embeddingModel",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "embeddingDimensions",
+      "named_type": "Int",
+      "nullable": true,
+      "type": "Int"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "canonicalTicker",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "legalName",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "displayName",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "organizationType",
+      "named_type": "OrganizationType",
+      "nullable": true,
+      "type": "OrganizationType"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "active",
+      "named_type": "Boolean",
+      "nullable": true,
+      "type": "Boolean"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "incorporatedOn",
+      "named_type": "DateTime",
+      "nullable": true,
+      "type": "DateTime"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "dissolvedOn",
+      "named_type": "DateTime",
+      "nullable": true,
+      "type": "DateTime"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "operatingFrom",
+      "named_type": "DateTime",
+      "nullable": true,
+      "type": "DateTime"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "operatingTo",
+      "named_type": "DateTime",
+      "nullable": true,
+      "type": "DateTime"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "foundedYear",
+      "named_type": "Int",
+      "nullable": true,
+      "type": "Int"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "fundingStage",
+      "named_type": "FundingStage",
+      "nullable": true,
+      "type": "FundingStage"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "totalFundingUsd",
+      "named_type": "Float",
+      "nullable": true,
+      "type": "Float"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "employeeCountMin",
+      "named_type": "Int",
+      "nullable": true,
+      "type": "Int"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "employeeCountMax",
+      "named_type": "Int",
+      "nullable": true,
+      "type": "Int"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "employeeCountEstimate",
+      "named_type": "Int",
+      "nullable": true,
+      "type": "Int"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "employeeCountBand",
+      "named_type": "EmployeeCountBand",
+      "nullable": true,
+      "type": "EmployeeCountBand"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "employeeCountRaw",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "revenueModel",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": true,
+      "name": "valueChainStages",
+      "named_type": "String",
+      "nullable": true,
+      "type": "[String!]"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "sector",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "websiteUrl",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "headquartersSummary",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "operatingSummary",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "marketCapUsd",
+      "named_type": "Float",
+      "nullable": true,
+      "type": "Float"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "pipelineSummary",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "competitivePositionSummary",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "isPublicCompany",
+      "named_type": "Boolean",
+      "nullable": true,
+      "type": "Boolean"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "isInvestor",
+      "named_type": "Boolean",
+      "nullable": true,
+      "type": "Boolean"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "isProviderOrganization",
+      "named_type": "Boolean",
+      "nullable": true,
+      "type": "Boolean"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "isResearchOrganization",
+      "named_type": "Boolean",
+      "nullable": true,
+      "type": "Boolean"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "isManufacturer",
+      "named_type": "Boolean",
+      "nullable": true,
+      "type": "Boolean"
+    },
+    {
+      "description": "Marks the timestamp of the current materialized state on this node.",
+      "directives": [],
+      "list": false,
+      "name": "currentAsOf",
+      "named_type": "DateTime",
+      "nullable": true,
+      "type": "DateTime"
+    },
+    {
+      "description": "Canonical semantic search embedding for the organization identity/current record.",
+      "directives": [],
+      "list": true,
+      "name": "searchEmbedding",
+      "named_type": "Float",
+      "nullable": true,
+      "type": "[Float!]"
+    },
+    {
+      "description": "Optional historical milestone snapshots.\nNon-temporal linkage only.",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "type": "HAS_SNAPSHOT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "snapshots",
+      "named_type": "OrganizationSnapshot",
+      "nullable": false,
+      "type": "[OrganizationSnapshot!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ListingMetadata",
+            "type": "LISTS"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "listings",
+      "named_type": "Listing",
+      "nullable": false,
+      "type": "[Listing!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "TemporalMetadata",
+            "type": "HAS_LOCATION"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "locations",
+      "named_type": "PhysicalLocation",
+      "nullable": false,
+      "type": "[PhysicalLocation!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "DEVELOPS_PLATFORM"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "developsPlatforms",
+      "named_type": "TechnologyPlatform",
+      "nullable": false,
+      "type": "[TechnologyPlatform!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "UsageMetadata",
+            "type": "USES_PLATFORM"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "usesPlatforms",
+      "named_type": "TechnologyPlatform",
+      "nullable": false,
+      "type": "[TechnologyPlatform!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "UsageMetadata",
+            "type": "USES"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "usesTools",
+      "named_type": "ToolOrInstrument",
+      "nullable": false,
+      "type": "[ToolOrInstrument!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "OFFERS"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "offersProducts",
+      "named_type": "Producible",
+      "nullable": false,
+      "type": "[Producible!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "OFFERS_PROCEDURE"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "offersProcedures",
+      "named_type": "Procedure",
+      "nullable": false,
+      "type": "[Procedure!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "DEVELOPS_TREATMENT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "developsTreatments",
+      "named_type": "Treatment",
+      "nullable": false,
+      "type": "[Treatment!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "OFFERS_TREATMENT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "offersTreatments",
+      "named_type": "Treatment",
+      "nullable": false,
+      "type": "[Treatment!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "WORKS_ON_CONDITION"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "worksOnConditions",
+      "named_type": "Condition",
+      "nullable": false,
+      "type": "[Condition!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "MANUFACTURES"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "manufactures",
+      "named_type": "Producible",
+      "nullable": false,
+      "type": "[Producible!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "PERFORMS_PROCESS"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "performsProcesses",
+      "named_type": "ManufacturingProcess",
+      "nullable": false,
+      "type": "[ManufacturingProcess!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "OwnershipMetadata",
+            "type": "CONTROLS"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "controls",
+      "named_type": "Organization",
+      "nullable": false,
+      "type": "[Organization!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "CONTRACTS_MANUFACTURING"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "contractsManufacturing",
+      "named_type": "ContractManufacturingTarget",
+      "nullable": false,
+      "type": "[ContractManufacturingTarget!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "SPONSORS"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "sponsors",
+      "named_type": "Sponsorable",
+      "nullable": false,
+      "type": "[Sponsorable!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "EXHIBITS_AT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "exhibitsAt",
+      "named_type": "Conference",
+      "nullable": false,
+      "type": "[Conference!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "OPERATES_CHANNEL"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "operatesChannels",
+      "named_type": "Channel",
+      "nullable": false,
+      "type": "[Channel!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "EMPLOYS"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "employs",
+      "named_type": "Person",
+      "nullable": false,
+      "type": "[Person!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "HAS_BOARD_MEMBER"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "hasBoardMembers",
+      "named_type": "Person",
+      "nullable": false,
+      "type": "[Person!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "FOUNDED_BY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "foundedBy",
+      "named_type": "Person",
+      "nullable": false,
+      "type": "[Person!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "TemporalMetadata",
+            "type": "HAS_CEO"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "hasCeos",
+      "named_type": "Person",
+      "nullable": false,
+      "type": "[Person!]!"
+    }
+  ],
+  "identity_candidates": [
+    "id"
+  ],
+  "incoming_relationships": [
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "ADVISES"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "advises",
+      "field_type": "[Organization!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "ADVISES",
+      "source": "Person",
+      "target": "Organization"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "AFFILIATED_WITH"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "affiliatedWith",
+      "field_type": "[Organization!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "AFFILIATED_WITH",
+      "source": "Person",
+      "target": "Organization"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "OwnershipMetadata",
+            "type": "CONTROLS"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "controls",
+      "field_type": "[Organization!]!",
+      "properties_type": "OwnershipMetadata",
+      "relationship_type": "CONTROLS",
+      "source": "Organization",
+      "target": "Organization"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "HOLDS_ROLE_AT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "holdsRoleAt",
+      "field_type": "[Organization!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "HOLDS_ROLE_AT",
+      "source": "Person",
+      "target": "Organization"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "OPERATED_BY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "operatedBy",
+      "field_type": "[Organization!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "OPERATED_BY",
+      "source": "Study",
+      "target": "Organization"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "SPONSORED_BY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "sponsoredBy",
+      "field_type": "[Organization!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "SPONSORED_BY",
+      "source": "Study",
+      "target": "Organization"
+    }
+  ],
+  "interfaces": [
+    "Entity",
+    "SearchIndexable"
+  ],
+  "name": "Organization",
+  "outgoing_relationships": [
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "CONTRACTS_MANUFACTURING"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "contractsManufacturing",
+      "field_type": "[ContractManufacturingTarget!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "CONTRACTS_MANUFACTURING",
+      "source": "Organization",
+      "target": "ContractManufacturingTarget"
+    },
+    {
+      "direction": "IN",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "IN",
+            "properties": "RoleMetadata",
+            "type": "CONTRACTS_MANUFACTURING"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "contractManufacturedBy",
+      "field_type": "[Organization!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "CONTRACTS_MANUFACTURING",
+      "source": "Product",
+      "target": "Organization"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "OwnershipMetadata",
+            "type": "CONTROLS"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "controls",
+      "field_type": "[Organization!]!",
+      "properties_type": "OwnershipMetadata",
+      "relationship_type": "CONTROLS",
+      "source": "Organization",
+      "target": "Organization"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "DEVELOPS_PLATFORM"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "developsPlatforms",
+      "field_type": "[TechnologyPlatform!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "DEVELOPS_PLATFORM",
+      "source": "Organization",
+      "target": "TechnologyPlatform"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "DEVELOPS_TREATMENT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "developsTreatments",
+      "field_type": "[Treatment!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "DEVELOPS_TREATMENT",
+      "source": "Organization",
+      "target": "Treatment"
+    },
+    {
+      "direction": "IN",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "IN",
+            "properties": "RoleMetadata",
+            "type": "DEVELOPS_TREATMENT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "developedBy",
+      "field_type": "[Organization!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "DEVELOPS_TREATMENT",
+      "source": "Treatment",
+      "target": "Organization"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "EMPLOYS"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "employs",
+      "field_type": "[Person!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "EMPLOYS",
+      "source": "Organization",
+      "target": "Person"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "EXHIBITS_AT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "exhibitsAt",
+      "field_type": "[Conference!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "EXHIBITS_AT",
+      "source": "Organization",
+      "target": "Conference"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "FOUNDED_BY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "foundedBy",
+      "field_type": "[Person!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "FOUNDED_BY",
+      "source": "Organization",
+      "target": "Person"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "HAS_BOARD_MEMBER"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "hasBoardMembers",
+      "field_type": "[Person!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "HAS_BOARD_MEMBER",
+      "source": "Organization",
+      "target": "Person"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "TemporalMetadata",
+            "type": "HAS_CEO"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "hasCeos",
+      "field_type": "[Person!]!",
+      "properties_type": "TemporalMetadata",
+      "relationship_type": "HAS_CEO",
+      "source": "Organization",
+      "target": "Person"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "TemporalMetadata",
+            "type": "HAS_LOCATION"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "locations",
+      "field_type": "[PhysicalLocation!]!",
+      "properties_type": "TemporalMetadata",
+      "relationship_type": "HAS_LOCATION",
+      "source": "Organization",
+      "target": "PhysicalLocation"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "type": "HAS_SNAPSHOT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "snapshots",
+      "field_type": "[OrganizationSnapshot!]!",
+      "properties_type": null,
+      "relationship_type": "HAS_SNAPSHOT",
+      "source": "Organization",
+      "target": "OrganizationSnapshot"
+    },
+    {
+      "direction": "IN",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "IN",
+            "type": "HAS_SNAPSHOT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "organization",
+      "field_type": "[Organization!]!",
+      "properties_type": null,
+      "relationship_type": "HAS_SNAPSHOT",
+      "source": "OrganizationSnapshot",
+      "target": "Organization"
+    },
+    {
+      "direction": "IN",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "IN",
+            "properties": "ListingMetadata",
+            "type": "LISTS"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "offeredBy",
+      "field_type": "[Organization!]!",
+      "properties_type": "ListingMetadata",
+      "relationship_type": "LISTS",
+      "source": "Listing",
+      "target": "Organization"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ListingMetadata",
+            "type": "LISTS"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "listings",
+      "field_type": "[Listing!]!",
+      "properties_type": "ListingMetadata",
+      "relationship_type": "LISTS",
+      "source": "Organization",
+      "target": "Listing"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "MANUFACTURES"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "manufactures",
+      "field_type": "[Producible!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "MANUFACTURES",
+      "source": "Organization",
+      "target": "Producible"
+    },
+    {
+      "direction": "IN",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "IN",
+            "properties": "RoleMetadata",
+            "type": "MANUFACTURES"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "manufacturedBy",
+      "field_type": "[Organization!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "MANUFACTURES",
+      "source": "Product",
+      "target": "Organization"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "OFFERS"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "offersProducts",
+      "field_type": "[Producible!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "OFFERS",
+      "source": "Organization",
+      "target": "Producible"
+    },
+    {
+      "direction": "IN",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "IN",
+            "properties": "RoleMetadata",
+            "type": "OFFERS"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "offeredBy",
+      "field_type": "[Organization!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "OFFERS",
+      "source": "Product",
+      "target": "Organization"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "OFFERS_PROCEDURE"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "offersProcedures",
+      "field_type": "[Procedure!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "OFFERS_PROCEDURE",
+      "source": "Organization",
+      "target": "Procedure"
+    },
+    {
+      "direction": "IN",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "IN",
+            "properties": "RoleMetadata",
+            "type": "OFFERS_PROCEDURE"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "offeredBy",
+      "field_type": "[Organization!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "OFFERS_PROCEDURE",
+      "source": "Procedure",
+      "target": "Organization"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "OFFERS_TREATMENT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "offersTreatments",
+      "field_type": "[Treatment!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "OFFERS_TREATMENT",
+      "source": "Organization",
+      "target": "Treatment"
+    },
+    {
+      "direction": "IN",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "IN",
+            "properties": "RoleMetadata",
+            "type": "OFFERS_TREATMENT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "offeredBy",
+      "field_type": "[Organization!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "OFFERS_TREATMENT",
+      "source": "Treatment",
+      "target": "Organization"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "OPERATES_CHANNEL"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "operatesChannels",
+      "field_type": "[Channel!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "OPERATES_CHANNEL",
+      "source": "Organization",
+      "target": "Channel"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "PERFORMS_PROCESS"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "performsProcesses",
+      "field_type": "[ManufacturingProcess!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "PERFORMS_PROCESS",
+      "source": "Organization",
+      "target": "ManufacturingProcess"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "SPONSORS"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "sponsors",
+      "field_type": "[Sponsorable!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "SPONSORS",
+      "source": "Organization",
+      "target": "Sponsorable"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "UsageMetadata",
+            "type": "USES"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "usesTools",
+      "field_type": "[ToolOrInstrument!]!",
+      "properties_type": "UsageMetadata",
+      "relationship_type": "USES",
+      "source": "Organization",
+      "target": "ToolOrInstrument"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "UsageMetadata",
+            "type": "USES_PLATFORM"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "usesPlatforms",
+      "field_type": "[TechnologyPlatform!]!",
+      "properties_type": "UsageMetadata",
+      "relationship_type": "USES_PLATFORM",
+      "source": "Organization",
+      "target": "TechnologyPlatform"
+    },
+    {
+      "direction": "IN",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "IN",
+            "properties": "RoleMetadata",
+            "type": "WORKS_ON_CONDITION"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "workedOnBy",
+      "field_type": "[Organization!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "WORKS_ON_CONDITION",
+      "source": "Condition",
+      "target": "Organization"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "WORKS_ON_CONDITION"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "worksOnConditions",
+      "field_type": "[Condition!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "WORKS_ON_CONDITION",
+      "source": "Organization",
+      "target": "Condition"
+    }
+  ],
+  "relationship_properties": false,
+  "sdl": "type Organization implements Entity & SearchIndexable @node @fulltext(indexes: [{indexName: \"OrganizationName\", fields: [\"name\", \"searchText\", \"legalName\", \"displayName\", \"canonicalTicker\"], queryName: \"searchOrganizationsByName\"}]) @vector(indexes: [{indexName: \"OrganizationSearchEmbedding\", provider: OPEN_AI, embeddingProperty: \"searchEmbedding\", queryName: \"searchOrganizationsBySemanticText\"}]) {\n  id: ID! @id\n  name: String!\n  description: String\n  mongoResearchRunId: String\n  createdAt: DateTime! @timestamp(operations: [CREATE])\n  updatedAt: DateTime! @timestamp(operations: [CREATE, UPDATE])\n  searchText: String\n  searchFields: [String!]\n  embeddingModel: String\n  embeddingDimensions: Int\n  canonicalTicker: String\n  legalName: String\n  displayName: String\n  organizationType: OrganizationType\n  active: Boolean\n  incorporatedOn: DateTime\n  dissolvedOn: DateTime\n  operatingFrom: DateTime\n  operatingTo: DateTime\n  foundedYear: Int\n  fundingStage: FundingStage\n  totalFundingUsd: Float\n  employeeCountMin: Int\n  employeeCountMax: Int\n  employeeCountEstimate: Int\n  employeeCountBand: EmployeeCountBand\n  employeeCountRaw: String\n  revenueModel: String\n  valueChainStages: [String!]\n  sector: String\n  websiteUrl: String\n  headquartersSummary: String\n  operatingSummary: String\n  marketCapUsd: Float\n  pipelineSummary: String\n  competitivePositionSummary: String\n  isPublicCompany: Boolean\n  isInvestor: Boolean\n  isProviderOrganization: Boolean\n  isResearchOrganization: Boolean\n  isManufacturer: Boolean\n  \"\"\"Marks the timestamp of the current materialized state on this node.\"\"\"\n  currentAsOf: DateTime\n  \"\"\"\n  Canonical semantic search embedding for the organization identity/current record.\n  \"\"\"\n  searchEmbedding: [Float!]\n  \"\"\"\n  Optional historical milestone snapshots.\n  Non-temporal linkage only.\n  \"\"\"\n  snapshots: [OrganizationSnapshot!]! @relationship(type: \"HAS_SNAPSHOT\", direction: OUT)\n  listings: [Listing!]! @relationship(type: \"LISTS\", direction: OUT, properties: \"ListingMetadata\")\n  locations: [PhysicalLocation!]! @relationship(type: \"HAS_LOCATION\", direction: OUT, properties: \"TemporalMetadata\")\n  developsPlatforms: [TechnologyPlatform!]! @relationship(type: \"DEVELOPS_PLATFORM\", direction: OUT, properties: \"RoleMetadata\")\n  usesPlatforms: [TechnologyPlatform!]! @relationship(type: \"USES_PLATFORM\", direction: OUT, properties: \"UsageMetadata\")\n  usesTools: [ToolOrInstrument!]! @relationship(type: \"USES\", direction: OUT, properties: \"UsageMetadata\")\n  offersProducts: [Producible!]! @relationship(type: \"OFFERS\", direction: OUT, properties: \"RoleMetadata\")\n  offersProcedures: [Procedure!]! @relationship(type: \"OFFERS_PROCEDURE\", direction: OUT, properties: \"RoleMetadata\")\n  developsTreatments: [Treatment!]! @relationship(type: \"DEVELOPS_TREATMENT\", direction: OUT, properties: \"RoleMetadata\")\n  offersTreatments: [Treatment!]! @relationship(type: \"OFFERS_TREATMENT\", direction: OUT, properties: \"RoleMetadata\")\n  worksOnConditions: [Condition!]! @relationship(type: \"WORKS_ON_CONDITION\", direction: OUT, properties: \"RoleMetadata\")\n  manufactures: [Producible!]! @relationship(type: \"MANUFACTURES\", direction: OUT, properties: \"RoleMetadata\")\n  performsProcesses: [ManufacturingProcess!]! @relationship(type: \"PERFORMS_PROCESS\", direction: OUT, properties: \"RoleMetadata\")\n  controls: [Organization!]! @relationship(type: \"CONTROLS\", direction: OUT, properties: \"OwnershipMetadata\")\n  contractsManufacturing: [ContractManufacturingTarget!]! @relationship(type: \"CONTRACTS_MANUFACTURING\", direction: OUT, properties: \"RoleMetadata\")\n  sponsors: [Sponsorable!]! @relationship(type: \"SPONSORS\", direction: OUT, properties: \"RoleMetadata\")\n  exhibitsAt: [Conference!]! @relationship(type: \"EXHIBITS_AT\", direction: OUT, properties: \"RoleMetadata\")\n  operatesChannels: [Channel!]! @relationship(type: \"OPERATES_CHANNEL\", direction: OUT, properties: \"RoleMetadata\")\n  employs: [Person!]! @relationship(type: \"EMPLOYS\", direction: OUT, properties: \"RoleMetadata\")\n  hasBoardMembers: [Person!]! @relationship(type: \"HAS_BOARD_MEMBER\", direction: OUT, properties: \"RoleMetadata\")\n  foundedBy: [Person!]! @relationship(type: \"FOUNDED_BY\", direction: OUT, properties: \"RoleMetadata\")\n  hasCeos: [Person!]! @relationship(type: \"HAS_CEO\", direction: OUT, properties: \"TemporalMetadata\")\n}",
+  "search_candidates": [
+    "canonicalTicker",
+    "competitivePositionSummary",
+    "createdAt",
+    "currentAsOf",
+    "description",
+    "displayName",
+    "dissolvedOn",
+    "embeddingDimensions",
+    "embeddingModel",
+    "employeeCountEstimate",
+    "employeeCountMax",
+    "employeeCountMin",
+    "employeeCountRaw",
+    "foundedYear",
+    "headquartersSummary",
+    "id",
+    "incorporatedOn",
+    "legalName",
+    "marketCapUsd",
+    "mongoResearchRunId",
+    "name",
+    "operatingFrom",
+    "operatingSummary",
+    "operatingTo",
+    "pipelineSummary",
+    "revenueModel",
+    "searchText",
+    "sector",
+    "totalFundingUsd",
+    "updatedAt",
+    "websiteUrl"
+  ],
+  "source_schema_digest": "sha256:86b5e0b5d11d203bd75b69b4507b0aad97d5df2495d3897ca64272068ea5f112"
+}

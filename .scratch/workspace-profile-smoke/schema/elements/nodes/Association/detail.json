@@ -1,0 +1,216 @@
+{
+  "aliases": [],
+  "catalog_digest": "sha256:cfba1f9b099fdd453e806b8c8eeccfa77435b778a6bdaa7e619b268d5dc89a11",
+  "description": null,
+  "directives": [
+    {
+      "arguments": {},
+      "name": "node"
+    }
+  ],
+  "fields": [
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {},
+          "name": "id"
+        }
+      ],
+      "list": false,
+      "name": "id",
+      "named_type": "ID",
+      "nullable": false,
+      "type": "ID!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "name",
+      "named_type": "String",
+      "nullable": false,
+      "type": "String!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "description",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "mongoResearchRunId",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "operations": [
+              "CREATE"
+            ]
+          },
+          "name": "timestamp"
+        }
+      ],
+      "list": false,
+      "name": "createdAt",
+      "named_type": "DateTime",
+      "nullable": false,
+      "type": "DateTime!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "operations": [
+              "CREATE",
+              "UPDATE"
+            ]
+          },
+          "name": "timestamp"
+        }
+      ],
+      "list": false,
+      "name": "updatedAt",
+      "named_type": "DateTime",
+      "nullable": false,
+      "type": "DateTime!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "associationSummary",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "associationType",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "associationCategory",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "LEFT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "left",
+      "named_type": "AssociationParticipant",
+      "nullable": false,
+      "type": "[AssociationParticipant!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "RIGHT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "right",
+      "named_type": "AssociationParticipant",
+      "nullable": false,
+      "type": "[AssociationParticipant!]!"
+    }
+  ],
+  "identity_candidates": [
+    "id"
+  ],
+  "incoming_relationships": [],
+  "interfaces": [
+    "Entity"
+  ],
+  "name": "Association",
+  "outgoing_relationships": [
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "LEFT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "left",
+      "field_type": "[AssociationParticipant!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "LEFT",
+      "source": "Association",
+      "target": "AssociationParticipant"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "RIGHT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "right",
+      "field_type": "[AssociationParticipant!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "RIGHT",
+      "source": "Association",
+      "target": "AssociationParticipant"
+    }
+  ],
+  "relationship_properties": false,
+  "sdl": "type Association implements Entity @node {\n  id: ID! @id\n  name: String!\n  description: String\n  mongoResearchRunId: String\n  createdAt: DateTime! @timestamp(operations: [CREATE])\n  updatedAt: DateTime! @timestamp(operations: [CREATE, UPDATE])\n  associationSummary: String\n  associationType: String\n  associationCategory: String\n  left: [AssociationParticipant!]! @relationship(type: \"LEFT\", direction: OUT, properties: \"RoleMetadata\")\n  right: [AssociationParticipant!]! @relationship(type: \"RIGHT\", direction: OUT, properties: \"RoleMetadata\")\n}",
+  "search_candidates": [
+    "associationCategory",
+    "associationSummary",
+    "associationType",
+    "createdAt",
+    "description",
+    "id",
+    "mongoResearchRunId",
+    "name",
+    "updatedAt"
+  ],
+  "source_schema_digest": "sha256:86b5e0b5d11d203bd75b69b4507b0aad97d5df2495d3897ca64272068ea5f112"
+}

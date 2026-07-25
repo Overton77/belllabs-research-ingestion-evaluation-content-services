@@ -1,0 +1,123 @@
+{
+  "aliases": [],
+  "catalog_digest": "sha256:cfba1f9b099fdd453e806b8c8eeccfa77435b778a6bdaa7e619b268d5dc89a11",
+  "description": null,
+  "directives": [
+    {
+      "arguments": {},
+      "name": "relationshipProperties"
+    }
+  ],
+  "fields": [
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "modelKind",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "coordinateSystem",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "scale",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "species",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "anatomicalContext",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "sourceDatabase",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "externalId",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "confidence",
+      "named_type": "Float",
+      "nullable": true,
+      "type": "Float"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "notes",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "mongoResearchRunId",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    }
+  ],
+  "identity_candidates": [],
+  "incoming_relationships": [],
+  "interfaces": [],
+  "name": "BiologicalModelMetadata",
+  "outgoing_relationships": [],
+  "relationship_properties": true,
+  "sdl": "type BiologicalModelMetadata @relationshipProperties {\n  modelKind: String\n  coordinateSystem: String\n  scale: String\n  species: String\n  anatomicalContext: String\n  sourceDatabase: String\n  externalId: String\n  confidence: Float\n  notes: String\n  mongoResearchRunId: String\n}",
+  "search_candidates": [
+    "anatomicalContext",
+    "confidence",
+    "coordinateSystem",
+    "externalId",
+    "modelKind",
+    "mongoResearchRunId",
+    "notes",
+    "scale",
+    "sourceDatabase",
+    "species"
+  ],
+  "source_schema_digest": "sha256:86b5e0b5d11d203bd75b69b4507b0aad97d5df2495d3897ca64272068ea5f112"
+}

@@ -1,0 +1,633 @@
+{
+  "aliases": [],
+  "catalog_digest": "sha256:cfba1f9b099fdd453e806b8c8eeccfa77435b778a6bdaa7e619b268d5dc89a11",
+  "description": null,
+  "directives": [
+    {
+      "arguments": {},
+      "name": "node"
+    },
+    {
+      "arguments": {
+        "indexes": [
+          {
+            "fields": [
+              "name",
+              "description",
+              "searchText"
+            ],
+            "indexName": "MetricSearch",
+            "queryName": "searchMetrics"
+          }
+        ]
+      },
+      "name": "fulltext"
+    }
+  ],
+  "fields": [
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {},
+          "name": "id"
+        }
+      ],
+      "list": false,
+      "name": "id",
+      "named_type": "ID",
+      "nullable": false,
+      "type": "ID!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "name",
+      "named_type": "String",
+      "nullable": false,
+      "type": "String!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "description",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "mongoResearchRunId",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "operations": [
+              "CREATE"
+            ]
+          },
+          "name": "timestamp"
+        }
+      ],
+      "list": false,
+      "name": "createdAt",
+      "named_type": "DateTime",
+      "nullable": false,
+      "type": "DateTime!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "operations": [
+              "CREATE",
+              "UPDATE"
+            ]
+          },
+          "name": "timestamp"
+        }
+      ],
+      "list": false,
+      "name": "updatedAt",
+      "named_type": "DateTime",
+      "nullable": false,
+      "type": "DateTime!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "searchText",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": true,
+      "name": "searchFields",
+      "named_type": "String",
+      "nullable": true,
+      "type": "[String!]"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "embeddingModel",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "embeddingDimensions",
+      "named_type": "Int",
+      "nullable": true,
+      "type": "Int"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "metricType",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "canonicalUnit",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "loincCode",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "ucumUnit",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "formulaExpression",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "formulaVariables",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "mediaUrl",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "mediaType",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": true,
+      "name": "searchEmbedding",
+      "named_type": "Float",
+      "nullable": true,
+      "type": "[Float!]"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "AssociationMetadata",
+            "type": "QUANTIFIES"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "quantifiesBiomarkers",
+      "named_type": "Biomarker",
+      "nullable": false,
+      "type": "[Biomarker!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "AssociationMetadata",
+            "type": "REFLECTS_MECHANISM"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "reflectsMechanisms",
+      "named_type": "Mechanism",
+      "nullable": false,
+      "type": "[Mechanism!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "AssociationMetadata",
+            "type": "MEASURED_IN"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "measuredInOrgans",
+      "named_type": "Organ",
+      "nullable": false,
+      "type": "[Organ!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "AssociationMetadata",
+            "type": "HAS_REFERENCE_RANGE"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "hasReferenceRanges",
+      "named_type": "ReferenceRange",
+      "nullable": false,
+      "type": "[ReferenceRange!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "supportedBy",
+      "named_type": "Chunk",
+      "nullable": false,
+      "type": "[Chunk!]!"
+    }
+  ],
+  "identity_candidates": [
+    "id"
+  ],
+  "incoming_relationships": [
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "FOR_METRIC"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "forMetrics",
+      "field_type": "[Metric!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "FOR_METRIC",
+      "source": "Target",
+      "target": "Metric"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "AssociationMetadata",
+            "type": "MEASURED_BY_METRIC"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "measuredByMetrics",
+      "field_type": "[Metric!]!",
+      "properties_type": "AssociationMetadata",
+      "relationship_type": "MEASURED_BY_METRIC",
+      "source": "Organ",
+      "target": "Metric"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "MeasurementMetadata",
+            "type": "MEASURED_BY_METRIC"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "measuredByMetrics",
+      "field_type": "[Metric!]!",
+      "properties_type": "MeasurementMetadata",
+      "relationship_type": "MEASURED_BY_METRIC",
+      "source": "OutcomeMeasure",
+      "target": "Metric"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "MeasurementMetadata",
+            "type": "MEASURES_METRIC"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "measuresMetrics",
+      "field_type": "[Metric!]!",
+      "properties_type": "MeasurementMetadata",
+      "relationship_type": "MEASURES_METRIC",
+      "source": "Device",
+      "target": "Metric"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "MeasurementMetadata",
+            "type": "MEASURES_METRIC"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "measuresMetrics",
+      "field_type": "[Metric!]!",
+      "properties_type": "MeasurementMetadata",
+      "relationship_type": "MEASURES_METRIC",
+      "source": "LabTest",
+      "target": "Metric"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "MeasurementMetadata",
+            "type": "MEASURES_METRIC"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "measuresMetrics",
+      "field_type": "[Metric!]!",
+      "properties_type": "MeasurementMetadata",
+      "relationship_type": "MEASURES_METRIC",
+      "source": "Observation",
+      "target": "Metric"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "MeasurementMetadata",
+            "type": "MEASURES_METRIC"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "measuresMetrics",
+      "field_type": "[Metric!]!",
+      "properties_type": "MeasurementMetadata",
+      "relationship_type": "MEASURES_METRIC",
+      "source": "Sensor",
+      "target": "Metric"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "AssociationMetadata",
+            "type": "OPERATIONALIZED_BY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "operationalizedBy",
+      "field_type": "[Metric!]!",
+      "properties_type": "AssociationMetadata",
+      "relationship_type": "OPERATIONALIZED_BY",
+      "source": "Outcome",
+      "target": "Metric"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "TRACKS_METRIC"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "tracksMetrics",
+      "field_type": "[Metric!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "TRACKS_METRIC",
+      "source": "MeasurementPlan",
+      "target": "Metric"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "TRIGGERED_BY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "triggeredByMetrics",
+      "field_type": "[Metric!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "TRIGGERED_BY",
+      "source": "ProtocolAdjustmentRule",
+      "target": "Metric"
+    }
+  ],
+  "interfaces": [
+    "Entity",
+    "SearchIndexable"
+  ],
+  "name": "Metric",
+  "outgoing_relationships": [
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "AssociationMetadata",
+            "type": "HAS_REFERENCE_RANGE"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "hasReferenceRanges",
+      "field_type": "[ReferenceRange!]!",
+      "properties_type": "AssociationMetadata",
+      "relationship_type": "HAS_REFERENCE_RANGE",
+      "source": "Metric",
+      "target": "ReferenceRange"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "AssociationMetadata",
+            "type": "MEASURED_IN"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "measuredInOrgans",
+      "field_type": "[Organ!]!",
+      "properties_type": "AssociationMetadata",
+      "relationship_type": "MEASURED_IN",
+      "source": "Metric",
+      "target": "Organ"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "AssociationMetadata",
+            "type": "QUANTIFIES"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "quantifiesBiomarkers",
+      "field_type": "[Biomarker!]!",
+      "properties_type": "AssociationMetadata",
+      "relationship_type": "QUANTIFIES",
+      "source": "Metric",
+      "target": "Biomarker"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "AssociationMetadata",
+            "type": "REFLECTS_MECHANISM"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "reflectsMechanisms",
+      "field_type": "[Mechanism!]!",
+      "properties_type": "AssociationMetadata",
+      "relationship_type": "REFLECTS_MECHANISM",
+      "source": "Metric",
+      "target": "Mechanism"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedBy",
+      "field_type": "[Chunk!]!",
+      "properties_type": "ExtractionMetadata",
+      "relationship_type": "SUPPORTED_BY",
+      "source": "Metric",
+      "target": "Chunk"
+    }
+  ],
+  "relationship_properties": false,
+  "sdl": "type Metric implements Entity & SearchIndexable @node @fulltext(indexes: [{indexName: \"MetricSearch\", fields: [\"name\", \"description\", \"searchText\"], queryName: \"searchMetrics\"}]) {\n  id: ID! @id\n  name: String!\n  description: String\n  mongoResearchRunId: String\n  createdAt: DateTime! @timestamp(operations: [CREATE])\n  updatedAt: DateTime! @timestamp(operations: [CREATE, UPDATE])\n  searchText: String\n  searchFields: [String!]\n  embeddingModel: String\n  embeddingDimensions: Int\n  metricType: String\n  canonicalUnit: String\n  loincCode: String\n  ucumUnit: String\n  formulaExpression: String\n  formulaVariables: String\n  mediaUrl: String\n  mediaType: String\n  searchEmbedding: [Float!]\n  quantifiesBiomarkers: [Biomarker!]! @relationship(type: \"QUANTIFIES\", direction: OUT, properties: \"AssociationMetadata\")\n  reflectsMechanisms: [Mechanism!]! @relationship(type: \"REFLECTS_MECHANISM\", direction: OUT, properties: \"AssociationMetadata\")\n  measuredInOrgans: [Organ!]! @relationship(type: \"MEASURED_IN\", direction: OUT, properties: \"AssociationMetadata\")\n  hasReferenceRanges: [ReferenceRange!]! @relationship(type: \"HAS_REFERENCE_RANGE\", direction: OUT, properties: \"AssociationMetadata\")\n  supportedBy: [Chunk!]! @relationship(type: \"SUPPORTED_BY\", direction: OUT, properties: \"ExtractionMetadata\")\n}",
+  "search_candidates": [
+    "canonicalUnit",
+    "createdAt",
+    "description",
+    "embeddingDimensions",
+    "embeddingModel",
+    "formulaExpression",
+    "formulaVariables",
+    "id",
+    "loincCode",
+    "mediaType",
+    "mediaUrl",
+    "metricType",
+    "mongoResearchRunId",
+    "name",
+    "searchText",
+    "ucumUnit",
+    "updatedAt"
+  ],
+  "source_schema_digest": "sha256:86b5e0b5d11d203bd75b69b4507b0aad97d5df2495d3897ca64272068ea5f112"
+}

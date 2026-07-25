@@ -1,0 +1,340 @@
+{
+  "aliases": [],
+  "catalog_digest": "sha256:cfba1f9b099fdd453e806b8c8eeccfa77435b778a6bdaa7e619b268d5dc89a11",
+  "description": null,
+  "directives": [
+    {
+      "arguments": {},
+      "name": "node"
+    }
+  ],
+  "fields": [
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {},
+          "name": "id"
+        }
+      ],
+      "list": false,
+      "name": "id",
+      "named_type": "ID",
+      "nullable": false,
+      "type": "ID!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "name",
+      "named_type": "String",
+      "nullable": false,
+      "type": "String!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "description",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "mongoResearchRunId",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "operations": [
+              "CREATE"
+            ]
+          },
+          "name": "timestamp"
+        }
+      ],
+      "list": false,
+      "name": "createdAt",
+      "named_type": "DateTime",
+      "nullable": false,
+      "type": "DateTime!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "operations": [
+              "CREATE",
+              "UPDATE"
+            ]
+          },
+          "name": "timestamp"
+        }
+      ],
+      "list": false,
+      "name": "updatedAt",
+      "named_type": "DateTime",
+      "nullable": false,
+      "type": "DateTime!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "pathwayClass",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "sourceDatabase",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "externalId",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "pathwayRevision",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "AssociationMetadata",
+            "type": "ACTS_IN"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "actsInOrgans",
+      "named_type": "Organ",
+      "nullable": false,
+      "type": "[Organ!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "MechanismLinkMetadata",
+            "type": "HAS_MECHANISM"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "hasMechanisms",
+      "named_type": "Mechanism",
+      "nullable": false,
+      "type": "[Mechanism!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "supportedBy",
+      "named_type": "Chunk",
+      "nullable": false,
+      "type": "[Chunk!]!"
+    }
+  ],
+  "identity_candidates": [
+    "id"
+  ],
+  "incoming_relationships": [
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "MechanismLinkMetadata",
+            "type": "INVOLVES_PATHWAY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "involvesPathways",
+      "field_type": "[Pathway!]!",
+      "properties_type": "MechanismLinkMetadata",
+      "relationship_type": "INVOLVES_PATHWAY",
+      "source": "Condition",
+      "target": "Pathway"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "MechanismLinkMetadata",
+            "type": "INVOLVES_PATHWAY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "involvesPathways",
+      "field_type": "[Pathway!]!",
+      "properties_type": "MechanismLinkMetadata",
+      "relationship_type": "INVOLVES_PATHWAY",
+      "source": "Mechanism",
+      "target": "Pathway"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "AssociationMetadata",
+            "type": "IN_PATHWAY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "inPathways",
+      "field_type": "[Pathway!]!",
+      "properties_type": "AssociationMetadata",
+      "relationship_type": "IN_PATHWAY",
+      "source": "Biomarker",
+      "target": "Pathway"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "MechanismLinkMetadata",
+            "type": "PARTICIPATES_IN"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "participatesInPathways",
+      "field_type": "[Pathway!]!",
+      "properties_type": "MechanismLinkMetadata",
+      "relationship_type": "PARTICIPATES_IN",
+      "source": "MolecularEntity",
+      "target": "Pathway"
+    }
+  ],
+  "interfaces": [
+    "Entity"
+  ],
+  "name": "Pathway",
+  "outgoing_relationships": [
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "AssociationMetadata",
+            "type": "ACTS_IN"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "actsInOrgans",
+      "field_type": "[Organ!]!",
+      "properties_type": "AssociationMetadata",
+      "relationship_type": "ACTS_IN",
+      "source": "Pathway",
+      "target": "Organ"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "MechanismLinkMetadata",
+            "type": "HAS_MECHANISM"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "hasMechanisms",
+      "field_type": "[Mechanism!]!",
+      "properties_type": "MechanismLinkMetadata",
+      "relationship_type": "HAS_MECHANISM",
+      "source": "Pathway",
+      "target": "Mechanism"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedBy",
+      "field_type": "[Chunk!]!",
+      "properties_type": "ExtractionMetadata",
+      "relationship_type": "SUPPORTED_BY",
+      "source": "Pathway",
+      "target": "Chunk"
+    }
+  ],
+  "relationship_properties": false,
+  "sdl": "type Pathway implements Entity @node {\n  id: ID! @id\n  name: String!\n  description: String\n  mongoResearchRunId: String\n  createdAt: DateTime! @timestamp(operations: [CREATE])\n  updatedAt: DateTime! @timestamp(operations: [CREATE, UPDATE])\n  pathwayClass: String\n  sourceDatabase: String\n  externalId: String\n  pathwayRevision: String\n  actsInOrgans: [Organ!]! @relationship(type: \"ACTS_IN\", direction: OUT, properties: \"AssociationMetadata\")\n  hasMechanisms: [Mechanism!]! @relationship(type: \"HAS_MECHANISM\", direction: OUT, properties: \"MechanismLinkMetadata\")\n  supportedBy: [Chunk!]! @relationship(type: \"SUPPORTED_BY\", direction: OUT, properties: \"ExtractionMetadata\")\n}",
+  "search_candidates": [
+    "createdAt",
+    "description",
+    "externalId",
+    "id",
+    "mongoResearchRunId",
+    "name",
+    "pathwayClass",
+    "pathwayRevision",
+    "sourceDatabase",
+    "updatedAt"
+  ],
+  "source_schema_digest": "sha256:86b5e0b5d11d203bd75b69b4507b0aad97d5df2495d3897ca64272068ea5f112"
+}

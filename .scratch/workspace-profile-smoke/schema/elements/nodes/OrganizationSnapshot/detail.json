@@ -1,0 +1,630 @@
+{
+  "aliases": [],
+  "catalog_digest": "sha256:cfba1f9b099fdd453e806b8c8eeccfa77435b778a6bdaa7e619b268d5dc89a11",
+  "description": null,
+  "directives": [
+    {
+      "arguments": {},
+      "name": "node"
+    },
+    {
+      "arguments": {
+        "indexes": [
+          {
+            "fields": [
+              "name",
+              "description",
+              "sector",
+              "searchText"
+            ],
+            "indexName": "OrganizationSnapshotSearch",
+            "queryName": "searchOrganizationSnapshots"
+          }
+        ]
+      },
+      "name": "fulltext"
+    },
+    {
+      "arguments": {
+        "indexes": [
+          {
+            "embeddingProperty": "searchEmbedding",
+            "indexName": "OrganizationSnapshotSearchEmbedding",
+            "provider": "OPEN_AI",
+            "queryName": "searchOrganizationSnapshotsBySemanticText"
+          }
+        ]
+      },
+      "name": "vector"
+    }
+  ],
+  "fields": [
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {},
+          "name": "id"
+        }
+      ],
+      "list": false,
+      "name": "id",
+      "named_type": "ID",
+      "nullable": false,
+      "type": "ID!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "name",
+      "named_type": "String",
+      "nullable": false,
+      "type": "String!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "description",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "mongoResearchRunId",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "operations": [
+              "CREATE"
+            ]
+          },
+          "name": "timestamp"
+        }
+      ],
+      "list": false,
+      "name": "createdAt",
+      "named_type": "DateTime",
+      "nullable": false,
+      "type": "DateTime!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "operations": [
+              "CREATE",
+              "UPDATE"
+            ]
+          },
+          "name": "timestamp"
+        }
+      ],
+      "list": false,
+      "name": "updatedAt",
+      "named_type": "DateTime",
+      "nullable": false,
+      "type": "DateTime!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "searchText",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": true,
+      "name": "searchFields",
+      "named_type": "String",
+      "nullable": true,
+      "type": "[String!]"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "embeddingModel",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "embeddingDimensions",
+      "named_type": "Int",
+      "nullable": true,
+      "type": "Int"
+    },
+    {
+      "description": "When this snapshot was true in the world.",
+      "directives": [],
+      "list": false,
+      "name": "validFrom",
+      "named_type": "DateTime",
+      "nullable": true,
+      "type": "DateTime"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "validTo",
+      "named_type": "DateTime",
+      "nullable": true,
+      "type": "DateTime"
+    },
+    {
+      "description": "When this snapshot was known/recorded in the graph.",
+      "directives": [],
+      "list": false,
+      "name": "recordedFrom",
+      "named_type": "DateTime",
+      "nullable": true,
+      "type": "DateTime"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "recordedTo",
+      "named_type": "DateTime",
+      "nullable": true,
+      "type": "DateTime"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "snapshotType",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "legalName",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "displayName",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "organizationType",
+      "named_type": "OrganizationType",
+      "nullable": true,
+      "type": "OrganizationType"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "active",
+      "named_type": "Boolean",
+      "nullable": true,
+      "type": "Boolean"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "foundedYear",
+      "named_type": "Int",
+      "nullable": true,
+      "type": "Int"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "fundingStage",
+      "named_type": "FundingStage",
+      "nullable": true,
+      "type": "FundingStage"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "totalFundingUsd",
+      "named_type": "Float",
+      "nullable": true,
+      "type": "Float"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "employeeCountMin",
+      "named_type": "Int",
+      "nullable": true,
+      "type": "Int"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "employeeCountMax",
+      "named_type": "Int",
+      "nullable": true,
+      "type": "Int"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "employeeCountEstimate",
+      "named_type": "Int",
+      "nullable": true,
+      "type": "Int"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "employeeCountBand",
+      "named_type": "EmployeeCountBand",
+      "nullable": true,
+      "type": "EmployeeCountBand"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "employeeCountRaw",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "revenueModel",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": true,
+      "name": "valueChainStages",
+      "named_type": "String",
+      "nullable": true,
+      "type": "[String!]"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "sector",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "websiteUrl",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "headquarters",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "headquartersSummary",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "operatingSummary",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "marketCapUsd",
+      "named_type": "Float",
+      "nullable": true,
+      "type": "Float"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "pipelineSummary",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "competitivePositionSummary",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "isPublicCompany",
+      "named_type": "Boolean",
+      "nullable": true,
+      "type": "Boolean"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "isInvestor",
+      "named_type": "Boolean",
+      "nullable": true,
+      "type": "Boolean"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "isProviderOrganization",
+      "named_type": "Boolean",
+      "nullable": true,
+      "type": "Boolean"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "isResearchOrganization",
+      "named_type": "Boolean",
+      "nullable": true,
+      "type": "Boolean"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "isManufacturer",
+      "named_type": "Boolean",
+      "nullable": true,
+      "type": "Boolean"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": true,
+      "name": "searchEmbedding",
+      "named_type": "Float",
+      "nullable": true,
+      "type": "[Float!]"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "IN",
+            "type": "HAS_SNAPSHOT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "organization",
+      "named_type": "Organization",
+      "nullable": false,
+      "type": "[Organization!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY_DOCUMENT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "supportedByDocuments",
+      "named_type": "Document",
+      "nullable": false,
+      "type": "[Document!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY_CHUNK"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "supportedByChunks",
+      "named_type": "Chunk",
+      "nullable": false,
+      "type": "[Chunk!]!"
+    }
+  ],
+  "identity_candidates": [
+    "id"
+  ],
+  "incoming_relationships": [
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "type": "HAS_SNAPSHOT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "snapshots",
+      "field_type": "[OrganizationSnapshot!]!",
+      "properties_type": null,
+      "relationship_type": "HAS_SNAPSHOT",
+      "source": "Organization",
+      "target": "OrganizationSnapshot"
+    },
+    {
+      "direction": "IN",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "IN",
+            "type": "HAS_SNAPSHOT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "organization",
+      "field_type": "[Organization!]!",
+      "properties_type": null,
+      "relationship_type": "HAS_SNAPSHOT",
+      "source": "OrganizationSnapshot",
+      "target": "Organization"
+    }
+  ],
+  "interfaces": [
+    "Entity",
+    "SearchIndexable",
+    "TemporalSnapshot"
+  ],
+  "name": "OrganizationSnapshot",
+  "outgoing_relationships": [
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY_CHUNK"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedByChunks",
+      "field_type": "[Chunk!]!",
+      "properties_type": "ExtractionMetadata",
+      "relationship_type": "SUPPORTED_BY_CHUNK",
+      "source": "OrganizationSnapshot",
+      "target": "Chunk"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY_DOCUMENT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedByDocuments",
+      "field_type": "[Document!]!",
+      "properties_type": "ExtractionMetadata",
+      "relationship_type": "SUPPORTED_BY_DOCUMENT",
+      "source": "OrganizationSnapshot",
+      "target": "Document"
+    }
+  ],
+  "relationship_properties": false,
+  "sdl": "type OrganizationSnapshot implements Entity & SearchIndexable & TemporalSnapshot @node @fulltext(indexes: [{indexName: \"OrganizationSnapshotSearch\", fields: [\"name\", \"description\", \"sector\", \"searchText\"], queryName: \"searchOrganizationSnapshots\"}]) @vector(indexes: [{indexName: \"OrganizationSnapshotSearchEmbedding\", provider: OPEN_AI, embeddingProperty: \"searchEmbedding\", queryName: \"searchOrganizationSnapshotsBySemanticText\"}]) {\n  id: ID! @id\n  name: String!\n  description: String\n  mongoResearchRunId: String\n  createdAt: DateTime! @timestamp(operations: [CREATE])\n  updatedAt: DateTime! @timestamp(operations: [CREATE, UPDATE])\n  searchText: String\n  searchFields: [String!]\n  embeddingModel: String\n  embeddingDimensions: Int\n  \"\"\"When this snapshot was true in the world.\"\"\"\n  validFrom: DateTime\n  validTo: DateTime\n  \"\"\"When this snapshot was known/recorded in the graph.\"\"\"\n  recordedFrom: DateTime\n  recordedTo: DateTime\n  snapshotType: String\n  legalName: String\n  displayName: String\n  organizationType: OrganizationType\n  active: Boolean\n  foundedYear: Int\n  fundingStage: FundingStage\n  totalFundingUsd: Float\n  employeeCountMin: Int\n  employeeCountMax: Int\n  employeeCountEstimate: Int\n  employeeCountBand: EmployeeCountBand\n  employeeCountRaw: String\n  revenueModel: String\n  valueChainStages: [String!]\n  sector: String\n  websiteUrl: String\n  headquarters: String\n  headquartersSummary: String\n  operatingSummary: String\n  marketCapUsd: Float\n  pipelineSummary: String\n  competitivePositionSummary: String\n  isPublicCompany: Boolean\n  isInvestor: Boolean\n  isProviderOrganization: Boolean\n  isResearchOrganization: Boolean\n  isManufacturer: Boolean\n  searchEmbedding: [Float!]\n  organization: [Organization!]! @relationship(type: \"HAS_SNAPSHOT\", direction: IN)\n  supportedByDocuments: [Document!]! @relationship(type: \"SUPPORTED_BY_DOCUMENT\", direction: OUT, properties: \"ExtractionMetadata\")\n  supportedByChunks: [Chunk!]! @relationship(type: \"SUPPORTED_BY_CHUNK\", direction: OUT, properties: \"ExtractionMetadata\")\n}",
+  "search_candidates": [
+    "competitivePositionSummary",
+    "createdAt",
+    "description",
+    "displayName",
+    "embeddingDimensions",
+    "embeddingModel",
+    "employeeCountEstimate",
+    "employeeCountMax",
+    "employeeCountMin",
+    "employeeCountRaw",
+    "foundedYear",
+    "headquarters",
+    "headquartersSummary",
+    "id",
+    "legalName",
+    "marketCapUsd",
+    "mongoResearchRunId",
+    "name",
+    "operatingSummary",
+    "pipelineSummary",
+    "recordedFrom",
+    "recordedTo",
+    "revenueModel",
+    "searchText",
+    "sector",
+    "snapshotType",
+    "totalFundingUsd",
+    "updatedAt",
+    "validFrom",
+    "validTo",
+    "websiteUrl"
+  ],
+  "source_schema_digest": "sha256:86b5e0b5d11d203bd75b69b4507b0aad97d5df2495d3897ca64272068ea5f112"
+}

@@ -1,0 +1,497 @@
+{
+  "aliases": [],
+  "catalog_digest": "sha256:cfba1f9b099fdd453e806b8c8eeccfa77435b778a6bdaa7e619b268d5dc89a11",
+  "description": null,
+  "directives": [
+    {
+      "arguments": {},
+      "name": "node"
+    },
+    {
+      "arguments": {
+        "indexes": [
+          {
+            "fields": [
+              "name",
+              "description",
+              "searchText"
+            ],
+            "indexName": "ProductSnapshotSearch",
+            "queryName": "searchProductSnapshots"
+          }
+        ]
+      },
+      "name": "fulltext"
+    },
+    {
+      "arguments": {
+        "indexes": [
+          {
+            "embeddingProperty": "searchEmbedding",
+            "indexName": "ProductSnapshotSearchEmbedding",
+            "provider": "OPEN_AI",
+            "queryName": "searchProductSnapshotsBySemanticText"
+          }
+        ]
+      },
+      "name": "vector"
+    }
+  ],
+  "fields": [
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {},
+          "name": "id"
+        }
+      ],
+      "list": false,
+      "name": "id",
+      "named_type": "ID",
+      "nullable": false,
+      "type": "ID!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "name",
+      "named_type": "String",
+      "nullable": false,
+      "type": "String!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "description",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "mongoResearchRunId",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "operations": [
+              "CREATE"
+            ]
+          },
+          "name": "timestamp"
+        }
+      ],
+      "list": false,
+      "name": "createdAt",
+      "named_type": "DateTime",
+      "nullable": false,
+      "type": "DateTime!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "operations": [
+              "CREATE",
+              "UPDATE"
+            ]
+          },
+          "name": "timestamp"
+        }
+      ],
+      "list": false,
+      "name": "updatedAt",
+      "named_type": "DateTime",
+      "nullable": false,
+      "type": "DateTime!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "searchText",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": true,
+      "name": "searchFields",
+      "named_type": "String",
+      "nullable": true,
+      "type": "[String!]"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "embeddingModel",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "embeddingDimensions",
+      "named_type": "Int",
+      "nullable": true,
+      "type": "Int"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "validFrom",
+      "named_type": "DateTime",
+      "nullable": true,
+      "type": "DateTime"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "validTo",
+      "named_type": "DateTime",
+      "nullable": true,
+      "type": "DateTime"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "recordedFrom",
+      "named_type": "DateTime",
+      "nullable": true,
+      "type": "DateTime"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "recordedTo",
+      "named_type": "DateTime",
+      "nullable": true,
+      "type": "DateTime"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "snapshotType",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "productType",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "applicationContext",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": true,
+      "name": "categories",
+      "named_type": "String",
+      "nullable": true,
+      "type": "[String!]"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "launchYear",
+      "named_type": "Int",
+      "nullable": true,
+      "type": "Int"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "targetCustomer",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "deliveryModel",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "status",
+      "named_type": "ProductStatus",
+      "nullable": true,
+      "type": "ProductStatus"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "approvedYear",
+      "named_type": "Int",
+      "nullable": true,
+      "type": "Int"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "productClass",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "formulationSummary",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "indicationSummary",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "modalitySummary",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "regulatoryAuthorizationId",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": true,
+      "name": "searchEmbedding",
+      "named_type": "Float",
+      "nullable": true,
+      "type": "[Float!]"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "IN",
+            "type": "HAS_SNAPSHOT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "product",
+      "named_type": "Product",
+      "nullable": false,
+      "type": "[Product!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY_DOCUMENT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "supportedByDocuments",
+      "named_type": "Document",
+      "nullable": false,
+      "type": "[Document!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY_CHUNK"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "supportedByChunks",
+      "named_type": "Chunk",
+      "nullable": false,
+      "type": "[Chunk!]!"
+    }
+  ],
+  "identity_candidates": [
+    "id"
+  ],
+  "incoming_relationships": [
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "type": "HAS_SNAPSHOT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "snapshots",
+      "field_type": "[ProductSnapshot!]!",
+      "properties_type": null,
+      "relationship_type": "HAS_SNAPSHOT",
+      "source": "Product",
+      "target": "ProductSnapshot"
+    },
+    {
+      "direction": "IN",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "IN",
+            "type": "HAS_SNAPSHOT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "product",
+      "field_type": "[Product!]!",
+      "properties_type": null,
+      "relationship_type": "HAS_SNAPSHOT",
+      "source": "ProductSnapshot",
+      "target": "Product"
+    }
+  ],
+  "interfaces": [
+    "Entity",
+    "SearchIndexable",
+    "TemporalSnapshot"
+  ],
+  "name": "ProductSnapshot",
+  "outgoing_relationships": [
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY_CHUNK"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedByChunks",
+      "field_type": "[Chunk!]!",
+      "properties_type": "ExtractionMetadata",
+      "relationship_type": "SUPPORTED_BY_CHUNK",
+      "source": "ProductSnapshot",
+      "target": "Chunk"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY_DOCUMENT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedByDocuments",
+      "field_type": "[Document!]!",
+      "properties_type": "ExtractionMetadata",
+      "relationship_type": "SUPPORTED_BY_DOCUMENT",
+      "source": "ProductSnapshot",
+      "target": "Document"
+    }
+  ],
+  "relationship_properties": false,
+  "sdl": "type ProductSnapshot implements Entity & SearchIndexable & TemporalSnapshot @node @fulltext(indexes: [{indexName: \"ProductSnapshotSearch\", fields: [\"name\", \"description\", \"searchText\"], queryName: \"searchProductSnapshots\"}]) @vector(indexes: [{indexName: \"ProductSnapshotSearchEmbedding\", provider: OPEN_AI, embeddingProperty: \"searchEmbedding\", queryName: \"searchProductSnapshotsBySemanticText\"}]) {\n  id: ID! @id\n  name: String!\n  description: String\n  mongoResearchRunId: String\n  createdAt: DateTime! @timestamp(operations: [CREATE])\n  updatedAt: DateTime! @timestamp(operations: [CREATE, UPDATE])\n  searchText: String\n  searchFields: [String!]\n  embeddingModel: String\n  embeddingDimensions: Int\n  validFrom: DateTime\n  validTo: DateTime\n  recordedFrom: DateTime\n  recordedTo: DateTime\n  snapshotType: String\n  productType: String\n  applicationContext: String\n  categories: [String!]\n  launchYear: Int\n  targetCustomer: String\n  deliveryModel: String\n  status: ProductStatus\n  approvedYear: Int\n  productClass: String\n  formulationSummary: String\n  indicationSummary: String\n  modalitySummary: String\n  regulatoryAuthorizationId: String\n  searchEmbedding: [Float!]\n  product: [Product!]! @relationship(type: \"HAS_SNAPSHOT\", direction: IN)\n  supportedByDocuments: [Document!]! @relationship(type: \"SUPPORTED_BY_DOCUMENT\", direction: OUT, properties: \"ExtractionMetadata\")\n  supportedByChunks: [Chunk!]! @relationship(type: \"SUPPORTED_BY_CHUNK\", direction: OUT, properties: \"ExtractionMetadata\")\n}",
+  "search_candidates": [
+    "applicationContext",
+    "approvedYear",
+    "createdAt",
+    "deliveryModel",
+    "description",
+    "embeddingDimensions",
+    "embeddingModel",
+    "formulationSummary",
+    "id",
+    "indicationSummary",
+    "launchYear",
+    "modalitySummary",
+    "mongoResearchRunId",
+    "name",
+    "productClass",
+    "productType",
+    "recordedFrom",
+    "recordedTo",
+    "regulatoryAuthorizationId",
+    "searchText",
+    "snapshotType",
+    "targetCustomer",
+    "updatedAt",
+    "validFrom",
+    "validTo"
+  ],
+  "source_schema_digest": "sha256:86b5e0b5d11d203bd75b69b4507b0aad97d5df2495d3897ca64272068ea5f112"
+}

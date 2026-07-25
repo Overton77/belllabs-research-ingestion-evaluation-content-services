@@ -1,0 +1,208 @@
+{
+  "catalog_digest": "sha256:cfba1f9b099fdd453e806b8c8eeccfa77435b778a6bdaa7e619b268d5dc89a11",
+  "endpoints": [
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY_DOCUMENT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedByDocuments",
+      "field_type": "[Document!]!",
+      "properties_type": "ExtractionMetadata",
+      "source": "AdverseEffect",
+      "target": "Document"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY_DOCUMENT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedByDocuments",
+      "field_type": "[Document!]!",
+      "properties_type": "ExtractionMetadata",
+      "source": "Lifestyle",
+      "target": "Document"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY_DOCUMENT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedByDocuments",
+      "field_type": "[Document!]!",
+      "properties_type": "ExtractionMetadata",
+      "source": "OrganizationSnapshot",
+      "target": "Document"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY_DOCUMENT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedByDocuments",
+      "field_type": "[Document!]!",
+      "properties_type": "ExtractionMetadata",
+      "source": "OutcomeMeasure",
+      "target": "Document"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY_DOCUMENT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedByDocuments",
+      "field_type": "[Document!]!",
+      "properties_type": "ExtractionMetadata",
+      "source": "OutcomeResult",
+      "target": "Document"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY_DOCUMENT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedByDocuments",
+      "field_type": "[Document!]!",
+      "properties_type": "ExtractionMetadata",
+      "source": "Procedure",
+      "target": "Document"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY_DOCUMENT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedByDocuments",
+      "field_type": "[Document!]!",
+      "properties_type": "ExtractionMetadata",
+      "source": "ProductSnapshot",
+      "target": "Document"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY_DOCUMENT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedByDocuments",
+      "field_type": "[Document!]!",
+      "properties_type": "ExtractionMetadata",
+      "source": "SafetySignal",
+      "target": "Document"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY_DOCUMENT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedByDocuments",
+      "field_type": "[Document!]!",
+      "properties_type": "ExtractionMetadata",
+      "source": "StudyArm",
+      "target": "Document"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY_DOCUMENT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedByDocuments",
+      "field_type": "[Document!]!",
+      "properties_type": "ExtractionMetadata",
+      "source": "StudyOutcome",
+      "target": "Document"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY_DOCUMENT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedByDocuments",
+      "field_type": "[Document!]!",
+      "properties_type": "ExtractionMetadata",
+      "source": "Treatment",
+      "target": "Document"
+    }
+  ],
+  "property_types": [
+    "ExtractionMetadata"
+  ],
+  "source_schema_digest": "sha256:86b5e0b5d11d203bd75b69b4507b0aad97d5df2495d3897ca64272068ea5f112",
+  "type": "SUPPORTED_BY_DOCUMENT"
+}

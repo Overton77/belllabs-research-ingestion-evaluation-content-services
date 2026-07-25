@@ -1,0 +1,9 @@
+{
+  "paths": [
+    "schema/manifest.json",
+    "schema/overview/tier0.json",
+    "schema/profiles/selection-tier0.json",
+    "schema/skills/schema-navigation/SKILL.md"
+  ],
+  "profile": "selection-tier0"
+}

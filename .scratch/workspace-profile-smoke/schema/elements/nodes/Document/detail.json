@@ -1,0 +1,827 @@
+{
+  "aliases": [
+    {
+      "field": "id",
+      "property": "documentId"
+    },
+    {
+      "field": "name",
+      "property": "title"
+    },
+    {
+      "field": "documentType",
+      "property": "type"
+    },
+    {
+      "field": "sourceUrl",
+      "property": "url"
+    }
+  ],
+  "catalog_digest": "sha256:cfba1f9b099fdd453e806b8c8eeccfa77435b778a6bdaa7e619b268d5dc89a11",
+  "description": null,
+  "directives": [
+    {
+      "arguments": {},
+      "name": "node"
+    },
+    {
+      "arguments": {
+        "indexes": [
+          {
+            "fields": [
+              "name",
+              "sourceUrl",
+              "searchText"
+            ],
+            "indexName": "DocumentSearch",
+            "queryName": "searchDocuments"
+          }
+        ]
+      },
+      "name": "fulltext"
+    },
+    {
+      "arguments": {
+        "indexes": [
+          {
+            "embeddingProperty": "searchEmbedding",
+            "indexName": "DocumentSearchEmbedding",
+            "provider": "OPEN_AI",
+            "queryName": "searchDocumentsBySemanticText"
+          }
+        ]
+      },
+      "name": "vector"
+    }
+  ],
+  "fields": [
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {},
+          "name": "id"
+        },
+        {
+          "arguments": {
+            "property": "documentId"
+          },
+          "name": "alias"
+        }
+      ],
+      "list": false,
+      "name": "id",
+      "named_type": "ID",
+      "nullable": false,
+      "type": "ID!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "property": "title"
+          },
+          "name": "alias"
+        }
+      ],
+      "list": false,
+      "name": "name",
+      "named_type": "String",
+      "nullable": false,
+      "type": "String!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "description",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "mongoResearchRunId",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "operations": [
+              "CREATE"
+            ]
+          },
+          "name": "timestamp"
+        }
+      ],
+      "list": false,
+      "name": "createdAt",
+      "named_type": "DateTime",
+      "nullable": false,
+      "type": "DateTime!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "operations": [
+              "CREATE",
+              "UPDATE"
+            ]
+          },
+          "name": "timestamp"
+        }
+      ],
+      "list": false,
+      "name": "updatedAt",
+      "named_type": "DateTime",
+      "nullable": false,
+      "type": "DateTime!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "searchText",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": true,
+      "name": "searchFields",
+      "named_type": "String",
+      "nullable": true,
+      "type": "[String!]"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "embeddingModel",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "embeddingDimensions",
+      "named_type": "Int",
+      "nullable": true,
+      "type": "Int"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "documentKey",
+      "named_type": "String",
+      "nullable": false,
+      "type": "String!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "property": "type"
+          },
+          "name": "alias"
+        }
+      ],
+      "list": false,
+      "name": "documentType",
+      "named_type": "DocumentType",
+      "nullable": false,
+      "type": "DocumentType!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "property": "url"
+          },
+          "name": "alias"
+        }
+      ],
+      "list": false,
+      "name": "sourceUrl",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "documentDomain",
+      "named_type": "DocumentDomain",
+      "nullable": true,
+      "type": "DocumentDomain"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "publisher",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "publicationVenue",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "publishedAt",
+      "named_type": "DateTime",
+      "nullable": true,
+      "type": "DateTime"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "fileFormat",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "languageCode",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "isPeerReviewed",
+      "named_type": "Boolean",
+      "nullable": true,
+      "type": "Boolean"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "isPrimarySource",
+      "named_type": "Boolean",
+      "nullable": true,
+      "type": "Boolean"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "isRegulatorySource",
+      "named_type": "Boolean",
+      "nullable": true,
+      "type": "Boolean"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "isFinancialDisclosure",
+      "named_type": "Boolean",
+      "nullable": true,
+      "type": "Boolean"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": true,
+      "name": "searchEmbedding",
+      "named_type": "Float",
+      "nullable": true,
+      "type": "[Float!]"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "type": "HAS_TEXT_VERSION"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "hasTextVersions",
+      "named_type": "DocumentTextVersion",
+      "nullable": false,
+      "type": "[DocumentTextVersion!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "OrderingMetadata",
+            "type": "HAS_CHUNK"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "hasChunks",
+      "named_type": "Chunk",
+      "nullable": false,
+      "type": "[Chunk!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "ABOUT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "about",
+      "named_type": "ClaimSubject",
+      "nullable": false,
+      "type": "[ClaimSubject!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "AUTHORED_BY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "authoredBy",
+      "named_type": "DocumentAuthor",
+      "nullable": false,
+      "type": "[DocumentAuthor!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "SOURCE_OF"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "sourceForEpisodes",
+      "named_type": "Episode",
+      "nullable": false,
+      "type": "[Episode!]!"
+    }
+  ],
+  "identity_candidates": [
+    "id"
+  ],
+  "incoming_relationships": [
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "HAS_PRIMARY_SOURCE"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "hasPrimarySources",
+      "field_type": "[Document!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "HAS_PRIMARY_SOURCE",
+      "source": "Study",
+      "target": "Document"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "REPORTED_IN"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "reportedIn",
+      "field_type": "[Document!]!",
+      "properties_type": "ExtractionMetadata",
+      "relationship_type": "REPORTED_IN",
+      "source": "Event",
+      "target": "Document"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "REPORTED_IN"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "reportedIn",
+      "field_type": "[Document!]!",
+      "properties_type": "ExtractionMetadata",
+      "relationship_type": "REPORTED_IN",
+      "source": "NarrativeArc",
+      "target": "Document"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "SOURCE_DOCUMENT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "sourceDocument",
+      "field_type": "[Document!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "SOURCE_DOCUMENT",
+      "source": "MediaSource",
+      "target": "Document"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY_DOCUMENT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedByDocuments",
+      "field_type": "[Document!]!",
+      "properties_type": "ExtractionMetadata",
+      "relationship_type": "SUPPORTED_BY_DOCUMENT",
+      "source": "AdverseEffect",
+      "target": "Document"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY_DOCUMENT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedByDocuments",
+      "field_type": "[Document!]!",
+      "properties_type": "ExtractionMetadata",
+      "relationship_type": "SUPPORTED_BY_DOCUMENT",
+      "source": "Lifestyle",
+      "target": "Document"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY_DOCUMENT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedByDocuments",
+      "field_type": "[Document!]!",
+      "properties_type": "ExtractionMetadata",
+      "relationship_type": "SUPPORTED_BY_DOCUMENT",
+      "source": "OrganizationSnapshot",
+      "target": "Document"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY_DOCUMENT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedByDocuments",
+      "field_type": "[Document!]!",
+      "properties_type": "ExtractionMetadata",
+      "relationship_type": "SUPPORTED_BY_DOCUMENT",
+      "source": "OutcomeMeasure",
+      "target": "Document"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY_DOCUMENT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedByDocuments",
+      "field_type": "[Document!]!",
+      "properties_type": "ExtractionMetadata",
+      "relationship_type": "SUPPORTED_BY_DOCUMENT",
+      "source": "OutcomeResult",
+      "target": "Document"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY_DOCUMENT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedByDocuments",
+      "field_type": "[Document!]!",
+      "properties_type": "ExtractionMetadata",
+      "relationship_type": "SUPPORTED_BY_DOCUMENT",
+      "source": "Procedure",
+      "target": "Document"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY_DOCUMENT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedByDocuments",
+      "field_type": "[Document!]!",
+      "properties_type": "ExtractionMetadata",
+      "relationship_type": "SUPPORTED_BY_DOCUMENT",
+      "source": "ProductSnapshot",
+      "target": "Document"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY_DOCUMENT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedByDocuments",
+      "field_type": "[Document!]!",
+      "properties_type": "ExtractionMetadata",
+      "relationship_type": "SUPPORTED_BY_DOCUMENT",
+      "source": "SafetySignal",
+      "target": "Document"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY_DOCUMENT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedByDocuments",
+      "field_type": "[Document!]!",
+      "properties_type": "ExtractionMetadata",
+      "relationship_type": "SUPPORTED_BY_DOCUMENT",
+      "source": "StudyArm",
+      "target": "Document"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY_DOCUMENT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedByDocuments",
+      "field_type": "[Document!]!",
+      "properties_type": "ExtractionMetadata",
+      "relationship_type": "SUPPORTED_BY_DOCUMENT",
+      "source": "StudyOutcome",
+      "target": "Document"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "SUPPORTED_BY_DOCUMENT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "supportedByDocuments",
+      "field_type": "[Document!]!",
+      "properties_type": "ExtractionMetadata",
+      "relationship_type": "SUPPORTED_BY_DOCUMENT",
+      "source": "Treatment",
+      "target": "Document"
+    }
+  ],
+  "interfaces": [
+    "Entity",
+    "SearchIndexable"
+  ],
+  "name": "Document",
+  "outgoing_relationships": [
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "ABOUT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "about",
+      "field_type": "[ClaimSubject!]!",
+      "properties_type": "ExtractionMetadata",
+      "relationship_type": "ABOUT",
+      "source": "Document",
+      "target": "ClaimSubject"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "AUTHORED_BY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "authoredBy",
+      "field_type": "[DocumentAuthor!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "AUTHORED_BY",
+      "source": "Document",
+      "target": "DocumentAuthor"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "OrderingMetadata",
+            "type": "HAS_CHUNK"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "hasChunks",
+      "field_type": "[Chunk!]!",
+      "properties_type": "OrderingMetadata",
+      "relationship_type": "HAS_CHUNK",
+      "source": "Document",
+      "target": "Chunk"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "type": "HAS_TEXT_VERSION"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "hasTextVersions",
+      "field_type": "[DocumentTextVersion!]!",
+      "properties_type": null,
+      "relationship_type": "HAS_TEXT_VERSION",
+      "source": "Document",
+      "target": "DocumentTextVersion"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "SOURCE_OF"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "sourceForEpisodes",
+      "field_type": "[Episode!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "SOURCE_OF",
+      "source": "Document",
+      "target": "Episode"
+    }
+  ],
+  "relationship_properties": false,
+  "sdl": "type Document implements Entity & SearchIndexable @node @fulltext(indexes: [{indexName: \"DocumentSearch\", fields: [\"name\", \"sourceUrl\", \"searchText\"], queryName: \"searchDocuments\"}]) @vector(indexes: [{indexName: \"DocumentSearchEmbedding\", provider: OPEN_AI, embeddingProperty: \"searchEmbedding\", queryName: \"searchDocumentsBySemanticText\"}]) {\n  id: ID! @id @alias(property: \"documentId\")\n  name: String! @alias(property: \"title\")\n  description: String\n  mongoResearchRunId: String\n  createdAt: DateTime! @timestamp(operations: [CREATE])\n  updatedAt: DateTime! @timestamp(operations: [CREATE, UPDATE])\n  searchText: String\n  searchFields: [String!]\n  embeddingModel: String\n  embeddingDimensions: Int\n  documentKey: String!\n  documentType: DocumentType! @alias(property: \"type\")\n  sourceUrl: String @alias(property: \"url\")\n  documentDomain: DocumentDomain\n  publisher: String\n  publicationVenue: String\n  publishedAt: DateTime\n  fileFormat: String\n  languageCode: String\n  isPeerReviewed: Boolean\n  isPrimarySource: Boolean\n  isRegulatorySource: Boolean\n  isFinancialDisclosure: Boolean\n  searchEmbedding: [Float!]\n  hasTextVersions: [DocumentTextVersion!]! @relationship(type: \"HAS_TEXT_VERSION\", direction: OUT)\n  hasChunks: [Chunk!]! @relationship(type: \"HAS_CHUNK\", direction: OUT, properties: \"OrderingMetadata\")\n  about: [ClaimSubject!]! @relationship(type: \"ABOUT\", direction: OUT, properties: \"ExtractionMetadata\")\n  authoredBy: [DocumentAuthor!]! @relationship(type: \"AUTHORED_BY\", direction: OUT, properties: \"RoleMetadata\")\n  sourceForEpisodes: [Episode!]! @relationship(type: \"SOURCE_OF\", direction: OUT, properties: \"RoleMetadata\")\n}",
+  "search_candidates": [
+    "createdAt",
+    "description",
+    "documentKey",
+    "embeddingDimensions",
+    "embeddingModel",
+    "fileFormat",
+    "id",
+    "languageCode",
+    "mongoResearchRunId",
+    "name",
+    "publicationVenue",
+    "publishedAt",
+    "publisher",
+    "searchText",
+    "sourceUrl",
+    "updatedAt"
+  ],
+  "source_schema_digest": "sha256:86b5e0b5d11d203bd75b69b4507b0aad97d5df2495d3897ca64272068ea5f112"
+}

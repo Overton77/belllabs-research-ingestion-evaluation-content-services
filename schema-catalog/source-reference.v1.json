@@ -1,0 +1,21 @@
+{
+  "reference_version": "1",
+  "published_at": "2026-07-22",
+  "provider": "aws-s3",
+  "account_id": "298199649527",
+  "bucket": "belllabs-biotech-schema-298199649527-us-east-1",
+  "region": "us-east-1",
+  "key": "schemas/neo4jbiotechschema/sha256/86b5e0b5d11d203bd75b69b4507b0aad97d5df2495d3897ca64272068ea5f112/neo4jbiotechschema.graphql",
+  "s3_uri": "s3://belllabs-biotech-schema-298199649527-us-east-1/schemas/neo4jbiotechschema/sha256/86b5e0b5d11d203bd75b69b4507b0aad97d5df2495d3897ca64272068ea5f112/neo4jbiotechschema.graphql",
+  "version_id": "J6d_lL6g2TEtTL9Imi6hwIMBNSTSahEB",
+  "sha256": "86b5e0b5d11d203bd75b69b4507b0aad97d5df2495d3897ca64272068ea5f112",
+  "checksum_sha256_base64": "hrXgtdEdIDvXW2m0UHsKrZfV3ySV04l8pkJyBo6l8RI=",
+  "content_length": 107632,
+  "content_type": "application/graphql; charset=utf-8",
+  "controls": {
+    "public_access_blocked": true,
+    "object_ownership": "BucketOwnerEnforced",
+    "versioning": "Enabled",
+    "default_encryption": "AES256"
+  }
+}

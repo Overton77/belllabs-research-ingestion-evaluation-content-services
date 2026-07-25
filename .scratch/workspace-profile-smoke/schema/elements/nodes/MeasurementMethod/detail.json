@@ -1,0 +1,179 @@
+{
+  "aliases": [],
+  "catalog_digest": "sha256:cfba1f9b099fdd453e806b8c8eeccfa77435b778a6bdaa7e619b268d5dc89a11",
+  "description": null,
+  "directives": [
+    {
+      "arguments": {},
+      "name": "node"
+    }
+  ],
+  "fields": [
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {},
+          "name": "id"
+        }
+      ],
+      "list": false,
+      "name": "id",
+      "named_type": "ID",
+      "nullable": false,
+      "type": "ID!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "name",
+      "named_type": "String",
+      "nullable": false,
+      "type": "String!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "description",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "mongoResearchRunId",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "operations": [
+              "CREATE"
+            ]
+          },
+          "name": "timestamp"
+        }
+      ],
+      "list": false,
+      "name": "createdAt",
+      "named_type": "DateTime",
+      "nullable": false,
+      "type": "DateTime!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "operations": [
+              "CREATE",
+              "UPDATE"
+            ]
+          },
+          "name": "timestamp"
+        }
+      ],
+      "list": false,
+      "name": "updatedAt",
+      "named_type": "DateTime",
+      "nullable": false,
+      "type": "DateTime!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "methodClass",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "MeasurementMetadata",
+            "type": "RUNS_ON_PLATFORM"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "runsOnPlatforms",
+      "named_type": "TechnologyPlatform",
+      "nullable": false,
+      "type": "[TechnologyPlatform!]!"
+    }
+  ],
+  "identity_candidates": [
+    "id"
+  ],
+  "incoming_relationships": [
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "MeasurementMetadata",
+            "type": "USES_METHOD"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "usesMethods",
+      "field_type": "[MeasurementMethod!]!",
+      "properties_type": "MeasurementMetadata",
+      "relationship_type": "USES_METHOD",
+      "source": "LabTest",
+      "target": "MeasurementMethod"
+    }
+  ],
+  "interfaces": [
+    "Entity"
+  ],
+  "name": "MeasurementMethod",
+  "outgoing_relationships": [
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "MeasurementMetadata",
+            "type": "RUNS_ON_PLATFORM"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "runsOnPlatforms",
+      "field_type": "[TechnologyPlatform!]!",
+      "properties_type": "MeasurementMetadata",
+      "relationship_type": "RUNS_ON_PLATFORM",
+      "source": "MeasurementMethod",
+      "target": "TechnologyPlatform"
+    }
+  ],
+  "relationship_properties": false,
+  "sdl": "type MeasurementMethod implements Entity @node {\n  id: ID! @id\n  name: String!\n  description: String\n  mongoResearchRunId: String\n  createdAt: DateTime! @timestamp(operations: [CREATE])\n  updatedAt: DateTime! @timestamp(operations: [CREATE, UPDATE])\n  methodClass: String\n  runsOnPlatforms: [TechnologyPlatform!]! @relationship(type: \"RUNS_ON_PLATFORM\", direction: OUT, properties: \"MeasurementMetadata\")\n}",
+  "search_candidates": [
+    "createdAt",
+    "description",
+    "id",
+    "methodClass",
+    "mongoResearchRunId",
+    "name",
+    "updatedAt"
+  ],
+  "source_schema_digest": "sha256:86b5e0b5d11d203bd75b69b4507b0aad97d5df2495d3897ca64272068ea5f112"
+}

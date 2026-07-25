@@ -182,5 +182,9 @@ poetry.lock
 !.env.template 
 
 
-app/personal_code 
+app/personal_code  
+
+.scratch/schema-context-selection-runs 
+
+
 

@@ -1,0 +1,320 @@
+{
+  "aliases": [],
+  "catalog_digest": "sha256:cfba1f9b099fdd453e806b8c8eeccfa77435b778a6bdaa7e619b268d5dc89a11",
+  "description": null,
+  "directives": [
+    {
+      "arguments": {},
+      "name": "node"
+    },
+    {
+      "arguments": {
+        "indexes": [
+          {
+            "fields": [
+              "name",
+              "description",
+              "searchText"
+            ],
+            "indexName": "TechnologyPlatformSearch",
+            "queryName": "searchTechnologyPlatforms"
+          }
+        ]
+      },
+      "name": "fulltext"
+    }
+  ],
+  "fields": [
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {},
+          "name": "id"
+        }
+      ],
+      "list": false,
+      "name": "id",
+      "named_type": "ID",
+      "nullable": false,
+      "type": "ID!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "name",
+      "named_type": "String",
+      "nullable": false,
+      "type": "String!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "description",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "mongoResearchRunId",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "operations": [
+              "CREATE"
+            ]
+          },
+          "name": "timestamp"
+        }
+      ],
+      "list": false,
+      "name": "createdAt",
+      "named_type": "DateTime",
+      "nullable": false,
+      "type": "DateTime!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "operations": [
+              "CREATE",
+              "UPDATE"
+            ]
+          },
+          "name": "timestamp"
+        }
+      ],
+      "list": false,
+      "name": "updatedAt",
+      "named_type": "DateTime",
+      "nullable": false,
+      "type": "DateTime!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "searchText",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": true,
+      "name": "searchFields",
+      "named_type": "String",
+      "nullable": true,
+      "type": "[String!]"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "embeddingModel",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "embeddingDimensions",
+      "named_type": "Int",
+      "nullable": true,
+      "type": "Int"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "platformClass",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": true,
+      "name": "searchEmbedding",
+      "named_type": "Float",
+      "nullable": true,
+      "type": "[Float!]"
+    }
+  ],
+  "identity_candidates": [
+    "id"
+  ],
+  "incoming_relationships": [
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "DEVELOPS_PLATFORM"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "developsPlatforms",
+      "field_type": "[TechnologyPlatform!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "DEVELOPS_PLATFORM",
+      "source": "Organization",
+      "target": "TechnologyPlatform"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "UsageMetadata",
+            "type": "IMPLEMENTS"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "implementsPlatforms",
+      "field_type": "[TechnologyPlatform!]!",
+      "properties_type": "UsageMetadata",
+      "relationship_type": "IMPLEMENTS",
+      "source": "Product",
+      "target": "TechnologyPlatform"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "UsageMetadata",
+            "type": "IMPLEMENTS_PLATFORM"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "implementsPlatforms",
+      "field_type": "[TechnologyPlatform!]!",
+      "properties_type": "UsageMetadata",
+      "relationship_type": "IMPLEMENTS_PLATFORM",
+      "source": "Device",
+      "target": "TechnologyPlatform"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "MeasurementMetadata",
+            "type": "RUNS_ON_PLATFORM"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "runsOnPlatforms",
+      "field_type": "[TechnologyPlatform!]!",
+      "properties_type": "MeasurementMetadata",
+      "relationship_type": "RUNS_ON_PLATFORM",
+      "source": "MeasurementMethod",
+      "target": "TechnologyPlatform"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "MeasurementMetadata",
+            "type": "USES_PLATFORM"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "usesPlatforms",
+      "field_type": "[TechnologyPlatform!]!",
+      "properties_type": "MeasurementMetadata",
+      "relationship_type": "USES_PLATFORM",
+      "source": "LabTest",
+      "target": "TechnologyPlatform"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "UsageMetadata",
+            "type": "USES_PLATFORM"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "usesPlatforms",
+      "field_type": "[TechnologyPlatform!]!",
+      "properties_type": "UsageMetadata",
+      "relationship_type": "USES_PLATFORM",
+      "source": "ManufacturingStep",
+      "target": "TechnologyPlatform"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "UsageMetadata",
+            "type": "USES_PLATFORM"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "usesPlatforms",
+      "field_type": "[TechnologyPlatform!]!",
+      "properties_type": "UsageMetadata",
+      "relationship_type": "USES_PLATFORM",
+      "source": "Organization",
+      "target": "TechnologyPlatform"
+    }
+  ],
+  "interfaces": [
+    "Entity",
+    "SearchIndexable"
+  ],
+  "name": "TechnologyPlatform",
+  "outgoing_relationships": [],
+  "relationship_properties": false,
+  "sdl": "type TechnologyPlatform implements Entity & SearchIndexable @node @fulltext(indexes: [{indexName: \"TechnologyPlatformSearch\", fields: [\"name\", \"description\", \"searchText\"], queryName: \"searchTechnologyPlatforms\"}]) {\n  id: ID! @id\n  name: String!\n  description: String\n  mongoResearchRunId: String\n  createdAt: DateTime! @timestamp(operations: [CREATE])\n  updatedAt: DateTime! @timestamp(operations: [CREATE, UPDATE])\n  searchText: String\n  searchFields: [String!]\n  embeddingModel: String\n  embeddingDimensions: Int\n  platformClass: String\n  searchEmbedding: [Float!]\n}",
+  "search_candidates": [
+    "createdAt",
+    "description",
+    "embeddingDimensions",
+    "embeddingModel",
+    "id",
+    "mongoResearchRunId",
+    "name",
+    "platformClass",
+    "searchText",
+    "updatedAt"
+  ],
+  "source_schema_digest": "sha256:86b5e0b5d11d203bd75b69b4507b0aad97d5df2495d3897ca64272068ea5f112"
+}

@@ -1,0 +1,935 @@
+{
+  "aliases": [],
+  "catalog_digest": "sha256:cfba1f9b099fdd453e806b8c8eeccfa77435b778a6bdaa7e619b268d5dc89a11",
+  "description": null,
+  "directives": [
+    {
+      "arguments": {},
+      "name": "node"
+    },
+    {
+      "arguments": {
+        "indexes": [
+          {
+            "fields": [
+              "name",
+              "description",
+              "searchText",
+              "productType",
+              "productClass",
+              "primaryRegulatoryIdentifier",
+              "regulatoryAuthorizationId"
+            ],
+            "indexName": "ProductSearch",
+            "queryName": "searchProducts"
+          }
+        ]
+      },
+      "name": "fulltext"
+    },
+    {
+      "arguments": {
+        "indexes": [
+          {
+            "embeddingProperty": "searchEmbedding",
+            "indexName": "ProductSearchEmbedding",
+            "provider": "OPEN_AI",
+            "queryName": "searchProductsBySemanticText"
+          }
+        ]
+      },
+      "name": "vector"
+    }
+  ],
+  "fields": [
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {},
+          "name": "id"
+        }
+      ],
+      "list": false,
+      "name": "id",
+      "named_type": "ID",
+      "nullable": false,
+      "type": "ID!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "name",
+      "named_type": "String",
+      "nullable": false,
+      "type": "String!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "description",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "mongoResearchRunId",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "operations": [
+              "CREATE"
+            ]
+          },
+          "name": "timestamp"
+        }
+      ],
+      "list": false,
+      "name": "createdAt",
+      "named_type": "DateTime",
+      "nullable": false,
+      "type": "DateTime!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "operations": [
+              "CREATE",
+              "UPDATE"
+            ]
+          },
+          "name": "timestamp"
+        }
+      ],
+      "list": false,
+      "name": "updatedAt",
+      "named_type": "DateTime",
+      "nullable": false,
+      "type": "DateTime!"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "searchText",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": true,
+      "name": "searchFields",
+      "named_type": "String",
+      "nullable": true,
+      "type": "[String!]"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "embeddingModel",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "embeddingDimensions",
+      "named_type": "Int",
+      "nullable": true,
+      "type": "Int"
+    },
+    {
+      "description": "Stable identity-level or canonical product identifier.\nKeep only if truly stable.",
+      "directives": [],
+      "list": false,
+      "name": "primaryRegulatoryIdentifier",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": "Current materialized product facts.",
+      "directives": [],
+      "list": false,
+      "name": "productType",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "applicationContext",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": true,
+      "name": "categories",
+      "named_type": "String",
+      "nullable": true,
+      "type": "[String!]"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "launchYear",
+      "named_type": "Int",
+      "nullable": true,
+      "type": "Int"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "targetCustomer",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "deliveryModel",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "status",
+      "named_type": "ProductStatus",
+      "nullable": true,
+      "type": "ProductStatus"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "approvedYear",
+      "named_type": "Int",
+      "nullable": true,
+      "type": "Int"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "productClass",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "formulationSummary",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "indicationSummary",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "modalitySummary",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": null,
+      "directives": [],
+      "list": false,
+      "name": "regulatoryAuthorizationId",
+      "named_type": "String",
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "description": "Timestamp for the current materialized product record.",
+      "directives": [],
+      "list": false,
+      "name": "currentAsOf",
+      "named_type": "DateTime",
+      "nullable": true,
+      "type": "DateTime"
+    },
+    {
+      "description": "Canonical semantic search embedding for the product current record.",
+      "directives": [],
+      "list": true,
+      "name": "searchEmbedding",
+      "named_type": "Float",
+      "nullable": true,
+      "type": "[Float!]"
+    },
+    {
+      "description": "Optional historical product snapshots.",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "type": "HAS_SNAPSHOT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "snapshots",
+      "named_type": "ProductSnapshot",
+      "nullable": false,
+      "type": "[ProductSnapshot!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "IN",
+            "properties": "RoleMetadata",
+            "type": "OFFERS"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "offeredBy",
+      "named_type": "Organization",
+      "nullable": false,
+      "type": "[Organization!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "IN",
+            "properties": "RoleMetadata",
+            "type": "MANUFACTURES"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "manufacturedBy",
+      "named_type": "Organization",
+      "nullable": false,
+      "type": "[Organization!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "IN",
+            "properties": "RoleMetadata",
+            "type": "CONTRACTS_MANUFACTURING"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "contractManufacturedBy",
+      "named_type": "Organization",
+      "nullable": false,
+      "type": "[Organization!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "IN",
+            "properties": "RoleMetadata",
+            "type": "LISTS_PRODUCT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "listedIn",
+      "named_type": "Listing",
+      "nullable": false,
+      "type": "[Listing!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "DoseMetadata",
+            "type": "CONTAINS_COMPOUND_FORM"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "containsCompoundForms",
+      "named_type": "CompoundForm",
+      "nullable": false,
+      "type": "[CompoundForm!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "UsageMetadata",
+            "type": "IMPLEMENTS"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "implementsPlatforms",
+      "named_type": "TechnologyPlatform",
+      "nullable": false,
+      "type": "[TechnologyPlatform!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "CLASSIFIED_AS"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "classifiedAs",
+      "named_type": "ProductClassification",
+      "nullable": false,
+      "type": "[ProductClassification!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "IMPLEMENTS_PANEL"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "implementsPanels",
+      "named_type": "PanelDefinition",
+      "nullable": false,
+      "type": "[PanelDefinition!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "DELIVERS_LABTEST"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "deliversLabTests",
+      "named_type": "LabTest",
+      "nullable": false,
+      "type": "[LabTest!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "FOLLOWS_PATHWAY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "followsRegulatoryPathways",
+      "named_type": "RegulatoryPathway",
+      "nullable": false,
+      "type": "[RegulatoryPathway!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "HAS_REGULATORY_STATUS"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "hasRegulatoryStatuses",
+      "named_type": "RegulatoryStatus",
+      "nullable": false,
+      "type": "[RegulatoryStatus!]!"
+    },
+    {
+      "description": null,
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "SafetyMetadata",
+            "type": "HAS_SAFETY_SIGNAL"
+          },
+          "name": "relationship"
+        }
+      ],
+      "list": true,
+      "name": "hasSafetySignals",
+      "named_type": "SafetySignal",
+      "nullable": false,
+      "type": "[SafetySignal!]!"
+    }
+  ],
+  "identity_candidates": [
+    "id"
+  ],
+  "incoming_relationships": [
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "ExtractionMetadata",
+            "type": "ABOUT_PRODUCT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "aboutProduct",
+      "field_type": "[Product!]!",
+      "properties_type": "ExtractionMetadata",
+      "relationship_type": "ABOUT_PRODUCT",
+      "source": "ProductLabelRegion",
+      "target": "Product"
+    },
+    {
+      "direction": "IN",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "IN",
+            "properties": "RoleMetadata",
+            "type": "CONTRACTS_MANUFACTURING"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "contractManufacturedBy",
+      "field_type": "[Organization!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "CONTRACTS_MANUFACTURING",
+      "source": "Product",
+      "target": "Organization"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "HOSTS_PRODUCT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "hostsProducts",
+      "field_type": "[Product!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "HOSTS_PRODUCT",
+      "source": "PhysicalLocation",
+      "target": "Product"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "TemporalMetadata",
+            "type": "LISTS_PRODUCT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "listsProducts",
+      "field_type": "[Product!]!",
+      "properties_type": "TemporalMetadata",
+      "relationship_type": "LISTS_PRODUCT",
+      "source": "Listing",
+      "target": "Product"
+    },
+    {
+      "direction": "IN",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "IN",
+            "properties": "RoleMetadata",
+            "type": "LISTS_PRODUCT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "listedIn",
+      "field_type": "[Listing!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "LISTS_PRODUCT",
+      "source": "Product",
+      "target": "Listing"
+    },
+    {
+      "direction": "IN",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "IN",
+            "properties": "RoleMetadata",
+            "type": "MANUFACTURES"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "manufacturedBy",
+      "field_type": "[Organization!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "MANUFACTURES",
+      "source": "Product",
+      "target": "Organization"
+    },
+    {
+      "direction": "IN",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "IN",
+            "properties": "RoleMetadata",
+            "type": "OFFERS"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "offeredBy",
+      "field_type": "[Organization!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "OFFERS",
+      "source": "Product",
+      "target": "Organization"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "DoseMetadata",
+            "type": "PART_OF"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "partOfProducts",
+      "field_type": "[Product!]!",
+      "properties_type": "DoseMetadata",
+      "relationship_type": "PART_OF",
+      "source": "Material",
+      "target": "Product"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "SPONSORS_PRODUCT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "sponsorsProducts",
+      "field_type": "[Product!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "SPONSORS_PRODUCT",
+      "source": "Episode",
+      "target": "Product"
+    }
+  ],
+  "interfaces": [
+    "Entity",
+    "SearchIndexable"
+  ],
+  "name": "Product",
+  "outgoing_relationships": [
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "CLASSIFIED_AS"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "classifiedAs",
+      "field_type": "[ProductClassification!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "CLASSIFIED_AS",
+      "source": "Product",
+      "target": "ProductClassification"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "DoseMetadata",
+            "type": "CONTAINS_COMPOUND_FORM"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "containsCompoundForms",
+      "field_type": "[CompoundForm!]!",
+      "properties_type": "DoseMetadata",
+      "relationship_type": "CONTAINS_COMPOUND_FORM",
+      "source": "Product",
+      "target": "CompoundForm"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "DELIVERS_LABTEST"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "deliversLabTests",
+      "field_type": "[LabTest!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "DELIVERS_LABTEST",
+      "source": "Product",
+      "target": "LabTest"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "FOLLOWS_PATHWAY"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "followsRegulatoryPathways",
+      "field_type": "[RegulatoryPathway!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "FOLLOWS_PATHWAY",
+      "source": "Product",
+      "target": "RegulatoryPathway"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "HAS_REGULATORY_STATUS"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "hasRegulatoryStatuses",
+      "field_type": "[RegulatoryStatus!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "HAS_REGULATORY_STATUS",
+      "source": "Product",
+      "target": "RegulatoryStatus"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "SafetyMetadata",
+            "type": "HAS_SAFETY_SIGNAL"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "hasSafetySignals",
+      "field_type": "[SafetySignal!]!",
+      "properties_type": "SafetyMetadata",
+      "relationship_type": "HAS_SAFETY_SIGNAL",
+      "source": "Product",
+      "target": "SafetySignal"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "type": "HAS_SNAPSHOT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "snapshots",
+      "field_type": "[ProductSnapshot!]!",
+      "properties_type": null,
+      "relationship_type": "HAS_SNAPSHOT",
+      "source": "Product",
+      "target": "ProductSnapshot"
+    },
+    {
+      "direction": "IN",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "IN",
+            "type": "HAS_SNAPSHOT"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "product",
+      "field_type": "[Product!]!",
+      "properties_type": null,
+      "relationship_type": "HAS_SNAPSHOT",
+      "source": "ProductSnapshot",
+      "target": "Product"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "UsageMetadata",
+            "type": "IMPLEMENTS"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "implementsPlatforms",
+      "field_type": "[TechnologyPlatform!]!",
+      "properties_type": "UsageMetadata",
+      "relationship_type": "IMPLEMENTS",
+      "source": "Product",
+      "target": "TechnologyPlatform"
+    },
+    {
+      "direction": "OUT",
+      "directives": [
+        {
+          "arguments": {
+            "direction": "OUT",
+            "properties": "RoleMetadata",
+            "type": "IMPLEMENTS_PANEL"
+          },
+          "name": "relationship"
+        }
+      ],
+      "field": "implementsPanels",
+      "field_type": "[PanelDefinition!]!",
+      "properties_type": "RoleMetadata",
+      "relationship_type": "IMPLEMENTS_PANEL",
+      "source": "Product",
+      "target": "PanelDefinition"
+    }
+  ],
+  "relationship_properties": false,
+  "sdl": "type Product implements Entity & SearchIndexable @node @fulltext(indexes: [{indexName: \"ProductSearch\", fields: [\"name\", \"description\", \"searchText\", \"productType\", \"productClass\", \"primaryRegulatoryIdentifier\", \"regulatoryAuthorizationId\"], queryName: \"searchProducts\"}]) @vector(indexes: [{indexName: \"ProductSearchEmbedding\", provider: OPEN_AI, embeddingProperty: \"searchEmbedding\", queryName: \"searchProductsBySemanticText\"}]) {\n  id: ID! @id\n  name: String!\n  description: String\n  mongoResearchRunId: String\n  createdAt: DateTime! @timestamp(operations: [CREATE])\n  updatedAt: DateTime! @timestamp(operations: [CREATE, UPDATE])\n  searchText: String\n  searchFields: [String!]\n  embeddingModel: String\n  embeddingDimensions: Int\n  \"\"\"\n  Stable identity-level or canonical product identifier.\n  Keep only if truly stable.\n  \"\"\"\n  primaryRegulatoryIdentifier: String\n  \"\"\"Current materialized product facts.\"\"\"\n  productType: String\n  applicationContext: String\n  categories: [String!]\n  launchYear: Int\n  targetCustomer: String\n  deliveryModel: String\n  status: ProductStatus\n  approvedYear: Int\n  productClass: String\n  formulationSummary: String\n  indicationSummary: String\n  modalitySummary: String\n  regulatoryAuthorizationId: String\n  \"\"\"Timestamp for the current materialized product record.\"\"\"\n  currentAsOf: DateTime\n  \"\"\"Canonical semantic search embedding for the product current record.\"\"\"\n  searchEmbedding: [Float!]\n  \"\"\"Optional historical product snapshots.\"\"\"\n  snapshots: [ProductSnapshot!]! @relationship(type: \"HAS_SNAPSHOT\", direction: OUT)\n  offeredBy: [Organization!]! @relationship(type: \"OFFERS\", direction: IN, properties: \"RoleMetadata\")\n  manufacturedBy: [Organization!]! @relationship(type: \"MANUFACTURES\", direction: IN, properties: \"RoleMetadata\")\n  contractManufacturedBy: [Organization!]! @relationship(type: \"CONTRACTS_MANUFACTURING\", direction: IN, properties: \"RoleMetadata\")\n  listedIn: [Listing!]! @relationship(type: \"LISTS_PRODUCT\", direction: IN, properties: \"RoleMetadata\")\n  containsCompoundForms: [CompoundForm!]! @relationship(type: \"CONTAINS_COMPOUND_FORM\", direction: OUT, properties: \"DoseMetadata\")\n  implementsPlatforms: [TechnologyPlatform!]! @relationship(type: \"IMPLEMENTS\", direction: OUT, properties: \"UsageMetadata\")\n  classifiedAs: [ProductClassification!]! @relationship(type: \"CLASSIFIED_AS\", direction: OUT, properties: \"RoleMetadata\")\n  implementsPanels: [PanelDefinition!]! @relationship(type: \"IMPLEMENTS_PANEL\", direction: OUT, properties: \"RoleMetadata\")\n  deliversLabTests: [LabTest!]! @relationship(type: \"DELIVERS_LABTEST\", direction: OUT, properties: \"RoleMetadata\")\n  followsRegulatoryPathways: [RegulatoryPathway!]! @relationship(type: \"FOLLOWS_PATHWAY\", direction: OUT, properties: \"RoleMetadata\")\n  hasRegulatoryStatuses: [RegulatoryStatus!]! @relationship(type: \"HAS_REGULATORY_STATUS\", direction: OUT, properties: \"RoleMetadata\")\n  hasSafetySignals: [SafetySignal!]! @relationship(type: \"HAS_SAFETY_SIGNAL\", direction: OUT, properties: \"SafetyMetadata\")\n}",
+  "search_candidates": [
+    "applicationContext",
+    "approvedYear",
+    "createdAt",
+    "currentAsOf",
+    "deliveryModel",
+    "description",
+    "embeddingDimensions",
+    "embeddingModel",
+    "formulationSummary",
+    "id",
+    "indicationSummary",
+    "launchYear",
+    "modalitySummary",
+    "mongoResearchRunId",
+    "name",
+    "primaryRegulatoryIdentifier",
+    "productClass",
+    "productType",
+    "regulatoryAuthorizationId",
+    "searchText",
+    "targetCustomer",
+    "updatedAt"
+  ],
+  "source_schema_digest": "sha256:86b5e0b5d11d203bd75b69b4507b0aad97d5df2495d3897ca64272068ea5f112"
+}
