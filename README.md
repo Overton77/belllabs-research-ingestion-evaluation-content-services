@@ -19,6 +19,9 @@ Current boundaries:
 - The governed operation tracer invokes the OpenAI Agents SDK through a bound Temporal
   activity and an isolated Docker sandbox. The old direct workflow probe is diagnostic only
   and cannot produce control-plane domain state.
+- The Issue 11 schema grounding pipeline is application-owned, content-addressed, and
+  default-deny at the graph boundary. See
+  [docs/SCHEMA_GROUNDING_PIPELINE.md](docs/SCHEMA_GROUNDING_PIPELINE.md).
 
 ## Local setup
 

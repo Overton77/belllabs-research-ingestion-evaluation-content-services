@@ -23,21 +23,42 @@ from app.application.run_control import (
     F1RunConfigurationVerifier,
     RunControlService,
 )
+from app.application.schema_catalog_build import SchemaCatalogBuildService
+from app.application.schema_context_derivation import SchemaContextDerivationService
+from app.application.schema_grounding_admission import (
+    register_schema_grounding_admission_policies,
+)
+from app.application.schema_grounding_repository import (
+    BeanieSchemaGroundingRecordRepository,
+)
+from app.application.schema_workspace_binding import SchemaGraphAdmissionService
+from app.application.supporting_graph_reconciliation import (
+    SupportingGraphReconciliationWorkflow,
+)
 from app.config import get_settings
 from app.domain.control_plane.extensions import ExtensionRegistry
 from app.domain.run_control.contracts import ActorContext
+from app.domain.schema_grounding.definitions import register_schema_grounding_extensions
 from app.integrations.control_plane_payloads import (
     S3PayloadStore,
     UnavailablePayloadStore,
 )
 from app.integrations.mongodb import create_mongodb
 from app.integrations.postgres import create_application_postgres_pool
+from app.integrations.schema_catalog_payloads import schema_catalog_payload_store
+from app.integrations.schema_neo4j_executor import (
+    Neo4jBoundedReadExecutorFactory,
+)
 from app.integrations.temporal import create_temporal_client
 from app.temporal.linked_run_activities import (
     DeferredLinkedResultAssessor,
     LinkedRunActivities,
     LinkedRunDecisionGateway,
     create_linked_run_worker,
+)
+from app.temporal.schema_grounding_activities import (
+    SchemaGroundingActivities,
+    create_schema_grounding_activity_worker,
 )
 from app.temporal.workflows import SandboxAgentProbeWorkflow
 
@@ -61,21 +82,26 @@ async def main() -> None:
     mongo_client, _database = await create_mongodb(settings)
     postgres_pool = await create_application_postgres_pool(settings)
     try:
-        payload_store = (
+        control_plane_payload_store = (
             S3PayloadStore(settings, settings.s3_bucket)
             if settings.s3_bucket
             else UnavailablePayloadStore()
         )
+        catalog_payload_store = schema_catalog_payload_store(settings)
+        extensions = ExtensionRegistry()
+        register_schema_grounding_extensions(extensions)
         control_plane = ControlPlaneService(
             BeanieDefinitionRepository(),
-            ExtensionRegistry(),
-            payload_store,
+            extensions,
+            control_plane_payload_store,
             externalize_above_bytes=(256_000 if settings.s3_bucket else 15_000_000),
         )
+        policies = AdmissionPolicyRegistry()
+        register_schema_grounding_admission_policies(policies)
         run_control = RunControlService(
             PostgresRunControlRepository(postgres_pool),
             F1RunConfigurationVerifier(control_plane),
-            AdmissionPolicyRegistry(),
+            policies,
         )
         linked_service = LinkedRunService(
             control_plane,
@@ -97,7 +123,30 @@ async def main() -> None:
             task_queue=f"{settings.temporal_task_queue}-linked-runs",
             activities=LinkedRunActivities(linked_gateway),
         )
-        await asyncio.gather(probe_worker.run(), linked_worker.run())
+        schema_records = BeanieSchemaGroundingRecordRepository()
+        schema_admission = SchemaGraphAdmissionService(schema_records)
+        schema_activities = SchemaGroundingActivities(
+            catalog_builds=SchemaCatalogBuildService(
+                schema_records,
+                catalog_payload_store,
+            ),
+            derivations=SchemaContextDerivationService(schema_records),
+            reconciliations=SupportingGraphReconciliationWorkflow(
+                admission=schema_admission,
+                executor_factory=Neo4jBoundedReadExecutorFactory(settings),
+                records=schema_records,
+            ),
+        )
+        schema_worker = create_schema_grounding_activity_worker(
+            client,
+            task_queue=f"{settings.temporal_task_queue}-schema-grounding",
+            activities=schema_activities,
+        )
+        await asyncio.gather(
+            probe_worker.run(),
+            linked_worker.run(),
+            schema_worker.run(),
+        )
     finally:
         await postgres_pool.close()
         await mongo_client.close()

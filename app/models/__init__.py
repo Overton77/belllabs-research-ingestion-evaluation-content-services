@@ -18,6 +18,7 @@ from app.models.sandbox_snapshot import (
     SandboxSnapshotCloneDocument,
     SandboxSnapshotDocument,
 )
+from app.models.schema_grounding import SchemaGroundingRecordDocument
 from app.models.workspace_materialization import (
     WorkspaceMaterializationManifestDocument,
     WorkspaceSlotReservationDocument,
@@ -38,6 +39,7 @@ __all__ = [
     "SandboxSnapshotClaimDocument",
     "SandboxSnapshotCloneDocument",
     "SandboxSnapshotDocument",
+    "SchemaGroundingRecordDocument",
     "WorkspaceMaterializationManifestDocument",
     "WorkspaceSlotReservationDocument",
 ]

@@ -5,11 +5,10 @@ import os
 import re
 import shutil
 import uuid
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, cast
 
 import docker
 from agents import AgentOutputSchema, ModelSettings, RunConfig, Runner, ToolExecutionConfig
@@ -20,6 +19,7 @@ from docker.types import Mount as DockerMount
 from openai.types.shared.reasoning import Reasoning
 from pydantic import Field, create_model
 
+from app.application.schema_context_selection import AgentRunOutput
 from app.application.schema_workspace import workspace_profile_paths
 from app.domain.schema_context.canonicalization import sha256_digest, write_json
 from app.domain.schema_context.contracts import (
@@ -36,24 +36,6 @@ from app.experiments.schema_context_selection.prompts import (
     SELECTOR_INSTRUCTIONS,
 )
 from app.experiments.schema_context_selection.workspace import sandbox_manifest
-
-
-@dataclass(frozen=True)
-class AgentRunOutput:
-    output: Any
-    usage: dict[str, int]
-
-
-class SelectionAgentPort(Protocol):
-    async def select(
-        self, run_root: Path, *, revision_feedback: str | None = None
-    ) -> AgentRunOutput: ...
-
-
-class ReviewAgentPort(Protocol):
-    async def review(
-        self, run_root: Path, *, retry_reason: str | None = None
-    ) -> AgentRunOutput: ...
 
 
 def _usage(result: Any) -> dict[str, int]:

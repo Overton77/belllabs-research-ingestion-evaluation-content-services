@@ -4,12 +4,15 @@ from pathlib import Path
 
 import pytest
 
-from app.domain.schema_context.contracts import SchemaSelectionReview
-from app.domain.schema_context.validation import accept_selection, validate_selection
-from app.experiments.schema_context_selection.agents import AgentRunOutput
-from app.experiments.schema_context_selection.selection_workflow import (
+from app.application.schema_context_selection import (
+    AgentRunOutput,
     SchemaContextSelectionWorkflow,
 )
+from app.application.schema_grounding_repository import (
+    InMemorySchemaGroundingRecordRepository,
+)
+from app.domain.schema_context.contracts import SchemaSelectionReview
+from app.domain.schema_context.validation import accept_selection, validate_selection
 from tests.schema_context_helpers import catalog, request, selection
 
 
@@ -107,6 +110,44 @@ async def test_reviewer_binding_mismatch_is_retried_without_rerunning_selector(
     assert "binding mismatch" in reviewer.retry_reasons[1]
     assert (tmp_path / "selection" / "review-binding-failure-1.json").is_file()
     assert outcome.accepted is not None
+
+
+@pytest.mark.asyncio
+async def test_canonical_selection_workflow_persists_immutable_revision_records(
+    tmp_path: Path,
+) -> None:
+    value = catalog()
+    draft = selection(value)
+    (tmp_path / "selection").mkdir()
+    records = InMemorySchemaGroundingRecordRepository()
+
+    class Selector:
+        async def select(self, _root: Path, *, revision_feedback=None):  # type: ignore[no-untyped-def]
+            return AgentRunOutput(draft, {"total_tokens": 1})
+
+    class Reviewer:
+        async def review(  # type: ignore[no-untyped-def]
+            self, _root: Path, *, retry_reason=None
+        ):
+            return AgentRunOutput(_review(draft.selection_id), {"total_tokens": 1})
+
+    outcome = await SchemaContextSelectionWorkflow(
+        selector=Selector(),
+        reviewer=Reviewer(),
+        catalog=value,
+        records=records,
+        request_scope="tenant-1",
+        run_id="selection-run-1",
+    ).run(request(value), tmp_path)
+
+    persisted = await records.list_for_run("tenant-1", "selection-run-1")
+    assert outcome.accepted is not None
+    assert {record.record_type for record in persisted} == {
+        "selection_draft",
+        "selection_validation",
+        "selection_review",
+        "accepted_selection",
+    }
 
 
 def _review(selection_id: str) -> SchemaSelectionReview:

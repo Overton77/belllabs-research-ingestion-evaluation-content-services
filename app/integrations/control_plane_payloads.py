@@ -14,6 +14,7 @@ class ContentAddress:
     uri: str
     digest: str
     size: int
+    version_id: str | None = None
 
 
 def _bytes_digest(payload: bytes) -> str:
@@ -68,7 +69,7 @@ class S3PayloadStore:
         digest = _bytes_digest(payload)
         key = f"{self._prefix}/{digest.removeprefix('sha256:')}.json"
         async with s3_client(self._settings) as client:
-            await client.put_object(
+            response = await client.put_object(
                 Bucket=self._bucket,
                 Key=key,
                 Body=payload,
@@ -79,6 +80,7 @@ class S3PayloadStore:
             uri=f"s3://{self._bucket}/{key}",
             digest=digest,
             size=len(payload),
+            version_id=response.get("VersionId"),
         )
 
     async def retrieve(self, address: ContentAddress) -> bytes:
@@ -87,7 +89,10 @@ class S3PayloadStore:
             raise PayloadIntegrityError("payload address belongs to a different S3 bucket")
         key = address.uri.removeprefix(prefix)
         async with s3_client(self._settings) as client:
-            response = await client.get_object(Bucket=self._bucket, Key=key)
+            arguments = {"Bucket": self._bucket, "Key": key}
+            if address.version_id is not None:
+                arguments["VersionId"] = address.version_id
+            response = await client.get_object(**arguments)
             async with response["Body"] as stream:
                 payload = await stream.read()
         _verify_payload(payload, address)

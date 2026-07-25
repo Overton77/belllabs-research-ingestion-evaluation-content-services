@@ -22,10 +22,12 @@ from app.api.run_control import (
     initialize_run_control_resources,
 )
 from app.api.run_control import router as run_control_router
+from app.api.schema_grounding import router as schema_grounding_router
 from app.config import get_settings
 from app.domain.control_plane.errors import ControlPlaneError
 from app.domain.operation_execution.contracts import RuntimeApprovalDecision
 from app.domain.run_control.errors import RunControlError
+from app.domain.schema_grounding.errors import SchemaGroundingError
 from app.integrations.openai_runtime_factory import DurableOpenAIAgentsRuntimeFactory
 from app.integrations.supabase import create_supabase
 from app.middleware.body_limit import BodySizeLimitMiddleware
@@ -142,6 +144,7 @@ api.add_middleware(
 )
 api.include_router(control_plane_router)
 api.include_router(run_control_router)
+api.include_router(schema_grounding_router)
 
 
 @api.exception_handler(ControlPlaneError)
@@ -158,6 +161,17 @@ async def control_plane_error_handler(_request: Request, error: ControlPlaneErro
 
 @api.exception_handler(RunControlError)
 async def run_control_error_handler(_request: Request, error: RunControlError) -> JSONResponse:
+    return JSONResponse(
+        status_code=error.status_code,
+        content={"code": error.code, "message": error.message},
+    )
+
+
+@api.exception_handler(SchemaGroundingError)
+async def schema_grounding_error_handler(
+    _request: Request,
+    error: SchemaGroundingError,
+) -> JSONResponse:
     return JSONResponse(
         status_code=error.status_code,
         content={"code": error.code, "message": error.message},
