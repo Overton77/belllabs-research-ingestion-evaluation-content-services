@@ -7,13 +7,16 @@ import pytest
 from app.application.control_plane import ControlPlaneService
 from app.application.control_plane_repository import InMemoryDefinitionRepository
 from app.domain.control_plane.contracts import (
+    AliasRef,
     CompilationContext,
     CompileInvocation,
     DefinitionKind,
     DefinitionSelector,
     EnvironmentAvailability,
+    MoveAliasRequest,
     PublishRequest,
     RunInputManifestRef,
+    WorkflowImplementationBindingDefinition,
     WorkflowTypeDefinition,
 )
 from app.domain.control_plane.extensions import ExtensionRegistry
@@ -33,16 +36,22 @@ async def test_schema_grounding_definitions_publish_and_compile_exact_selection_
     register_schema_grounding_extensions(extensions)
     service = ControlPlaneService(repository, extensions, InMemoryPayloadStore())
     published = {}
+    implementation_records = []
+    revisions: dict[tuple[DefinitionKind, str], int] = {}
     for definition in schema_grounding_definitions():
+        key = (definition.kind, definition.logical_id)
         record = await service.publish(
             PublishRequest(
                 definition=definition,
                 actor_id="schema-definition-publisher",
                 published_at=NOW,
-                expected_head_revision=0,
+                expected_head_revision=revisions.get(key, 0),
             )
         )
+        revisions[key] = record.ref.revision
         published[definition.logical_id] = record
+        if isinstance(definition, WorkflowImplementationBindingDefinition):
+            implementation_records.append(record)
 
     selection = published["schema-context-selection"].definition
     reconciliation = published["supporting-graph-reconciliation"].definition
@@ -181,3 +190,124 @@ async def test_schema_grounding_definitions_publish_and_compile_exact_selection_
             0
         ].payload["output_schema_refs"]
     )
+
+    selection_implementation = next(
+        record
+        for record in implementation_records
+        if record.definition.workflow_type_ref
+        == published["schema-context-selection"].ref
+    )
+    reconciliation_implementations = [
+        record
+        for record in implementation_records
+        if record.definition.workflow_type_ref
+        == published["supporting-graph-reconciliation"].ref
+    ]
+    staged_reconciliation = next(
+        record
+        for record in reconciliation_implementations
+        if record.definition.blueprint_ref
+        == published["supporting-graph-reconciliation-v1"].ref
+    )
+    goal_reconciliation = next(
+        record
+        for record in reconciliation_implementations
+        if record.definition.blueprint_ref
+        == published["supporting-graph-reconciliation-goal-directed-v1"].ref
+    )
+    for logical_id, alias, target in (
+        ("schema-context-selection.implementation", "default", selection_implementation),
+        (
+            "supporting-graph-reconciliation.implementation",
+            "default",
+            staged_reconciliation,
+        ),
+        (
+            "supporting-graph-reconciliation.implementation",
+            "goal-directed",
+            goal_reconciliation,
+        ),
+    ):
+        await service.move_alias(
+            MoveAliasRequest(
+                alias=AliasRef(
+                    kind=DefinitionKind.WORKFLOW_IMPLEMENTATION,
+                    logical_id=logical_id,
+                    alias=alias,
+                ),
+                target=target.ref,
+                actor_id="schema-definition-publisher",
+                moved_at=NOW,
+            )
+        )
+
+    default_erc = await service.compile(
+        CompileInvocation(
+            workflow_type=DefinitionSelector(
+                exact=published["supporting-graph-reconciliation"].ref
+            ),
+            input_manifest=RunInputManifestRef(
+                manifest_id="schema-reconciliation-default-input",
+                revision=1,
+                digest="sha256:" + "3" * 64,
+            ),
+            caller_authority=reconciliation.authority_ceiling,
+            environment=EnvironmentAvailability(
+                capabilities=reconciliation.authority_ceiling.capabilities,
+                runtime_bindings=frozenset(
+                    {
+                        "temporal-stagegraph+operation-execution+neo4j-bounded-read"
+                    }
+                ),
+            ),
+            context=CompilationContext(
+                compilation_id="schema-reconciliation-default",
+                compiled_at=NOW,
+                actor_id="operator-1",
+                authority_subject_id="operator-1",
+                authority_scope="tenant-1",
+            ),
+        )
+    )
+    assert default_erc.selected_blueprint.family == "StageGraph"
+    assert default_erc.source_refs[1] == staged_reconciliation.ref
+    assert default_erc.alias_evidence[0].alias_ref.alias == "default"
+
+    alternative_erc = await service.compile(
+        CompileInvocation(
+            workflow_type=DefinitionSelector(
+                exact=published["supporting-graph-reconciliation"].ref
+            ),
+            implementation=DefinitionSelector(
+                alias=AliasRef(
+                    kind=DefinitionKind.WORKFLOW_IMPLEMENTATION,
+                    logical_id="supporting-graph-reconciliation.implementation",
+                    alias="goal-directed",
+                )
+            ),
+            input_manifest=RunInputManifestRef(
+                manifest_id="schema-reconciliation-goal-input",
+                revision=1,
+                digest="sha256:" + "4" * 64,
+            ),
+            caller_authority=reconciliation.authority_ceiling,
+            environment=EnvironmentAvailability(
+                capabilities=reconciliation.authority_ceiling.capabilities,
+                runtime_bindings=frozenset(
+                    {
+                        "temporal-stagegraph+operation-execution+neo4j-bounded-read"
+                    }
+                ),
+            ),
+            context=CompilationContext(
+                compilation_id="schema-reconciliation-goal",
+                compiled_at=NOW,
+                actor_id="operator-1",
+                authority_subject_id="operator-1",
+                authority_scope="tenant-1",
+            ),
+        )
+    )
+    assert alternative_erc.selected_blueprint.family == "GoalDirected"
+    assert alternative_erc.source_refs[1] == goal_reconciliation.ref
+    assert alternative_erc.alias_evidence[0].alias_ref.alias == "goal-directed"

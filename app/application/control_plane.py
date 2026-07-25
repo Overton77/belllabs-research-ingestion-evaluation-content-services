@@ -17,6 +17,7 @@ from app.domain.control_plane.contracts import (
     CompileInvocation,
     ControlProfileDefinition,
     Definition,
+    DefinitionKind,
     DefinitionSelector,
     EffectiveRunConfiguration,
     EvaluationProfileDefinition,
@@ -32,6 +33,7 @@ from app.domain.control_plane.contracts import (
     SaveDraftRequest,
     StageGraphBlueprint,
     WorkflowConfigurationDefinition,
+    WorkflowImplementationBindingDefinition,
     WorkflowTypeDefinition,
     WorkspaceTemplateDefinition,
 )
@@ -114,53 +116,124 @@ class ControlPlaneService:
         return await self._repository.retire(request.ref, request.actor_id, request.retired_at)
 
     async def compile(self, invocation: CompileInvocation) -> EffectiveRunConfiguration:
-        refs: list[ExactDefinitionRef] = []
+        workflow_ref, workflow_alias = await self._resolve_selector(
+            invocation.workflow_type
+        )
         evidence: list[AliasBinding] = []
-        for selector in (
-            invocation.workflow_type,
+        if workflow_alias is not None:
+            evidence.append(workflow_alias)
+        workflow_record = await self._selectable(workflow_ref)
+        workflow_type = self._expect(
+            workflow_record.definition,
+            WorkflowTypeDefinition,
+        )
+
+        component_selectors = (
             invocation.blueprint,
             invocation.control_profile,
             invocation.runtime_profile,
             invocation.workspace_template,
             invocation.evaluation_profile,
-        ):
-            ref, alias = await self._resolve_selector(selector)
-            refs.append(ref)
+        )
+        implementation_ref: ExactDefinitionRef | None = None
+        implementation: WorkflowImplementationBindingDefinition | None = None
+        if all(selector is None for selector in component_selectors):
+            implementation_selector = invocation.implementation
+            if implementation_selector is None:
+                implementation_selector = DefinitionSelector(
+                    alias=AliasRef(
+                        kind=DefinitionKind.WORKFLOW_IMPLEMENTATION,
+                        logical_id=f"{workflow_type.logical_id}.implementation",
+                        alias="default",
+                    )
+                )
+            implementation_ref, alias = await self._resolve_selector(
+                implementation_selector
+            )
             if alias is not None:
                 evidence.append(alias)
-        if invocation.workflow_configuration is not None:
-            ref, alias = await self._resolve_selector(invocation.workflow_configuration)
-            refs.append(ref)
-            if alias is not None:
-                evidence.append(alias)
+            implementation_record = await self._selectable(implementation_ref)
+            implementation = self._expect(
+                implementation_record.definition,
+                WorkflowImplementationBindingDefinition,
+            )
+            refs = [
+                workflow_ref,
+                implementation_ref,
+                implementation.blueprint_ref,
+                implementation.control_profile_ref,
+                implementation.runtime_profile_ref,
+                implementation.workspace_template_ref,
+                implementation.evaluation_profile_ref,
+            ]
+            if implementation.workflow_configuration_ref is not None:
+                refs.append(implementation.workflow_configuration_ref)
+        else:
+            selectors = tuple(
+                selector for selector in component_selectors if selector is not None
+            )
+            refs = [workflow_ref]
+            for selector in selectors:
+                ref, alias = await self._resolve_selector(selector)
+                refs.append(ref)
+                if alias is not None:
+                    evidence.append(alias)
+            if invocation.workflow_configuration is not None:
+                ref, alias = await self._resolve_selector(
+                    invocation.workflow_configuration
+                )
+                refs.append(ref)
+                if alias is not None:
+                    evidence.append(alias)
+
         published = [await self._selectable(ref) for ref in refs]
-        blueprint = published[1].definition
+        offset = 2 if implementation is not None else 1
+        blueprint = published[offset].definition
         if not isinstance(blueprint, StageGraphBlueprint | GoalDirectedBlueprint):
             raise CompilationRejected(
                 f"expected workflow blueprint, got {type(blueprint).__name__}"
             )
         definitions = ResolvedDefinitions(
-            workflow_type=self._expect(published[0].definition, WorkflowTypeDefinition),
+            workflow_type=workflow_type,
+            implementation_binding=implementation,
             blueprint=blueprint,
-            control_profile=self._expect(published[2].definition, ControlProfileDefinition),
-            runtime_profile=self._expect(published[3].definition, RuntimeProfileDefinition),
-            workspace_template=self._expect(published[4].definition, WorkspaceTemplateDefinition),
-            evaluation_profile=self._expect(published[5].definition, EvaluationProfileDefinition),
+            control_profile=self._expect(
+                published[offset + 1].definition,
+                ControlProfileDefinition,
+            ),
+            runtime_profile=self._expect(
+                published[offset + 2].definition,
+                RuntimeProfileDefinition,
+            ),
+            workspace_template=self._expect(
+                published[offset + 3].definition,
+                WorkspaceTemplateDefinition,
+            ),
+            evaluation_profile=self._expect(
+                published[offset + 4].definition,
+                EvaluationProfileDefinition,
+            ),
             workflow_configuration=(
-                self._expect(published[6].definition, WorkflowConfigurationDefinition)
-                if len(published) == 7
+                self._expect(
+                    published[offset + 5].definition,
+                    WorkflowConfigurationDefinition,
+                )
+                if len(published) == offset + 6
                 else None
             ),
             published_records=tuple(published),
         )
         request = CompilationRequest(
-            workflow_type_ref=refs[0],
-            blueprint_ref=refs[1],
-            control_profile_ref=refs[2],
-            runtime_profile_ref=refs[3],
-            workspace_template_ref=refs[4],
-            evaluation_profile_ref=refs[5],
-            workflow_configuration_ref=refs[6] if len(refs) == 7 else None,
+            workflow_type_ref=workflow_ref,
+            implementation_ref=implementation_ref,
+            blueprint_ref=refs[offset],
+            control_profile_ref=refs[offset + 1],
+            runtime_profile_ref=refs[offset + 2],
+            workspace_template_ref=refs[offset + 3],
+            evaluation_profile_ref=refs[offset + 4],
+            workflow_configuration_ref=(
+                refs[offset + 5] if len(refs) == offset + 6 else None
+            ),
             input_manifest=invocation.input_manifest,
             overlay=invocation.overlay,
             caller_authority=invocation.caller_authority,
@@ -235,12 +308,87 @@ class ControlPlaneService:
             blueprint = await self._selectable(definition.blueprint_ref)
             if not isinstance(blueprint.definition, StageGraphBlueprint | GoalDirectedBlueprint):
                 raise CompilationRejected("control profile target is not a blueprint")
+        elif isinstance(definition, WorkflowImplementationBindingDefinition):
+            await self._validate_implementation_publication(definition)
         elif isinstance(definition, WorkflowConfigurationDefinition):
             self._extensions.validate_all(definition.extensions)
 
     async def _validate_definition_shape(self, definition: Definition) -> None:
         if isinstance(definition, WorkflowTypeDefinition):
             self._extensions.validate_all(definition.required_extensions)
+
+    async def _validate_implementation_publication(
+        self,
+        binding: WorkflowImplementationBindingDefinition,
+    ) -> None:
+        records = [
+            await self._selectable(ref)
+            for ref in (
+                binding.workflow_type_ref,
+                binding.blueprint_ref,
+                binding.control_profile_ref,
+                binding.runtime_profile_ref,
+                binding.workspace_template_ref,
+                binding.evaluation_profile_ref,
+            )
+        ]
+        workflow = self._expect(records[0].definition, WorkflowTypeDefinition)
+        blueprint = records[1].definition
+        if not isinstance(blueprint, StageGraphBlueprint | GoalDirectedBlueprint):
+            raise CompilationRejected("Workflow Implementation target is not a blueprint")
+        control = self._expect(records[2].definition, ControlProfileDefinition)
+        runtime = self._expect(records[3].definition, RuntimeProfileDefinition)
+        workspace = self._expect(records[4].definition, WorkspaceTemplateDefinition)
+        evaluation = self._expect(records[5].definition, EvaluationProfileDefinition)
+        if control.blueprint_ref != binding.blueprint_ref:
+            raise CompilationRejected(
+                "Workflow Implementation control profile selects a different blueprint"
+            )
+        if binding.workflow_configuration_ref is not None:
+            configuration_record = await self._selectable(
+                binding.workflow_configuration_ref
+            )
+            configuration = self._expect(
+                configuration_record.definition,
+                WorkflowConfigurationDefinition,
+            )
+            if configuration.workflow_type_logical_id != workflow.logical_id:
+                raise CompilationRejected(
+                    "Workflow Implementation configuration targets a different Workflow Type"
+                )
+        realized_obligations = {
+            item.obligation_ref for item in binding.obligation_realizations
+        }
+        if not workflow.obligations <= realized_obligations:
+            raise CompilationRejected(
+                "Workflow Implementation does not realize every Workflow Type obligation"
+            )
+        realized_outputs = {
+            item.output_contract_ref
+            for item in binding.output_contract_realizations
+        }
+        if not workflow.output_contracts <= realized_outputs:
+            raise CompilationRejected(
+                "Workflow Implementation does not realize every Workflow Type output"
+            )
+        contract_slots = {slot.name: slot for slot in workflow.workspace_contract.slots}
+        template_slots = {slot.name: slot for slot in workspace.slots}
+        if any(
+            template_slots.get(name) != contract_slot
+            for name, contract_slot in contract_slots.items()
+        ):
+            raise CompilationRejected(
+                "Workflow Implementation workspace does not satisfy the Workflow Type contract"
+            )
+        required_capabilities = (
+            runtime.required_capabilities
+            | workspace.required_capabilities
+            | evaluation.required_capabilities
+        )
+        if not required_capabilities <= workflow.authority_ceiling.capabilities:
+            raise CompilationRejected(
+                "Workflow Implementation requirements exceed Workflow Type authority"
+            )
 
     async def _resolve_selector(
         self, selector: DefinitionSelector

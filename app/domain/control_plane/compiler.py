@@ -16,11 +16,12 @@ from app.domain.control_plane.contracts import (
     OverlayDecisionStatus,
     ResolvedDefinitions,
     StageGraphBlueprint,
+    WorkflowImplementationBindingDefinition,
 )
 from app.domain.control_plane.errors import CompilationRejected
 from app.domain.control_plane.extensions import ExtensionRegistry
 
-COMPILER_VERSION = "control-plane-f1/1"
+COMPILER_VERSION = "control-plane-f1/2"
 
 
 def _reject(field: str, requested: object, reason: str) -> None:
@@ -83,6 +84,105 @@ def _validate_exact_ref(ref: ExactDefinitionRef, definition: Definition) -> None
         )
 
 
+def _validate_implementation_binding(
+    request: CompilationRequest,
+    definitions: ResolvedDefinitions,
+    binding: WorkflowImplementationBindingDefinition,
+) -> None:
+    exact_bindings = (
+        (binding.workflow_type_ref, request.workflow_type_ref, "Workflow Type"),
+        (binding.blueprint_ref, request.blueprint_ref, "blueprint"),
+        (binding.control_profile_ref, request.control_profile_ref, "control profile"),
+        (binding.runtime_profile_ref, request.runtime_profile_ref, "runtime profile"),
+        (
+            binding.workspace_template_ref,
+            request.workspace_template_ref,
+            "workspace template",
+        ),
+        (
+            binding.evaluation_profile_ref,
+            request.evaluation_profile_ref,
+            "evaluation profile",
+        ),
+        (
+            binding.workflow_configuration_ref,
+            request.workflow_configuration_ref,
+            "workflow configuration",
+        ),
+    )
+    for bound, selected, label in exact_bindings:
+        if bound != selected:
+            raise CompilationRejected(
+                f"Workflow Implementation selects a different {label}"
+            )
+    if definitions.control_profile.blueprint_ref != request.blueprint_ref:
+        raise CompilationRejected(
+            "Workflow Implementation control profile selects a different blueprint"
+        )
+    configuration = definitions.workflow_configuration
+    if (
+        configuration is not None
+        and configuration.workflow_type_logical_id
+        != definitions.workflow_type.logical_id
+    ):
+        raise CompilationRejected(
+            "Workflow Implementation configuration targets a different Workflow Type"
+        )
+
+    realized_obligations = {
+        item.obligation_ref for item in binding.obligation_realizations
+    }
+    missing_obligations = (
+        definitions.workflow_type.obligations - realized_obligations
+    )
+    if missing_obligations:
+        raise CompilationRejected(
+            "Workflow Implementation does not realize required obligations: "
+            f"{sorted(missing_obligations)}"
+        )
+    realized_outputs = {
+        item.output_contract_ref for item in binding.output_contract_realizations
+    }
+    missing_outputs = definitions.workflow_type.output_contracts - realized_outputs
+    if missing_outputs:
+        raise CompilationRejected(
+            "Workflow Implementation does not realize required outputs: "
+            f"{sorted(missing_outputs)}"
+        )
+
+    blueprint = definitions.blueprint
+    if isinstance(blueprint, StageGraphBlueprint):
+        stages = {stage.stage_id: stage for stage in blueprint.stages}
+        for realization in binding.obligation_realizations:
+            stage = stages.get(realization.realization_ref)
+            if realization.realization_kind != "stage" or stage is None:
+                raise CompilationRejected(
+                    "StageGraph obligation realization must name an existing stage"
+                )
+            if realization.obligation_ref not in stage.obligation_refs:
+                raise CompilationRejected(
+                    "StageGraph stage does not declare its realized obligation"
+                )
+        for output_realization in binding.output_contract_realizations:
+            if output_realization.output_slot not in blueprint.declared_output_slots:
+                raise CompilationRejected(
+                    "StageGraph output realization names an undeclared output slot"
+                )
+    else:
+        goal_contracts = {
+            blueprint.objective_contract,
+            blueprint.acceptance_contract,
+        }
+        if any(
+            realization.realization_kind != "goal_acceptance"
+            or realization.realization_ref not in goal_contracts
+            for realization in binding.obligation_realizations
+        ):
+            raise CompilationRejected(
+                "GoalDirected obligations must bind to its objective or acceptance contract"
+            )
+
+
 def _validate_bindings(
     request: CompilationRequest, definitions: ResolvedDefinitions
 ) -> list[OverlayDecision]:
@@ -95,6 +195,19 @@ def _validate_bindings(
         (request.workspace_template_ref, definitions.workspace_template),
         (request.evaluation_profile_ref, definitions.evaluation_profile),
     ]
+    if request.implementation_ref is not None:
+        if definitions.implementation_binding is None:
+            raise CompilationRejected(
+                "Workflow Implementation reference and definition must both be present"
+            )
+        resolved_pairs.insert(
+            1,
+            (request.implementation_ref, definitions.implementation_binding),
+        )
+    elif definitions.implementation_binding is not None:
+        raise CompilationRejected(
+            "Workflow Implementation reference and definition must both be present"
+        )
     if (
         request.workflow_configuration_ref is not None
         and definitions.workflow_configuration is not None
@@ -121,40 +234,49 @@ def _validate_bindings(
     source_ref_set = {ref for ref, _definition in resolved_pairs}
     if any(evidence.target not in source_ref_set for evidence in request.alias_evidence):
         raise CompilationRejected("alias resolution evidence targets an unselected revision")
-    checks = (
-        (request.blueprint_ref, workflow.allowed_blueprints, "blueprint"),
-        (request.control_profile_ref, workflow.allowed_control_profiles, "control profile"),
-        (request.runtime_profile_ref, workflow.allowed_runtime_profiles, "runtime profile"),
-        (
-            request.workspace_template_ref,
-            workflow.allowed_workspace_templates,
-            "workspace template",
-        ),
-        (
-            request.evaluation_profile_ref,
-            workflow.allowed_evaluation_profiles,
-            "evaluation profile",
-        ),
-    )
-    for selected, allowed, label in checks:
-        if selected not in allowed:
-            raise CompilationRejected(f"{label} is not allowed by the Workflow Type")
-    if request.workflow_configuration_ref is None:
-        if workflow.allowed_workflow_configurations:
-            raise CompilationRejected("Workflow Type requires a workflow-specific configuration")
+    if definitions.implementation_binding is not None:
+        _validate_implementation_binding(
+            request,
+            definitions,
+            definitions.implementation_binding,
+        )
     else:
-        if request.workflow_configuration_ref not in workflow.allowed_workflow_configurations:
-            raise CompilationRejected(
-                "workflow-specific configuration is not allowed by the Workflow Type"
-            )
-        assert definitions.workflow_configuration is not None
-        if (
-            definitions.workflow_configuration.workflow_type_logical_id
-            != request.workflow_type_ref.logical_id
-        ):
-            raise CompilationRejected(
-                "workflow-specific configuration targets a different Workflow Type"
-            )
+        checks = (
+            (request.blueprint_ref, workflow.allowed_blueprints, "blueprint"),
+            (request.control_profile_ref, workflow.allowed_control_profiles, "control profile"),
+            (request.runtime_profile_ref, workflow.allowed_runtime_profiles, "runtime profile"),
+            (
+                request.workspace_template_ref,
+                workflow.allowed_workspace_templates,
+                "workspace template",
+            ),
+            (
+                request.evaluation_profile_ref,
+                workflow.allowed_evaluation_profiles,
+                "evaluation profile",
+            ),
+        )
+        for selected, allowed, label in checks:
+            if selected not in allowed:
+                raise CompilationRejected(f"{label} is not allowed by the Workflow Type")
+        if request.workflow_configuration_ref is None:
+            if workflow.allowed_workflow_configurations:
+                raise CompilationRejected(
+                    "Workflow Type requires a workflow-specific configuration"
+                )
+        else:
+            if request.workflow_configuration_ref not in workflow.allowed_workflow_configurations:
+                raise CompilationRejected(
+                    "workflow-specific configuration is not allowed by the Workflow Type"
+                )
+            assert definitions.workflow_configuration is not None
+            if (
+                definitions.workflow_configuration.workflow_type_logical_id
+                != request.workflow_type_ref.logical_id
+            ):
+                raise CompilationRejected(
+                    "workflow-specific configuration targets a different Workflow Type"
+                )
     if definitions.control_profile.blueprint_ref != request.blueprint_ref:
         raise CompilationRejected("control profile selects a different blueprint")
 
@@ -417,6 +539,9 @@ def compile_effective_run_configuration(
     )
     source_refs = (
         request.workflow_type_ref,
+    ) + (
+        (request.implementation_ref,) if request.implementation_ref is not None else ()
+    ) + (
         request.blueprint_ref,
         request.control_profile_ref,
         request.runtime_profile_ref,

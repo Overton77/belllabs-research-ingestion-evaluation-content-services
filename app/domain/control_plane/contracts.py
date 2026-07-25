@@ -22,6 +22,7 @@ class Contract(BaseModel):
 
 class DefinitionKind(StrEnum):
     WORKFLOW_TYPE = "workflow_type"
+    WORKFLOW_IMPLEMENTATION = "workflow_implementation"
     BLUEPRINT = "blueprint"
     CONTROL_PROFILE = "control_profile"
     RUNTIME_PROFILE = "runtime_profile"
@@ -445,8 +446,71 @@ class WorkflowConfigurationDefinition(DefinitionBase):
     extensions: tuple[NamespacedExtension, ...] = ()
 
 
+class ObligationRealization(Contract):
+    obligation_ref: str = Field(min_length=1)
+    realization_kind: Literal["stage", "goal_acceptance"]
+    realization_ref: str = Field(min_length=1)
+
+
+class OutputContractRealization(Contract):
+    output_contract_ref: str = Field(min_length=1)
+    output_slot: str = Field(min_length=1)
+
+
+class WorkflowImplementationBindingDefinition(DefinitionBase):
+    """One approved, exact implementation of a semantic Workflow Type revision."""
+
+    kind: Literal[DefinitionKind.WORKFLOW_IMPLEMENTATION] = (
+        DefinitionKind.WORKFLOW_IMPLEMENTATION
+    )
+    workflow_type_ref: ExactDefinitionRef
+    blueprint_ref: ExactDefinitionRef
+    control_profile_ref: ExactDefinitionRef
+    runtime_profile_ref: ExactDefinitionRef
+    workspace_template_ref: ExactDefinitionRef
+    evaluation_profile_ref: ExactDefinitionRef
+    workflow_configuration_ref: ExactDefinitionRef | None = None
+    obligation_realizations: tuple[ObligationRealization, ...] = Field(min_length=1)
+    output_contract_realizations: tuple[OutputContractRealization, ...] = Field(
+        min_length=1
+    )
+    conformance_evidence_refs: frozenset[str] = Field(min_length=1)
+    approval_status: Literal["approved"] = "approved"
+
+    @model_validator(mode="after")
+    def validate_ref_families(self) -> WorkflowImplementationBindingDefinition:
+        expected = (
+            (self.workflow_type_ref, DefinitionKind.WORKFLOW_TYPE),
+            (self.blueprint_ref, DefinitionKind.BLUEPRINT),
+            (self.control_profile_ref, DefinitionKind.CONTROL_PROFILE),
+            (self.runtime_profile_ref, DefinitionKind.RUNTIME_PROFILE),
+            (self.workspace_template_ref, DefinitionKind.WORKSPACE_TEMPLATE),
+            (self.evaluation_profile_ref, DefinitionKind.EVALUATION_PROFILE),
+        )
+        if any(ref.kind != kind for ref, kind in expected):
+            raise ValueError("Workflow Implementation contains a reference of the wrong family")
+        if (
+            self.workflow_configuration_ref is not None
+            and self.workflow_configuration_ref.kind
+            != DefinitionKind.WORKFLOW_CONFIGURATION
+        ):
+            raise ValueError(
+                "Workflow Implementation configuration reference has the wrong family"
+            )
+        obligations = [item.obligation_ref for item in self.obligation_realizations]
+        outputs = [
+            item.output_contract_ref for item in self.output_contract_realizations
+        ]
+        if len(obligations) != len(set(obligations)):
+            raise ValueError("Workflow Implementation obligation realizations must be unique")
+        if len(outputs) != len(set(outputs)):
+            raise ValueError("Workflow Implementation output realizations must be unique")
+        return self
+
+
 Definition = (
     WorkflowTypeDefinition
+    | WorkflowImplementationBindingDefinition
     | StageGraphBlueprint
     | GoalDirectedBlueprint
     | ControlProfileDefinition
@@ -498,6 +562,7 @@ class CompilationContext(Contract):
 
 class CompilationRequest(Contract):
     workflow_type_ref: ExactDefinitionRef
+    implementation_ref: ExactDefinitionRef | None = None
     blueprint_ref: ExactDefinitionRef
     control_profile_ref: ExactDefinitionRef
     runtime_profile_ref: ExactDefinitionRef
@@ -515,6 +580,7 @@ class CompilationRequest(Contract):
 
 class ResolvedDefinitions(Contract):
     workflow_type: WorkflowTypeDefinition
+    implementation_binding: WorkflowImplementationBindingDefinition | None = None
     blueprint: WorkflowBlueprint
     control_profile: ControlProfileDefinition
     runtime_profile: RuntimeProfileDefinition
@@ -576,11 +642,12 @@ class DefinitionSelector(Contract):
 
 class CompileInvocation(Contract):
     workflow_type: DefinitionSelector
-    blueprint: DefinitionSelector
-    control_profile: DefinitionSelector
-    runtime_profile: DefinitionSelector
-    workspace_template: DefinitionSelector
-    evaluation_profile: DefinitionSelector
+    implementation: DefinitionSelector | None = None
+    blueprint: DefinitionSelector | None = None
+    control_profile: DefinitionSelector | None = None
+    runtime_profile: DefinitionSelector | None = None
+    workspace_template: DefinitionSelector | None = None
+    evaluation_profile: DefinitionSelector | None = None
     workflow_configuration: DefinitionSelector | None = None
     input_manifest: RunInputManifestRef
     overlay: RunOverlay = Field(default_factory=RunOverlay)
@@ -588,6 +655,32 @@ class CompileInvocation(Contract):
     parent_authority: AuthorityCeiling | None = None
     environment: EnvironmentAvailability
     context: CompilationContext
+
+    @model_validator(mode="after")
+    def select_one_compilation_mode(self) -> CompileInvocation:
+        components = (
+            self.blueprint,
+            self.control_profile,
+            self.runtime_profile,
+            self.workspace_template,
+            self.evaluation_profile,
+        )
+        if self.implementation is not None:
+            if any(item is not None for item in components) or self.workflow_configuration:
+                raise ValueError(
+                    "implementation selection cannot be mixed with component selectors"
+                )
+            return self
+        if all(item is not None for item in components):
+            return self
+        if all(item is None for item in components) and self.workflow_configuration is None:
+            # The service resolves the Workflow Type's conventional `default` implementation
+            # alias after it has resolved the exact Workflow Type identity.
+            return self
+        raise ValueError(
+            "provide an implementation selector, no implementation selectors for the default, "
+            "or the complete legacy component selector set"
+        )
 
 
 class PublishRequest(Contract):

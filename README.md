@@ -21,7 +21,11 @@ Current boundaries:
   and cannot produce control-plane domain state.
 - The Issue 11 schema grounding pipeline is application-owned, content-addressed, and
   default-deny at the graph boundary. See
-  [docs/SCHEMA_GROUNDING_PIPELINE.md](docs/SCHEMA_GROUNDING_PIPELINE.md).
+  [docs/SCHEMA_GROUNDING_PIPELINE.md](docs/SCHEMA_GROUNDING_PIPELINE.md). For a route-to-domain
+  trace and current runtime-wiring assessment, see
+  [docs/CODEBASE_DOMAIN_WORKFLOW_GUIDE.md](docs/CODEBASE_DOMAIN_WORKFLOW_GUIDE.md). The executable
+  default/alternative control-plane prototype and live `gpt-5-mini` results are recorded in
+  [docs/WORKFLOW_IMPLEMENTATION_BINDINGS_PROTOTYPE.md](docs/WORKFLOW_IMPLEMENTATION_BINDINGS_PROTOTYPE.md).
 
 ## Local setup
 

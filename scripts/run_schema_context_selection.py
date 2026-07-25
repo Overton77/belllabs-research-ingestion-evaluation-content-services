@@ -10,6 +10,7 @@ from pathlib import Path
 from app.application.schema_catalog import DEFAULT_SEMANTIC_OVERLAY
 from app.domain.schema_context.canonicalization import write_json
 from app.experiments.schema_context_selection.reconciliation_workflow import (
+    DEFAULT_EXECUTION_MODE,
     DEFAULT_MODEL,
     ReconciliationRunConfig,
     ReportGraphReconciliationWorkflow,
@@ -57,6 +58,15 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--max-query-intents", type=int, default=12)
     parser.add_argument("--database", default="neo4j")
     parser.add_argument(
+        "--execution-mode",
+        choices=("stagegraph", "goal-directed"),
+        default=DEFAULT_EXECUTION_MODE,
+        help=(
+            "Execution implementation: deterministic host-owned required intents "
+            "(stagegraph, default) or bounded adaptive GPT planner (goal-directed)."
+        ),
+    )
+    parser.add_argument(
         "--semantic-overlay",
         type=Path,
         default=DEFAULT_SEMANTIC_OVERLAY,
@@ -83,6 +93,7 @@ async def _main() -> int:
         max_query_intents=args.max_query_intents,
         database=args.database,
         semantic_overlay_path=args.semantic_overlay,
+        execution_mode=args.execution_mode,
     )
     try:
         result = await ReportGraphReconciliationWorkflow().run(config)

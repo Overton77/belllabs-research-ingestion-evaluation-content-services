@@ -42,6 +42,7 @@ class _Driver:
 
 class _Harness:
     review_decision = "accepted"
+    planner_calls = 0
 
     def __init__(self, **_kwargs: Any) -> None:
         pass
@@ -108,6 +109,7 @@ class _Harness:
         retry_reason: str | None = None,
     ) -> AgentRunOutput:
         del max_turns, retry_reason
+        type(self).planner_calls += 1
         brief = json.loads((run_root / "selection/query-brief.json").read_text(encoding="utf-8"))
         intents = [brief["required_first_intent"], *brief["required_seed_intents"]]
         references: list[IntentResultReference] = []
@@ -192,7 +194,12 @@ class _Executor:
         )
 
 
-def _config(tmp_path: Path, run_id: str) -> ReconciliationRunConfig:
+def _config(
+    tmp_path: Path,
+    run_id: str,
+    *,
+    execution_mode: str = "stagegraph",
+) -> ReconciliationRunConfig:
     schema = tmp_path / "schema.graphql"
     report = tmp_path / "report.md"
     schema.write_bytes(SDL)
@@ -204,6 +211,7 @@ def _config(tmp_path: Path, run_id: str) -> ReconciliationRunConfig:
         output_root=tmp_path / "runs",
         run_id=run_id,
         semantic_overlay_path=None,
+        execution_mode=execution_mode,  # type: ignore[arg-type]
     )
 
 
@@ -259,6 +267,7 @@ async def test_accepted_selection_executes_and_persists_one_result_per_intent(
 ) -> None:
     monkeypatch.setenv("SCHEMA_EXPERIMENT_ALLOW_TEST_ATTESTATION", "1")
     _Executor.instances.clear()
+    _Harness.planner_calls = 0
     driver = _Driver()
 
     async def driver_factory(_settings: Any) -> _Driver:
@@ -280,4 +289,39 @@ async def test_accepted_selection_executes_and_persists_one_result_per_intent(
     assert len(executor.intents) == len(intent_files) == len(result_files) == 2
     assert len(result.query_result_references) == 2
     assert len(result.reconciliation_evidence.intent_result_references) == 2
+    assert result.reconciliation_evidence.match_method == (
+        "exact_identity + bounded_neighborhood"
+    )
+    assert _Harness.planner_calls == 0
+    run = json.loads((config.output_root / config.run_id / "run.json").read_text())
+    assert run["execution_mode"] == "stagegraph"
+    assert "stagegraph-required-intents" in run["implementation_id"]
     assert driver.closed
+
+
+@pytest.mark.asyncio
+async def test_goal_directed_mode_preserves_bounded_agent_planner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SCHEMA_EXPERIMENT_ALLOW_TEST_ATTESTATION", "1")
+    _Executor.instances.clear()
+    _Harness.planner_calls = 0
+    driver = _Driver()
+
+    async def driver_factory(_settings: Any) -> _Driver:
+        return driver
+
+    config = _config(tmp_path, "goal-directed-query", execution_mode="goal-directed")
+    result = await ReportGraphReconciliationWorkflow(
+        settings=_Settings(),  # type: ignore[arg-type]
+        driver_factory=driver_factory,
+        executor_factory=_Executor,  # type: ignore[arg-type]
+        harness_factory=_Harness,  # type: ignore[arg-type]
+    ).run(config)
+
+    assert result.status == "completed"
+    assert _Harness.planner_calls == 1
+    assert result.reconciliation_evidence.match_method == "fake_bounded_reads"
+    runtime = result.evaluation_metrics["runtime"]
+    assert runtime["execution_mode"] == "goal-directed"
+    assert "goal-directed-planner" in runtime["implementation_id"]

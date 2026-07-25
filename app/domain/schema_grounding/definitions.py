@@ -9,13 +9,17 @@ from app.domain.control_plane.contracts import (
     EvaluationProfileDefinition,
     ExactDefinitionRef,
     ExtensionIdentity,
+    GoalDirectedBlueprint,
     LinkedRunSlotConstraint,
     NamespacedExtension,
+    ObligationRealization,
+    OutputContractRealization,
     RuntimeProfileDefinition,
     StageGraphBlueprint,
     StageNode,
     WorkflowConfigurationDefinition,
     WorkflowCyclePolicy,
+    WorkflowImplementationBindingDefinition,
     WorkflowTypeDefinition,
     WorkflowWorkspaceContract,
     WorkspaceSlot,
@@ -37,6 +41,7 @@ SHARED_BUDGETS = BudgetCeiling(
         "model.turns": 80,
         "tool.calls.total": 100,
         "operation.attempts": 20,
+        "goal.iterations": 12,
         "stage.cycles": 2,
         "workflow.cycles": 2,
         "concurrency.slots": 2,
@@ -66,8 +71,10 @@ def schema_grounding_definitions() -> tuple[Definition, ...]:
     """Return immutable revision-one definitions in safe publication order."""
     selection_blueprint = _selection_blueprint()
     reconciliation_blueprint = _reconciliation_blueprint()
+    reconciliation_goal_blueprint = _reconciliation_goal_blueprint()
     selection_blueprint_ref = _ref(selection_blueprint)
     reconciliation_blueprint_ref = _ref(reconciliation_blueprint)
+    reconciliation_goal_blueprint_ref = _ref(reconciliation_goal_blueprint)
 
     selection_control = ControlProfileDefinition(
         logical_id="schema-context-selection-control-v1",
@@ -109,6 +116,23 @@ def schema_grounding_definitions() -> tuple[Definition, ...]:
         ),
         overlayable_fields=frozenset({"budgets", "max_concurrency"}),
         strengthen_only_fields=frozenset({"budgets", "max_concurrency"}),
+    )
+    reconciliation_goal_control = ControlProfileDefinition(
+        logical_id="supporting-graph-reconciliation-goal-directed-control-v1",
+        title="GoalDirected Supporting Graph Reconciliation control profile",
+        description=(
+            "Bounds objective-driven query iterations while preserving host admission, "
+            "validation, independent evidence checks, and stopping policy."
+        ),
+        blueprint_ref=reconciliation_goal_blueprint_ref,
+        selected_variants=frozenset({"required-seed-intents"}),
+        authority_ceiling=AuthorityCeiling(
+            capabilities=reconciliation_control.authority_ceiling.capabilities,
+            budgets=SHARED_BUDGETS,
+            max_concurrency=1,
+        ),
+        overlayable_fields=frozenset({"budgets"}),
+        strengthen_only_fields=frozenset({"budgets"}),
     )
     selection_runtime = RuntimeProfileDefinition(
         logical_id="schema-context-selection-runtime-v1",
@@ -299,8 +323,12 @@ def schema_grounding_definitions() -> tuple[Definition, ...]:
         output_contracts=frozenset(
             {"schema:supporting-graph-reconciliation-record:v1"}
         ),
-        allowed_blueprints=frozenset({reconciliation_blueprint_ref}),
-        allowed_control_profiles=frozenset({_ref(reconciliation_control)}),
+        allowed_blueprints=frozenset(
+            {reconciliation_blueprint_ref, reconciliation_goal_blueprint_ref}
+        ),
+        allowed_control_profiles=frozenset(
+            {_ref(reconciliation_control), _ref(reconciliation_goal_control)}
+        ),
         allowed_runtime_profiles=frozenset({_ref(reconciliation_runtime)}),
         allowed_workspace_templates=frozenset({_ref(reconciliation_workspace)}),
         allowed_evaluation_profiles=frozenset({_ref(reconciliation_evaluation)}),
@@ -323,11 +351,136 @@ def schema_grounding_definitions() -> tuple[Definition, ...]:
         ),
         allowed_overlay_extensions=frozenset({_extension_identity()}),
     )
+    selection_implementation = WorkflowImplementationBindingDefinition(
+        logical_id="schema-context-selection.implementation",
+        title="Default staged Schema Context Selection implementation",
+        description=(
+            "The approved selector, deterministic validator, independent reviewer, "
+            "and bounded workflow-cycle implementation."
+        ),
+        workflow_type_ref=_ref(selection_type),
+        blueprint_ref=selection_blueprint_ref,
+        control_profile_ref=_ref(selection_control),
+        runtime_profile_ref=_ref(selection_runtime),
+        workspace_template_ref=_ref(selection_workspace),
+        evaluation_profile_ref=_ref(selection_evaluation),
+        workflow_configuration_ref=_ref(selection_config),
+        obligation_realizations=(
+            ObligationRealization(
+                obligation_ref="obligation:semantic-selection:v1",
+                realization_kind="stage",
+                realization_ref="semantic_selector",
+            ),
+            ObligationRealization(
+                obligation_ref="obligation:structural-validation:v1",
+                realization_kind="stage",
+                realization_ref="structural_validation",
+            ),
+            ObligationRealization(
+                obligation_ref="obligation:independent-review:v1",
+                realization_kind="stage",
+                realization_ref="independent_reviewer",
+            ),
+        ),
+        output_contract_realizations=(
+            OutputContractRealization(
+                output_contract_ref="schema:accepted-schema-context-selection:v1",
+                output_slot="accepted_selection",
+            ),
+        ),
+        conformance_evidence_refs=frozenset(
+            {
+                "test:test_schema_context_selection:v1",
+                "evaluation:schema-selection:v1",
+            }
+        ),
+    )
+    reconciliation_stage_implementation = WorkflowImplementationBindingDefinition(
+        logical_id="supporting-graph-reconciliation.implementation",
+        title="Default staged Supporting Graph Reconciliation implementation",
+        description=(
+            "Executes the admitted host-compiled required intents in deterministic order "
+            "and verifies their exact immutable evidence."
+        ),
+        workflow_type_ref=_ref(reconciliation_type),
+        blueprint_ref=reconciliation_blueprint_ref,
+        control_profile_ref=_ref(reconciliation_control),
+        runtime_profile_ref=_ref(reconciliation_runtime),
+        workspace_template_ref=_ref(reconciliation_workspace),
+        evaluation_profile_ref=_ref(reconciliation_evaluation),
+        workflow_configuration_ref=_ref(reconciliation_config),
+        obligation_realizations=(
+            ObligationRealization(
+                obligation_ref="obligation:schema-context-derived:v1",
+                realization_kind="stage",
+                realization_ref="derive_schema_context",
+            ),
+            ObligationRealization(
+                obligation_ref="obligation:graph-gate-admitted:v1",
+                realization_kind="stage",
+                realization_ref="graph_authority_gate",
+            ),
+            ObligationRealization(
+                obligation_ref="obligation:bounded-query-evidence:v1",
+                realization_kind="stage",
+                realization_ref="execute_bounded_intents",
+            ),
+        ),
+        output_contract_realizations=(
+            OutputContractRealization(
+                output_contract_ref="schema:supporting-graph-reconciliation-record:v1",
+                output_slot="reconciliation_result",
+            ),
+        ),
+        conformance_evidence_refs=frozenset(
+            {
+                "test:test_schema_grounding_services:v1",
+                "evaluation:supporting-graph-reconciliation:v1",
+            }
+        ),
+    )
+    reconciliation_goal_implementation = WorkflowImplementationBindingDefinition(
+        logical_id="supporting-graph-reconciliation.implementation",
+        title="Alternative GoalDirected Supporting Graph Reconciliation implementation",
+        description=(
+            "Allows a bounded agent planner to add admitted query intents after mandatory "
+            "host seed intents, while deterministic host gates remain authoritative."
+        ),
+        workflow_type_ref=_ref(reconciliation_type),
+        blueprint_ref=reconciliation_goal_blueprint_ref,
+        control_profile_ref=_ref(reconciliation_goal_control),
+        runtime_profile_ref=_ref(reconciliation_runtime),
+        workspace_template_ref=_ref(reconciliation_workspace),
+        evaluation_profile_ref=_ref(reconciliation_evaluation),
+        workflow_configuration_ref=_ref(reconciliation_config),
+        obligation_realizations=tuple(
+            ObligationRealization(
+                obligation_ref=obligation,
+                realization_kind="goal_acceptance",
+                realization_ref="evaluation:supporting-graph-reconciliation:v1",
+            )
+            for obligation in sorted(reconciliation_type.obligations)
+        ),
+        output_contract_realizations=(
+            OutputContractRealization(
+                output_contract_ref="schema:supporting-graph-reconciliation-record:v1",
+                output_slot="goal_result",
+            ),
+        ),
+        conformance_evidence_refs=frozenset(
+            {
+                "experiment:official-catalog-v1-live-20260723-3",
+                "evaluation:supporting-graph-reconciliation:v1",
+            }
+        ),
+    )
     return (
         selection_blueprint,
         reconciliation_blueprint,
+        reconciliation_goal_blueprint,
         selection_control,
         reconciliation_control,
+        reconciliation_goal_control,
         selection_runtime,
         reconciliation_runtime,
         selection_workspace,
@@ -338,6 +491,9 @@ def schema_grounding_definitions() -> tuple[Definition, ...]:
         reconciliation_config,
         selection_type,
         reconciliation_type,
+        selection_implementation,
+        reconciliation_stage_implementation,
+        reconciliation_goal_implementation,
     )
 
 
@@ -349,26 +505,34 @@ def _selection_blueprint() -> StageGraphBlueprint:
         stages=(
             StageNode(
                 stage_id="materialize_selection_context",
+                reservation={"operation.attempts": 1},
                 output_slots=frozenset({"selection_workspace_binding"}),
             ),
             StageNode(
                 stage_id="semantic_selector",
                 depends_on=frozenset({"materialize_selection_context"}),
+                reservation={"operation.attempts": 1},
+                obligation_refs=frozenset({"obligation:semantic-selection:v1"}),
                 output_slots=frozenset({"selection_draft"}),
             ),
             StageNode(
                 stage_id="structural_validation",
                 depends_on=frozenset({"semantic_selector"}),
+                reservation={"operation.attempts": 1},
+                obligation_refs=frozenset({"obligation:structural-validation:v1"}),
                 output_slots=frozenset({"selection_validation"}),
             ),
             StageNode(
                 stage_id="independent_reviewer",
                 depends_on=frozenset({"structural_validation"}),
+                reservation={"operation.attempts": 1},
+                obligation_refs=frozenset({"obligation:independent-review:v1"}),
                 output_slots=frozenset({"selection_review"}),
             ),
             StageNode(
                 stage_id="accept_selection",
                 depends_on=frozenset({"independent_reviewer"}),
+                reservation={"operation.attempts": 1},
                 output_slots=frozenset({"accepted_selection"}),
             ),
         ),
@@ -415,6 +579,17 @@ def _reconciliation_blueprint() -> StageGraphBlueprint:
         "evaluate": "evaluation",
         "promote_result": "reconciliation_result",
     }
+    obligations = {
+        "derive_schema_context": frozenset(
+            {"obligation:schema-context-derived:v1"}
+        ),
+        "graph_authority_gate": frozenset(
+            {"obligation:graph-gate-admitted:v1"}
+        ),
+        "execute_bounded_intents": frozenset(
+            {"obligation:bounded-query-evidence:v1"}
+        ),
+    }
     return StageGraphBlueprint(
         logical_id="supporting-graph-reconciliation-v1",
         title="Supporting Graph Reconciliation StageGraph",
@@ -425,6 +600,8 @@ def _reconciliation_blueprint() -> StageGraphBlueprint:
                 depends_on=(
                     frozenset({stage_ids[index - 1]}) if index else frozenset()
                 ),
+                reservation={"operation.attempts": 1},
+                obligation_refs=obligations.get(stage_id, frozenset()),
                 output_slots=frozenset({output_slots[stage_id]}),
             )
             for index, stage_id in enumerate(stage_ids)
@@ -432,6 +609,21 @@ def _reconciliation_blueprint() -> StageGraphBlueprint:
         declared_output_slots=frozenset(output_slots.values()),
         max_parallel_stages=1,
         workflow_evaluation_contract_ref="evaluation:supporting-graph-reconciliation:v1",
+    )
+
+
+def _reconciliation_goal_blueprint() -> GoalDirectedBlueprint:
+    return GoalDirectedBlueprint(
+        logical_id="supporting-graph-reconciliation-goal-directed-v1",
+        title="GoalDirected Supporting Graph Reconciliation",
+        description=(
+            "Pursues one bounded reconciliation objective through host-validated query "
+            "iterations and requires independent acceptance verification."
+        ),
+        objective_contract="objective:supporting-graph-reconciliation:v1",
+        acceptance_contract="evaluation:supporting-graph-reconciliation:v1",
+        max_iterations=12,
+        variant_names=frozenset({"required-seed-intents"}),
     )
 
 

@@ -14,11 +14,12 @@ import them.
 | `SchemaWorkspaceMaterialization` | governed operation whose durable contract is owned by Issue 13 | `app/application/schema_workspace_binding.py` consumes its result |
 | `SupportingGraphReconciliationWorkflow` | bounded Workflow Type/stage | `app/application/supporting_graph_reconciliation.py` |
 
-The control-plane fixtures in `app/domain/schema_grounding/definitions.py` publish both
+The control-plane fixtures in `app/domain/schema_grounding/definitions.py` define both
 Workflow Types, their StageGraph blueprints, control/runtime/workspace/evaluation
-profiles, configurations, and the linked selection slot. They use the existing
-`POST /control-plane/v1/definitions` publication boundary and compile through the normal
-Effective Run Configuration path.
+profiles, configurations, and the linked selection slot. They can be published through the
+existing `POST /control-plane/v1/definitions` boundary and compiled through the normal
+Effective Run Configuration path. The current server does not automatically publish these
+fixtures at startup.
 
 ## Durable identity and authority
 
@@ -48,9 +49,11 @@ Preflight coverage.
 ## Runtime and API
 
 The main Temporal worker composes schema-grounding activities on
-`<TEMPORAL_TASK_QUEUE>-schema-grounding`. Agent-backed selector, reviewer, and planner
-operations execute through immutable Operation Execution Bindings. Schema Context
-Derivation and catalog construction stay deterministic application services.
+`<TEMPORAL_TASK_QUEUE>-schema-grounding` for catalog build, context derivation, and direct
+supporting reconciliation. The selector/reviewer application workflow and generic StageGraph
+mechanism exist, but the current production worker does not yet compose a schema-aware
+StageGraph operation executor. Schema Context Derivation and catalog construction stay
+deterministic application services.
 
 Authenticated, tenant-scoped query routes are under `/schema-grounding/v1`:
 
@@ -61,7 +64,17 @@ Authenticated, tenant-scoped query routes are under `/schema-grounding/v1`:
 - JSON Schemas for the public contracts.
 
 There is intentionally no workflow start route here. Runs enter through the existing run
-admission and Effective Run Configuration flow.
+admission and Effective Run Configuration flow. A deployment still needs to connect admitted
+runs to the generic StageGraph launch/worker path.
+
+For the complete current-state trace, including what is domain-defined versus runtime-connected,
+see [CODEBASE_DOMAIN_WORKFLOW_GUIDE.md](CODEBASE_DOMAIN_WORKFLOW_GUIDE.md).
+
+The first Workflow Implementation Binding prototype now publishes a staged default and a
+GoalDirected alternative for Supporting Graph Reconciliation. The experiment runner can execute
+both against the same governed workload, although generic production GoalDirected Temporal
+dispatch remains a later slice. See
+[WORKFLOW_IMPLEMENTATION_BINDINGS_PROTOTYPE.md](WORKFLOW_IMPLEMENTATION_BINDINGS_PROTOTYPE.md).
 
 ## Verification
 

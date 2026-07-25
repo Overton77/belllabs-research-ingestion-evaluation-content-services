@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
-from typing import Any
+from typing import Any, Literal
 from uuid import NAMESPACE_URL, uuid5
 
 from agents import function_tool, set_default_openai_key
@@ -18,7 +18,11 @@ from app.application.schema_workspace import materialize_schema_workspace
 from app.config import Settings
 from app.domain.schema_context.canonicalization import sha256_digest
 from app.domain.schema_context.contracts import (
+    EvidenceAttribute,
+    ExistingRelationshipEvidence,
     GraphReconciliationEvidence,
+    IntentResultReference,
+    MatchedExistingEntity,
     QueryExecutionIntent,
     QueryExecutionResult,
     ReportGraphReconciliationResult,
@@ -54,6 +58,13 @@ from app.integrations.neo4j_read_executor import (
 )
 
 DEFAULT_MODEL = "gpt-5-mini"
+ExecutionMode = Literal["stagegraph", "goal-directed"]
+DEFAULT_EXECUTION_MODE: ExecutionMode = "stagegraph"
+
+_IMPLEMENTATION_IDENTITIES: dict[ExecutionMode, str] = {
+    "stagegraph": "supporting-graph-reconciliation.stagegraph-required-intents@1",
+    "goal-directed": "supporting-graph-reconciliation.goal-directed-planner@1",
+}
 
 
 @dataclass(frozen=True)
@@ -70,6 +81,7 @@ class ReconciliationRunConfig:
     max_query_intents: int = 12
     database: str = "neo4j"
     semantic_overlay_path: Path | None = DEFAULT_SEMANTIC_OVERLAY
+    execution_mode: ExecutionMode = DEFAULT_EXECUTION_MODE
 
 
 class ReportGraphReconciliationWorkflow:
@@ -100,6 +112,10 @@ class ReportGraphReconciliationWorkflow:
             "deployment attestation.",
             "Research reconciliation output is not medical advice.",
         ]
+        implementation_metrics = {
+            "execution_mode": config.execution_mode,
+            "implementation_id": _IMPLEMENTATION_IDENTITIES[config.execution_mode],
+        }
         self._event(run_root, "run.started", {"run_id": config.run_id})
         write_json(
             run_root / "run.json",
@@ -110,6 +126,8 @@ class ReportGraphReconciliationWorkflow:
                 "offline": config.offline,
                 "skip_vector": config.skip_vector,
                 "max_query_intents": config.max_query_intents,
+                "execution_mode": config.execution_mode,
+                "implementation_id": implementation_metrics["implementation_id"],
                 "started_at": datetime.now(UTC).isoformat(),
             },
         )
@@ -175,7 +193,10 @@ class ReportGraphReconciliationWorkflow:
             **({"structured_candidates": candidate_digest} if candidate_digest else {}),
         }
         if config.build_only:
-            metrics = {"workspace": workspace_metrics, "runtime": timings}
+            metrics = {
+                "workspace": workspace_metrics,
+                "runtime": {**timings, **implementation_metrics},
+            }
             result = self._result(
                 config=config,
                 run_root=run_root,
@@ -233,6 +254,11 @@ class ReportGraphReconciliationWorkflow:
                         **evaluate_selection(selection_outcome.draft),
                         "review_decision": selection_outcome.review.decision,
                         "revision_count": selection_outcome.revision_count,
+                    },
+                    "runtime": {
+                        **timings,
+                        **selection_outcome.usage,
+                        **implementation_metrics,
                     },
                 }
                 result = self._result(
@@ -448,13 +474,7 @@ class ReportGraphReconciliationWorkflow:
             query_results: list[QueryExecutionResult] = []
             query_intents: list[QueryExecutionIntent] = []
             if executor is not None:
-
-                @function_tool(name_override="execute_read_intent", strict_mode=False)
-                async def execute_read_intent(intent: QueryExecutionIntent) -> str:
-                    """Validate and execute one bounded read intent.
-
-                    The host admits it against the purpose-bound projection.
-                    """
+                async def execute_intent(intent: QueryExecutionIntent) -> QueryExecutionResult:
                     query_intents.append(intent)
                     sequence = len(query_intents)
                     if sequence > config.max_query_intents:
@@ -470,52 +490,84 @@ class ReportGraphReconciliationWorkflow:
                         run_root / f"queries/{sequence:03d}-result.json",
                         result.model_dump(mode="json"),
                     )
+                    return result
+
+                @function_tool(name_override="execute_read_intent", strict_mode=False)
+                async def execute_read_intent(intent: QueryExecutionIntent) -> str:
+                    """Validate and execute one bounded read intent.
+
+                    The host admits it against the purpose-bound projection.
+                    """
+                    result = await execute_intent(intent)
                     return result.model_dump_json()
 
                 stage = perf_counter()
-                planned = await harness.plan_queries(
-                    run_root,
-                    execute_tool=execute_read_intent,
-                    max_turns=config.max_query_intents * 2 + 4,
-                )
-                planned_usage = dict(planned.usage)
-                required_intent_ids = {
-                    required_first_intent.intent_id,
-                    *(intent.intent_id for intent in required_seed_intents),
-                }
-
-                def missing_required_successes() -> set[str]:
-                    successful = {
+                required_intents = (required_first_intent, *required_seed_intents)
+                if len(required_intents) > config.max_query_intents:
+                    raise RuntimeError(
+                        "required host-compiled intents exceed the query-intent ceiling"
+                    )
+                if config.execution_mode == "stagegraph":
+                    for intent in required_intents:
+                        await execute_intent(intent)
+                    unsuccessful = [
                         result.intent_id
                         for result in query_results
-                        if result.status == "succeeded"
-                    }
-                    return required_intent_ids - successful
-
-                missing_required = missing_required_successes()
-                if missing_required:
-                    retry = await harness.plan_queries(
+                        if result.status != "succeeded"
+                    ]
+                    if unsuccessful:
+                        raise RuntimeError(
+                            "required host-compiled intents did not all succeed: "
+                            f"{unsuccessful}"
+                        )
+                    evidence = _observational_evidence(query_intents, query_results)
+                    planned_usage: dict[str, int] = {}
+                else:
+                    planned = await harness.plan_queries(
                         run_root,
                         execute_tool=execute_read_intent,
                         max_turns=config.max_query_intents * 2 + 4,
-                        retry_reason=(
-                            "required host-compiled intents did not all produce successful "
-                            f"Neo4j results: {sorted(missing_required)}"
-                        ),
                     )
-                    for key, value in retry.usage.items():
-                        planned_usage[key] = planned_usage.get(key, 0) + value
-                    planned = retry
-                missing_required = missing_required_successes()
-                if missing_required:
-                    raise RuntimeError(
-                        "query planner did not successfully execute all required bounded intents "
-                        f"after retry: {sorted(missing_required)}"
-                    )
-                timings["query_planner_ms"] = int((perf_counter() - stage) * 1000)
-                evidence = planned.output
-                if not isinstance(evidence, GraphReconciliationEvidence):
-                    evidence = GraphReconciliationEvidence.model_validate(evidence)
+                    planned_usage = dict(planned.usage)
+                    required_intent_ids = {
+                        intent.intent_id for intent in required_intents
+                    }
+
+                    def missing_required_successes() -> set[str]:
+                        successful = {
+                            result.intent_id
+                            for result in query_results
+                            if result.status == "succeeded"
+                        }
+                        return required_intent_ids - successful
+
+                    missing_required = missing_required_successes()
+                    if missing_required:
+                        retry = await harness.plan_queries(
+                            run_root,
+                            execute_tool=execute_read_intent,
+                            max_turns=config.max_query_intents * 2 + 4,
+                            retry_reason=(
+                                "required host-compiled intents did not all produce successful "
+                                f"Neo4j results: {sorted(missing_required)}"
+                            ),
+                        )
+                        for key, value in retry.usage.items():
+                            planned_usage[key] = planned_usage.get(key, 0) + value
+                        planned = retry
+                    missing_required = missing_required_successes()
+                    if missing_required:
+                        raise RuntimeError(
+                            "query planner did not successfully execute all required bounded "
+                            f"intents after retry: {sorted(missing_required)}"
+                        )
+                    evidence = planned.output
+                    if not isinstance(evidence, GraphReconciliationEvidence):
+                        evidence = GraphReconciliationEvidence.model_validate(evidence)
+                query_elapsed_ms = int((perf_counter() - stage) * 1000)
+                timings["query_execution_ms"] = query_elapsed_ms
+                if config.execution_mode == "goal-directed":
+                    timings["query_planner_ms"] = query_elapsed_ms
                 actual_references = tuple(
                     (intent.intent_id, result.result_id)
                     for intent, result in zip(query_intents, query_results, strict=True)
@@ -578,7 +630,11 @@ class ReportGraphReconciliationWorkflow:
                 "workspace": workspace_metrics,
                 "selection": selection_metrics,
                 "query": query_metrics,
-                "runtime": {**timings, **usage},
+                "runtime": {
+                    **timings,
+                    **usage,
+                    **implementation_metrics,
+                },
             }
             status = "offline" if config.offline else "completed"
             result = self._result(
@@ -687,6 +743,10 @@ class ReportGraphReconciliationWorkflow:
             "",
             f"Status: **{result.status}**",
             f"Model: `{result.model}`",
+            (
+                "Execution implementation: "
+                f"`{metrics.get('runtime', {}).get('implementation_id', 'not-applicable')}`"
+            ),
             f"Schema digest: `{result.schema_digest}`",
             f"Catalog digest: `{result.catalog_digest}`",
             "",
@@ -710,3 +770,139 @@ class ReportGraphReconciliationWorkflow:
         ]
         write_text(run_root / "summary.md", "\n".join(summary))
         self._event(run_root, "run.completed", {"status": result.status})
+
+
+_EVIDENCE_ATTRIBUTE_FIELDS = (
+    "displayName",
+    "legalName",
+    "productType",
+    "panelType",
+)
+
+
+def _observational_evidence(
+    intents: list[QueryExecutionIntent],
+    results: list[QueryExecutionResult],
+) -> GraphReconciliationEvidence:
+    """Build exact evidence from persisted results without semantic invention."""
+    entities: dict[tuple[str, str | None, str | None], dict[str, Any]] = {}
+    relationships: dict[
+        tuple[str, str, str, str], ExistingRelationshipEvidence
+    ] = {}
+    failures: list[str] = []
+
+    for intent, result in zip(intents, results, strict=True):
+        if result.status != "succeeded":
+            detail = "; ".join(result.diagnostics) or result.error_type or result.status
+            failures.append(f"{intent.intent_id}: {detail}")
+            continue
+        for record in result.records:
+            candidates: list[dict[str, Any]] = []
+            entity = record.get("entity")
+            if isinstance(entity, dict):
+                candidates.append(entity)
+            source = record.get("source")
+            target = record.get("target")
+            if isinstance(source, dict):
+                candidates.append(source)
+            if isinstance(target, dict):
+                candidates.append(target)
+            for candidate in candidates:
+                labels = candidate.get("__labels")
+                entity_type = (
+                    str(labels[0])
+                    if isinstance(labels, list | tuple) and labels
+                    else (intent.labels[0] if intent.labels else "Unknown")
+                )
+                entity_id = _optional_string(candidate.get("id"))
+                name = _optional_string(candidate.get("name"))
+                key = (entity_type, entity_id, name)
+                entry = entities.setdefault(
+                    key,
+                    {
+                        "result_ids": [],
+                        "match_methods": [],
+                        "attributes": {},
+                    },
+                )
+                if result.result_id not in entry["result_ids"]:
+                    entry["result_ids"].append(result.result_id)
+                if intent.query_kind not in entry["match_methods"]:
+                    entry["match_methods"].append(intent.query_kind)
+                for field in _EVIDENCE_ATTRIBUTE_FIELDS:
+                    value = candidate.get(field)
+                    if value is not None:
+                        entry["attributes"][field] = str(value)
+            relationship_type = record.get("relationship_type")
+            if (
+                isinstance(source, dict)
+                and isinstance(target, dict)
+                and isinstance(relationship_type, str)
+            ):
+                source_id = _optional_string(source.get("id"))
+                target_id = _optional_string(target.get("id"))
+                if source_id is not None and target_id is not None:
+                    relationship = ExistingRelationshipEvidence(
+                        source_id=source_id,
+                        relationship_type=relationship_type,
+                        target_id=target_id,
+                        result_id=result.result_id,
+                    )
+                    relationships[
+                        (source_id, relationship_type, target_id, result.result_id)
+                    ] = relationship
+
+    matched_entities = tuple(
+        MatchedExistingEntity(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            name=name,
+            match_method=" + ".join(entry["match_methods"]),
+            result_ids=tuple(entry["result_ids"]),
+            attributes=tuple(
+                EvidenceAttribute(name=field, value=value)
+                for field, value in sorted(entry["attributes"].items())
+            ),
+        )
+        for (entity_type, entity_id, name), entry in sorted(
+            entities.items(),
+            key=lambda item: (
+                item[0][0],
+                item[0][2] or "",
+                item[0][1] or "",
+            ),
+        )
+    )
+    all_succeeded = len(results) == len(intents) and all(
+        result.status == "succeeded" for result in results
+    )
+    all_complete = all_succeeded and not any(result.truncated for result in results)
+    return GraphReconciliationEvidence(
+        reconciliation_question=(
+            "What existing TruDiagnostic organization record and its offered products, "
+            "lab-tests, panels, and technology platforms exist in the graph?"
+        ),
+        query_goals=tuple(intent.goal for intent in intents),
+        intent_result_references=tuple(
+            IntentResultReference(intent_id=intent.intent_id, result_id=result.result_id)
+            for intent, result in zip(intents, results, strict=True)
+        ),
+        matched_existing_entities=matched_entities,
+        existing_relationships=tuple(relationships.values()),
+        aliases_used=(),
+        match_method=" + ".join(dict.fromkeys(intent.query_kind for intent in intents)),
+        confidence="high" if all_complete else "limited",
+        unresolved_candidates=(),
+        schema_mismatches=(),
+        legacy_name_mappings=(),
+        query_failures=tuple(failures),
+        stopping_rationale=(
+            "All host-required ordered intents succeeded with complete bounded results."
+            if all_complete
+            else "Host-required ordered intents completed with failures or truncated results."
+        ),
+    )
+
+
+def _optional_string(value: Any) -> str | None:
+    return None if value is None else str(value)
