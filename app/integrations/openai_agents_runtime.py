@@ -273,6 +273,7 @@ class OpenAIAgentsSandboxRuntime:
         session_factory: RuntimeSessionFactory | None = None,
         snapshot_bridge: OpenAIAgentsSnapshotBridge | None = None,
         approval_timeout_seconds: int = 900,
+        retain_sandbox_sessions: bool = False,
     ) -> None:
         self._fixture_assets = dict(fixture_asset_contents or {})
         self._required_sandbox_tools = required_sandbox_tools
@@ -285,13 +286,23 @@ class OpenAIAgentsSandboxRuntime:
         self._session_factory = session_factory
         self._snapshot_bridge = snapshot_bridge
         self._approval_timeout_seconds = approval_timeout_seconds
+        self._retain_sandbox_sessions = retain_sandbox_sessions
         self.artifacts: dict[str, bytes] = {}
         self._docker_client: DockerSandboxClient | None = (
             snapshot_bridge.client if snapshot_bridge is not None else None
         )
         self._effects: dict[str, RuntimeResult] = {}
+        self._retained_sandboxes: dict[str, Any] = {}
+        self._retained_sandbox_locks: dict[str, asyncio.Lock] = {}
 
     async def aclose(self) -> None:
+        if self._docker_client is not None:
+            for workspace_id, session in tuple(self._retained_sandboxes.items()):
+                try:
+                    await session.aclose()
+                finally:
+                    await self._docker_client.delete(session)
+                    self._retained_sandboxes.pop(workspace_id, None)
         if self._snapshot_bridge is not None:
             await self._snapshot_bridge.aclose()
 
@@ -560,11 +571,34 @@ class OpenAIAgentsSandboxRuntime:
             if self._snapshot_bridge is not None and restored_session is None
             else None
         )
-        session = restored_session or await self._docker_client.create(
-            manifest=manifest,
-            options=sandbox_options,
-            snapshot=archive,
+        retention_key = (
+            binding.workspace.workspace_id if self._retain_sandbox_sessions else None
         )
+        retained_lock = (
+            self._retained_sandbox_locks.setdefault(retention_key, asyncio.Lock())
+            if retention_key is not None
+            else None
+        )
+        if retained_lock is not None:
+            await retained_lock.acquire()
+        retained_session = (
+            self._retained_sandboxes.get(retention_key)
+            if retention_key is not None
+            else None
+        )
+        session = restored_session or retained_session
+        if session is None:
+            session = await self._docker_client.create(
+                manifest=manifest,
+                options=sandbox_options,
+                snapshot=archive,
+            )
+            if retention_key is not None:
+                self._retained_sandboxes[retention_key] = session
+        elif retained_session is not None:
+            session.state = session.state.model_copy(update={"manifest": manifest})
+            await session.apply_manifest()
+        succeeded = False
         try:
             if restored_session is not None:
                 session.state = session.state.model_copy(update={"manifest": manifest})
@@ -700,23 +734,31 @@ class OpenAIAgentsSandboxRuntime:
                 ),
             )
             self._effects[binding.side_effect_key] = runtime_result
+            succeeded = True
             return runtime_result
         finally:
             try:
-                await session.aclose()
-                if archive is not None and self._snapshot_bridge is not None:
-                    self._snapshot_bridge.complete_capture(
-                        binding,
-                        invocation.workspace,
-                        archive,
-                        sensitive_values=tuple(
-                            value.encode("utf-8")
-                            for value in resolved_secrets.values()
-                            if value
-                        ),
-                    )
+                keep_session = retention_key is not None and succeeded
+                if not keep_session:
+                    await session.aclose()
+                    if retention_key is not None:
+                        self._retained_sandboxes.pop(retention_key, None)
+                    if archive is not None and self._snapshot_bridge is not None:
+                        self._snapshot_bridge.complete_capture(
+                            binding,
+                            invocation.workspace,
+                            archive,
+                            sensitive_values=tuple(
+                                value.encode("utf-8")
+                                for value in resolved_secrets.values()
+                                if value
+                            ),
+                        )
             finally:
-                await self._docker_client.delete(session)
+                if retention_key is None or not succeeded:
+                    await self._docker_client.delete(session)
+                if retained_lock is not None:
+                    retained_lock.release()
 
     async def _run_with_streaming_and_approvals(
         self,

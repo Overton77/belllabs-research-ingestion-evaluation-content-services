@@ -141,6 +141,11 @@ sandbox/
 .sandbox/
 agent-sandbox/
 sandbox-work/agentic-capability-probe/
+sandbox-work/goal-directed-live/
+.scratch/pytest-goal-workspace-runtime-audit/
+.scratch/pytest-of-Pinda/
+.scratch/temporal-test-server-*.exe
+.scratch/uv-*.lock
 # Do not ignore intentionally tracked example configs
 !.env.example
 

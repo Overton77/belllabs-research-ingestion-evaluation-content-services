@@ -218,25 +218,30 @@ invariants.
 - Failed semantic selection remains a valid rejected run and cannot be forced through by choosing
   another execution implementation.
 
-## 7. Current limitation
+## 7. GoalDirected runtime status
 
-The generic production GoalDirected runtime is not implemented. `GoalDirectedBlueprint` is
-publishable and compilable, but `StageGraphLaunchService` and the current Temporal orchestration
-worker execute only StageGraph blueprints.
+The generic GoalDirected runtime is now implemented alongside StageGraph:
 
-The successful GoalDirected run in this prototype uses the application-owned experiment adapter,
-not a generic GoalDirected Temporal interpreter. The binding is therefore an accurate
-control-plane prototype and an executable application proof, but it is not yet proof of generic
-production dispatch.
+- `GoalDirectedLaunchService` resolves the exact admitted configuration and protected launch
+  envelope;
+- `WorkflowLaunchDispatcher` selects execution only from the frozen blueprint family;
+- `GoalDirectedWorkflow` coordinates deterministic bounded iterations, stable retry identities,
+  budget reservation/reconciliation, token-triggered fresh sessions, typed handoffs, independent
+  verification, and terminalization through `RunControlService`;
+- `GoalWorkspaceService` regenerates read-only `goal/GOAL.md` and `goal/state.json`, enforces a
+  single sequential writer, and persists immutable checkpoints and accepted handoffs; and
+- the live acceptance runner publishes, compiles, admits, dispatches, and executes the same
+  general path with `gpt-5-mini`. Its Dave mode additionally binds the exact immutable Tavily
+  skill and a retained sequential Docker sandbox.
 
-The next runtime slice should add:
+Run the bounded live proofs with:
 
-1. a `GoalDirectedLaunchService`;
-2. a deterministic Temporal GoalDirected coordinator;
-3. typed iteration request/result/evaluation contracts;
-4. lifecycle facts routed through `RunControlService`;
-5. budget reservation/settlement for `goal.iterations`;
-6. independent final verification; and
-7. a dispatcher that rejects an admitted implementation when its execution family is unavailable.
+```powershell
+uv run python -m app.temporal.run_goal_directed_live --mode smoke
+uv run python -m app.temporal.run_goal_directed_live --mode dave
+```
 
-Until then, the staged implementation should remain the production default.
+Both modes require the already configured secret references at runtime. Secret values are
+resolved just in time and are not written into Temporal input, configuration, workspace truth,
+logs, snapshots, or committed artifacts. StageGraph remains the cheaper default for known static
+graphs; GoalDirected is the alternative when discovery and repair require bounded adaptive work.

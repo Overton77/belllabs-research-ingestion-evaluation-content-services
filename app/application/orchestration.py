@@ -8,8 +8,20 @@ from pydantic import TypeAdapter
 from app.application.control_plane import ControlPlaneService
 from app.application.run_control import RunControlService
 from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.contracts import DefinitionKind, StageGraphBlueprint
+from app.domain.control_plane.contracts import (
+    DefinitionKind,
+    GoalDirectedBlueprint,
+    StageGraphBlueprint,
+)
 from app.domain.orchestration.contracts import (
+    GoalDirectedRunInput,
+    GoalExecutionClaim,
+    GoalExecutionResult,
+    GoalHandoffRequest,
+    GoalHandoffResult,
+    GoalRevision,
+    GoalVerificationRequest,
+    GoalVerificationResult,
     LifecycleCommandOutcome,
     LifecycleCommandRequest,
     StageGraphRunInput,
@@ -117,10 +129,172 @@ class StageGraphLaunchService:
         )
 
 
+class GoalDirectedLaunchService:
+    """Resolve one admitted GoalDirected run into immutable Temporal input."""
+
+    def __init__(
+        self,
+        run_control: RunControlService,
+        control_plane: ControlPlaneService,
+    ) -> None:
+        self._run_control = run_control
+        self._control_plane = control_plane
+
+    async def prepare(
+        self,
+        request_scope: str,
+        run_id: str,
+        *,
+        initial_goal: str,
+        execution_epoch: int = 1,
+        task_timeout_seconds: int = 300,
+        orchestration_authority_ref: str = "orchestration-authority",
+    ) -> GoalDirectedRunInput:
+        if not initial_goal.strip():
+            raise ValueError("GoalDirected launch requires a concrete initial goal")
+        if execution_epoch != 1:
+            raise ValueError(
+                "execution epoch rollover requires the deferred orchestration continuity contract"
+            )
+        projection = await self._run_control.get_run(request_scope, run_id)
+        configuration = await self._control_plane.retrieve_for_admission(
+            projection.effective_configuration_digest
+        )
+        if configuration.digest != projection.effective_configuration_digest:
+            raise ValueError("admitted effective configuration digest does not match F1 authority")
+        blueprint = configuration.selected_blueprint
+        if not isinstance(blueprint, GoalDirectedBlueprint):
+            raise ValueError("admitted blueprint is not GoalDirected")
+        blueprint_ref = next(
+            (ref for ref in configuration.source_refs if ref.kind == DefinitionKind.BLUEPRINT),
+            None,
+        )
+        if blueprint_ref is None or blueprint_ref.digest != sha256_digest(blueprint):
+            raise ValueError("exact GoalDirected reference does not match the frozen blueprint")
+        budget = await self._run_control.get_budget(request_scope, run_id)
+        protected_scope_digest = sha256_digest(
+            {
+                "initial_goal": initial_goal,
+                "objective_contract": blueprint.objective_contract,
+                "acceptance_contract": blueprint.acceptance_contract,
+                "workflow_invariants": configuration.workflow_type.invariants,
+                "admitted_input_manifest": configuration.input_manifest,
+                "effective_authority": configuration.effective_authority,
+                "budget_limits": budget.limits,
+                "prohibited_work": configuration.workflow_type.non_goals,
+                "allowed_operation_classes": blueprint.allowed_operation_classes,
+                "protected_fields": blueprint.protected_scope_policy.protected_fields,
+            }
+        )
+        initial_revision_id = sha256_digest(
+            {
+                "run_id": run_id,
+                "execution_epoch": execution_epoch,
+                "revision": 1,
+                "objective": initial_goal,
+                "protected_scope_digest": protected_scope_digest,
+            }
+        )
+        initial_revision = GoalRevision(
+            revision_id=initial_revision_id,
+            revision=1,
+            parent_revision_id=None,
+            protected_scope_digest=protected_scope_digest,
+            objective=initial_goal,
+            evidence_refs=(configuration.input_manifest.digest,),
+            unmet_obligations=tuple(sorted(projection.required_obligation_refs)),
+            author="application:goal-launch",
+            deciding_authority=orchestration_authority_ref,
+            applicability="remaining_run",
+        )
+        return GoalDirectedRunInput(
+            run_id=run_id,
+            request_scope=request_scope,
+            effective_configuration_digest=configuration.digest,
+            blueprint_digest=blueprint_ref.digest,
+            blueprint=blueprint.model_dump(mode="json"),
+            protected_scope_digest=protected_scope_digest,
+            initial_revision=initial_revision,
+            initial_run_version=projection.version,
+            execution_epoch=execution_epoch,
+            task_timeout_seconds=task_timeout_seconds,
+            orchestration_authority_ref=orchestration_authority_ref,
+            correlation_id=f"orchestration:{run_id}:epoch:{execution_epoch}",
+            baseline_reservation=dict(budget.reservations.get("baseline", {})),
+            required_obligation_refs=tuple(sorted(projection.required_obligation_refs)),
+        )
+
+
+PreparedWorkflowInput = StageGraphRunInput | GoalDirectedRunInput
+
+
+class WorkflowLaunchDispatcher:
+    """Select an available orchestrator only from the admitted blueprint family."""
+
+    def __init__(
+        self,
+        *,
+        stagegraph: StageGraphLaunchService | None,
+        goal_directed: GoalDirectedLaunchService | None,
+        run_control: RunControlService,
+        control_plane: ControlPlaneService,
+    ) -> None:
+        self._stagegraph = stagegraph
+        self._goal_directed = goal_directed
+        self._run_control = run_control
+        self._control_plane = control_plane
+
+    async def prepare(
+        self,
+        request_scope: str,
+        run_id: str,
+        *,
+        initial_goal: str | None = None,
+        task_timeout_seconds: int = 300,
+        orchestration_authority_ref: str = "orchestration-authority",
+    ) -> PreparedWorkflowInput:
+        projection = await self._run_control.get_run(request_scope, run_id)
+        configuration = await self._control_plane.retrieve_for_admission(
+            projection.effective_configuration_digest
+        )
+        blueprint = configuration.selected_blueprint
+        if isinstance(blueprint, StageGraphBlueprint):
+            if self._stagegraph is None:
+                raise ValueError("StageGraph execution family is unavailable")
+            if initial_goal is not None:
+                raise ValueError("StageGraph launch does not accept a GoalDirected initial goal")
+            return await self._stagegraph.prepare(request_scope, run_id)
+        if isinstance(blueprint, GoalDirectedBlueprint):
+            if self._goal_directed is None:
+                raise ValueError("GoalDirected execution family is unavailable")
+            if initial_goal is None:
+                raise ValueError("GoalDirected launch requires a concrete initial goal")
+            return await self._goal_directed.prepare(
+                request_scope,
+                run_id,
+                initial_goal=initial_goal,
+                task_timeout_seconds=task_timeout_seconds,
+                orchestration_authority_ref=orchestration_authority_ref,
+            )
+        raise ValueError(f"unsupported admitted blueprint family: {type(blueprint).__name__}")
+
+
 class StageOperationExecutor(Protocol):
     """F4 seam for bounded runtime execution; issue 3 uses explicit fakes."""
 
     async def execute(self, request: StageOperationRequest) -> StageOperationResult: ...
+
+
+class GoalIterationExecutor(Protocol):
+    async def execute(self, claim: GoalExecutionClaim) -> GoalExecutionResult: ...
+
+
+class GoalHandoffPreparer(Protocol):
+    async def prepare(self, request: GoalHandoffRequest) -> GoalHandoffResult: ...
+
+
+class GoalIndependentVerifier(Protocol):
+    async def verify(self, request: GoalVerificationRequest) -> GoalVerificationResult: ...
 
 
 class WorkflowEvaluator(Protocol):
