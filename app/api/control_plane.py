@@ -27,6 +27,7 @@ from app.domain.control_plane.contracts import (
     SaveDraftRequest,
 )
 from app.domain.control_plane.extensions import ExtensionRegistry
+from app.domain.schema_grounding.definitions import register_schema_grounding_extensions
 from app.integrations.control_plane_payloads import (
     ContentAddressedPayloadStore,
     S3PayloadStore,
@@ -58,9 +59,11 @@ async def get_control_plane_service(request: Request) -> ControlPlaneService:
             payload_store = UnavailablePayloadStore()
             # Stay below MongoDB's 16 MiB document limit and fail explicitly above it.
             externalize_above_bytes = 15_000_000
+        extensions = ExtensionRegistry()
+        register_schema_grounding_extensions(extensions)
         service = ControlPlaneService(
             BeanieDefinitionRepository(),
-            ExtensionRegistry(),
+            extensions,
             payload_store,
             externalize_above_bytes=externalize_above_bytes,
         )

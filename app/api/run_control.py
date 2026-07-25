@@ -16,8 +16,12 @@ from app.api.control_plane import (
 from app.application.operation_submission import GenericArtifactSubmissionPort
 from app.application.postgres_run_control_repository import PostgresRunControlRepository
 from app.application.run_control import (
+    AdmissionPolicyRegistry,
     F1RunConfigurationVerifier,
     RunControlService,
+)
+from app.application.schema_grounding_admission import (
+    register_schema_grounding_admission_policies,
 )
 from app.config import get_settings
 from app.domain.operation_execution.contracts import (
@@ -126,10 +130,9 @@ async def get_run_control_service(request: Request) -> RunControlService:
         control_plane = await get_control_plane_service(request)
         policies = getattr(request.app.state, "admission_policy_registry", None)
         if policies is None:
-            raise HTTPException(
-                status_code=503,
-                detail="executable admission policy registry is not configured",
-            )
+            policies = AdmissionPolicyRegistry()
+            register_schema_grounding_admission_policies(policies)
+            request.app.state.admission_policy_registry = policies
         service = RunControlService(
             PostgresRunControlRepository(pool),
             F1RunConfigurationVerifier(control_plane),
