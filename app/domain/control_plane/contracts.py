@@ -308,14 +308,138 @@ class StageGraphBlueprint(DefinitionBase):
         return self
 
 
+class GoalSessionRolloverPolicy(Contract):
+    """Authored context lifecycle for bounded GoalDirected iterations."""
+
+    session_mode: Literal["reuse", "fresh", "fresh_from_handoff"] = "reuse"
+    fresh_agent_token_threshold: int = Field(default=100_000, ge=1)
+    handoff_token_reserve: int = Field(default=4_000, ge=0)
+    rollover_mode: Literal["fresh", "fresh_from_handoff"] = "fresh_from_handoff"
+
+
+class GoalWorkspaceSnapshotPolicy(Contract):
+    """Workspace continuity is independent from model-session continuity."""
+
+    workspace_mode: Literal["shared", "fresh", "fresh_from_snapshot"] = "shared"
+    snapshot_mode: Literal[
+        "none",
+        "on_rollover",
+        "every_iteration",
+        "on_failure",
+    ] = "on_rollover"
+    rollback_on_failure: bool = True
+    goal_path: str = Field(default="/goal/GOAL.md", min_length=1)
+    handoff_path: str = Field(default="/goal/HANDOFF.md", min_length=1)
+    checkpoint_path: str = Field(default="/goal/checkpoint.json", min_length=1)
+
+    @field_validator("goal_path", "handoff_path", "checkpoint_path")
+    @classmethod
+    def goal_paths_are_absolute(cls, value: str) -> str:
+        if not value.startswith("/") or ".." in value.split("/"):
+            raise ValueError("goal workspace paths must be absolute and cannot traverse parents")
+        return value
+
+
+class GoalConvergencePolicy(Contract):
+    max_no_progress_iterations: int = Field(default=3, ge=1)
+    max_repeated_blockers: int = Field(default=3, ge=1)
+
+
+GoalProtectedField = Literal[
+    "objective",
+    "acceptance",
+    "invariants",
+    "admitted_inputs",
+    "authority",
+    "budget",
+    "prohibited_work",
+]
+
+
+class GoalProtectedScopePolicy(Contract):
+    """Fields a Goal Revision can never mutate inside the current run."""
+
+    protected_fields: frozenset[GoalProtectedField] = frozenset(
+        {
+            "objective",
+            "acceptance",
+            "invariants",
+            "admitted_inputs",
+            "authority",
+            "budget",
+            "prohibited_work",
+        }
+    )
+    expansion_route: Literal[
+        "control_revision",
+        "fork",
+        "linked_run",
+        "new_run",
+    ] = "new_run"
+
+    @field_validator("protected_fields")
+    @classmethod
+    def all_governing_fields_are_protected(
+        cls, value: frozenset[GoalProtectedField]
+    ) -> frozenset[GoalProtectedField]:
+        required = {
+            "objective",
+            "acceptance",
+            "invariants",
+            "admitted_inputs",
+            "authority",
+            "budget",
+            "prohibited_work",
+        }
+        if value != required:
+            raise ValueError("GoalDirected revisions must protect the complete launch envelope")
+        return value
+
+
 class GoalDirectedBlueprint(DefinitionBase):
     kind: Literal[DefinitionKind.BLUEPRINT] = DefinitionKind.BLUEPRINT
     family: Literal["GoalDirected"] = "GoalDirected"
     objective_contract: str = Field(min_length=1)
     acceptance_contract: str = Field(min_length=1)
     independent_verification_required: Literal[True] = True
+    independent_verifier_ref: str = Field(
+        default="verifier:independent-goal-acceptance@1",
+        min_length=1,
+    )
+    allowed_operation_classes: frozenset[str] = frozenset({"goal_iteration"})
+    session_policy: GoalSessionRolloverPolicy = Field(
+        default_factory=GoalSessionRolloverPolicy
+    )
+    workspace_policy: GoalWorkspaceSnapshotPolicy = Field(
+        default_factory=GoalWorkspaceSnapshotPolicy
+    )
+    convergence_policy: GoalConvergencePolicy = Field(
+        default_factory=GoalConvergencePolicy
+    )
+    iteration_reservation: dict[str, int] = Field(
+        default_factory=lambda: {"goal.iterations": 1}
+    )
+    protected_scope_policy: GoalProtectedScopePolicy = Field(
+        default_factory=GoalProtectedScopePolicy
+    )
     max_iterations: int = Field(ge=1)
     variant_names: frozenset[str] = Field(default_factory=frozenset)
+
+    @field_validator("allowed_operation_classes")
+    @classmethod
+    def operation_classes_are_declared(cls, value: frozenset[str]) -> frozenset[str]:
+        if not value or any(not item for item in value):
+            raise ValueError("GoalDirected requires at least one allowed operation class")
+        return value
+
+    @field_validator("iteration_reservation")
+    @classmethod
+    def iteration_reservation_is_bounded(cls, value: dict[str, int]) -> dict[str, int]:
+        if any(not dimension or amount < 0 for dimension, amount in value.items()):
+            raise ValueError("goal iteration reservations require names and non-negative amounts")
+        if value.get("goal.iterations", 0) < 1:
+            raise ValueError("goal iteration reservations require one goal.iterations unit")
+        return value
 
 
 WorkflowBlueprint = Annotated[

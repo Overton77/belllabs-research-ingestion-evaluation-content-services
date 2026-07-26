@@ -31,6 +31,7 @@ class Settings(BaseSettings):
 
     openai_api_key: SecretStr
     openai_model: str = "gpt-5.4-nano"
+    tavily_api_key: SecretStr | None = None
 
     mongodb_uri: SecretStr
     mongodb_database: str = "belllabsbiotech"
