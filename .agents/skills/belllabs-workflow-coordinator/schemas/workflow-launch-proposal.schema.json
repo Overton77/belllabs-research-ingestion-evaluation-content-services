@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "request_scope",
+    "workflow_type_selector",
+    "input_manifest",
+    "requested_overlays",
+    "selected_asset_requests",
+    "approvals",
+    "idempotency_issuer",
+    "idempotency_key"
+  ],
+  "properties": {
+    "request_scope": {"type": "string", "minLength": 1},
+    "workflow_type_selector": {"type": "object"},
+    "implementation_selector": {"type": ["object", "null"]},
+    "initial_goal": {"type": ["string", "null"]},
+    "input_manifest": {"type": "object"},
+    "requested_overlays": {"type": "object"},
+    "selected_asset_requests": {"type": "array", "items": {"type": "object"}},
+    "parent_constraints": {"type": ["object", "null"]},
+    "approvals": {"type": "array", "items": {"type": "string"}},
+    "idempotency_issuer": {"type": "string", "minLength": 1},
+    "idempotency_key": {"type": "string", "minLength": 1}
+  }
+}

@@ -10,6 +10,7 @@ from app.application.control_plane_repository import DefinitionRepository
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.compiler import compile_effective_run_configuration
 from app.domain.control_plane.contracts import (
+    AgentProfileDefinition,
     AliasBinding,
     AliasRef,
     AuthoringHead,
@@ -23,6 +24,8 @@ from app.domain.control_plane.contracts import (
     EvaluationProfileDefinition,
     ExactDefinitionRef,
     GoalDirectedBlueprint,
+    MCPServerDefinition,
+    MCPToolDefinition,
     MoveAliasRequest,
     PublishDraftRequest,
     PublishedDefinition,
@@ -31,6 +34,7 @@ from app.domain.control_plane.contracts import (
     RetireRequest,
     RuntimeProfileDefinition,
     SaveDraftRequest,
+    SkillDefinition,
     StageGraphBlueprint,
     WorkflowConfigurationDefinition,
     WorkflowImplementationBindingDefinition,
@@ -312,6 +316,63 @@ class ControlPlaneService:
             await self._validate_implementation_publication(definition)
         elif isinstance(definition, WorkflowConfigurationDefinition):
             self._extensions.validate_all(definition.extensions)
+        elif isinstance(definition, SkillDefinition):
+            actual_manifest_digest = sha256_digest(definition.file_manifest)
+            if definition.manifest_digest != actual_manifest_digest:
+                raise CompilationRejected(
+                    "Skill Definition manifest digest does not match its exact file manifest"
+                )
+        elif isinstance(definition, MCPServerDefinition):
+            if definition.schema_digest != definition.schema_snapshot_ref.digest:
+                raise CompilationRejected(
+                    "MCP Server schema digest does not match its immutable schema snapshot"
+                )
+        elif isinstance(definition, MCPToolDefinition):
+            server_record = await self._selectable(definition.server_ref)
+            server = self._expect(server_record.definition, MCPServerDefinition)
+            if definition.tool_name not in server.allowed_tools:
+                raise CompilationRejected(
+                    "MCP Tool is not present in the exact parent server allowlist"
+                )
+            schema_payload = {
+                "tool_name": definition.tool_name,
+                "input_schema": definition.input_schema,
+                "output_schema": definition.output_schema,
+                "annotations": definition.annotations,
+            }
+            if definition.schema_digest != sha256_digest(schema_payload):
+                raise CompilationRejected(
+                    "MCP Tool schema digest does not match its frozen schema payload"
+                )
+        elif isinstance(definition, AgentProfileDefinition):
+            records = [
+                await self._selectable(ref)
+                for ref in (
+                    *sorted(
+                        definition.prompt_refs,
+                        key=lambda ref: (ref.logical_id, ref.revision),
+                    ),
+                    *sorted(
+                        definition.skill_refs,
+                        key=lambda ref: (ref.logical_id, ref.revision),
+                    ),
+                    *sorted(
+                        definition.mcp_server_refs,
+                        key=lambda ref: (ref.logical_id, ref.revision),
+                    ),
+                    *sorted(
+                        definition.tool_refs,
+                        key=lambda ref: (ref.logical_id, ref.revision),
+                    ),
+                )
+            ]
+            selected_servers = set(definition.mcp_server_refs)
+            for record in records:
+                if isinstance(record.definition, MCPToolDefinition):
+                    if record.definition.server_ref not in selected_servers:
+                        raise CompilationRejected(
+                            "Agent Profile tool selection requires its exact parent MCP Server"
+                        )
 
     async def _validate_definition_shape(self, definition: Definition) -> None:
         if isinstance(definition, WorkflowTypeDefinition):

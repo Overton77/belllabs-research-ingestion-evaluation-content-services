@@ -60,20 +60,39 @@ class UnavailablePayloadStore:
 
 
 class S3PayloadStore:
-    def __init__(self, settings: Settings, bucket: str, prefix: str = "control-plane/erc") -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        bucket: str,
+        prefix: str = "control-plane/erc",
+        *,
+        media_type: str = "application/json",
+        suffix: str = ".json",
+    ) -> None:
+        if not media_type.strip():
+            raise ValueError("S3 payload media type must be non-empty")
+        if (
+            not suffix.startswith(".")
+            or len(suffix) == 1
+            or "/" in suffix
+            or "\\" in suffix
+        ):
+            raise ValueError("S3 payload suffix must be a simple dot-prefixed extension")
         self._settings = settings
         self._bucket = bucket
         self._prefix = prefix.rstrip("/")
+        self._media_type = media_type
+        self._suffix = suffix
 
     async def put(self, payload: bytes) -> ContentAddress:
         digest = _bytes_digest(payload)
-        key = f"{self._prefix}/{digest.removeprefix('sha256:')}.json"
+        key = f"{self._prefix}/{digest.removeprefix('sha256:')}{self._suffix}"
         async with s3_client(self._settings) as client:
             response = await client.put_object(
                 Bucket=self._bucket,
                 Key=key,
                 Body=payload,
-                ContentType="application/json",
+                ContentType=self._media_type,
                 Metadata={"sha256": digest.removeprefix("sha256:")},
             )
         return ContentAddress(

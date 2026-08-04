@@ -13,7 +13,10 @@ dependencies = [
   "beanie>=2,<3",
   "docker>=7,<8",
   "fastapi>=0.116,<1",
+  "fastmcp==3.4.4",
   "graphql-core>=3.2,<4",
+  "httpx>=0.28,<1",
+  "langsmith[openai-agents]>=0.3.15",
   "neo4j>=5.28,<7",
   # openai 2.46 added a required usage field before openai-agents 0.17.8 adapted.
   "openai>=2.36,<2.45",
@@ -59,6 +62,7 @@ select = ["E", "F", "I", "UP", "B", "ASYNC"]
 [tool.mypy]
 python_version = "3.12"
 plugins = ["pydantic.mypy"]
+exclude = ["app/personal_code/"]
 check_untyped_defs = true
 no_implicit_optional = true
 warn_unused_ignores = true

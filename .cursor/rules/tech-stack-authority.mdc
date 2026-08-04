@@ -1,28 +1,45 @@
 ---
-description: Current stack roles and data-authority boundaries (control-plane snapshot)
-alwaysApply: true
+alwaysApply: false
 ---
 
 # Tech stack & data authority
 
-**Evolving snapshot** while finishing control-plane foundations/capabilities. Update when stack roles change. Do not invent new stores without a spec/ticket. Local wiring: `README.md` / `.env.example`.
+**Evolving snapshot** after control-plane foundations, linked runs, operation execution, sandbox snapshots, schema grounding, and goal-directed live experiments. Update when stack roles change. Do not invent new stores without a spec/ticket. Local wiring: `README.md` / `.env.example`.
 
-| System | Used for | Authority |
-|--------|----------|-----------|
-| **FastAPI + Socket.IO** | HTTP API, startup migrations, realtime transport | Entry/transport only |
-| **uv / Python 3.12** | Project env, `uv run`, lockfile | Standard invoke path |
-| **Postgres (application)** | Run lifecycle, commands, transitions, budgets, outbox, cursors, authz projections, linked-run rollups, durable approvals | **Authoritative** control-plane transactional state (local port `55432`) |
-| **Postgres (Temporal)** | Temporal persistence only | Separate DB — **not** domain authority |
-| **Redis** | Fan-out / notifications for realtime + approval wakes | **Not** durable authority; durable events stay in application Postgres |
-| **Supabase** | Hosted Postgres path + vector for memory-related retrieval | Memory/vector when wired; do not confuse with Temporal or app control DB |
-| **MongoDB + Beanie** | Immutable definitions, Effective Run Config, operation bindings, workspace/artifact metadata, workflow-shaped docs | **Authoritative** for those document payloads (`AsyncMongoClient`, DB `belllabsbiotech`) |
-| **Temporal** | Durable workflows/activities, retries, sandbox-bound agent work | Execution mechanics only |
-| **Neo4j** | Approved canonical graph knowledge | Graph authority; preflight/refinement read-only unless a later spec says otherwise |
-| **Object storage (S3/aioboto3)** | Large immutable payloads, artifacts, reports, snapshots | Blob authority (Mongo holds refs/metadata) |
-| **OpenAI Agents SDK + Docker** | Governed agent runs, tools, sandboxed exec, Temporal durable-workflow plugin | Bound through ports/bindings; never invents control-plane state by existing |
+| System                           | Used for                                                                                                                                                                                                 | Authority                                                                                                                         |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| **FastAPI + Socket.IO**          | HTTP API (`/control-plane/v1`, `/run-control/v1`, `/schema-grounding/v1`), startup migrations, Supabase-authenticated realtime transport                                                                 | Entry/transport only                                                                                                              |
+| **uv / Python 3.12**             | Project env, `uv run`, lockfile                                                                                                                                                                          | Standard invoke path                                                                                                              |
+| **Postgres (application)**       | Run lifecycle, commands, transitions, budgets, outbox, cursors, authz projections, linked-run rollups, durable approvals, artifact reference index, **agent runtime** sessions/messages/events/approvals | **Authoritative** control-plane transactional state (local port `55432`; runtime role `belllabs_control_runtime` with tenant RLS) |
+| **Postgres (Temporal)**          | Temporal persistence only                                                                                                                                                                                | Separate DB — **not** domain authority                                                                                            |
+| **Redis**                        | Fan-out / notifications for realtime clients and approval wakes (local port `56379`)                                                                                                                     | **Not** durable authority; durable events stay in application Postgres                                                            |
+| **Supabase**                     | Socket.IO auth (`access_token` → actor/roles/scopes); optional hosted Postgres/vector path for memory-related retrieval                                                                                  | Auth/tenant context for realtime; memory/vector when wired — do not confuse with Temporal or app control DB                       |
+| **MongoDB + Beanie**             | Immutable definitions, Effective Run Configuration, operation bindings/settlements, sandbox snapshots, workspace materialization manifests, schema grounding records, artifact metadata revisions        | **Authoritative** for those document payloads (`AsyncMongoClient`, DB `belllabsbiotech`)                                          |
+| **Temporal**                     | Durable workflows/activities, retries, sandbox-bound agent work; task queues: default, `-linked-runs`, `-schema-grounding`                                                                               | Execution mechanics only                                                                                                          |
+| **Neo4j**                        | Approved canonical graph knowledge; **bounded read-only** intents at the schema-grounding boundary                                                                                                       | Graph authority; no arbitrary Cypher from agents — host validates allowlisted query kinds                                         |
+| **Object storage (S3/aioboto3)** | Large immutable payloads: control-plane externalized definitions, schema catalog bundles, artifacts, reports, snapshots                                                                                  | Blob authority (Mongo holds refs/metadata/digests)                                                                                |
+| **OpenAI Agents SDK + Docker**   | Governed agent runs, tools, sandboxed exec, Temporal durable-workflow plugin (`OpenAIAgentsPlugin`)                                                                                                      | Bound through ports/bindings; never invents control-plane state by existing                                                       |
+| **Tavily** (optional)            | Web search tool in governed runs when `TAVILY_API_KEY` is set                                                                                                                                            | External retrieval — not authority                                                                                                |
+| **Filesystem workspace**         | Goal-directed live probes and local workspace materialization under `sandbox-work/`                                                                                                                      | Ephemeral execution surface — durable contracts/refs live in Mongo/Postgres                                                       |
+| **OpenTelemetry**                | Temporal/OpenAI Agents plugin tracing hooks                                                                                                                                                              | Observability only                                                                                                                |
+
+## Authority by concern
+
+| Concern                                   | Authoritative store   | Notes                                                         |
+| ----------------------------------------- | --------------------- | ------------------------------------------------------------- |
+| Workflow Run lifecycle, budgets, commands | Application Postgres  | Reducer + outbox in `domain/run_control`                      |
+| Published definitions, ERC, aliases       | MongoDB               | Large bodies may externalize to S3                            |
+| Linked-run composition, admission         | Application Postgres  | Child runs still compile/admit separately                     |
+| Operation bindings, settlements           | MongoDB               | Exact prompt/model/tool/MCP/skill/plugin bindings             |
+| Sandbox snapshots, clone lineage          | MongoDB               | Compatibility assessed in application layer                   |
+| Agent runtime session/events/approvals    | Application Postgres  | Redis wakes clients; Postgres is durable                      |
+| Schema catalog bundles                    | S3 (+ Mongo metadata) | Content-addressed, default-deny graph access                  |
+| Schema grounding records, query intents   | MongoDB               | Neo4j results are validated projections, not free-form writes |
+| Graph canonical knowledge                 | Neo4j                 | Read through bounded executor + workspace binding gates       |
 
 ## Hard rules
 
-- Temporal, Redis, Socket.IO, and model output must **not** be the system of record for run lifecycle, budgets, or admissions.
-- Prompts, skills, MCP tools, plugins, memory packs, and agent output are **never** authority merely because they exist (catalog + exact bindings required where specs say so).
-- When unsure where state lives, check the matching `F*`/`C*` spec in `../biotech-meta/docs/specs/pre-research/` before coding.
+- Temporal, Redis, Socket.IO, model output, and experiment folders must **not** be the system of record for run lifecycle, budgets, or admissions.
+- Prompts, skills, MCP tools, plugins, memory packs, Tavily results, and agent output are **never** authority merely because they exist (catalog + exact bindings required where specs say so).
+- Graph access is default-deny: require matching catalog deployment manifest, workspace binding, graph-authority grant, and purpose-bound projection before Neo4j reads.
+- When unsure where state lives, check the matching `F*`/`C*` spec in `../biotech-meta/docs/specs/pre-research/` and `docs/CODEBASE_DOMAIN_WORKFLOW_GUIDE.md` before coding.

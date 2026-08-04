@@ -2,19 +2,28 @@ from __future__ import annotations
 
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import (
+    AgentProfileDefinition,
     AuthorityCeiling,
     BudgetCeiling,
+    CatalogPayloadRef,
     ControlProfileDefinition,
     Definition,
+    DefinitionKind,
     EvaluationProfileDefinition,
     ExactDefinitionRef,
     ExtensionIdentity,
     GoalDirectedBlueprint,
     LinkedRunSlotConstraint,
+    ModelPolicy,
     NamespacedExtension,
     ObligationRealization,
     OutputContractRealization,
+    PromptDefinition,
     RuntimeProfileDefinition,
+    SkillCompatibility,
+    SkillDefinition,
+    SkillFileManifestEntry,
+    SourceProvenance,
     StageGraphBlueprint,
     StageNode,
     WorkflowConfigurationDefinition,
@@ -139,9 +148,7 @@ def schema_grounding_definitions() -> tuple[Definition, ...]:
         title="Governed schema selection runtime",
         description="Executes selector and reviewer through immutable operation bindings.",
         binding="temporal-stagegraph+operation-execution",
-        required_capabilities=frozenset(
-            {"schema.catalog.read", "operation.execute.agent"}
-        ),
+        required_capabilities=frozenset({"schema.catalog.read", "operation.execute.agent"}),
     )
     reconciliation_runtime = RuntimeProfileDefinition(
         logical_id="supporting-graph-reconciliation-runtime-v1",
@@ -201,9 +208,7 @@ def schema_grounding_definitions() -> tuple[Definition, ...]:
                 purpose="immutable bounded intent/result evidence candidates",
             ),
         ),
-        required_capabilities=frozenset(
-            {"schema.workspace.read", "graph.read.bounded"}
-        ),
+        required_capabilities=frozenset({"schema.workspace.read", "graph.read.bounded"}),
     )
     selection_evaluation = EvaluationProfileDefinition(
         logical_id="schema-context-selection-evaluation-v1",
@@ -240,6 +245,73 @@ def schema_grounding_definitions() -> tuple[Definition, ...]:
             }
         ),
         required_capabilities=frozenset({"graph.read.bounded"}),
+    )
+    schema_agent_skill = _schema_navigation_skill()
+    selection_prompt = PromptDefinition(
+        logical_id="prompt.schema-context-selection-v1",
+        title="Schema context selection prompt",
+        description="Reviewed instructions for purpose-bound schema selection.",
+        format="markdown",
+        template_engine="none",
+        body=(
+            "Select only schema elements justified by the admitted report and catalog. "
+            "Preserve exact lineage and return the strict selection contract."
+        ),
+        trust_class="privileged",
+        eval_refs=frozenset({"evaluation:schema-selection:v1"}),
+    )
+    reconciliation_prompt = PromptDefinition(
+        logical_id="prompt.supporting-graph-reconciliation-v1",
+        title="Supporting graph reconciliation prompt",
+        description="Reviewed instructions for bounded observational graph reconciliation.",
+        format="markdown",
+        template_engine="none",
+        body=(
+            "Use only projection-bound query intents admitted by the host. Never author "
+            "arbitrary Cypher or mutate the graph; return strict immutable evidence."
+        ),
+        trust_class="privileged",
+        eval_refs=frozenset({"evaluation:supporting-graph-reconciliation:v1"}),
+    )
+    selection_agent = AgentProfileDefinition(
+        logical_id="agent-profile.schema-context-selection-v1",
+        title="Schema context selection agent",
+        description="Exact selector and independent-reviewer profile for Scenario A.",
+        prompt_refs=frozenset({_ref(selection_prompt)}),
+        skill_refs=frozenset({_ref(schema_agent_skill)}),
+        model_policy=ModelPolicy(
+            provider="openai",
+            model="gpt-5-mini",
+            settings={"reasoning_effort": "low", "max_turns": 20},
+        ),
+        guardrail_refs=frozenset(
+            {
+                "guardrail:schema-selection-exact-lineage:v1",
+                "guardrail:independent-review-binding:v1",
+            }
+        ),
+        output_schema_ref="schema:schema-context-selection:v1",
+        maximum_capability_request=selection_control.authority_ceiling,
+    )
+    reconciliation_agent = AgentProfileDefinition(
+        logical_id="agent-profile.supporting-graph-reconciliation-v1",
+        title="Supporting graph reconciliation agent",
+        description="Exact bounded planner profile for Scenario C.",
+        prompt_refs=frozenset({_ref(reconciliation_prompt)}),
+        skill_refs=frozenset({_ref(schema_agent_skill)}),
+        model_policy=ModelPolicy(
+            provider="openai",
+            model="gpt-5-mini",
+            settings={"reasoning_effort": "low", "max_turns": 20},
+        ),
+        guardrail_refs=frozenset(
+            {
+                "guardrail:no-arbitrary-cypher:v1",
+                "guardrail:projection-bound-intents:v1",
+            }
+        ),
+        output_schema_ref="schema:bounded-query-plan:v1",
+        maximum_capability_request=reconciliation_goal_control.authority_ceiling,
     )
 
     selection_config = WorkflowConfigurationDefinition(
@@ -320,9 +392,7 @@ def schema_grounding_definitions() -> tuple[Definition, ...]:
                 "obligation:bounded-query-evidence:v1",
             }
         ),
-        output_contracts=frozenset(
-            {"schema:supporting-graph-reconciliation-record:v1"}
-        ),
+        output_contracts=frozenset({"schema:supporting-graph-reconciliation-record:v1"}),
         allowed_blueprints=frozenset(
             {reconciliation_blueprint_ref, reconciliation_goal_blueprint_ref}
         ),
@@ -334,9 +404,7 @@ def schema_grounding_definitions() -> tuple[Definition, ...]:
         allowed_evaluation_profiles=frozenset({_ref(reconciliation_evaluation)}),
         allowed_workflow_configurations=frozenset({_ref(reconciliation_config)}),
         authority_ceiling=reconciliation_control.authority_ceiling,
-        workspace_contract=WorkflowWorkspaceContract(
-            slots=reconciliation_workspace.slots
-        ),
+        workspace_contract=WorkflowWorkspaceContract(slots=reconciliation_workspace.slots),
         linked_run_slots=(
             LinkedRunSlotConstraint(
                 slot_id="schema_context_selection",
@@ -487,6 +555,11 @@ def schema_grounding_definitions() -> tuple[Definition, ...]:
         reconciliation_workspace,
         selection_evaluation,
         reconciliation_evaluation,
+        schema_agent_skill,
+        selection_prompt,
+        reconciliation_prompt,
+        selection_agent,
+        reconciliation_agent,
         selection_config,
         reconciliation_config,
         selection_type,
@@ -494,6 +567,21 @@ def schema_grounding_definitions() -> tuple[Definition, ...]:
         selection_implementation,
         reconciliation_stage_implementation,
         reconciliation_goal_implementation,
+    )
+
+
+def schema_grounding_agent_definitions() -> tuple[Definition, ...]:
+    """Return only the exact agent assets added to the established workflow surface."""
+
+    kinds = {
+        DefinitionKind.PROMPT,
+        DefinitionKind.SKILL,
+        DefinitionKind.AGENT_PROFILE,
+    }
+    return tuple(
+        definition
+        for definition in schema_grounding_definitions()
+        if definition.kind in kinds
     )
 
 
@@ -580,15 +668,9 @@ def _reconciliation_blueprint() -> StageGraphBlueprint:
         "promote_result": "reconciliation_result",
     }
     obligations = {
-        "derive_schema_context": frozenset(
-            {"obligation:schema-context-derived:v1"}
-        ),
-        "graph_authority_gate": frozenset(
-            {"obligation:graph-gate-admitted:v1"}
-        ),
-        "execute_bounded_intents": frozenset(
-            {"obligation:bounded-query-evidence:v1"}
-        ),
+        "derive_schema_context": frozenset({"obligation:schema-context-derived:v1"}),
+        "graph_authority_gate": frozenset({"obligation:graph-gate-admitted:v1"}),
+        "execute_bounded_intents": frozenset({"obligation:bounded-query-evidence:v1"}),
     }
     return StageGraphBlueprint(
         logical_id="supporting-graph-reconciliation-v1",
@@ -597,9 +679,7 @@ def _reconciliation_blueprint() -> StageGraphBlueprint:
         stages=tuple(
             StageNode(
                 stage_id=stage_id,
-                depends_on=(
-                    frozenset({stage_ids[index - 1]}) if index else frozenset()
-                ),
+                depends_on=(frozenset({stage_ids[index - 1]}) if index else frozenset()),
                 reservation={"operation.attempts": 1},
                 obligation_refs=obligations.get(stage_id, frozenset()),
                 output_slots=frozenset({output_slots[stage_id]}),
@@ -671,6 +751,60 @@ def _extension_identity() -> ExtensionIdentity:
         namespace=SCHEMA_GROUNDING_EXTENSION_NAMESPACE,
         schema_version=SCHEMA_GROUNDING_EXTENSION_VERSION,
         discriminator=SCHEMA_GROUNDING_EXTENSION_DISCRIMINATOR,
+    )
+
+
+def _schema_navigation_skill() -> SkillDefinition:
+    body = (
+        "---\nname: schema-navigation\n"
+        "description: Navigate an admitted schema catalog and projection.\n---\n"
+        "Read only the mounted catalog profile. Keep every selection and query intent "
+        "bound to exact admitted digests."
+    )
+    body_digest = sha256_digest(body)
+    manifest = (
+        SkillFileManifestEntry(
+            path="SKILL.md",
+            digest=body_digest,
+            size_bytes=len(body.encode("utf-8")),
+        ),
+    )
+    return SkillDefinition(
+        logical_id="skill.schema-navigation",
+        title="Schema navigation",
+        description="Reviewed procedure for exact catalog and projection navigation.",
+        skill_name="schema-navigation",
+        frontmatter={
+            "name": "schema-navigation",
+            "description": "Navigate an admitted schema catalog and projection.",
+        },
+        body_summary=(
+            "Keep schema selection and graph query intents bound to admitted exact digests."
+        ),
+        bundle_ref=CatalogPayloadRef(
+            uri=(
+                "belllabs://schema-grounding/skills/schema-navigation/"
+                f"{body_digest.removeprefix('sha256:')}"
+            ),
+            digest=body_digest,
+            media_type="text/markdown",
+            size_bytes=len(body.encode("utf-8")),
+        ),
+        manifest_digest=sha256_digest(manifest),
+        file_manifest=manifest,
+        required_capabilities=frozenset({"schema.catalog.read"}),
+        compatibility=SkillCompatibility(
+            runtimes=frozenset({"python-3.12"}),
+            workspace_capabilities=frozenset({"workspace.read_only"}),
+        ),
+        source_provenance=SourceProvenance(
+            source="local",
+            locator="app/integrations/schema_agent_prompts.py",
+            upstream_identity="belllabs-schema-navigation",
+            upstream_version="1",
+            license="proprietary",
+        ),
+        review_status="approved",
     )
 
 

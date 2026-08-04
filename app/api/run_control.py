@@ -23,6 +23,9 @@ from app.application.run_control import (
 from app.application.schema_grounding_admission import (
     register_schema_grounding_admission_policies,
 )
+from app.application.web_research_admission import (
+    register_web_research_admission_policies,
+)
 from app.config import get_settings
 from app.domain.operation_execution.contracts import (
     GenericArtifactWorkflowRequest,
@@ -132,6 +135,7 @@ async def get_run_control_service(request: Request) -> RunControlService:
         if policies is None:
             policies = AdmissionPolicyRegistry()
             register_schema_grounding_admission_policies(policies)
+            register_web_research_admission_policies(policies)
             request.app.state.admission_policy_registry = policies
         service = RunControlService(
             PostgresRunControlRepository(pool),

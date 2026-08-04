@@ -61,6 +61,7 @@ from app.temporal.operation_activities import (
     parse_operation_result,
 )
 from app.temporal.operation_workflow import OperationExecutionWorkflow
+from app.temporal.workflow_sandbox import coordinator_workflow_runner
 
 NOW = datetime(2026, 7, 19, 20, 0, tzinfo=UTC)
 DIGEST = "sha256:" + "a" * 64
@@ -645,6 +646,7 @@ async def test_real_temporal_activity_uses_public_operation_result_seam() -> Non
             environment.client,
             task_queue="operation-execution-conformance",
             workflows=[OperationExecutionWorkflow],
+            workflow_runner=coordinator_workflow_runner(),
             activities=[activities.execute],
         ):
             payload = await environment.client.execute_workflow(

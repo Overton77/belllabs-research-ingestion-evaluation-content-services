@@ -452,7 +452,10 @@ async def main() -> None:
         openai_client = AsyncOpenAI(api_key=settings.openai_api_key.get_secret_value())
         try:
             searchable = [ORGANIZATION, *PRODUCTS]
-            embeddings = await _embed(openai_client, [item["searchText"] for item in searchable])
+            embeddings = await _embed(
+                openai_client,
+                [str(item["searchText"]) for item in searchable],
+            )
             organization = {
                 **_with_common_fields(ORGANIZATION),
                 "searchEmbedding": embeddings[0],

@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal
 
+from app.domain.run_control.contracts import RunOutcome
+
 StageStatus = Literal[
     "pending",
     "running",
@@ -49,6 +51,10 @@ class StageOperationRequest:
     reservation_id: str
     reservation: dict[str, int]
     workspace_namespace: str
+    request_scope: str = ""
+    semantic_input_binding_ref: str = ""
+    effective_configuration_digest: str = ""
+    blueprint_digest: str = ""
     cycle_evaluation_contract_ref: str = ""
     cycle_objective_contract_ref: str = ""
 
@@ -69,6 +75,7 @@ class StageOperationResult:
     temporal_activity_attempt: int = 1
     actual_usage: dict[str, int] = field(default_factory=dict)
     pending_external_usage: dict[str, int] = field(default_factory=dict)
+    output_contract_ref: str = ""
 
 
 @dataclass(frozen=True)
@@ -78,6 +85,10 @@ class WorkflowEvaluationRequest:
     objective: str
     current_output_refs: dict[str, tuple[str, ...]]
     execution_lineage: tuple[StageOperationResult, ...]
+    request_scope: str = ""
+    semantic_input_binding_ref: str = ""
+    effective_configuration_digest: str = ""
+    blueprint_digest: str = ""
     evaluation_contract_ref: str = ""
     objective_contract_ref: str = ""
 
@@ -90,6 +101,7 @@ class WorkflowEvaluationResult:
     next_objective: str = ""
     evaluation_contract_ref: str = ""
     objective_contract_ref: str = ""
+    output_contract_ref: str = ""
 
 
 @dataclass(frozen=True)
@@ -118,6 +130,7 @@ class LifecycleCommandOutcome:
     obligation_revision: str = ""
     accepted_obligation_evidence_digest: str = ""
     required_obligations_accepted: bool = False
+    terminal_outcome: RunOutcome | None = None
 
 
 @dataclass
@@ -141,6 +154,10 @@ class StageGraphExecutionState:
     schedule_trace: list[str] = field(default_factory=list)
     fairness_cursor: dict[str, int] = field(default_factory=dict)
     workflow_objective: str = "satisfy the frozen StageGraph"
+    request_scope: str = ""
+    semantic_input_binding_ref: str = ""
+    effective_configuration_digest: str = ""
+    blueprint_digest: str = ""
 
 
 @dataclass(frozen=True)
@@ -158,6 +175,9 @@ class StageGraphRunInput:
     lifecycle_idempotency_issuer: str = "stagegraph-worker"
     correlation_id: str = ""
     baseline_reservation: dict[str, int] = field(default_factory=dict)
+    semantic_input_binding_ref: str = ""
+    tenant_scope: str = ""
+    materialize_typed_result: bool = False
 
 
 @dataclass(frozen=True)
@@ -295,6 +315,10 @@ class GoalExecutionClaim:
     fresh_agent_token_threshold: int = 0
     handoff_token_reserve: int = 0
     token_budget_remaining: int = 0
+    request_scope: str = ""
+    semantic_input_binding_ref: str = ""
+    effective_configuration_digest: str = ""
+    blueprint_digest: str = ""
 
 
 @dataclass(frozen=True)
@@ -310,6 +334,7 @@ class GoalExecutionResult:
     irrecoverable_failure_ref: str = ""
     handoff_checkpoint: GoalHandoffCheckpoint | None = None
     temporal_activity_attempt: int = 1
+    output_contract_ref: str = ""
 
 
 @dataclass(frozen=True)
@@ -328,6 +353,7 @@ class GoalHandoffResult:
     checkpoint: GoalHandoffCheckpoint
     actual_usage: dict[str, int] = field(default_factory=dict)
     fallback_used: bool = False
+    output_contract_ref: str = ""
 
 
 @dataclass(frozen=True)
@@ -355,6 +381,7 @@ class GoalVerificationResult:
     irrecoverable_failure_ref: str = ""
     proposed_revision: GoalRevision | None = None
     actual_usage: dict[str, int] = field(default_factory=dict)
+    output_contract_ref: str = ""
 
 
 @dataclass(frozen=True)
@@ -374,6 +401,9 @@ class GoalDirectedRunInput:
     correlation_id: str = ""
     baseline_reservation: dict[str, int] = field(default_factory=dict)
     required_obligation_refs: tuple[str, ...] = ()
+    semantic_input_binding_ref: str = ""
+    tenant_scope: str = ""
+    materialize_typed_result: bool = False
 
 
 @dataclass(frozen=True)
@@ -403,6 +433,10 @@ class GoalDirectedExecutionState:
     degraded: bool = False
     stop_reason: GoalStopReason | None = None
     final_action: GoalVerifierAction | None = None
+    request_scope: str = ""
+    semantic_input_binding_ref: str = ""
+    effective_configuration_digest: str = ""
+    blueprint_digest: str = ""
 
 
 @dataclass(frozen=True)

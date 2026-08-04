@@ -142,6 +142,10 @@ sandbox/
 agent-sandbox/
 sandbox-work/agentic-capability-probe/
 sandbox-work/goal-directed-live/
+.artifacts/
+.scratch/
+app/.cursor/*_url_map.txt
+app/.cursor/raw_maps/
 .scratch/pytest-goal-workspace-runtime-audit/
 .scratch/pytest-of-Pinda/
 .scratch/temporal-test-server-*.exe

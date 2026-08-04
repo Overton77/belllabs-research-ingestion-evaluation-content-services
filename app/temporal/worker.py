@@ -35,6 +35,9 @@ from app.application.schema_workspace_binding import SchemaGraphAdmissionService
 from app.application.supporting_graph_reconciliation import (
     SupportingGraphReconciliationWorkflow,
 )
+from app.application.web_research_admission import (
+    register_web_research_admission_policies,
+)
 from app.config import get_settings
 from app.domain.control_plane.extensions import ExtensionRegistry
 from app.domain.run_control.contracts import ActorContext
@@ -43,6 +46,7 @@ from app.integrations.control_plane_payloads import (
     S3PayloadStore,
     UnavailablePayloadStore,
 )
+from app.integrations.langsmith_tracing import configure_langsmith_tracing
 from app.integrations.mongodb import create_mongodb
 from app.integrations.postgres import create_application_postgres_pool
 from app.integrations.schema_catalog_payloads import schema_catalog_payload_store
@@ -50,6 +54,11 @@ from app.integrations.schema_neo4j_executor import (
     Neo4jBoundedReadExecutorFactory,
 )
 from app.integrations.temporal import create_temporal_client
+from app.temporal.coordinator_runtime import (
+    CoordinatorWorkerActivities,
+    coordinator_task_queues,
+    create_coordinator_workers,
+)
 from app.temporal.linked_run_activities import (
     DeferredLinkedResultAssessor,
     LinkedRunActivities,
@@ -60,13 +69,22 @@ from app.temporal.schema_grounding_activities import (
     SchemaGroundingActivities,
     create_schema_grounding_activity_worker,
 )
+from app.temporal.workflow_sandbox import coordinator_workflow_runner
 from app.temporal.workflows import SandboxAgentProbeWorkflow
 
 
-async def main() -> None:
+async def main(
+    coordinator_activities: CoordinatorWorkerActivities | None = None,
+) -> None:
     settings = get_settings()
+    if settings.coordinator_launch_enabled and coordinator_activities is None:
+        raise RuntimeError(
+            "COORDINATOR_LAUNCH_ENABLED requires concrete StageGraph and "
+            "GoalDirected activity adapters; refusing to advertise unusable workers"
+        )
     # PRE-EMPTIVE SETUP: Pydantic reads .env without mutating process env, while
-    # the Agents SDK reads OPENAI_API_KEY from the process environment.
+    # the Agents SDK and LangSmith read credentials from the process environment.
+    configure_langsmith_tracing(settings)
     os.environ.setdefault("OPENAI_API_KEY", settings.openai_api_key.get_secret_value())
     docker_client = DockerSandboxClient(docker.from_env())
     plugin = OpenAIAgentsPlugin(
@@ -74,10 +92,19 @@ async def main() -> None:
         sandbox_clients=[SandboxClientProvider("docker", docker_client)],
     )
     client = await create_temporal_client(settings, plugins=[plugin])
+    coordinator_workers = None
+    if settings.coordinator_launch_enabled:
+        assert coordinator_activities is not None
+        coordinator_workers = create_coordinator_workers(
+            client,
+            task_queues=coordinator_task_queues(settings.temporal_task_queue),
+            activities=coordinator_activities,
+        )
     probe_worker = Worker(
         client,
         task_queue=settings.temporal_task_queue,
         workflows=[SandboxAgentProbeWorkflow],
+        workflow_runner=coordinator_workflow_runner(),
     )
     mongo_client, _database = await create_mongodb(settings)
     postgres_pool = await create_application_postgres_pool(settings)
@@ -98,6 +125,7 @@ async def main() -> None:
         )
         policies = AdmissionPolicyRegistry()
         register_schema_grounding_admission_policies(policies)
+        register_web_research_admission_policies(policies)
         run_control = RunControlService(
             PostgresRunControlRepository(postgres_pool),
             F1RunConfigurationVerifier(control_plane),
@@ -142,11 +170,14 @@ async def main() -> None:
             task_queue=f"{settings.temporal_task_queue}-schema-grounding",
             activities=schema_activities,
         )
-        await asyncio.gather(
-            probe_worker.run(),
-            linked_worker.run(),
-            schema_worker.run(),
-        )
+        workers = [
+            probe_worker,
+            linked_worker,
+            schema_worker,
+        ]
+        if coordinator_workers is not None:
+            workers.extend(coordinator_workers.workers)
+        await asyncio.gather(*(worker.run() for worker in workers))
     finally:
         await postgres_pool.close()
         await mongo_client.close()

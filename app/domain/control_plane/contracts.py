@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from enum import StrEnum
 from typing import Annotated, Literal
+from urllib.parse import urlsplit
 
 from pydantic import (
     AwareDatetime,
@@ -42,7 +43,7 @@ class DefinitionKind(StrEnum):
 
 class ExactDefinitionRef(Contract):
     kind: DefinitionKind
-    logical_id: str = Field(min_length=1, pattern=r"^[a-z0-9][a-z0-9._-]*$")
+    logical_id: str = Field(min_length=1, pattern=r"^[a-z0-9][a-z0-9._:-]*$")
     revision: int = Field(ge=1)
     digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
 
@@ -71,7 +72,7 @@ class AliasBinding(Contract):
 
 class DefinitionBase(Contract):
     schema_version: Literal["1"] = "1"
-    logical_id: str = Field(min_length=1, pattern=r"^[a-z0-9][a-z0-9._-]*$")
+    logical_id: str = Field(min_length=1, pattern=r"^[a-z0-9][a-z0-9._:-]*$")
     title: str = Field(min_length=1)
     description: str = Field(min_length=1)
 
@@ -566,7 +567,10 @@ class EvaluationProfileDefinition(DefinitionBase):
 
 class WorkflowConfigurationDefinition(DefinitionBase):
     kind: Literal[DefinitionKind.WORKFLOW_CONFIGURATION] = DefinitionKind.WORKFLOW_CONFIGURATION
-    workflow_type_logical_id: str = Field(min_length=1, pattern=r"^[a-z0-9][a-z0-9._-]*$")
+    workflow_type_logical_id: str = Field(
+        min_length=1,
+        pattern=r"^[a-z0-9][a-z0-9._:-]*$",
+    )
     extensions: tuple[NamespacedExtension, ...] = ()
 
 
@@ -632,6 +636,202 @@ class WorkflowImplementationBindingDefinition(DefinitionBase):
         return self
 
 
+class CatalogPayloadRef(Contract):
+    uri: str = Field(min_length=1)
+    digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    media_type: str = Field(min_length=1)
+    size_bytes: int = Field(ge=0)
+
+
+class SourceProvenance(Contract):
+    source: Literal["belllabs", "local", "git", "mcp_registry", "npx_skills"]
+    locator: str = Field(min_length=1)
+    upstream_identity: str = Field(min_length=1)
+    upstream_version: str = Field(min_length=1)
+    commit_digest: str | None = Field(default=None, min_length=1)
+    license: str | None = Field(default=None, min_length=1)
+
+    @field_validator("locator")
+    @classmethod
+    def locator_cannot_embed_credentials(cls, value: str) -> str:
+        parsed = urlsplit(value)
+        if parsed.scheme and (
+            parsed.username is not None
+            or parsed.password is not None
+            or any(
+                fragment in key.lower()
+                for key in parsed.query.split("&")
+                for fragment in ("token", "secret", "password", "api_key", "apikey")
+            )
+        ):
+            raise ValueError("source provenance locators cannot embed credentials")
+        return value
+
+
+class PromptVariable(Contract):
+    name: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    description: str = Field(min_length=1)
+    required: bool = True
+    value_schema: dict[str, object] = Field(default_factory=dict)
+
+
+class PromptDefinition(DefinitionBase):
+    kind: Literal[DefinitionKind.PROMPT] = DefinitionKind.PROMPT
+    format: Literal["text", "markdown", "messages"]
+    template_engine: Literal["none", "jinja2", "format"]
+    variables: tuple[PromptVariable, ...] = ()
+    body: str | None = None
+    payload_ref: CatalogPayloadRef | None = None
+    trust_class: Literal["privileged", "reviewed", "untrusted"]
+    eval_refs: frozenset[str] = Field(default_factory=frozenset)
+
+    @model_validator(mode="after")
+    def exactly_one_payload(self) -> PromptDefinition:
+        if (self.body is None) == (self.payload_ref is None):
+            raise ValueError("Prompt Definition requires exactly one body or payload_ref")
+        names = [variable.name for variable in self.variables]
+        if len(names) != len(set(names)):
+            raise ValueError("Prompt Definition variable names must be unique")
+        return self
+
+
+class SkillFileManifestEntry(Contract):
+    path: str = Field(min_length=1)
+    digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    size_bytes: int = Field(ge=0)
+    executable: bool = False
+
+    @field_validator("path")
+    @classmethod
+    def path_is_relative_and_normalized(cls, value: str) -> str:
+        normalized = value.replace("\\", "/")
+        if normalized.startswith("/") or ".." in normalized.split("/"):
+            raise ValueError("skill file paths must be normalized relative paths")
+        return normalized
+
+
+class SkillCompatibility(Contract):
+    runtimes: frozenset[str] = Field(default_factory=frozenset)
+    executables: frozenset[str] = Field(default_factory=frozenset)
+    network_capabilities: frozenset[str] = Field(default_factory=frozenset)
+    workspace_capabilities: frozenset[str] = Field(default_factory=frozenset)
+
+
+class SkillDefinition(DefinitionBase):
+    kind: Literal[DefinitionKind.SKILL] = DefinitionKind.SKILL
+    skill_name: str = Field(min_length=1, pattern=r"^[a-z0-9][a-z0-9-]*$")
+    frontmatter: dict[str, object]
+    body_summary: str = Field(min_length=1)
+    bundle_ref: CatalogPayloadRef
+    manifest_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    file_manifest: tuple[SkillFileManifestEntry, ...] = Field(min_length=1)
+    required_capabilities: frozenset[str] = Field(default_factory=frozenset)
+    compatibility: SkillCompatibility = Field(default_factory=SkillCompatibility)
+    source_provenance: SourceProvenance
+    review_status: Literal["reviewed", "approved"] = "reviewed"
+
+    @model_validator(mode="after")
+    def validate_manifest(self) -> SkillDefinition:
+        paths = [entry.path for entry in self.file_manifest]
+        if len(paths) != len(set(paths)):
+            raise ValueError("Skill Definition file paths must be unique")
+        if "SKILL.md" not in paths:
+            raise ValueError("Skill Definition manifest must contain SKILL.md")
+        return self
+
+
+class MCPNetworkRequirement(Contract):
+    host: str = Field(min_length=1)
+    port: int = Field(ge=1, le=65535)
+    protocol: Literal["https", "http", "stdio"]
+
+
+class MCPServerDefinition(DefinitionBase):
+    kind: Literal[DefinitionKind.MCP_SERVER] = DefinitionKind.MCP_SERVER
+    transport: Literal["stdio", "streamable_http", "sse"]
+    endpoint: str | None = None
+    launch_template: tuple[str, ...] | None = None
+    credential_refs: tuple[SecretRef, ...] = ()
+    allowed_tools: frozenset[str] = Field(default_factory=frozenset)
+    approval_policy: dict[str, Literal["never", "always", "conditional"]] = Field(
+        default_factory=dict
+    )
+    network_requirements: tuple[MCPNetworkRequirement, ...] = ()
+    schema_snapshot_ref: CatalogPayloadRef
+    schema_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    source_provenance: SourceProvenance
+    review_status: Literal["reviewed", "approved"] = "reviewed"
+
+    @model_validator(mode="after")
+    def validate_transport_recipe(self) -> MCPServerDefinition:
+        if self.transport == "stdio":
+            if not self.launch_template or self.endpoint is not None:
+                raise ValueError("stdio MCP servers require only a launch_template")
+        elif not self.endpoint or self.launch_template is not None:
+            raise ValueError("remote MCP servers require only an endpoint")
+        if self.endpoint is not None:
+            parsed = urlsplit(self.endpoint)
+            if (
+                parsed.scheme not in {"https", "http"}
+                or not parsed.hostname
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValueError("MCP endpoint must be a sanitized HTTP(S) origin/path")
+        if not set(self.approval_policy) <= self.allowed_tools:
+            raise ValueError("MCP approval policy may reference only allowed tools")
+        return self
+
+
+class MCPToolDefinition(DefinitionBase):
+    kind: Literal[DefinitionKind.MCP_TOOL] = DefinitionKind.MCP_TOOL
+    server_ref: ExactDefinitionRef
+    tool_name: str = Field(min_length=1)
+    input_schema: dict[str, object]
+    output_schema: dict[str, object] | None = None
+    annotations: dict[str, object] = Field(default_factory=dict)
+    schema_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    side_effect_class: Literal["read_only", "bounded_write", "consequential"]
+
+    @model_validator(mode="after")
+    def validate_server_ref(self) -> MCPToolDefinition:
+        if self.server_ref.kind != DefinitionKind.MCP_SERVER:
+            raise ValueError("MCP Tool server_ref must reference an MCP Server Definition")
+        return self
+
+
+class ModelPolicy(Contract):
+    provider: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    settings: dict[str, object] = Field(default_factory=dict)
+
+
+class AgentProfileDefinition(DefinitionBase):
+    kind: Literal[DefinitionKind.AGENT_PROFILE] = DefinitionKind.AGENT_PROFILE
+    prompt_refs: frozenset[ExactDefinitionRef] = Field(default_factory=frozenset)
+    skill_refs: frozenset[ExactDefinitionRef] = Field(default_factory=frozenset)
+    mcp_server_refs: frozenset[ExactDefinitionRef] = Field(default_factory=frozenset)
+    tool_refs: frozenset[ExactDefinitionRef] = Field(default_factory=frozenset)
+    model_policy: ModelPolicy
+    guardrail_refs: frozenset[str] = Field(default_factory=frozenset)
+    output_schema_ref: str | None = Field(default=None, min_length=1)
+    maximum_capability_request: AuthorityCeiling
+
+    @model_validator(mode="after")
+    def validate_ref_families(self) -> AgentProfileDefinition:
+        expected = (
+            (self.prompt_refs, DefinitionKind.PROMPT),
+            (self.skill_refs, DefinitionKind.SKILL),
+            (self.mcp_server_refs, DefinitionKind.MCP_SERVER),
+            (self.tool_refs, DefinitionKind.MCP_TOOL),
+        )
+        if any(ref.kind != kind for refs, kind in expected for ref in refs):
+            raise ValueError("Agent Profile contains a catalog reference of the wrong family")
+        return self
+
+
 Definition = (
     WorkflowTypeDefinition
     | WorkflowImplementationBindingDefinition
@@ -642,6 +842,11 @@ Definition = (
     | WorkspaceTemplateDefinition
     | EvaluationProfileDefinition
     | WorkflowConfigurationDefinition
+    | PromptDefinition
+    | SkillDefinition
+    | MCPServerDefinition
+    | MCPToolDefinition
+    | AgentProfileDefinition
 )
 
 

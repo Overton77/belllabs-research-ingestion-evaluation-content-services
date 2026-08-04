@@ -24,6 +24,7 @@ from app.domain.control_plane.errors import (
     RetiredDefinition,
 )
 from app.models.control_plane import (
+    CatalogProjectionEventDocument,
     DefinitionAliasDocument,
     DefinitionAliasMovementDocument,
     DefinitionHeadDocument,
@@ -71,6 +72,8 @@ class DefinitionRepository(Protocol):
 
     async def get_erc_record(self, digest: str) -> dict[str, Any]: ...
 
+    async def list_projection_events(self) -> tuple[dict[str, Any], ...]: ...
+
 
 class InMemoryDefinitionRepository:
     def __init__(self) -> None:
@@ -82,6 +85,7 @@ class InMemoryDefinitionRepository:
         self._retirements: dict[tuple[str, str, int], tuple[datetime, str]] = {}
         self._erc: dict[str, dict[str, Any]] = {}
         self._erc_by_compilation: dict[str, str] = {}
+        self._projection_events: dict[str, dict[str, Any]] = {}
 
     async def save_draft(
         self,
@@ -156,6 +160,8 @@ class InMemoryDefinitionRepository:
         if draft is not None:
             self._drafts[head_key] = draft.model_copy(update={"published_revision": revision})
         self._published[(ref.kind.value, ref.logical_id, revision)] = published
+        event = _projection_event_record(ref, "upsert", published_at)
+        self._projection_events[str(event["event_id"])] = event
         return published.model_copy(deep=True)
 
     async def get(self, ref: ExactDefinitionRef) -> PublishedDefinition:
@@ -207,6 +213,8 @@ class InMemoryDefinitionRepository:
             return current
         key = (ref.kind.value, ref.logical_id, ref.revision)
         self._retirements[key] = (retired_at, actor_id)
+        event = _projection_event_record(ref, "retire", retired_at)
+        self._projection_events[str(event["event_id"])] = event
         return current.model_copy(update={"retired_at": retired_at})
 
     async def save_erc_record(self, record: dict[str, Any]) -> None:
@@ -228,6 +236,12 @@ class InMemoryDefinitionRepository:
             return deepcopy(self._erc[digest])
         except KeyError as exc:
             raise DefinitionNotFound(f"ERC not found: {digest}") from exc
+
+    async def list_projection_events(self) -> tuple[dict[str, Any], ...]:
+        return tuple(
+            deepcopy(self._projection_events[event_id])
+            for event_id in sorted(self._projection_events)
+        )
 
 
 class BeanieDefinitionRepository:
@@ -337,6 +351,10 @@ class BeanieDefinitionRepository:
                         published_by=actor_id,
                     )
                     await document.insert(session=session)
+                    projection_event = CatalogProjectionEventDocument.model_validate(
+                        _projection_event_record(ref, "upsert", published_at)
+                    )
+                    await projection_event.insert(session=session)
         except DuplicateKeyError as exc:
             raise DefinitionConflict(
                 "definition head changed or published revision already exists"
@@ -445,8 +463,15 @@ class BeanieDefinitionRepository:
             retired_at=retired_at,
             retired_by=actor_id,
         )
+        collection = DefinitionRetirementDocument.get_pymongo_collection()
         try:
-            await retirement.insert()
+            async with collection.database.client.start_session() as session:
+                async with await session.start_transaction():
+                    await retirement.insert(session=session)
+                    projection_event = CatalogProjectionEventDocument.model_validate(
+                        _projection_event_record(ref, "retire", retired_at)
+                    )
+                    await projection_event.insert(session=session)
         except DuplicateKeyError:
             return await self.get(ref)
         return await self.get(ref)
@@ -483,6 +508,13 @@ class BeanieDefinitionRepository:
             raise DefinitionNotFound(f"ERC not found: {digest}")
         return document.model_dump(mode="json", exclude={"id"})
 
+    async def list_projection_events(self) -> tuple[dict[str, Any], ...]:
+        documents = await CatalogProjectionEventDocument.find_all().to_list()
+        return tuple(
+            document.model_dump(mode="json", exclude={"id", "revision_id"})
+            for document in sorted(documents, key=lambda item: item.event_id)
+        )
+
 
 def _published_from_document(document: PublishedDefinitionDocument) -> PublishedDefinition:
     definition = DEFINITION_ADAPTER.validate_python(document.definition)
@@ -497,6 +529,42 @@ def _published_from_document(document: PublishedDefinitionDocument) -> Published
         published_at=document.published_at,
         published_by=document.published_by,
     )
+
+
+def _projection_event_record(
+    ref: ExactDefinitionRef,
+    operation: str,
+    occurred_at: datetime,
+) -> dict[str, Any]:
+    tenant_scope = "global"
+    event_id = sha256_digest(
+        {
+            "tenant_scope": tenant_scope,
+            "asset_kind": ref.kind.value,
+            "logical_id": ref.logical_id,
+            "revision": ref.revision,
+            "source_digest": ref.digest,
+            "operation": operation,
+        }
+    )
+    return {
+        "event_id": event_id,
+        "tenant_scope": tenant_scope,
+        "asset_kind": ref.kind.value,
+        "logical_id": ref.logical_id,
+        "revision": ref.revision,
+        "source_digest": ref.digest,
+        "operation": operation,
+        "state": "pending",
+        "attempt_count": 0,
+        "lease_owner": None,
+        "lease_expires_at": None,
+        "next_attempt_at": occurred_at,
+        "last_error_code": None,
+        "poison_reason": None,
+        "completed_at": None,
+        "created_at": occurred_at,
+    }
 
 
 def _head_from_mapping(head: dict[str, Any]) -> AuthoringHead:

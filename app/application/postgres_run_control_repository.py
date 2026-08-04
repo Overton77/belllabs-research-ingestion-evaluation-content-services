@@ -601,23 +601,15 @@ class PostgresRunControlRepository:
     ) -> None:
         if not events:
             return
-        await _advisory_lock(connection, "belllabs-control-outbox-order")
-        position = int(
-            await connection.fetchval(
-                "SELECT COALESCE(MAX(position), 0) FROM belllabs_control.outbox"
-            )
-        )
         for event in events:
-            position += 1
             await connection.execute(
                 """
                 INSERT INTO belllabs_control.outbox
-                    (event_id, position, aggregate_id, aggregate_version, sequence, event_type,
+                    (event_id, aggregate_id, aggregate_version, sequence, event_type,
                      envelope, recorded_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
+                VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
                 """,
                 event.event_id,
-                position,
                 event.aggregate_id,
                 event.aggregate_version,
                 event.sequence,

@@ -22,6 +22,7 @@ from app.domain.schema_grounding.contracts import (
     SupportingGraphReconciliationRecord,
     SupportingGraphReconciliationRequest,
 )
+from app.temporal.workflow_sandbox import coordinator_workflow_runner
 
 
 class ActivityInput(BaseModel):
@@ -112,6 +113,7 @@ def create_schema_grounding_activity_worker(
         client,
         task_queue=task_queue,
         workflows=[],
+        workflow_runner=coordinator_workflow_runner(),
         activities=[
             activities.build_catalog,
             activities.derive_context,

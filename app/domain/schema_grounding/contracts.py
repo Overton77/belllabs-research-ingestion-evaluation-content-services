@@ -67,9 +67,7 @@ class SchemaCatalogBuildRequest(Contract):
             return value
         normalized = value.replace("\\", "/")
         if normalized.startswith("/") or (
-            len(normalized) > 2
-            and normalized[1] == ":"
-            and normalized[0].isalpha()
+            len(normalized) > 2 and normalized[1] == ":" and normalized[0].isalpha()
         ):
             raise ValueError("host absolute paths are not durable schema build identity")
         return value
@@ -77,9 +75,7 @@ class SchemaCatalogBuildRequest(Contract):
     @model_validator(mode="after")
     def candidate_seed_binding_is_complete(self) -> SchemaCatalogBuildRequest:
         if (self.candidate_seed_ref is None) != (self.candidate_seed_digest is None):
-            raise ValueError(
-                "candidate seed reference and digest must be supplied together"
-            )
+            raise ValueError("candidate seed reference and digest must be supplied together")
         return self
 
 
@@ -195,6 +191,211 @@ class GraphCapabilityGrant(Contract):
     decided_at: AwareDatetime
 
 
+class LiveSchemaDeploymentEvidence(Contract):
+    """Immutable current verification evidence read from the target graph."""
+
+    evidence_id: str = Field(min_length=1)
+    evidence_digest: str = Field(pattern=DIGEST_PATTERN)
+    event_kind: Literal["current_schema_verification_attestation"] = (
+        "current_schema_verification_attestation"
+    )
+    environment: str = Field(min_length=1)
+    database: str = Field(min_length=1)
+    schema_definition_ref: str = Field(min_length=1)
+    deployed_sdl_digest: str = Field(pattern=DIGEST_PATTERN)
+    live_schema_snapshot_digest: str = Field(pattern=DIGEST_PATTERN)
+    deployment_id: str = Field(min_length=1)
+    issuer_authority_ref: str = Field(min_length=1)
+    deployment_succeeded: bool
+    active: bool
+    revoked: bool = False
+    issued_at: AwareDatetime
+
+
+class Neo4jIndexDescriptor(Contract):
+    name: str = Field(min_length=1)
+    index_type: str = Field(min_length=1)
+    entity_type: str = Field(min_length=1)
+    labels_or_types: tuple[str, ...] = ()
+    properties: tuple[str, ...] = ()
+    state: str = Field(min_length=1)
+    owning_constraint: str | None = None
+
+    @field_validator("labels_or_types")
+    @classmethod
+    def labels_are_canonical(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if value != tuple(sorted(set(value))):
+            raise ValueError("index labels/types must be sorted and unique")
+        return value
+
+
+class Neo4jConstraintDescriptor(Contract):
+    name: str = Field(min_length=1)
+    constraint_type: str = Field(min_length=1)
+    entity_type: str = Field(min_length=1)
+    labels_or_types: tuple[str, ...] = ()
+    properties: tuple[str, ...] = ()
+    owned_index: str | None = None
+
+    @field_validator("labels_or_types")
+    @classmethod
+    def labels_are_canonical(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if value != tuple(sorted(set(value))):
+            raise ValueError("constraint labels/types must be sorted and unique")
+        return value
+
+
+class LiveNeo4jSchemaSnapshot(Contract):
+    snapshot_schema_version: Literal["2"] = "2"
+    database: str = Field(min_length=1)
+    server_agent: str = Field(min_length=1)
+    token_catalog_node_labels: frozenset[str] = frozenset()
+    token_catalog_relationship_types: frozenset[str] = frozenset()
+    active_node_labels: frozenset[str] = frozenset()
+    active_relationship_types: frozenset[str] = frozenset()
+    indexes: tuple[Neo4jIndexDescriptor, ...] = ()
+    constraints: tuple[Neo4jConstraintDescriptor, ...] = ()
+    observed_at: AwareDatetime
+    snapshot_digest: str = Field(pattern=DIGEST_PATTERN)
+
+    @model_validator(mode="after")
+    def descriptors_are_canonical(self) -> LiveNeo4jSchemaSnapshot:
+        if self.indexes != tuple(sorted(self.indexes, key=lambda item: item.name)):
+            raise ValueError("snapshot indexes must be sorted by exact name")
+        if self.constraints != tuple(
+            sorted(self.constraints, key=lambda item: item.name)
+        ):
+            raise ValueError("snapshot constraints must be sorted by exact name")
+        if not self.active_node_labels.issubset(self.token_catalog_node_labels):
+            raise ValueError("active node labels must exist in the token catalog")
+        if not self.active_relationship_types.issubset(
+            self.token_catalog_relationship_types
+        ):
+            raise ValueError("active relationship types must exist in the token catalog")
+        return self
+
+    @property
+    def node_labels(self) -> frozenset[str]:
+        """Backward reporting alias; authority decisions use active_node_labels."""
+
+        return self.token_catalog_node_labels
+
+    @property
+    def relationship_types(self) -> frozenset[str]:
+        """Backward reporting alias; authority decisions use active_relationship_types."""
+
+        return self.token_catalog_relationship_types
+
+    @property
+    def index_names(self) -> frozenset[str]:
+        return frozenset(index.name for index in self.indexes)
+
+
+class LiveSchemaCompatibilityDiff(Contract):
+    schema_definition_ref: str = Field(min_length=1)
+    expected_database: str = Field(min_length=1)
+    observed_database: str = Field(min_length=1)
+    database_matches: bool
+    observed_snapshot_digest: str = Field(pattern=DIGEST_PATTERN)
+    recomputed_snapshot_digest: str = Field(pattern=DIGEST_PATTERN)
+    snapshot_digest_matches: bool
+    operational_node_labels: frozenset[str] = frozenset()
+    expected_node_labels: frozenset[str] = frozenset()
+    observed_node_labels: frozenset[str] = frozenset()
+    active_node_labels: frozenset[str] = frozenset()
+    expected_but_unobserved_node_labels: frozenset[str] = frozenset()
+    unexpected_node_labels: frozenset[str] = frozenset()
+    unexpected_active_node_labels: frozenset[str] = frozenset()
+    expected_relationship_types: frozenset[str] = frozenset()
+    observed_relationship_types: frozenset[str] = frozenset()
+    active_relationship_types: frozenset[str] = frozenset()
+    expected_but_unobserved_relationship_types: frozenset[str] = frozenset()
+    unexpected_relationship_types: frozenset[str] = frozenset()
+    unexpected_active_relationship_types: frozenset[str] = frozenset()
+    expected_canonical_indexes: tuple[Neo4jIndexDescriptor, ...] = ()
+    observed_indexes: tuple[Neo4jIndexDescriptor, ...] = ()
+    missing_canonical_indexes: tuple[Neo4jIndexDescriptor, ...] = ()
+    noncanonical_indexes: tuple[Neo4jIndexDescriptor, ...] = ()
+    observed_constraints: tuple[Neo4jConstraintDescriptor, ...] = ()
+    noncanonical_constraints: tuple[Neo4jConstraintDescriptor, ...] = ()
+    expected_index_names: frozenset[str] = frozenset()
+    observed_index_names: frozenset[str] = frozenset()
+    missing_index_names: frozenset[str] = frozenset()
+    unexpected_index_names: frozenset[str] = frozenset()
+    compatible: bool
+
+
+class SchemaDeploymentEvidenceProvisioningRequest(Contract):
+    event_kind: Literal["current_schema_verification_attestation"] = (
+        "current_schema_verification_attestation"
+    )
+    environment: str = Field(min_length=1)
+    database: str = Field(min_length=1)
+    deployment_id: str = Field(min_length=1)
+    schema_definition_ref: str = Field(min_length=1)
+    schema_definition_digest: str = Field(pattern=DIGEST_PATTERN)
+    canonical_sdl: str = Field(min_length=1)
+    issued_at: AwareDatetime
+
+
+class SchemaAuthorityIssuerIdentities(Contract):
+    deployment_issuer_authority_ref: str = Field(min_length=1)
+    workspace_issuer_authority_ref: str = Field(min_length=1)
+    graph_capability_authority_ref: str = Field(min_length=1)
+    workspace_materializer_version: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def authorities_are_distinct_and_owned(self) -> SchemaAuthorityIssuerIdentities:
+        identities = {
+            self.deployment_issuer_authority_ref,
+            self.workspace_issuer_authority_ref,
+            self.graph_capability_authority_ref,
+        }
+        if len(identities) != 3:
+            raise ValueError("schema authority issuer identities must be distinct")
+        if not self.deployment_issuer_authority_ref.startswith("issue-12:"):
+            raise ValueError("deployment issuer must be an Issue-12 service identity")
+        if not self.workspace_issuer_authority_ref.startswith("issue-13:"):
+            raise ValueError("workspace issuer must be an Issue-13 service identity")
+        if not self.graph_capability_authority_ref.startswith("graph-authority:"):
+            raise ValueError("graph capability issuer must be a graph-authority identity")
+        return self
+
+
+class SchemaAuthorityIssuanceRequest(Contract):
+    request_scope: str = Field(min_length=1)
+    run_id: str = Field(min_length=1)
+    environment: str = Field(min_length=1)
+    database: str = Field(min_length=1)
+    deployment_id: str = Field(min_length=1)
+    schema_definition_ref: str = Field(min_length=1)
+    schema_definition_digest: str = Field(pattern=DIGEST_PATTERN)
+    catalog_build_id: str = Field(min_length=1)
+    catalog_digest: str = Field(pattern=DIGEST_PATTERN)
+    resource_manifest_digest: str = Field(pattern=DIGEST_PATTERN)
+    workspace_id: str = Field(min_length=1)
+    slot_name: str = Field(min_length=1)
+    profile: str = Field(min_length=1)
+    purpose: str = Field(min_length=1)
+    workspace_read_only: bool
+    requested_graph_access: Literal["read", "write"]
+    query_kinds: frozenset[QueryKind] = frozenset()
+    allowed_node_labels: frozenset[str] = frozenset()
+    allowed_relationship_types: frozenset[str] = frozenset()
+    maximum_limit: int = Field(ge=1)
+    maximum_traversal_depth: int = Field(ge=0, le=3)
+    secret_ref: str = Field(min_length=1)
+    budget_reservation_id: str = Field(min_length=1)
+    sensitive_data_policy_ref: str = Field(min_length=1)
+    requested_at: AwareDatetime
+
+
+class SchemaAuthorityBundle(Contract):
+    deployment_manifest: SchemaDeploymentManifestRef
+    workspace_binding: SchemaWorkspaceBindingRef
+    graph_capability: GraphCapabilityGrant
+
+
 class GraphAdmissionRequest(Contract):
     request_scope: str = Field(min_length=1)
     run_id: str = Field(min_length=1)
@@ -218,15 +419,18 @@ class GraphAdmissionRequest(Contract):
 class GraphAdmissionDecision(Contract):
     decision_id: str = Field(min_length=1)
     admitted: bool
-    failure_code: Literal[
-        "deployment_manifest_missing",
-        "deployment_manifest_revoked",
-        "schema_deployment_mismatch",
-        "workspace_binding_missing",
-        "workspace_profile_invalid",
-        "projection_purpose_mismatch",
-        "graph_capability_denied",
-    ] | None = None
+    failure_code: (
+        Literal[
+            "deployment_manifest_missing",
+            "deployment_manifest_revoked",
+            "schema_deployment_mismatch",
+            "workspace_binding_missing",
+            "workspace_profile_invalid",
+            "projection_purpose_mismatch",
+            "graph_capability_denied",
+        ]
+        | None
+    ) = None
     reason: str = Field(min_length=1)
     deployment_manifest_id: str | None = None
     workspace_binding_id: str | None = None
@@ -297,9 +501,7 @@ class SupportingGraphReconciliationRequest(Contract):
             raise ValueError("graph admission is bound to a different projection")
         if self.projection.projection_digest != self.admission.projection_digest:
             raise ValueError("graph admission projection digest mismatch")
-        if self.projection.source_schema_digest != (
-            self.admission.schema_definition_digest
-        ):
+        if self.projection.source_schema_digest != (self.admission.schema_definition_digest):
             raise ValueError("projection source schema differs from graph admission")
         if self.projection.purpose != self.admission.purpose:
             raise ValueError("projection purpose differs from graph admission")
@@ -331,6 +533,8 @@ class SupportingGraphReconciliationRecord(Contract):
 SchemaGroundingRecordType = Literal[
     "catalog_build",
     "catalog_resource",
+    "deployment_evidence",
+    "deployment_manifest",
     "selection_draft",
     "selection_validation",
     "selection_review",
@@ -339,6 +543,7 @@ SchemaGroundingRecordType = Literal[
     "operation_projection",
     "compatibility_decision",
     "workspace_binding",
+    "graph_capability",
     "query_intent",
     "query_result",
     "reconciliation",

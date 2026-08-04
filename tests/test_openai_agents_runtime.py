@@ -10,11 +10,27 @@ from app.domain.control_plane.canonical import sha256_digest
 from app.domain.operation_execution.contracts import MCPServerBinding, ToolBinding
 from app.integrations.openai_agents_runtime import (
     OpenAIAgentsSandboxRuntime,
+    _progressive_skill_index_line,
     _ProjectRunHooks,
 )
 from tests.test_operation_execution import operation_request
 
 DIGEST = "sha256:" + "a" * 64
+
+
+def test_skill_index_uses_progressive_disclosure_without_body_content() -> None:
+    marker = "UNTRUSTED_SKILL_BODY_MUST_NOT_ENTER_PRIVILEGED_INSTRUCTIONS"
+    index_line = _progressive_skill_index_line(
+        logical_id="skill.agent-browser",
+        manifest_digest=DIGEST,
+        mount_path="/skills/agent-browser/SKILL.md",
+    )
+
+    assert "skill.agent-browser" in index_line
+    assert "/skills/agent-browser/SKILL.md" in index_line
+    assert DIGEST in index_line
+    assert marker not in index_line
+    assert "only when the current task requires the skill" in index_line
 
 
 def tool(tool_id: str) -> ToolBinding:

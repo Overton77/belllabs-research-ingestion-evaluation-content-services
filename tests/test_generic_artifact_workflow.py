@@ -6,6 +6,7 @@ from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
 from app.temporal.artifact_workflow import GenericArtifactWorkflow
+from app.temporal.workflow_sandbox import coordinator_workflow_runner
 
 
 @activity.defn(name="operation.execute")
@@ -47,6 +48,7 @@ async def test_generic_temporal_workflow_promotes_only_after_operation() -> None
             environment.client,
             task_queue="generic-artifact-test",
             workflows=[GenericArtifactWorkflow],
+            workflow_runner=coordinator_workflow_runner(),
             activities=[complete_operation, promote_artifact],
         ):
             result = await environment.client.execute_workflow(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -30,8 +31,139 @@ class Settings(BaseSettings):
     supabase_secret_key: SecretStr
 
     openai_api_key: SecretStr
+    anthropic_api_key: SecretStr | None = None
+    anthropic_model: str = "claude-haiku-4.5"
     openai_model: str = "gpt-5.4-nano"
+    firecrawl_api_key: SecretStr | None = None
     tavily_api_key: SecretStr | None = None
+
+    langsmith_api_key: SecretStr | None = None
+    langsmith_tracing: bool = False
+    langsmith_endpoint: str = "https://api.smith.langchain.com"
+    langsmith_project: str = "BellLabsBiotech"
+    langsmith_workspace_id: str | None = None
+
+    coordinator_mcp_enabled: bool = False
+    coordinator_mcp_mount_path: str = Field(
+        default="/mcp/coordinator",
+        min_length=2,
+    )
+    coordinator_mcp_jwt_issuer: str | None = None
+    coordinator_mcp_jwt_audience: str = Field(default="authenticated", min_length=1)
+    coordinator_standalone_mode: Literal["read-only"] = "read-only"
+    coordinator_request_timeout_seconds: float = Field(default=30, ge=1, le=120)
+    coordinator_max_request_bytes: int = Field(
+        default=131_072,
+        ge=1_024,
+        le=1_000_000,
+    )
+    coordinator_max_response_bytes: int = Field(
+        default=1_000_000,
+        ge=1_024,
+        le=4_000_000,
+    )
+    coordinator_max_concurrency: int = Field(default=16, ge=1, le=256)
+    coordinator_requests_per_minute: int = Field(default=120, ge=1, le=10_000)
+    capability_search_enabled: bool = False
+    external_capability_discovery_enabled: bool = False
+    coordinator_launch_enabled: bool = False
+    capability_embedding_model: Literal["text-embedding-3-small"] = (
+        "text-embedding-3-small"
+    )
+    capability_embedding_dimensions: Literal[1536] = 1536
+    capability_projection_lease_seconds: int = Field(
+        default=120,
+        ge=15,
+        le=900,
+    )
+    capability_projection_max_attempts: int = Field(default=6, ge=1, le=20)
+    capability_projection_base_backoff_seconds: int = Field(
+        default=5,
+        ge=1,
+        le=300,
+    )
+    capability_projection_max_backoff_seconds: int = Field(
+        default=900,
+        ge=5,
+        le=86_400,
+    )
+    capability_projection_batch_size: int = Field(default=64, ge=1, le=256)
+    coordinator_launch_ticket_ttl_seconds: int = Field(
+        default=900,
+        ge=60,
+        le=3_600,
+    )
+    external_discovery_request_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=60.0,
+    )
+    external_discovery_command_timeout_seconds: float = Field(
+        default=30.0,
+        ge=1.0,
+        le=120.0,
+    )
+    external_discovery_max_output_bytes: int = Field(
+        default=1_000_000,
+        ge=1_024,
+        le=10_000_000,
+    )
+    external_discovery_max_results: int = Field(default=25, ge=1, le=100)
+    external_discovery_max_pages: int = Field(default=5, ge=1, le=20)
+    external_discovery_max_retries: int = Field(default=2, ge=0, le=5)
+    mcp_registry_base_url: str = "https://registry.modelcontextprotocol.io"
+    mcp_registry_api_version: Literal["v0.1"] = "v0.1"
+    npx_skills_executable: str = Field(default="npx", min_length=1)
+    npx_skills_package_version: str = Field(
+        default="1.5.20",
+        pattern=r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$",
+    )
+    web_research_firecrawl_mcp_command: Path | None = None
+    web_research_firecrawl_mcp_arguments: tuple[str, ...] = ()
+    web_research_firecrawl_mcp_module: Path = (
+        PROJECT_ROOT.parent
+        / ".tools"
+        / "reviewed"
+        / "firecrawl-mcp-7232b6d1cdd80335107d53a33b80c902b515a334"
+        / "dist"
+        / "index.js"
+    )
+    web_research_tavily_mcp_command: Path | None = None
+    web_research_tavily_mcp_arguments: tuple[str, ...] = ()
+    web_research_tavily_mcp_module: Path = (
+        PROJECT_ROOT.parent
+        / ".tools"
+        / "node_modules"
+        / "tavily-mcp"
+        / "build"
+        / "index.js"
+    )
+    web_research_agent_browser_node: Path | None = None
+    web_research_agent_browser_entrypoint: Path = (
+        PROJECT_ROOT.parent
+        / ".tools"
+        / "node_modules"
+        / "agent-browser"
+        / "bin"
+        / "agent-browser.js"
+    )
+    web_research_mcp_timeout_seconds: float = Field(default=30, ge=5, le=120)
+    web_research_browser_timeout_seconds: float = Field(default=90, ge=10, le=300)
+    web_research_browser_command_timeout_seconds: float = Field(
+        default=25,
+        ge=5,
+        le=60,
+    )
+    web_research_max_provider_output_bytes: int = Field(
+        default=1_000_000,
+        ge=16_384,
+        le=10_000_000,
+    )
+    web_research_max_browser_output_bytes: int = Field(
+        default=250_000,
+        ge=16_384,
+        le=2_000_000,
+    )
 
     mongodb_uri: SecretStr
     mongodb_database: str = "belllabsbiotech"
@@ -43,6 +175,14 @@ class Settings(BaseSettings):
     neo4j_uri: str = Field(validation_alias=AliasChoices("NEO4J_URI", "NEO$J_URI"))
     neo4j_aura_username: str
     neo4j_aura_password: SecretStr
+    schema_deployment_issuer_authority_ref: str = (
+        "issue-12:graph-schema-deployment-service"
+    )
+    schema_workspace_issuer_authority_ref: str = (
+        "issue-13:schema-workspace-materialization-service"
+    )
+    graph_capability_authority_ref: str = "graph-authority:read-capability-service"
+    schema_workspace_materializer_version: str = "issue-13-materializer-v1"
 
     aws_region: str = "us-east-1"
     aws_profile: str | None = "default"
@@ -89,6 +229,12 @@ class Settings(BaseSettings):
         return [
             origin.strip() for origin in self.socketio_cors_origins.split(",") if origin.strip()
         ]
+
+    @property
+    def coordinator_jwt_issuer(self) -> str:
+        return self.coordinator_mcp_jwt_issuer or (
+            f"{self.supabase_url.rstrip('/')}/auth/v1"
+        )
 
     @property
     def checkpoint_signing_key(self) -> bytes:

@@ -1,18 +1,23 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Protocol
 
 from pydantic import TypeAdapter
 
 from app.application.control_plane import ControlPlaneService
-from app.application.run_control import RunControlService
+from app.application.orchestration_binding_repository import (
+    RunSemanticInputBindingService,
+)
+from app.application.run_control import ACTION_PERMISSIONS, RunControlService
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import (
     DefinitionKind,
     GoalDirectedBlueprint,
     StageGraphBlueprint,
 )
+from app.domain.orchestration.bindings import RunSemanticInputBinding
 from app.domain.orchestration.contracts import (
     GoalDirectedRunInput,
     GoalExecutionClaim,
@@ -38,6 +43,17 @@ from app.domain.run_control.contracts import (
 )
 
 LIFECYCLE_ACTION_ADAPTER: TypeAdapter[LifecycleAction] = TypeAdapter(LifecycleAction)
+ORCHESTRATION_AUTHORITY_REF = "orchestration-authority"
+
+
+def orchestration_lifecycle_actor() -> ActorContext:
+    """Return the least-privilege service identity for workflow lifecycle commands."""
+
+    return ActorContext(
+        actor_id=ORCHESTRATION_AUTHORITY_REF,
+        authority_refs=frozenset({ORCHESTRATION_AUTHORITY_REF}),
+        permissions=frozenset(ACTION_PERMISSIONS.values()),
+    )
 
 
 class OrchestrationBindingVerifier(Protocol):
@@ -91,7 +107,8 @@ class StageGraphLaunchService:
         *,
         execution_epoch: int = 1,
         task_timeout_seconds: int = 30,
-        orchestration_authority_ref: str = "orchestration-authority",
+        orchestration_authority_ref: str = ORCHESTRATION_AUTHORITY_REF,
+        semantic_input_binding_ref: str = "",
     ) -> StageGraphRunInput:
         if execution_epoch != 1:
             raise ValueError(
@@ -126,6 +143,7 @@ class StageGraphLaunchService:
             orchestration_authority_ref=orchestration_authority_ref,
             correlation_id=f"orchestration:{run_id}:epoch:{execution_epoch}",
             baseline_reservation=dict(budget.reservations.get("baseline", {})),
+            semantic_input_binding_ref=semantic_input_binding_ref,
         )
 
 
@@ -148,7 +166,8 @@ class GoalDirectedLaunchService:
         initial_goal: str,
         execution_epoch: int = 1,
         task_timeout_seconds: int = 300,
-        orchestration_authority_ref: str = "orchestration-authority",
+        orchestration_authority_ref: str = ORCHESTRATION_AUTHORITY_REF,
+        semantic_input_binding_ref: str = "",
     ) -> GoalDirectedRunInput:
         if not initial_goal.strip():
             raise ValueError("GoalDirected launch requires a concrete initial goal")
@@ -222,6 +241,7 @@ class GoalDirectedLaunchService:
             correlation_id=f"orchestration:{run_id}:epoch:{execution_epoch}",
             baseline_reservation=dict(budget.reservations.get("baseline", {})),
             required_obligation_refs=tuple(sorted(projection.required_obligation_refs)),
+            semantic_input_binding_ref=semantic_input_binding_ref,
         )
 
 
@@ -251,7 +271,8 @@ class WorkflowLaunchDispatcher:
         *,
         initial_goal: str | None = None,
         task_timeout_seconds: int = 300,
-        orchestration_authority_ref: str = "orchestration-authority",
+        orchestration_authority_ref: str = ORCHESTRATION_AUTHORITY_REF,
+        semantic_input_binding_ref: str = "",
     ) -> PreparedWorkflowInput:
         projection = await self._run_control.get_run(request_scope, run_id)
         configuration = await self._control_plane.retrieve_for_admission(
@@ -263,7 +284,13 @@ class WorkflowLaunchDispatcher:
                 raise ValueError("StageGraph execution family is unavailable")
             if initial_goal is not None:
                 raise ValueError("StageGraph launch does not accept a GoalDirected initial goal")
-            return await self._stagegraph.prepare(request_scope, run_id)
+            return await self._stagegraph.prepare(
+                request_scope,
+                run_id,
+                task_timeout_seconds=task_timeout_seconds,
+                orchestration_authority_ref=orchestration_authority_ref,
+                semantic_input_binding_ref=semantic_input_binding_ref,
+            )
         if isinstance(blueprint, GoalDirectedBlueprint):
             if self._goal_directed is None:
                 raise ValueError("GoalDirected execution family is unavailable")
@@ -275,8 +302,46 @@ class WorkflowLaunchDispatcher:
                 initial_goal=initial_goal,
                 task_timeout_seconds=task_timeout_seconds,
                 orchestration_authority_ref=orchestration_authority_ref,
+                semantic_input_binding_ref=semantic_input_binding_ref,
             )
         raise ValueError(f"unsupported admitted blueprint family: {type(blueprint).__name__}")
+
+    async def prepare_bound(
+        self,
+        request_scope: str,
+        run_id: str,
+        *,
+        semantic_binding: RunSemanticInputBinding,
+        binding_service: RunSemanticInputBindingService,
+        initial_goal: str | None = None,
+        task_timeout_seconds: int = 300,
+        orchestration_authority_ref: str = ORCHESTRATION_AUTHORITY_REF,
+    ) -> PreparedWorkflowInput:
+        """Verify, freeze, and attach semantic inputs before Temporal submission."""
+
+        prepared = await self.prepare(
+            request_scope,
+            run_id,
+            initial_goal=initial_goal,
+            task_timeout_seconds=task_timeout_seconds,
+            orchestration_authority_ref=orchestration_authority_ref,
+        )
+        expected_family = (
+            "StageGraph" if isinstance(prepared, StageGraphRunInput) else "GoalDirected"
+        )
+        if (
+            semantic_binding.request_scope != request_scope
+            or semantic_binding.run_id != run_id
+            or semantic_binding.blueprint_family != expected_family
+            or semantic_binding.effective_configuration_digest
+            != prepared.effective_configuration_digest
+            or semantic_binding.blueprint_digest != prepared.blueprint_digest
+        ):
+            raise ValueError(
+                "semantic input binding does not match the admitted workflow launch"
+            )
+        binding_ref = await binding_service.freeze(semantic_binding)
+        return replace(prepared, semantic_input_binding_ref=binding_ref)
 
 
 class StageOperationExecutor(Protocol):
@@ -395,4 +460,5 @@ class RunControlLifecycleGateway:
             accepted_obligation_evidence_digest=sha256_digest(evidence_payload),
             required_obligations_accepted=projection.required_obligation_refs
             <= {item.obligation_ref for item in projection.accepted_obligation_evidence},
+            terminal_outcome=projection.terminal_outcome,
         )

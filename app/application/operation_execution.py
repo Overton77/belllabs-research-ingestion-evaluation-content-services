@@ -483,6 +483,15 @@ class InMemoryOperationBindingRepository:
             return deepcopy(settlement)
 
 
+def bind_operation_execution_request(
+    request: OperationExecutionRequest,
+) -> OperationExecutionBinding:
+    """Create the immutable OEB document without invoking its provider side effect."""
+
+    fingerprint = sha256_digest(request.model_dump(mode="json", exclude={"requested_at"}))
+    return _binding_for(request, fingerprint)
+
+
 def _binding_for(request: OperationExecutionRequest, fingerprint: str) -> OperationExecutionBinding:
     binding_id = _stable_id("operation-binding", request.identity.semantic_key)
     return OperationExecutionBinding(

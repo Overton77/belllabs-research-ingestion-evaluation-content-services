@@ -1,0 +1,20 @@
+{
+  "request_scope": "tenant.example",
+  "workflow_type_selector": {
+    "exact": null,
+    "alias": {
+      "kind": "workflow_type",
+      "logical_id": "replace-me",
+      "alias": "default"
+    }
+  },
+  "implementation_selector": null,
+  "initial_goal": null,
+  "input_manifest": {},
+  "requested_overlays": {},
+  "selected_asset_requests": [],
+  "parent_constraints": null,
+  "approvals": [],
+  "idempotency_issuer": "operator",
+  "idempotency_key": "replace-me"
+}

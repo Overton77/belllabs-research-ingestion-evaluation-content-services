@@ -56,6 +56,10 @@ class GoalDirectedInterpreter:
             active_revision=revision,
             accepted_revisions=(revision,),
             next_session_mode=self.blueprint.session_policy.session_mode,
+            request_scope=run_input.request_scope,
+            semantic_input_binding_ref=run_input.semantic_input_binding_ref,
+            effective_configuration_digest=run_input.effective_configuration_digest,
+            blueprint_digest=run_input.blueprint_digest,
         )
 
     def claim_execution(
@@ -116,6 +120,10 @@ class GoalDirectedInterpreter:
             fresh_agent_token_threshold=policy.fresh_agent_token_threshold,
             handoff_token_reserve=policy.handoff_token_reserve,
             token_budget_remaining=work_remaining + policy.handoff_token_reserve,
+            request_scope=state.request_scope,
+            semantic_input_binding_ref=state.semantic_input_binding_ref,
+            effective_configuration_digest=state.effective_configuration_digest,
+            blueprint_digest=state.blueprint_digest,
         )
         return replace(state, status="executing", active_claim=claim), claim
 

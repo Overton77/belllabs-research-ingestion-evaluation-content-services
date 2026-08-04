@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager, suppress
+from contextlib import AsyncExitStack, asynccontextmanager, suppress
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import asyncpg
@@ -11,8 +12,10 @@ import socketio
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastmcp.server.auth.providers.jwt import JWTVerifier
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
+from starlette.routing import BaseRoute
 from supabase import AsyncClient
 
 from app.api.control_plane import close_control_plane_resources
@@ -23,16 +26,28 @@ from app.api.run_control import (
 )
 from app.api.run_control import router as run_control_router
 from app.api.schema_grounding import router as schema_grounding_router
-from app.config import get_settings
+from app.application.coordinator_composition import (
+    CoordinatorProductionDependencies,
+    ReadOnlyCoordinatorRuntimeReadiness,
+    build_production_coordinator_facade,
+    load_coordinator_catalog_bindings,
+)
+from app.application.coordinator_facade import CoordinatorLimits
+from app.config import Settings, get_settings
 from app.domain.control_plane.errors import ControlPlaneError
 from app.domain.operation_execution.contracts import RuntimeApprovalDecision
 from app.domain.run_control.errors import RunControlError
 from app.domain.schema_grounding.errors import SchemaGroundingError
+from app.integrations.langsmith_tracing import configure_langsmith_tracing
+from app.integrations.mongodb import create_mongodb
 from app.integrations.openai_runtime_factory import DurableOpenAIAgentsRuntimeFactory
+from app.integrations.postgres import create_postgres_pool
 from app.integrations.supabase import create_supabase
+from app.mcp import create_coordinator_http_deployment, mount_coordinator_http
 from app.middleware.body_limit import BodySizeLimitMiddleware
 
 settings = get_settings()
+configure_langsmith_tracing(settings)
 sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins=settings.cors_origins)
 
 
@@ -114,8 +129,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 await create_supabase(settings),
             )
             relay_task = asyncio.create_task(_relay_runtime_events(redis, pool))
+    coordinator_route: BaseRoute | None = None
     try:
-        yield
+        async with AsyncExitStack() as coordinator_stack:
+            if settings.coordinator_mcp_enabled:
+                coordinator_route = await _mount_coordinator(
+                    app,
+                    settings,
+                    coordinator_stack,
+                )
+            try:
+                yield
+            finally:
+                if coordinator_route is not None:
+                    app.router.routes.remove(coordinator_route)
     finally:
         if relay_task is not None:
             relay_task.cancel()
@@ -127,6 +154,84 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await redis.aclose()
         await close_run_control_resources(app)
         await close_control_plane_resources(app)
+
+
+async def _mount_coordinator(
+    app: FastAPI,
+    active_settings: Settings,
+    stack: AsyncExitStack,
+) -> BaseRoute:
+    application_pool = getattr(app.state, "run_control_postgres_pool", None)
+    if application_pool is None:
+        raise RuntimeError(
+            "COORDINATOR_MCP_ENABLED requires application PostgreSQL"
+        )
+    mongo_client, _database = await create_mongodb(active_settings)
+    app.state.control_plane_mongodb_client = mongo_client
+    capability_pool = await create_postgres_pool(active_settings)
+    stack.push_async_callback(capability_pool.close)
+    dependencies = getattr(app.state, "coordinator_production_dependencies", None)
+    coordinator_skill, prompt_bindings = await load_coordinator_catalog_bindings(
+        payloads_available=(
+            dependencies is not None and getattr(dependencies, "payloads", None) is not None
+        )
+    )
+    if dependencies is None:
+        if active_settings.coordinator_launch_enabled:
+            raise RuntimeError(
+                "COORDINATOR_LAUNCH_ENABLED requires mounted production launch dependencies"
+            )
+        dependencies = CoordinatorProductionDependencies(
+            readiness=ReadOnlyCoordinatorRuntimeReadiness(),
+            coordinator_skill=coordinator_skill,
+            prompt_bindings=prompt_bindings,
+        )
+    else:
+        if not isinstance(dependencies, CoordinatorProductionDependencies):
+            raise RuntimeError("mounted coordinator dependencies have an invalid type")
+        dependencies = replace(
+            dependencies,
+            coordinator_skill=coordinator_skill,
+            prompt_bindings=prompt_bindings,
+        )
+    facade = build_production_coordinator_facade(
+        settings=active_settings,
+        capability_postgres_pool=capability_pool,
+        application_postgres_pool=application_pool,
+        dependencies=dependencies,
+        limits=CoordinatorLimits(
+            request_timeout_seconds=(
+                active_settings.coordinator_request_timeout_seconds
+            ),
+            max_request_bytes=active_settings.coordinator_max_request_bytes,
+            max_response_bytes=active_settings.coordinator_max_response_bytes,
+            max_concurrency=active_settings.coordinator_max_concurrency,
+            requests_per_minute=active_settings.coordinator_requests_per_minute,
+        ),
+    )
+    issuer = active_settings.coordinator_jwt_issuer
+    auth = getattr(
+        app.state,
+        "coordinator_auth_provider",
+        JWTVerifier(
+            jwks_uri=f"{issuer.rstrip('/')}/.well-known/jwks.json",
+            issuer=issuer,
+            audience=active_settings.coordinator_mcp_jwt_audience,
+        ),
+    )
+    deployment = create_coordinator_http_deployment(
+        settings=active_settings,
+        facade=facade,
+        auth=auth,
+        mount_path=active_settings.coordinator_mcp_mount_path,
+    )
+    await stack.enter_async_context(
+        deployment.app.router.lifespan_context(deployment.app)
+    )
+    mount_coordinator_http(app, deployment, lifespan_is_combined=True)
+    route = app.router.routes[-1]
+    app.state.coordinator_facade = facade
+    return route
 
 
 api = FastAPI(

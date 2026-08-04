@@ -17,6 +17,7 @@ from app.domain.operation_execution.contracts import (
 from app.domain.run_control.errors import IdempotencyConflict
 from app.temporal.artifact_workflow import GenericArtifactWorkflow
 from app.temporal.operation_activities import OperationExecutionActivities
+from app.temporal.workflow_sandbox import coordinator_workflow_runner
 
 
 class ArtifactPromotionActivities:
@@ -79,5 +80,6 @@ def create_generic_artifact_worker(
         client,
         task_queue=task_queue,
         workflows=[GenericArtifactWorkflow],
+        workflow_runner=coordinator_workflow_runner(),
         activities=[operations.execute, artifacts.promote],
     )

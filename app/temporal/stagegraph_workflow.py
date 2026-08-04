@@ -8,9 +8,16 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 from temporalio.exceptions import ActivityError, ApplicationError
 
+from app.domain.orchestration.contracts import StageOperationResult
+
 with workflow.unsafe.imports_passed_through():
     from app.domain.control_plane.canonical import sha256_digest
     from app.domain.control_plane.contracts import StageGraphBlueprint
+    from app.domain.coordinator.launch import (
+        BlueprintFamily,
+        StageGraphResultDetails,
+        TerminalWorkflowCompletion,
+    )
     from app.domain.orchestration.contracts import (
         ExecutionIdentity,
         LifecycleCommandOutcome,
@@ -86,6 +93,10 @@ class StageGraphWorkflow:
                 execution_epoch=run_input.execution_epoch,
             ),
             run_version=run_input.initial_run_version,
+            request_scope=run_input.request_scope,
+            semantic_input_binding_ref=run_input.semantic_input_binding_ref,
+            effective_configuration_digest=run_input.effective_configuration_digest,
+            blueprint_digest=run_input.blueprint_digest,
         )
         retry_policy = RetryPolicy(maximum_attempts=3)
         timeout = timedelta(seconds=run_input.task_timeout_seconds)
@@ -197,7 +208,7 @@ class StageGraphWorkflow:
                         for request in requests
                     ]
                 else:
-                    raw_results = list(
+                    raw_results = list[StageOperationResult | BaseException](
                         await asyncio.gather(
                             *[
                                 workflow.execute_activity(
@@ -295,6 +306,14 @@ class StageGraphWorkflow:
                             objective=state.workflow_objective,
                             current_output_refs=interpreter.current_outputs(state),
                             execution_lineage=tuple(state.lineage),
+                            request_scope=run_input.request_scope,
+                            semantic_input_binding_ref=(
+                                run_input.semantic_input_binding_ref
+                            ),
+                            effective_configuration_digest=(
+                                run_input.effective_configuration_digest
+                            ),
+                            blueprint_digest=run_input.blueprint_digest,
                             evaluation_contract_ref=frozen_evaluation_contract,
                             objective_contract_ref=frozen_objective_contract,
                         ),
@@ -542,7 +561,7 @@ class StageGraphWorkflow:
             retry_policy,
         )
         state.run_version = terminal.resulting_run_version
-        return StageGraphRunResult(
+        run_result = StageGraphRunResult(
             run_id=run_input.run_id,
             workflow_cycles=state.workflow_cycle,
             execution_epoch=state.identity.execution_epoch,
@@ -555,6 +574,57 @@ class StageGraphWorkflow:
             schedule_trace=tuple(state.schedule_trace),
             lineage=tuple(state.lineage),
         )
+        if run_input.materialize_typed_result:
+            if not run_input.tenant_scope or terminal.terminal_outcome is None:
+                raise ApplicationError(
+                    "coordinator completion lacks terminal scope or outcome",
+                    non_retryable=True,
+                )
+            usage_summary: dict[str, int] = {}
+            output_contract_results: dict[str, object] = {}
+            for item in state.lineage:
+                for metric, amount in item.actual_usage.items():
+                    usage_summary[metric] = usage_summary.get(metric, 0) + amount
+                if item.output_contract_ref and item.output_refs:
+                    output_contract_results[item.output_contract_ref] = {
+                        "output_refs": list(item.output_refs),
+                        "stage_id": item.identity.stage_id,
+                    }
+            await workflow.execute_activity(
+                "coordinator.materialize_workflow_result",
+                TerminalWorkflowCompletion(
+                    run_id=run_input.run_id,
+                    tenant_scope=run_input.tenant_scope,
+                    request_scope=run_input.request_scope,
+                    blueprint_family=BlueprintFamily.STAGE_GRAPH,
+                    terminal_outcome=terminal.terminal_outcome,
+                    output_contract_results=output_contract_results,
+                    evidence_refs=tuple(
+                        output_ref
+                        for stage_outputs in outputs.values()
+                        for output_ref in stage_outputs
+                    ),
+                    degradations=tuple(
+                        stage_id
+                        for stage_id, item in state.stages.items()
+                        if item.status in {"degraded", "skipped", "failed"}
+                    ),
+                    usage_summary=usage_summary,
+                    family_result=StageGraphResultDetails(
+                        execution_epoch=run_result.execution_epoch,
+                        workflow_cycles=run_result.workflow_cycles,
+                        stage_cycles=run_result.stage_cycles,
+                        operation_attempts=run_result.operation_attempts,
+                        output_refs=run_result.output_refs,
+                        reused_output_refs=run_result.reused_output_refs,
+                        schedule_trace=run_result.schedule_trace,
+                    ),
+                    completed_at=workflow.now(),
+                ),
+                start_to_close_timeout=timeout,
+                retry_policy=retry_policy,
+            )
+        return run_result
 
     async def _report_stage_result(
         self,

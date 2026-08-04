@@ -187,8 +187,7 @@ class RunControlService:
             )
             return await self._repository.commit_admission(AdmissionMutation(decision=decision))
 
-        run_id = _stable_id(
-            "run",
+        run_id = run_identity_for(
             request.request_scope,
             request.idempotency_issuer,
             request.request_id,
@@ -567,6 +566,18 @@ def _require_same_fingerprint(actual: str, expected: str, subject: str) -> None:
 
 def _stable_id(*parts: str) -> str:
     return str(uuid5(NAMESPACE_URL, ":".join(parts)))
+
+
+def run_identity_for(
+    request_scope: str,
+    idempotency_issuer: str,
+    request_id: str,
+) -> str:
+    """Return the immutable run identity used by authoritative admission."""
+
+    if not request_scope or not idempotency_issuer or not request_id:
+        raise ValueError("run identity inputs must be non-empty")
+    return _stable_id("run", request_scope, idempotency_issuer, request_id)
 
 
 def _event(

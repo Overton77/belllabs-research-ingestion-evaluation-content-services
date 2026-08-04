@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import timedelta
 
 from temporalio import workflow
@@ -10,6 +10,11 @@ from temporalio.exceptions import ActivityError, ApplicationError
 with workflow.unsafe.imports_passed_through():
     from app.domain.control_plane.canonical import sha256_digest
     from app.domain.control_plane.contracts import GoalDirectedBlueprint
+    from app.domain.coordinator.launch import (
+        BlueprintFamily,
+        GoalDirectedResultDetails,
+        TerminalWorkflowCompletion,
+    )
     from app.domain.orchestration.contracts import (
         GoalDirectedRunInput,
         GoalDirectedRunResult,
@@ -321,7 +326,7 @@ class GoalDirectedWorkflow:
             run_version = lifecycle.resulting_run_version
 
         final_verification = result.verification_results[-1]
-        await self._lifecycle(
+        terminal = await self._lifecycle(
             LifecycleCommandRequest(
                 command_id=(
                     f"orchestration:{run_input.run_id}:epoch:{run_input.execution_epoch}:"
@@ -369,6 +374,64 @@ class GoalDirectedWorkflow:
             ),
             timeout,
         )
+        if run_input.materialize_typed_result:
+            if not run_input.tenant_scope or terminal.terminal_outcome is None:
+                raise ApplicationError(
+                    "coordinator completion lacks terminal scope or outcome",
+                    non_retryable=True,
+                )
+            usage_summary: dict[str, int] = {}
+            output_contract_results: dict[str, object] = {}
+            for item in result.execution_results:
+                for metric, amount in item.actual_usage.items():
+                    usage_summary[metric] = usage_summary.get(metric, 0) + amount
+                if item.output_contract_ref and item.output_refs:
+                    output_contract_results[item.output_contract_ref] = {
+                        "output_refs": list(item.output_refs),
+                        "goal_iteration": item.identity.iteration,
+                    }
+            await workflow.execute_activity(
+                "coordinator.materialize_workflow_result",
+                TerminalWorkflowCompletion(
+                    run_id=run_input.run_id,
+                    tenant_scope=run_input.tenant_scope,
+                    request_scope=run_input.request_scope,
+                    blueprint_family=BlueprintFamily.GOAL_DIRECTED,
+                    terminal_outcome=terminal.terminal_outcome,
+                    output_contract_results=output_contract_results,
+                    evidence_refs=result.output_refs,
+                    degradations=(
+                        ("goal-directed-degraded",) if state.degraded else ()
+                    ),
+                    usage_summary=usage_summary,
+                    family_result=GoalDirectedResultDetails(
+                        execution_epoch=result.execution_epoch,
+                        stop_reason=result.stop_reason,
+                        final_verifier_action=result.final_action,
+                        goal_iterations=result.goal_iterations,
+                        agent_runs=result.agent_runs,
+                        rollover_count=result.rollover_count,
+                        active_revision_id=result.active_revision_id,
+                        accepted_revision_ids=result.accepted_revision_ids,
+                        handoff_checkpoints=tuple(
+                            asdict(item) for item in result.handoff_checkpoints
+                        ),
+                        execution_results=tuple(
+                            asdict(item) for item in result.execution_results
+                        ),
+                        verification_results=tuple(
+                            asdict(item) for item in result.verification_results
+                        ),
+                    ),
+                    completed_at=workflow.now(),
+                ),
+                start_to_close_timeout=timeout,
+                retry_policy=RetryPolicy(
+                    initial_interval=timedelta(seconds=1),
+                    maximum_interval=timedelta(seconds=10),
+                    maximum_attempts=8,
+                ),
+            )
         return result
 
     async def _lifecycle(

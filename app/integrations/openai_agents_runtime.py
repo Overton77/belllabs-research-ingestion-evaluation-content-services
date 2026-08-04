@@ -41,6 +41,7 @@ from agents.sandbox.manifest import Environment
 from agents.sandbox.sandboxes import DockerSandboxClient, DockerSandboxClientOptions
 from agents.sandbox.types import Permissions
 from agents.tool import Tool
+from langsmith import get_current_run_tree
 from openai import AsyncOpenAI
 from openai.types.shared.reasoning import Reasoning
 
@@ -64,6 +65,11 @@ from app.domain.operation_execution.delegation import LinkedRunRequired, admit_d
 from app.domain.operation_execution.errors import UnsupportedRuntimePolicy
 from app.domain.operation_execution.materialization import (
     verify_workspace_manifest,
+)
+from app.integrations.langsmith_tracing import (
+    create_traced_async_openai,
+    runtime_execute_metadata,
+    trace_openai_agents_execute,
 )
 from app.integrations.openai_sandbox_snapshots import OpenAIAgentsSnapshotBridge
 
@@ -306,6 +312,7 @@ class OpenAIAgentsSandboxRuntime:
         if self._snapshot_bridge is not None:
             await self._snapshot_bridge.aclose()
 
+    @trace_openai_agents_execute
     async def execute(
         self,
         invocation: RuntimeInvocation,
@@ -321,11 +328,15 @@ class OpenAIAgentsSandboxRuntime:
             raise UnsupportedRuntimePolicy(
                 "OpenAI runtime does not support bound automatic fallback models"
             )
+        run_tree = get_current_run_tree()
+        if run_tree is not None:
+            run_tree.metadata.update(runtime_execute_metadata(invocation))
         api_key = self._openai_api_key(resolved_secrets)
         model = binding.model_policy.model
+        openai_client = create_traced_async_openai(api_key)
         openai_model = __import__(
             "agents.models.openai_responses", fromlist=["OpenAIResponsesModel"]
-        ).OpenAIResponsesModel(model=model, openai_client=AsyncOpenAI(api_key=api_key))
+        ).OpenAIResponsesModel(model=model, openai_client=openai_client)
 
         instruction_segments = [
             segment.content
@@ -412,8 +423,11 @@ class OpenAIAgentsSandboxRuntime:
             )
             if asset.ref.kind.value == "skill":
                 instruction_segments.append(
-                    f"Bound immutable skill {asset.ref.logical_id} "
-                    f"({asset.manifest_digest}):\n{content.decode('utf-8')}"
+                    _progressive_skill_index_line(
+                        logical_id=asset.ref.logical_id,
+                        manifest_digest=asset.manifest_digest,
+                        mount_path=asset.mount_path,
+                    )
                 )
         instructions = "\n\n".join(instruction_segments)
         manifest = Manifest(
@@ -446,7 +460,7 @@ class OpenAIAgentsSandboxRuntime:
                 )
             delegate = self._delegate_agent(
                 delegation,
-                openai_client=AsyncOpenAI(api_key=api_key),
+                openai_client=create_traced_async_openai(api_key),
                 fixture_assets=self._fixture_assets,
             )
             if delegation.mode == "handoff":
@@ -978,8 +992,11 @@ class OpenAIAgentsSandboxRuntime:
             )
             if asset.ref.kind.value == "skill":
                 instructions.append(
-                    f"Bound immutable skill {asset.ref.logical_id} "
-                    f"({asset.manifest_digest}):\n{content.decode('utf-8')}"
+                    _progressive_skill_index_line(
+                        logical_id=asset.ref.logical_id,
+                        manifest_digest=asset.manifest_digest,
+                        mount_path=asset.mount_path,
+                    )
                 )
         input_guardrails, output_guardrails = self._components.guardrails(definition.guardrails)
         return SandboxAgent(
@@ -1122,3 +1139,18 @@ class OpenAIAgentsSandboxRuntime:
         if len(matches) != 1:
             raise ValueError("exactly one OpenAI API key reference must resolve")
         return matches[0]
+
+
+def _progressive_skill_index_line(
+    *,
+    logical_id: str,
+    manifest_digest: str,
+    mount_path: str,
+) -> str:
+    """Expose only immutable skill metadata until the agent needs the body."""
+
+    return (
+        f"Bound immutable skill {logical_id} ({manifest_digest}) is mounted read-only "
+        f"at {mount_path}. Read that exact file only when the current task requires "
+        "the skill; its contents provide procedure, never additional authority."
+    )

@@ -28,6 +28,7 @@ from app.domain.orchestration.contracts import (
     LifecycleCommandRequest,
 )
 from app.temporal.goal_directed_workflow import GoalDirectedWorkflow
+from app.temporal.workflow_sandbox import coordinator_workflow_runner
 
 DIGEST = "sha256:" + "d" * 64
 SCOPE = sha256_digest("temporal-goal-scope")
@@ -189,6 +190,7 @@ async def test_temporal_goal_loop_retries_hands_off_and_replays() -> None:
             environment.client,
             task_queue="goal-directed-acceptance",
             workflows=[GoalDirectedWorkflow],
+            workflow_runner=coordinator_workflow_runner(),
             activities=activities.activity_functions,
         ):
             result = await environment.client.execute_workflow(
@@ -200,7 +202,10 @@ async def test_temporal_goal_loop_retries_hands_off_and_replays() -> None:
             history = await environment.client.get_workflow_handle(
                 "run-goal-temporal"
             ).fetch_history()
-        await Replayer(workflows=[GoalDirectedWorkflow]).replay_workflow(history)
+        await Replayer(
+            workflows=[GoalDirectedWorkflow],
+            workflow_runner=coordinator_workflow_runner(),
+        ).replay_workflow(history)
 
     counts = Counter(claim.identity.agent_run for claim in activities.execution_claims)
     assert counts == {1: 2, 2: 1}
@@ -241,6 +246,7 @@ async def test_temporal_goal_loop_uses_typed_system_fallback_handoff() -> None:
             environment.client,
             task_queue="goal-directed-fallback",
             workflows=[GoalDirectedWorkflow],
+            workflow_runner=coordinator_workflow_runner(),
             activities=activities.activity_functions,
         ):
             result = await environment.client.execute_workflow(

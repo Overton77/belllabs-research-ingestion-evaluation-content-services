@@ -1,11 +1,19 @@
 from app.models.artifact_promotion import ArtifactMetadataRevisionDocument
 from app.models.control_plane import (
+    CatalogProjectionAlertDocument,
+    CatalogProjectionEventDocument,
     DefinitionAliasDocument,
     DefinitionAliasMovementDocument,
     DefinitionHeadDocument,
     DefinitionRetirementDocument,
     EffectiveRunConfigurationDocument,
     PublishedDefinitionDocument,
+)
+from app.models.external_capability import (
+    ExternalCandidateInspectionReportDocument,
+    ExternalCandidateInspectionWorkspaceDocument,
+    ExternalDiscoveryCandidateDocument,
+    ExternalDiscoveryEvidenceDocument,
 )
 from app.models.infrastructure import InfrastructureMarker
 from app.models.operation_execution import (
@@ -19,6 +27,7 @@ from app.models.sandbox_snapshot import (
     SandboxSnapshotDocument,
 )
 from app.models.schema_grounding import SchemaGroundingRecordDocument
+from app.models.web_research import WebResearchRecordDocument
 from app.models.workspace_materialization import (
     WorkspaceMaterializationManifestDocument,
     WorkspaceSlotReservationDocument,
@@ -26,11 +35,17 @@ from app.models.workspace_materialization import (
 
 __all__ = [
     "ArtifactMetadataRevisionDocument",
+    "CatalogProjectionAlertDocument",
+    "CatalogProjectionEventDocument",
     "DefinitionAliasDocument",
     "DefinitionAliasMovementDocument",
     "DefinitionHeadDocument",
     "DefinitionRetirementDocument",
     "EffectiveRunConfigurationDocument",
+    "ExternalCandidateInspectionReportDocument",
+    "ExternalCandidateInspectionWorkspaceDocument",
+    "ExternalDiscoveryCandidateDocument",
+    "ExternalDiscoveryEvidenceDocument",
     "InfrastructureMarker",
     "OperationExecutionBindingDocument",
     "OperationExecutionClaimDocument",
@@ -42,4 +57,5 @@ __all__ = [
     "SchemaGroundingRecordDocument",
     "WorkspaceMaterializationManifestDocument",
     "WorkspaceSlotReservationDocument",
+    "WebResearchRecordDocument",
 ]

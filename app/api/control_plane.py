@@ -50,7 +50,10 @@ async def get_control_plane_service(request: Request) -> ControlPlaneService:
         if service is not None:
             return service
         settings = get_settings()
-        client, _database = await create_mongodb(settings)
+        client = getattr(request.app.state, "control_plane_mongodb_client", None)
+        if client is None:
+            client, _database = await create_mongodb(settings)
+            request.app.state.control_plane_mongodb_client = client
         payload_store: ContentAddressedPayloadStore
         if settings.s3_bucket:
             payload_store = S3PayloadStore(settings, settings.s3_bucket)
@@ -68,7 +71,6 @@ async def get_control_plane_service(request: Request) -> ControlPlaneService:
             externalize_above_bytes=externalize_above_bytes,
         )
         request.app.state.control_plane_service = service
-        request.app.state.control_plane_mongodb_client = client
         return service
 
 

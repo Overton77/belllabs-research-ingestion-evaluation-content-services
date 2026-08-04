@@ -17,6 +17,7 @@ from app.domain.operation_execution.contracts import (
 )
 from app.domain.run_control.errors import IdempotencyConflict
 from app.temporal.operation_workflow import OperationExecutionWorkflow
+from app.temporal.workflow_sandbox import coordinator_workflow_runner
 
 
 class OperationExecutionActivities:
@@ -49,6 +50,7 @@ def create_operation_worker(
         client,
         task_queue=task_queue,
         workflows=[OperationExecutionWorkflow],
+        workflow_runner=coordinator_workflow_runner(),
         activities=[activities.execute],
     )
 

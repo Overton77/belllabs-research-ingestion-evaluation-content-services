@@ -49,6 +49,7 @@ from app.temporal.agentic_probe_assets import (
 )
 from app.temporal.operation_activities import OperationExecutionActivities
 from app.temporal.operation_workflow import OperationExecutionWorkflow
+from app.temporal.workflow_sandbox import coordinator_workflow_runner
 
 EXPECTED = "BELL-LABS-AGENTIC-CAPABILITIES-OK"
 PROBE_IMAGE = "belllabs-agentic-probe:local"
@@ -270,6 +271,7 @@ async def main() -> None:
         client,
         task_queue=f"{settings.temporal_task_queue}-operation-probe",
         workflows=[OperationExecutionWorkflow],
+        workflow_runner=coordinator_workflow_runner(),
         activities=[activities.execute],
     ):
         payload = await client.execute_workflow(

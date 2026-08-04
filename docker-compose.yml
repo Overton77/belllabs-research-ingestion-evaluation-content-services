@@ -3,7 +3,9 @@ name: biotech-research-ingestion-evaluation-system
 # Temporal persistence and application authority are intentionally separate PostgreSQL services.
 services:
   application-postgres:
-    image: postgres:16
+    # Application authority and the local disposable capability-search projection
+    # share one development server but remain in separate schemas.
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_DB: belllabs
       POSTGRES_USER: belllabs

@@ -16,6 +16,7 @@ from app.domain.composition.contracts import (
     ResultEvidenceAssessment,
 )
 from app.domain.run_control.contracts import ActorContext
+from app.temporal.workflow_sandbox import coordinator_workflow_runner
 
 
 class LinkedRunDecisionPort(Protocol):
@@ -195,6 +196,7 @@ def create_linked_run_worker(
         client,
         task_queue=task_queue,
         workflows=[LinkedRunWorkflow, LinkedRunObserverWorkflow],
+        workflow_runner=coordinator_workflow_runner(),
         activities=[
             activities.resolve_execution_binding,
             activities.resolve_child_observation,

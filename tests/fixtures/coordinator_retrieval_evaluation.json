@@ -1,0 +1,139 @@
+{
+  "dataset_version": "2026-07-26.1",
+  "cases": [
+    {
+      "case_id": "schema-direct-id",
+      "category": "retrieval",
+      "query": "schema-context-selection",
+      "expected_workflow_type": "schema-context-selection"
+    },
+    {
+      "case_id": "schema-paraphrase-minimal-context",
+      "category": "retrieval",
+      "query": "select the smallest valid schema context for a research task",
+      "expected_workflow_type": "schema-context-selection"
+    },
+    {
+      "case_id": "schema-paraphrase-grounded-fields",
+      "category": "retrieval",
+      "query": "ground requested fields in an approved schema catalog and independently review the selection",
+      "expected_workflow_type": "schema-context-selection"
+    },
+    {
+      "case_id": "overlapping-workflow-contracts",
+      "category": "planning",
+      "fixture": "overlapping workflow types with distinct input contracts",
+      "evidence_test": "tests/test_coordinator_launch_preparation.py"
+    },
+    {
+      "case_id": "tenant-forbidden-capability",
+      "category": "authorization",
+      "fixture": "valid capability forbidden to the caller",
+      "evidence_test": "tests/test_coordinator_facade.py"
+    },
+    {
+      "case_id": "runtime-incompatible-asset",
+      "category": "compatibility",
+      "fixture": "published asset incompatible with selected runtime",
+      "evidence_test": "tests/test_agentic_asset_definitions.py"
+    },
+    {
+      "case_id": "retired-asset",
+      "category": "lifecycle",
+      "fixture": "retired exact definition",
+      "evidence_test": "tests/test_capability_hybrid_search.py"
+    },
+    {
+      "case_id": "unsafe-external-mcp",
+      "category": "external_discovery",
+      "fixture": "attractive candidate with unsafe permissions",
+      "evidence_test": "tests/test_external_candidate_quarantine.py"
+    },
+    {
+      "case_id": "skill-description-injection",
+      "category": "prompt_injection",
+      "fixture": "skill description attempts to change launch authority",
+      "evidence_test": "tests/test_external_candidate_quarantine.py"
+    },
+    {
+      "case_id": "skill-unsafe-script",
+      "category": "inspection",
+      "fixture": "benign SKILL.md with unsafe bundled script",
+      "evidence_test": "tests/test_external_candidate_quarantine.py"
+    },
+    {
+      "case_id": "cli-search-miss",
+      "category": "external_discovery",
+      "fixture": "pinned npx skills search miss",
+      "evidence_test": "tests/test_external_capability_discovery.py"
+    },
+    {
+      "case_id": "alias-moves-before-prepare",
+      "category": "stale_authority",
+      "fixture": "alias moves after search and before preparation",
+      "evidence_test": "tests/test_coordinator_launch_preparation.py"
+    },
+    {
+      "case_id": "launch-idempotent-repeat",
+      "category": "launch",
+      "fixture": "same launch identity is repeated",
+      "evidence_test": "tests/test_coordinator_launch_idempotency.py"
+    },
+    {
+      "case_id": "launch-idempotency-conflict",
+      "category": "launch",
+      "fixture": "changed launch under the same idempotency key",
+      "evidence_test": "tests/test_coordinator_launch_idempotency.py"
+    },
+    {
+      "case_id": "goal-directed-contract-negatives",
+      "category": "goal_directed",
+      "fixture": "blank goal, StageGraph initial goal, protected-scope revision, verifier mismatch, and unavailable worker",
+      "evidence_test": "tests/test_coordinator_temporal_runtime.py"
+    },
+    {
+      "case_id": "web-natural-language-no-provider-names",
+      "category": "web_retrieval",
+      "query": "Research current official information using two independent web-search providers, open and verify a primary source in an interactive browser, capture evidence, and return a cited summary.",
+      "expected_workflow_type": "web-research-browser-verification",
+      "expected_capability_assets": [
+        "mcp.firecrawl",
+        "mcp.firecrawl:firecrawl_search",
+        "skill.firecrawl-search",
+        "mcp.tavily",
+        "mcp.tavily:tavily_search",
+        "skill.tavily-search",
+        "skill.agent-browser"
+      ],
+      "forbidden_query_terms": [
+        "firecrawl",
+        "tavily",
+        "agent-browser"
+      ]
+    },
+    {
+      "case_id": "web-provider-identity-preserved",
+      "category": "web_execution",
+      "fixture": "competing provider results retain distinct identities",
+      "evidence_test": "tests/test_web_research_semantic_handlers.py"
+    },
+    {
+      "case_id": "web-sibling-tool-rejection",
+      "category": "least_authority",
+      "fixture": "selection attempts to expose unrelated sibling tools",
+      "evidence_test": "tests/test_web_research_live_adapters.py"
+    },
+    {
+      "case_id": "browser-runtime-grant-missing",
+      "category": "compatibility",
+      "fixture": "agent-browser skill without browser process, network, workspace, and artifact grants",
+      "evidence_test": "tests/test_agentic_asset_definitions.py"
+    },
+    {
+      "case_id": "projection-and-embedding-negatives",
+      "category": "projection",
+      "fixture": "stale digest and unavailable embedding credential",
+      "evidence_test": "tests/test_catalog_projection_reliability.py"
+    }
+  ]
+}

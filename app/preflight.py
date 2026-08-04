@@ -12,6 +12,10 @@ from app.integrations.postgres import create_postgres_pool
 from app.integrations.s3 import s3_client
 from app.integrations.supabase import create_supabase
 from app.integrations.temporal import create_temporal_client
+from app.temporal.coordinator_runtime import (
+    coordinator_task_queues,
+    coordinator_worker_readiness,
+)
 
 
 async def _check(name: str, operation: Callable[[], Awaitable[Any]]) -> tuple[str, dict[str, Any]]:
@@ -50,6 +54,34 @@ async def main() -> int:
         await client.service_client.check_health()
         return "connected"
 
+    async def coordinator_temporal_workers() -> dict[str, object]:
+        if not settings.coordinator_launch_enabled:
+            return {
+                "enabled": False,
+                "families": {
+                    "StageGraph": {"available": False, "reason": "launch_disabled"},
+                    "GoalDirected": {"available": False, "reason": "launch_disabled"},
+                },
+            }
+        client = await create_temporal_client(settings)
+        readiness = await coordinator_worker_readiness(
+            client,
+            task_queues=coordinator_task_queues(settings.temporal_task_queue),
+        )
+        families = {
+            item.family: {
+                "available": item.available,
+                "task_queue": item.task_queue,
+                "workflow_pollers": item.workflow_pollers,
+            }
+            for item in readiness
+        }
+        if not all(item.available for item in readiness):
+            raise RuntimeError(
+                "both coordinator Temporal workflow families require active pollers"
+            )
+        return {"enabled": True, "families": families}
+
     async def s3() -> str:
         async with s3_client(settings) as client:
             response = await client.list_buckets()
@@ -62,6 +94,7 @@ async def main() -> int:
             _check("supabase_postgres", postgres),
             _check("supabase_async", supabase),
             _check("temporal", temporal),
+            _check("coordinator_temporal_workers", coordinator_temporal_workers),
             _check("aws_async_s3", s3),
         )
     )

@@ -49,11 +49,19 @@ class StageGraphInterpreter:
         identity: ExecutionIdentity,
         *,
         run_version: int,
+        request_scope: str = "",
+        semantic_input_binding_ref: str = "",
+        effective_configuration_digest: str = "",
+        blueprint_digest: str = "",
     ) -> StageGraphExecutionState:
         return StageGraphExecutionState(
             identity=identity,
             run_version=run_version,
             stages={stage_id: StageExecutionState() for stage_id in self.stages},
+            request_scope=request_scope,
+            semantic_input_binding_ref=semantic_input_binding_ref,
+            effective_configuration_digest=effective_configuration_digest,
+            blueprint_digest=blueprint_digest,
         )
 
     def runnable(self, state: StageGraphExecutionState) -> tuple[str, ...]:
@@ -134,6 +142,10 @@ class StageGraphInterpreter:
                 f"workflow-cycle/{identity.workflow_cycle}/"
                 f"stage/{stage_id}/stage-cycle/{identity.stage_cycle}"
             ),
+            request_scope=state.request_scope,
+            semantic_input_binding_ref=state.semantic_input_binding_ref,
+            effective_configuration_digest=state.effective_configuration_digest,
+            blueprint_digest=state.blueprint_digest,
             cycle_evaluation_contract_ref=(
                 stage.stage_cycle_policy.evaluation_contract_ref
                 if stage.stage_cycle_policy is not None

@@ -10,11 +10,17 @@ from pymongo.asynchronous.database import AsyncDatabase
 from app.config import Settings
 from app.models import (
     ArtifactMetadataRevisionDocument,
+    CatalogProjectionAlertDocument,
+    CatalogProjectionEventDocument,
     DefinitionAliasDocument,
     DefinitionAliasMovementDocument,
     DefinitionHeadDocument,
     DefinitionRetirementDocument,
     EffectiveRunConfigurationDocument,
+    ExternalCandidateInspectionReportDocument,
+    ExternalCandidateInspectionWorkspaceDocument,
+    ExternalDiscoveryCandidateDocument,
+    ExternalDiscoveryEvidenceDocument,
     InfrastructureMarker,
     OperationExecutionBindingDocument,
     OperationExecutionClaimDocument,
@@ -24,12 +30,15 @@ from app.models import (
     SandboxSnapshotCloneDocument,
     SandboxSnapshotDocument,
     SchemaGroundingRecordDocument,
+    WebResearchRecordDocument,
     WorkspaceMaterializationManifestDocument,
     WorkspaceSlotReservationDocument,
 )
 
 BEANIE_MODELS = [
     ArtifactMetadataRevisionDocument,
+    CatalogProjectionAlertDocument,
+    CatalogProjectionEventDocument,
     InfrastructureMarker,
     DefinitionHeadDocument,
     DefinitionAliasDocument,
@@ -37,6 +46,10 @@ BEANIE_MODELS = [
     PublishedDefinitionDocument,
     DefinitionRetirementDocument,
     EffectiveRunConfigurationDocument,
+    ExternalDiscoveryEvidenceDocument,
+    ExternalDiscoveryCandidateDocument,
+    ExternalCandidateInspectionWorkspaceDocument,
+    ExternalCandidateInspectionReportDocument,
     OperationExecutionBindingDocument,
     OperationExecutionClaimDocument,
     OperationSettlementDocument,
@@ -46,6 +59,7 @@ BEANIE_MODELS = [
     SchemaGroundingRecordDocument,
     WorkspaceSlotReservationDocument,
     WorkspaceMaterializationManifestDocument,
+    WebResearchRecordDocument,
 ]
 
 

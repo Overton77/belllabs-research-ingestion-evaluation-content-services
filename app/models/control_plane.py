@@ -118,3 +118,60 @@ class EffectiveRunConfigurationDocument(Document):
             IndexModel([("digest", ASCENDING)], unique=True),
             IndexModel([("compilation_id", ASCENDING)], unique=True),
         ]
+
+
+class CatalogProjectionEventDocument(Document):
+    event_id: str
+    tenant_scope: str
+    asset_kind: str
+    logical_id: str
+    revision: int = Field(ge=1)
+    source_digest: str
+    operation: str
+    state: str = "pending"
+    attempt_count: int = Field(default=0, ge=0)
+    lease_owner: str | None = None
+    lease_expires_at: datetime | None = None
+    next_attempt_at: datetime
+    last_error_code: str | None = None
+    poison_reason: str | None = None
+    completed_at: datetime | None = None
+    created_at: datetime
+
+    class Settings:
+        name = "catalog_projection_events"
+        use_revision = True
+        indexes = [
+            IndexModel([("event_id", ASCENDING)], unique=True),
+            IndexModel(
+                [
+                    ("state", ASCENDING),
+                    ("next_attempt_at", ASCENDING),
+                    ("lease_expires_at", ASCENDING),
+                ]
+            ),
+            IndexModel(
+                [
+                    ("tenant_scope", ASCENDING),
+                    ("asset_kind", ASCENDING),
+                    ("logical_id", ASCENDING),
+                    ("revision", ASCENDING),
+                ]
+            ),
+        ]
+
+
+class CatalogProjectionAlertDocument(Document):
+    alert_id: str
+    event_id: str
+    error_code: str
+    emitted_at: datetime
+    acknowledged_at: datetime | None = None
+
+    class Settings:
+        name = "catalog_projection_alerts"
+        indexes = [
+            IndexModel([("alert_id", ASCENDING)], unique=True),
+            IndexModel([("event_id", ASCENDING), ("emitted_at", ASCENDING)]),
+            IndexModel([("acknowledged_at", ASCENDING), ("emitted_at", ASCENDING)]),
+        ]

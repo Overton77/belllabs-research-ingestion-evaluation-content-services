@@ -29,6 +29,7 @@ from app.domain.orchestration.contracts import (
 )
 from app.domain.orchestration.interpreter import StageGraphInterpreter
 from app.temporal.stagegraph_workflow import StageGraphWorkflow
+from app.temporal.workflow_sandbox import coordinator_workflow_runner
 from tests.test_run_control import NOW, actor
 from tests.test_run_control import request as run_request
 from tests.test_run_control import service as run_control_service
@@ -375,6 +376,7 @@ async def test_real_temporal_stagegraph_runs_stage_and_workflow_cycles() -> None
             environment.client,
             task_queue="stagegraph-acceptance",
             workflows=[StageGraphWorkflow],
+            workflow_runner=coordinator_workflow_runner(),
             activities=[
                 activities.execute_operation,
                 activities.evaluate_workflow,
@@ -397,7 +399,10 @@ async def test_real_temporal_stagegraph_runs_stage_and_workflow_cycles() -> None
             history = await environment.client.get_workflow_handle(
                 "run-stagegraph-acceptance"
             ).fetch_history()
-        await Replayer(workflows=[StageGraphWorkflow]).replay_workflow(history)
+        await Replayer(
+            workflows=[StageGraphWorkflow],
+            workflow_runner=coordinator_workflow_runner(),
+        ).replay_workflow(history)
 
     attempts = Counter(request.identity.stage_id for request in activities.operation_requests)
     assert attempts == {
@@ -487,6 +492,7 @@ async def test_workflow_rejects_cycle_beyond_frozen_policy() -> None:
             environment.client,
             task_queue="stagegraph-cycle-bound",
             workflows=[StageGraphWorkflow],
+            workflow_runner=coordinator_workflow_runner(),
             activities=[
                 activities.execute_operation,
                 activities.evaluate_workflow,

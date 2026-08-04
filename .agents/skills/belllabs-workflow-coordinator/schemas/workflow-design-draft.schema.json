@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "draft_id",
+    "purpose",
+    "blueprint_family",
+    "input_contract",
+    "invariants",
+    "output_contracts",
+    "requested_assets",
+    "requested_authority",
+    "workspace_requirements",
+    "budgets",
+    "rationale"
+  ],
+  "properties": {
+    "draft_id": {"type": "string", "minLength": 1},
+    "purpose": {"type": "string", "minLength": 1},
+    "blueprint_family": {"enum": ["StageGraph", "GoalDirected"]},
+    "proposed_stage_graph": {"type": ["object", "null"]},
+    "proposed_objective": {"type": ["string", "null"]},
+    "proposed_acceptance": {"type": ["string", "null"]},
+    "input_contract": {"type": "string", "minLength": 1},
+    "invariants": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+    "obligations": {"type": "array", "items": {"type": "string"}},
+    "output_contracts": {"type": "array", "items": {"type": "string"}},
+    "requested_assets": {"type": "array", "items": {"type": "object"}},
+    "requested_authority": {"type": "object"},
+    "workspace_requirements": {"type": "object"},
+    "budgets": {"type": "object"},
+    "rationale": {"type": "string", "minLength": 1},
+    "validation_findings": {"type": "array", "items": {"type": "string"}}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"blueprint_family": {"const": "StageGraph"}}},
+      "then": {"required": ["proposed_stage_graph"]},
+      "else": {"required": ["proposed_objective", "proposed_acceptance"]}
+    }
+  ]
+}

@@ -58,6 +58,7 @@ from app.temporal.linked_run_workflow import (
     LinkedRunObserverWorkflow,
     LinkedRunWorkflow,
 )
+from app.temporal.workflow_sandbox import coordinator_workflow_runner
 
 NOW = datetime(2026, 7, 19, 21, 0, tzinfo=UTC)
 DIGEST = "sha256:" + "a" * 64
@@ -615,6 +616,7 @@ async def test_temporal_mapping_executes_admitted_child_as_distinct_workflow(
                 LinkedRunObserverWorkflow,
                 FixtureChildWorkflow,
             ],
+            workflow_runner=coordinator_workflow_runner(),
             activities=[
                 activities.resolve_execution_binding,
                 activities.resolve_child_observation,
@@ -689,6 +691,7 @@ async def test_degradable_child_failure_requires_governed_resolution() -> None:
                 LinkedRunObserverWorkflow,
                 FixtureChildWorkflow,
             ],
+            workflow_runner=coordinator_workflow_runner(),
             activities=[
                 activities.resolve_execution_binding,
                 activities.resolve_child_observation,

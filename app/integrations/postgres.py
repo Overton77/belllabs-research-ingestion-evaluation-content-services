@@ -9,6 +9,10 @@ from app.config import Settings
 MIGRATIONS_ROOT = Path(__file__).resolve().parents[1] / "migrations"
 
 
+def _is_capability_search_migration(path: Path) -> bool:
+    return "_capability_search" in path.stem
+
+
 async def create_postgres_pool(settings: Settings) -> asyncpg.Pool:
     """Connect to Supabase Postgres without creating application tables or migrations."""
     pool = await asyncpg.create_pool(
@@ -71,7 +75,11 @@ async def create_application_migration_pool(settings: Settings) -> asyncpg.Pool:
 
 async def apply_application_migrations(pool: asyncpg.Pool) -> None:
     """Apply ordered, application-owned migrations under one advisory lock."""
-    migration_paths = sorted(MIGRATIONS_ROOT.glob("*.sql"))
+    migration_paths = [
+        path
+        for path in sorted(MIGRATIONS_ROOT.glob("*.sql"))
+        if not _is_capability_search_migration(path)
+    ]
     async with pool.acquire() as connection, connection.transaction():
         await connection.execute("SELECT pg_advisory_xact_lock($1)", 0x42454C4C)
         await connection.execute(
@@ -95,5 +103,42 @@ async def apply_application_migrations(pool: asyncpg.Pool) -> None:
             await connection.execute(path.read_text(encoding="utf-8"))
             await connection.execute(
                 "INSERT INTO belllabs_control.schema_migrations (version) VALUES ($1)",
+                path.name,
+            )
+
+
+async def apply_capability_search_migrations(pool: asyncpg.Pool) -> None:
+    """Apply ordered disposable Supabase/pgvector projection migrations only."""
+    migration_paths = [
+        path
+        for path in sorted(MIGRATIONS_ROOT.glob("*.sql"))
+        if _is_capability_search_migration(path)
+    ]
+    async with pool.acquire() as connection, connection.transaction():
+        await connection.execute("SELECT pg_advisory_xact_lock($1)", 0x42454C53)
+        await connection.execute(
+            """
+            CREATE SCHEMA IF NOT EXISTS capability_search;
+            CREATE TABLE IF NOT EXISTS capability_search.schema_migrations (
+                version text PRIMARY KEY,
+                applied_at timestamptz NOT NULL DEFAULT clock_timestamp()
+            );
+            """
+        )
+        applied = {
+            row["version"]
+            for row in await connection.fetch(
+                "SELECT version FROM capability_search.schema_migrations"
+            )
+        }
+        for path in migration_paths:
+            if path.name in applied:
+                continue
+            await connection.execute(path.read_text(encoding="utf-8"))
+            await connection.execute(
+                """
+                INSERT INTO capability_search.schema_migrations (version)
+                VALUES ($1)
+                """,
                 path.name,
             )
