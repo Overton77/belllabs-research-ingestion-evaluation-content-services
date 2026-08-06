@@ -36,6 +36,8 @@ class OperationExecutionBindingReader(Protocol):
     async def get_binding_by_id(
         self,
         binding_id: str,
+        *,
+        request_scope: str,
     ) -> OperationExecutionBinding | None: ...
 
 
@@ -451,7 +453,10 @@ async def _verify_operation_authority(
         raise SemanticRoutingError(
             "semantic handler requires an Operation Execution Binding repository"
         )
-    binding = await repository.get_binding_by_id(binding_ref)
+    binding = await repository.get_binding_by_id(
+        binding_ref,
+        request_scope=request_scope,
+    )
     if binding is None:
         raise SemanticRoutingError("semantic handler Operation Execution Binding is unavailable")
     if (

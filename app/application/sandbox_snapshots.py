@@ -87,7 +87,12 @@ class SnapshotAuthorityPort(Protocol):
 
 
 class SnapshotBindingRepository(Protocol):
-    async def get_binding_by_id(self, binding_id: str) -> OperationExecutionBinding | None: ...
+    async def get_binding_by_id(
+        self,
+        binding_id: str,
+        *,
+        request_scope: str,
+    ) -> OperationExecutionBinding | None: ...
 
 
 class CurrentSnapshotBindingAuthority(Protocol):
@@ -128,7 +133,10 @@ class BindingSnapshotAuthority:
         self._current = current
 
     async def verify_creation(self, request: SandboxSnapshotCreateRequest) -> None:
-        binding = await self._bindings.get_binding_by_id(request.producer_binding_id)
+        binding = await self._bindings.get_binding_by_id(
+            request.producer_binding_id,
+            request_scope=request.request_scope,
+        )
         if binding is None:
             raise SnapshotAuthorityError("snapshot producer binding is unavailable")
         await self._current.verify_binding(binding)
@@ -159,7 +167,10 @@ class BindingSnapshotAuthority:
     async def verify_restore(
         self, request: SnapshotCloneRequest, snapshot: SandboxSnapshot
     ) -> None:
-        binding = await self._bindings.get_binding_by_id(request.binding_id)
+        binding = await self._bindings.get_binding_by_id(
+            request.binding_id,
+            request_scope=request.request_scope,
+        )
         if binding is None:
             raise SnapshotAuthorityError("restore binding is unavailable")
         await self._current.verify_binding(binding)

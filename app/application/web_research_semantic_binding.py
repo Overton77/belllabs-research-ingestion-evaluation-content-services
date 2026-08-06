@@ -185,7 +185,10 @@ class SemanticServiceWebResearchOperationBindingAuthor:
         )
         bindings: dict[str, OperationExecutionBinding] = {}
         for stage_id, binding_id in refs.items():
-            binding = await self._reader.get_binding_by_id(binding_id)
+            binding = await self._reader.get_binding_by_id(
+                binding_id,
+                request_scope=request.request_scope,
+            )
             if binding is None:
                 raise SemanticRoutingError("persisted Scenario D OEB is unavailable after freeze")
             bindings[stage_id] = binding

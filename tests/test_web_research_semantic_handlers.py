@@ -208,8 +208,16 @@ class FakeOperationBindingReader:
             )
         }
 
-    async def get_binding_by_id(self, binding_id: str) -> object | None:
-        return self._values.get(binding_id)
+    async def get_binding_by_id(
+        self,
+        binding_id: str,
+        *,
+        request_scope: str,
+    ) -> object | None:
+        binding = self._values.get(binding_id)
+        if binding is None or binding.request_scope != request_scope:
+            return None
+        return binding
 
 
 class FakeSearch:

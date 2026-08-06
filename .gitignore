@@ -22,6 +22,7 @@ ENV/
 env/
 .uv/
 .uv-cache/
+.langgraph_api/
 pip-wheel-metadata/
 pip-log.txt
 
@@ -42,6 +43,7 @@ __pycache__/
 *.log
 *.out
 *.pid
+/NUL
 
 # Test & Coverage outputs
 htmlcov/

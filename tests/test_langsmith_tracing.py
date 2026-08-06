@@ -65,7 +65,9 @@ def test_runtime_execute_redaction_drops_secrets_and_prompt_bodies() -> None:
             effective_configuration_digest="sha256:abc",
         ),
         resolved_secret_names=("environment:OPENAI_API_KEY",),
-        prompt_segments=(SimpleNamespace(content="SECRET PROMPT"),),
+        prompt_segments=(
+            SimpleNamespace(content="SECRET PROMPT SYNTHETIC-PHI-000-00-0000"),
+        ),
         workspace=SimpleNamespace(workspace_id="ws-1"),
     )
     redacted = process_runtime_execute_inputs(
@@ -77,6 +79,7 @@ def test_runtime_execute_redaction_drops_secrets_and_prompt_bodies() -> None:
     assert redacted["resolved_secrets"] == "[redacted]"
     assert "sk-live-secret" not in str(redacted)
     assert "SECRET PROMPT" not in str(redacted)
+    assert "SYNTHETIC-PHI-000-00-0000" not in str(redacted)
     assert redacted["secret_names"] == ["environment:OPENAI_API_KEY"]
     assert redacted["prompt_segment_count"] == 1
 

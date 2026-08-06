@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     application_database_direct: SecretStr | None = None
     application_database_url: SecretStr | None = None
     application_migration_database_direct: SecretStr | None = None
+    application_backfill_database_direct: SecretStr | None = None
 
     supabase_url: str
     supabase_publishable_key: SecretStr
@@ -42,6 +43,24 @@ class Settings(BaseSettings):
     langsmith_endpoint: str = "https://api.smith.langchain.com"
     langsmith_project: str = "BellLabsBiotech"
     langsmith_workspace_id: str | None = None
+    agent_server_langsmith_project: str = "BellLabsBiotech-AgentServer-Local"
+    bell_labs_trace_pseudonym_key: SecretStr | None = None
+
+    langgraph_runtime_enabled: bool = False
+    bell_labs_environment: Literal["development", "staging", "production"] = "development"
+    agent_server_endpoint: str = "http://127.0.0.1:2024"
+    agent_server_api_key: SecretStr | None = None
+    agent_server_stagegraph_id: Literal["belllabs_stagegraph"] = "belllabs_stagegraph"
+    agent_server_goal_directed_id: Literal["belllabs_goal_directed"] = (
+        "belllabs_goal_directed"
+    )
+    agent_server_deployment_endpoint_id: str | None = None
+    agent_server_deployment_revision: str | None = None
+    bell_labs_agent_auth_issuer: str | None = None
+    bell_labs_agent_auth_audience: str = "authenticated"
+    bell_labs_agent_auth_jwks_uri: str | None = None
+    bell_labs_agent_auth_public_key: SecretStr | None = None
+    bell_labs_agent_auth_algorithm: Literal["RS256", "ES256"] = "RS256"
 
     coordinator_mcp_enabled: bool = False
     coordinator_mcp_mount_path: str = Field(
@@ -167,6 +186,9 @@ class Settings(BaseSettings):
 
     mongodb_uri: SecretStr
     mongodb_database: str = "belllabsbiotech"
+    operation_binding_write_authority: Literal["legacy", "v2"] = "legacy"
+    operation_binding_legacy_read_fallback: bool = False
+    legacy_operation_journal_read_fallback: bool = False
     redis_url: SecretStr = SecretStr("redis://localhost:56379/0")
     runtime_realtime_required: bool = False
     runtime_approval_timeout_seconds: int = Field(default=900, ge=30, le=86_400)
@@ -223,6 +245,14 @@ class Settings(BaseSettings):
         if self.application_migration_database_direct is not None:
             return self.application_migration_database_direct.get_secret_value()
         return self.application_postgres_dsn
+
+    @property
+    def application_backfill_postgres_dsn(self) -> str:
+        if self.application_backfill_database_direct is None:
+            raise ValueError(
+                "APPLICATION_BACKFILL_DATABASE_DIRECT is required for backfill"
+            )
+        return self.application_backfill_database_direct.get_secret_value()
 
     @property
     def cors_origins(self) -> list[str]:

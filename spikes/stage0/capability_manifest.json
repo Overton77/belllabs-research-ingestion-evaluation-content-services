@@ -1,0 +1,70 @@
+{
+  "schema_version": "belllabs.stage0.capability-manifest.v1",
+  "capabilities": [
+    {
+      "id": "langgraph_standard_agent_server",
+      "maturity": "stable",
+      "required_for_migration": true,
+      "feature_flag": "LANGGRAPH_RUNTIME_ENABLED",
+      "default": false,
+      "fallback": "legacy_temporal_openai_agents_runtime"
+    },
+    {
+      "id": "deepagents_sync_subagents",
+      "maturity": "stable",
+      "required_for_migration": true,
+      "feature_flag": "DEEPAGENTS_SYNC_SUBAGENTS_ENABLED",
+      "default": false,
+      "fallback": "linked_belllabs_run"
+    },
+    {
+      "id": "deepagents_async_subagents",
+      "maturity": "preview",
+      "required_for_migration": true,
+      "feature_flag": "DEEPAGENTS_ASYNC_SUBAGENTS_ENABLED",
+      "default": false,
+      "fallback": "linked_belllabs_run_or_sync_subagent",
+      "promotion_gate": "Stage 6 crash_orphan_cancel_capacity_tenant_reconciliation proofs"
+    },
+    {
+      "id": "quickjs_call_mode",
+      "maturity": "beta",
+      "required_for_migration": false,
+      "feature_flag": "QUICKJS_CALL_ENABLED",
+      "default": false,
+      "fallback": "reviewed_native_async_tool"
+    },
+    {
+      "id": "quickjs_ptc",
+      "maturity": "beta",
+      "required_for_migration": false,
+      "feature_flag": "QUICKJS_PTC_ENABLED",
+      "default": false,
+      "fallback": "reviewed_native_async_tool"
+    },
+    {
+      "id": "quickjs_dynamic_subagents",
+      "maturity": "beta",
+      "required_for_migration": false,
+      "feature_flag": "DYNAMIC_SUBAGENTS_ENABLED",
+      "default": false,
+      "fallback": "compiled_sync_or_async_subagent"
+    },
+    {
+      "id": "langsmith_sandbox",
+      "maturity": "entitlement_dependent",
+      "required_for_migration": true,
+      "feature_flag": "LANGSMITH_SANDBOX_ENABLED",
+      "default": false,
+      "fallback": "unsupported_capability_or_existing_local_docker_sandbox"
+    },
+    {
+      "id": "cross_thread_scientific_memory",
+      "maturity": "policy_disabled",
+      "required_for_migration": false,
+      "feature_flag": "SCIENTIFIC_STORE_MEMORY_ENABLED",
+      "default": false,
+      "fallback": "immutable_evidence_and_context_refs"
+    }
+  ]
+}

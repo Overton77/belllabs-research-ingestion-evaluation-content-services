@@ -25,11 +25,14 @@ from app.application.artifact_promotion import (
     ArtifactPromotionService,
     StaticArtifactValidationAuthority,
 )
+from app.application.journaled_operation_execution import (
+    JournaledOperationExecutionCoordinator,
+)
 from app.application.mongo_artifact_repository import (
     MongoArtifactMetadataRepository,
 )
 from app.application.mongo_operation_execution_repository import (
-    MongoOperationBindingRepository,
+    create_semantic_operation_binding_repository,
 )
 from app.application.mongo_workspace_repository import (
     MongoWorkspaceManifestRepository,
@@ -38,8 +41,12 @@ from app.application.operation_execution import (
     OperationExecutionService,
     RunControlOperationBudgetAuthority,
 )
+from app.application.operation_journal import OperationJournalService
 from app.application.postgres_artifact_repository import (
     PostgresArtifactDurableReferenceRepository,
+)
+from app.application.postgres_operation_journal import (
+    PostgresAtomicOperationJournalRepository,
 )
 from app.application.postgres_run_control_repository import (
     PostgresRunControlRepository,
@@ -478,8 +485,9 @@ async def main() -> None:
     policies = AdmissionPolicyRegistry()
     policies.register("contract:live-artifact-input@1", lambda _request, _config: None)
     policies.register("contract:live-artifact-invariant@1", lambda _request, _config: None)
+    run_control_repository = PostgresRunControlRepository(postgres_pool)
     run_control = RunControlService(
-        PostgresRunControlRepository(postgres_pool),
+        run_control_repository,
         LiveConfigurationVerifier(),
         policies,
     )
@@ -528,7 +536,13 @@ async def main() -> None:
                 required_artifact_paths=(REPORT_PATH,),
                 candidate_sink=candidates,
             )
-            binding_repository = MongoOperationBindingRepository()
+            binding_repository = create_semantic_operation_binding_repository(settings)
+            artifact_payloads = S3ArtifactPayloadStore(settings, settings.s3_bucket)
+            operation_result_payloads = S3ArtifactPayloadStore(
+                settings,
+                settings.s3_bucket,
+                prefix="operation-results/local-artifact-acceptance/sha256",
+            )
             operation_authority = ConformanceAuthority(
                 accepted_run_id="pending",
                 configuration_digest=configuration_digest,
@@ -556,8 +570,17 @@ async def main() -> None:
                         "workflow_run.settle_usage",
                     ),
                 ),
+                journal=JournaledOperationExecutionCoordinator(
+                    journal=OperationJournalService(
+                        PostgresAtomicOperationJournalRepository(postgres_pool)
+                    ),
+                    run_control=run_control_repository,
+                    results=operation_result_payloads,
+                    actor=_actor(
+                        "workflow_run.report_usage",
+                    ),
+                ),
             )
-            artifact_payloads = S3ArtifactPayloadStore(settings, settings.s3_bucket)
             durable_references = PostgresArtifactDurableReferenceRepository(postgres_pool)
             artifact_service = ArtifactPromotionService(
                 bindings=binding_repository,

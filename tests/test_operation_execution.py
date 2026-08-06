@@ -11,6 +11,7 @@ from app.application.operation_execution import (
     InMemoryOperationBindingRepository,
     OperationBudgetReconciliationInProgress,
     OperationExecutionInProgress,
+    OperationExecutionJournalPort,
     OperationExecutionService,
     RunControlOperationAuthority,
     RunControlOperationBudgetAuthority,
@@ -39,6 +40,7 @@ from app.domain.operation_execution.contracts import (
     WorkspaceOwnerKind,
     WorkspaceSlotBinding,
 )
+from app.domain.operation_execution.journal import OperationClaimResult, OperationEffectClaim
 from app.domain.run_control.contracts import (
     ActorContext,
     CommandResult,
@@ -160,6 +162,7 @@ def service_fixture(
     *,
     assets: ConformanceAssetVerifier | None = None,
     runtime: ConformanceRuntime | None = None,
+    journal: OperationExecutionJournalPort | None = None,
 ) -> tuple[
     OperationExecutionService,
     InMemoryOperationBindingRepository,
@@ -191,8 +194,45 @@ def service_fixture(
         secrets=ConformanceSecretResolver({"environment:OPENAI_API_KEY": SECRET_VALUE}),
         events=events,
         budget=budget,
+        journal=journal,
     )
     return service, bindings, runtime, events, budget
+
+
+class FakeJournal:
+    def __init__(self) -> None:
+        self.claim: OperationEffectClaim | None = None
+        self.settlement: OperationSettlement | None = None
+
+    async def acquire(self, binding, *, claimed_by):  # type: ignore[no-untyped-def]
+        self.claim = OperationEffectClaim(
+            effect_claim_id="journal-claim-1",
+            request_scope=binding.request_scope,
+            belllabs_run_id=binding.run_id,
+            operation_contract_digest=sha256_digest(binding.operation_contract_ref),
+            idempotency_key=binding.side_effect_key,
+            request_digest=binding.request_fingerprint,
+            semantic_binding_id=binding.binding_id,
+            semantic_binding_digest=sha256_digest(binding),
+            semantic_attempt_key=binding.semantic_attempt_key,
+            claimed_by=claimed_by,
+            claimed_at=NOW,
+        )
+        return OperationClaimResult(
+            status="acquired",
+            claim=self.claim,
+            reason="fixture claim acquired",
+        )
+
+    async def get_settlement(self, _binding):  # type: ignore[no-untyped-def]
+        return self.settlement
+
+    async def settle(
+        self, _binding, _claim, settlement, *, started_at
+    ):  # type: ignore[no-untyped-def]
+        assert started_at <= settlement.settled_at
+        self.settlement = settlement
+        return settlement
 
 
 @pytest.mark.asyncio
@@ -214,6 +254,29 @@ async def test_binding_precedes_effects_and_retry_is_exactly_idempotent() -> Non
     persisted = repr((binding, await bindings.get_settlement(binding.binding_id), events.events))
     assert SECRET_VALUE not in persisted
     assert SECRET_VALUE not in repr(runtime.invocations)
+
+
+@pytest.mark.asyncio
+async def test_journal_mode_owns_claim_settlement_and_post_effects() -> None:
+    journal = FakeJournal()
+    service, bindings, runtime, events, budget = service_fixture(journal=journal)
+    request = operation_request()
+
+    first = await service.execute(request)
+    replay = await service.execute(request)
+
+    assert first == replay
+    assert len(runtime.invocations) == 1
+    assert journal.claim is not None
+    assert journal.settlement is not None
+    assert events.events == {}
+    assert budget.settlements == {}
+    binding = await bindings.get_binding(
+        request.identity.semantic_key,
+        request_scope=request.request_scope,
+    )
+    assert binding is not None
+    assert await bindings.get_settlement(binding.binding_id) is None
 
 
 @pytest.mark.asyncio
@@ -534,11 +597,19 @@ async def test_activity_redelivery_never_repeats_claimed_unsettled_provider_work
             super().__init__()
             self.failed = False
 
-        async def settle(self, settlement: OperationSettlement) -> OperationSettlement:
+        async def settle(
+            self,
+            settlement: OperationSettlement,
+            *,
+            request_scope: str | None = None,
+        ) -> OperationSettlement:
             if not self.failed:
                 self.failed = True
                 raise RuntimeError("simulated worker loss before settlement commit")
-            return await super().settle(settlement)
+            return await super().settle(
+                settlement,
+                request_scope=request_scope,
+            )
 
     request = operation_request()
     bindings = FailSettlementOnce()

@@ -29,6 +29,17 @@ async def test_postgres_atomic_rollback_and_concurrent_version_conflict(
         async with pool.acquire() as connection:
             await connection.execute("DROP SCHEMA IF EXISTS belllabs_control CASCADE")
         await apply_application_migrations(pool)
+        await apply_application_migrations(pool)
+        async with pool.acquire() as connection:
+            assert {
+                row["version"]
+                for row in await connection.fetch(
+                    "SELECT version FROM belllabs_control.schema_migrations"
+                )
+            } >= {
+                "0012_graph_runtime_operation_journal.sql",
+                "0013_legacy_operation_journal_backfill.sql",
+            }
 
         async def fail_admission(boundary: str) -> None:
             if boundary == "admission":

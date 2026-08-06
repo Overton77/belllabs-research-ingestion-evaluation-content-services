@@ -1,0 +1,30 @@
+{
+  "$schema": "https://langgra.ph/schema.json",
+  "dependencies": ["."],
+  "graphs": {
+    "stage0_qualification": "./graph_factory.py:graph_factory"
+  },
+  "auth": {
+    "path": "./auth.py:auth",
+    "disable_studio_auth": true,
+    "openapi": {
+      "securitySchemes": {
+        "stage0Token": {
+          "type": "apiKey",
+          "in": "header",
+          "name": "X-Stage0-Token"
+        }
+      },
+      "security": [
+        {
+          "stage0Token": []
+        }
+      ]
+    }
+  },
+  "http": {
+    "app": "./http_app.py:app",
+    "middleware_order": "auth_first"
+  },
+  "python_version": "3.12"
+}

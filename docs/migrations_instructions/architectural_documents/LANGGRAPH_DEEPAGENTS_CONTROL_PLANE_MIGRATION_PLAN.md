@@ -5,7 +5,7 @@ Date: 2026-08-01
 Scope: control plane, run control, schema grounding, StageGraph, GoalDirected, operation execution, coordinator launch/result integration, and LangSmith Agent Server deployment  
 End state: the LangSmith-deployed API and graphs are usable, observable, resumable, and ready for the coordinator-agent MCP server to orchestrate.
 
-Research round 2 amendment: this revision incorporates the evidence and readiness verdict in [`LANGGRAPH_DEEPAGENTS_RESEARCH_ROUND_2.md`](./LANGGRAPH_DEEPAGENTS_RESEARCH_ROUND_2.md), including runtime graph rebuilding, first-class context policy, delegation modes, MongoDB/PostgreSQL boundaries, async execution, naming, and coordinator capability composition.
+Research round 2 amendment: this revision incorporates the evidence and readiness verdict in `[LANGGRAPH_DEEPAGENTS_RESEARCH_ROUND_2.md](./LANGGRAPH_DEEPAGENTS_RESEARCH_ROUND_2.md)`, including runtime graph rebuilding, first-class context policy, delegation modes, MongoDB/PostgreSQL boundaries, async execution, naming, and coordinator capability composition.
 
 ## 1. Outcome and recommendation
 
@@ -13,20 +13,22 @@ Adopt a **standard LangSmith Deployment / Agent Server application containing cu
 
 The target ownership boundary is:
 
-| Concern | Owner after migration | Authority |
-|---|---|---|
-| Immutable definitions, aliases, compilation, ERCs | BellLabs control plane | Authoritative |
-| Admission, lifecycle CAS, budgets, decisions, terminality, outbox | BellLabs run control in PostgreSQL | Authoritative |
-| Schema/KG bindings, evidence, reconciliation | BellLabs schema grounding, MongoDB, Neo4j | Authoritative |
-| Workflow execution, suspension, checkpointing, replay, streaming | LangGraph on Agent Server | Execution mechanics |
-| Operation-level agent loop | LangChain agent or Deep Agent | Produces governed evidence/results |
-| Models and tools | LangChain integrations and middleware | Capability mechanics |
-| Outbound MCP clients | `langchain-mcp-adapters` | Capability mechanics |
-| Shell/filesystem/browser isolation | LangSmith Sandboxes through a BellLabs provider port | Execution mechanics |
-| Bounded in-process JavaScript | Deep Agents QuickJS interpreter | Execution mechanics |
-| Traces, Studio, datasets, evaluators, online evaluation | LangSmith | Observability/evaluation evidence |
-| Cross-thread agent memory | LangGraph Store | Non-authoritative memory only |
-| Large artifacts and snapshots | S3 or governed artifact store | Authoritative by BellLabs record/digest |
+
+| Concern                                                           | Owner after migration                                | Authority                               |
+| ----------------------------------------------------------------- | ---------------------------------------------------- | --------------------------------------- |
+| Immutable definitions, aliases, compilation, ERCs                 | BellLabs control plane                               | Authoritative                           |
+| Admission, lifecycle CAS, budgets, decisions, terminality, outbox | BellLabs run control in PostgreSQL                   | Authoritative                           |
+| Schema/KG bindings, evidence, reconciliation                      | BellLabs schema grounding, MongoDB, Neo4j            | Authoritative                           |
+| Workflow execution, suspension, checkpointing, replay, streaming  | LangGraph on Agent Server                            | Execution mechanics                     |
+| Operation-level agent loop                                        | LangChain agent or Deep Agent                        | Produces governed evidence/results      |
+| Models and tools                                                  | LangChain integrations and middleware                | Capability mechanics                    |
+| Outbound MCP clients                                              | `langchain-mcp-adapters`                             | Capability mechanics                    |
+| Shell/filesystem/browser isolation                                | LangSmith Sandboxes through a BellLabs provider port | Execution mechanics                     |
+| Bounded in-process JavaScript                                     | Deep Agents QuickJS interpreter                      | Execution mechanics                     |
+| Traces, Studio, datasets, evaluators, online evaluation           | LangSmith                                            | Observability/evaluation evidence       |
+| Cross-thread agent memory                                         | LangGraph Store                                      | Non-authoritative memory only           |
+| Large artifacts and snapshots                                     | S3 or governed artifact store                        | Authoritative by BellLabs record/digest |
+
 
 This produces a deliberate hybrid:
 
@@ -37,24 +39,26 @@ This produces a deliberate hybrid:
 
 ### 1.1 Decisions this plan proposes for acceptance
 
-| ID | Proposal | Reason |
-|---|---|---|
-| D-01 | Use standard Agent Server, not Managed Deep Agents, as the primary deployment. | Custom state, reducers, domain APIs, exact bindings, and outer graphs are required. |
-| D-02 | Implement StageGraph as a generic frontier-scheduler graph first. | Existing semantics include fairness, joins, cycles, invalidation, waits, and reuse; they are not a static DAG. |
-| D-03 | Add generated native LangGraphs only later for stable, measured hot paths. | Keeps the initial migration behaviorally equivalent without forbidding optimization. |
-| D-04 | Implement GoalDirected as a deterministic outer graph around a bounded Deep Agent and independent verifier. | Deep Agent output is evidence; BellLabs decides acceptance and terminality. |
-| D-05 | Use one Agent Server thread per `(request_scope, BellLabs run_id, execution_epoch)`. | Epoch rollover or fork cannot contaminate an earlier checkpoint lineage. |
-| D-06 | Keep the existing public FastAPI deployable independently during coexistence, while making the same routers mountable as Agent Server custom routes. | Enables safe migration and the requested single Agent Server API end state without duplicating domain logic. |
-| D-07 | Let Agent Server provide production checkpointer/Store; use async PostgreSQL saver/store explicitly only in standalone integration tests or self-hosted mode. | Avoids competing persistence layers inside a managed deployment. |
-| D-08 | Persist an authoritative `RuntimeExecutionBinding` in BellLabs PostgreSQL. | Agent Server IDs and checkpoints are runtime facts that must be correlated to governed runs. |
-| D-09 | Use typed interventions only; do not expose arbitrary `update_state` to normal callers. | Checkpoint editing invokes reducers and is not a lifecycle authorization mechanism. |
-| D-10 | Put messages only in operation-agent subgraphs, not the top-level lifecycle state. | Prevents checkpoint bloat and keeps lifecycle replay deterministic. |
-| D-11 | Use an async graph factory as the governed graph-assembly boundary when per-run resources or harness composition differ; keep a static compiled graph for families that do not require runtime assembly. | Agent Server can rebuild a graph for each run, but also calls factories for state reads, updates, and schema inspection. The factory therefore needs an explicit introspection-safe protocol. |
-| D-12 | Make all I/O-bearing application, graph, middleware, tool, MCP, sandbox, and Store paths natively async; keep pure domain reducers/interpreters synchronous. | Native async avoids thread-pool indirection, permits structured cancellation, and matches the current project ports and production Deep Agents guidance. |
-| D-13 | Move authoritative operation claims, dispatch attempts, and settlements into BellLabs PostgreSQL; retain MongoDB for definitions, compiled semantic records, evidence metadata, and immutable context manifests. | External-effect identity must coordinate transactionally with run lifecycle, budgets, and outbox. The current Mongo operation claim documents cannot provide that atomic boundary. |
-| D-14 | Publish a first-class `ContextPolicyDefinition` and compile an immutable `ContextAssemblySpec` into the ERC. | Context compression, retrieval, provenance, quarantine, expiry, and reconstruction are governed behavior, not incidental middleware settings. |
-| D-15 | Model synchronous, dynamic-interpreter, asynchronous, and linked-run delegation as four distinct execution modes. | They have different state, recovery, authority, capacity, and compatibility semantics; a single `subagents` flag is insufficient. |
-| D-16 | Freeze a canonical vocabulary and identifier grammar before new schemas are published. | Workflow Types, runtime graphs, assistants, threads, Agent Server runs, operations, subagents, async tasks, and linked runs must not share overloaded names or IDs. |
+
+| ID   | Proposal                                                                                                                                                                                                         | Reason                                                                                                                                                                                        |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D-01 | Use standard Agent Server, not Managed Deep Agents, as the primary deployment.                                                                                                                                   | Custom state, reducers, domain APIs, exact bindings, and outer graphs are required.                                                                                                           |
+| D-02 | Implement StageGraph as a generic frontier-scheduler graph first.                                                                                                                                                | Existing semantics include fairness, joins, cycles, invalidation, waits, and reuse; they are not a static DAG.                                                                                |
+| D-03 | Add generated native LangGraphs only later for stable, measured hot paths.                                                                                                                                       | Keeps the initial migration behaviorally equivalent without forbidding optimization.                                                                                                          |
+| D-04 | Implement GoalDirected as a deterministic outer graph around a bounded Deep Agent and independent verifier.                                                                                                      | Deep Agent output is evidence; BellLabs decides acceptance and terminality.                                                                                                                   |
+| D-05 | Use one parent Agent Server thread per `(request_scope, BellLabs run_id, execution_epoch)`; bind linked runs and async subagents to explicit child threads.                                                         | Epoch rollover or fork cannot contaminate an earlier checkpoint lineage, while delegated work retains separate ownership, capacity, and recovery identity.                                    |
+| D-06 | Keep the existing public FastAPI deployable independently during coexistence, while making the same routers mountable as Agent Server custom routes.                                                             | Enables safe migration and the requested single Agent Server API end state without duplicating domain logic.                                                                                  |
+| D-07 | Let Agent Server provide production checkpointer/Store; use async PostgreSQL saver/store explicitly only in standalone integration tests or self-hosted mode.                                                    | Avoids competing persistence layers inside a managed deployment.                                                                                                                              |
+| D-08 | Persist an authoritative `RuntimeExecutionBinding` in BellLabs PostgreSQL.                                                                                                                                       | Agent Server IDs and checkpoints are runtime facts that must be correlated to governed runs.                                                                                                  |
+| D-09 | Use typed interventions only; do not expose arbitrary `update_state` to normal callers.                                                                                                                          | Checkpoint editing invokes reducers and is not a lifecycle authorization mechanism.                                                                                                           |
+| D-10 | Put messages only in operation-agent subgraphs, not the top-level lifecycle state.                                                                                                                               | Prevents checkpoint bloat and keeps lifecycle replay deterministic.                                                                                                                           |
+| D-11 | Use an async graph factory as the governed graph-assembly boundary when per-run resources or harness composition differ; keep a static compiled graph for families that do not require runtime assembly.         | Agent Server can rebuild a graph for each run, but also calls factories for state reads, updates, and schema inspection. The factory therefore needs an explicit introspection-safe protocol. |
+| D-12 | Make all I/O-bearing application, graph, middleware, tool, MCP, sandbox, and Store paths natively async; keep pure domain reducers/interpreters synchronous.                                                     | Native async avoids thread-pool indirection, permits structured cancellation, and matches the current project ports and production Deep Agents guidance.                                      |
+| D-13 | Move authoritative operation claims, dispatch attempts, and settlements into BellLabs PostgreSQL; retain MongoDB for definitions, compiled semantic records, evidence metadata, and immutable context manifests. | External-effect identity must coordinate transactionally with run lifecycle, budgets, and outbox. The current Mongo operation claim documents cannot provide that atomic boundary.            |
+| D-14 | Publish a first-class `ContextPolicyDefinition` and compile an immutable `ContextAssemblySpec` into the ERC.                                                                                                     | Context compression, retrieval, provenance, quarantine, expiry, and reconstruction are governed behavior, not incidental middleware settings.                                                 |
+| D-15 | Model synchronous, dynamic-interpreter, asynchronous, and linked-run delegation as four distinct execution modes.                                                                                                | They have different state, recovery, authority, capacity, and compatibility semantics; a single `subagents` flag is insufficient.                                                             |
+| D-16 | Freeze a canonical vocabulary and identifier grammar before new schemas are published.                                                                                                                           | Workflow Types, runtime graphs, assistants, threads, Agent Server runs, operations, subagents, async tasks, and linked runs must not share overloaded names or IDs.                           |
+
 
 ### 1.2 Explicit non-goals
 
@@ -107,6 +111,8 @@ flowchart LR
     API -. correlation .-> LS
 ```
 
+
+
 ### 2.1 Runtime boundaries
 
 1. A coordinator or REST caller prepares a launch using exact immutable refs.
@@ -124,10 +130,12 @@ flowchart LR
 
 Use two process shapes from one codebase during migration:
 
-| Shape | Purpose | Routes/runtime |
-|---|---|---|
-| Existing standalone FastAPI | Current production/coexistence and rollback | v1 APIs, coordinator MCP, optionally v2 proxy routes |
-| LangSmith Agent Server application | New runtime and final serverless endpoint | registered graphs, Agent Server defaults, custom BellLabs HTTP app |
+
+| Shape                              | Purpose                                     | Routes/runtime                                                     |
+| ---------------------------------- | ------------------------------------------- | ------------------------------------------------------------------ |
+| Existing standalone FastAPI        | Current production/coexistence and rollback | v1 APIs, coordinator MCP, optionally v2 proxy routes               |
+| LangSmith Agent Server application | New runtime and final serverless endpoint   | registered graphs, Agent Server defaults, custom BellLabs HTTP app |
+
 
 The custom Agent Server HTTP app imports router factories and shared dependencies. It must not import the existing `app.server` lifespan because that composition assumes Temporal/OpenAI workers and currently has incomplete REST principal injection. Route-shadowing tests must prove that custom routes do not collide with Agent Server default endpoints.
 
@@ -135,18 +143,20 @@ The custom Agent Server HTTP app imports router factories and shared dependencie
 
 ### 3.1 Identity map
 
-| Identity | Meaning | Lifecycle |
-|---|---|---|
-| `request_scope` | Tenant/project governance boundary | Existing, authoritative |
-| `run_id` | BellLabs governed workflow run | Existing, authoritative |
-| `execution_epoch` | Continuity boundary within a BellLabs run | Existing concept; implement beyond epoch 1 |
-| `thread_id` | Agent Server checkpoint lineage | One per run and epoch |
-| Agent Server `run_id` | One invocation/resume/steering execution on a thread | Many per thread |
-| `assistant_id` | Deployed graph/config pointer | Runtime configuration, not Workflow Type |
-| `deployment_revision` | Exact Agent Server code/config revision | Frozen into runtime binding |
-| `checkpoint_id` | Runtime checkpoint position | Runtime fact, never a domain handoff ID |
-| `trace_id` | LangSmith trace correlation | Evidence/observability |
-| `semantic_key` | Stable stage/iteration/attempt identity | Existing BellLabs idempotency identity |
+
+| Identity              | Meaning                                              | Lifecycle                                  |
+| --------------------- | ---------------------------------------------------- | ------------------------------------------ |
+| `request_scope`       | Tenant/project governance boundary                   | Existing, authoritative                    |
+| `run_id`              | BellLabs governed workflow run                       | Existing, authoritative                    |
+| `execution_epoch`     | Continuity boundary within a BellLabs run            | Existing concept; implement beyond epoch 1 |
+| `thread_id`           | Agent Server checkpoint lineage                      | One per run and epoch                      |
+| Agent Server `run_id` | One invocation/resume/steering execution on a thread | Many per thread                            |
+| `assistant_id`        | Deployed graph/config pointer                        | Runtime configuration, not Workflow Type   |
+| `deployment_revision` | Exact Agent Server code/config revision              | Frozen into runtime binding                |
+| `checkpoint_id`       | Runtime checkpoint position                          | Runtime fact, never a domain handoff ID    |
+| `trace_id`            | LangSmith trace correlation                          | Evidence/observability                     |
+| `semantic_key`        | Stable stage/iteration/attempt identity              | Existing BellLabs idempotency identity     |
+
 
 Create a thread using deterministic metadata, but let Agent Server own the actual thread identifier. Persist the binding before considering launch complete. A fork creates a new BellLabs run and thread. A sanctioned epoch rollover creates a new thread and a compact handoff input containing only verified refs/digests.
 
@@ -190,16 +200,18 @@ Constraints:
 
 ### 3.3 Persistence boundary
 
-| Data | Storage | Rule |
-|---|---|---|
-| Graph execution state | Agent Server checkpointer | Compact, replayable, ref-oriented |
-| Cross-thread agent memory/preferences | Agent Server Store | Non-authoritative and revocable |
-| Run lifecycle, budgets, approvals, interventions, outbox | BellLabs PostgreSQL | Authoritative |
-| Definitions, ERCs, semantic records | MongoDB, external payloads in S3 | Immutable/content-addressed |
-| Large outputs, snapshots, transcripts | S3/governed artifact storage | State carries only ref/digest |
-| Knowledge graph | Neo4j | Governed scientific/schema authority |
-| Trace/evaluation evidence | LangSmith | Not lifecycle authority |
-| Wakeups/cache | Redis if retained | Reconstructable acceleration only |
+
+| Data                                                     | Storage                          | Rule                                 |
+| -------------------------------------------------------- | -------------------------------- | ------------------------------------ |
+| Graph execution state                                    | Agent Server checkpointer        | Compact, replayable, ref-oriented    |
+| Cross-thread agent memory/preferences                    | Agent Server Store               | Non-authoritative and revocable      |
+| Run lifecycle, budgets, approvals, interventions, outbox | BellLabs PostgreSQL              | Authoritative                        |
+| Definitions, ERCs, semantic records                      | MongoDB, external payloads in S3 | Immutable/content-addressed          |
+| Large outputs, snapshots, transcripts                    | S3/governed artifact storage     | State carries only ref/digest        |
+| Knowledge graph                                          | Neo4j                            | Governed scientific/schema authority |
+| Trace/evaluation evidence                                | LangSmith                        | Not lifecycle authority              |
+| Wakeups/cache                                            | Redis if retained                | Reconstructable acceleration only    |
+
 
 In Serverless, use platform-managed checkpointer and Store. In local unit tests use in-memory persistence. In production-like standalone integration tests, create `AsyncPostgresSaver` and `AsyncPostgresStore` in an async lifespan and run their setup migrations once. Never construct a new saver/store per graph invocation.
 
@@ -229,30 +241,34 @@ Use separate lifecycle state schemas for StageGraph and GoalDirected, plus opera
 
 ### 4.1 Common lifecycle channels
 
-| Channel | Writer | Parallel writes | Reducer/update rule | Authority | Trace/retention |
-|---|---|---:|---|---|---|
-| `identity` | bootstrap | No | Immutable single assignment | Reference to BellLabs IDs | Metadata only; thread lifetime |
-| `runtime_binding_ref` | bootstrap | No | Immutable single assignment | Ref to authoritative row | Safe ref/digests only |
-| `definition_digests` | bootstrap | No | Immutable single assignment | Exact control-plane refs | Trace-safe digests |
-| `lifecycle_projection_ref` | reconcile/settle | No | Replace only after successful CAS | Ref/version authoritative in PG | Compact; thread lifetime |
-| `pending_decisions` | decision nodes | Yes | Conflict-detecting keyed state-machine merge | Decision rows authoritative | IDs/status only |
-| `outbox_position` | boundary nodes | Yes | Monotonic maximum | PG cursor authoritative | Safe integer |
-| `diagnostics` | nodes | Yes | Keyed union by stable diagnostic ID | Non-authoritative | Redacted and TTL-bound |
-| `final_result_ref` | finalizer | No | Single assignment; equality permits replay | Result repository authoritative | Ref/digest only |
+
+| Channel                    | Writer           | Parallel writes | Reducer/update rule                          | Authority                       | Trace/retention                |
+| -------------------------- | ---------------- | --------------- | -------------------------------------------- | ------------------------------- | ------------------------------ |
+| `identity`                 | bootstrap        | No              | Immutable single assignment                  | Reference to BellLabs IDs       | Metadata only; thread lifetime |
+| `runtime_binding_ref`      | bootstrap        | No              | Immutable single assignment                  | Ref to authoritative row        | Safe ref/digests only          |
+| `definition_digests`       | bootstrap        | No              | Immutable single assignment                  | Exact control-plane refs        | Trace-safe digests             |
+| `lifecycle_projection_ref` | reconcile/settle | No              | Replace only after successful CAS            | Ref/version authoritative in PG | Compact; thread lifetime       |
+| `pending_decisions`        | decision nodes   | Yes             | Conflict-detecting keyed state-machine merge | Decision rows authoritative     | IDs/status only                |
+| `outbox_position`          | boundary nodes   | Yes             | Monotonic maximum                            | PG cursor authoritative         | Safe integer                   |
+| `diagnostics`              | nodes            | Yes             | Keyed union by stable diagnostic ID          | Non-authoritative               | Redacted and TTL-bound         |
+| `final_result_ref`         | finalizer        | No              | Single assignment; equality permits replay   | Result repository authoritative | Ref/digest only                |
+
 
 ### 4.2 StageGraph state
 
-| Channel | Writer | Parallel writes | Rule |
-|---|---|---:|---|
-| `stage_projection` | reconcile/settle | No | Whole typed projection replacement after domain interpreter/CAS |
-| `workflow_cycle` | settle/evaluate | No | Monotonic validated replacement |
-| `fairness_cursor` | scheduler/settle | No | Scheduler-owned replacement |
-| `dispatch_batch` | scheduler | No | Replace with exact batch ID and semantic keys |
-| `pending_results` | operation workers | Yes | Conflict-detecting keyed union by semantic key |
-| `pending_failures` | operation workers | Yes | Same keyed union semantics |
-| `pending_async_jobs` | operation workers/reconciler | Yes | Keyed state-machine merge by durable job ID |
-| `wait_projection` | wait/reconcile | No | Replace from authoritative wait/pause record |
-| `reuse_candidates` | scheduler | No | Replace with immutable refs |
+
+| Channel              | Writer                       | Parallel writes | Rule                                                            |
+| -------------------- | ---------------------------- | --------------- | --------------------------------------------------------------- |
+| `stage_projection`   | reconcile/settle             | No              | Whole typed projection replacement after domain interpreter/CAS |
+| `workflow_cycle`     | settle/evaluate              | No              | Monotonic validated replacement                                 |
+| `fairness_cursor`    | scheduler/settle             | No              | Scheduler-owned replacement                                     |
+| `dispatch_batch`     | scheduler                    | No              | Replace with exact batch ID and semantic keys                   |
+| `pending_results`    | operation workers            | Yes             | Conflict-detecting keyed union by semantic key                  |
+| `pending_failures`   | operation workers            | Yes             | Same keyed union semantics                                      |
+| `pending_async_jobs` | operation workers/reconciler | Yes             | Keyed state-machine merge by durable job ID                     |
+| `wait_projection`    | wait/reconcile               | No              | Replace from authoritative wait/pause record                    |
+| `reuse_candidates`   | scheduler                    | No              | Replace with immutable refs                                     |
+
 
 The keyed union reducer must be associative, commutative, and idempotent:
 
@@ -265,19 +281,21 @@ Parallel workers never mutate `stage_projection`. A single settlement node sorts
 
 ### 4.3 GoalDirected state
 
-| Channel | Writer | Parallel writes | Rule |
-|---|---|---:|---|
-| `protected_scope_ref` | bootstrap | No | Immutable exact ref/digest |
-| `goal_revision_ref` | decision/settle | No | Parent-linked monotonic revision |
-| `iteration_projection` | claim/settle | No | Replace after CAS |
-| `agent_session_ref` | session manager | No | Replace only at declared rollover |
-| `workspace_snapshot_ref` | workspace manager | No | Immutable refs, parent-linked |
-| `agent_result_ref` | agent operation | No per iteration | Single assignment per semantic iteration key |
-| `verification_result_ref` | independent verifier | No per iteration | Single assignment per verifier key |
-| `blockers` | operation/verifier | Potentially | Keyed union by blocker ID/digest |
-| `no_progress_projection` | convergence node | No | Deterministic replacement |
-| `handoff_ref` | handoff node | No | Single assignment per rollover |
-| `messages` | **not top-level** | N/A | Kept in the bounded agent subgraph only |
+
+| Channel                   | Writer               | Parallel writes  | Rule                                         |
+| ------------------------- | -------------------- | ---------------- | -------------------------------------------- |
+| `protected_scope_ref`     | bootstrap            | No               | Immutable exact ref/digest                   |
+| `goal_revision_ref`       | decision/settle      | No               | Parent-linked monotonic revision             |
+| `iteration_projection`    | claim/settle         | No               | Replace after CAS                            |
+| `agent_session_ref`       | session manager      | No               | Replace only at declared rollover            |
+| `workspace_snapshot_ref`  | workspace manager    | No               | Immutable refs, parent-linked                |
+| `agent_result_ref`        | agent operation      | No per iteration | Single assignment per semantic iteration key |
+| `verification_result_ref` | independent verifier | No per iteration | Single assignment per verifier key           |
+| `blockers`                | operation/verifier   | Potentially      | Keyed union by blocker ID/digest             |
+| `no_progress_projection`  | convergence node     | No               | Deterministic replacement                    |
+| `handoff_ref`             | handoff node         | No               | Single assignment per rollover               |
+| `messages`                | **not top-level**    | N/A              | Kept in the bounded agent subgraph only      |
+
 
 `messages` uses `add_messages` only inside an agent or Deep Agent subgraph. The outer GoalDirected graph carries compact session, result, evidence, and summary refs.
 
@@ -311,6 +329,8 @@ flowchart TD
     D -->|inconsistent| K["reconcile or fail safely"]
 ```
 
+
+
 Suggested nodes:
 
 1. `hydrate_runtime_binding`: load by authoritative ref and verify every digest.
@@ -329,16 +349,18 @@ Suggested nodes:
 
 Replace vendor dispatch with an exact registry keyed by the frozen implementation binding:
 
-| Kind | Runtime |
-|---|---|
-| `deterministic_function` | Plain async Python node/service |
-| `langchain_agent` | `create_agent` with ordered middleware |
-| `deep_agent` | Deep Agent with bound backend, skills, subagents, middleware |
-| `langgraph_subgraph` | Invocation-scoped subgraph or remote graph |
-| `mcp_operation` | Reviewed tools through `langchain-mcp-adapters` |
-| `quickjs_interpreter` | Bounded QuickJS with exact injected capabilities |
-| `sandbox_job` | LangSmith Sandbox via provider port |
-| `human_decision` | BellLabs decision plus `interrupt()` |
+
+| Kind                     | Runtime                                                      |
+| ------------------------ | ------------------------------------------------------------ |
+| `deterministic_function` | Plain async Python node/service                              |
+| `langchain_agent`        | `create_agent` with ordered middleware                       |
+| `deep_agent`             | Deep Agent with bound backend, skills, subagents, middleware |
+| `langgraph_subgraph`     | Invocation-scoped subgraph or remote graph                   |
+| `mcp_operation`          | Reviewed tools through `langchain-mcp-adapters`              |
+| `quickjs_interpreter`    | Bounded QuickJS with exact injected capabilities             |
+| `sandbox_job`            | LangSmith Sandbox via provider port                          |
+| `human_decision`         | BellLabs decision plus `interrupt()`                         |
+
 
 The registry does not choose mutable aliases at runtime. It consumes an exact, compiled `StageImplementationBinding` and rejects an unregistered kind, schema drift, or missing capability.
 
@@ -375,6 +397,8 @@ flowchart TD
     J --> B
     F -->|bounded failure| K["terminal failure / fallback handoff"]
 ```
+
+
 
 The outer graph owns iteration, reservations, protected fields, convergence, rollover, independent verification, and terminality. The Deep Agent receives a bounded operation contract and returns structured evidence/result refs. It cannot mark the governed run successful.
 
@@ -413,15 +437,17 @@ Use the Deep Agents native harness for its filesystem/todo/subagent/context beha
 
 Publish an exact ordered middleware manifest. Recommended logical order:
 
-| Hook | Responsibility |
-|---|---|
-| `before_agent` | Verify binding, tenant/scope, lifecycle phase, remaining budgets; attach trace taxonomy. |
-| `dynamic_prompt` | Render exact base prompt plus typed, permitted state/runtime/store context; record rendered digest. |
-| `before_model` | Retrieve allowed memory, redact, compact/offload context, preserve evidence refs, enforce token ceiling. |
-| `wrap_model_call` | Select only authorized model, apply timeout/retry/fallback, trace, capture usage. |
-| `after_model` | Validate structured output and tool calls; detect policy/budget/evidence violations. |
-| `wrap_tool_call` | Capability check, canonical identity, approval, idempotency, timeout/retry, cancellation, trace/redaction, usage settlement. |
-| `after_agent` | Persist compact result refs, settle usage, snapshot/cleanup workspace, emit events. |
+
+| Hook              | Responsibility                                                                                                               |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `before_agent`    | Verify binding, tenant/scope, lifecycle phase, remaining budgets; attach trace taxonomy.                                     |
+| `dynamic_prompt`  | Render exact base prompt plus typed, permitted state/runtime/store context; record rendered digest.                          |
+| `before_model`    | Retrieve allowed memory, redact, compact/offload context, preserve evidence refs, enforce token ceiling.                     |
+| `wrap_model_call` | Select only authorized model, apply timeout/retry/fallback, trace, capture usage.                                            |
+| `after_model`     | Validate structured output and tool calls; detect policy/budget/evidence violations.                                         |
+| `wrap_tool_call`  | Capability check, canonical identity, approval, idempotency, timeout/retry, cancellation, trace/redaction, usage settlement. |
+| `after_agent`     | Persist compact result refs, settle usage, snapshot/cleanup workspace, emit events.                                          |
+
 
 Middleware ordering is contract data because wrapper hooks nest and after-hooks execute in reverse. Each middleware entry needs an exact implementation ref/version, configuration digest, allowed state channels, failure policy, and trace/redaction class.
 
@@ -442,32 +468,36 @@ They may not use mutable aliases, secrets, raw auth tokens, unapproved cross-ten
 
 Context placement:
 
-| Context | Location |
-|---|---|
-| Immutable instructions and policy | Exact prompt/binding refs |
-| Auth identity, secrets handles, request metadata | Runtime context, never serializable state |
-| Current operation messages | Agent subgraph state |
-| Lifecycle projection | Compact outer graph state refs/versions |
-| Cross-thread preferences/memory | Store under tenant-scoped namespace |
-| Large tool output | Artifact/filesystem backend with compact ref in messages/state |
-| Files and shell workspace | LangSmith Sandbox |
+
+| Context                                          | Location                                                       |
+| ------------------------------------------------ | -------------------------------------------------------------- |
+| Immutable instructions and policy                | Exact prompt/binding refs                                      |
+| Auth identity, secrets handles, request metadata | Runtime context, never serializable state                      |
+| Current operation messages                       | Agent subgraph state                                           |
+| Lifecycle projection                             | Compact outer graph state refs/versions                        |
+| Cross-thread preferences/memory                  | Store under tenant-scoped namespace                            |
+| Large tool output                                | Artifact/filesystem backend with compact ref in messages/state |
+| Files and shell workspace                        | LangSmith Sandbox                                              |
+
 
 ### 7.3 First-class context policy
 
 Add a published `ContextPolicyDefinition` and compile a `ContextAssemblySpec` into each ERC. The compiled spec is exact, immutable, and operation-class-specific; it is not a mutable assistant preference. It must contain:
 
-| Field group | Required semantics |
-|---|---|
-| Identity/compatibility | policy exact ref/digest, schema version, minimum harness/runtime versions, applicable operation classes |
-| Trust and admission | allowed source kinds, trust class per source, prompt-injection quarantine, schema validation, tenant/purpose filters |
-| Budget | total input ceiling, reserved instruction/evidence/output tokens, parent/child allocation, overflow action |
-| Retrieval | namespace, query construction policy, filters, top-k/score ceilings, diversity/recency policy, deterministic tie-breaker |
-| Preservation | immutable goal/protected scope, exact instructions, citations, claim/evidence links, unresolved contradictions, approvals, budget facts, artifact digests |
-| Compression | trigger, selected middleware, target size, maximum generations, refresh/reconstruction cadence, summary schema |
-| Mutation | which actor/hook may add, replace, summarize, expire, or delete each context class; expected-version rule |
-| Provenance | source refs/digests, transformation lineage, model/prompt binding for generated summaries, creation time |
-| Retention/privacy | sensitivity class, trace policy, Store/checkpoint/artifact TTL, deletion/tombstone behavior |
-| Evaluation | invariant-retention, citation recall, contradiction retention, contamination, retrieval utility, and compaction-drift thresholds |
+
+| Field group            | Required semantics                                                                                                                                        |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Identity/compatibility | policy exact ref/digest, schema version, minimum harness/runtime versions, applicable operation classes                                                   |
+| Trust and admission    | allowed source kinds, trust class per source, prompt-injection quarantine, schema validation, tenant/purpose filters                                      |
+| Budget                 | total input ceiling, reserved instruction/evidence/output tokens, parent/child allocation, overflow action                                                |
+| Retrieval              | namespace, query construction policy, filters, top-k/score ceilings, diversity/recency policy, deterministic tie-breaker                                  |
+| Preservation           | immutable goal/protected scope, exact instructions, citations, claim/evidence links, unresolved contradictions, approvals, budget facts, artifact digests |
+| Compression            | trigger, selected middleware, target size, maximum generations, refresh/reconstruction cadence, summary schema                                            |
+| Mutation               | which actor/hook may add, replace, summarize, expire, or delete each context class; expected-version rule                                                 |
+| Provenance             | source refs/digests, transformation lineage, model/prompt binding for generated summaries, creation time                                                  |
+| Retention/privacy      | sensitivity class, trace policy, Store/checkpoint/artifact TTL, deletion/tombstone behavior                                                               |
+| Evaluation             | invariant-retention, citation recall, contradiction retention, contamination, retrieval utility, and compaction-drift thresholds                          |
+
 
 Never summarize or model-rewrite exact instructions, protected goals, authority and approval facts, budget/attempt identities, source locators/digests, citation edges, or final accepted evidence. Model-written summaries are derived context only. Store them as a structured manifest that points to immutable source material; they never replace it.
 
@@ -543,12 +573,14 @@ Outer StageGraph `Send` is the primary parallelism mechanism for independent sta
 
 Freeze delegation by mode rather than by a generic enablement flag:
 
-| Mode | Native mechanism | Continuity | BellLabs contract |
-|---|---|---|---|
-| `synchronous_subagent` | Deep Agents/LangChain `task` | Parent blocks; custom child invocation is otherwise fresh/stateless | Exact subagent profile, context slice, output schema, depth/count/budget ceiling |
-| `dynamic_interpreter_subagent` | QuickJS `task()` with interpreter middleware | Bounded to interpreter call/turn/thread mode | All synchronous controls plus interpreter profile, PTC allowlist, source digest, resource limits; beta feature flag |
-| `asynchronous_subagent` | Deep Agents async task tools over Agent Protocol | Stateful child on its own thread; task status must be freshly queried | Durable async-task binding, child thread/run correlation, update/cancel/reconcile policy, capacity reservation; preview feature flag |
-| `linked_workflow_run` | Coordinator/run-composition service | Independent admitted run and thread | Declared linked-run slot, child Workflow Type admission, separate budget/authority, dependency class |
+
+| Mode                           | Native mechanism                                 | Continuity                                                            | BellLabs contract                                                                                                                    |
+| ------------------------------ | ------------------------------------------------ | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `synchronous_subagent`         | Deep Agents/LangChain `task`                     | Parent blocks; custom child invocation is otherwise fresh/stateless   | Exact subagent profile, context slice, output schema, depth/count/budget ceiling                                                     |
+| `dynamic_interpreter_subagent` | QuickJS `task()` with interpreter middleware     | Bounded to interpreter call/turn/thread mode                          | All synchronous controls plus interpreter profile, PTC allowlist, source digest, resource limits; beta feature flag                  |
+| `asynchronous_subagent`        | Deep Agents async task tools over Agent Protocol | Stateful child on its own thread; task status must be freshly queried | Durable async-task binding, child thread/run correlation, update/cancel/reconcile policy, capacity reservation; preview feature flag |
+| `linked_workflow_run`          | Coordinator/run-composition service              | Independent admitted run and thread                                   | Declared linked-run slot, child Workflow Type admission, separate budget/authority, dependency class                                 |
+
 
 The coordinator may choose only among modes allowed by the exact Workflow Type and implementation binding. A recognized Workflow Type boundary, durable independent wait, materially distinct authority, reusable governed output, or substantial separate budget forces `linked_workflow_run`. Never depend on the current coincidence that an async Deep Agents task ID is also a thread ID; persist both typed fields and an observed relationship.
 
@@ -628,14 +660,16 @@ Prefer a static generic StageGraph factory unless a per-run resource truly affec
 
 Treat these as distinct contracts:
 
-| Mechanism | Purpose | Runtime action | Authority |
-|---|---|---|---|
-| Approval/decision | Known human authority boundary | `interrupt()` then `Command(resume=decision_ref)` | Durable BellLabs decision |
-| Message/input steering | Add authorized information | Enqueue or interrupt/restart run with typed input | Intervention record + policy |
-| Async-subagent update | Refine active child work | Preview job update API | Parent binding + ceiling |
-| Cancellation | Stop/cooperatively unwind work | Run-control cancel, Agent Server cancel/interrupt, child cascade | BellLabs lifecycle command |
-| Checkpoint repair | Operator recovery | Controlled `update_state`/`Overwrite` | Audited admin repair |
-| Fork/time travel | Explore alternate continuation | New BellLabs run + new thread | New admission and lineage |
+
+| Mechanism              | Purpose                        | Runtime action                                                   | Authority                    |
+| ---------------------- | ------------------------------ | ---------------------------------------------------------------- | ---------------------------- |
+| Approval/decision      | Known human authority boundary | `interrupt()` then `Command(resume=decision_ref)`                | Durable BellLabs decision    |
+| Message/input steering | Add authorized information     | Enqueue or interrupt/restart run with typed input                | Intervention record + policy |
+| Async-subagent update  | Refine active child work       | Preview job update API                                           | Parent binding + ceiling     |
+| Cancellation           | Stop/cooperatively unwind work | Run-control cancel, Agent Server cancel/interrupt, child cascade | BellLabs lifecycle command   |
+| Checkpoint repair      | Operator recovery              | Controlled `update_state`/`Overwrite`                            | Audited admin repair         |
+| Fork/time travel       | Explore alternate continuation | New BellLabs run + new thread                                    | New admission and lineage    |
+
 
 ### 9.1 Durable interrupt protocol
 
@@ -673,17 +707,19 @@ Preserve the strict/frozen/content-addressed style of existing Pydantic contract
 
 ### 10.1 New or enhanced definition kinds
 
-| Contract | Key fields |
-|---|---|
+
+| Contract                        | Key fields                                                                                                                                                                                      |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `GraphRuntimeProfileDefinition` | graph family/ID, compatible state schema digest, reducer spec ref, durability, store/TTL, stream policy, concurrency strategy, retry layers, interrupt/steering policy, runtime revision policy |
-| `AgentHarnessProfileDefinition` | harness kind, model/profile refs, middleware manifest, context policy, filesystem backend, skill refs, subagent policy, output schema |
-| `MiddlewareStackDefinition` | ordered exact middleware refs/config digests, hooks, allowed state/context channels, failure/redaction policies |
-| `MCPServerDefinition` | transport, endpoint SecretRef/config ref, session policy, auth strategy, timeouts, retry, allowed tools and schema digests |
-| `PromptContextBinding` | exact prompt commit/ref, trusted segments, dynamic slot schema, permitted sources, rendered digest policy |
-| `StageImplementationBinding` | implementation kind plus exact function/agent/subgraph/MCP/interpreter/sandbox/human binding |
-| `InterpreterProfileDefinition` | engine/version, source digest, state mode, PTC allowlist, limits, output schema |
-| `SandboxProfileDefinition` | backend/image, scope, mounts, egress, limits, snapshot, retention, cleanup |
-| `EvaluationProfileDefinition` | datasets, evaluator refs/versions, thresholds, online sampling, feedback policy |
+| `AgentHarnessProfileDefinition` | harness kind, model/profile refs, middleware manifest, context policy, filesystem backend, skill refs, subagent policy, output schema                                                           |
+| `MiddlewareStackDefinition`     | ordered exact middleware refs/config digests, hooks, allowed state/context channels, failure/redaction policies                                                                                 |
+| `MCPServerDefinition`           | transport, endpoint SecretRef/config ref, session policy, auth strategy, timeouts, retry, allowed tools and schema digests                                                                      |
+| `PromptContextBinding`          | exact prompt commit/ref, trusted segments, dynamic slot schema, permitted sources, rendered digest policy                                                                                       |
+| `StageImplementationBinding`    | implementation kind plus exact function/agent/subgraph/MCP/interpreter/sandbox/human binding                                                                                                    |
+| `InterpreterProfileDefinition`  | engine/version, source digest, state mode, PTC allowlist, limits, output schema                                                                                                                 |
+| `SandboxProfileDefinition`      | backend/image, scope, mounts, egress, limits, snapshot, retention, cleanup                                                                                                                      |
+| `EvaluationProfileDefinition`   | datasets, evaluator refs/versions, thresholds, online sampling, feedback policy                                                                                                                 |
+
 
 Enhance the current operation binding rather than replace it. Existing exact prompt, model, tool, MCP, workspace, delegation, capability, budget, trace, session, and snapshot contracts are the anti-corruption layer for LangChain/Deep Agents.
 
@@ -742,13 +778,15 @@ Use storage according to authority and transaction boundaries, not framework own
 
 Continue using the existing generic control-plane collections rather than creating one collection per LangChain feature:
 
-| Collection/model | Target use |
-|---|---|
-| `control_plane_definition_heads` | Mutable authoring head only; optimistic revision; never selected at execution |
-| `control_plane_published_definitions` | New exact kinds including `graph_runtime_profile`, `agent_harness_profile`, `middleware_stack`, `context_policy`, `delegation_policy`, `mcp_server`, `interpreter_profile`, `sandbox_profile`, and `evaluation_profile` |
-| `control_plane_effective_run_configurations` | ERC plus inline or external content-addressed `GraphAssemblySpec` and `ContextAssemblySpec` refs/digests |
-| `schema_grounding_records` and existing semantic collections | Immutable scientific/schema/evidence records with execution-binding lineage and deterministic ordering |
-| new `context_manifests` only if query/access patterns justify it | Immutable derived-context metadata: source refs/digests, summary ref, transformation binding, sensitivity, expiry, and parent manifest; large content remains in the artifact store |
+
+| Collection/model                                                 | Target use                                                                                                                                                                                                              |
+| ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `control_plane_definition_heads`                                 | Mutable authoring head only; optimistic revision; never selected at execution                                                                                                                                           |
+| `control_plane_published_definitions`                            | New exact kinds including `graph_runtime_profile`, `agent_harness_profile`, `middleware_stack`, `context_policy`, `delegation_policy`, `mcp_server`, `interpreter_profile`, `sandbox_profile`, and `evaluation_profile` |
+| `control_plane_effective_run_configurations`                     | ERC plus inline or external content-addressed `GraphAssemblySpec` and `ContextAssemblySpec` refs/digests                                                                                                                |
+| `schema_grounding_records` and existing semantic collections     | Immutable scientific/schema/evidence records with execution-binding lineage and deterministic ordering                                                                                                                  |
+| new `context_manifests` only if query/access patterns justify it | Immutable derived-context metadata: source refs/digests, summary ref, transformation binding, sensitivity, expiry, and parent manifest; large content remains in the artifact store                                     |
+
 
 Published definition payloads remain strict Pydantic discriminated unions in domain code even though Mongo stores a common document shape. Add compound unique indexes for every logical identity and query indexes for lifecycle/status lookups. Do not put secrets, mutable runtime status, leases, side-effect claims, budget balances, or Agent Server checkpoint bodies in Mongo.
 
@@ -756,20 +794,21 @@ Published definition payloads remain strict Pydantic discriminated unions in dom
 
 Add a forward-only migration with RLS and least-privilege grants for:
 
-| Table | Cardinality and purpose |
-|---|---|
-| `runtime_execution_bindings` | One row per `(request_scope, belllabs_run_id, execution_epoch)`; exact deployment/graph/assembly/thread binding and reconciliation status |
-| `runtime_execution_attempts` | Append-only row per Agent Server invocation/resume/steer/cancel submission; provider run ID, submission key, request digest, status, retry layer, timestamps, trace ID |
-| `runtime_checkpoint_observations` | Optional append-only compact observation/cursor only; never checkpoint state; unique provider checkpoint identity per binding |
-| `runtime_intervention_commands` | Idempotent typed intervention request/result with expected run/checkpoint versions and actor/reason |
-| `runtime_interrupt_requests` / `runtime_interrupt_decisions` | Generalized durable decision protocol; can supersede legacy agent-runtime approval tables after compatibility migration |
-| `runtime_async_tasks` | Parent binding, mode, task ID, child thread/run IDs, exact subagent binding, reservation, state-machine status, heartbeat/reconcile fields, result/error refs |
-| `operation_execution_bindings` | Exact semantic attempt and compiled operation binding; migrated from Mongo when used for authority |
-| `operation_effect_claims` | Unique provider-effect/idempotency claim acquired transactionally before an external effect |
-| `operation_execution_attempts` | Append-only infrastructure/model/tool/MCP/sandbox attempts and usage evidence |
-| `operation_settlements` | Exactly-once result/usage settlement connected to budget ledger and outbox |
 
-The operation binding/claim/settlement migration is mandatory before claiming exactly-once external-effect behavior. During coexistence, dual-read is allowed only behind a migration repository; authoritative writes go to one store selected by schema version. Do not dual-write without a transactionally recoverable journal. Backfill verifies canonical payload digests, records source document IDs, and leaves old Mongo records read-only until the rollback window expires.
+| Table                                                        | Cardinality and purpose                                                                                                                                                |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `runtime_execution_bindings`                                 | One row per `(request_scope, belllabs_run_id, execution_epoch)`; exact deployment/graph/assembly/thread binding and reconciliation status                              |
+| `runtime_execution_attempts`                                 | Append-only row per Agent Server invocation/resume/steer/cancel submission; provider run ID, submission key, request digest, status, retry layer, timestamps, trace ID |
+| `runtime_checkpoint_observations`                            | Optional append-only compact observation/cursor only; never checkpoint state; unique provider checkpoint identity per binding                                          |
+| `runtime_intervention_commands`                              | Idempotent typed intervention request/result with expected run/checkpoint versions and actor/reason                                                                    |
+| `runtime_interrupt_requests` / `runtime_interrupt_decisions` | Generalized durable decision protocol; can supersede legacy agent-runtime approval tables after compatibility migration                                                |
+| `runtime_async_tasks`                                        | Parent binding, mode, task ID, child thread/run IDs, exact subagent binding, reservation, state-machine status, heartbeat/reconcile fields, result/error refs          |
+| `operation_effect_claims`                                    | Unique provider-effect/idempotency claim acquired transactionally before an external effect                                                                            |
+| `operation_execution_attempts`                               | Append-only infrastructure/model/tool/MCP/sandbox attempts and usage evidence; references the immutable Mongo-authoritative semantic binding by stable identity/digest |
+| `operation_settlements`                                      | Exactly-once result/usage settlement connected to budget ledger and outbox                                                                                             |
+
+
+The claim/attempt/settlement migration is mandatory before claiming exactly-once external-effect behavior. The immutable semantic `OperationExecutionBinding` remains MongoDB/Beanie-authoritative under accepted `biotech-meta`; PostgreSQL stores only its stable identity and canonical digest reference. During coexistence, dual-read of the migrating journal records is allowed only behind a migration repository; authoritative writes go to one store selected by schema version. Do not dual-write without a transactionally recoverable journal. Backfill verifies canonical payload digests, records source document IDs, and leaves migrated Mongo claim/settlement records read-only until the rollback window expires.
 
 Every PostgreSQL table includes `request_scope` directly or reaches it through a non-deferrable foreign key to `workflow_runs`, enables and forces RLS, and has indexes for pending reconciliation (`status`, `next_attempt_at`, lease expiry), run lineage, provider IDs, and idempotency keys. JSONB holds versioned payload details; identity, lifecycle, uniqueness, timestamps, expected versions, and reconciliation fields remain typed columns.
 
@@ -781,20 +820,22 @@ Every newly published or runtime contract must include a field-governance append
 
 Use this vocabulary consistently:
 
-| Term | Meaning |
-|---|---|
-| Workflow Type | Reusable BellLabs domain contract |
-| Workflow Run | One admitted execution of exactly one Workflow Type |
-| graph family | `stagegraph` or `goal_directed`; lifecycle topology class |
-| graph ID | Stable Agent Server registration key, for example `belllabs_stagegraph` |
-| graph assembly | Exact compiled runtime composition for one compatibility class/binding |
-| assistant | Agent Server configuration pointer; never a Workflow Type or governed agent identity |
-| thread | Agent Server checkpoint lineage for one BellLabs run epoch |
-| Agent Server run | One invocation/resume/steer execution on a thread |
-| operation | Bounded unit inside a Workflow Run |
-| subagent | Operation-local delegated agent under the parent ceiling |
-| async task | Durable runtime fact for a stateful background subagent thread |
-| linked run | Independently admitted child Workflow Run across a Workflow Type boundary |
+
+| Term             | Meaning                                                                              |
+| ---------------- | ------------------------------------------------------------------------------------ |
+| Workflow Type    | Reusable BellLabs domain contract                                                    |
+| Workflow Run     | One admitted execution of exactly one Workflow Type                                  |
+| graph family     | `stagegraph` or `goal_directed`; lifecycle topology class                            |
+| graph ID         | Stable Agent Server registration key, for example `belllabs_stagegraph`              |
+| graph assembly   | Exact compiled runtime composition for one compatibility class/binding               |
+| assistant        | Agent Server configuration pointer; never a Workflow Type or governed agent identity |
+| thread           | Agent Server checkpoint lineage for one BellLabs run epoch                           |
+| Agent Server run | One invocation/resume/steer execution on a thread                                    |
+| operation        | Bounded unit inside a Workflow Run                                                   |
+| subagent         | Operation-local delegated agent under the parent ceiling                             |
+| async task       | Durable runtime fact for a stateful background subagent thread                       |
+| linked run       | Independently admitted child Workflow Run across a Workflow Type boundary            |
+
 
 Conventions:
 
@@ -811,20 +852,22 @@ Conventions:
 
 ### 11.0 Current-to-target surface map
 
-| Current surface | Preserve | Change/add |
-|---|---|---|
-| `POST /control-plane/v1/definitions`, drafts, publish, aliases, compile, retire | Existing domain services, exact refs, immutable revisions, compiler authority | Shared auth/envelope; v2 exact-definition discovery and LangGraph ecosystem definition kinds |
-| `GET /control-plane/v1/effective-run-configurations/{digest}` | Digest verification and admission retrieval | Authenticate/authorize appropriately; expose redacted compiled runtime preview in v2 |
-| `GET /control-plane/v1/schemas` | Schema discoverability | Complete bundle for every request/response/error contract |
-| `POST /run-control/v1/run-requests` | Admission policy, deterministic identity, accepted/rejected durability | v2 envelope and runtime-binding request integration |
-| `POST /run-control/v1/runs/{id}/commands` | Optimistic lifecycle reducer and idempotent command results | Add typed graph interventions that first pass lifecycle authority |
-| `POST /run-control/v1/runs/{id}/operations` | Reservation/current-version/config guards | Deprecate Temporal submitter; replace with v2 `/executions` and operation registry |
-| run/budget/transitions/outbox reads | PostgreSQL authority and tenant scope | Add correlated runtime projection, resumable events, compact checkpoint/operator views |
-| schema-grounding v1 read endpoints | Immutable record repository, grants, evidence, reconciliation | v2 envelope, deterministic latest ordering, runtime lineage/status; no generic memory mutation API |
-| coordinator MCP `prepare_workflow_launch` | Exact compile, preview admission, frozen semantic plan, redacted expiring ticket | Runtime-neutral dispatcher and REST wrapper |
-| coordinator MCP `launch_workflow` | Revalidation, authoritative admission, semantic input binding, idempotency | Agent Server outbox/dispatcher instead of Temporal start |
-| coordinator MCP `get_workflow_result` | Typed family result and terminal consistency | Shared REST/MCP result facade plus runtime correlation |
-| Socket.IO operation approval | Durable approval record concepts | Converge on BellLabs decision + LangGraph interrupt/resume; keep compatibility bridge during coexistence |
+
+| Current surface                                                                 | Preserve                                                                         | Change/add                                                                                               |
+| ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `POST /control-plane/v1/definitions`, drafts, publish, aliases, compile, retire | Existing domain services, exact refs, immutable revisions, compiler authority    | Shared auth/envelope; v2 exact-definition discovery and LangGraph ecosystem definition kinds             |
+| `GET /control-plane/v1/effective-run-configurations/{digest}`                   | Digest verification and admission retrieval                                      | Authenticate/authorize appropriately; expose redacted compiled runtime preview in v2                     |
+| `GET /control-plane/v1/schemas`                                                 | Schema discoverability                                                           | Complete bundle for every request/response/error contract                                                |
+| `POST /run-control/v1/run-requests`                                             | Admission policy, deterministic identity, accepted/rejected durability           | v2 envelope and runtime-binding request integration                                                      |
+| `POST /run-control/v1/runs/{id}/commands`                                       | Optimistic lifecycle reducer and idempotent command results                      | Add typed graph interventions that first pass lifecycle authority                                        |
+| `POST /run-control/v1/runs/{id}/operations`                                     | Reservation/current-version/config guards                                        | Deprecate Temporal submitter; replace with v2 `/executions` and operation registry                       |
+| run/budget/transitions/outbox reads                                             | PostgreSQL authority and tenant scope                                            | Add correlated runtime projection, resumable events, compact checkpoint/operator views                   |
+| schema-grounding v1 read endpoints                                              | Immutable record repository, grants, evidence, reconciliation                    | v2 envelope, deterministic latest ordering, runtime lineage/status; no generic memory mutation API       |
+| coordinator MCP `prepare_workflow_launch`                                       | Exact compile, preview admission, frozen semantic plan, redacted expiring ticket | Runtime-neutral dispatcher and REST wrapper                                                              |
+| coordinator MCP `launch_workflow`                                               | Revalidation, authoritative admission, semantic input binding, idempotency       | Agent Server outbox/dispatcher instead of Temporal start                                                 |
+| coordinator MCP `get_workflow_result`                                           | Typed family result and terminal consistency                                     | Shared REST/MCP result facade plus runtime correlation                                                   |
+| Socket.IO operation approval                                                    | Durable approval record concepts                                                 | Converge on BellLabs decision + LangGraph interrupt/resume; keep compatibility bridge during coexistence |
+
 
 The v1 surface remains callable through coexistence. A v2 route is not allowed to implement a second compiler, admission path, lifecycle reducer, semantic-record repository, or result service.
 
@@ -857,17 +900,19 @@ Do not model mutable Agent Server assistants as Workflow Types. Compilation free
 
 Keep v1 reads/commands and deprecate the Temporal-only operation submission after parity. Add:
 
-| Method/path | Purpose |
-|---|---|
-| `POST /run-control/v2/run-requests` | Existing authoritative admission with v2 envelope |
-| `POST /run-control/v2/runs/{run_id}/executions` | Idempotently request Agent Server execution through outbox/dispatcher |
-| `GET /run-control/v2/runs/{run_id}/runtime` | Correlated BellLabs and Agent Server projection |
-| `POST /run-control/v2/runs/{run_id}/interventions` | Typed steering/cancel/wait/fork/reconcile command |
-| `GET /run-control/v2/runs/{run_id}/interrupts` | Authorized pending/durable decisions |
-| `POST /run-control/v2/runs/{run_id}/interrupts/{decision_id}/responses` | Idempotent decision and resume |
-| `GET /run-control/v2/runs/{run_id}/events` | Resumable stream by BellLabs outbox cursor |
-| `GET /run-control/v2/runs/{run_id}/checkpoints` | Redacted operator-only summaries |
-| `GET /run-control/v2/runs/{run_id}/result` | Existing typed family result |
+
+| Method/path                                                             | Purpose                                                               |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `POST /run-control/v2/run-requests`                                     | Existing authoritative admission with v2 envelope                     |
+| `POST /run-control/v2/runs/{run_id}/executions`                         | Idempotently request Agent Server execution through outbox/dispatcher |
+| `GET /run-control/v2/runs/{run_id}/runtime`                             | Correlated BellLabs and Agent Server projection                       |
+| `POST /run-control/v2/runs/{run_id}/interventions`                      | Typed steering/cancel/wait/fork/reconcile command                     |
+| `GET /run-control/v2/runs/{run_id}/interrupts`                          | Authorized pending/durable decisions                                  |
+| `POST /run-control/v2/runs/{run_id}/interrupts/{decision_id}/responses` | Idempotent decision and resume                                        |
+| `GET /run-control/v2/runs/{run_id}/events`                              | Resumable stream by BellLabs outbox cursor                            |
+| `GET /run-control/v2/runs/{run_id}/checkpoints`                         | Redacted operator-only summaries                                      |
+| `GET /run-control/v2/runs/{run_id}/result`                              | Existing typed family result                                          |
+
 
 `POST /executions` writes an outbox request in the same transaction as the authoritative execution-binding request. A dispatcher owns Agent Server calls. If submission returns ambiguously, it reconciles by binding metadata before retry. The graph cannot become active until the binding row contains a thread ID.
 
@@ -897,15 +942,17 @@ Both REST and MCP call one `CoordinatorFacade`. Replace its Temporal dispatcher 
 
 Retries exist at different layers and must not multiply one another invisibly:
 
-| Layer | May retry | Stable identity / guard |
-|---|---|---|
-| API client | Safe request transport | BellLabs idempotency key and canonical request digest |
-| Outbox dispatcher | Ambiguous thread/run submission | `submission_key`, execution-binding unique constraint, Agent Server metadata reconciliation |
-| LangGraph node | Node replay after checkpoint/resume | Semantic operation identity and pre-existing reservation/claim |
-| Model middleware | Transient model attempt | Bound retry policy and usage attempt ID; no external side effect |
-| Tool/MCP middleware | Only declared transient/idempotent calls | Exact tool identity plus provider-effect idempotency key |
-| Domain semantic retry | New governed stage/goal attempt | New semantic attempt identity and budget reservation |
-| Async subagent reconciler | Query/update/cancel transport | Durable job binding and child operation identity |
+
+| Layer                     | May retry                                | Stable identity / guard                                                                     |
+| ------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------- |
+| API client                | Safe request transport                   | BellLabs idempotency key and canonical request digest                                       |
+| Outbox dispatcher         | Ambiguous thread/run submission          | `submission_key`, execution-binding unique constraint, Agent Server metadata reconciliation |
+| LangGraph node            | Node replay after checkpoint/resume      | Semantic operation identity and pre-existing reservation/claim                              |
+| Model middleware          | Transient model attempt                  | Bound retry policy and usage attempt ID; no external side effect                            |
+| Tool/MCP middleware       | Only declared transient/idempotent calls | Exact tool identity plus provider-effect idempotency key                                    |
+| Domain semantic retry     | New governed stage/goal attempt          | New semantic attempt identity and budget reservation                                        |
+| Async subagent reconciler | Query/update/cancel transport            | Durable job binding and child operation identity                                            |
+
 
 Rules:
 
@@ -1021,25 +1068,27 @@ Before locking versions, run a compatibility spike that imports and minimally ex
 
 Add names, never values, to the example environment contract:
 
-| Setting | Purpose |
-|---|---|
-| `BELLLABS_RUNTIME_MODE` | `legacy`, `shadow`, or `langgraph` |
-| `BELLLABS_ENVIRONMENT` | dev/staging/prod trace and namespace dimension |
-| `AGENT_SERVER_URL` | runtime endpoint for standalone API dispatcher |
-| `AGENT_SERVER_API_KEY` | Secret in standalone caller only |
-| `STAGEGRAPH_GRAPH_ID` | deployed graph ID |
-| `GOAL_DIRECTED_GRAPH_ID` | deployed graph ID |
-| `AGENT_SERVER_DEPLOYMENT_ID` | expected deployment identity |
-| `AGENT_SERVER_DEPLOYMENT_REVISION` | optional exact compatibility guard |
-| `LANGSMITH_API_KEY` | deployment/tracing secret |
-| `LANGSMITH_PROJECT` | local/standalone trace project |
-| `LANGSMITH_TRACING` | tracing switch |
-| `LANGSMITH_HIDE_INPUTS` / `LANGSMITH_HIDE_OUTPUTS` | baseline redaction posture |
-| `APPLICATION_POSTGRES_DSN` | BellLabs runtime DB credentials, not migration owner |
-| `APPLICATION_MIGRATION_DATABASE_DIRECT` | CI/release only; never Agent Server runtime |
-| `MONGODB_URI` | control plane/schema record authority |
-| `SANDBOX_*` policy settings | entitlement, timeouts, TTL, snapshots, egress, resource caps |
-| `MCP_*` endpoint/auth refs | remote reviewed server bindings; credentials remain secrets |
+
+| Setting                                            | Purpose                                                      |
+| -------------------------------------------------- | ------------------------------------------------------------ |
+| `BELLLABS_RUNTIME_MODE`                            | `legacy`, `shadow`, or `langgraph`                           |
+| `BELLLABS_ENVIRONMENT`                             | dev/staging/prod trace and namespace dimension               |
+| `AGENT_SERVER_URL`                                 | runtime endpoint for standalone API dispatcher               |
+| `AGENT_SERVER_API_KEY`                             | Secret in standalone caller only                             |
+| `STAGEGRAPH_GRAPH_ID`                              | deployed graph ID                                            |
+| `GOAL_DIRECTED_GRAPH_ID`                           | deployed graph ID                                            |
+| `AGENT_SERVER_DEPLOYMENT_ID`                       | expected deployment identity                                 |
+| `AGENT_SERVER_DEPLOYMENT_REVISION`                 | optional exact compatibility guard                           |
+| `LANGSMITH_API_KEY`                                | deployment/tracing secret                                    |
+| `LANGSMITH_PROJECT`                                | local/standalone trace project                               |
+| `LANGSMITH_TRACING`                                | tracing switch                                               |
+| `LANGSMITH_HIDE_INPUTS` / `LANGSMITH_HIDE_OUTPUTS` | baseline redaction posture                                   |
+| `APPLICATION_POSTGRES_DSN`                         | BellLabs runtime DB credentials, not migration owner         |
+| `APPLICATION_MIGRATION_DATABASE_DIRECT`            | CI/release only; never Agent Server runtime                  |
+| `MONGODB_URI`                                      | control plane/schema record authority                        |
+| `SANDBOX_*` policy settings                        | entitlement, timeouts, TTL, snapshots, egress, resource caps |
+| `MCP_*` endpoint/auth refs                         | remote reviewed server bindings; credentials remain secrets  |
+
 
 Do not upload the broad local `.env` to LangSmith. Configure the narrow staging/production secret set in deployment settings. Do not use `AWS_PROFILE` in Cloud; use workload credentials, presigned operations, or a governed tool boundary. Make provider keys conditional on the compiled model policy.
 
@@ -1084,17 +1133,19 @@ Use a separate development config that permits authenticated Studio development.
 
 Use async at every I/O boundary and preserve synchronous pure domain logic:
 
-| Layer | Policy |
-|---|---|
-| Domain contracts, reducers, StageGraph interpreter, canonicalization/digests | Synchronous and side-effect free |
-| Application services and repository/provider ports | `async def`; no hidden event loop creation |
-| FastAPI and coordinator MCP handlers | Await application services; propagate request cancellation/deadline |
-| LangGraph nodes/routers | Pure routers may be sync; any DB, network, model, Store, artifact, or runtime call is async |
-| LangChain/Deep Agents tools | Native async tools; sync CPU work only when bounded or explicitly offloaded |
-| Middleware | Implement async hook variants (`abefore_*`, `aafter_*`, async wrappers) whenever downstream work is async |
-| Graph factories/resources | Async factory/context manager; one resource lifetime per declared run/thread scope |
-| MCP, Sandbox, Neo4j, Mongo, PostgreSQL, S3, model clients | Async clients/context managers with deadlines and explicit close |
-| Streaming/reconciliation | Async iterators, bounded queues, backpressure, cooperative cancellation, and heartbeat/lease renewal |
+
+| Layer                                                                        | Policy                                                                                                    |
+| ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Domain contracts, reducers, StageGraph interpreter, canonicalization/digests | Synchronous and side-effect free                                                                          |
+| Application services and repository/provider ports                           | `async def`; no hidden event loop creation                                                                |
+| FastAPI and coordinator MCP handlers                                         | Await application services; propagate request cancellation/deadline                                       |
+| LangGraph nodes/routers                                                      | Pure routers may be sync; any DB, network, model, Store, artifact, or runtime call is async               |
+| LangChain/Deep Agents tools                                                  | Native async tools; sync CPU work only when bounded or explicitly offloaded                               |
+| Middleware                                                                   | Implement async hook variants (`abefore_`*, `aafter_*`, async wrappers) whenever downstream work is async |
+| Graph factories/resources                                                    | Async factory/context manager; one resource lifetime per declared run/thread scope                        |
+| MCP, Sandbox, Neo4j, Mongo, PostgreSQL, S3, model clients                    | Async clients/context managers with deadlines and explicit close                                          |
+| Streaming/reconciliation                                                     | Async iterators, bounded queues, backpressure, cooperative cancellation, and heartbeat/lease renewal      |
+
 
 Prohibit `asyncio.run()` inside application/runtime code, blocking SDK calls on the event loop, unbounded `gather`, fire-and-forget tasks without a durable task binding, and background tasks whose ownership ends with an HTTP request. Use `TaskGroup` or bounded semaphores for in-process concurrency; use LangGraph `Send`, async subagent tasks, or linked runs when work must survive process loss. Convert blocking libraries through a narrow adapter using a bounded executor only until a native async integration is qualified.
 
@@ -1104,17 +1155,19 @@ Every external call accepts or derives a deadline, maps cancellation distinctly 
 
 ### 14.1 Trace taxonomy
 
-| Span | Required metadata |
-|---|---|
-| BellLabs run root | pseudonymous scope, run ID, family, Workflow Type exact ref, deployment revision, thread ID |
-| Workflow cycle / goal iteration | semantic identity, lifecycle version, budget projection |
-| Stage / operation | stage/iteration key, implementation ref, binding digest, retry layer |
-| Model | model binding ref, prompt rendered digest, token/usage summary |
-| Tool/MCP | canonical server/tool identity, schema digest, idempotency key, approval ID |
-| Subagent | parent identity, allowed subagent ref, job/thread/run ID, delegation depth |
-| Interpreter | engine/version, source digest, limits, injected capability names |
-| Sandbox | sandbox/snapshot ref, command class, resource usage; no command secrets |
-| Verifier | verification contract ref, evidence refs, action and reason code |
+
+| Span                            | Required metadata                                                                           |
+| ------------------------------- | ------------------------------------------------------------------------------------------- |
+| BellLabs run root               | pseudonymous scope, run ID, family, Workflow Type exact ref, deployment revision, thread ID |
+| Workflow cycle / goal iteration | semantic identity, lifecycle version, budget projection                                     |
+| Stage / operation               | stage/iteration key, implementation ref, binding digest, retry layer                        |
+| Model                           | model binding ref, prompt rendered digest, token/usage summary                              |
+| Tool/MCP                        | canonical server/tool identity, schema digest, idempotency key, approval ID                 |
+| Subagent                        | parent identity, allowed subagent ref, job/thread/run ID, delegation depth                  |
+| Interpreter                     | engine/version, source digest, limits, injected capability names                            |
+| Sandbox                         | sandbox/snapshot ref, command class, resource usage; no command secrets                     |
+| Verifier                        | verification contract ref, evidence refs, action and reason code                            |
+
 
 Use LangGraph `messages`, `updates`, and `custom` stream modes for consumers. Expose values/debug/checkpoint details only to authorized operators. Custom BellLabs events include a monotonic outbox cursor so reconnecting clients can deduplicate and resume independently of transient Agent Server stream positions.
 
@@ -1459,25 +1512,27 @@ Gate:
 
 ## 16. Test and acceptance matrix
 
-| Area | Required evidence |
-|---|---|
-| Contracts | Strict parsing, schema snapshots, digest round trips, unknown-field rejection, v1 compatibility |
-| Reducers | Associative/commutative/idempotent property tests; conflict fail-closed; randomized `Send` merge order |
-| Persistence | restart/resume, checkpoint lineage, namespace isolation, Store TTL/delete, old-revision policy |
-| Idempotency | ambiguous submission, duplicate node, duplicate resume, duplicate tool/MCP call, duplicate terminalization |
-| StageGraph | joins, fairness, concurrency, cycles, waits, pause/resume, invalidation/reuse, degradation/failure |
-| GoalDirected | protected scope, revisions, independent verification, convergence, rollover, handoff, terminal agreement |
-| HITL/steering | restart across interrupt, parallel interrupt IDs, stale/expired/unauthorized responses, cancel/fork/update |
-| Subagents | ceiling enforcement, context isolation, cancellation, orphan reconciliation, capacity deadlock |
-| MCP | exact allowlist/schema, auth, sessions, errors, timeout/cancel, progress, elicitation, tenant denial |
-| QuickJS | resource limits, PTC allowlist, state modes, checkpoint size, cancellation, no ambient capability |
-| Sandbox | isolation, egress, secrets, limits, files/snapshot, reconnect, cleanup, tenant denial |
-| API/auth | all routes, native Agent Server resources, error envelope, OpenAPI, resource filters, RLS |
-| Schema grounding | immutable records, deterministic latest, grants, bounded query plans, reconciliation, result parity |
-| Observability | correlation, nested spans, deployment/binding metadata, stream cursor, no secret/PHI leakage |
-| Evaluation | baseline comparison, deterministic invariant metrics, quality/citation, adversarial injection/escalation |
-| Deployment | cold start, max duration, concurrency, scale-to-zero recovery, build reproducibility, BellLabs DB backup/restore, managed thread recovery/export/fork |
-| Rollback | route new admissions to legacy/known-good deployment; preserve in-flight bindings and authority |
+
+| Area             | Required evidence                                                                                                                                     |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Contracts        | Strict parsing, schema snapshots, digest round trips, unknown-field rejection, v1 compatibility                                                       |
+| Reducers         | Associative/commutative/idempotent property tests; conflict fail-closed; randomized `Send` merge order                                                |
+| Persistence      | restart/resume, checkpoint lineage, namespace isolation, Store TTL/delete, old-revision policy                                                        |
+| Idempotency      | ambiguous submission, duplicate node, duplicate resume, duplicate tool/MCP call, duplicate terminalization                                            |
+| StageGraph       | joins, fairness, concurrency, cycles, waits, pause/resume, invalidation/reuse, degradation/failure                                                    |
+| GoalDirected     | protected scope, revisions, independent verification, convergence, rollover, handoff, terminal agreement                                              |
+| HITL/steering    | restart across interrupt, parallel interrupt IDs, stale/expired/unauthorized responses, cancel/fork/update                                            |
+| Subagents        | ceiling enforcement, context isolation, cancellation, orphan reconciliation, capacity deadlock                                                        |
+| MCP              | exact allowlist/schema, auth, sessions, errors, timeout/cancel, progress, elicitation, tenant denial                                                  |
+| QuickJS          | resource limits, PTC allowlist, state modes, checkpoint size, cancellation, no ambient capability                                                     |
+| Sandbox          | isolation, egress, secrets, limits, files/snapshot, reconnect, cleanup, tenant denial                                                                 |
+| API/auth         | all routes, native Agent Server resources, error envelope, OpenAPI, resource filters, RLS                                                             |
+| Schema grounding | immutable records, deterministic latest, grants, bounded query plans, reconciliation, result parity                                                   |
+| Observability    | correlation, nested spans, deployment/binding metadata, stream cursor, no secret/PHI leakage                                                          |
+| Evaluation       | baseline comparison, deterministic invariant metrics, quality/citation, adversarial injection/escalation                                              |
+| Deployment       | cold start, max duration, concurrency, scale-to-zero recovery, build reproducibility, BellLabs DB backup/restore, managed thread recovery/export/fork |
+| Rollback         | route new admissions to legacy/known-good deployment; preserve in-flight bindings and authority                                                       |
+
 
 ### 16.1 Final Definition of Done
 
@@ -1525,24 +1580,26 @@ Every reconciliation action is idempotent, version-checked, tenant-scoped, trace
 
 ## 18. Principal risks and mitigations
 
-| Risk | Mitigation/gate |
-|---|---|
-| Checkpoint state becomes a second lifecycle authority | Reconcile nodes, authoritative PG CAS, refs/versions only, invariant tests |
+
+| Risk                                                    | Mitigation/gate                                                                                                                             |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Checkpoint state becomes a second lifecycle authority   | Reconcile nodes, authoritative PG CAS, refs/versions only, invariant tests                                                                  |
 | Serverless persistence is incorrectly double-configured | Export `builder.compile()` without explicit checkpointer/Store; graph-load and platform-injection spike; standalone saver isolated to tests |
-| Custom auth diverges from REST/MCP auth | One principal mapper; Agent Server resource filters; shared adversarial auth suite |
-| Startup migrations race across replicas | Release-job migrations; non-owner runtime credentials |
-| Parallel reducers silently lose/conflict data | Conflict-detecting keyed reducers and randomized merge property tests |
-| New code cannot resume old checkpoint | Blue/green deployment endpoint binding for incompatible changes; compatibility policy; fork/fail-safe; N-on-N after N+1 drill |
-| Shadow runtime duplicates external effects | One shared provider-effect claim; passive shadow where claims unavailable |
-| Preview async subagents/QuickJS are unstable | Pin versions, feature flags, fallback to synchronous/ordinary nodes, qualification spikes |
-| Parent and async children deadlock worker capacity | Reservation/capacity model; parent wait state; load tests |
-| MCP schema/auth drift grants capability | Exact tool/schema digest and fail-closed interceptors |
-| Local stdio tools are missing in Cloud | Remote Streamable HTTP or deliberately packaged sandbox artifacts |
-| Sandbox/Store leaks tenants or secrets | Typed namespaces, auth filters, narrow credentials, egress policy, sentinel tests |
-| Checkpoints/traces grow without bound | Refs/digests, agent-local messages, compaction/offload, TTL/retention tests |
-| Serverless cold start/max duration misses workflow SLO | Measure in staging; use async waits/jobs; move to Dedicated only with evidence |
-| Managed plan entitlement is assumed | Verify actual organization entitlements/capacity during Phase 1 |
-| Personal/experimental code ships | Narrow package/build context and artifact manifest test |
+| Custom auth diverges from REST/MCP auth                 | One principal mapper; Agent Server resource filters; shared adversarial auth suite                                                          |
+| Startup migrations race across replicas                 | Release-job migrations; non-owner runtime credentials                                                                                       |
+| Parallel reducers silently lose/conflict data           | Conflict-detecting keyed reducers and randomized merge property tests                                                                       |
+| New code cannot resume old checkpoint                   | Blue/green deployment endpoint binding for incompatible changes; compatibility policy; fork/fail-safe; N-on-N after N+1 drill               |
+| Shadow runtime duplicates external effects              | One shared provider-effect claim; passive shadow where claims unavailable                                                                   |
+| Preview async subagents/QuickJS are unstable            | Pin versions, feature flags, fallback to synchronous/ordinary nodes, qualification spikes                                                   |
+| Parent and async children deadlock worker capacity      | Reservation/capacity model; parent wait state; load tests                                                                                   |
+| MCP schema/auth drift grants capability                 | Exact tool/schema digest and fail-closed interceptors                                                                                       |
+| Local stdio tools are missing in Cloud                  | Remote Streamable HTTP or deliberately packaged sandbox artifacts                                                                           |
+| Sandbox/Store leaks tenants or secrets                  | Typed namespaces, auth filters, narrow credentials, egress policy, sentinel tests                                                           |
+| Checkpoints/traces grow without bound                   | Refs/digests, agent-local messages, compaction/offload, TTL/retention tests                                                                 |
+| Serverless cold start/max duration misses workflow SLO  | Measure in staging; use async waits/jobs; move to Dedicated only with evidence                                                              |
+| Managed plan entitlement is assumed                     | Verify actual organization entitlements/capacity during Phase 1                                                                             |
+| Personal/experimental code ships                        | Narrow package/build context and artifact manifest test                                                                                     |
+
 
 ## 19. Operator/developer runbook target
 

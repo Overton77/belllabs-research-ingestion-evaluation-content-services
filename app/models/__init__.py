@@ -17,8 +17,10 @@ from app.models.external_capability import (
 )
 from app.models.infrastructure import InfrastructureMarker
 from app.models.operation_execution import (
+    OperationExecutionBindingAuthorityV2Document,
     OperationExecutionBindingDocument,
     OperationExecutionClaimDocument,
+    OperationMigrationQuarantineDocument,
     OperationSettlementDocument,
 )
 from app.models.sandbox_snapshot import (
@@ -47,8 +49,10 @@ __all__ = [
     "ExternalDiscoveryCandidateDocument",
     "ExternalDiscoveryEvidenceDocument",
     "InfrastructureMarker",
+    "OperationExecutionBindingAuthorityV2Document",
     "OperationExecutionBindingDocument",
     "OperationExecutionClaimDocument",
+    "OperationMigrationQuarantineDocument",
     "OperationSettlementDocument",
     "PublishedDefinitionDocument",
     "SandboxSnapshotClaimDocument",

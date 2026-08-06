@@ -27,6 +27,7 @@ from app.domain.operation_execution.contracts import (
     SnapshotCloneResult,
 )
 from app.domain.operation_execution.errors import UnsupportedRuntimePolicy
+from app.domain.operation_execution.journal import OperationClaimResult, OperationEffectClaim
 from app.domain.run_control.contracts import (
     ActorContext,
     CommandStatus,
@@ -214,19 +215,65 @@ class RunControlOperationBudgetAuthority:
 
 
 class OperationBindingRepository(Protocol):
-    async def get_binding(self, semantic_attempt_key: str) -> OperationExecutionBinding | None: ...
+    async def get_binding(
+        self,
+        semantic_attempt_key: str,
+        *,
+        request_scope: str,
+    ) -> OperationExecutionBinding | None: ...
 
-    async def get_binding_by_id(self, binding_id: str) -> OperationExecutionBinding | None: ...
+    async def get_binding_by_id(
+        self,
+        binding_id: str,
+        *,
+        request_scope: str,
+    ) -> OperationExecutionBinding | None: ...
 
     async def create_binding(
-        self, binding: OperationExecutionBinding
+        self,
+        binding: OperationExecutionBinding,
+        *,
+        request_scope: str,
     ) -> OperationExecutionBinding: ...
 
-    async def get_settlement(self, binding_id: str) -> OperationSettlement | None: ...
+    async def get_settlement(
+        self,
+        binding_id: str,
+        *,
+        request_scope: str,
+    ) -> OperationSettlement | None: ...
 
     async def claim_execution(self, binding: OperationExecutionBinding) -> bool: ...
 
-    async def settle(self, settlement: OperationSettlement) -> OperationSettlement: ...
+    async def settle(
+        self,
+        settlement: OperationSettlement,
+        *,
+        request_scope: str,
+    ) -> OperationSettlement: ...
+
+
+class OperationExecutionJournalPort(Protocol):
+    async def acquire(
+        self,
+        binding: OperationExecutionBinding,
+        *,
+        claimed_by: str,
+    ) -> OperationClaimResult: ...
+
+    async def get_settlement(
+        self,
+        binding: OperationExecutionBinding,
+    ) -> OperationSettlement | None: ...
+
+    async def settle(
+        self,
+        binding: OperationExecutionBinding,
+        claim: OperationEffectClaim,
+        settlement: OperationSettlement,
+        *,
+        started_at: datetime,
+    ) -> OperationSettlement: ...
 
 
 class RuntimePort(Protocol):
@@ -295,6 +342,8 @@ class OperationExecutionService:
         secrets: SecretResolutionPort,
         events: OperationEventPort,
         budget: OperationBudgetPort,
+        journal: OperationExecutionJournalPort | None = None,
+        journal_claimed_by: str = "operation-runtime",
     ) -> None:
         self._authority = authority
         self._bindings = bindings
@@ -305,16 +354,21 @@ class OperationExecutionService:
         self._secrets = secrets
         self._events = events
         self._budget = budget
+        self._journal = journal
+        self._journal_claimed_by = journal_claimed_by
 
     async def execute(self, request: OperationExecutionRequest) -> OperationExecutionResult:
         fingerprint = sha256_digest(request.model_dump(mode="json", exclude={"requested_at"}))
-        prior = await self._bindings.get_binding(request.identity.semantic_key)
+        prior = await self._bindings.get_binding(
+            request.identity.semantic_key,
+            request_scope=request.request_scope,
+        )
         if prior is not None:
             if prior.request_fingerprint != fingerprint:
                 raise IdempotencyConflict(
                     "semantic operation attempt was reused with conflicting execution intent"
                 )
-            settlement = await self._bindings.get_settlement(prior.binding_id)
+            settlement = await self._get_settlement(prior)
             if settlement is not None:
                 await self._complete_post_effects(prior, settlement)
                 return _public_result(prior, settlement)
@@ -322,12 +376,28 @@ class OperationExecutionService:
         else:
             await self._authority.verify(request)
             binding = _binding_for(request, fingerprint)
-            binding = await self._bindings.create_binding(binding)
+            binding = await self._bindings.create_binding(
+                binding,
+                request_scope=request.request_scope,
+            )
 
         await self._authority.verify(request)
-        claimed = await self._bindings.claim_execution(binding)
+        claim_result = (
+            await self._journal.acquire(
+                binding,
+                claimed_by=self._journal_claimed_by,
+            )
+            if self._journal is not None
+            else None
+        )
+        claim = claim_result.claim if claim_result is not None else None
+        claimed = (
+            claim_result.status == "acquired"
+            if claim_result is not None
+            else await self._bindings.claim_execution(binding)
+        )
         if not claimed:
-            settlement = await self._bindings.get_settlement(binding.binding_id)
+            settlement = await self._get_settlement(binding)
             if settlement is not None:
                 await self._complete_post_effects(binding, settlement)
                 return _public_result(binding, settlement)
@@ -336,6 +406,7 @@ class OperationExecutionService:
                 "settlement is visible or explicitly reconcile the claim"
             )
         runtime_invoked = False
+        started_at = datetime.now(UTC)
         observed_usage = RuntimeUsage()
         try:
             self._validate_policy_support(request)
@@ -387,7 +458,19 @@ class OperationExecutionService:
                 settled_at=datetime.now(UTC),
             )
 
-        settlement = await self._bindings.settle(settlement)
+        settlement = (
+            await self._journal.settle(
+                binding,
+                claim,
+                settlement,
+                started_at=started_at,
+            )
+            if self._journal is not None and claim is not None
+            else await self._bindings.settle(
+                settlement,
+                request_scope=binding.request_scope,
+            )
+        )
         await self._complete_post_effects(binding, settlement)
         return _public_result(binding, settlement)
 
@@ -396,6 +479,8 @@ class OperationExecutionService:
         binding: OperationExecutionBinding,
         settlement: OperationSettlement,
     ) -> None:
+        if self._journal is not None:
+            return
         for index, payload in enumerate(settlement.event_payloads):
             await self._events.publish(
                 event_key=f"{binding.side_effect_key}:event:{index}",
@@ -407,6 +492,17 @@ class OperationExecutionService:
             settlement_id=settlement.settlement_id,
             usage=settlement.usage,
             budget_violation=settlement.failure_code == "budget_exceeded",
+        )
+
+    async def _get_settlement(
+        self,
+        binding: OperationExecutionBinding,
+    ) -> OperationSettlement | None:
+        if self._journal is not None:
+            return await self._journal.get_settlement(binding)
+        return await self._bindings.get_settlement(
+            binding.binding_id,
+            request_scope=binding.request_scope,
         )
 
     @staticmethod
@@ -427,17 +523,47 @@ class InMemoryOperationBindingRepository:
         self._settlements: dict[str, OperationSettlement] = {}
         self._claims: dict[str, str] = {}
 
-    async def get_binding(self, semantic_attempt_key: str) -> OperationExecutionBinding | None:
-        return deepcopy(self._bindings.get(semantic_attempt_key))
+    async def get_binding(
+        self,
+        semantic_attempt_key: str,
+        *,
+        request_scope: str | None = None,
+    ) -> OperationExecutionBinding | None:
+        binding = self._bindings.get(semantic_attempt_key)
+        if (
+            binding is not None
+            and request_scope is not None
+            and binding.request_scope != request_scope
+        ):
+            return None
+        return deepcopy(binding)
 
-    async def get_binding_by_id(self, binding_id: str) -> OperationExecutionBinding | None:
+    async def get_binding_by_id(
+        self,
+        binding_id: str,
+        *,
+        request_scope: str | None = None,
+    ) -> OperationExecutionBinding | None:
         binding = next(
             (item for item in self._bindings.values() if item.binding_id == binding_id),
             None,
         )
+        if (
+            binding is not None
+            and request_scope is not None
+            and binding.request_scope != request_scope
+        ):
+            return None
         return deepcopy(binding)
 
-    async def create_binding(self, binding: OperationExecutionBinding) -> OperationExecutionBinding:
+    async def create_binding(
+        self,
+        binding: OperationExecutionBinding,
+        *,
+        request_scope: str | None = None,
+    ) -> OperationExecutionBinding:
+        if request_scope is not None and binding.request_scope != request_scope:
+            raise ValueError("operation binding write cannot cross request scope")
         async with self._lock:
             prior = self._bindings.get(binding.semantic_attempt_key)
             if prior is not None:
@@ -449,7 +575,19 @@ class InMemoryOperationBindingRepository:
             self._bindings[binding.semantic_attempt_key] = deepcopy(binding)
             return deepcopy(binding)
 
-    async def get_settlement(self, binding_id: str) -> OperationSettlement | None:
+    async def get_settlement(
+        self,
+        binding_id: str,
+        *,
+        request_scope: str | None = None,
+    ) -> OperationSettlement | None:
+        if request_scope is not None:
+            binding = next(
+                (item for item in self._bindings.values() if item.binding_id == binding_id),
+                None,
+            )
+            if binding is None or binding.request_scope != request_scope:
+                return None
         return deepcopy(self._settlements.get(binding_id))
 
     async def claim_execution(self, binding: OperationExecutionBinding) -> bool:
@@ -464,7 +602,23 @@ class InMemoryOperationBindingRepository:
             self._claims[binding.side_effect_key] = binding.binding_id
             return True
 
-    async def settle(self, settlement: OperationSettlement) -> OperationSettlement:
+    async def settle(
+        self,
+        settlement: OperationSettlement,
+        *,
+        request_scope: str | None = None,
+    ) -> OperationSettlement:
+        if request_scope is not None:
+            binding = next(
+                (
+                    item
+                    for item in self._bindings.values()
+                    if item.binding_id == settlement.binding_id
+                ),
+                None,
+            )
+            if binding is None or binding.request_scope != request_scope:
+                raise ValueError("operation settlement cannot cross request scope")
         async with self._lock:
             prior = self._settlements.get(settlement.binding_id)
             if prior is not None:
@@ -493,7 +647,10 @@ def bind_operation_execution_request(
 
 
 def _binding_for(request: OperationExecutionRequest, fingerprint: str) -> OperationExecutionBinding:
-    binding_id = _stable_id("operation-binding", request.identity.semantic_key)
+    binding_id = _stable_id(
+        "operation-binding",
+        f"{request.request_scope}:{request.identity.semantic_key}",
+    )
     return OperationExecutionBinding(
         binding_id=binding_id,
         semantic_attempt_key=request.identity.semantic_key,

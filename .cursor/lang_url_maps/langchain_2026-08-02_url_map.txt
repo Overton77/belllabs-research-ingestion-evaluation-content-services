@@ -1,0 +1,98 @@
+# LangChain docs URL map
+# Source: https://docs.langchain.com/oss/python/langchain
+# Mapped: 2026-08-02
+# Unique canonical pages: 74
+# Methods: Tavily map + Firecrawl map (merged)
+# Raw counts: tavily:105, tavily_overview:18, firecrawl:83
+# Note: / and /overview are likely the same landing page.
+# .md variants, /index, query params, and URL fragments were deduped.
+
+## Root
+https://docs.langchain.com/oss/python/langchain
+https://docs.langchain.com/oss/python/langchain/overview
+
+## Core docs
+https://docs.langchain.com/oss/python/langchain/academy
+https://docs.langchain.com/oss/python/langchain/agents
+https://docs.langchain.com/oss/python/langchain/component-architecture
+https://docs.langchain.com/oss/python/langchain/context-engineering
+https://docs.langchain.com/oss/python/langchain/deep-agent-from-scratch
+https://docs.langchain.com/oss/python/langchain/deploy
+https://docs.langchain.com/oss/python/langchain/event-streaming
+https://docs.langchain.com/oss/python/langchain/get-help
+https://docs.langchain.com/oss/python/langchain/guardrails
+https://docs.langchain.com/oss/python/langchain/human-in-the-loop
+https://docs.langchain.com/oss/python/langchain/install
+https://docs.langchain.com/oss/python/langchain/knowledge-base
+https://docs.langchain.com/oss/python/langchain/long-term-memory
+https://docs.langchain.com/oss/python/langchain/mcp
+https://docs.langchain.com/oss/python/langchain/messages
+https://docs.langchain.com/oss/python/langchain/models
+https://docs.langchain.com/oss/python/langchain/observability
+https://docs.langchain.com/oss/python/langchain/philosophy
+https://docs.langchain.com/oss/python/langchain/quickstart
+https://docs.langchain.com/oss/python/langchain/rag
+https://docs.langchain.com/oss/python/langchain/retrieval
+https://docs.langchain.com/oss/python/langchain/runtime
+https://docs.langchain.com/oss/python/langchain/short-term-memory
+https://docs.langchain.com/oss/python/langchain/sql-agent
+https://docs.langchain.com/oss/python/langchain/streaming
+https://docs.langchain.com/oss/python/langchain/structured-output
+https://docs.langchain.com/oss/python/langchain/studio
+https://docs.langchain.com/oss/python/langchain/tools
+https://docs.langchain.com/oss/python/langchain/ui
+https://docs.langchain.com/oss/python/langchain/voice-agent
+
+## Middleware
+https://docs.langchain.com/oss/python/langchain/middleware
+https://docs.langchain.com/oss/python/langchain/middleware/built-in
+https://docs.langchain.com/oss/python/langchain/middleware/custom
+https://docs.langchain.com/oss/python/langchain/middleware/overview
+
+## Multi-agent
+https://docs.langchain.com/oss/python/langchain/multi-agent
+https://docs.langchain.com/oss/python/langchain/multi-agent/custom-workflow
+https://docs.langchain.com/oss/python/langchain/multi-agent/handoffs
+https://docs.langchain.com/oss/python/langchain/multi-agent/handoffs-customer-support
+https://docs.langchain.com/oss/python/langchain/multi-agent/router
+https://docs.langchain.com/oss/python/langchain/multi-agent/router-knowledge-base
+https://docs.langchain.com/oss/python/langchain/multi-agent/skills
+https://docs.langchain.com/oss/python/langchain/multi-agent/skills-sql-assistant
+https://docs.langchain.com/oss/python/langchain/multi-agent/subagents
+https://docs.langchain.com/oss/python/langchain/multi-agent/subagents-personal-assistant
+
+## Frontend
+https://docs.langchain.com/oss/python/langchain/frontend/branching-chat
+https://docs.langchain.com/oss/python/langchain/frontend/generative-ui
+https://docs.langchain.com/oss/python/langchain/frontend/headless-tools
+https://docs.langchain.com/oss/python/langchain/frontend/human-in-the-loop
+https://docs.langchain.com/oss/python/langchain/frontend/join-rejoin
+https://docs.langchain.com/oss/python/langchain/frontend/markdown-messages
+https://docs.langchain.com/oss/python/langchain/frontend/message-queues
+https://docs.langchain.com/oss/python/langchain/frontend/overview
+https://docs.langchain.com/oss/python/langchain/frontend/reasoning-tokens
+https://docs.langchain.com/oss/python/langchain/frontend/structured-output
+https://docs.langchain.com/oss/python/langchain/frontend/time-travel
+https://docs.langchain.com/oss/python/langchain/frontend/tool-calling
+
+## Frontend integrations
+https://docs.langchain.com/oss/python/langchain/frontend/integrations/ai-elements
+https://docs.langchain.com/oss/python/langchain/frontend/integrations/assistant-ui
+https://docs.langchain.com/oss/python/langchain/frontend/integrations/copilotkit
+https://docs.langchain.com/oss/python/langchain/frontend/integrations/openui
+https://docs.langchain.com/oss/python/langchain/frontend/integrations/overview
+
+## Test / evals
+https://docs.langchain.com/oss/python/langchain/test
+https://docs.langchain.com/oss/python/langchain/test/evals
+https://docs.langchain.com/oss/python/langchain/test/integration-testing
+https://docs.langchain.com/oss/python/langchain/test/unit-testing
+
+## Errors
+https://docs.langchain.com/oss/python/langchain/errors/INVALID_PROMPT_INPUT
+https://docs.langchain.com/oss/python/langchain/errors/INVALID_TOOL_RESULTS
+https://docs.langchain.com/oss/python/langchain/errors/MESSAGE_COERCION_FAILURE
+https://docs.langchain.com/oss/python/langchain/errors/MODEL_AUTHENTICATION
+https://docs.langchain.com/oss/python/langchain/errors/MODEL_NOT_FOUND
+https://docs.langchain.com/oss/python/langchain/errors/MODEL_RATE_LIMIT
+https://docs.langchain.com/oss/python/langchain/errors/OUTPUT_PARSING_FAILURE

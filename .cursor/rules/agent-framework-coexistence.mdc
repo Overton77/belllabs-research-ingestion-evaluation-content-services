@@ -1,0 +1,21 @@
+---
+description: Keep BellLabs contracts framework-neutral while prioritizing the LangGraph/Deep Agents Agent Server path
+alwaysApply: true
+---
+
+# Agent framework coexistence
+
+BellLabs is both a biotech research/ingestion/evaluation service and a frontier agent-framework/model evaluation service.
+
+- Keep BellLabs shared contracts, domain invariants, provenance, budgets, approvals, ingestion gates, and durable lifecycle state authoritative and framework-neutral.
+- Treat agent frameworks and model providers as execution adapters, not domain authorities. Do not leak provider SDK objects or ambiguous provider IDs into shared contracts.
+- Allow LangChain/LangGraph/Deep Agents/LangSmith, OpenAI Agents SDK/API with Temporal and FastAPI, and Anthropic API/agent SDK implementations to coexist behind the same BellLabs ports and exact run bindings.
+- Do not force a least-common-denominator runtime. Model shared semantics in the core contracts and express special capabilities through explicit, provider-qualified capability profiles and adapters.
+- Current delivery priority: bring the LangGraph + Deep Agents Agent Server path to operational research and governed ingestion, with LangSmith tracing/evaluation and the owner's available LangSmith plan.
+- Next: implement comparable OpenAI-native and Anthropic-native paths and evaluate them on the same versioned research, ingestion, and evaluation cases.
+- Treat the hypothesis that provider-native models perform better with provider-native agent tooling as something to measure, not assume.
+- Compare quality, citation fidelity, ingestion correctness, safety, latency, cost, durability, observability, intervention, and recovery using frozen inputs, budgets, outputs, and evaluator versions.
+- Select a runtime per exact Workflow Implementation or operation binding; never create multiple authorities for one BellLabs run or allow runtime state to bypass admission and settlement.
+- Preserve the distinction between researched evidence and approved ingestion. No framework may write canonical knowledge without BellLabs validation, provenance, policy, and review gates.
+
+Detailed intent: `docs/AGENT_FRAMEWORK_COEXISTENCE_STRATEGY.md`.

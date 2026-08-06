@@ -1,16 +1,17 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from app.application.operation_execution import (
-    OperationBindingRepository,
     bind_operation_execution_request,
 )
 from app.domain.coordinator.launch import PreparedLaunchTicket
 from app.domain.operation_execution.contracts import (
     OperationAttemptIdentity,
+    OperationExecutionBinding,
     OperationExecutionRequest,
 )
 
@@ -37,7 +38,7 @@ class SemanticOperationBindingTemplates(BaseModel):
 class SemanticOperationExecutionBindingService:
     """Persist real OEB documents after admission and before Temporal dispatch."""
 
-    def __init__(self, repository: OperationBindingRepository) -> None:
+    def __init__(self, repository: SemanticOperationBindingRepository) -> None:
         self._repository = repository
 
     async def freeze(
@@ -57,11 +58,30 @@ class SemanticOperationExecutionBindingService:
                 bound_at=bound_at,
             )
             expected = bind_operation_execution_request(request)
-            persisted = await self._repository.create_binding(expected)
+            persisted = await self._repository.create_binding(
+                expected,
+                request_scope=ticket.request_scope,
+            )
             if persisted != expected:
                 raise ValueError("persisted Operation Execution Binding differs from frozen intent")
             refs[operation_id] = persisted.binding_id
         return refs
+
+
+class SemanticOperationBindingRepository(Protocol):
+    async def get_binding_by_id(
+        self,
+        binding_id: str,
+        *,
+        request_scope: str,
+    ) -> OperationExecutionBinding | None: ...
+
+    async def create_binding(
+        self,
+        binding: OperationExecutionBinding,
+        *,
+        request_scope: str,
+    ) -> OperationExecutionBinding: ...
 
 
 def _bind_request(

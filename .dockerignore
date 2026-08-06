@@ -7,6 +7,12 @@
 .uv-cache
 .venv
 __pycache__
+docs
+spikes
 graphify-out
 sandbox-work
 tests
+.cursor
+.github
+docker-compose*.yml
+internal_docs

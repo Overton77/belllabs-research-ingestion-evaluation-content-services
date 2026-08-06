@@ -18,9 +18,8 @@ from app.application.coordinator_semantic_bindings import (
     WorkflowSemanticBindingProviderRouter,
 )
 from app.application.mongo_operation_execution_repository import (
-    MongoOperationBindingRepository,
+    create_semantic_operation_binding_repository,
 )
-from app.application.operation_execution import OperationBindingRepository
 from app.application.orchestration import (
     F1OrchestrationBindingVerifier,
     GoalDirectedLaunchService,
@@ -78,6 +77,7 @@ from app.application.schema_grounding_semantic_handlers import (
 )
 from app.application.schema_workspace_binding import SchemaGraphAdmissionService
 from app.application.semantic_operation_bindings import (
+    SemanticOperationBindingRepository,
     SemanticOperationBindingTemplates,
     SemanticOperationExecutionBindingService,
 )
@@ -372,7 +372,7 @@ async def run_live_schema_grounding_coordinator(
             workspace_ref="belllabs://schema-workspaces/{run_id}/selection",
             created_at=now,
         )
-        operation_repository: OperationBindingRepository = MongoOperationBindingRepository()
+        operation_repository = create_semantic_operation_binding_repository(settings)
         freezer = SemanticOperationExecutionBindingService(operation_repository)
         provider_a = SchemaContextSemanticBindingProvider(
             SchemaContextBindingPlanInput(
@@ -1103,14 +1103,18 @@ def _proposal(
 
 
 async def _operation_binding_refs(
-    repository: OperationBindingRepository,
+    repository: SemanticOperationBindingRepository,
+    request_scope: str,
     run_id: str,
     operation_ids: tuple[str, ...],
 ) -> tuple[str, ...]:
     refs = []
     for operation_id in operation_ids:
         binding_id = f"{run_id}:operation:{operation_id}:attempt:1"
-        binding = await repository.get_binding(binding_id)
+        binding = await repository.get_binding_by_id(
+            binding_id,
+            request_scope=request_scope,
+        )
         if binding is None:
             raise RuntimeError(f"durable OEB is unavailable after launch: {binding_id}")
         refs.append(binding.binding_id)
@@ -1123,7 +1127,7 @@ async def _stage_result_record(
     handle: Any,
     tenant_scope: str,
     request_scope: str,
-    operation_repository: OperationBindingRepository,
+    operation_repository: SemanticOperationBindingRepository,
 ) -> WorkflowResultRecord:
     evidence = tuple(
         ref
@@ -1147,6 +1151,7 @@ async def _stage_result_record(
         evidence_refs=evidence,
         operation_binding_refs=await _operation_binding_refs(
             operation_repository,
+            request_scope,
             handle.run_id,
             ("semantic_selector", "independent_reviewer"),
         ),
@@ -1169,7 +1174,7 @@ async def _goal_result_record(
     handle: Any,
     tenant_scope: str,
     request_scope: str,
-    operation_repository: OperationBindingRepository,
+    operation_repository: SemanticOperationBindingRepository,
 ) -> WorkflowResultRecord:
     if result.final_action != "verified_completion" or not result.output_refs:
         raise RuntimeError("Scenario C did not reach independently verified completion")
@@ -1187,6 +1192,7 @@ async def _goal_result_record(
         evidence_refs=result.output_refs,
         operation_binding_refs=await _operation_binding_refs(
             operation_repository,
+            request_scope,
             handle.run_id,
             ("goal_iteration",),
         ),

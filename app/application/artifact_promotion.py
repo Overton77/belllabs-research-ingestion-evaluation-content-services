@@ -39,7 +39,12 @@ class ArtifactPayloadAddress(BaseModel):
 
 
 class ArtifactBindingRepository(Protocol):
-    async def get_binding_by_id(self, binding_id: str) -> OperationExecutionBinding | None: ...
+    async def get_binding_by_id(
+        self,
+        binding_id: str,
+        *,
+        request_scope: str,
+    ) -> OperationExecutionBinding | None: ...
 
 
 class ArtifactMetadataRepository(Protocol):
@@ -326,7 +331,10 @@ class ArtifactPromotionService:
     async def _validate_authority(
         self, request: ArtifactPromotionRequest, content: bytes
     ) -> OperationExecutionBinding:
-        binding = await self._bindings.get_binding_by_id(request.binding_id)
+        binding = await self._bindings.get_binding_by_id(
+            request.binding_id,
+            request_scope=request.request_scope,
+        )
         if binding is None:
             raise ValueError("artifact producer binding does not exist")
         if (

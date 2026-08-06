@@ -43,9 +43,8 @@ from app.application.external_capability_discovery import (
     ExternalDiscoveryBatch,
 )
 from app.application.mongo_operation_execution_repository import (
-    MongoOperationBindingRepository,
+    create_semantic_operation_binding_repository,
 )
-from app.application.operation_execution import OperationBindingRepository
 from app.application.orchestration import (
     F1OrchestrationBindingVerifier,
     RunControlLifecycleGateway,
@@ -84,6 +83,7 @@ from app.application.run_control import (
     RunControlService,
 )
 from app.application.semantic_operation_bindings import (
+    SemanticOperationBindingRepository,
     SemanticOperationBindingTemplates,
     SemanticOperationExecutionBindingService,
 )
@@ -641,7 +641,7 @@ async def run_live_coordinator(
         )
         goal = WebResearchGoal(question=args.goal)
         artifacts = attest_reviewed_web_research_runtime(settings)
-        operation_repository: OperationBindingRepository = MongoOperationBindingRepository()
+        operation_repository = create_semantic_operation_binding_repository(settings)
         operation_templates = _operation_templates(
             selected_hits,
             records=current,
@@ -2129,13 +2129,17 @@ def _record_for_exact_ref(
 
 
 async def _operation_binding_ids(
-    repository: OperationBindingRepository,
+    repository: SemanticOperationBindingRepository,
     *,
+    request_scope: str,
     run_id: str,
 ) -> tuple[str, ...]:
     refs = []
     for stage_id in ("search_firecrawl", "search_tavily", "browser_verify"):
-        binding = await repository.get_binding(f"{run_id}:operation:{stage_id}:attempt:1")
+        binding = await repository.get_binding_by_id(
+            f"{run_id}:operation:{stage_id}:attempt:1",
+            request_scope=request_scope,
+        )
         if binding is None:
             raise RuntimeError(f"Scenario D OEB is unavailable after launch: {stage_id}")
         refs.append(binding.binding_id)

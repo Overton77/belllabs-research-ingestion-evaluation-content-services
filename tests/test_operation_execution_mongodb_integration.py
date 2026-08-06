@@ -68,8 +68,14 @@ async def test_mongodb_binding_claim_and_settlement_are_immutable_and_idempotent
 
         first = await service.execute(request)
         replayed = await service.execute(request)
-        binding = await repository.get_binding(request.identity.semantic_key)
-        settlement = await repository.get_settlement(first.binding_id)
+        binding = await repository.get_binding(
+            request.identity.semantic_key,
+            request_scope=request.request_scope,
+        )
+        settlement = await repository.get_settlement(
+            first.binding_id,
+            request_scope=request.request_scope,
+        )
 
         assert first == replayed
         assert binding is not None

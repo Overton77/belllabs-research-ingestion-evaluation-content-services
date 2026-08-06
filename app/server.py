@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 
 import asyncpg
 import socketio
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastmcp.server.auth.providers.jwt import JWTVerifier
@@ -18,8 +18,9 @@ from redis.exceptions import RedisError
 from starlette.routing import BaseRoute
 from supabase import AsyncClient
 
-from app.api.control_plane import close_control_plane_resources
+from app.api.control_plane import close_control_plane_resources, get_control_plane_principal
 from app.api.control_plane import router as control_plane_router
+from app.api.graph_runtime_schemas import router as graph_runtime_contract_router
 from app.api.run_control import (
     close_run_control_resources,
     initialize_run_control_resources,
@@ -250,6 +251,10 @@ api.add_middleware(
 api.include_router(control_plane_router)
 api.include_router(run_control_router)
 api.include_router(schema_grounding_router)
+api.include_router(
+    graph_runtime_contract_router,
+    dependencies=[Depends(get_control_plane_principal)],
+)
 
 
 @api.exception_handler(ControlPlaneError)

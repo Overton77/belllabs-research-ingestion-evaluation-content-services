@@ -1,0 +1,31 @@
+{
+  "$schema": "https://langgra.ph/schema.json",
+  "dependencies": ["."],
+  "graphs": {
+    "belllabs_stagegraph": "./app/agent_server/stagegraph/graph.py:graph",
+    "belllabs_goal_directed": "./app/agent_server/goal_directed/graph.py:graph"
+  },
+  "auth": {
+    "path": "./app/agent_server/auth.py:auth",
+    "disable_studio_auth": false,
+    "openapi": {
+      "securitySchemes": {
+        "belllabsBearer": {
+          "type": "http",
+          "scheme": "bearer",
+          "bearerFormat": "JWT"
+        }
+      },
+      "security": [
+        {
+          "belllabsBearer": []
+        }
+      ]
+    }
+  },
+  "http": {
+    "app": "./app/agent_server/http_app.py:app",
+    "middleware_order": "auth_first"
+  },
+  "python_version": "3.12"
+}
