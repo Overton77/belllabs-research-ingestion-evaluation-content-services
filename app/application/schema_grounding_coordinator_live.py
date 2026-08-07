@@ -13,6 +13,7 @@ from app.application.capability_search import CapabilitySearchService
 from app.application.control_plane import ControlPlaneService
 from app.application.control_plane_repository import BeanieDefinitionRepository
 from app.application.coordinator_composition import CoordinatorLaunchProductionInputs
+from app.application.coordinator_launch import UnavailableRuntimePlanPreparer
 from app.application.coordinator_results import CoordinatorResultService
 from app.application.coordinator_semantic_bindings import (
     WorkflowSemanticBindingProviderRouter,
@@ -543,6 +544,7 @@ async def run_live_schema_grounding_coordinator(
                 goal_directed_task_queue=queues.goal_directed,
             ),
             semantic_bindings=providers,
+            runtime_plans=UnavailableRuntimePlanPreparer(),
             binding_service=RunSemanticInputBindingService(semantic_repository),
         )
         preparation, launcher = launch_inputs.build()

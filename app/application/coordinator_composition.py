@@ -26,6 +26,8 @@ from app.application.coordinator_launch import (
     CoordinatorLaunchPreparationService,
     CoordinatorWorkflowLaunchService,
     LaunchTicketRepository,
+    RuntimePlanPreparer,
+    RuntimePlanRequirement,
     SemanticBindingProvider,
     WorkflowSubmissionPort,
 )
@@ -114,6 +116,7 @@ class CoordinatorLaunchProductionInputs:
     dispatcher: BoundLaunchDispatcherPort
     submissions: WorkflowSubmissionPort
     semantic_bindings: SemanticBindingProvider
+    runtime_plans: RuntimePlanPreparer
     binding_service: RunSemanticInputBindingService
 
     def build(
@@ -124,6 +127,8 @@ class CoordinatorLaunchProductionInputs:
             admission=self.admission_preview,
             tickets=self.tickets,
             semantic_bindings=self.semantic_bindings,
+            runtime_plans=self.runtime_plans,
+            runtime_plan_requirement=RuntimePlanRequirement.REQUIRE_RUN_PLAN_V3,
         )
         launcher = CoordinatorWorkflowLaunchService(
             tickets=self.tickets,
@@ -132,6 +137,7 @@ class CoordinatorLaunchProductionInputs:
             submissions=self.submissions,
             semantic_bindings=self.semantic_bindings,
             binding_service=self.binding_service,
+            runtime_plan_requirement=RuntimePlanRequirement.REQUIRE_RUN_PLAN_V3,
         )
         return preparation, launcher
 

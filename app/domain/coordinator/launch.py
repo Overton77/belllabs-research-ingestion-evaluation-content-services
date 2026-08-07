@@ -11,6 +11,7 @@ from app.domain.control_plane.contracts import (
     CompileInvocation,
     ExactDefinitionRef,
 )
+from app.domain.graph_runtime.definitions import RunPlanV3, UnavailableStageSurface
 from app.domain.run_control.contracts import (
     ActorContext,
     BudgetEnvelope,
@@ -205,6 +206,11 @@ class PreparedLaunchTicket(Contract):
         default=None,
         repr=False,
     )
+    runtime_run_plan: RunPlanV3 | None = Field(default=None, repr=False)
+    runtime_unavailable_surfaces: tuple[UnavailableStageSurface, ...] = Field(
+        default=(),
+        repr=False,
+    )
     warnings: tuple[str, ...] = ()
     launchable: bool
     idempotency_issuer: str = Field(min_length=1)
@@ -257,6 +263,20 @@ class PreparedLaunchTicket(Contract):
             raise ValueError(
                 "frozen semantic binding plan differs from launch ticket metadata"
             )
+        if self.runtime_run_plan is not None:
+            if self.runtime_run_plan.effective_run_configuration_digest != (
+                self.effective_configuration_digest
+            ):
+                raise ValueError("runtime RunPlan has a different ERC digest")
+            if (
+                self.runtime_run_plan.semantic_binding_ref
+                != self.semantic_binding_plan_ref
+            ):
+                raise ValueError("runtime RunPlan has a different semantic binding plan")
+            if self.runtime_run_plan.workflow_implementation_ref not in self.resolved_asset_refs:
+                raise ValueError("runtime RunPlan implementation is not a resolved asset")
+        if self.runtime_unavailable_surfaces and self.launchable:
+            raise ValueError("unavailable required runtime surfaces cannot be launchable")
         if self.state == LaunchTicketState.CONSUMED:
             if self.consumed_run_id is None or self.consumed_at is None:
                 raise ValueError("consumed launch tickets require run identity and timestamp")
@@ -274,6 +294,8 @@ class PreparedLaunchTicket(Contract):
                     "initial_goal",
                     "frozen_run_request",
                     "semantic_binding_plan",
+                    "runtime_run_plan",
+                    "runtime_unavailable_surfaces",
                 },
             )
         )

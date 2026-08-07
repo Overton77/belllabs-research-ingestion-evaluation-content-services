@@ -30,6 +30,7 @@ from app.application.coordinator_facade import (
     ProductionCoordinatorFacade,
     WorkflowDesignValidation,
 )
+from app.application.coordinator_launch import UnavailableRuntimePlanPreparer
 from app.application.coordinator_results import (
     CoordinatorResultService,
     TerminalWorkflowCompletionService,
@@ -715,6 +716,7 @@ async def run_live_coordinator(
                 goal_directed_task_queue=f"{task_queue}-unused-goal-directed",
             ),
             semantic_bindings=provider,
+            runtime_plans=UnavailableRuntimePlanPreparer(),
             binding_service=RunSemanticInputBindingService(semantic_repository),
         )
         preparation, launcher = launch_inputs.build()

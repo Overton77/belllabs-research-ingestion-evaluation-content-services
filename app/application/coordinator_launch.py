@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import timedelta
+from enum import StrEnum
 from typing import Any, Protocol
 from uuid import uuid4
 
@@ -32,6 +33,7 @@ from app.domain.coordinator.launch import (
     is_expired,
     validate_launch_context,
 )
+from app.domain.graph_runtime.definitions import RunPlanV3, UnavailableStageSurface
 from app.domain.orchestration.bindings import RunSemanticInputBinding
 from app.domain.orchestration.contracts import GoalDirectedRunInput, StageGraphRunInput
 from app.domain.run_control.contracts import (
@@ -91,6 +93,46 @@ class SemanticBindingProvider(Protocol):
         *,
         run_id: str,
     ) -> RunSemanticInputBinding: ...
+
+
+@dataclass(frozen=True)
+class RuntimePlanPreparation:
+    """Exact Stage-1 structural result to freeze with a coordinator launch ticket."""
+
+    run_plan: RunPlanV3
+    unavailable_surfaces: tuple[UnavailableStageSurface, ...] = ()
+
+
+class RuntimePlanPreparer(Protocol):
+    async def prepare_runtime_plan(
+        self,
+        proposal: WorkflowLaunchProposal,
+        configuration: EffectiveRunConfiguration,
+        semantic_plan: SemanticBindingPlan,
+    ) -> RuntimePlanPreparation: ...
+
+
+class RuntimePlanRequirement(StrEnum):
+    """Whether a launch path accepts legacy tickets or requires RunPlanV3."""
+
+    LEGACY_COMPATIBILITY = "legacy_compatibility"
+    REQUIRE_RUN_PLAN_V3 = "require_run_plan_v3"
+
+
+@dataclass(frozen=True)
+class UnavailableRuntimePlanPreparer:
+    """Explicit production placeholder until exact Stage-1 assets are published."""
+
+    reason: str = "no exact RunPlanV3 authoring provider is configured"
+
+    async def prepare_runtime_plan(
+        self,
+        proposal: WorkflowLaunchProposal,
+        configuration: EffectiveRunConfiguration,
+        semantic_plan: SemanticBindingPlan,
+    ) -> RuntimePlanPreparation:
+        del proposal, configuration, semantic_plan
+        raise LaunchTicketUnavailable(self.reason)
 
 
 class BoundLaunchDispatcherPort(LaunchDispatcherPort, Protocol):
@@ -166,10 +208,11 @@ class InMemoryLaunchTicketRepository:
                 prior.proposal_digest != ticket.proposal_digest
                 or prior.semantic_binding_plan_digest
                 != ticket.semantic_binding_plan_digest
+                or _runtime_plan_digest(prior) != _runtime_plan_digest(ticket)
             ):
                 raise LaunchIdempotencyConflict(
                     "launch idempotency identity was reused with a changed proposal "
-                    "or semantic binding plan"
+                    "semantic binding plan, or runtime plan"
                 )
             return prior
         self._by_id[ticket.ticket_id] = ticket
@@ -272,6 +315,10 @@ class CoordinatorLaunchPreparationService:
         admission: AdmissionPreviewPort,
         tickets: LaunchTicketRepository,
         semantic_bindings: SemanticBindingProvider | None = None,
+        runtime_plans: RuntimePlanPreparer | None = None,
+        runtime_plan_requirement: RuntimePlanRequirement = (
+            RuntimePlanRequirement.LEGACY_COMPATIBILITY
+        ),
         ttl: timedelta = timedelta(minutes=15),
     ) -> None:
         if ttl.total_seconds() <= 0:
@@ -280,6 +327,8 @@ class CoordinatorLaunchPreparationService:
         self._admission = admission
         self._tickets = tickets
         self._semantic_bindings = semantic_bindings
+        self._runtime_plans = runtime_plans
+        self._runtime_plan_requirement = runtime_plan_requirement
         self._ttl = ttl
 
     async def prepare(
@@ -302,6 +351,19 @@ class CoordinatorLaunchPreparationService:
             raise LaunchTicketUnavailable(
                 "semantic binding plan differs from the compiled blueprint family"
             )
+        if (
+            self._runtime_plan_requirement
+            == RuntimePlanRequirement.REQUIRE_RUN_PLAN_V3
+            and (self._runtime_plans is None or semantic_plan is None)
+        ):
+            raise LaunchTicketUnavailable(
+                "production launch preparation requires a frozen RunPlanV3"
+            )
+        runtime_plan = (
+            await self._runtime_plans.prepare_runtime_plan(proposal, erc, semantic_plan)
+            if self._runtime_plans is not None and semantic_plan is not None
+            else None
+        )
         run_request = RunRequest(
             request_scope=proposal.request_scope,
             idempotency_issuer=proposal.idempotency_issuer,
@@ -323,7 +385,17 @@ class CoordinatorLaunchPreparationService:
         preview = await self._admission.preview(run_request)
         resolved_refs = tuple(
             sorted(
-                set((*erc.source_refs, *proposal.selected_asset_refs)),
+                set(
+                    (
+                        *erc.source_refs,
+                        *proposal.selected_asset_refs,
+                        *(
+                            (runtime_plan.run_plan.workflow_implementation_ref,)
+                            if runtime_plan is not None
+                            else ()
+                        ),
+                    )
+                ),
                 key=lambda ref: (ref.kind.value, ref.logical_id, ref.revision, ref.digest),
             )
         )
@@ -333,6 +405,14 @@ class CoordinatorLaunchPreparationService:
         )
         if semantic_plan is None:
             warnings += ("semantic_binding_provider_unavailable",)
+        if runtime_plan is not None and runtime_plan.unavailable_surfaces:
+            warnings += (
+                "required_runtime_surfaces_unavailable:"
+                + ",".join(
+                    f"{surface.stage_id}:{surface.variant_name}:{surface.capability_id}"
+                    for surface in runtime_plan.unavailable_surfaces
+                ),
+            )
         ticket = PreparedLaunchTicket(
             ticket_id=str(uuid4()),
             caller_id=context.caller_id,
@@ -361,8 +441,16 @@ class CoordinatorLaunchPreparationService:
                 semantic_plan.plan_digest if semantic_plan is not None else None
             ),
             semantic_binding_plan=semantic_plan,
+            runtime_run_plan=runtime_plan.run_plan if runtime_plan is not None else None,
+            runtime_unavailable_surfaces=(
+                runtime_plan.unavailable_surfaces if runtime_plan is not None else ()
+            ),
             warnings=warnings,
-            launchable=preview.accepted and semantic_plan is not None,
+            launchable=(
+                preview.accepted
+                and semantic_plan is not None
+                and (runtime_plan is None or not runtime_plan.unavailable_surfaces)
+            ),
             idempotency_issuer=proposal.idempotency_issuer,
             idempotency_key=proposal.idempotency_key,
             frozen_run_request=run_request,
@@ -395,6 +483,9 @@ class CoordinatorWorkflowLaunchService:
         submissions: WorkflowSubmissionPort,
         semantic_bindings: SemanticBindingProvider | None = None,
         binding_service: RunSemanticInputBindingService | None = None,
+        runtime_plan_requirement: RuntimePlanRequirement = (
+            RuntimePlanRequirement.LEGACY_COMPATIBILITY
+        ),
     ) -> None:
         self._tickets = tickets
         self._admission = admission
@@ -402,6 +493,7 @@ class CoordinatorWorkflowLaunchService:
         self._submissions = submissions
         self._semantic_bindings = semantic_bindings
         self._binding_service = binding_service
+        self._runtime_plan_requirement = runtime_plan_requirement
 
     async def launch(
         self,
@@ -434,6 +526,16 @@ class CoordinatorWorkflowLaunchService:
         if ticket.semantic_binding_plan is None:
             raise LaunchTicketUnavailable(
                 "launch ticket has no frozen exact semantic binding plan"
+            )
+        if ticket.runtime_unavailable_surfaces:
+            raise LaunchTicketUnavailable("launch ticket has unavailable required runtime surfaces")
+        if (
+            self._runtime_plan_requirement
+            == RuntimePlanRequirement.REQUIRE_RUN_PLAN_V3
+            and ticket.runtime_run_plan is None
+        ):
+            raise LaunchTicketUnavailable(
+                "production launch ticket has no frozen RunPlanV3"
             )
         if not ticket.launchable:
             raise LaunchTicketUnavailable("launch ticket did not pass admission preview")
@@ -510,6 +612,10 @@ def _family_for(erc: EffectiveRunConfiguration) -> BlueprintFamily:
     if isinstance(erc.selected_blueprint, GoalDirectedBlueprint):
         return BlueprintFamily.GOAL_DIRECTED
     raise LaunchTicketUnavailable("compiled configuration selected an unsupported blueprint family")
+
+
+def _runtime_plan_digest(ticket: PreparedLaunchTicket) -> str | None:
+    return ticket.runtime_run_plan.plan_digest if ticket.runtime_run_plan is not None else None
 
 
 def _validated_initial_goal(

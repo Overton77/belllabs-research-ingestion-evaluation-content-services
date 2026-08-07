@@ -91,7 +91,9 @@ def test_langgraph_config_registers_exact_graphs_without_route_collision() -> No
         "belllabs_stagegraph": "./app/agent_server/stagegraph/graph.py:graph",
         "belllabs_goal_directed": "./app/agent_server/goal_directed/graph.py:graph",
     }
+    assert config["auth"]["path"] == "app.agent_server.auth:auth"
     assert config["auth"]["disable_studio_auth"] is False
+    assert config["http"]["app"] == "app.agent_server.http_app:app"
     custom_paths = {
         path
         for route in app.routes
@@ -211,6 +213,20 @@ async def test_only_immutable_deployment_assistants_are_available() -> None:
                 "graph_id": "belllabs_stagegraph",
                 "metadata": {"request_scope": "tenant-a"},
             },
+        )
+
+
+@pytest.mark.asyncio
+async def test_studio_user_cannot_bypass_belllabs_roles() -> None:
+    studio_user = SimpleNamespace(identity="langgraph-studio-user", permissions=())
+
+    with pytest.raises(
+        Auth.exceptions.HTTPException,
+        match="lacks runtime permission",
+    ):
+        await authorize_assistants(
+            SimpleNamespace(user=studio_user, action="assistants.search"),
+            {},
         )
 
 

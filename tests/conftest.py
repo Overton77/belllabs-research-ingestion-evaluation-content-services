@@ -10,6 +10,15 @@ from app.domain.control_plane.extensions import ExtensionRegistry
 from app.integrations.control_plane_payloads import InMemoryPayloadStore
 
 
+def _required_external_test_service(name: str) -> str:
+    value = os.getenv(name)
+    if value:
+        return value
+    if os.getenv("BELL_LABS_REQUIRE_STAGE3_ENTRY_SERVICES") == "1":
+        pytest.fail(f"{name} is required for the Stage 3 entry evidence job")
+    pytest.skip(f"{name} is not configured")
+
+
 @pytest.fixture
 def in_memory_control_plane_service() -> ControlPlaneService:
     return ControlPlaneService(
@@ -21,15 +30,13 @@ def in_memory_control_plane_service() -> ControlPlaneService:
 
 @pytest.fixture
 def test_mongodb_uri() -> str:
-    uri = os.getenv("TEST_MONGODB_URI")
-    if not uri:
-        pytest.skip("TEST_MONGODB_URI is not configured")
-    return uri
+    return _required_external_test_service("TEST_MONGODB_URI")
 
 
 @pytest.fixture
 def test_application_postgres_dsn() -> str:
-    dsn = os.getenv("TEST_APPLICATION_POSTGRES_DSN")
-    if not dsn:
-        pytest.skip("TEST_APPLICATION_POSTGRES_DSN is not configured")
-    return dsn
+    return _required_external_test_service("TEST_APPLICATION_POSTGRES_DSN")
+
+
+# Block C live fixtures / helpers for persistent Agent Server qualification.
+pytest_plugins = ["tests.fixtures.agent_server_block_c"]

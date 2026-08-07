@@ -79,12 +79,14 @@ class PostgresRuntimeCoordinationRepository:
                     binding_id, request_scope, belllabs_run_id, execution_epoch,
                     submission_id, submission_idempotency_key, submission_digest, run_plan_digest,
                     graph_assembly_digest, state_schema_digest, runtime_provider,
-                    deployment_endpoint_id, deployment_revision, agent_server_thread_id,
+                    deployment_endpoint_id, deployment_revision, deployment_id,
+                    assistant_id, graph_id, agent_server_thread_id,
                     status, active, version, binding_payload, created_at, updated_at
                 )
                 VALUES (
                     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-                    $12, $13, $14, $15, $16, $17, $18::jsonb, $19, $20
+                    $12, $13, $14, $15, $16, $17, $18, $19, $20,
+                    $21::jsonb, $22, $23
                 )
                 """,
                 binding.binding_id,
@@ -100,6 +102,9 @@ class PostgresRuntimeCoordinationRepository:
                 binding.runtime_provider,
                 deployment.deployment_endpoint_id if deployment else None,
                 deployment.deployment_revision if deployment else None,
+                deployment.deployment_id if deployment else None,
+                deployment.assistant_id if deployment else None,
+                binding.graph_id,
                 thread.agent_server_thread_id if thread else None,
                 binding.status.value,
                 binding.active,

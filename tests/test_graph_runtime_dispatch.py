@@ -122,6 +122,8 @@ def submission(plan: RunPlan) -> GraphExecutionSubmission:
         ),
         "run_plan_digest": plan.plan_digest,
         "graph_assembly_digest": plan.graph_assembly.graph_assembly_ref.digest,
+        "target_deployment": None,
+        "target_graph_id": None,
         "state_schema_digest": plan.graph_assembly.state_schema_digest,
         "input_manifest_ref": "input-manifest-1",
         "actor": ActorRef(
@@ -212,7 +214,11 @@ async def test_dispatch_freezes_binding_before_effect_and_replay_does_not_resubm
             ): client
         }
     )
-    service = GraphRuntimeDispatchService(repository=repository, selector=selector)
+    service = GraphRuntimeDispatchService(
+        repository=repository,
+        selector=selector,
+        allow_legacy_plan=True,
+    )
 
     first = await service.submit(request, plan)
     second = await service.submit(request, plan)
@@ -245,6 +251,7 @@ async def test_ambiguous_launch_enters_reconciliation_and_is_not_blindly_retried
                 ): client
             }
         ),
+        allow_legacy_plan=True,
     )
 
     with pytest.raises(TimeoutError, match="ambiguous"):
@@ -340,6 +347,7 @@ async def test_concurrent_identical_submission_dispatches_provider_once() -> Non
                 ): client
             }
         ),
+        allow_legacy_plan=True,
     )
     first_task = asyncio.create_task(service.submit(request, plan))
     await client.started.wait()
@@ -368,6 +376,7 @@ async def test_intervention_is_reserved_before_ambiguous_provider_effect() -> No
                 ): dispatch_client
             }
         ),
+        allow_legacy_plan=True,
     )
     await dispatch.submit(request, plan)
 
@@ -402,6 +411,15 @@ async def test_intervention_is_reserved_before_ambiguous_provider_effect() -> No
         async def apply(self, _intervention, *, binding_id):  # type: ignore[no-untyped-def]
             self.calls += 1
             raise TimeoutError(f"ambiguous provider effect for {binding_id}")
+
+        async def reconcile(
+            self,
+            _intervention,
+            *,
+            binding_id,
+        ):  # type: ignore[no-untyped-def]
+            del binding_id
+            return None
 
     client = AmbiguousClient()
     service = RuntimeInterventionService(

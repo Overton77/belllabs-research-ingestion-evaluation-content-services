@@ -3,6 +3,8 @@ from __future__ import annotations
 from fastapi import APIRouter
 from pydantic import BaseModel, TypeAdapter
 
+from app.agent_server.common_state import CommonStateMetadata
+from app.application.operation_executor import OperationExecutionOutcome
 from app.domain.graph_runtime.contracts import (
     BellLabsErrorEnvelope,
     BellLabsStreamEvent,
@@ -46,8 +48,19 @@ from app.domain.graph_runtime.definitions import (
     SandboxProfileDefinition,
     StageCapabilityRequirement,
     StageExecutionBinding,
+    UnavailableStageSurface,
 )
 from app.domain.graph_runtime.governance import field_governance_schema
+from app.domain.graph_runtime.kernel import (
+    CancellationContext,
+    DecisionRequest,
+    DecisionResponse,
+    LineageParentEdge,
+    ProviderQualifiedLineageRecord,
+    ResourceLeaseRecord,
+    ResourceLeaseRequest,
+    WaitLeaseProjection,
+)
 from app.domain.operation_execution.journal import (
     OperationClaimResult,
     OperationEffectClaim,
@@ -99,8 +112,18 @@ def graph_runtime_contract_schemas() -> dict[str, object]:
         "stage_execution_binding": StageExecutionBinding,
         "execution_resource_envelope": ExecutionResourceEnvelope,
         "execution_lineage_envelope": ExecutionLineageEnvelope,
+        "unavailable_stage_surface": UnavailableStageSurface,
         "graph_assembly_spec_v2": GraphAssemblySpecV2,
         "run_plan_v3": RunPlanV3,
+        "common_state_metadata": CommonStateMetadata,
+        "decision_request": DecisionRequest,
+        "decision_response": DecisionResponse,
+        "provider_qualified_lineage_record": ProviderQualifiedLineageRecord,
+        "lineage_parent_edge": LineageParentEdge,
+        "resource_lease_request": ResourceLeaseRequest,
+        "resource_lease_record": ResourceLeaseRecord,
+        "wait_lease_projection": WaitLeaseProjection,
+        "cancellation_context": CancellationContext,
         "operation_effect_claim": OperationEffectClaim,
         "operation_technical_attempt": OperationTechnicalAttempt,
         "operation_journal_settlement": OperationJournalSettlement,
@@ -110,6 +133,9 @@ def graph_runtime_contract_schemas() -> dict[str, object]:
         name: model.model_json_schema() for name, model in models.items()
     }
     schemas["runtime_intervention"] = TypeAdapter(RuntimeIntervention).json_schema()
+    schemas["operation_execution_outcome"] = TypeAdapter(
+        OperationExecutionOutcome
+    ).json_schema()
     schemas["field_governance"] = field_governance_schema()
     return schemas
 

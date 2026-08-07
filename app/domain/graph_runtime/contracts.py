@@ -77,6 +77,8 @@ class GraphExecutionSubmission(Contract):
     run_plan_ref: ContentAddressedRef
     run_plan_digest: str = Field(pattern=DIGEST_PATTERN)
     graph_assembly_digest: str = Field(pattern=DIGEST_PATTERN)
+    target_deployment: DeploymentIdentity | None
+    target_graph_id: str | None = Field(min_length=1)
     state_schema_digest: str = Field(pattern=DIGEST_PATTERN)
     input_manifest_ref: str = Field(min_length=1)
     actor: ActorRef
@@ -87,6 +89,8 @@ class GraphExecutionSubmission(Contract):
     def submission_digest_matches_intent(self) -> GraphExecutionSubmission:
         if self.run_plan_ref.kind.value != "run_plan":
             raise ValueError("graph execution submissions require an exact RunPlan reference")
+        if (self.target_deployment is None) != (self.target_graph_id is None):
+            raise ValueError("target deployment and graph ID must be bound together")
         content = self.model_dump(mode="json", exclude={"request_digest"})
         if sha256_digest(content) != self.request_digest:
             raise ValueError("graph execution submission request digest mismatch")
@@ -122,6 +126,7 @@ class RuntimeExecutionBinding(Contract):
     runtime_provider: Literal["legacy_temporal", "langgraph_agent_server"]
     deployment: DeploymentIdentity | None = None
     agent_thread: AgentThreadKey | None = None
+    graph_id: str | None = Field(default=None, min_length=1)
     active: bool = True
     status: RuntimeExecutionStatus = RuntimeExecutionStatus.SUBMITTING
     version: int = Field(default=1, ge=1)
@@ -131,9 +136,13 @@ class RuntimeExecutionBinding(Contract):
     @model_validator(mode="after")
     def provider_facts_match_runtime(self) -> RuntimeExecutionBinding:
         graph = self.runtime_provider == "langgraph_agent_server"
-        if graph != (self.deployment is not None and self.agent_thread is not None):
+        if graph != (
+            self.deployment is not None
+            and self.agent_thread is not None
+            and self.graph_id is not None
+        ):
             raise ValueError(
-                "LangGraph bindings require qualified deployment and thread identities"
+                "LangGraph bindings require qualified deployment, graph, and thread identities"
             )
         return self
 
@@ -261,6 +270,8 @@ class PrivilegedOperatorReconcileIntervention(InterventionBase):
     ) -> PrivilegedOperatorReconcileIntervention:
         if self.actor.actor_type != "operator":
             raise ValueError("privileged reconciliation requires an operator actor")
+        if self.expected_checkpoint is None:
+            raise ValueError("privileged reconciliation requires an expected checkpoint")
         return self
 
 
@@ -305,7 +316,7 @@ class DurableInterruptEnvelope(Contract):
     def interrupt_summary_has_no_sensitive_values(
         cls, value: dict[str, Any]
     ) -> dict[str, Any]:
-        _reject_sensitive_payload(value)
+        _reject_redacted_runtime_payload(value)
         return value
 
 
@@ -361,7 +372,7 @@ class BellLabsStreamEvent(Contract):
     def stream_payload_has_no_sensitive_values(
         cls, value: dict[str, Any]
     ) -> dict[str, Any]:
-        _reject_sensitive_payload(value)
+        _reject_redacted_runtime_payload(value)
         return value
 
 
@@ -495,9 +506,63 @@ def _reject_sensitive_payload(value: object) -> None:
         if isinstance(item, dict):
             for key, nested in item.items():
                 normalized = str(key).lower().replace("-", "_")
-                reference_only = normalized.endswith(("_ref", "_refs", "_digest", "_id"))
+                reference_only = normalized.endswith(("_ref", "_refs", "_digest"))
                 if any(fragment in normalized for fragment in sensitive) and not reference_only:
                     raise ValueError("runtime payloads may contain sensitive references only")
+                inspect(nested)
+        elif isinstance(item, list | tuple):
+            for nested in item:
+                inspect(nested)
+
+    inspect(value)
+
+
+def _reject_redacted_runtime_payload(value: object) -> None:
+    _reject_sensitive_payload(value)
+    safe_keys = {
+        "status",
+        "phase",
+        "reason_code",
+        "retry_layer",
+        "intervention_kind",
+        "failure_class",
+        "node_name",
+        "checkpoint_status",
+        "provider_status",
+        "decision_id",
+        "binding_id",
+        "command_id",
+        "interrupt_kind",
+        "display_text",
+        "title",
+        "prompt",
+        "label",
+        "value",
+        "description",
+        "choices",
+        "payload_ref",
+        "result_manifest_ref",
+        "evidence_ref",
+        "evidence_refs",
+        "artifact_ref",
+        "artifact_refs",
+        "policy_ref",
+        "schema_ref",
+        "assembly_digest",
+        "run_plan_digest",
+        "state_schema_digest",
+        "response_digest",
+        "request_digest",
+    }
+
+    def inspect(item: object) -> None:
+        if isinstance(item, dict):
+            for key, nested in item.items():
+                normalized = str(key).lower().replace("-", "_")
+                if normalized not in safe_keys:
+                    raise ValueError(
+                        "redacted runtime payload contains a non-allowlisted field"
+                    )
                 inspect(nested)
         elif isinstance(item, list | tuple):
             for nested in item:

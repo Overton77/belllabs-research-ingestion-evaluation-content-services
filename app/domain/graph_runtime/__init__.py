@@ -8,13 +8,33 @@ from app.domain.graph_runtime.contracts import (
 )
 from app.domain.graph_runtime.definitions import GraphAssemblyDefinition, RunPlan
 from app.domain.graph_runtime.identities import ExecutionEpochKey
+from app.domain.graph_runtime.kernel import (
+    CancellationContext,
+    DecisionRequest,
+    DecisionResponse,
+    LineageParentEdge,
+    ProviderQualifiedLineageRecord,
+    ResourceLeaseRecord,
+    ResourceLeaseRequest,
+    ResourceLeaseStatus,
+    WaitLeaseProjection,
+)
 
 __all__ = [
     "ExecutionEpochKey",
     "GraphAssemblyDefinition",
     "GraphExecutionReceipt",
     "GraphExecutionSubmission",
+    "CancellationContext",
+    "DecisionRequest",
+    "DecisionResponse",
+    "LineageParentEdge",
+    "ProviderQualifiedLineageRecord",
+    "ResourceLeaseRecord",
+    "ResourceLeaseRequest",
+    "ResourceLeaseStatus",
     "RunPlan",
     "RuntimeExecutionBinding",
     "RuntimeIntervention",
+    "WaitLeaseProjection",
 ]

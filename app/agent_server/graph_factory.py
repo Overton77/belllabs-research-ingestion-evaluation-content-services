@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from app.agent_server.graphs import goal_directed_graph, stagegraph_graph
-from app.domain.graph_runtime.definitions import GraphAssemblyDefinition, RunPlan
+from app.domain.graph_runtime.definitions import GraphAssemblyDefinition, RunPlan, RunPlanV3
 
 
 def graph_from_exact_definitions(
     *,
     assembly: GraphAssemblyDefinition,
-    run_plan: RunPlan,
+    run_plan: RunPlan | RunPlanV3,
 ) -> object:
     """Select immutable topology only after exact assembly/RunPlan agreement."""
 

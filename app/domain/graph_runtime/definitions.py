@@ -570,6 +570,26 @@ class ExecutionResourceEnvelope(Contract):
     release_policy: str = Field(min_length=1)
 
 
+class UnavailableStageSurface(Contract):
+    """Fail-closed prediction for one required stage capability surface."""
+
+    stage_id: str = Field(pattern=r"^[a-z][a-z0-9_-]*$")
+    variant_name: str = Field(default="default", pattern=r"^[a-z][a-z0-9_-]*$")
+    capability_id: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    reason_code: Literal[
+        "authority_denied",
+        "capability_unavailable",
+        "maturity_not_promoted",
+        "feature_disabled",
+        "readiness_unavailable",
+    ]
+    maturity: Literal[
+        "stable", "beta", "preview", "entitlement_dependent", "policy_disabled"
+    ]
+    fallback: str = Field(min_length=1)
+    detail: str = Field(min_length=1)
+
+
 class OperationAssemblySpec(Contract):
     schema_version: Literal["belllabs.operation-assembly.v2"] = "belllabs.operation-assembly.v2"
     operation_assembly_id: str = Field(min_length=1)

@@ -5,8 +5,9 @@
     "belllabs_stagegraph": "./app/agent_server/stagegraph/graph.py:graph",
     "belllabs_goal_directed": "./app/agent_server/goal_directed/graph.py:graph"
   },
+  "env": ".env",
   "auth": {
-    "path": "./app/agent_server/auth.py:auth",
+    "path": "app.agent_server.auth:auth",
     "disable_studio_auth": false,
     "openapi": {
       "securitySchemes": {
@@ -24,7 +25,7 @@
     }
   },
   "http": {
-    "app": "./app/agent_server/http_app.py:app",
+    "app": "app.agent_server.http_app:app",
     "middleware_order": "auth_first"
   },
   "python_version": "3.12"

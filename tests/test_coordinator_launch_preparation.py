@@ -7,9 +7,12 @@ import pytest
 
 from app.application.control_plane import ControlPlaneService
 from app.application.control_plane_repository import InMemoryDefinitionRepository
+from app.application.coordinator_composition import CoordinatorLaunchProductionInputs
 from app.application.coordinator_launch import (
     CoordinatorLaunchPreparationService,
+    CoordinatorWorkflowLaunchService,
     InMemoryLaunchTicketRepository,
+    RuntimePlanPreparation,
 )
 from app.application.coordinator_results import (
     CoordinatorResultService,
@@ -19,8 +22,10 @@ from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import (
     CompilationContext,
     CompileInvocation,
+    DefinitionKind,
     DefinitionSelector,
     EnvironmentAvailability,
+    ExactDefinitionRef,
     GoalDirectedBlueprint,
     PublishRequest,
     RunInputManifestRef,
@@ -39,6 +44,13 @@ from app.domain.coordinator.launch import (
     StageGraphResultDetails,
     WorkflowLaunchProposal,
     WorkflowResultRecord,
+)
+from app.domain.graph_runtime.definitions import (
+    ContentAddressedRef,
+    GraphAssemblySpecV2,
+    RunPlanV3,
+    RuntimeDefinitionKind,
+    UnavailableStageSurface,
 )
 from app.domain.orchestration.bindings import (
     GoalOperationHandlerBinding,
@@ -80,6 +92,11 @@ class AcceptingPreview:
             reason_code="accepted",
             reason="admission preview accepted",
         )
+
+
+class UnexpectedAdmission:
+    async def admit(self, _request):
+        raise AssertionError("the tested launch guard must reject before admission")
 
 
 class FixtureSemanticBindingProvider:
@@ -140,6 +157,7 @@ async def launch_fixture(
     idempotency_key: str = "launch-1",
     initial_goal: str | None = None,
     semantic_bindings=None,
+    runtime_plans=None,
 ):
     repository = InMemoryDefinitionRepository()
     extensions = ExtensionRegistry()
@@ -260,9 +278,62 @@ async def launch_fixture(
         admission=AcceptingPreview(),
         tickets=tickets,
         semantic_bindings=semantic_bindings or FixtureSemanticBindingProvider(),
+        runtime_plans=runtime_plans,
         ttl=timedelta(minutes=15),
     )
     return service, tickets, proposal, context
+
+
+class FixtureRuntimePlans:
+    def __init__(self, *, unavailable: bool = False) -> None:
+        self.unavailable = unavailable
+
+    async def prepare_runtime_plan(self, _proposal, configuration, semantic_plan):
+        implementation = ExactDefinitionRef(
+            kind=DefinitionKind.WORKFLOW_IMPLEMENTATION,
+            logical_id="workflow.fixture.v3",
+            revision=1,
+            digest=sha256_digest("workflow.fixture.v3"),
+        )
+        graph = GraphAssemblySpecV2(
+            graph_assembly_ref=ContentAddressedRef(
+                kind=RuntimeDefinitionKind.GRAPH_ASSEMBLY,
+                logical_id="graph.fixture.v3",
+                schema_version="1",
+                digest=sha256_digest("graph.fixture.v3"),
+            ),
+            state_schema_digest=sha256_digest("state.fixture.v3"),
+            reducer_registry_digest=sha256_digest("reducers.fixture.v3"),
+            operation_registry_digest=sha256_digest("operations.fixture.v3"),
+            stage_requirements=(),
+            stage_execution_bindings=(),
+            compatibility_manifest_digest=sha256_digest("compatibility.fixture.v3"),
+        )
+        plan = RunPlanV3.create(
+            plan_id=f"plan:{semantic_plan.plan_ref}",
+            effective_run_configuration_digest=configuration.digest,
+            semantic_binding_ref=semantic_plan.plan_ref,
+            workflow_implementation_ref=implementation,
+            graph_assembly=graph,
+            alias_evidence_digest=sha256_digest(
+                [item.model_dump(mode="json") for item in configuration.alias_evidence]
+            ),
+        )
+        unavailable = (
+            (
+                UnavailableStageSurface(
+                    stage_id="fixture",
+                    capability_id="literature_search",
+                    reason_code="authority_denied",
+                    maturity="stable",
+                    fallback="reject",
+                    detail="outside effective authority",
+                ),
+            )
+            if self.unavailable
+            else ()
+        )
+        return RuntimePlanPreparation(run_plan=plan, unavailable_surfaces=unavailable)
 
 
 @pytest.mark.asyncio
@@ -296,6 +367,109 @@ async def test_stagegraph_rejects_initial_goal_and_public_ticket_redacts_private
         PreparedLaunchTicket.model_validate(private.model_dump(mode="json"))
         == private
     )
+
+
+@pytest.mark.asyncio
+async def test_preparation_persists_frozen_v3_runtime_plan() -> None:
+    service, tickets, proposal, context = await launch_fixture(
+        "StageGraph",
+        runtime_plans=FixtureRuntimePlans(),
+    )
+
+    public = await service.prepare(proposal, context)
+    private = await tickets.get(public.ticket_id, request_scope=SCOPE)
+
+    assert private is not None
+    assert private.runtime_run_plan is not None
+    assert private.runtime_run_plan.schema_version == "belllabs.run-plan.v3"
+    assert private.runtime_run_plan.effective_run_configuration_digest == (
+        private.effective_configuration_digest
+    )
+    assert private.runtime_unavailable_surfaces == ()
+    assert private.launchable
+    assert "runtime_run_plan" not in public.model_dump(mode="json")
+
+
+@pytest.mark.asyncio
+async def test_preparation_fails_closed_for_unavailable_required_runtime_surface() -> None:
+    service, tickets, proposal, context = await launch_fixture(
+        "StageGraph",
+        runtime_plans=FixtureRuntimePlans(unavailable=True),
+    )
+
+    public = await service.prepare(proposal, context)
+    private = await tickets.get(public.ticket_id, request_scope=SCOPE)
+
+    assert private is not None
+    assert not public.launchable
+    assert private.runtime_unavailable_surfaces[0].reason_code == "authority_denied"
+    assert any("required_runtime_surfaces_unavailable" in item for item in public.warnings)
+
+
+@pytest.mark.asyncio
+async def test_launch_rejects_ticket_with_unavailable_runtime_surface() -> None:
+    preparation, tickets, proposal, context = await launch_fixture(
+        "StageGraph",
+        runtime_plans=FixtureRuntimePlans(unavailable=True),
+    )
+    public = await preparation.prepare(proposal, context)
+
+    class UnexpectedAdmission:
+        async def admit(self, _request):
+            raise AssertionError("unavailable runtime surfaces must reject before admission")
+
+    service = CoordinatorWorkflowLaunchService(
+        tickets=tickets,
+        admission=UnexpectedAdmission(),
+        dispatcher=None,  # type: ignore[arg-type]
+        submissions=None,  # type: ignore[arg-type]
+    )
+    with pytest.raises(LaunchTicketUnavailable, match="unavailable required runtime surfaces"):
+        await service.launch(public.ticket_id, context)
+
+
+@pytest.mark.asyncio
+async def test_production_composition_requires_and_freezes_v3_plan() -> None:
+    legacy_preparation, tickets, proposal, context = await launch_fixture("StageGraph")
+    inputs = CoordinatorLaunchProductionInputs(
+        compiler=legacy_preparation._compiler,
+        admission_preview=legacy_preparation._admission,
+        admission=UnexpectedAdmission(),
+        tickets=tickets,
+        dispatcher=None,  # type: ignore[arg-type]
+        submissions=None,  # type: ignore[arg-type]
+        semantic_bindings=FixtureSemanticBindingProvider(),
+        runtime_plans=FixtureRuntimePlans(),
+        binding_service=None,  # type: ignore[arg-type]
+    )
+    production_preparation, _launcher = inputs.build()
+
+    public = await production_preparation.prepare(proposal, context)
+    frozen = await tickets.get(public.ticket_id, request_scope=SCOPE)
+
+    assert frozen is not None and frozen.runtime_run_plan is not None
+    assert frozen.runtime_run_plan.schema_version == "belllabs.run-plan.v3"
+
+
+@pytest.mark.asyncio
+async def test_production_composed_launcher_rejects_legacy_ticket_without_v3_plan() -> None:
+    legacy_preparation, tickets, proposal, context = await launch_fixture("StageGraph")
+    legacy_ticket = await legacy_preparation.prepare(proposal, context)
+    inputs = CoordinatorLaunchProductionInputs(
+        compiler=legacy_preparation._compiler,
+        admission_preview=legacy_preparation._admission,
+        admission=UnexpectedAdmission(),
+        tickets=tickets,
+        dispatcher=None,  # type: ignore[arg-type]
+        submissions=None,  # type: ignore[arg-type]
+        semantic_bindings=FixtureSemanticBindingProvider(),
+        runtime_plans=FixtureRuntimePlans(),
+        binding_service=None,  # type: ignore[arg-type]
+    )
+    _preparation, launcher = inputs.build()
+
+    with pytest.raises(LaunchTicketUnavailable, match="no frozen RunPlanV3"):
+        await launcher.launch(legacy_ticket.ticket_id, context)
 
 
 @pytest.mark.asyncio

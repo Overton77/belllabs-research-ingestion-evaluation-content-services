@@ -130,8 +130,20 @@ class BackfillBatch:
                 "previous_cursor": self.previous_cursor,
                 "cursor": self.cursor,
                 "source_snapshot_digest": self.source_snapshot.snapshot_digest,
-                "claims": self.claims,
-                "settlements": self.settlements,
+                "claims": tuple(
+                    {
+                        "claim": item.claim,
+                        "lineage": _source_lineage_content(item.lineage),
+                    }
+                    for item in self.claims
+                ),
+                "settlements": tuple(
+                    {
+                        "settlement": item.settlement,
+                        "lineage": _source_lineage_content(item.lineage),
+                    }
+                    for item in self.settlements
+                ),
                 "quarantines": tuple(
                     {
                         "quarantine_id": item.quarantine_id,
@@ -503,6 +515,16 @@ def _lineage(record: LegacyMongoRecord) -> SourceLineage:
         source_recorded_at=record.recorded_at,
         source_canonical_digest=record.canonical_digest,
     )
+
+
+def _source_lineage_content(lineage: SourceLineage) -> dict[str, object]:
+    return {
+        "source_system": lineage.source_system,
+        "source_collection": lineage.source_collection,
+        "source_document_id": lineage.source_document_id,
+        "source_recorded_at": lineage.source_recorded_at,
+        "source_canonical_digest": lineage.source_canonical_digest,
+    }
 
 
 def _effect_claim_id(binding: OperationExecutionBinding) -> str:

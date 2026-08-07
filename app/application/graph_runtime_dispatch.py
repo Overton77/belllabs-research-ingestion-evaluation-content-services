@@ -18,7 +18,7 @@ from app.domain.graph_runtime.contracts import (
     RuntimeExecutionBinding,
     RuntimeExecutionStatus,
 )
-from app.domain.graph_runtime.definitions import RunPlan
+from app.domain.graph_runtime.definitions import RunPlan, RunPlanV3
 from app.domain.graph_runtime.identities import (
     AgentThreadKey,
     DeploymentIdentity,
@@ -87,14 +87,16 @@ class GraphRuntimeDispatchService:
         *,
         repository: RuntimeExecutionBindingRepository,
         selector: RuntimeSelector,
+        allow_legacy_plan: bool = False,
     ) -> None:
         self._repository = repository
         self._selector = selector
+        self._allow_legacy_plan = allow_legacy_plan
 
     async def submit(
         self,
         submission: GraphExecutionSubmission,
-        run_plan: RunPlan,
+        run_plan: RunPlan | RunPlanV3,
     ) -> GraphExecutionReceipt:
         self._validate_plan(submission, run_plan)
         existing = await self._repository.get_by_submission(
@@ -109,6 +111,11 @@ class GraphRuntimeDispatchService:
             return await self._existing_receipt(submission, existing)
 
         client = self._selector.select(run_plan.workflow_implementation_ref)
+        deployment = client.deployment_for(submission)
+        if submission.target_deployment is not None and deployment != submission.target_deployment:
+            raise RuntimeBindingConflict(
+                "selected runtime does not match the frozen deployment route"
+            )
         observed_at = submission.submitted_at
         binding = RuntimeExecutionBinding(
             binding_id=_stable_id("runtime-binding", submission.epoch.canonical_key),
@@ -120,8 +127,9 @@ class GraphRuntimeDispatchService:
             graph_assembly_digest=submission.graph_assembly_digest,
             state_schema_digest=submission.state_schema_digest,
             runtime_provider=client.runtime_provider,
-            deployment=client.deployment_for(submission),
+            deployment=deployment,
             agent_thread=client.thread_for(submission),
+            graph_id=submission.target_graph_id,
             status=RuntimeExecutionStatus.SUBMITTING,
             created_at=observed_at,
             updated_at=observed_at,
@@ -186,7 +194,7 @@ class GraphRuntimeDispatchService:
     async def reconcile(
         self,
         submission: GraphExecutionSubmission,
-        run_plan: RunPlan,
+        run_plan: RunPlan | RunPlanV3,
     ) -> GraphExecutionReceipt | None:
         self._validate_plan(submission, run_plan)
         binding = await self._repository.get_by_submission(
@@ -256,8 +264,17 @@ class GraphRuntimeDispatchService:
             accepted_at=binding.updated_at,
         )
 
-    @staticmethod
-    def _validate_plan(submission: GraphExecutionSubmission, run_plan: RunPlan) -> None:
+    def _validate_plan(
+        self,
+        submission: GraphExecutionSubmission,
+        run_plan: RunPlan | RunPlanV3,
+    ) -> None:
+        if isinstance(run_plan, RunPlan) and not self._allow_legacy_plan:
+            raise ValueError("production graph dispatch requires a frozen RunPlanV3")
+        if isinstance(run_plan, RunPlanV3) and (
+            submission.target_deployment is None or submission.target_graph_id is None
+        ):
+            raise ValueError("RunPlanV3 dispatch requires an exact deployment and graph route")
         if (
             submission.run_plan_digest != run_plan.plan_digest
             or submission.run_plan_ref.digest != run_plan.plan_digest

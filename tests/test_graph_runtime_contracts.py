@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -10,7 +11,10 @@ from app.application.mongo_operation_authority_migration import select_authority
 from app.application.runtime_run_plan import compile_structural_graph_assembly
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import StageGraphBlueprint, StageNode
-from app.domain.graph_runtime.contracts import ProviderNeutralAttemptMetadata
+from app.domain.graph_runtime.contracts import (
+    ProviderNeutralAttemptMetadata,
+    RuntimeCapabilityReadiness,
+)
 from app.domain.graph_runtime.definitions import (
     CapabilityManifestDefinition,
     CapabilityMaturityRecord,
@@ -325,7 +329,9 @@ def test_v2_structural_compiler_requires_exact_coverage_and_reports_disabled_sur
         compatibility_manifest_digest=DIGEST,
     )
     assert compiled.schema_version == "belllabs.graph-assembly-spec.v2"
-    assert unavailable == ("collect:default:literature_search",)
+    assert len(unavailable) == 1
+    assert unavailable[0].capability_id == "literature_search"
+    assert unavailable[0].reason_code == "feature_disabled"
     with pytest.raises(ValueError, match="cover every declared"):
         compile_structural_graph_assembly(
             blueprint=blueprint,
@@ -338,4 +344,170 @@ def test_v2_structural_compiler_requires_exact_coverage_and_reports_disabled_sur
             assemblies={},
             allowed_capability_ids=frozenset(),
             compatibility_manifest_digest=DIGEST,
+        )
+
+
+def test_structural_compiler_intersects_exact_manifest_authority_and_readiness() -> None:
+    capability = CapabilityMaturityRecord(
+        capability_id="literature_search",
+        maturity="stable",
+        required_for_migration=True,
+        feature_flag="LITERATURE_SEARCH_ENABLED",
+        enabled=True,
+        fallback="reject",
+    )
+    manifest = CapabilityManifestDefinition(
+        logical_id="capability.manifest.v1",
+        title="Capability manifest",
+        description="Pinned stage capability maturity.",
+        capabilities=(capability,),
+    )
+    manifest_ref = ref(
+        RuntimeDefinitionKind.CAPABILITY_MANIFEST,
+        manifest.logical_id,
+        manifest.digest,
+    ).model_copy(update={"schema_version": manifest.schema_version})
+    requirement = StageCapabilityRequirement(
+        stage_id="collect",
+        operation_contract_ref="operation:collect@1",
+        required_capability_ids=frozenset({"literature_search"}),
+        input_contract_ref="contract:input@1",
+        output_contract_ref="contract:output@1",
+        context_purpose="research",
+        effect_class="read_only",
+        resource_class_ref="resource:default@1",
+        verification_contract_ref="verification:collect@1",
+        degradation_contract_ref="degradation:collect@1",
+        speculation_policy_ref="policy:speculation:disabled",
+    )
+    assembly = OperationAssemblySpec.create(
+        operation_assembly_id="assembly.collect.v1",
+        operation_contract_ref=requirement.operation_contract_ref,
+        implementation_kind="native",
+        implementation_ref=ref(RuntimeDefinitionKind.GRAPH_ASSEMBLY, "operation.collect"),
+        model_policy_ref=manifest_ref,
+        prompt_manifest_ref=manifest_ref,
+        middleware_manifest_ref=manifest_ref,
+        tool_manifest_ref=manifest_ref,
+        mcp_manifest_ref=manifest_ref,
+        skill_manifest_ref=manifest_ref,
+        context_assembly_ref=manifest_ref,
+        delegation_policy_ref=manifest_ref,
+        workspace_policy_ref=manifest_ref,
+        sandbox_profile_ref=manifest_ref,
+        verifier_ref=manifest_ref,
+        resource_envelope_ref=manifest_ref,
+        effect_policy_ref=manifest_ref,
+        fallback_policy_ref=manifest_ref,
+        trace_redaction_policy_ref=manifest_ref,
+        capability_manifest_ref=manifest_ref,
+        compatibility_manifest_ref=manifest_ref.model_copy(update={"digest": DIGEST}),
+    )
+    binding = StageExecutionBinding(
+        stage_id="collect",
+        stage_requirement_ref=manifest_ref.model_copy(
+            update={"digest": sha256_digest(requirement.model_dump(mode="json"))}
+        ),
+        operation_assembly_ref=assembly.implementation_ref.model_copy(
+            update={"digest": assembly.operation_assembly_digest}
+        ),
+        operation_assembly_digest=assembly.operation_assembly_digest,
+        input_projection_ref="projection:input@1",
+        output_projection_ref="projection:output@1",
+        resource_envelope_ref=manifest_ref,
+        compatibility_key="stagegraph-v2",
+    )
+    blueprint = StageGraphBlueprint(
+        logical_id="blueprint.collect",
+        title="Collect",
+        description="One exact stage",
+        stages=(StageNode(stage_id="collect"),),
+    )
+    readiness = RuntimeCapabilityReadiness(
+        capability_id="literature_search",
+        maturity="stable",
+        enabled=True,
+        ready=True,
+        reason="qualified",
+        fallback="reject",
+    )
+    erc = SimpleNamespace(
+        effective_authority=SimpleNamespace(capabilities=frozenset())
+    )
+    _compiled, unavailable = compile_structural_graph_assembly(
+        blueprint=blueprint,
+        effective_configuration=erc,
+        graph_assembly_ref=ref(RuntimeDefinitionKind.GRAPH_ASSEMBLY, "stagegraph.v2"),
+        state_schema_digest=DIGEST,
+        reducer_registry_digest=DIGEST,
+        operation_registry_digest=DIGEST,
+        requirements=(requirement,),
+        bindings=(binding,),
+        assemblies={binding.operation_assembly_ref.logical_id: assembly},
+        compatibility_manifest_digest=DIGEST,
+        capability_manifest_ref=manifest_ref,
+        capability_manifest=manifest,
+        capability_readiness=(readiness,),
+    )
+    assert unavailable[0].reason_code == "authority_denied"
+
+    # A capability advertised by an alias or a discovered provider cannot widen ERC authority.
+    erc.effective_authority.capabilities = frozenset({"literature_search"})
+    _compiled, unavailable = compile_structural_graph_assembly(
+        blueprint=blueprint,
+        effective_configuration=erc,
+        graph_assembly_ref=ref(RuntimeDefinitionKind.GRAPH_ASSEMBLY, "stagegraph.v2"),
+        state_schema_digest=DIGEST,
+        reducer_registry_digest=DIGEST,
+        operation_registry_digest=DIGEST,
+        requirements=(requirement,),
+        bindings=(binding,),
+        assemblies={binding.operation_assembly_ref.logical_id: assembly},
+        compatibility_manifest_digest=DIGEST,
+        capability_manifest_ref=manifest_ref,
+        capability_manifest=manifest,
+        capability_readiness=(readiness,),
+    )
+    assert unavailable == ()
+    with pytest.raises(ValueError, match="capability manifest reference is not exact"):
+        compile_structural_graph_assembly(
+            blueprint=blueprint,
+            effective_configuration=erc,
+            graph_assembly_ref=ref(RuntimeDefinitionKind.GRAPH_ASSEMBLY, "stagegraph.v2"),
+            state_schema_digest=DIGEST,
+            reducer_registry_digest=DIGEST,
+            operation_registry_digest=DIGEST,
+            requirements=(requirement,),
+            bindings=(binding,),
+            assemblies={binding.operation_assembly_ref.logical_id: assembly},
+            compatibility_manifest_digest=DIGEST,
+            capability_manifest_ref=manifest_ref.model_copy(
+                update={"schema_version": "belllabs.graph-runtime.v2"}
+            ),
+            capability_manifest=manifest,
+            capability_readiness=(readiness,),
+        )
+    with pytest.raises(ValueError, match="resource envelopes differ"):
+        compile_structural_graph_assembly(
+            blueprint=blueprint,
+            effective_configuration=erc,
+            graph_assembly_ref=ref(RuntimeDefinitionKind.GRAPH_ASSEMBLY, "stagegraph.v2"),
+            state_schema_digest=DIGEST,
+            reducer_registry_digest=DIGEST,
+            operation_registry_digest=DIGEST,
+            requirements=(requirement,),
+            bindings=(
+                binding.model_copy(
+                    update={
+                        "resource_envelope_ref": manifest_ref.model_copy(
+                            update={"logical_id": "resource.other"}
+                        )
+                    }
+                ),
+            ),
+            assemblies={binding.operation_assembly_ref.logical_id: assembly},
+            compatibility_manifest_digest=DIGEST,
+            capability_manifest_ref=manifest_ref,
+            capability_manifest=manifest,
+            capability_readiness=(readiness,),
         )

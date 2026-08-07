@@ -4,6 +4,7 @@
   "graphs": {
     "stage0_qualification": "./graph_factory.py:graph_factory"
   },
+  "env": "../../.env",
   "auth": {
     "path": "./auth.py:auth",
     "disable_studio_auth": true,

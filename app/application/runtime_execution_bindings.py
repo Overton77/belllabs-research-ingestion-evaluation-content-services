@@ -234,6 +234,7 @@ class InMemoryRuntimeCoordinationRepository(
                 "runtime_provider",
                 "deployment",
                 "agent_thread",
+                "graph_id",
                 "created_at",
             )
             if any(getattr(prior, field) != getattr(binding, field) for field in immutable):

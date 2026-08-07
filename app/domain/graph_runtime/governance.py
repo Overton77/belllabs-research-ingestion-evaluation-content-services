@@ -89,6 +89,7 @@ _DEFINITION_MODELS: tuple[type[BaseModel], ...] = (
     definitions.StageExecutionBinding,
     definitions.ExecutionResourceEnvelope,
     definitions.ExecutionLineageEnvelope,
+    definitions.UnavailableStageSurface,
     definitions.GraphAssemblySpecV2,
     definitions.RunPlanV3,
 )
