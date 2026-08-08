@@ -22,6 +22,7 @@ dependencies = [
   "langchain-anthropic==1.5.3",
   "langchain-core==1.5.3",
   "langchain-mcp-adapters==0.3.1",
+  "langchain-openai>=1.1,<1.4",
   "langchain-quickjs==0.3.5",
   "langgraph==1.2.10",
   "langgraph-api==0.12.0",

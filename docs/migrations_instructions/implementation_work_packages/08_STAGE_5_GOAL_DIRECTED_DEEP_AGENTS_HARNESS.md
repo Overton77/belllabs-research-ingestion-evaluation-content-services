@@ -1,402 +1,275 @@
-# Stage 5 — stable capability compiler, governed Deep Agents harness, StageGraph composition, and GoalDirected
+# Stage 5 — GoalDirected Temporal family and exact Deep Agents harness
 
-Status: not started  
-Mission type: reusable stable operation-capability compilation and execution, followed by deterministic GoalDirected lifecycle  
-Depends on: accepted Stages 1–4
+Status: `NOT_STARTED`
+Document role: normative Stage 5 implementation and qualification package
+Mission type: reusable bounded agent runtime plus GoalDirected Temporal workflow-family implementation
+Depends on: accepted Stage 4 and [06A_STAGES_3_TO_6_OPERATION_ASSEMBLY_CONCURRENCY_AND_LINEAGE_CONTRACT.md](06A_STAGES_3_TO_6_OPERATION_ASSEMBLY_CONCURRENCY_AND_LINEAGE_CONTRACT.md), [06B_STAGE_3_TEMPORAL_WORKFLOW_FOUNDATION.md](06B_STAGE_3_TEMPORAL_WORKFLOW_FOUNDATION.md), and [06C_STAGE_3_COMMUNICATION_AND_INTERVENTION_QUALIFICATION.md](06C_STAGE_3_COMMUNICATION_AND_INTERVENTION_QUALIFICATION.md)
 
-## 1. Mission
+## 1. Mission and accepted architecture
 
-First implement the exact stable operation-capability compiler and bounded LangChain/Deep Agents harness selected by each per-stage/operation binding. Register it behind the Stage 3 `OperationExecutor` port and prove that Stage 4 can run a capability-bearing stage without changing scheduler topology. Then port the existing GoalDirected semantics to a deterministic outer LangGraph as another consumer of the same compiler, executor, and harness.
+Complete the reusable exact Deep Agents operation harness introduced by the Stage 4 vertical slice, then implement GoalDirected as a Temporal workflow family under `BellLabsRunWorkflow`.
 
-Preserve goal protection, iterations, budgets, revisions, convergence, rollover, handoffs, independent verification, and BellLabs terminality while adding the Deep Agents planning/filesystem/reviewed-skill/context/synchronous-specialist capabilities that benefit open-ended work.
+BellLabs PostgreSQL/application services own admission, lifecycle authority, accepted goal-revision
+facts, settlement, and terminality. `BellLabsRunWorkflow` and `GoalDirectedWorkflow` coordinate,
+route, and reconcile runtime work against that authority; they do not independently authorize,
+settle, or terminalize BellLabs state.
 
-This is the stable Deep Agents path. QuickJS/PTC/dynamic delegation remains an optional disabled Stage 6 track. Async subagents also remain disabled in Stage 5, but their Stage 6 implementation and qualification track is required by the accepted Stage 0 decision.
-
-This migration does not constrain the new Workflow Implementations to the model/provider selections used by the OpenAI Agents SDK/Temporal path. Model, prompt, tool, specialist, and verifier choices are exact compiled implementation decisions. Parity is evaluated at BellLabs authority, obligations, evidence, typed-result, budget, failure, and owner-approved semantic-quality boundaries—not provider or incidental token/trace equality.
-
-## 2. Permission to clarify or interview
-
-The agent may interview the owner before starting. Clarify:
-
-- first GoalDirected Workflow Type/Implementation and accepted parity baseline;
-- protected goal/scope fields and allowed revision policy;
-- independent verifier separation and accepted evidence contract;
-- session/workspace reuse versus fresh/fresh-from-handoff modes;
-- rollover triggers, snapshot retention, and maximum checkpoint/context size;
-- permitted skills, filesystem capabilities, Store memory purposes, and scientific-memory denial;
-- synchronous specialist catalog and dictionary versus compiled-graph construction;
-- sandbox egress/mount/secret/cleanup requirements;
-- output quality/citation/context-preservation thresholds;
-- first non-legacy model policies for the stable Deep Agent and independent verifier, including authored fallback and evaluation thresholds;
-- which StageGraph stage will be the Stage 5B capability-composition slice and confirmation that it does not require Stage 6-only MCP/async mechanics.
-
-Do not enable an undeclared general-purpose subagent or let parent skills/tools/filesystem leak into custom children by default.
-
-## 3. Existing BellLabs seams to preserve
-
-Inspect and reuse:
-
-- `app/domain/orchestration/goal_directed.py::GoalDirectedInterpreter`;
-- GoalDirected contracts/identities/revisions/handoffs in `app/domain/orchestration/`;
-- `GoalDirectedLaunchService`, iteration executor, handoff preparer, independent verifier, evaluator ports;
-- operation-execution binding/materialization/delegation/snapshot services;
-- current bounded live GoalDirected proof and workspace service;
-- run-control lifecycle/budgets/evidence/terminalization;
-- coordinator exact preparation/launch/result paths;
-- Stage 4 operation port/registry, exact stage execution bindings, native adapter conformance suite, stable scheduler compatibility manifest, and measured concurrency evidence.
-
-Legacy Agent SDK/Temporal behavior is a parity oracle, not a target architecture.
-
-Follow [06A_STAGES_3_TO_6_OPERATION_ASSEMBLY_CONCURRENCY_AND_LINEAGE_CONTRACT.md](06A_STAGES_3_TO_6_OPERATION_ASSEMBLY_CONCURRENCY_AND_LINEAGE_CONTRACT.md). Do not build a GoalDirected-only harness that StageGraph cannot invoke.
-
-## 4. Implementation order and target topology
-
-Execute this work package in three gated internal units:
-
-1. **Stage 5A — stable compiler and harness:** compile, predict, construct, and conformance-test the stable native/LangChain/Deep Agents operation surface.
-2. **Stage 5B — StageGraph composition:** register the harness through the Stage 3 executor port and run at least one StageGraph stage with a distinct exact capability assembly. The Stage 4 scheduler node/state topology remains unchanged.
-3. **Stage 5C — GoalDirected:** implement the deterministic outer lifecycle and use the same operation assembly/executor for each bounded iteration.
-
-Do not begin 5C by embedding agent construction in GoalDirected nodes. If 5A or 5B fails, repair the shared abstraction before proceeding.
-
-### GoalDirected target graph shape
-
-Implement stable nodes equivalent to:
+Each significant GoalDirected iteration is one generic `OperationWorkflow` child. Model turns,
+ordinary tool calls, planning, filesystem work, skills, and built-in synchronous subagents remain
+internal to that bounded operation runtime. The Temporal family coordinates goal-revision and
+iteration execution, durable waits, communication, independent verification, context rollover, and
+delegation, while the pure interpreter supplies deterministic transition/convergence decisions and
+BellLabs application services accept and settle them.
 
 ```text
-hydrate_goal_binding
-reconcile_and_claim_iteration
-construct_operation_runtime
-execute_bound_agent
-independent_verify
-decide_goal_action
-persist_revision_or_repair
-snapshot_and_handoff
-wait_for_human_authority
-materialize_and_terminalize
-fail_or_fallback_handoff
+BellLabsRunWorkflow
+└── GoalDirectedWorkflow
+    ├── OperationWorkflow(goal iteration; bounded Deep Agent runtime)
+    ├── OperationWorkflow(independent verifier)
+    └── delegated Temporal child/linked run when independent lifecycle is required
 ```
 
-The outer graph owns lifecycle. Agent messages exist only in the bounded agent subgraph/session.
+There is no outer LangGraph lifecycle and no Agent Server macro scheduler. A LangGraph/Deep Agents graph may execute inside an `OperationWorkflow` activity boundary as the exact bounded agent runtime.
 
-## 5. Deliverables
+## 2. Semantic boundaries
 
-### 5.1 Stable capability compiler and operation assembly
+Keep these identities distinct:
 
-Extend the Stage 1 structural compiler into the Stage 5 stable runtime compiler defined in `06A`. For every native, plain LangChain, or Deep Agent operation, compile an exact `OperationAssemblySpec` and `StageExecutionBinding` containing:
+- **Goal iteration:** durable GoalDirected semantic step selected by the pure `GoalDirectedInterpreter`.
+- **Operation attempt:** one addressable `OperationWorkflow` child for that iteration or verifier.
+- **Agent thread/session:** one semantic operation attempt's bounded model/tool conversation.
+- **Model turn:** internal technical step; never a Temporal child and never BellLabs lifecycle authority.
+- **Context rollover:** reconstruction of bounded agent context, possibly continuing the same semantic operation according to policy.
+- **Temporal Continue-As-New:** history-management mechanism for a family workflow; it does not imply a new goal iteration, agent thread, or context rollover.
+- **Delegated lifecycle:** distinct governed work started through BellLabs' Temporal delegation tool.
 
-- implementation kind/ref and operation contract;
-- exact model and authored technical fallback policy;
-- prompt, ordered middleware, tools, reviewed skills, and predicted model-visible names;
-- context assembly, filesystem/workspace, Store purpose, and sandbox policy;
-- explicit synchronous child catalog and effective child grants;
-- verifier, output, effect, trace/redaction, resource, fallback, and compatibility policies;
-- complete capability manifest, maturity/readiness facts, and assembly digest.
+One agent thread corresponds to one semantic operation attempt. Runtime retry may reopen or reconstruct that exact attempt only under its frozen policy. A new semantic retry gets a new operation attempt and agent thread.
 
-The compiler must reproduce the same assembly and predicted surface from identical immutable inputs. It rejects mutable aliases, runtime model selection, installed-package authority, implicit tool/skill inheritance, duplicate core Deep Agents middleware, ambiguous filesystem/search tools, unreviewed external assets, missing verifier/output contracts, unsupported capability combinations, and resource requests outside authority.
+## 3. Implementation order
 
-Outbound MCP bindings may be represented and predicted here, but an implementation that requires a real outbound MCP adapter remains unavailable until Stage 6 unless the exact adapter has already passed its Stage 0 qualification and is deliberately pulled forward with recorded owner acceptance. Do not create a one-off MCP client in Stage 5.
+1. **5A — exact harness:** compile, construct, conformance-test, and evaluate native/LangChain/Deep Agents operation assemblies.
+2. **5B — StageGraph completion proof:** rerun the Stage 4 heterogeneous slice with the full harness; preserve the Temporal StageGraph topology.
+3. **5C — GoalDirected family:** implement interpreter-driven iterations, independent verifier children, interventions, rollover, and terminality.
+4. **5D — GoalDirected research vertical proof:** run a production-shaped multi-iteration research case after StageGraph proof passes.
 
-### 5.2 Stable operation executor and StageGraph composition
+Repair the shared `OperationWorkflow`/executor abstraction if either workflow needs special-case provider mechanics.
 
-Implement the Deep Agent adapter behind the Stage 3 `OperationExecutor` port and run the shared conformance suite. Then bind at least one StageGraph stage to this adapter and prove:
+## 4. Exact capability compiler
 
-- Stage 4 topology, frontier computation, reservation, and settlement are unchanged;
-- the stage receives only its exact model/prompt/tools/skills/context/children/workspace/verifier surface;
-- another concurrently eligible native or differently assembled stage cannot see or inherit that surface;
-- capability unavailability returns the shared typed failure and authored fallback/degradation behavior;
-- the result manifest contains the complete lineage envelope and settles through the existing deterministic boundary.
+For each operation compile an immutable `OperationAssemblySpec` containing:
 
-Use barriers or controlled clocks where two stages are eligible to prove actual bounded overlap. This Stage 5B slice is smaller than the required heterogeneous Stage 6 proof and must not depend on async subagents or optional QuickJS/dynamic delegation.
+- implementation kind/ref and typed input/output contract;
+- exact model and authored technical retry/fallback policy;
+- base prompt, permitted dynamic slots, and rendering implementation;
+- exact ordered middleware with hook scopes and digests;
+- model-visible tools and schemas;
+- reviewed skill bundles and mounts;
+- context sources, trust classes, budgets, retrieval, compression, and preservation rules;
+- filesystem/workspace backend and path policy;
+- Store namespaces/purposes and denial rules;
+- built-in synchronous subagent catalog and effective grants;
+- custom BellLabs Temporal delegation tool policy;
+- verifier, effect, approval, trace/redaction, resource, cancellation, and compatibility policies;
+- predicted runtime surface, readiness facts, and assembly digest.
 
-### 5.3 GoalDirected state/reducers
+Compilation must reject mutable aliases, runtime model preference, implicit inheritance, duplicate core Deep Agents middleware, ambiguous tool/filesystem names, unreviewed skills, unsupported middleware ordering, undeclared delegation, missing verifier/output contract, and resource requests outside authority.
 
-Implement compact channels for:
+Identical immutable inputs reproduce the same assembly and predicted surface. Runtime availability checks may fail or follow only an authored exact fallback; they may not substitute another capability.
 
-- protected scope ref/digest;
-- goal revision ref with parent lineage;
-- iteration projection and stable iteration/agent-run identities;
-- agent session ref and declared rollover;
-- workspace/sandbox snapshot ref lineage;
-- agent result and independent verification refs;
-- conflict-detecting blocker set;
-- deterministic no-progress projection;
-- handoff ref;
-- Stage 3 common channels.
+## 5. Bounded Deep Agents operation runtime
 
-No top-level `messages`. Agent-local messages use the standard message reducer only inside the operation subgraph.
+Construct the exact `create_agent`/`create_deep_agent` variant from the frozen assembly. Preserve the complete Deep Agents harness:
 
-### 5.4 Deterministic outer lifecycle
+- planning and bounded model turns;
+- typed operation context;
+- exact middleware and native async hooks;
+- wrapped tools with approval/effect/budget/cancellation;
+- reviewed skills with progressive disclosure;
+- explicit filesystem/workspace backend;
+- purpose-scoped Store access;
+- structured output and compact result persistence;
+- operation-local synchronous subagents;
+- usage, artifact, evidence, trace, and lineage manifests.
 
-- hydrate exact goal/RunPlan/operation/verifier bindings;
-- reconcile/claim one bounded iteration and reserve budgets;
-- keep protected scope immutable except through accepted revision contract;
-- create stable semantic identity for every iteration/agent/verifier attempt;
-- execute one bounded operation harness;
-- independently verify against exact evidence and evaluation contract;
-- deterministically decide accept, revise/repair, rollover/handoff, human decision, bounded failure, or fallback;
-- terminalize only when verifier action and BellLabs transition agree.
+Deep Agents core planning, filesystem, skills, subagent, and context mechanics must not be duplicated by custom middleware. The harness may checkpoint internally only when the selected runtime supports it and the checkpoint is operation-local. Full messages never become GoalDirected workflow state.
 
-### 5.5 Operation harness factory
+Middleware order:
 
-Construct `create_agent` or `create_deep_agent` from the exact binding:
+1. `before_agent`: binding, scope, phase, budget, lease, trace, and cancellation checks;
+2. dynamic prompt: exact base plus typed permitted slots;
+3. `before_model`: trust filtering, retrieval, redaction, context budget, compaction/offload;
+4. model wrapper: exact model, timeout, technical retry/fallback, usage and trace;
+5. `after_model`: structured output, tool-call, policy, and evidence validation;
+6. tool wrapper: authority, approval, effect identity, timeout/retry/cancel, budget and settlement;
+7. `after_agent`: compact manifests, usage settlement, snapshot/cleanup, durable events.
 
-- exact model selected for this new Workflow Implementation and authored fallback/retry policy; no legacy-model equality requirement;
-- exact prompt definition/revision and permitted dynamic slots;
-- exact tool/MCP allowlists and schema digests;
-- exact skill refs/mounts;
-- exact synchronous subagent definitions;
-- delegation depth/count/concurrency/model/tool/data/network/budget ceilings;
-- exact `ExecutionResourceEnvelope`, subordinate reservation plan, acquisition order, deadlines, and lease release behavior;
-- filesystem backend/sandbox/workspace policy;
-- session reuse/rollover mode;
-- context policy and compaction/offload behavior;
-- trace/redaction policy;
-- structured output and independent verification contract.
+Test actual wrapper nesting and reverse after-hook ordering.
 
-The harness factory never resolves mutable aliases or widens compiled capabilities. Use native async tools and async middleware hooks.
+## 6. Context, filesystem, skills, and Store
 
-The factory does not choose a model based on runtime preference, cheapest availability, or a model-authored request. Any adaptive model routing must itself be a published deterministic policy with a closed exact candidate set, authority/budget intersection, traceable decision inputs, and a resulting exact invocation binding.
+The context policy must define source trust/admission/quarantine, total and reserved token budgets, deterministic retrieval filters/tie-breakers, immutable preservation set, compression trigger/schema, mutation writers, provenance, retention/deletion, and evaluation thresholds.
 
-### 5.6 Ordered middleware manifest
+Never summarize or rewrite protected goal/scope, exact instructions, authority, approvals, budgets, semantic-attempt facts, source locators/digests, citation edges, contradictions, or accepted evidence.
 
-Implement and validate exact ordered middleware responsibilities:
+Reconstruction:
 
-1. `before_agent`: binding/scope/phase/budget/trace checks;
-2. dynamic prompt: exact base plus typed permitted slots and rendered digests;
-3. `before_model`: purpose-compatible retrieval, redaction, context budget, compaction/offload while preserving evidence refs;
-4. model wrapper: exact model, timeout, technical retry/fallback, trace, usage;
-5. `after_model`: structured output/tool-call/policy/budget/evidence validation;
-6. tool wrapper: capability, approval, effect identity, timeout/retry/cancel, budget, trace, settlement;
-7. `after_agent`: compact result persistence, usage settlement, snapshot/cleanup, durable events.
-
-Store exact implementation/version/config digest, hook set, allowed state/context channels, failure policy, and redaction class for every middleware entry. Account for wrapper nesting and reverse after-hooks.
-
-Deep Agents already provides core planning, filesystem, subagent, skills, and context behavior. Do not add duplicate summarization/filesystem/subagent middleware. Plain LangChain agents may select their own explicit context middleware.
-
-### 5.7 Dynamic prompt and context assembly
-
-Permitted dynamic context includes current objective/iteration, exact prompt segments, approved evidence/artifacts, budget projection, schema/workspace refs, allowed memory, verifier feedback, and bounded prior summary.
-
-Forbidden context includes mutable aliases, raw secrets/tokens, unapproved cross-tenant memory, unbounded checkpoint history, and model-authored authority.
-
-Persist:
-
-- base prompt ref/digest;
-- rendered-input manifest digest;
-- rendered prompt digest;
-- rendering implementation/version;
-- source/trust/redaction classes.
-
-### 5.8 First-class context policy implementation
-
-Implement the Stage 1 context definition/spec:
-
-- source trust/admission/quarantine;
-- total and reserved token budgets;
-- retrieval namespaces/filters/top-k/score/tie-breakers;
-- immutable preservation set;
-- compression trigger/middleware/target/generation/refresh/schema;
-- mutation writers and expected versions;
-- full transformation provenance;
-- retention/privacy/deletion/tombstones;
-- evaluation thresholds.
-
-Never summarize or model-rewrite exact instructions, protected goal, authority/approval/budget/attempt facts, source locators/digests, citation edges, or final accepted evidence.
-
-Reconstruction after compaction/rollover:
-
-1. load exact prompt/policy/protected scope/current authoritative projection;
-2. load accepted context manifest and verify source digests;
-3. rehydrate bounded evidence/citation/contradiction projection;
+1. load frozen prompt/policy/protected scope and current authoritative projection;
+2. verify the accepted context manifest and source digests;
+3. rehydrate bounded evidence/citations/contradictions;
 4. retrieve only purpose-compatible non-authoritative Store items;
-5. add bounded working summary/verifier feedback;
-6. render and record assembly digest;
-7. fail closed or request rollover when mandatory context cannot fit.
+5. add bounded working summary and verifier feedback;
+6. render and persist the new context-assembly digest;
+7. fail safely or roll over when mandatory context cannot fit.
 
-### 5.9 Filesystem, skills, and Store
+Filesystem roots, mounts, read/write/delete rights, size limits, exclusions, sensitivity, and promotion rules are exact. Deployed shell/process/browser work requires an approved sandbox adapter in Stage 6; Stage 5 may use only its qualified local/test backend. Skill text cannot grant capability. Scientific-claim memory is denied by default; Store cannot authorize, approve, prove, or terminalize.
 
-- select one model-visible implementation for each filesystem/search capability;
-- real shell/mutable deployed filesystem work goes to approved sandbox;
-- path roots/mounts/read/write/delete/size/exclusion/sensitivity/promotion are exact;
-- skills are exact reviewed immutable bundles with progressive disclosure;
-- skill contents cannot grant tools/network/write/budget/delegation;
-- each custom subagent gets explicit skill refs and compatible backend;
-- Store namespaces include environment, tenant, agent profile, subject, and purpose;
-- scientific-claim memory is off by default;
-- procedural memory requires provenance, expiry, contradiction/retraction, and deletion;
-- Store never authorizes, approves, proves, or terminalizes.
+## 7. Synchronous subagents versus Temporal delegation
 
-### 5.10 Stable synchronous subagents
+Built-in Deep Agents subagents are operation-local, synchronous, non-addressable implementation details:
 
-Support both:
+- fresh per invocation unless the frozen operation-local policy says otherwise;
+- explicit prompt/model/tools/middleware/skills/filesystem/output grants;
+- bounded `ContextSlice`, never parent transcript/secrets/authority;
+- parent blocks until schema-validated result;
+- aggregate subordinate capacity reserved before permitted fan-out;
+- no durable external inbox, independent cancellation lifecycle, or reusable governed result;
+- cannot terminalize, revise the GoalDirected workflow, or survive as an independently managed unit.
 
-- dictionary `SubAgent` for a small standard-loop specialist;
-- `CompiledSubAgent` for reusable typed topology/state/gates/repair.
+Work requiring any of the following must use the custom BellLabs delegation tool:
 
-Requirements:
+- durable independent wait or recovery;
+- addressable update/cancel/query;
+- distinct Workflow Type or authority;
+- substantial independent budget;
+- reusable governed result;
+- declared lifecycle dependency.
 
-- default general-purpose subagent disabled unless exactly selected;
-- name/description/prompt/model/tools/middleware/approval/skills/output/permissions are exact;
-- tool inheritance is not relied upon; compile explicit effective tool grants;
-- skills are explicitly attached;
-- each invocation is operation-local/fresh unless compiled graph policy says otherwise;
-- parent blocks and receives schema-validated `SubagentResultManifest`;
-- concurrent sync-child fan-out occurs only when the compiled policy permits it and aggregate child/model/tool/budget capacity is reserved first;
-- controlled-clock/barrier tests measure actual overlap, maximum concurrency, cancellation, and release without starvation;
-- child gets `ContextSlice`, not full parent messages/secrets/filesystem/Store/authority;
-- child cannot terminalize parent;
-- known Workflow Type, separate authority, substantial budget, durable independent wait, or reusable governed result forces linked Workflow Run.
+The delegation tool validates a typed request, checks authority and resource policy, and asks the parent Temporal workflow/application service to start an `OperationWorkflow` child or linked `BellLabsRunWorkflow`. It returns a durable binding/ref, not a provider-specific task object. The model cannot select arbitrary workflow code, task queues, IDs, authority, or budget.
 
-### 5.11 Sandbox provider and workspace lifecycle
+## 8. GoalDirected workflow loop
 
-Implement LangSmith Sandbox behind the BellLabs provider port for the selected workflow:
+`GoalDirectedWorkflow` performs:
 
-- thread-scoped by default for workflow workspace;
-- assistant scope only for immutable non-tenant-shared assets;
-- exact image/runtime/package policy;
-- default-deny/allowlisted egress where available;
-- secrets proxy/ref handling with no ambient credentials;
-- read-only inputs and governed write destinations;
-- CPU/RAM/disk/time/command limits;
-- upload/download/execute/reconnect;
-- snapshot before declared rollover/handoff;
-- external governed snapshot record/digest;
-- idempotent cleanup/orphan reconciliation/usage settlement.
+1. reconcile frozen goal/RunPlan/bindings and authoritative lifecycle;
+2. call the pure `GoalDirectedInterpreter`;
+3. claim and reserve one significant iteration;
+4. start its `OperationWorkflow` idempotently;
+5. process completion and interventions using canonical ordering;
+6. start an independently bound verifier `OperationWorkflow`;
+7. settle verifier output and ask the interpreter for accept, revise/repair, roll over, wait, handoff, fail, or continue;
+8. persist accepted revisions/snapshots/context manifests through CAS;
+9. recompute immediately;
+10. terminalize only when verifier action and BellLabs authoritative transition agree.
 
-QuickJS is not implemented here as a substitute. Sandboxes own OS/files/shell/packages/browser isolation.
+Compact workflow state contains protected-scope digest, goal revision lineage, iteration projection, active child bindings, context/session refs, workspace snapshot refs, agent result and verifier refs, blockers/no-progress projection, communication inbox refs, continuation generation, and terminal result ref.
 
-### 5.12 Independent verifier and terminal gate
+No top-level `messages`, provider client, filesystem handle, or mutable workspace is allowed.
 
-Bind verifier separately from worker with exact model/prompt/tools/evidence/thresholds. It must:
+## 9. Independent verifier
 
-- verify exact operation output/evidence refs;
-- evaluate goal/acceptance contract and required citations;
-- return typed action/reason/evidence;
-- not share mutable session memory or hidden authority with the worker;
-- drive the outer deterministic decision only through accepted contract;
-- never directly terminalize.
+The verifier is a separately bound `OperationWorkflow`, not an after-hook in the worker session. It has exact model/prompt/tools/evidence/thresholds and:
 
-### 5.13 Rollover, snapshots, and handoff
+- reads immutable operation outputs and evidence refs;
+- evaluates goal/acceptance/citation contracts;
+- returns typed action, reasons, measurements, and evidence;
+- shares no mutable worker session or hidden worker authority;
+- cannot invoke the worker's private tools or filesystem;
+- cannot directly revise or terminalize;
+- influences lifecycle only through interpreter and authoritative CAS settlement.
 
-- trigger by accepted token/session/no-progress/workspace policy;
-- snapshot workspace immutably with parent lineage;
-- write a context manifest, not a summary-only handoff;
-- create new session/thread scope as policy requires;
-- reacquire secrets/MCP/sandbox resources;
-- preserve protected scope/evidence/contradictions/approvals/budget identities;
-- verify clone compatibility and source digests;
-- resume through outer graph reconciliation.
+Technical verifier retry retains semantic verifier identity; a policy-driven re-verification creates a new semantic attempt.
 
-Every rollover/handoff preserves the `ExecutionLineageEnvelope`, exact operation assembly, model/prompt/context digests, child invocation edges, and accepted evidence chain. Reacquiring current resources may report unavailability but may not silently replace a frozen capability.
+## 10. Rollover, Continue-As-New, and handoff
 
-## 6. Required tests
+Context rollover and Temporal continuation are independently triggered and independently recorded.
+
+Context rollover:
+
+- follows token, no-progress, provider-session, or workspace policy;
+- closes the current operation attempt or reconstructs it only as explicitly authored;
+- writes immutable context/workspace manifests and parent lineage;
+- reacquires current secrets, leases, tool sessions, and authority;
+- preserves protected scope, evidence, contradictions, approvals, budgets, and exact assembly.
+
+Temporal Continue-As-New:
+
+- bounds family-workflow history;
+- carries compact goal state and active-child reconciliation records;
+- never silently creates a new agent thread, iteration, revision, or context summary;
+- reconciles child completion/cancellation and duplicate commands across generations.
+
+Handoff is a governed semantic outcome with a complete context manifest, not a summary-only escape hatch.
+
+## 11. Communication and intervention
+
+Use `BellLabsRunWorkflow` as the stable external target and the `06C` envelope/disposition contracts. Support goal-scoped pause/resume/cancel, evidence injection, accepted scope-revision request, human decision, operation-addressed steering at declared safe boundaries, and delegated-child update/cancel.
+
+Commands are authorized, deduplicated, journaled, and version-checked. Agent injection is admitted into the next safe context assembly; it is not spliced into an in-flight model response. Built-in synchronous subagents remain non-addressable.
+
+## 12. GoalDirected research vertical proof
+
+After the StageGraph harness proof, publish a research Workflow Implementation that demonstrates:
+
+- immutable protected research objective and acceptance contract;
+- at least two significant iterations, each a distinct `OperationWorkflow`;
+- exact Deep Agents model, tools, reviewed skill, context, and local workspace;
+- bounded synchronous specialist use;
+- one custom BellLabs Temporal delegation request with independent lifecycle;
+- independent verifier rejection followed by evidence-driven repair;
+- context rollover distinct from parent Continue-As-New;
+- inbox evidence injection and pause/resume;
+- typed cited result, usage/effect settlement, and complete lineage.
+
+Use fixture providers where live effects are unsafe, plus one owner-approved live evaluation path. Semantic acceptance uses explicit quality/citation thresholds, not provider/token/trace equality with legacy.
+
+## 13. Required tests
+
+### Compiler and harness
+
+- deterministic assembly and predicted-versus-observed surface;
+- mutable alias, implicit inheritance, duplicate middleware/tool, and drift denial;
+- exact tool/skill/context/filesystem/subagent isolation;
+- hook order, retry accounting, cancellation, effects, redaction, and structured output;
+- operation-local checkpoint/recovery and bounded transcript size;
+- Deep Agent adapter passes all shared `OperationExecutor` cases.
 
 ### Goal lifecycle
 
-- protected goal/scope mutation denial;
-- bounded accepted revision;
-- stable iteration/agent/verifier identities;
-- no-progress/repeated-blocker/convergence;
-- budget exhaustion and continuation decisions;
-- rollover/handoff/fallback;
-- interrupt/resume node restart;
-- verifier/terminality agreement.
+- protected-scope mutation denial and bounded accepted revision;
+- stable iteration/operation/thread/verifier identities;
+- no-progress, repeated blocker, convergence, and budget exhaustion;
+- verifier reject/repair/accept and terminality agreement;
+- crash before/after iteration start/result, verifier, revision, snapshot, and terminal CAS;
+- deterministic duplicate and same-time completion handling.
 
-### Harness/middleware
+### Delegation and capacity
 
-- deterministic stable compiler reproduction and predicted-versus-observed surface equality;
-- per-stage `OperationAssemblySpec`/`StageExecutionBinding` completeness and digest validation;
-- exact binding reproduction and mutable-alias denial;
-- hook order/nesting and async implementation;
-- duplicate middleware/tool collision rejection;
-- model/tool retry accounting and cancellation;
-- structured output/tool-call validation;
-- provider effect claim/settlement;
-- trace/redaction;
-- non-legacy model selection is exact, evaluated, and traceable; no test requires provider/model equality with the legacy path;
-- unavailable model/capability follows only the authored exact fallback/wait/degrade/fail path.
+- synchronous child isolation, depth/count/concurrency, cancellation, and release;
+- built-in child cannot be addressed externally;
+- independent-lifecycle classifier forces Temporal delegation;
+- delegation start ambiguity, wait, update, cancel, crash, orphan reconciliation, and linked-run escalation;
+- protected supervisor/resumption capacity under maximum subordinate load.
 
-### Context/skills/memory
+### Rollover and communication
 
-- repeated compaction and reconstruction thresholds from Stage 0;
-- citation/evidence/contradiction/protected instruction preservation;
-- prompt-injection quarantine;
-- Store tenant/purpose/deletion/retraction tests;
-- skill progressive loading and no authority escalation;
-- explicit child skill binding;
-- mandatory context overflow fails/rolls over safely.
+- repeated context rollover preserves mandatory facts and lineage;
+- Continue-As-New with active iteration/verifier/delegated child;
+- no identity conflation between rollover and continuation;
+- accepted, duplicate, stale, unauthorized, conflicting, and terminal commands;
+- injection only at declared safe boundary.
 
-### Subagents/sandbox
+### E2E
 
-- dictionary and compiled construction compatibility;
-- context/secret/filesystem/Store isolation;
-- depth/count/concurrency/budget ceilings;
-- barrier/controlled-clock proof of permitted synchronous-child overlap and aggregate capacity reservation;
-- no deadlock/starvation and protected resumption capacity under maximum child load;
-- structured return size/schema/provenance;
-- linked-run classification;
-- sandbox egress/secrets/limits/snapshot/restore/reconnect/cleanup/tenant tests;
-- checkpoint size and recovery.
+- StageGraph full-harness proof remains green;
+- GoalDirected research prepare/admit/iterate/verify/repair/delegate/rollover/intervene/result;
+- process loss at every durable boundary;
+- compact histories/checkpoints and no prohibited data;
+- trace/evaluation hierarchy and end-to-end lineage query.
 
-### Vertical-slice E2E
+## 14. Gate and handoff
 
-- Stage 5B StageGraph execution through the stable Deep Agent adapter with unchanged Stage 4 scheduler topology;
-- concurrent native and agent-harness stages with distinct capability surfaces and no cross-stage inheritance;
-- prepare/admit/execute/verify/revise/rollover/interrupt/result;
-- accepted and rejected live/fixture cases against legacy baseline;
-- crash at operation/verifier/snapshot/terminal boundaries;
-- only BellLabs terminality succeeds;
-- trace/eval-ready outputs and redaction.
+Stage 5 passes when the exact reusable harness is reproducible; StageGraph still runs through Temporal `OperationWorkflow` children; GoalDirected iterations and independent verifiers are Temporal children; model turns remain internal; built-in subagents are operation-local/non-addressable; independent lifecycle uses BellLabs Temporal delegation; rollover and Continue-As-New remain distinct; the GoalDirected research proof passes; and only BellLabs authority terminalizes.
 
-### Adapter and lineage conformance
+QuickJS, programmatic tool calling, provider async subagents, remote LangSmith deployments, and broad production cutover remain disabled for Stage 6.
 
-- stable Deep Agent adapter passes every shared `OperationExecutor` conformance case;
-- every final StageGraph/GoalDirected result resolves semantic/runtime attempts, exact assembly/model/prompt/context, child invocations, effects, artifacts/evidence, usage settlements, and traces;
-- crash before/after agent invocation, sync-child fan-out, result persistence, verifier, snapshot, and settlement preserves one semantic lineage with distinct technical attempts;
-- tool/skill/model/sandbox drift never silently changes a resumed binding.
-
-## 7. Gate
-
-Stage 5 passes when:
-
-- Stage 5A stable compiler predicts and reproduces the exact runtime surface;
-- Stage 5B proves the reusable harness executes inside StageGraph through the Stage 3 port without scheduler changes or capability leakage;
-- GoalDirected parity and accepted enhancements pass;
-- only independent verifier plus BellLabs lifecycle can terminalize;
-- context reconstruction preserves all mandatory invariants within accepted thresholds;
-- exact middleware/harness/tool/skill/subagent surface is reproducible from binding digests;
-- child isolation and linked-run classification pass;
-- sandbox secrets/egress/limits/snapshot lineage/cleanup pass;
-- session/workspace rollover survives checkpoint resume and process loss;
-- top-level state/checkpoints remain compact and free of prohibited data;
-- complete lineage queries pass for the StageGraph capability slice and GoalDirected vertical slice;
-- QuickJS/dynamic/async capabilities remain disabled pending Stage 6; the outgoing handoff marks async implementation/qualification as required, not optional;
-- outgoing handoff is accepted.
-
-## 8. Explicit non-goals
-
-- Do not let the Deep Agent own the outer lifecycle.
-- Do not make the harness GoalDirected-specific or bypass the Stage 3 executor port.
-- Do not enable dynamic interpreter subagents or async subagents.
-- Do not attach unreviewed external MCP/skills.
-- Do not use Store as scientific truth.
-- Do not switch broad production traffic yet.
-
-## 9. Outgoing handoff additions
-
-Include:
-
-- stable capability compiler version, operation assemblies, predicted/observed surfaces, and conflict results;
-- Stage 5B StageGraph composition trace, scheduler-compatibility proof, and measured overlap/isolation evidence;
-- GoalDirected topology/state/compatibility manifest;
-- exact agent harness and middleware manifests;
-- context policy/reconstruction evidence;
-- filesystem/skills/Store capability surface;
-- synchronous subagent catalog and construction choices;
-- linked-run classifier evidence;
-- sandbox provider/lifecycle/snapshot evidence;
-- verifier separation and terminality proof;
-- checkpoint/context size measurements;
-- end-to-end lineage reports for StageGraph and GoalDirected;
-- stable extension points and disabled flags for Stage 6, explicitly recording the required async track and optional QuickJS/dynamic track.
+Handoff includes compiler/harness manifests, predicted/observed surfaces, StageGraph proof evidence, GoalDirected topology/history policy, context reconstruction vectors, sync-child and Temporal-delegation classification evidence, verifier separation, communication qualification, crash/capacity matrices, research evaluation, compact-state measurements, and complete lineage reports.

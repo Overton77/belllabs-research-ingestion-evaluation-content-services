@@ -189,7 +189,7 @@ class Settings(BaseSettings):
     operation_binding_write_authority: Literal["legacy", "v2"] = "legacy"
     operation_binding_legacy_read_fallback: bool = False
     legacy_operation_journal_read_fallback: bool = False
-    redis_url: SecretStr = SecretStr("redis://localhost:56379/0")
+    redis_url: SecretStr = SecretStr("redis://localhost:16379/0")
     runtime_realtime_required: bool = False
     runtime_approval_timeout_seconds: int = Field(default=900, ge=30, le=86_400)
     runtime_checkpoint_signing_key: SecretStr | None = None

@@ -1,147 +1,211 @@
 # Global handoff and stage-gate rules
 
-Status: mandatory execution protocol for every migration stage  
-Applies to: all work packages in this directory and any formally accepted substages
+Status: mandatory execution protocol for every migration package and accepted subpackage
+Architecture: Temporal sole macro runtime; BellLabs semantic authority; bounded LangGraph/Deep Agents cognition
+Applies to: all work packages in this directory
 
-## 1. Purpose
+## 1. Purpose and precedence
 
-These rules make each large stage independently executable, reviewable, resumable, and safe to hand to another model or engineer. A stage handoff is an evidence-bearing contract, not a conversational summary.
+A handoff is an evidence-bearing contract, not a narrative summary. It must let a new engineer or agent reproduce the claimed state, distinguish accepted facts from assumptions, and refuse unsafe downstream work.
 
-Each stage document adds stage-specific entry conditions, exit evidence, and questions. If a stage rule conflicts with this global protocol, the stricter safety, authority, compatibility, or evidence requirement wins unless the owner explicitly decides otherwise.
+Apply requirements in this order:
 
-Stages 3–6 must also read and satisfy [02A_OWNER_AMENDMENTS_FOR_STAGES_3_TO_6.md](02A_OWNER_AMENDMENTS_FOR_STAGES_3_TO_6.md) and [06A_STAGES_3_TO_6_OPERATION_ASSEMBLY_CONCURRENCY_AND_LINEAGE_CONTRACT.md](06A_STAGES_3_TO_6_OPERATION_ASSEMBLY_CONCURRENCY_AND_LINEAGE_CONTRACT.md). Stage 6 must additionally complete [09A_STAGE_6_HETEROGENEOUS_STAGEGRAPH_COMPOSITION_PROOF.md](09A_STAGE_6_HETEROGENEOUS_STAGEGRAPH_COMPOSITION_PROOF.md).
+1. accepted owner decisions and explicit supersession in [00_MAIN_GOAL_AND_INDEX.md](00_MAIN_GOAL_AND_INDEX.md) and [02A_OWNER_AMENDMENTS_FOR_STAGES_3_TO_6.md](02A_OWNER_AMENDMENTS_FOR_STAGES_3_TO_6.md);
+2. this global protocol;
+3. package-specific requirements and direct-dependency handoffs;
+4. earlier package text only where it is not superseded.
 
-The D-17–D-23 amendment and Stage 0–2 entry-critical evidence are closed by [05A_PRE_STAGE_3_ENTRY_GATE_CLOSURE.md](05A_PRE_STAGE_3_ENTRY_GATE_CLOSURE.md) in a separate task. When its compact `stage2_evidence/PRE_STAGE_3_ENTRY_HANDOFF.md` is `ACCEPTED`, the Stage 3 agent may treat that document as the accepted prior handoff and need not load the full Stage 0–2 evidence history unless it reports a contradiction.
+The stricter authority, safety, compatibility, or evidence requirement wins. A package may not silently revive the superseded Agent Server-primary architecture.
 
-## 2. Pre-stage clarification and interview are allowed
+## 2. Global architecture guardrails
 
-Before starting implementation, the agent may ask clarifying questions or conduct an interview with the owner. This permission is explicit in every stage.
+Every package gate must affirm all applicable guardrails:
 
-An interview is recommended when the stage contains any of the following:
+- **No dual macro schedulers.** Temporal is the sole macro runtime for admitted production implementations. Agent Server/LangGraph macro graphs must be repurposed, qualification-only, or removed.
+- **No provider bypass.** The BellLabs API and application ports are the only governed public command/query/result facade. Direct Temporal, Agent Server, sandbox, callback, or model-provider access cannot become an alternate product path.
+- **No semantic-authority drift.** BellLabs stores/application services and pure StageGraph/GoalDirected interpreters retain lifecycle, readiness, convergence, budget, approval, effect, evidence, settlement, and terminality authority.
+- **No unqualified intervention promise.** Pause, cancel, steering, message injection, fork, edited-state start, and disruptive intervention may be exposed only after their typed protocol, authorization, dedupe, quiescence, ambiguous-effect reconciliation, and recovery evidence passes.
+- **No premature handoff.** A dependent package cannot begin merely because code exists or broad tests pass. Every direct package gate, evidence manifest, and acceptance record must exist.
+- **No contract erosion.** Exact assemblies, capabilities, resource envelopes, canonical lineage, journals, effect claims, evidence, usage, and settlement identities must be preserved or deliberately versioned with compatibility evidence.
+- **No secrets or PHI.** Never commit secrets, credentials, PHI, raw private payloads, unrestricted traces, sandbox dumps, or Temporal histories containing sensitive data.
 
-- an unsettled architecture decision;
-- a public contract or accepted vocabulary change;
-- a PostgreSQL/MongoDB authority or migration decision;
-- platform purchase, region, deployment type, or ownership-path choice;
-- data retention, PHI, trace, sandbox egress, or secret policy;
-- preview/beta feature enablement;
-- cutover, rollback, destructive reset, or decommission behavior;
-- an acceptance threshold that cannot be derived from the existing baseline.
+Violation of a guardrail is `REWORK_REQUIRED`, not a deferrable documentation issue.
 
-Use a short decision-oriented interview. For each question record:
+## 3. Package dependency and entry protocol
+
+The normative dependency chain is:
 
 ```text
-decision_id
-question
-why_now
-options_and_tradeoffs
-recommendation
-owner_answer
-effective_scope
-follow_up_evidence
+Stage 0 -> Stage 1 -> Stage 2 -> Pre-Stage 3 closure
+                                  -> 06 + 06A contract sections
+                                  -> 06-contract-frozen
+                                  -> 06B Temporal foundation
+                                  -> 06C communication/intervention
+                                  -> aggregate Stage 3 acceptance
+                                  -> Stage 4 Temporal StageGraph
+                                  -> Stage 5 GoalDirected + Deep Agents
+                                  -> Stage 6 advanced/remote candidate adapters
+                                  -> 09A internal Stage 6 exit proof
+                                  -> aggregate Stage 6 acceptance
+                                  -> Stage 7 API/observability/security
+                                  -> Stage 8 AWS deployment/cutover
 ```
 
-The agent may continue with non-blocking discovery while awaiting an answer. It must not implement a branch whose choice would materially change authority, compatibility, data safety, or rollout without an accepted answer or explicit assumption approval.
+After the contract-defining sections of `06` and `06A` are reviewed, versioned, internally
+consistent, and recorded with their conformance evidence, the gate authority may record
+`06-contract-frozen`. This gate authorizes `06B`; it is not acceptance of package `06` or Stage 3.
+`06C` requires both `06-contract-frozen` and the passed `06B` implementation gate. Aggregate Stage 3
+acceptance occurs only after the `06B` and `06C` gates pass and package `06` records the combined
+handoff. Stage 4 depends on that aggregate acceptance.
 
-## 3. Stage status model
+Within Stage 6, `09A` depends on stable candidate adapters completed during `09`, not on accepted
+Stage 6. Its evidence is the internal Stage 6 exit proof; only after `09A` passes may package `09`
+record aggregate Stage 6 acceptance for Stage 7. The exact package table in `00` is normative if
+shorthand here is ambiguous.
 
-Use exactly these stage statuses in the handoff:
+Before editing, verify:
+
+1. repository, worktree, base revision, and dirty-state identity;
+2. every direct dependency's durable acceptance record;
+3. the accepted requirement-matrix digest and evidence-manifest path for each dependency;
+4. explicit scope, non-goals, changed paths, migrations, versions, feature flags, failures, risks, and rollback posture;
+5. applicable owner decisions and supersession;
+6. exact current code/tests named by the package;
+7. no contradiction between the handoff and current worktree.
+
+Missing evidence must be reconstructed by read-only inspection or returned as an entry blocker. Do not substitute an earlier agent's chat summary.
+
+## 4. Package status model
+
+Use exactly:
 
 | Status | Meaning |
 |---|---|
-| `NOT_STARTED` | Entry material exists but no discovery has begun |
+| `NOT_STARTED` | Entry artifacts exist; discovery has not begun |
 | `DISCOVERY` | Current code, decisions, versions, and evidence are being inspected |
-| `IMPLEMENTING` | Accepted scope is being changed |
-| `VERIFYING` | Required tests, inspections, drills, and evidence are being completed |
-| `READY_FOR_REVIEW` | Implementer believes all mandatory exit criteria are met |
-| `REWORK_REQUIRED` | Reviewer found missing or failed mandatory evidence |
-| `BLOCKED_ON_DECISION` | A required owner/authority decision prevents safe progress |
-| `BLOCKED_ON_EXTERNAL_STATE` | Entitlement, service, credential, environment, or third-party state prevents proof |
-| `ACCEPTED` | Gate authority accepts the stage and next-stage entry |
-| `ACCEPTED_WITH_DEFERRED_OPTIONAL_TRACKS` | Critical path is accepted; named optional tracks remain disabled/deferred |
+| `IMPLEMENTING` | Accepted scope is changing |
+| `VERIFYING` | Required tests, inspections, drills, and manifests are being completed |
+| `READY_FOR_REVIEW` | Implementer believes every mandatory row passes |
+| `REWORK_REQUIRED` | Mandatory evidence is missing or failed |
+| `BLOCKED_ON_DECISION` | An owner/authority choice prevents safe work |
+| `BLOCKED_ON_EXTERNAL_STATE` | Entitlement, credential, environment, or service state prevents proof |
+| `ACCEPTED` | Gate authority accepts the package and its dependents' entry |
+| `ACCEPTED_WITH_DEFERRED_OPTIONAL_TRACKS` | Critical path accepted; named optional features remain disabled |
 
-Do not mark a stage `ACCEPTED` merely because tests pass. Required decision and operational evidence must also exist.
+Only the gate authority may append an accepted status. Passing tests is insufficient.
 
-## 4. Incoming handoff requirements
+## 5. Required package artifacts and exact paths
 
-Before editing, verify the incoming handoff contains:
+At package start, select and record stable repository-relative paths for:
 
-1. stage and repository identity;
-2. accepted scope and explicit non-goals;
-3. accepted architecture/owner decisions and unresolved questions;
-4. exact commit/worktree state or an explicit statement that the worktree is dirty;
-5. files changed by the previous stage and files intentionally left unchanged;
-6. dependency/version/configuration matrix when relevant;
-7. schema and migration status;
-8. commands and evidence for tests, lint, types, builds, deployments, evals, security, and recovery;
-9. known failures, skips, risks, workarounds, and deferred optional tracks;
-10. rollback/recovery posture;
-11. next-stage entry criteria and recommended starting points.
-
-If this information is absent, reconstruct it through read-only inspection before implementation. Do not assume the previous agent's narrative is complete.
-
-## 5. Required stage artifacts
-
-Every stage must maintain or create these artifacts. Their exact repository location may be selected in Stage 0, but the handoff must link them:
-
-- `STAGE_HANDOFF.md` or an equivalently named stage-specific handoff;
-- decision log with owner answers and assumptions;
+- package handoff;
+- decision/supersession log;
 - requirements-to-evidence matrix;
-- implementation/change summary;
-- exact verification command log and outcome summary;
-- schema/migration manifest when applicable;
-- feature flag and maturity manifest when applicable;
+- evidence manifest;
+- exact command/outcome log;
+- implementation/change-path manifest;
+- schema/migration manifest, if applicable;
+- dependency/version/deployment-compatibility manifest;
+- feature-maturity/flag manifest, if applicable;
 - known-risk/deferred-work register;
-- rollback or recovery note proportional to the stage;
-- links to traces, experiments, snapshots, build revisions, or deployment evidence when applicable.
+- rollback/recovery runbook or note;
+- trace, evaluation, replay-history, snapshot, build, and deployment references, if applicable.
 
-Do not commit secrets, access tokens, raw private payloads, PHI, or unrestricted trace/sandbox output in these artifacts.
+The handoff must link the exact path to every artifact. “See tests,” “see logs,” glob-only references, uncommitted terminal scrollback, or links without environment/revision identity are not evidence manifests.
+
+The evidence manifest must include:
+
+```text
+evidence_id
+requirement_id
+repository_relative_path_or_external_ref
+revision_or_digest
+environment
+producer
+created_at
+redaction_class
+reproduction_command_or_drill
+result
+```
+
+External refs must be stable and access-controlled. Artifacts must contain references or sanitized fixtures, never secrets/PHI.
 
 ## 6. Requirements-to-evidence rule
 
-At stage start, turn every deliverable and exit criterion into a matrix:
+Before substantive implementation, atomize every deliverable and exit criterion:
 
-| Requirement ID | Requirement | Implementation location | Verification | Evidence | Status |
+| Requirement ID | Atomic proposition | Implementation path | Verification | Evidence ID/path | Status |
 |---|---|---|---|---|---|
-| `Sx-R01` | One atomic requirement | Exact files/components | Test, inspection, drill, or decision | Stable link/ref | pending/pass/fail/deferred |
+| `Sx-R01` | One testable requirement | Exact file/component | Test/inspection/drill/decision | Stable ref | pending/pass/fail/deferred |
 
 Rules:
 
-- Each row contains one testable proposition.
-- Deterministic invariants use deterministic tests, not model scores.
-- Security and tenant requirements include negative tests.
-- Recovery requirements include failure injection or a documented operational drill.
-- Evaluation requirements identify dataset/evaluator versions and thresholds.
-- Optional capability rows may be deferred only with a disabled feature flag and fallback proof.
-- A failing mandatory row prevents `READY_FOR_REVIEW`.
+- Deterministic invariants require deterministic tests, not model scores.
+- Authority, tenant, provider-bypass, and intervention constraints require negative tests.
+- Recovery requires failure injection or an accepted operational drill.
+- Evaluation rows name dataset/evaluator versions and thresholds.
+- Every changed contract maps to schema, migration/compatibility, producer, consumer, and test evidence.
+- Optional features may defer only when disabled by default, with unsupported-capability behavior and fallback proof.
+- Any failed or missing mandatory row prevents `READY_FOR_REVIEW`.
 
-## 7. Change discipline
+## 7. Cross-package contract preservation
 
-- Preserve unrelated user changes in a dirty worktree.
-- Prefer existing project packages and ports; create a new domain package only for a distinct lifecycle/authority.
-- Keep domain contracts strict, frozen, typed, and content-addressed where existing conventions require it.
-- Keep vendor imports in runtime/integration/Agent Server packages, not pure domain reducers or compilers.
-- Use forward-only database migrations and least-privilege runtime roles.
-- Run database migrations in release jobs, never implicitly on every replica/cold start.
-- Keep graph module import side-effect free: no network, DB, tracing startup, secret resolution, sandbox creation, or worker startup.
-- Keep all I/O paths async; do not add `asyncio.run()` in application/runtime code, unbounded `gather`, request-owned fire-and-forget work, or blocking SDK calls on the event loop.
-- Use typed identity builders; do not add ambiguous `run_id`, `checkpoint_id`, or `agent_id` fields.
-- Update schemas, docs, tests, and runbooks in the same stage as the behavior they describe.
+Every affected package must map and test:
 
-## 8. Verification hierarchy
+- BellLabs run, execution epoch, execution segment, family, semantic operation, attempt, and settlement identities;
+- Temporal Workflow ID/Run ID, child, Activity ID/attempt, and worker/task-queue identity;
+- agent thread/run/checkpoint, model, tool, MCP, sandbox, external-job, trace, and evaluation identities;
+- exact Workflow Implementation, RunPlan, `StageCapabilityRequirement`, `StageExecutionBinding`, `OperationAssemblySpec`, prompts, schemas, policies, and compatibility digests;
+- inbox, ledger, outbox, journal, claims, effects, evidence, usage, and typed result links.
 
-Use proportionate evidence in this order:
+Continue-As-New retains the BellLabs run and epoch and starts a new technical segment. A fork creates a new BellLabs run at epoch `1` and carries immutable parent/snapshot lineage. Temporal Reset is operational repair, never the product fork API.
 
-1. strict contract parsing, canonical digest, and schema snapshot tests;
-2. pure domain unit/property tests;
-3. application and repository integration tests;
-4. Agent Server local authenticated API/E2E tests with `langgraph dev`;
-5. production-like container tests with `langgraph build`/`langgraph up`;
-6. LangSmith datasets/experiments and trace inspection;
-7. staging deployment tests and operational drills;
-8. shadow/canary evidence.
+A child or provider return is not sufficient settlement evidence. The parent must re-read authoritative records, validate identities/digests, and settle through BellLabs application services.
 
-Do not substitute a higher-level happy-path test for missing lower-level invariant tests.
+## 8. Communication and intervention gate
+
+Any package touching communication must prove:
+
+1. authoritative per-attempt inbox/ledger/outbox persistence and deduplication;
+2. typed Signal/Update/callback/provider facts with authorization and stable command IDs;
+3. product durable events emitted from authoritative BellLabs state, not inferred from Temporal history or traces;
+4. no peer message affects StageGraph readiness or GoalDirected convergence before accepted settlement;
+5. handler serialization/guards and quiescence before Continue-As-New;
+6. disruptive-saga behavior across pause/cancel, reconciliation, mutation, rebind/resume, and failure compensation;
+7. built-in synchronous subagents remain operation-local;
+8. independent-lifecycle delegation uses custom Temporal workflows/children;
+9. provider async is a subordinate adapter;
+10. remote lifecycle follows start-bind-wait/reconcile, with optional callback completion converging on the same journal.
+
+Stage 3 must certify exact post-model/pre-tool injection locally. Stage 6 must separately certify it for selected remote LangSmith deployments. Until the applicable certification passes, the API must report the capability as unsupported rather than promise best-effort intervention.
+
+## 9. Change discipline
+
+- Preserve unrelated user changes.
+- Use existing pure domain services, interpreters, contracts, and ports before adding abstractions.
+- Keep vendor imports out of pure domain compilers/reducers/interpreters.
+- Keep workflow code deterministic and import-safe; no network, database, secret, tracing, sandbox, or worker startup at import/replay time.
+- Put I/O in activities/application ports; use async I/O and bounded concurrency.
+- Use forward-only migrations and least-privilege roles; never migrate implicitly on every worker start.
+- Use typed identity builders; never add ambiguous `run_id`, `agent_id`, or `checkpoint_id`.
+- Update schemas, tests, docs, runbooks, and compatibility manifests with behavior.
+- A model/provider cannot select undeclared capabilities, queues, credentials, or fallback paths.
+- Unfinished Agent Server macro graphs may be repurposed or removed only with explicit path inventory and preserved test/evidence disposition; they may not be production fallback work.
+
+## 10. Verification hierarchy
+
+Use proportionate evidence:
+
+1. strict schema parsing, canonical digest, snapshot, and compatibility tests;
+2. pure interpreter/domain unit and property tests;
+3. repository/application/transaction integration tests;
+4. self-hosted Temporal workflow replay, child/activity, message, restart, and Continue-As-New tests;
+5. bounded local LangGraph/Deep Agents operation tests;
+6. remote LangSmith deployment/sandbox/evaluation qualification;
+7. BellLabs API authenticated E2E and negative-bypass tests;
+8. production-like AWS staging, shadow/canary, rollback, and failure drills.
+
+Do not replace missing lower-level invariants with a happy-path E2E.
 
 Default project checks remain:
 
@@ -151,25 +215,29 @@ uv run mypy app
 uv run pytest
 ```
 
-Each stage may use a scoped subset during iteration, but the stage exit must run the full accepted suite or record an owner-approved exception with gate impact.
+The package may iterate with scoped checks, but exit requires the accepted full suite or an owner-approved exception with explicit gate effect.
 
-## 9. Handoff review roles
+## 11. Package-specific mandatory gates
 
-| Role | Responsibility |
-|---|---|
-| Implementer | Makes changes, produces evidence, recommends gate disposition |
-| Gate reviewer | Re-runs/inspects critical evidence and checks scope/authority/compatibility |
-| Owner/authority | Decides unsettled architecture, risk exceptions, destructive actions, and rollout |
-| Next-stage implementer | Verifies entry conditions and refuses unsupported assumptions |
+- **Stages 0–2 reconciliation:** retain decision history, identify still-valid evidence, and explicitly supersede Agent Server-primary assumptions.
+- **Stage 3 / `06-contract-frozen`:** reviewed and versioned `06` root/family/operation, identity, command/fact, continuity, intervention, and recovery contract sections plus `06A` exact assembly, hierarchical capacity, canonical lineage, journal, effect, and settlement conformance. This gate authorizes implementation but does not accept Stage 3.
+- **Stage 3 / 06B:** distinct `BellLabsRunWorkflow`, family children, generic `OperationWorkflow`, self-host Temporal replay/restart, five pool classes, independent-operation progress, and same-epoch/new-segment Continue-As-New.
+- **Stage 3 / 06C:** local post-model/pre-tool injection, inbox/ledger/outbox, disruptive saga, typed peer input, settlement-before-readiness, dedupe, and product-event proof.
+- **Stage 3 aggregate:** accepted only after `06-contract-frozen`, 06B, and 06C all pass and the combined `06` handoff is accepted.
+- **Stage 4:** small heterogeneous Temporal-native StageGraph first; `all`, `any`, and `minimum(k)` incremental scheduling; slow-sibling policy; no direct-gather frontier barrier.
+- **Stage 5:** GoalDirected research second; reusable Deep Agents operation harness; independent verifier; subgoals/revisions; context rollover; no private macro scheduler.
+- **Stage 6:** advanced capability, remote LangSmith start-bind-wait/reconcile, remote injection, sandbox, optional async completion, and stable candidate adapters, followed by the internal `09A` heterogeneous and hours-long injected-failure exit proof.
+- **Stage 7:** modular BellLabs API as sole facade, coordinator integration, durable product events, auth/tenant/redaction, observability/evaluation, and provider-bypass negative tests.
+- **Stage 8:** owner selection and proof of final AWS self-host topology, five isolated pool classes, hours-long topology failure/recovery, N/N+1 replay, canary, rollback, cutover, and drain.
 
-One agent may perform implementer and technical-review work in a small stage, but it cannot self-grant owner authority.
+No later package can waive an earlier mandatory gate by duplicating its implementation.
 
-## 10. Mandatory outgoing handoff template
+## 12. Mandatory outgoing handoff
 
-Use this structure verbatim or preserve every field in an equivalent machine-readable document:
+Use this structure or a machine-readable equivalent preserving every field:
 
 ```markdown
-# Stage <N> handoff — <title>
+# <Package> handoff — <title>
 
 Status: READY_FOR_REVIEW | REWORK_REQUIRED | BLOCKED_ON_DECISION | BLOCKED_ON_EXTERNAL_STATE
 Prepared by:
@@ -177,99 +245,57 @@ Prepared at:
 Repository/worktree:
 Base revision:
 Result revision or diff ref:
+Requirement matrix path and digest:
+Evidence manifest path and digest:
 
 ## Outcome
-One concise statement of what is now true.
-
 ## Scope completed
-- Requirement IDs and delivered outcomes.
-
 ## Explicitly not completed
-- Non-goals, deferred optional tracks, and unaccepted work.
-
-## Owner decisions and assumptions
-| ID | Decision/assumption | Source/actor | Scope | Revisit trigger |
-
-## Changes
-| Area | Files/migrations/config | Behavioral effect |
-
+## Direct-dependency acceptance records
+## Owner decisions, amendments, and supersession
+## Exact changed paths
 ## Contract and compatibility impact
-- Schemas and digests changed.
-- Backward/forward compatibility posture.
-- State/checkpoint compatibility posture.
-- Provider/runtime identity changes.
-
 ## Data and migration status
-- Applied/not applied.
-- Backfill/rollback status.
-- RLS/grant verification.
-- Destructive actions: none or exact approved action and recovery.
-
 ## Feature maturity and flags
-| Capability | Version | stable/beta/preview | Flag/default | Fallback | Evidence |
-
 ## Verification evidence
-| Command/drill/experiment | Environment | Result | Evidence ref |
-
 ## Failures, skips, and residual risks
-| Item | Reason | Gate effect | Owner/follow-up |
-
 ## Security and data handling
-- Tenant isolation, secrets, PHI/redaction, sandbox/network, Store/checkpoint findings.
-
-## Operations and rollback
-- How to disable/revert new behavior without destroying authority or evidence.
-
-## Next-stage entry assessment
-| Entry criterion | Met? | Evidence/blocker |
-
-## Recommended first actions for next agent
-1. Exact file/test/decision starting points.
-
+## Runtime authority and bypass audit
+## Operations, recovery, and rollback
+## Next-package entry assessment
+## Recommended first actions
 ## Gate recommendation
 ACCEPT | ACCEPT_WITH_DEFERRED_OPTIONAL_TRACKS | REWORK | BLOCK
 Reason:
 ```
 
-## 11. Stage-specific handoff rules
+“Exact changed paths” lists every changed/added/deleted/renamed file and generated artifact. Security explicitly states that secret/PHI scans were run or why they were not applicable.
 
-Each stage mission contains its own outgoing handoff section. In addition to the global template:
+## 13. Review, blocking, and acceptance
 
-- Stage 0 hands off accepted decisions, pinned qualification matrix, spike evidence, and enabled/disabled capability posture.
-- Stage 1 hands off exact schemas, naming grammar, migrations, authority mapping, and transactional journal proof.
-- Stage 2 hands off import-safe graph exports, `langgraph.json`, auth/resource filters, route collision evidence, and local server instructions.
-- Stage 3 hands off runtime binding/attempt history, canonical lineage/query evidence, hierarchical resource-lease semantics, the shared operation-executor/outcome contract, interrupt/intervention protocols, recovery/reconciliation state machines, and checkpoint compatibility policy.
-- Stage 4 hands off the exact per-stage requirement/execution-binding catalog, native/test adapter conformance, measured bounded concurrency, a parity matrix against the legacy StageGraph, and shadow-safe effect strategy; it must not hand off temporary Deep Agent/MCP mechanics.
-- Stage 5 hands off the stable compiler and predicted/observed capability surfaces, reusable Deep Agent adapter, StageGraph composition proof, GoalDirected parity, exact harness/middleware/context manifests, sync-subagent construction, sandbox lifecycle, verifier evidence, and end-to-end lineage reports.
-- Stage 6 hands off the required heterogeneous StageGraph proof, required/default-off async-subagent qualification, and a capability/maturity manifest for MCP, skills, optional QuickJS/dynamic delegation, Store, sandbox, and snapshots. Only explicitly optional tracks may be deferred.
-- Stage 7 hands off public/MCP schemas, end-to-end operator path, trace taxonomy, dataset/evaluator registry, security findings, SLO thresholds, and production-like build evidence.
-- Stage 8 hands off deployed endpoint/revision bindings, staging/canary evidence, rollback drill, in-flight routing, legacy drain ledger, and decommission approval.
-
-## 12. Blocking and partial completion
+The implementer produces evidence and recommends a disposition. The gate reviewer reproduces critical evidence and audits scope, authority, compatibility, and paths. The owner decides architecture exceptions, destructive actions, risk exceptions, topology, and rollout. No agent self-grants owner acceptance.
 
 If blocked:
 
-1. complete all safe read-only discovery and independent work;
-2. record the exact missing decision/external state and why assumptions are unsafe;
-3. show which requirement rows are blocked and which are complete;
-4. preserve a runnable worktree or clearly identify incomplete changes;
-5. produce the outgoing handoff with `BLOCKED_ON_DECISION` or `BLOCKED_ON_EXTERNAL_STATE`;
-6. do not weaken the gate to declare success.
+1. complete safe independent discovery;
+2. identify the exact missing decision/external state;
+3. mark affected requirement rows;
+4. preserve a runnable worktree or enumerate incomplete paths;
+5. produce a blocked handoff;
+6. never weaken the gate.
 
-If optional preview work fails qualification, disable and defer that track; do not block the stable critical path unless an accepted Workflow Implementation requires it.
-
-## 13. Stage acceptance record
-
-The gate reviewer/owner should append:
+The acceptance record is:
 
 ```text
 gate_disposition: ACCEPTED | ACCEPTED_WITH_DEFERRED_OPTIONAL_TRACKS | REWORK_REQUIRED
 accepted_by:
 accepted_at:
 accepted_requirement_matrix_digest:
-deferred_tracks:
+accepted_evidence_manifest_digest:
+accepted_direct_dependency_records:
+deferred_tracks_and_disabled_flags:
 required_follow_ups:
-next_stage_authorized: yes | no
+next_package_authorized: yes | no
 ```
 
-This record is the incoming authority for the next stage. A chat acknowledgment should be copied into the durable handoff or decision log.
+An acceptance chat message is not durable authority until copied into the package handoff or decision log.

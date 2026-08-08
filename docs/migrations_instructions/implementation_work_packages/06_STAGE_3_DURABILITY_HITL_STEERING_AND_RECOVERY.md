@@ -1,345 +1,262 @@
-# Stage 3 — durable runtime kernel: binding, lineage, resources, HITL, steering, and recovery
-
-Status: not started  
-Mission type: production runtime coordination foundation shared by both graph families  
-Depends on: accepted Stages 1 and 2
-
-## 1. Mission
-
-Implement the common durable execution kernel beneath StageGraph and GoalDirected: transactional graph dispatch, authoritative runtime identity and lineage binding, hierarchical resource leases, compact state/reducers, decision/interrupt bridge, typed interventions, cancellation, forks, resumable streams, checkpoint compatibility enforcement, and continuous reconciliation.
-
-This stage must prove that process loss, ambiguous submission, replay, interrupt resume, or operator intervention cannot bypass BellLabs lifecycle/budget authority or duplicate a consequential effect.
-
-This stage implements the shared primitives in [06A_STAGES_3_TO_6_OPERATION_ASSEMBLY_CONCURRENCY_AND_LINEAGE_CONTRACT.md](06A_STAGES_3_TO_6_OPERATION_ASSEMBLY_CONCURRENCY_AND_LINEAGE_CONTRACT.md). It does not schedule the StageGraph business frontier and does not construct models, Deep Agents, MCP clients, skills, subagents, or sandboxes.
-
-## 2. Permission to clarify or interview
-
-The agent may interview the owner before starting. Clarify:
-
-- accepted concurrent-run policy per intervention type;
-- interruption versus enqueue semantics for active work;
-- operator repair roles and `update_state` scope;
-- fork versus retry versus epoch-rollover policy;
-- cancellation cascade policy for operations, MCP sessions, sandboxes, async tasks, and linked runs;
-- event retention/reconnect expectations;
-- checkpoint summary visibility and redaction;
-- reconciliation SLOs, incident severity, and automatic versus human repair boundaries;
-- checkpoint-incompatible deployment/fail-safe behavior.
-
-Do not expose a broader state mutation or rollback mechanism because it is convenient in the SDK.
-
-## 3. Required inputs
-
-- Stage 1 runtime contracts, tables, repositories, and operation journal;
-- Stage 2 graphs/auth/custom app/client adapter;
-- Stage 0 interrupt/state/fork/checkpoint compatibility evidence;
-- existing run-control reducer/service/outbox/Socket.IO behavior;
-- current coordinator launch idempotency and semantic binding services;
-- accepted blue/green endpoint policy;
-- the shared operation assembly, concurrency, and lineage contract in `06A`.
-
-If the accepted Stage 1/2 handoffs predate D-17–D-23, Stage 3 implementation must not begin until the targeted amendment in `02A` has versioned the required contracts and evaluated Stage 2 compatibility. This is a focused prerequisite amendment, not permission to discard valid earlier-stage work.
-
-Run [05A_PRE_STAGE_3_ENTRY_GATE_CLOSURE.md](05A_PRE_STAGE_3_ENTRY_GATE_CLOSURE.md) as a separate Cursor task. Once its compact `stage2_evidence/PRE_STAGE_3_ENTRY_HANDOFF.md` is `ACCEPTED`, the Stage 3 implementation agent may use that handoff instead of loading the complete Stage 0–2 evidence history.
-
-## 4. Deliverables
-
-### 4.1 Compact common state and reducers
-
-Implement accepted common channels such as:
-
-- immutable identity and runtime binding ref;
-- definition/assembly/state schema digests;
-- lifecycle projection ref/version;
-- pending durable decisions;
-- monotonic outbox position;
-- redacted diagnostics;
-- final result ref.
-
-Every channel declares writer, readers, parallelism, reducer/update rule, authority class, trace policy, retention, and compatibility behavior.
-
-Required reducer behavior:
-
-- immutable single assignment for identity/digests;
-- monotonic cursor/version transitions;
-- conflict-detecting keyed merge for parallel results/decisions/jobs;
-- same key/same canonical digest is idempotent;
-- same key/different digest fails closed and creates reconciliation incident;
-- no last-writer-wins for accepted result/effect identity;
-- operator replacement of reducer-backed data requires `Overwrite`, expected checkpoint, expected BellLabs version, actor, reason, and audit.
-
-### 4.2 Runtime execution dispatch and binding
-
-Implement the runtime-neutral dispatcher/outbox consumer:
-
-1. read an authoritative requested binding/outbox item;
-2. revalidate exact deployment/graph/assembly compatibility;
-3. create or reconcile the thread for the BellLabs run epoch;
-4. persist actual provider IDs before considering launch active;
-5. submit the Agent Server run with stable submission metadata;
-6. append a runtime execution attempt;
-7. persist initial/latest run/checkpoint/trace observations;
-8. settle the outbox action idempotently.
-
-Ambiguous transport response must query Agent Server by persisted metadata/submission identity before retry. Never accept provider IDs from an untrusted caller. Keep each invocation/resume/steer/cancel as a separate attempt on the bound thread.
-
-### 4.3 Canonical execution lineage
-
-Implement the `ExecutionLineageEnvelope` and typed provider-qualified identities from `06A` across:
-
-- BellLabs run and execution epoch;
-- Workflow Implementation and graph assembly;
-- workflow/stage cycles and semantic operation attempts;
-- technical runtime attempts;
-- operation binding/assembly digests;
-- agent invocations, effect claims, child tasks/threads/runs;
-- input/context/result/evidence manifests;
-- usage/effect settlements and trace refs.
-
-Persist parent/child edges explicitly. Never infer identity equality between a BellLabs run, Agent Server run, thread, task, operation attempt, or trace. Provide a repository/query service that later stages can use to reconstruct final-result provenance without reading model transcripts or checkpoints.
-
-### 4.4 Hierarchical resource reservation and lease primitives
-
-Implement the provider-neutral `ExecutionResourceEnvelope` and lease journal required by Stages 4–6:
-
-- tenant/environment/workflow/stage/operation capacity;
-- model, tool, MCP, synchronous-child, asynchronous-child, and linked-run slots;
-- provider quota and budget reservation refs;
-- deadline, lease TTL, renewal, release, expiry, and reconciliation;
-- protected supervisor/resumption capacity;
-- canonical acquisition order and deadlock prevention;
-- retained-versus-released lease projection for durable waits.
-
-This stage implements reservation mechanics and invariants, not StageGraph frontier selection. Duplicate acquisition with the same semantic identity is idempotent; a different envelope digest conflicts. Process loss must not leak capacity permanently. Actual usage is settled even when cancelled, failed, speculative, or discarded work produces no accepted result.
-
-### 4.5 First-node authoritative reconciliation
-
-Both graph families begin with a common bootstrap/reconcile node that:
-
-- loads runtime binding by exact ref;
-- verifies request scope, BellLabs run/epoch, graph/assembly/schema/deployment compatibility;
-- loads current authoritative lifecycle/budget/decision projection;
-- compares checkpoint projection version/digest;
-- rebuilds compact derived projection when safe;
-- fails/interrupts for reconciliation when inconsistent;
-- never treats checkpoint or Agent Server status as permission to advance.
-
-### 4.6 Durable interrupt and decision protocol
-
-Implement the full protocol:
-
-1. create durable decision request with type/schema/choices, evidence refs, expiry, expected lifecycle version, and policy;
-2. call `interrupt()` with compact display data and decision ID only;
-3. authenticate and authorize response through BellLabs API/facade;
-4. validate schema, expiry, expected version, role, and idempotency;
-5. persist response;
-6. resume the same thread with decision ID and response digest;
-7. allow the node to restart from the beginning, reread the durable decision, verify version/digest, and continue.
-
-All code before `interrupt()` is idempotent. Prefer placing consequential side effects in separate nodes after the decision. Support parallel interrupts by runtime interrupt ID map without conflating runtime interrupt IDs with BellLabs decision IDs.
-
-### 4.7 Typed interventions
-
-Implement the accepted discriminated union and service/API foundation for:
-
-- append input;
-- satisfy wait;
-- resume pause;
-- respond to interrupt;
-- update/cancel async task placeholders for Stage 6;
-- cancel run;
-- fork from checkpoint;
-- privileged operator reconcile/repair.
-
-Each intervention:
-
-- first passes BellLabs lifecycle/authority/version policy;
-- persists idempotently in PostgreSQL;
-- then maps to Agent Server action;
-- records a runtime attempt and outcome;
-- reconciles ambiguous transport;
-- never writes arbitrary unchecked graph state.
-
-Default active-run behavior is `reject` unless accepted policy says otherwise. Enqueue non-preemptive input only when the workflow supports it. Agent Server interrupt strategy must follow a recorded BellLabs intervention. Do not use provider rollback for authoritative external effects.
-
-### 4.8 Cooperative cancellation
-
-Implement cancellation as a distinct lifecycle:
-
-- accepted BellLabs cancel command is authority;
-- dispatcher cancels/interrupts Agent Server attempts;
-- graph nodes/tools observe deadlines/cancellation;
-- child operation/MCP/sandbox/async/linked work follows accepted cascade or allow-to-finish policy;
-- external usage/effects are reconciled and settled;
-- cancellation never becomes success or generic failure;
-- late completion cannot overwrite terminal cancellation state.
-
-Stage 6 fills async-task-specific behavior; this stage provides the shared contracts and hooks.
-
-### 4.9 Fork, replay, and epoch behavior
-
-Implement policy distinctions:
-
-- inspect: read-only checkpoint/state view;
-- diagnostic replay: no-side-effect evaluation environment;
-- retry: same run only under domain policy and stable semantic identity;
-- fork: new BellLabs run, new thread, parent lineage, budget/admission, optional cloned snapshot;
-- epoch rollover: new thread and compact verified handoff for same BellLabs run only under accepted policy;
-- rollback: compensate or fork; never rewrite authoritative history.
-
-Checkpoint/state continuation must verify assembly/schema/deployment compatibility. A fork cannot mutate the original lineage.
-
-### 4.10 Resumable BellLabs event translation
-
-Translate Agent Server runtime events into non-authoritative UI detail while preserving durable BellLabs events:
-
-- accepted BellLabs events carry monotonic outbox cursor;
-- reconnect accepts cursor and replays missed durable events;
-- transient Agent Server stream position is not durability authority;
-- values/debug/checkpoint detail is operator-restricted;
-- event IDs/digests support deduplication;
-- no secret/PHI/raw large output leakage;
-- retry layer is explicit.
-
-Maintain any Socket.IO compatibility bridge through coexistence without keeping two decision authorities.
-
-### 4.11 Reconciliation loops and incident records
-
-Implement idempotent, tenant-scoped, version-checked reconciliation for:
-
-- requested binding without thread;
-- thread without persisted initial run;
-- active Agent Server run while BellLabs paused/cancelled/terminal;
-- active BellLabs run with missing/failed/interrupted runtime run;
-- accepted operation with unsettled usage/result/effect;
-- stale interrupt/decision state;
-- orphan async task/sandbox placeholders;
-- terminal run without typed result;
-- checkpoint on incompatible endpoint/deployment/assembly;
-- stream/outbox cursor drift.
-- expired or leaked resource lease;
-- child/task/thread/run lineage gap or identity collision;
-- accepted result whose operation assembly or context digest is missing.
-
-Each action records actor/reason, before/after versions, evidence, and retry schedule. Unsafe cases stop and request operator decision rather than guessing.
-
-### 4.12 Operation executor contracts and standalone persistence fixture
-
-Publish the runtime-neutral async `OperationExecutor` port and discriminated `OperationExecutionOutcome` union defined in `06A`. Stage 3 supplies contract fixtures only; actual native, Deep Agent, MCP, sandbox, and async-child adapters are implemented and conformance-tested in later stages.
-
-For production-like standalone tests/self-hosting only:
-
-- construct `AsyncPostgresSaver`/Store in one async lifespan;
-- run setup migrations once through the accepted release/test path;
-- never create per invocation;
-- use tenant/purpose namespaces;
-- close cleanly on cancellation.
-
-Exported managed graphs remain compiled without explicit checkpointer/Store.
-
-## 5. Required tests
-
-### Reducers/state
-
-- associative, commutative, idempotent property tests;
-- randomized merge order and duplicate replay;
-- digest conflict fail-closed incident;
-- update/Overwrite semantics and privileged audit;
-- no large payload/transcript/secret in checkpoint fixtures.
-
-### Dispatch/identity
-
-- duplicate outbox delivery;
-- same submission/same digest idempotency;
-- same submission/different digest conflict;
-- timeout after thread creation and after run creation;
-- metadata reconciliation before retry;
-- one thread per run epoch;
-- provider IDs rejected from external request;
-- incompatible assembly/deployment refusal;
-- complete lineage parent/child creation for submit/resume/steer/cancel;
-- semantic attempt identity remains stable while runtime attempt identity changes;
-- task/thread/run/operation/trace identities cannot validate in the wrong typed field.
-
-### Resources
-
-- hierarchical authority/ceiling intersection;
-- duplicate same-digest acquisition and conflicting-digest rejection;
-- lease expiry/renewal/release and process-loss reconciliation;
-- canonical acquisition order under randomized contenders;
-- no starvation or deadlock at minimum accepted capacity;
-- protected resumption capacity under child saturation;
-- wait retains/releases only the declared resources;
-- cancellation and failure release capacity while settling observed usage.
-
-### Interrupt/intervention
-
-- process restart across interrupt;
-- duplicate resume;
-- stale/expired/wrong-actor/wrong-scope/wrong-version response;
-- parallel interrupts;
-- non-idempotent pre-interrupt effect is prevented by test;
-- cancel while model/tool/DB/stream boundary active;
-- enqueue/reject policy;
-- repair requires privilege and audit.
-
-### Fork/recovery
-
-- fork creates new run/thread/budget/lineage;
-- original remains immutable;
-- diagnostic replay cannot acquire effect claim;
-- N-on-N resume after N+1 deployment;
-- incompatible checkpoint fails safely;
-- reconciliation crash/replay is idempotent.
-
-### Security/streams
-
-- cross-tenant thread/run/Store/interrupt/checkpoint denial;
-- cursor reconnect/deduplication;
-- operator-only debug/state detail;
-- sentinel secret and synthetic PHI stream/error tests.
-
-## 6. Gate
-
-Stage 3 passes when:
-
-- crash/restart loses no accepted transition;
-- ambiguous submission and duplicate replay create no duplicate consequential effect;
-- runtime binding/attempt/checkpoint correlations are authoritative runtime facts in PostgreSQL;
-- durable interrupt/resume rereads BellLabs decisions;
-- typed steering/cancel/fork paths pass authority/idempotency tests;
-- reducer laws hold under randomized concurrency;
-- cross-tenant resources and operator repair are protected;
-- incompatible checkpoint routing follows accepted blue/green/fail-safe policy;
-- reconciliation closes or safely escalates every injected inconsistency;
-- lineage can be reconstructed from a typed result placeholder through every persisted binding/attempt/claim/settlement edge;
-- resource leases survive duplicate delivery and process loss without over-admission, permanent leakage, or resumption deadlock;
-- the runtime-neutral operation executor/outcome contracts and adapter conformance harness are published for Stages 4–6;
-- full accepted verification suite passes;
-- outgoing handoff is accepted.
-
-## 7. Explicit non-goals
-
-- Do not complete StageGraph or GoalDirected business execution.
-- Do not expose arbitrary public checkpoint editing.
-- Do not enable async subagents before Stage 6.
-- Do not use Agent Server rollback to erase authoritative effects/history.
-- Do not switch production default runtime.
-
-## 8. Outgoing handoff additions
-
-Include:
-
-- common state/reducer manifest and compatibility version;
-- runtime binding/attempt state machine;
-- dispatcher ambiguity matrix;
-- durable interrupt/intervention sequence and schemas;
-- cancel/fork/epoch policies;
-- stream event taxonomy/cursor semantics;
-- reconciliation incident catalog and repair authority;
-- managed versus standalone persistence proof;
-- checkpoint/deployment compatibility and routing instructions;
-- exact common nodes/services later graph stages must call;
-- canonical lineage schema/query and identity-confusion test evidence;
-- resource hierarchy, acquisition order, lease/release/wait matrix, and measured recovery evidence;
-- operation executor/outcome protocol and shared adapter conformance harness.
+# Stage 3 — Temporal durability, intervention, and recovery foundation
+
+Status: `NOT_STARTED`
+Document role: normative Stage 3 work-package index and aggregate acceptance contract
+Mission type: macro-runtime foundation shared by StageGraph and GoalDirected
+Depends on: accepted Stages 1 and 2 and accepted Pre-Stage-3 entry handoff
+Companion contracts: [`06A`](06A_STAGES_3_TO_6_OPERATION_ASSEMBLY_CONCURRENCY_AND_LINEAGE_CONTRACT.md), [`06B`](06B_STAGE_3_TEMPORAL_WORKFLOW_FOUNDATION.md), and [`06C`](06C_STAGE_3_COMMUNICATION_AND_INTERVENTION_QUALIFICATION.md)
+
+## 1. Accepted decision and preserved history
+
+Stage 3 adopts Temporal as the **sole macro-workflow runtime** for admitted BellLabs runs. This
+supersedes the earlier Stage 3 direction in which an Agent Server graph owned macro dispatch,
+interrupt, checkpoint, and recovery mechanics. That earlier direction remains useful decision
+history: its compact-state, typed-decision, authority, idempotency, lineage, resource, effect,
+settlement, and reconciliation requirements are preserved, but they are now implemented around
+Temporal workflows rather than a competing Agent Server scheduler.
+
+The accepted ownership boundary is:
+
+- BellLabs PostgreSQL, application services, and pure interpreters are semantic authority;
+- Temporal owns durable macro execution, timers, child lifecycles, retries, and message delivery;
+- a distinct `BellLabsRunWorkflow` is the root lifecycle shell;
+- `StageGraphWorkflow` or `GoalDirectedWorkflow` is the family child;
+- generic `OperationWorkflow` children durably own semantic operation attempts;
+- `OperationExecutor` remains inside `OperationWorkflow`;
+- LangGraph and Deep Agents provide bounded operation cognition, never macro scheduling authority;
+- LangSmith remains tracing, evaluation, development, sandbox, and optional operation-runtime
+  infrastructure.
+
+Local in-process/library and remote Agent Server execution are separate, exact adapter variants.
+Neither may be selected dynamically or treated as an invisible fallback for the other.
+
+## 2. Identity and continuity decisions
+
+- A BellLabs product fork creates a **new BellLabs run**, starts at execution epoch `1`, and records
+  immutable parent-run/snapshot lineage. It is not Temporal Reset.
+- `Continue-As-New` preserves the same BellLabs run and execution epoch and starts a **new technical
+  execution segment** with the same Temporal Workflow ID and a new Temporal Run ID.
+- A semantic operation attempt remains stable across Temporal Activity retries and across a
+  disruptive cancel/reconcile/restart authorized by policy.
+- Each restarted operation execution gets a new `execution_generation`; each Activity attempt gets
+  its own technical `runtime_attempt_id`.
+- Temporal Workflow ID, Temporal Run ID, execution epoch, technical segment, execution generation,
+  agent thread/checkpoint, and BellLabs semantic IDs are distinct typed fields.
+
+## 3. Mission
+
+Implement and qualify the contracts required before Stage 4 may build production StageGraph
+scheduling:
+
+1. preserve exact operation assemblies, hierarchical resources, concurrency, lineage, journal,
+   effect claims, usage, and deterministic settlement in `06A`;
+2. establish the Temporal root/family/operation hierarchy and recovery foundation in `06B`;
+3. establish the PostgreSQL-authoritative communication and intervention protocol in `06C`;
+4. prove process loss, replay, duplicate delivery, intervention, cancellation, and reconciliation
+   cannot bypass BellLabs authority or duplicate a consequential effect.
+
+Self-hosted Temporal on AWS is the accepted initial production direction. Stage 3 uses a
+self-hosted local Temporal service for deterministic qualification without selecting or encoding
+the eventual ECS, EKS, EC2, or combined AWS topology. Stage 8 selects and proves that exact
+topology, worker hosting, autoscaling, and regional design from production-shaped evidence; the
+Cloud-versus-self-host decision is not reopened here.
+
+## 4. Required inputs and entry gate
+
+Required inputs:
+
+- accepted Stage 1 contracts, repositories, operation journal, effect claims, and outbox;
+- accepted Stage 2 authentication, authorization, API, pure interpreters, graphs, and exact
+  compilation contracts;
+- accepted Stage 0 compatibility, replay, interrupt, and fork evidence;
+- accepted [`05A_PRE_STAGE_3_ENTRY_GATE_CLOSURE.md`](05A_PRE_STAGE_3_ENTRY_GATE_CLOSURE.md) handoff;
+- owner-approved intervention, cancellation, orphan-overlap, retention, and repair policies.
+
+If earlier handoffs predate the operation-assembly, lineage, resource, or Temporal acceptance
+decisions, amend those contracts explicitly. Do not silently reinterpret persisted fields.
+
+## 5. Work-package sequence and `06-contract-frozen` gate
+
+### 5.1 `06A` — shared semantic execution contract
+
+First freeze:
+
+- operation requirement, assembly, binding, executor, and typed outcome contracts;
+- resource hierarchy, reservation, lease, release, and resumption behavior;
+- semantic and technical identity grammar, including Temporal runtime identities;
+- parent lifecycle protocol for start, observe, command, cancel, and reconcile;
+- operation journal, effect-claim, immutable artifact, usage, and settlement invariants;
+- compatibility, failure, wait, concurrency, and lineage rules.
+
+### 5.2 `06B` — Temporal workflow foundation
+
+Then implement:
+
+- root, family, and operation workflow contracts;
+- stable Workflow ID grammar and worker registrations;
+- Query, Signal, and Update surfaces;
+- task-queue, timeout, heartbeat, and retry profiles;
+- `Continue-As-New`, replay, N/N+1, active-child reattachment, and reconciliation;
+- BellLabs rehydration and deterministic projection rebuilding;
+- local self-hosted Temporal qualification.
+
+### 5.3 `06C` — communication and intervention qualification
+
+Then implement and prove:
+
+- PostgreSQL message/command ledger with inbox and transactional outbox;
+- exact target attempt, monotonic sequence, immutable ordered batches, receipts, claims, leases, and
+  idempotent redelivery;
+- certified post-model/pre-tool intervention safe point;
+- typed peer messages and privileged prompt-role changes;
+- durable agent waits only through `OperationWorkflow`;
+- disruptive cancel/reconcile/restart with late-output quarantine.
+
+After the contract-defining sections of `06` and `06A` are reviewed, versioned, mutually
+consistent, and backed by the shared contract-conformance record, the gate authority records
+`06-contract-frozen`. This is an internal implementation-entry gate, not acceptance of `06` or
+Stage 3.
+
+`06B` may begin only after `06-contract-frozen`. `06C` may begin only after
+`06-contract-frozen` and the `06B` implementation gate pass. Overlapping implementation is allowed
+only after these dependencies are satisfied. Aggregate Stage 3 acceptance is recorded through this
+`06` package only after both `06B` and `06C` pass.
+
+## 6. Cross-cutting invariants
+
+1. Temporal history is durable execution history, not BellLabs domain truth.
+2. Temporal, LangGraph checkpoints, models, tools, traces, and provider status cannot authorize,
+   settle, or terminalize BellLabs state.
+3. Workflow code calls deterministic logic only. Database, network, object-store, provider, model,
+   and clock/random effects occur through Activities with explicit contracts.
+4. Temporal payloads contain compact IDs, refs, digests, versions, and bounded summaries only.
+   Large documents, raw transcripts, secrets, credentials, and PHI stay in governed stores.
+5. Every consequential external action requires a stable BellLabs effect claim and reconciliation.
+   Temporal provides at-least-once Activity execution, not exactly-once effects.
+6. Waiting child workflows remain open durably. A process-local task, LangGraph background task, or
+   worker-held request is not a durable wait.
+7. No public API writes arbitrary workflow/checkpoint state. Repair is typed, authorized,
+   version-checked, reasoned, and audited.
+8. Cancellation and message injection are cooperative; there is no atomic
+   cancellation-and-injection primitive and no exactly-once transport claim.
+9. Reconciliation is expected control flow, not an exceptional escape hatch.
+
+## 7. Stage 3 implementation slices
+
+### 7.1 Contract and persistence slice
+
+- map every `06A`/`06B`/`06C` field to one model, repository, application service, workflow,
+  activity, API schema, and test;
+- add schema-compatible fields or explicit versioned migrations;
+- reject duplicate models that create competing authority;
+- publish compatibility and redaction manifests.
+
+### 7.2 Temporal kernel slice
+
+- register root/family/operation workflows and typed test Activities;
+- start an admitted run through the root and selected family child;
+- start, observe, command, cancel, and reconcile operation children;
+- rehydrate BellLabs projection at start, repair, and continuation;
+- preserve open waits and active child bindings across worker loss and `Continue-As-New`.
+
+### 7.3 Communication and intervention slice
+
+- persist commands/messages before runtime delivery;
+- claim and route bounded batches through an authorized service;
+- prove receipt progression and stale-target rejection;
+- checkpoint injected model-visible batches and safely invalidate superseded tool calls;
+- prove disruptive recovery and quarantine.
+
+### 7.4 Recovery and compatibility slice
+
+- capture histories for replay;
+- qualify current code (`N`) against `N` histories and compatible next code (`N+1`) against `N`
+  histories;
+- test incompatible behavior as safe refusal or explicit routing, never silent drift;
+- continuously reconcile BellLabs, Temporal, operation, agent, artifact, effect, and settlement
+  bindings.
+
+## 8. Concrete acceptance tests
+
+### Authority and identity
+
+- duplicate start with the same identity/digest is idempotent; a different digest conflicts;
+- root, family, operation, Activity, agent, and BellLabs IDs cannot validate in the wrong field;
+- `Continue-As-New` retains run+epoch and increments only technical segment;
+- fork creates a new run at epoch `1`, preserves the parent, and leaves the source immutable;
+- local and remote adapters produce distinct assembly and compatibility digests.
+
+### Durability and recovery
+
+- kill API, workflow worker, and Activity worker independently before and after each consequential
+  boundary; accepted progress recovers without duplicate settlement;
+- an open decision/external/agent wait survives all process restarts;
+- active children reattach after parent `Continue-As-New`;
+- ambiguous child start and Activity completion reconcile before retry;
+- no accepted transition is inferred solely from Temporal or provider status.
+
+### Scheduling prerequisites
+
+- controlled child workflows overlap under hierarchical ceilings;
+- one completion is observed without waiting for a slow sibling;
+- protected coordinator/resumption capacity remains available under operation saturation;
+- lease loss, cancellation, failure, and waiting release or retain exactly declared resources.
+
+### Communication and intervention
+
+- duplicate, delayed, and out-of-order delivery preserves per-target sequence and idempotency;
+- stale target, wrong tenant, wrong actor, expired, and superseded commands fail closed;
+- every receipt transition is queryable and immutable;
+- post-model/pre-tool injection checkpoints the response and prevents superseded calls from running;
+- late output from an old execution generation is quarantined and cannot settle;
+- neither tests nor documentation claim atomic cancellation/injection or exactly-once transport.
+
+### Security and payloads
+
+- sentinel secrets, synthetic PHI, large documents, and raw transcripts are absent from Event
+  History, memo, search attributes, heartbeats, logs, and errors;
+- cross-tenant Workflow ID, child, command, checkpoint, effect, and artifact access is denied;
+- Queries return compact diagnostics only; product reads come from BellLabs projections.
+
+## 9. Stage 3 handoff gate
+
+Stage 3 passes only when:
+
+- `06-contract-frozen` was recorded from the reviewed `06`/`06A` contract sections;
+- the `06B` and `06C` implementation and proof gates both pass in sequence;
+- Temporal is the only qualified macro execution path;
+- the root/family/operation hierarchy and exact adapter variants are published;
+- BellLabs can reconstruct lifecycle and final-result lineage without reading Temporal history or
+  model transcripts;
+- replay and N/N+1 evidence is accepted;
+- process-loss, duplicate-delivery, cancellation, wait, intervention, effect, and reconciliation
+  suites pass against local self-hosted Temporal;
+- history and payload inspections pass redaction and size limits;
+- Stage 4 receives stable child-lifecycle, executor, resource, lineage, settlement, and
+  communication contracts.
+
+## 10. Explicit non-goals
+
+- Do not implement StageGraph frontier business scheduling or GoalDirected convergence here.
+- Do not complete production Deep Agent, MCP, sandbox, ingestion, or asynchronous-subagent
+  capability sets.
+- Do not run Agent Server as a second macro scheduler.
+- Do not select production Temporal hosting or final worker infrastructure.
+- Do not use Temporal Reset as a BellLabs fork or use checkpoint editing as rollback.
+- Do not certify the remote post-model/pre-tool intervention safe point; that proof is deferred to
+  Stage 6.
+
+## 11. Outgoing handoff
+
+Publish:
+
+- accepted decision/supersession record;
+- requirements-to-code/test ownership matrix;
+- root/family/operation and message contracts;
+- Workflow ID, epoch, segment, generation, and lineage grammar;
+- task-queue and timeout/retry/heartbeat profiles;
+- resource lease and wait matrix;
+- journal/effect/settlement and reconciliation catalog;
+- communication receipts and certified-safe-point evidence;
+- replay histories, N/N+1 report, payload inspection, and process-loss results;
+- exact Stage 4 entry APIs and forbidden shortcuts.

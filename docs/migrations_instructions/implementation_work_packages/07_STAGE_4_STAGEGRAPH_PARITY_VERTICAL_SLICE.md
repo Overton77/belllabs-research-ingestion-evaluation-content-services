@@ -1,281 +1,256 @@
-# Stage 4 — generic capability-aware StageGraph scheduler and native parity slice
+# Stage 4 — Temporal StageGraph parity and heterogeneous vertical slice
 
-Status: not started  
-Mission type: production graph implementation around the existing deterministic StageGraph interpreter, with selected workflow shadow parity  
-Depends on: accepted Stages 1–3
+Status: `NOT_STARTED`
+Document role: normative Stage 4 implementation and parity-qualification package
+Mission type: production Temporal workflow-family implementation and parity qualification
+Depends on: accepted Stages 1–3, [06A_STAGES_3_TO_6_OPERATION_ASSEMBLY_CONCURRENCY_AND_LINEAGE_CONTRACT.md](06A_STAGES_3_TO_6_OPERATION_ASSEMBLY_CONCURRENCY_AND_LINEAGE_CONTRACT.md), [06B_STAGE_3_TEMPORAL_WORKFLOW_FOUNDATION.md](06B_STAGE_3_TEMPORAL_WORKFLOW_FOUNDATION.md), and [06C_STAGE_3_COMMUNICATION_AND_INTERVENTION_QUALIFICATION.md](06C_STAGE_3_COMMUNICATION_AND_INTERVENTION_QUALIFICATION.md)
 
-## 1. Mission
+## 1. Mission and accepted architecture
 
-Port the BellLabs StageGraph execution lifecycle to the standard Agent Server graph without translating Temporal mechanics or weakening the existing interpreter. The graph must hydrate exact per-stage execution bindings, reconcile run control, compute the fair admitted frontier, reserve hierarchical resources before effects, dispatch bounded workers through the Stage 3 `OperationExecutor` port, settle results deterministically, evaluate cycles/joins/reuse, wait/interrupt durably, and materialize the existing typed result.
+Implement production StageGraph as a Temporal workflow family rooted at `BellLabsRunWorkflow`.
+BellLabs PostgreSQL and application services own admission, lifecycle authority, accepted command
+facts, settlement, and terminality. `BellLabsRunWorkflow` is the stable internal execution handle:
+it coordinates and routes already-authorized commands, supervises the family child, and reconciles
+runtime observations against BellLabs authority. It does not admit, authorize, settle, or
+terminalize by itself. The StageGraph family workflow calls the existing pure
+`StageGraphInterpreter` to decide runnable work and starts one `OperationWorkflow` child per
+semantic operation attempt.
 
-Use a representative deterministic/native schema-grounding implementation as the first vertical slice, selected from the accepted Stage 0 baseline. Prove behavior against the legacy path with one runtime holding consequential provider-effect claims. Do not choose a slice that forces Stage 4 to construct a temporary Deep Agent, outbound MCP client, skill runtime, sandbox provider, or subagent implementation.
+Temporal is the durable macro-scheduler. LangGraph/Deep Agents may exist only inside bounded
+operation runtimes. There is no Agent Server or LangGraph macro-scheduler, no LangGraph `Send`
+fan-out, and no gather barrier. The StageGraph workflow processes child completions incrementally,
+requests authoritative CAS settlement through BellLabs application services, and recomputes the
+frontier from the resulting accepted projection after every settlement or intervention.
 
-Stage 4 is capability-aware because every stage is bound to an exact requirement and assembly digest. It is capability-mechanics-free because later adapters execute behind the unchanged operation port. Follow [06A_STAGES_3_TO_6_OPERATION_ASSEMBLY_CONCURRENCY_AND_LINEAGE_CONTRACT.md](06A_STAGES_3_TO_6_OPERATION_ASSEMBLY_CONCURRENCY_AND_LINEAGE_CONTRACT.md).
+The first proof is deliberately heterogeneous: a small StageGraph containing a native operation and a local Deep Agent operation, an early join, inbox command injection, and cancellation. This pulls the smallest exact Deep Agents operation adapter needed for composition into Stage 4; the full reusable harness and GoalDirected proof remain Stage 5.
 
-## 2. Permission to clarify or interview
-
-The agent may interview the owner before starting. Clarify:
-
-- which Workflow Type/Implementation is the first parity target;
-- accepted parity dimensions and tolerances for semantic/agentic outputs;
-- whether the direct reconciliation service remains one coarse operation or is decomposed into declared stages now;
-- shadow execution policy for external reads/writes and cost;
-- execution epoch greater than one: implement now or reject at admission;
-- failure/degradation behavior for optional providers;
-- generated native graph optimization remains out of scope unless owner changes D-03;
-- the deterministic/native vertical slice that does not depend on Stage 5/6 adapters;
-- whether optimistic execution remains disabled, as required by default, or a separately published pure/read-only policy will be designed for a later stage.
-
-## 3. Existing BellLabs seams to preserve
-
-Inspect and reuse:
-
-- `app/domain/orchestration/interpreter.py::StageGraphInterpreter`;
-- StageGraph contracts/identities/bindings in `app/domain/orchestration/`;
-- `app/application/orchestration.py::StageGraphLaunchService` and `WorkflowLaunchDispatcher`;
-- `StageOperationExecutor`, `WorkflowEvaluator`, and lifecycle gateway ports;
-- `RunControlService`, pure lifecycle reducer, budget/outbox repositories;
-- control-plane Workflow Type/Implementation/ERC compilation;
-- coordinator prepared tickets/semantic bindings/results;
-- schema-grounding application services and immutable records;
-- legacy `app/temporal/stagegraph_workflow.py` as behavior evidence, not target topology;
-- Stage 3 `OperationExecutor`, lineage, resource-envelope/lease, typed failure/outcome, and adapter-conformance contracts from `06A`.
-
-Do not copy provider-specific workflow/activity retries into the new domain path.
-
-## 4. Target graph shape
-
-Implement stable nodes equivalent to:
+## 2. Authority and topology
 
 ```text
-hydrate_runtime_binding
-reconcile_run_control
-compute_frontier
-reserve_frontier
-dispatch_ready
-execute_operation
-settle_frontier
-evaluate_cycles_and_reuse
-wait_or_interrupt
-materialize_result
-terminalize
-reconcile_or_fail_safely
+BellLabsRunWorkflow
+└── StageGraphWorkflow (family workflow; pure interpreter loop)
+    ├── OperationWorkflow(native)
+    ├── OperationWorkflow(local_deep_agent)
+    └── later OperationWorkflow children selected by the interpreter
 ```
 
-Exact names become checkpoint compatibility surfaces. If Stage 2 published placeholder names, preserve or version them deliberately.
+Required ownership:
 
-## 5. Deliverables
+- PostgreSQL BellLabs lifecycle, operation journal, effects, usage, evidence, and result bindings remain authoritative.
+- Temporal history is durable execution evidence and replay state, not an alternate business database.
+- The pure interpreter alone decides frontier membership, joins, cycles, invalidation, reuse, and semantic retries.
+- `OperationWorkflow` owns one semantic operation attempt and its bounded technical attempts.
+- Activities perform I/O and provider calls; workflow code remains deterministic and replay-safe.
+- Only authoritative application services using expected-version CAS settle stage and run transitions.
+- `BellLabsRunWorkflow` is the stable target for signals, updates, queries, and cancellation.
 
-### 5.1 StageGraph state and reducers
+Do not copy legacy Temporal mechanics blindly. Reuse domain contracts and accepted behavior while implementing the Stage 3 Temporal foundation.
 
-Implement compact channels for:
+## 3. Family workflow state
 
-- authoritative stage projection ref/version;
-- workflow cycle and fairness cursor;
-- exact dispatch batch and semantic keys;
-- pending result/failure refs with conflict reducer;
-- typed `pending_external_work` refs with conflict reducer, capable of representing decision, provider job, sandbox job, async child, and linked-run waits without importing Stage 6 SDK types;
-- wait projection and retained/released resource-lease refs;
-- immutable reuse candidates;
-- common Stage 3 channels.
+Keep compact deterministic state sufficient to replay orchestration:
 
-Parallel workers return refs/manifests only and never mutate `stage_projection`. One deterministic settlement node sorts by semantic identity and invokes existing application/domain transitions through CAS.
+- run/epoch, Workflow Type/Implementation, RunPlan, graph, and assembly digests;
+- authoritative stage-projection ref/version and fairness cursor;
+- active child map keyed by semantic operation attempt identity;
+- child Workflow ID, first-run ID, current-run ID when known, operation binding digest, and cancellation state;
+- ordered completion inbox containing compact immutable result/error manifest refs;
+- pending decision, communication, provider wait, and reconciliation refs;
+- retained/released resource-lease refs;
+- Continue-As-New generation and predecessor history link;
+- terminal result ref or typed terminal failure.
 
-Publish the generic operation-state projection from `06A` now, including `RESERVED`, `DISPATCHED`, `RUNNING`, `WAITING_ON_DECISION`, `WAITING_ON_EXTERNAL`, `WAITING_ON_ASYNC_CHILD`, `READY_TO_RECONCILE`, `SETTLING`, and typed terminal dispositions. Stage 6 fills async-child bindings behind these generic channels; it must not add an ad hoc scheduler node/channel or store Agent Protocol objects in checkpoint state.
+Never place full transcripts, large artifacts, secrets, PHI, provider SDK objects, sandbox handles, or mutable domain projections in workflow state.
 
-### 5.2 Hydration/reconciliation
+## 4. Deterministic scheduling loop
 
-- load exact ERC/RunPlan/assembly and operation registry by digest;
-- require exactly one `StageCapabilityRequirement` and `StageExecutionBinding` for every selected stage/variant;
-- load the exact `OperationAssemblySpec`, resource envelope, input/output projections, and compatibility key without constructing provider resources;
-- verify all published refs and implementation binding;
-- verify runtime binding/endpoint/graph/schema compatibility;
-- read current lifecycle/budget/decision state;
-- rebuild compact projection if checkpoint lags accepted PostgreSQL truth;
-- fail closed on mismatched digests or impossible transitions.
+For every activation:
 
-### 5.3 Fair frontier and reservations
+1. Reconcile the compact workflow projection with authoritative PostgreSQL versions.
+2. Drain accepted signals/updates and classify them through the Stage 3 communication/intervention contracts.
+3. Drain child completion notifications in canonical order.
+4. For each completion individually, validate identity and digests, settle effects/usage/result exactly once through expected-version CAS, and update the compact projection.
+5. After each accepted settlement, call the pure interpreter immediately.
+6. Reserve the interpreter-selected operation and subordinate capacity in canonical order.
+7. Start newly admitted `OperationWorkflow` children idempotently with stable Workflow IDs.
+8. Apply wait, slow-sibling, cancellation, invalidation, and reuse policy.
+9. Continue waiting on child completions, timers, or signals; terminalize only through BellLabs authority.
 
-Call the pure interpreter with current projections. Enforce the minimum of:
+Canonical same-activation ordering is:
 
-- blueprint maximum parallel stages;
-- admitted BellLabs run concurrency;
-- reserved provider/operation limits;
-- deployment/runtime capacity;
-- feature-specific ceilings.
+```text
+(authoritative completion time bucket,
+ stage semantic key,
+ cycle,
+ semantic attempt,
+ child workflow ID,
+ manifest digest)
+```
 
-Preserve fairness cursor, joins, cycle ceilings, waits, reuse, and invalidation. Persist semantic attempt identities and acquire budget/concurrency/effect claims plus the Stage 3 hierarchical resource leases before `Send` fan-out. Use the canonical acquisition order and protect resumption capacity. Frontier slots, operation-worker slots, and subordinate model/tool/MCP/subagent slots remain distinct.
+Do not depend on Temporal event arrival order for business ordering. If two completions have the same authoritative logical timestamp, the canonical semantic ordering above determines settlement and resulting frontier decisions.
 
-Use barriers or controlled clocks to prove actual worker overlap and maximum-observed concurrency. Randomized result ordering is necessary reducer evidence but is not sufficient proof of parallel execution.
+## 5. Incremental joins and slow siblings
 
-Ordinary Stage 4 scheduling is dependency-safe concurrency, not optimistic speculation. Keep every `speculation_policy_ref` disabled. A future pure/read-only speculative adapter must follow `06A`, quarantine outputs, and pass a separate gate; it cannot be inferred from idempotency or `Send` fan-out.
+Implement all declared dependency modes, including:
 
-### 5.4 Operation registry
+- `all`;
+- `any(1)`;
+- `minimum(k)`;
+- optional/soft dependencies;
+- cycle-local and cross-cycle dependencies;
+- reusable results and invalidated descendants.
 
-Implement exact registry dispatch through the Stage 3 `OperationExecutor` port for accepted initial kinds:
+`any(1)` and `minimum(k)` must advance as soon as their threshold is authoritatively satisfied. They must not wait for unrelated or unnecessary siblings. Tests must prove the downstream child starts before the slow sibling completes.
 
-- deterministic async Python/application service;
-- deterministic invocation-scoped subgraph when it has no Stage 5/6 capability dependency;
-- typed test adapters for completed/waiting/paused/degraded/failed/cancelled conformance outcomes;
-- non-executable, readiness-reporting placeholders for `agent_harness`, MCP-backed, sandbox, async-child, and linked-run kinds that later stages register behind the same port.
+Every join declares a slow-sibling policy:
 
-Registry inputs are frozen `StageExecutionBinding`/`OperationAssemblySpec` records. Reject unknown kind, schema drift, missing capability, mutable alias, absent per-stage binding, or deployment-incompatible implementation with the shared typed failure taxonomy. Do not silently fall back to a plain agent or hard-coded model.
+- `allow_to_finish`: retain the sibling for possible reuse/evidence;
+- `cancel_when_unneeded`: request child cancellation after the join commits;
+- `detach_from_join`: keep supervision and accounting but remove it from join blocking;
+- `required_for_terminal_obligation`: allow early downstream progress but prevent terminality until the obligation settles.
 
-### 5.5 Worker execution boundary
+Late sibling results are never silently attached. The interpreter and authoritative version decide whether they are accepted, reused, quarantined, or rejected as stale.
 
-Every operation:
+## 6. OperationWorkflow boundary
 
-1. reloads/verifies the exact stage requirement, execution binding, operation assembly, resource lease, and compatibility manifest;
-2. uses stable semantic and effect identities;
-3. derives deadline/cancellation;
-4. invokes native async adapter;
-5. writes immutable result/error/usage/evidence refs;
-6. never applies lifecycle transition directly;
-7. returns one compact manifest for settlement.
+Every `OperationWorkflow`:
 
-The manifest includes or resolves the complete `ExecutionLineageEnvelope`. Worker code cannot choose a different model, prompt, tool, skill, MCP server, child, backend, verifier, or fallback at runtime.
+1. verifies the exact `StageCapabilityRequirement`, `StageExecutionBinding`, `OperationAssemblySpec`, compatibility key, and resource lease;
+2. records one stable semantic attempt and distinct technical/runtime attempts;
+3. derives timeout, heartbeat, retry, and cancellation from the frozen binding;
+4. invokes only registered activities/adapters;
+5. persists immutable output/error/usage/evidence manifests;
+6. returns a compact typed completion manifest;
+7. never mutates StageGraph or run lifecycle directly.
 
-Runtime replay reuses the same semantic identity. Semantic retry is created only by the interpreter/domain policy.
+The shared adapter contract includes completed, waiting-on-decision, waiting-on-external, paused, degraded, failed, and cancelled outcomes. Unknown or unavailable capability returns the shared typed failure; there is no plain-agent fallback.
 
-### 5.6 Deterministic settlement and cycle evaluation
+Runtime replay preserves semantic identity. A new semantic retry exists only when the pure interpreter and authoritative domain transition create it.
 
-- sort result/failure manifests deterministically;
-- verify digests/schemas/attempt identities;
-- settle effect/usage/budget exactly once;
-- apply existing StageGraph interpreter/application transition through expected-version CAS;
-- evaluate joins, stage/workflow cycles, descendant invalidation, and reuse;
-- emit durable events and compact checkpoint updates;
-- reconcile conflicts rather than last-writer-wins.
+## 7. First heterogeneous vertical proof
 
-### 5.7 Wait, pause, resume, cancellation, and readiness
+Publish a small production-shaped Workflow Implementation:
 
-Map external wait, human decision, pause, and readiness conditions to durable BellLabs state plus Stage 3 interrupts. Resume begins by reconciliation. Cancellation cooperatively stops fan-out/operations and settles observed usage. Wait/resume must survive process loss.
+```mermaid
+flowchart LR
+    H["hydrate input"] --> N["native normalize"]
+    H --> D["local Deep Agent research"]
+    N --> J{"any(1) early join"}
+    D --> J
+    J --> M["native materialize"]
+```
 
-### 5.8 Result materialization and terminality
+Requirements:
 
-Build the existing typed StageGraph workflow result from accepted immutable refs. Terminal node:
+- `N` is a deterministic/native operation.
+- `D` uses an exact local Deep Agents binding with bounded model turns, context, middleware, tools, reviewed skill refs, filesystem policy, and typed output.
+- `N` and `D` overlap under controlled clocks.
+- The fast branch satisfies `any(1)` and starts `M` while the slow branch remains active.
+- An inbox command is sent to `BellLabsRunWorkflow`, durably classified, authorized, deduplicated, and routed to the addressable target.
+- A cancellation case proves cooperative child cancellation, late-completion handling, observed-usage settlement, and stable terminal lineage.
+- The Deep Agent remains operation-local; it does not own StageGraph scheduling or BellLabs terminality.
 
-- verifies required obligations and outputs;
-- checks no unresolved required wait/operation/effect/usage;
-- calls BellLabs terminal completion service with expected version;
-- records final result binding/ref;
-- cannot terminalize from checkpoint state alone.
+## 8. Communication and intervention
 
-### 5.9 Schema-grounding lineage
+Use the exact message envelope, target identity, dedupe key, authorization, and disposition contracts from `06C`.
 
-For the selected schema workflow, preserve:
+- Signals carry notifications or commands that do not require synchronous acceptance.
+- Updates validate commands requiring an accepted/rejected response.
+- Queries are non-mutating and read compact workflow state.
+- Every accepted command is journaled before consequential action.
+- Unsupported target, stale generation, invalid authority, conflicting duplicate, and terminal-run intervention fail with typed dispositions.
+- Operation-addressed injection is delivered through a durable child signal/update or authoritative inbox ref; it is never appended directly to an agent transcript.
+- Pause, resume, cancel, revise, evidence injection, and decision response retain distinct command types.
 
-- exact catalog/selection/projection/deployment/workspace/capability lineage;
-- deterministic graph admission before executor creation;
-- no arbitrary Cypher;
-- immutable intent/result/evidence records;
-- successful-zero/rejected/failed distinctions;
-- deterministic latest-record ordering;
-- typed final result compatibility.
+## 9. Waits, cycles, reuse, and invalidation
 
-### 5.10 Shadow comparison harness
+Prove:
 
-Run identical frozen bindings/input manifests through legacy and LangGraph paths.
+- durable timers and external-decision waits survive worker/process loss;
+- cycles obey exact ceilings and semantic identities;
+- fairness cursor persists across wakeups and Continue-As-New;
+- reuse verifies implementation, input, policy, evidence, and authority compatibility;
+- accepted upstream revision invalidates descendants deterministically;
+- active invalidated children receive policy-driven cancellation and late results cannot settle stale versions;
+- no wait occupies an activity worker;
+- resumption capacity is protected from frontier saturation.
 
-Rules:
+## 10. Continue-As-New and active-child reconciliation
 
-- one active runtime holds provider-effect claim;
-- passive shadow uses captured/read-only results where a claim cannot be shared safely;
-- compare schedule semantics, obligations, outputs, evidence, usage, budgets, and result contracts;
-- do not require incidental trace ordering to match;
-- preserve rejected/failure behavior as valid parity cases.
+Continue-As-New is mandatory before configured history/event/size thresholds. Before continuation:
 
-## 6. Required tests
+1. persist an immutable continuation manifest;
+2. record every active child identity and binding digest;
+3. record pending completions, waits, timers, commands, leases, and authoritative versions;
+4. reconcile child start ambiguity using stable Workflow IDs;
+5. carry only compact state into the new run.
 
-### Pure/domain parity
+The new run must reconcile active children before starting replacements. It must handle:
 
-- all existing `StageGraphInterpreter` tests against graph routing/settlement;
-- dependency modes and joins;
-- fairness under constrained slots;
-- stage/workflow cycles and ceilings;
-- invalidation and reuse;
-- wait/readiness/failure/degradation;
-- semantic identities and deterministic ordering.
+- child still running;
+- child completed before continuation;
+- completion signal duplicated across generations;
+- child Continue-As-New with changed current-run ID;
+- parent cancellation during handoff;
+- child not found after ambiguous start;
+- authoritative operation already settled;
+- binding or deployment incompatibility.
 
-### Reducer/concurrency
+No child is duplicated merely because the parent continued. Parent Close Policy and child cancellation policy must be explicit and tested.
 
-- multiple roots and joins via `Send`;
-- global/per-stage/runtime caps before fan-out;
-- randomized completion order;
-- barrier/controlled-clock proof that eligible workers actually overlap;
-- observed concurrency respects workflow, stage, operation-worker, tenant, and deployment limits;
-- lease release on completion/failure/cancel and protected resumption capacity;
-- duplicate same-digest result;
-- duplicate conflicting result incident;
-- cancellation mid-frontier;
-- no shared mutable projection from workers.
+## 11. Required tests
 
-### Effects/recovery
+### Interpreter and scheduling
 
-- crash before/after operation call and before/after settlement;
-- provider timeout/ambiguous result;
-- no duplicate external effect;
-- restart from every meaningful checkpoint;
-- interrupt/wait resume;
-- stale lifecycle version reconciliation.
+- all existing `StageGraphInterpreter` cases;
+- roots, joins, fairness, cycles, ceilings, waits, reuse, and invalidation;
+- `any(1)` and `minimum(k)` threshold progress before slow siblings finish;
+- each slow-sibling policy;
+- recomputation after each completion rather than after frontier exhaustion;
+- same-time completion canonical ordering and replay equality;
+- randomized arrival with deterministic final projection.
 
-### Binding, adapter, and lineage
+### Durability and effects
 
-- missing or duplicate per-stage requirement/execution binding fails compilation/hydration;
-- native and typed test adapters pass the shared `OperationExecutor` conformance suite;
-- unimplemented agent/MCP/sandbox/async kinds return typed `capability_unavailable` and never construct a fallback;
-- different stage variants select different exact assemblies without changing scheduler nodes;
-- final typed result traces through every stage, semantic/runtime attempt, assembly, input/output manifest, effect, usage settlement, and trace ref;
-- task/thread/run/operation IDs fail validation when placed in the wrong typed field;
-- all Stage 4 speculation policies remain disabled.
+- crash before/after reserve, child start, activity effect, manifest persistence, CAS settlement, and terminal binding;
+- duplicate start, duplicate completion, conflicting manifest, stale CAS, and ambiguous provider result;
+- no duplicate consequential effect;
+- wait/resume and cancellation across worker loss;
+- Continue-As-New at multiple loop points with active-child reconciliation;
+- history and payload thresholds remain bounded.
 
-### Vertical-slice E2E
+### Concurrency and capacity
 
-- prepare/admit/dispatch/stream/wait/cancel/result through authenticated APIs;
-- selected deterministic/native schema workflow accepted and rejected cases;
-- legacy versus graph parity matrix;
-- checkpoint state size and prohibited-data inspection;
-- LangSmith trace hierarchy and redaction.
+- controlled-clock proof of actual native/Deep Agent overlap;
+- run, operation, tenant, deployment, model, and tool ceilings;
+- canonical lease acquisition/release and protected resumption slots;
+- cancellation mid-frontier and no leaked lease;
+- no activity or child worker starvation at minimum supported capacity.
 
-## 7. Gate
+### Communication and vertical E2E
+
+- prepare/admit/start/signal/update/query/stream/cancel/result through authenticated APIs;
+- accepted, duplicate, stale, unauthorized, and conflicting inbox commands;
+- local Deep Agent injection at a declared safe boundary;
+- native plus Deep Agent early-join proof;
+- typed result and complete execution lineage;
+- trace hierarchy/redaction and prohibited-payload inspection.
+
+## 12. Gate
 
 Stage 4 passes when:
 
-- existing pure interpreter behavioral tests pass against graph runtime;
-- Agent Server E2E proves joins, concurrency, fairness, cycles, wait/resume, crash recovery, invalidation/reuse, cancellation, and stable effects;
-- chosen vertical slice matches accepted legacy contracts/results/evidence within owner-approved semantic tolerance;
-- one runtime only owns consequential effects in shadow;
-- schema-grounding lineage and typed results match accepted contracts;
-- every stage/variant has an exact requirement and execution binding and every native adapter passes the shared conformance suite;
-- measured worker overlap proves real bounded parallelism without resource over-admission or leakage;
-- Deep Agents, MCP, skills, sandboxes, sync/async subagents, and speculative execution are not temporarily implemented in the Stage 4 graph;
-- top-level checkpoints contain no full transcripts, large payloads, secrets, or PHI;
-- execution epoch policy is implemented or rejected at admission;
-- no Temporal imports exist in the Agent Server graph package;
+- production StageGraph runs as a Temporal family under `BellLabsRunWorkflow`;
+- pure interpreter decisions and authoritative CAS settlement remain the only scheduling/business authority;
+- no LangGraph `Send`, gather barrier, or Agent Server macro-scheduler exists;
+- incremental completion handling proves early `any(1)`/`minimum(k)` progress;
+- deterministic same-time ordering, slow siblings, waits, cycles, reuse, invalidation, cancellation, and Continue-As-New reconciliation pass;
+- the native + local Deep Agent + early join + inbox injection/cancellation proof passes;
+- exact bindings, resource envelopes, effect ownership, compact state, and full lineage pass;
 - outgoing handoff is accepted.
 
-## 8. Explicit non-goals
+## 13. Explicit non-goals and handoff
 
-- Do not replace the generic interpreter with generated graphs.
-- Do not make every stage an agent.
-- Do not complete full GoalDirected/Deep Agents behavior.
-- Do not construct a minimal or temporary agent/MCP capability stack; Stage 5/6 adapters plug into the Stage 3 port.
-- Do not enable preview async/dynamic delegation.
-- Do not change default runtime for broad production admissions.
+Do not make every stage an agent, place provider SDK state in workflow history, let activities choose scheduling, or add remote agent/sandbox/MCP provider mechanics. Do not enable QuickJS, dynamic delegation, or speculative execution.
 
-## 9. Outgoing handoff additions
-
-Include:
-
-- stable graph topology/state/reducer manifest;
-- stage requirement/execution-binding catalog and exact assembly digests;
-- operation registry kind/readiness matrix and shared conformance results;
-- parity matrix by legacy test/workflow behavior;
-- measured concurrency/fairness/resource-lease/reducer proof;
-- crash/effect/settlement matrix;
-- selected vertical-slice trace/evidence/result refs;
-- checkpoint size/prohibited-data report;
-- known semantic differences and accepted decisions;
-- shadow effect-ownership strategy;
-- end-to-end lineage query/report for the native slice;
-- reusable operation/hydration/reconciliation pieces for the Stage 5 Deep Agent adapter and GoalDirected.
+Handoff includes workflow/event topology, compatibility and task-queue manifest, interpreter parity matrix, early-join timing evidence, same-time ordering vectors, slow-sibling matrix, Continue-As-New recovery matrix, communication qualification evidence, Deep Agent slice assembly, measured capacity, effect/crash matrix, checkpoint/history sizes, and end-to-end lineage report. Stage 5 must reuse this Temporal family and `OperationWorkflow`; it may not replace it with a LangGraph macro lifecycle.

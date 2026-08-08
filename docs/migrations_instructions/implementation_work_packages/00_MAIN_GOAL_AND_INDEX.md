@@ -1,281 +1,216 @@
-# BellLabs LangGraph, Deep Agents, and LangSmith migration implementation goal and index
+# BellLabs Temporal, LangSmith, and Deep Agents implementation goal and index
 
-Status: implementation work-package index; architecture proposals remain subject to owner acceptance  
-Scope: `biotech-research-ingestion-evaluation-system`  
-Planning unit: evidence-gated implementation stages, not calendar estimates  
-Primary outcome: restore and then exceed the current BellLabs research-backend capability on a governed LangGraph and Agent Server runtime without replacing BellLabs domain authority
+Status: accepted architecture and normative implementation work-package index
+Recorded: 2026-08-08
+Scope: `biotech-research-ingestion-evaluation-system`
+Planning unit: evidence-gated implementation stages, not calendar estimates
 
-Implementation companion: [App runtime porting reference](../APP_RUNTIME_PORTING_REFERENCE.md) extracts the reusable workflow, operation, skill, MCP, sandbox, snapshot, schema-selection, and API contracts from the legacy app without treating its provider adapters as target architecture.
+## 1. Accepted target
 
-## 1. Main goal
+BellLabs will retain and enhance its research, ingestion, evaluation, and content-production backend under this division of responsibility:
 
-Migrate the BellLabs research, ingestion, evaluation, and content-production backend from Temporal/OpenAI Agents execution mechanics to a standard LangSmith Deployment running custom LangGraph graphs, with Deep Agents used selectively as the bounded operation harness and LangSmith used for deployment, tracing, evaluation, Studio, prompts/context, and runtime operations.
+- **Temporal is the sole production macro-workflow runtime.** It supplies durable workflows, child workflows, activities, messages, timers, retries, cancellation, replay, and Continue-As-New.
+- **BellLabs application services and pure interpreters are semantic authority.** PostgreSQL/run control owns lifecycle, admission, budgets, approvals, claims, effects, settlements, and terminality. `StageGraphInterpreter` and `GoalDirectedInterpreter` own deterministic scheduling and convergence semantics.
+- **LangGraph and Deep Agents provide bounded operation cognition.** They may plan, use exact tools and skills, manage bounded context/filesystems, and perform operation-local delegation only under frozen BellLabs bindings.
+- **LangSmith provides tracing, evaluation, sandboxes, graph development/registration, Studio, and selected bounded deployments.** A LangSmith deployment never becomes a competing macro scheduler.
+- **The BellLabs API is the sole governed public facade.** Clients and the coordinator do not call Temporal, Agent Server, providers, sandboxes, or worker-specific endpoints as alternate product APIs.
 
-The migration is successful only when:
+The hierarchy is:
 
-1. BellLabs retains authority for immutable definitions, exact compilation, admission, lifecycle compare-and-set, budgets, approvals, effect claims, evidence acceptance, and terminality.
-2. LangGraph supplies durable execution, checkpoints, interrupts, resume, replay mechanics, streaming, and graph scheduling without becoming a second domain authority.
-3. Deep Agents supplies selected planning, filesystem, skill, context, synchronous delegation, and optional interpreter/async-task mechanics inside exact operation bindings.
-4. Agent Server exposes both graph families and the required custom authenticated BellLabs routes, and can be built, tested, deployed, observed, recovered, and rolled back.
-5. The existing coordinator can discover, compile, prepare, launch, observe, intervene, and retrieve typed results through one runtime-neutral facade without learning vendor IDs or credentials.
-6. StageGraph and GoalDirected behavior reaches accepted parity with the current system before legacy execution is drained.
-7. MCP servers, tools, prompts, skills, subagents, async subagents, QuickJS, sandboxes, snapshots, memory, and middleware are exact compiled capabilities with maturity, authority, budget, isolation, and fallback contracts.
-8. Shadow and canary operation cannot duplicate consequential provider effects.
-9. Traces and evaluations provide evidence for promotion but never authorize or terminalize a workflow.
+```text
+BellLabs API/control service
+  -> BellLabsRunWorkflow                         # distinct stable root
+       -> StageGraphWorkflow | GoalDirectedWorkflow | other family child
+            -> OperationWorkflow                 # generic policy-driven child
+                 -> native | Deep Agent/LangGraph | MCP | sandbox | external-job adapter
+```
 
-## 2. Governing system invariant
+`BellLabsRunWorkflow` owns macro lifecycle mechanics but not family semantics. Family workflows apply the exact pure interpreter. `OperationWorkflow` owns one independently durable operation lifecycle and delegates cognition or provider work through an exact `OperationAssemblySpec`.
+
+Self-hosted Temporal is the initial implementation and qualification target. Stage 8 selects and proves the final AWS topology; no earlier package may silently hard-code that final topology.
+
+## 2. Governing invariant and preserved contracts
 
 > Discover broadly, select narrowly, compile exactly, admit authoritatively, execute from frozen bindings, reconcile continuously, and terminalize only from accepted evidence.
 
-The implementation must preserve this direction of control:
+Every stage must preserve or deliberately version, migrate, and prove compatibility for:
+
+- immutable Workflow Types, Workflow Implementations, blueprints, ERCs, RunPlans, and exact runtime bindings;
+- `StageCapabilityRequirement`, `StageExecutionBinding`, `OperationAssemblySpec`, resource/deadline envelopes, and capability maturity;
+- canonical semantic and runtime lineage;
+- authoritative operation journals, attempt inboxes, ledgers, outboxes, effect claims, usage, evidence acceptance, and exactly-once settlement identities;
+- typed results, failures, commands, facts, interventions, and readiness projections;
+- tenant isolation, authorization, redaction, secret references, and research-versus-medical-advice boundaries.
+
+Execution produces evidence. BellLabs authorizes, accepts, rejects, settles, and terminalizes it.
+
+## 3. Non-negotiable boundaries
+
+- There is exactly one macro scheduler for an admitted implementation: Temporal. Do not run a production Agent Server StageGraph or GoalDirected graph beside it.
+- Do not replace pure interpreter semantics with model planning, Temporal workflow code, provider state, or graph checkpoint state.
+- Do not bypass the BellLabs API or application ports to call a provider, Temporal command surface, Agent Server, or sandbox as an alternative public control path.
+- Do not let runtime discovery, mutable aliases, installed packages, prompts, models, tools, MCP servers, skills, subagents, checkpoints, traces, or deployments grant authority.
+- Do not claim exactly-once provider execution. Use stable claims, idempotency identities, reconciliation, and exactly-once BellLabs settlement.
+- Do not place secrets, PHI, raw corpora, unrestricted transcripts, or large artifacts in Temporal histories, graph state, prompts, traces, logs, heartbeats, or handoffs.
+- Do not expose arbitrary graph-state mutation or Temporal Reset as a normal product intervention or fork.
+- Do not make preview provider-async or interpreter features critical-path dependencies.
+- Do not hand off a stage on code completion alone. Its package-specific gate and evidence manifest must pass.
+- Unfinished Agent Server macro graphs must be repurposed as bounded operation implementations, qualification/development graphs, visualizations, or governed facade internals, or removed with preserved evidence. They must not be completed as a production fallback macro scheduler.
+- Never commit secrets or PHI. Research output is not medical advice.
+
+## 4. Authority and runtime ownership
+
+| Concern | Owner |
+|---|---|
+| Definitions, exact compilation, ERCs, RunPlans, assemblies | BellLabs control plane |
+| Admission, lifecycle, budgets, approvals, claims, effects, settlement, terminality | BellLabs PostgreSQL/application services |
+| StageGraph readiness and GoalDirected convergence | BellLabs pure interpreters |
+| Durable macro execution and independently durable operation coordination | Temporal |
+| Bounded planning, agent sessions, tools, skills, operation-local delegation | LangGraph/Deep Agents under exact bindings |
+| Traces, datasets, experiments, online evaluators | LangSmith as non-authoritative evidence |
+| Sandboxes and selected remote graph deployments | LangSmith/provider ports under exact bindings |
+| Public commands, queries, streams, and typed results | BellLabs API |
+| Product-facing durable progress/events | BellLabs journal/outbox/projections |
+
+Temporal Event History is execution truth for replay, not the BellLabs product query model. Product durable events are authoritative for clients and downstream consumers. Temporal Queries are diagnostics only.
+
+## 5. Communication and continuity decisions
+
+The accepted communication model is:
+
+1. BellLabs owns an authoritative per-attempt **inbox, ledger, and outbox**. Temporal Signals/Updates and provider callbacks transport typed commands or facts; handlers deduplicate and reconcile through those stores.
+2. Exact **post-model/pre-tool** communication injection is required. It is certified for local bounded operation execution in Stage 3 and for remote LangSmith execution in Stage 6.
+3. A disruptive intervention is a governed saga: authorize, journal intent, pause/cancel or quiesce subordinate work, reconcile ambiguous effects, apply the typed change, resume/rebind, and emit durable outcome facts.
+4. Peer/subordinate communication is typed input. A message cannot alter StageGraph readiness or GoalDirected convergence until accepted evidence is settled and the pure interpreter consumes the resulting authoritative fact.
+5. Built-in synchronous Deep Agents subagents are operation-local. Independent lifecycle, cancellation, capacity, lineage, or settlement requires custom Temporal delegation. Provider-async execution is a subordinate adapter, not macro orchestration.
+6. Remote execution follows **start -> bind -> wait/reconcile**. Asynchronous provider completion is optional; polling or callback completion must converge through the same journal and settlement contracts.
+7. Continue-As-New preserves the same BellLabs run and execution epoch while creating a new technical execution segment. A product fork creates a new BellLabs run at epoch `1` with explicit parent/snapshot lineage.
+
+## 6. Five worker-pool classes
+
+The logical worker isolation classes are fixed; exact queues, counts, sizes, and AWS services are Stage 8 decisions:
+
+1. coordinator/family-workflow workers;
+2. agent/cognitive-operation workers;
+3. ingestion/I/O workers;
+4. sandbox-control/external-job workers;
+5. verification/reconciliation workers.
+
+Queue selection is compiled from exact operation and deployment compatibility bindings. A model or provider cannot choose an undeclared queue.
+
+## 7. Work-package index and dependency graph
+
+The file numbering is historical. New Stage 3 subpackages refine package `06`; they do not create extra product stages.
+
+| Package | Mission | Direct dependencies | Exit gate |
+|---|---|---|---|
+| [03 — Stage 0](03_STAGE_0_ARCHITECTURE_BASELINE_AND_QUALIFICATION.md) | Historical baseline/qualification; interpreted under this accepted index and architecture | None | Supersession and still-valid evidence recorded |
+| [04 — Stage 1](04_STAGE_1_RUNTIME_NEUTRAL_CONTRACTS_AND_OPERATION_JOURNAL.md) | Preserve/version runtime-neutral contracts, exact assemblies, journals, claims, effects, settlement, and lineage | Stage 0 amendments | Contract/migration compatibility evidence |
+| [05 — Stage 2](05_STAGE_2_AGENT_SERVER_FOUNDATION.md) | Preserve bounded Agent Server/LangGraph operation assets; prevent macro-runtime promotion | Stages 0–1 | Import-safe bounded assets and explicit repurpose/remove disposition |
+| [05A — Pre-Stage 3 closure](05A_PRE_STAGE_3_ENTRY_GATE_CLOSURE.md) | Reconcile earlier evidence with accepted Temporal architecture and publish compact entry handoff | Stages 0–2 | Accepted pre-Stage 3 manifest |
+| [06 — Stage 3 overview/contracts](06_STAGE_3_DURABILITY_HITL_STEERING_AND_RECOVERY.md) | Govern Stage 3 scope, root/family/operation contracts, messages, continuity, intervention, and recovery gates | `02A`, 04, 05A | Contributes `06` contract sections to `06-contract-frozen`; aggregate Stage 3 acceptance waits for 06B/06C |
+| [06A — Cross-stage assembly/concurrency/lineage](06A_STAGES_3_TO_6_OPERATION_ASSEMBLY_CONCURRENCY_AND_LINEAGE_CONTRACT.md) | Preserve exact operation assembly, hierarchical capacity, journals/effects/settlement, and canonical lineage across Stages 3–6 | 04, 05A | Contributes shared contract conformance to `06-contract-frozen` |
+| [06B — Temporal workflow foundation](06B_STAGE_3_TEMPORAL_WORKFLOW_FOUNDATION.md) | Implement self-hosted Temporal foundation, `BellLabsRunWorkflow`, family children, generic `OperationWorkflow`, five worker classes, replay/recovery/Continue-As-New | `06-contract-frozen` | Crash/replay/continuity and independent-operation proof |
+| [06C — Communication/intervention qualification](06C_STAGE_3_COMMUNICATION_AND_INTERVENTION_QUALIFICATION.md) | Qualify inbox/ledger/outbox, typed messages, local post-model/pre-tool injection, disruptive saga, peer input, and settlement-before-readiness | `06-contract-frozen`, passed 06B implementation gate | Communication, dedupe, intervention, and negative-readiness proof |
+| [07 — Stage 4](07_STAGE_4_STAGEGRAPH_PARITY_VERTICAL_SLICE.md) | Implement Temporal-native StageGraph family workflow around the pure interpreter and generic operation child | Entire Stage 3 package | Small heterogeneous `all`/`any`/`minimum(k)` vertical passes |
+| [08 — Stage 5](08_STAGE_5_GOAL_DIRECTED_DEEP_AGENTS_HARNESS.md) | Implement GoalDirected family workflow plus reusable bounded Deep Agents operation harness | Stage 4 | GoalDirected research vertical, verifier, context rollover, and recovery pass |
+| [09 — Stage 6](09_STAGE_6_ADVANCED_CAPABILITY_ASSEMBLY.md) | Qualify advanced capabilities, remote LangSmith start-bind-wait/reconcile, sandboxes, provider async adapter, and heterogeneous composition | Stage 5 | Aggregate Stage 6 gate, including internal 09A exit proof |
+| [09A — Stage 6 proof](09A_STAGE_6_HETEROGENEOUS_STAGEGRAPH_COMPOSITION_PROOF.md) | Required heterogeneous StageGraph composition evidence internal to Stage 6 | Stage 4 baseline plus stable candidate adapters completed within 09 | Exact mixed-capability proof accepted for aggregate Stage 6 exit |
+| [10 — Stage 7](10_STAGE_7_API_COORDINATOR_OBSERVABILITY_EVALUATION_AND_SECURITY.md) | Deliver modular BellLabs API facade, coordinator integration, product events, observability/evaluation, and security | Aggregate Stage 6 acceptance after 09A | Governed E2E API, trace/eval, security, and operability gates |
+| [11 — Stage 8](11_STAGE_8_DEPLOYMENT_SHADOW_CANARY_CUTOVER_AND_DECOMMISSION.md) | Select final AWS self-host topology; deploy, shadow/canary, cut over, recover, and drain superseded runtime paths | Stage 7 | Hours-long failure, rollback, replay/versioning, SLO, and cutover gates |
+
+Explicit dependency graph:
 
 ```mermaid
 flowchart LR
-    Intent["Operator or coordinator intent"] --> Catalog["BellLabs discovery and exact definitions"]
-    Catalog --> Compile["Pure compilation to ERC and RunPlan"]
-    Compile --> Admission["Run-control admission and budget authority"]
-    Admission --> Dispatch["Transactional execution request and runtime binding"]
-    Dispatch --> AgentServer["Agent Server and LangGraph execution"]
-    AgentServer --> Harness["Bound operation harness"]
-    Harness --> Evidence["Immutable result, usage, and evidence refs"]
-    Evidence --> Settlement["BellLabs settlement and verification"]
-    Settlement --> Terminality["BellLabs terminal result"]
+    S03["03 / Stage 0"] --> S04["04 / Stage 1"]
+    S04 --> S05["05 / Stage 2"]
+    S05 --> S05A["05A / Pre-Stage 3 closure"]
+
+    A02["02A / owner amendments"] --> S06["06 / Stage 3 overview"]
+    S04 --> S06
+    S05A --> S06
+    S04 --> S06A["06A / shared contract"]
+    S05A --> S06A
+
+    S06 --> F["06-contract-frozen"]
+    S06A --> F
+    F --> S06B["06B"]
+    S06B --> S06C["06C"]
+    S06C --> S07["07 / Stage 4"]
+    S07 --> S08["08 / Stage 5"]
+    S08 --> S09["09 / Stage 6"]
+    S09 --> S09A["09A / internal Stage 6 exit proof"]
+    S09A --> S10["10 / Stage 7"]
+    S10 --> S11["11 / Stage 8"]
 ```
 
-Execution produces evidence. BellLabs accepts, rejects, settles, and terminalizes it.
+`02A` feeds package `06`; it is not a dependency of Stage 0 package `03`.
 
-## 3. Authority and source precedence
+No package may begin implementation merely because an upstream stage number exists. It needs every direct dependency's accepted handoff, exact evidence paths, requirement-matrix digest, and unresolved-risk disposition.
 
-When sources disagree, use this order:
+`06-contract-frozen` is an internal Stage 3 implementation-entry gate, not acceptance of package
+`06` or Stage 3. Aggregate Stage 3 acceptance occurs only after the `06B` and `06C` implementation
+and proof gates pass. Likewise, `09A` consumes stable candidate adapters produced during `09`; it is
+an internal Stage 6 exit proof and never an entry dependency of `09`.
 
-1. accepted product/domain specifications in `../../../../biotech-meta`;
-2. current domain and application code plus its tests;
-3. owner decisions recorded during a stage;
-4. [LANGGRAPH_DEEPAGENTS_RESEARCH_ROUND_2.md](../architectural_documents/LANGGRAPH_DEEPAGENTS_RESEARCH_ROUND_2.md);
-5. [LANGGRAPH_DEEPAGENTS_CONTROL_PLANE_MIGRATION_PLAN.md](../architectural_documents/LANGGRAPH_DEEPAGENTS_CONTROL_PLANE_MIGRATION_PLAN.md);
-6. [CONTROLLED_RUN_PROOF_OF_REPRESENTATION.md](../architectural_documents/CONTROLLED_RUN_PROOF_OF_REPRESENTATION.md);
-7. [LANGGRAPH_LANGSMITH_MIGRATION_RECOMMENDATIONS.md](../architectural_documents/LANGGRAPH_LANGSMITH_MIGRATION_RECOMMENDATIONS.md), which is explicitly unsettled;
-8. project-local `.agents/skills` for the exact installed or proposed ecosystem behavior;
-9. current official LangChain/LangSmith documentation;
-10. inference, which must be labeled and verified before it becomes a contract.
+## 8. Vertical-slice order and mandatory long-run gates
 
-Current live documentation is authoritative for current API shape, not for the version eventually pinned. The exact dependency-lock qualification in Stage 0 is the final authority for callable APIs, defaults, maturity labels, configuration keys, and platform behavior.
+The first production-shaped vertical is a **small heterogeneous StageGraph**: at least two materially different exact operation assemblies, independently durable execution, controlled slow sibling, early downstream release, deterministic settlement, and complete lineage.
 
-## 4. Non-negotiable boundaries
+The second vertical is **GoalDirected research**: bounded Deep Agents cognition, independent verifier, revision/convergence semantics from the pure interpreter, context rollover, typed interventions, and durable recovery.
 
-- Do not translate Temporal workflows node-for-node.
-- Do not replace the pure StageGraph or GoalDirected interpreters with unconstrained model planning.
-- Do not put lifecycle authority, budgets, approvals, terminality, secrets, PHI, raw corpora, or large artifacts in graph state, Store, prompts, skills, traces, or stream events.
-- Do not resolve mutable aliases after preparation/admission.
-- Do not let a model, prompt, skill, MCP server, tool, subagent, interpreter program, sandbox, checkpoint, assistant, or trace grant authority.
-- Do not treat `assistant_id` as a Workflow Type, a LangGraph checkpoint as a goal handoff checkpoint, or a framework run ID as a BellLabs run ID.
-- Do not claim exactly-once arbitrary provider execution. Implement at-least-once runtime execution with stable claims and exactly-once settlement identities.
-- Do not expose arbitrary `update_state` to normal callers.
-- Do not use a sandbox snapshot as current authority; restore by cloning and reacquiring live resources.
-- Do not use deployment-global credential-bearing MCP sessions.
-- Do not rely on local `stdio` MCP servers or host `.tools` paths in Cloud.
-- Do not add duplicate Deep Agents core middleware or ambiguous filesystem/search tools.
-- Do not make QuickJS a security sandbox.
-- Do not make preview async subagents or beta interpreter features critical-path dependencies.
-- Do not remove Temporal/OpenAI Agents execution until parity, canary, recovery, and rollback gates pass.
-- Do not reset broad PostgreSQL/Supabase scopes. Any reset needs a separate approved, backed-up destructive runbook with literal schema targets.
-- Never commit secrets or PHI. Research output is not medical advice.
+Stage 6 must execute hours-long remote/capability runs with worker loss, callback/poll ambiguity, cancellation, provider failure, reconciliation, and no duplicate effective settlement. Stage 8 repeats hours-long tests in the selected AWS topology and adds service/worker loss, N/N+1 replay, backlog recovery, rollback, and region/topology-specific drills.
 
-## 5. Target ownership model
+## 9. Decision history and supersession
 
-| Concern | Post-migration owner | Classification |
+Earlier package drafts proposed Agent Server as the primary macro runtime. That history is retained, but the accepted 2026-08-08 architecture supersedes its runtime meaning:
+
+| Decision | Historical meaning | Accepted supersession |
 |---|---|---|
-| Workflow Types, implementations, aliases, ERCs, RunPlans | BellLabs control plane | Authoritative |
-| Admission, lifecycle, budgets, decisions, effect claims, settlements, outbox | BellLabs PostgreSQL/run control | Authoritative |
-| Definitions, semantic records, context manifests, schema-grounding evidence | BellLabs MongoDB/S3/Neo4j boundaries | Authoritative or immutable semantic |
-| Threads, Agent Server runs, checkpoints, suspension, runtime streaming | LangGraph Agent Server | Execution mechanics/runtime facts |
-| Agent loop, planning, bounded filesystem, skills, sync delegation | LangChain/Deep Agents | Capability mechanics |
-| Cross-thread Store memory | Agent Server Store | Non-authoritative and revocable |
-| Outbound MCP | `langchain-mcp-adapters` behind BellLabs wrappers | Capability mechanics |
-| QuickJS interpreter and dynamic delegation | Feature-gated Deep Agents integration | Beta mechanics |
-| Async subagents | Feature-gated Agent Protocol integration | Preview runtime facts |
-| Shell, packages, browser, mutable files | Sandbox provider port, LangSmith first | Isolated execution mechanics |
-| Tracing, datasets, experiments, online evaluators | LangSmith | Observability/evaluation evidence |
-| Typed final result and readiness | BellLabs result/run-control services | Authoritative |
+| D-01 | Standard Agent Server is primary | Temporal is the sole macro runtime. Agent Server/LangSmith deployments are bounded operation, development, evaluation, or interaction surfaces only. |
+| D-05 | One parent Agent Server thread per BellLabs run/epoch | `BellLabsRunWorkflow` is the distinct root. Agent threads/checkpoints are subordinate operation lineage. Continue-As-New uses the same epoch/new segment; fork uses a new run/epoch 1. |
+| D-07 | Managed Agent Server persistence is primary production durability | Self-hosted Temporal provides initial macro durability; Stage 8 selects the final AWS self-host topology. Agent/checkpoint persistence remains subordinate cognition state. |
 
-## 6. Migration stage map
+D-02 through D-04 and D-08 through D-23 are amended, not erased: references to Agent Server or LangGraph scheduling now mean a Temporal family workflow applying the same pure semantic interpreter; thread/run/checkpoint facts become subordinate lineage; async subagents become provider adapters or custom Temporal delegation according to lifecycle; deployment references mean selected bounded LangSmith deployments. Exact contracts, authority, effects, evidence, and acceptance criteria remain in force unless an explicit row in `02A` says otherwise.
 
-The stages are deliberately larger units of work suitable for a frontier coding model with a large context window. They are not time estimates. A stage may be split during execution only when its accepted handoff records the split and preserves the gate.
+## 10. Stage start, handoff, and completion
 
-| Stage | Mission | Depends on | May proceed when |
-|---|---|---|---|
-| [Stage 0](03_STAGE_0_ARCHITECTURE_BASELINE_AND_QUALIFICATION.md) | Accept/amend architecture, reconcile baseline, and qualify the exact ecosystem/deployment matrix | None | Owner decisions and architecture-invalidating spikes are accepted |
-| [Stage 1](04_STAGE_1_RUNTIME_NEUTRAL_CONTRACTS_AND_OPERATION_JOURNAL.md) | Add runtime-neutral contracts, exact assembly definitions, SQL/RLS runtime binding and operation journal | Stage 0 | Critical contracts, transaction boundary, naming, and schemas pass |
-| [Stage 2](05_STAGE_2_AGENT_SERVER_FOUNDATION.md) | Add pinned dependencies and a side-effect-free standard Agent Server app with auth, graphs, routes, and tracing | Stages 0–1 | Both graphs import/inspect/run locally and resource auth is proven |
-| [Pre-Stage 3 entry closure](05A_PRE_STAGE_3_ENTRY_GATE_CLOSURE.md) | Amend Stage 1/2 contracts for D-17–D-23, prove isolated database authority and pinned durability/restart mechanics, and produce one compact Stage 3 handoff | Stage 2 local foundation | Blocks A–D pass and `PRE_STAGE_3_ENTRY_HANDOFF.md` is `ACCEPTED` |
-| [Stage 3](06_STAGE_3_DURABILITY_HITL_STEERING_AND_RECOVERY.md) | Implement the durable runtime kernel: dispatch/binding, canonical lineage, hierarchical resource leases, operation-executor contracts, interrupts, steering, cancellation, forks, streams, and reconciliation | Stages 1–2 | Crash/restart, lineage, resources, and intervention proofs pass without duplicate effects or leaked capacity |
-| [Stage 4](07_STAGE_4_STAGEGRAPH_PARITY_VERTICAL_SLICE.md) | Port the capability-aware generic StageGraph scheduler around the existing interpreter and prove a deterministic/native parity slice | Stages 1–3 | Scheduler, binding, concurrency, authority, effect, lineage, and schema-grounding parity pass without temporary agent/MCP mechanics |
-| [Stage 5](08_STAGE_5_GOAL_DIRECTED_DEEP_AGENTS_HARNESS.md) | Build the stable capability compiler and reusable Deep Agents/LangChain operation harness, compose it into StageGraph, then port GoalDirected | Stages 1–4 | Exact stable surface, StageGraph harness composition, Goal protection, verifier terminality, context, sync delegation, sandbox, lineage, and recovery pass |
-| [Stage 6](09_STAGE_6_ADVANCED_CAPABILITY_ASSEMBLY.md) | Complete stable MCP/skills/context/sandbox providers, prove heterogeneous StageGraph composition, qualify required default-off async subagents, and optionally qualify QuickJS/dynamic delegation | Stage 5; feature-specific Stage 0 spikes | Stable providers, heterogeneous composition, and async gates pass; only QuickJS/PTC/dynamic may remain deferred |
-| [Stage 7](10_STAGE_7_API_COORDINATOR_OBSERVABILITY_EVALUATION_AND_SECURITY.md) | Converge APIs/coordinator/MCP and establish trace, evaluation, security, operability, and production-like gates | Stages 3–6 | Full operator/coordinator path and release evidence pass |
-| [Stage 8](11_STAGE_8_DEPLOYMENT_SHADOW_CANARY_CUTOVER_AND_DECOMMISSION.md) | Deploy staging, shadow/canary exact bindings, cut over safely, then drain legacy runtime | Stage 7 | Staging, rollback, parity, SLO, recovery, and final drain gates pass |
+Before implementation, read in order: this index; [global gates](01_GLOBAL_HANDOFF_AND_STAGE_GATE_RULES.md);
+[owner amendments](02A_OWNER_AMENDMENTS_FOR_STAGES_3_TO_6.md) when applicable; the
+[canonical application codebase organization](../../CANONICAL_APPLICATION_CODEBASE_ORGANIZATION.md);
+the complete active package, its declared dependencies, and direct-dependency handoffs; accepted
+architecture proposals and contract documents; then the as-built guide, exact code, and tests named
+by the package. The canonical organization governs projected target paths and incremental move
+timing, but the active package remains implementation authority when a projected path differs.
 
-## 7. Critical path and optional tracks
+Each package must:
 
-Critical path:
+- publish its requirements-to-evidence matrix before substantive implementation;
+- preserve unrelated worktree changes;
+- list exact changed paths, migrations, commands, versions, artifacts, traces, and failures;
+- demonstrate that optional capabilities remain disabled unless qualified;
+- produce an evidence manifest with stable repository-relative paths;
+- obtain the package gate disposition before authorizing a dependent package.
 
-```text
-Stage 0 -> Stage 1 -> Stage 2
-        -> Pre-Stage 3 entry closure and compact accepted handoff
-        -> Stage 3 durable kernel
-        -> Stage 4 generic scheduler/native parity
-        -> Stage 5A stable compiler/harness
-        -> Stage 5B StageGraph harness composition
-        -> Stage 5C GoalDirected
-        -> Stage 6A stable provider completion
-        -> Stage 6B required async-subagent implementation
-        -> Stage 6C heterogeneous StageGraph proof and async qualification
-        -> Stage 7 -> Stage 8
-```
+The whole migration is done only when both workflow families pass semantic parity and recovery; the BellLabs API is the only public facade; no dual macro scheduler or provider bypass exists; exact assemblies and full lineage remain queryable; Stage 6 and Stage 8 hours-long failure gates pass; the AWS self-host topology, rollback, replay, worker versioning, and cutover pass; and superseded Agent Server macro paths are repurposed or removed without loss of historical evidence.
 
-Optional, independently gated tracks:
+## 11. Reference index
 
-- QuickJS pure `call`-mode transforms may join the stable path only after containment and replay tests.
-- QuickJS `turn`/`thread`, programmatic tool calling, and dynamic subagents remain disabled until their additional gates pass.
-- Bounded optimistic/speculative StageGraph execution remains default-off; if enabled, it is limited to published pure/read-only policies with quarantined outputs, deterministic commit barriers, invalidation, wasted-budget ceilings, and no consequential effective capabilities.
-- Async subagents are a required Stage 6 migration track under the accepted Stage 0 decision and remain default-off until their preview API, capacity, crash/orphan, update/cancel, tenant, lineage, StageGraph wait/resume, and reconciliation gates pass. They are not a deferable optional track unless the owner amends that decision.
-- Daytona or another sandbox provider remains a later adapter qualification. LangSmith Sandbox is the first target behind the provider-neutral port.
-- Generated native LangGraphs for hot StageGraph paths are a post-parity optimization.
-- Dedicated deployment is chosen only when Serverless measurements or business criticality justify it.
-- [Stages 3–6 shared execution contract](06A_STAGES_3_TO_6_OPERATION_ASSEMBLY_CONCURRENCY_AND_LINEAGE_CONTRACT.md) governs per-stage capability assembly, resource hierarchy, optimistic execution, failure taxonomy, and end-to-end lineage.
-- [Stage 6 heterogeneous composition proof](09A_STAGE_6_HETEROGENEOUS_STAGEGRAPH_COMPOSITION_PROOF.md) is required evidence that a coordinator-authored graph can compose different operation capabilities concurrently.
+Normative:
 
-A deferred optional track must have a recorded feature flag, fallback, unsupported-capability response, and no hidden dependency from a critical-path workflow.
-
-## 8. Decisions that Stage 0 must accept or amend
-
-| ID | Proposed decision | Primary implementation stage |
-|---|---|---|
-| D-01 | Standard Agent Server is primary; Managed Deep Agents is not | 0, 2, 8 |
-| D-02 | Generic frontier-scheduler StageGraph first | 0, 4 |
-| D-03 | Generated graphs only after measured parity | 4, post-migration |
-| D-04 | Deterministic GoalDirected outer graph, bounded agent, independent verifier | 0, 5 |
-| D-05 | One parent thread per `(request_scope, belllabs_run_id, execution_epoch)`; explicitly bound child threads for linked runs/async subagents | 0, 1, 3 |
-| D-06 | Shared router factories support standalone FastAPI and Agent Server coexistence | 0, 2, 7 |
-| D-07 | Managed Agent Server persistence in Cloud; explicit async saver/store only in standalone tests/self-hosting | 0, 2, 3 |
-| D-08 | Authoritative PostgreSQL `RuntimeExecutionBinding`, compatibility digests, and one-to-many attempt/task history | 1, 3 |
-| D-09 | Typed interventions only; privileged audited repair for `update_state` | 1, 3, 7 |
-| D-10 | Top-level lifecycle state remains compact; messages stay in agent subgraphs | 1, 4, 5 |
-| D-11 | Async, introspection-safe graph assembly factory only when required | 0, 2, 5, 6 |
-| D-12 | Async I/O boundaries; synchronous pure domain logic | All implementation stages |
-| D-13 | Authoritative operation claims/attempts/settlements move to PostgreSQL | 0, 1, 4–6 |
-| D-14 | First-class context policy and immutable context assembly | 1, 5, 6 |
-| D-15 | Sync, dynamic-interpreter, async, and linked-run delegation are distinct | 1, 5, 6 |
-| D-16 | Canonical vocabulary and provider-qualified identity grammar | 0, 1, all later stages |
-
-Owner amendments recorded after the Stage 0 package are normative for Stages 3–6: [02A_OWNER_AMENDMENTS_FOR_STAGES_3_TO_6.md](02A_OWNER_AMENDMENTS_FOR_STAGES_3_TO_6.md). They add D-17–D-23 for model/provider freedom, granular stage capability authorship, compiler ordering, reusable harness composition, hierarchical concurrency, bounded speculation, and end-to-end lineage without weakening D-01–D-16.
-
-## 9. Rules for starting any stage
-
-The implementing agent may and should clarify before starting. It may conduct a structured interview with the owner. This is explicitly permitted and encouraged when a decision changes contracts, data authority, deployment topology, feature maturity, destructive operations, rollout posture, or acceptance thresholds.
-
-Before editing, the agent must:
-
-1. read [01_GLOBAL_HANDOFF_AND_STAGE_GATE_RULES.md](01_GLOBAL_HANDOFF_AND_STAGE_GATE_RULES.md), this index, the entire stage mission, and the accepted handoff from the previous stage;
-2. inspect the current worktree and preserve unrelated user changes;
-3. inspect the exact code/tests named by the stage rather than assuming this planning snapshot is current;
-4. identify owner decisions, discoverable facts, safe assumptions, and blockers separately;
-5. offer or run a pre-stage interview when useful;
-6. publish a working plan and a requirements-to-evidence checklist;
-7. confirm that optional features not accepted for the stage remain feature-disabled;
-8. avoid editing `biotech-meta` unless the stage has explicit owner authorization.
-
-Clarification is not failure. A stage starts implementation only after blocking decisions are answered or the owner explicitly accepts a documented assumption. Non-blocking questions may remain in the decision log while safe work continues.
-
-## 10. Rules for executing a large-context stage
-
-- Load context progressively: governing docs, prior handoff, target code, tests, then exact live/version docs.
-- Use existing pure domain functions and ports before introducing new abstractions.
-- Maintain a stage evidence map while working; do not reconstruct it from memory at the end.
-- Record exact commands, versions, migrations, test results, known skips, trace/experiment IDs, and artifacts.
-- Use subagents only when the active execution environment and user instructions permit them; never make a delegated report the sole basis for an authority or destructive decision.
-- Keep previews, spikes, fixtures, and production abstractions separate.
-- If context compaction occurs, reconstruct from the stage mission, accepted decisions, current diff, test output, and handoff draft; do not rely on a model-written summary alone.
-- If the stage becomes too broad, stop at a coherent evidence boundary and propose a formally named substage. Do not silently reduce acceptance criteria.
-
-## 11. Global completion conditions
-
-No stage is complete merely because code was written. It is complete only when:
-
-- all required deliverables exist;
-- required checks pass or each failure is explicitly accepted with a follow-up owner and gate effect;
-- schema, migrations, auth, tenant, idempotency, recovery, and redaction evidence appropriate to the stage exists;
-- documentation and runbooks match the actual implementation;
-- the outgoing handoff is complete;
-- the gate reviewer or owner records `ACCEPTED`, `ACCEPTED_WITH_DEFERRED_OPTIONAL_TRACKS`, or `REWORK_REQUIRED`;
-- the next stage's entry criteria are explicitly evaluated.
-
-The implementing agent may recommend acceptance but must not manufacture owner acceptance for architecture decisions, risk exceptions, data migrations, destructive actions, or production rollout.
-
-## 12. Final definition of done
-
-The whole goal is complete only when all criteria in Stage 8 and the architecture plan's final definition of done are satisfied, including:
-
-- both graph families work in `langgraph dev`, production-like `langgraph up`, and the selected LangSmith deployment;
-- current exact compilation, launch idempotency, run control, StageGraph, GoalDirected, schema-grounding, and typed result behavior is preserved or intentionally enhanced;
-- checkpoint resume, durable interrupts, steering, cancellation, forks, epoch handling, recovery, and deployment compatibility are proven;
-- MCP, skills, middleware, context assembly, filesystem, sandbox, snapshots, and enabled delegation modes are exact, bounded, isolated, traced, and evaluated;
-- API/MCP/coordinator callers share one authorization and application facade;
-- trace redaction and cross-tenant protection pass;
-- offline and online evaluation gates are versioned and operational;
-- staging, shadow, canary, rollback, backup/restore, and incident drills pass;
-- new admissions use LangGraph by exact implementation binding;
-- all legacy runs are drained or explicitly reconciled before legacy removal;
-- historical evidence remains readable for the accepted retention period.
-
-## 13. Reference index
-
-Normative implementation-package amendments and shared contracts:
-
+- [Canonical application codebase organization](../../CANONICAL_APPLICATION_CODEBASE_ORGANIZATION.md)
+- [Global handoff and stage-gate rules](01_GLOBAL_HANDOFF_AND_STAGE_GATE_RULES.md)
+- [Architecture traceability matrix](02_ARCHITECTURE_TRACEABILITY_MATRIX.md)
 - [Owner amendments for Stages 3–6](02A_OWNER_AMENDMENTS_FOR_STAGES_3_TO_6.md)
 - [Pre-Stage 3 entry-gate closure](05A_PRE_STAGE_3_ENTRY_GATE_CLOSURE.md)
-- [Stages 3–6 operation assembly, concurrency, and lineage contract](06A_STAGES_3_TO_6_OPERATION_ASSEMBLY_CONCURRENCY_AND_LINEAGE_CONTRACT.md)
-- [Stage 6 heterogeneous StageGraph composition proof](09A_STAGE_6_HETEROGENEOUS_STAGEGRAPH_COMPOSITION_PROOF.md)
+- [Cross-stage operation assembly, concurrency, and lineage contract](06A_STAGES_3_TO_6_OPERATION_ASSEMBLY_CONCURRENCY_AND_LINEAGE_CONTRACT.md)
+- [Stage 6 heterogeneous composition proof](09A_STAGE_6_HETEROGENEOUS_STAGEGRAPH_COMPOSITION_PROOF.md)
 
-Local architecture:
+Accepted architecture source and decision history:
 
+- [Temporal, LangSmith, and Deep Agents BellLabs backend architecture proposal](../../TEMPORAL_LANGSMITH_DEEPAGENTS_BELLLABS_BACKEND_ARCHITECTURE_PROPOSAL.md)
 - [Controlled-run proof](../architectural_documents/CONTROLLED_RUN_PROOF_OF_REPRESENTATION.md)
 - [Round-two research](../architectural_documents/LANGGRAPH_DEEPAGENTS_RESEARCH_ROUND_2.md)
-- [Migration recommendations — unsettled](../architectural_documents/LANGGRAPH_LANGSMITH_MIGRATION_RECOMMENDATIONS.md)
-- [Large migration plan](../architectural_documents/LANGGRAPH_DEEPAGENTS_CONTROL_PLANE_MIGRATION_PLAN.md)
-- [Current-state workflow guide](../../CODEBASE_DOMAIN_WORKFLOW_GUIDE.md)
-- [Workflow implementation binding prototype](../../WORKFLOW_IMPLEMENTATION_BINDINGS_PROTOTYPE.md)
-- [Workflow control-plane next slices](../../workflow-control-plane-current-state-and-next-slices.md)
-- [BellLabs coordinator skill](../../../.agents/skills/belllabs-workflow-coordinator/SKILL.md)
-
-Project-local ecosystem skills:
-
-- `../../../.agents/skills/deep-agents-core/SKILL.md`
-- `../../../.agents/skills/deep-agents-orchestration/SKILL.md`
-- `../../../.agents/skills/deep-agents-memory/SKILL.md`
-- `../../../.agents/skills/managed-deep-agents/SKILL.md`
-- `../../../.agents/skills/langgraph-persistence/SKILL.md`
-- `../../../.agents/skills/langgraph-human-in-the-loop/SKILL.md`
-- `../../../.agents/skills/langgraph-cli/SKILL.md`
-- `../../../.agents/skills/langchain-middleware/SKILL.md`
-- `../../../.agents/skills/langsmith-trace/SKILL.md`
-- `../../../.agents/skills/langsmith-evaluator/SKILL.md`
-- `../../../.agents/skills/langsmith-online-eval-engineering/SKILL.md`
-
-Current official documentation to recheck at Stage 0 and before deployment:
-
-- [Agent Server](https://docs.langchain.com/langsmith/agent-server-overview)
-- [Application structure](https://docs.langchain.com/langsmith/application-structure)
-- [Runtime graph rebuilding](https://docs.langchain.com/langsmith/graph-rebuild)
-- [Custom authentication](https://docs.langchain.com/langsmith/custom-auth)
-- [Custom routes](https://docs.langchain.com/langsmith/custom-routes)
-- [Deploy to Cloud](https://docs.langchain.com/langsmith/deploy-to-cloud)
-- [Deep Agents production](https://docs.langchain.com/oss/python/deepagents/going-to-production)
-- [Synchronous subagents](https://docs.langchain.com/oss/python/deepagents/subagents)
-- [Async subagents](https://docs.langchain.com/oss/python/deepagents/async-subagents)
-- [Dynamic subagents](https://docs.langchain.com/oss/python/deepagents/dynamic-subagents)
-- [Interpreters](https://docs.langchain.com/oss/python/deepagents/interpreters)
-- [Skills](https://docs.langchain.com/oss/python/deepagents/skills)
-- [Sandboxes](https://docs.langchain.com/oss/python/deepagents/sandboxes)
-- [LangChain MCP](https://docs.langchain.com/oss/python/langchain/mcp)
-- [LangSmith evaluation concepts](https://docs.langchain.com/langsmith/evaluation-concepts)
+- [Prior Agent Server migration plan](../architectural_documents/LANGGRAPH_DEEPAGENTS_CONTROL_PLANE_MIGRATION_PLAN.md)
+- [Prior unsettled recommendations](../architectural_documents/LANGGRAPH_LANGSMITH_MIGRATION_RECOMMENDATIONS.md)

@@ -1,6 +1,6 @@
 # Stage 3 requirements-to-code and evidence matrix
 
-Status: READY_FOR_REVIEW
+Status: ACCEPTED
 Prepared at: 2026-08-06
 Scope: durable runtime kernel only; StageGraph business scheduling and later-stage capabilities remain disabled
 
@@ -55,4 +55,4 @@ Scope: durable runtime kernel only; StageGraph business scheduling and later-sta
 | S3-G05 | `uv run mypy app` passes | passed: 286 source files |
 | S3-G06 | Full accepted `uv run pytest` suite passes or every exception has explicit gate impact | passed: 528, 25 optional/external skips |
 | S3-G07 | Technical review and security review have no unresolved mandatory findings | passed: durability and security re-reviews approved |
-| S3-G08 | Outgoing handoff is `READY_FOR_REVIEW`; only owner/gate reviewer may record `ACCEPTED` | passed: handoff is `READY_FOR_REVIEW` |
+| S3-G08 | Outgoing handoff is accepted only by the owner/gate reviewer | passed: owner accepted the handoff on 2026-08-06 |

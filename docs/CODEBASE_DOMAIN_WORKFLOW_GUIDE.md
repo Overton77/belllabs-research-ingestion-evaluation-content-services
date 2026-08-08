@@ -1,5 +1,13 @@
 # Current codebase and domain-workflow guide
 
+> **Status — current/as-built reference.** This guide preserves a description of the executable
+> code as built; it is not the target organization. Planned direction is governed by
+> [`CANONICAL_APPLICATION_CODEBASE_ORGANIZATION.md`](CANONICAL_APPLICATION_CODEBASE_ORGANIZATION.md)
+> and the
+> [accepted implementation index](migrations_instructions/implementation_work_packages/00_MAIN_GOAL_AND_INDEX.md).
+> Where they conflict, those target documents govern planned work, while executable code and
+> tests govern current behavior.
+
 This guide explains the current `app/` codebase using the domain language in
 [`biotech-meta/docs/CONTEXT.md`](../../biotech-meta/docs/CONTEXT.md). It traces the
 FastAPI surfaces into application services and domain functions, then follows the

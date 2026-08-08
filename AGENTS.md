@@ -1,5 +1,24 @@
 # Agent instructions
 
+## Canonical architecture and reading order
+
+- The application stays in this repository under the canonical Python package `app/`.
+- [Canonical application codebase organization](docs/CANONICAL_APPLICATION_CODEBASE_ORGANIZATION.md)
+  is the accepted target for paths, ownership, dependency direction, and staged refactoring.
+- Read migration guidance in this order: the
+  [main index](docs/migrations_instructions/implementation_work_packages/00_MAIN_GOAL_AND_INDEX.md);
+  global gates; owner amendments when applicable; canonical organization; the complete active
+  package and dependencies; accepted architecture/contract docs; then as-built guidance, code,
+  and tests. The active package remains implementation authority if a projected path differs.
+- Temporal is the sole production macro-workflow runtime. The BellLabs API is the sole governed
+  public facade. Agent Server is bounded to operation, qualification, development, and shared
+  support assets; it is not an application root or competing scheduler.
+- Preserve `domain <- application <- api/temporal/integrations`. Providers and runtime adapters
+  cannot own BellLabs semantics or durable product authority.
+- Current/as-built guides and executable code explain current behavior. Historical migration
+  plans, experiments, and superseded recommendations are non-normative and cannot override
+  accepted documents.
+
 ## Cursor Cloud specific instructions
 
 The Cloud Agent environment starts Docker and the default `docker-compose.yml`

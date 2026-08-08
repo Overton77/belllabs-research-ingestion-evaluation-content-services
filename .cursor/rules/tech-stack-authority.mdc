@@ -1,45 +1,59 @@
 ---
+description: Runtime roles, data authority, and worker isolation
 alwaysApply: false
 ---
 
 # Tech stack & data authority
 
-**Evolving snapshot** after control-plane foundations, linked runs, operation execution, sandbox snapshots, schema grounding, and goal-directed live experiments. Update when stack roles change. Do not invent new stores without a spec/ticket. Local wiring: `README.md` / `.env.example`.
+Use `docs/CANONICAL_APPLICATION_CODEBASE_ORGANIZATION.md` and
+`docs/migrations_instructions/implementation_work_packages/00_MAIN_GOAL_AND_INDEX.md` for
+accepted target decisions. Do not invent stores, runtimes, or public control paths.
 
-| System                           | Used for                                                                                                                                                                                                 | Authority                                                                                                                         |
-| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| **FastAPI + Socket.IO**          | HTTP API (`/control-plane/v1`, `/run-control/v1`, `/schema-grounding/v1`), startup migrations, Supabase-authenticated realtime transport                                                                 | Entry/transport only                                                                                                              |
-| **uv / Python 3.12**             | Project env, `uv run`, lockfile                                                                                                                                                                          | Standard invoke path                                                                                                              |
-| **Postgres (application)**       | Run lifecycle, commands, transitions, budgets, outbox, cursors, authz projections, linked-run rollups, durable approvals, artifact reference index, **agent runtime** sessions/messages/events/approvals | **Authoritative** control-plane transactional state (local port `55432`; runtime role `belllabs_control_runtime` with tenant RLS) |
-| **Postgres (Temporal)**          | Temporal persistence only                                                                                                                                                                                | Separate DB — **not** domain authority                                                                                            |
-| **Redis**                        | Fan-out / notifications for realtime clients and approval wakes (local port `56379`)                                                                                                                     | **Not** durable authority; durable events stay in application Postgres                                                            |
-| **Supabase**                     | Socket.IO auth (`access_token` → actor/roles/scopes); optional hosted Postgres/vector path for memory-related retrieval                                                                                  | Auth/tenant context for realtime; memory/vector when wired — do not confuse with Temporal or app control DB                       |
-| **MongoDB + Beanie**             | Immutable definitions, Effective Run Configuration, operation bindings/settlements, sandbox snapshots, workspace materialization manifests, schema grounding records, artifact metadata revisions        | **Authoritative** for those document payloads (`AsyncMongoClient`, DB `belllabsbiotech`)                                          |
-| **Temporal**                     | Durable workflows/activities, retries, sandbox-bound agent work; task queues: default, `-linked-runs`, `-schema-grounding`                                                                               | Execution mechanics only                                                                                                          |
-| **Neo4j**                        | Approved canonical graph knowledge; **bounded read-only** intents at the schema-grounding boundary                                                                                                       | Graph authority; no arbitrary Cypher from agents — host validates allowlisted query kinds                                         |
-| **Object storage (S3/aioboto3)** | Large immutable payloads: control-plane externalized definitions, schema catalog bundles, artifacts, reports, snapshots                                                                                  | Blob authority (Mongo holds refs/metadata/digests)                                                                                |
-| **OpenAI Agents SDK + Docker**   | Governed agent runs, tools, sandboxed exec, Temporal durable-workflow plugin (`OpenAIAgentsPlugin`)                                                                                                      | Bound through ports/bindings; never invents control-plane state by existing                                                       |
-| **Tavily** (optional)            | Web search tool in governed runs when `TAVILY_API_KEY` is set                                                                                                                                            | External retrieval — not authority                                                                                                |
-| **Filesystem workspace**         | Goal-directed live probes and local workspace materialization under `sandbox-work/`                                                                                                                      | Ephemeral execution surface — durable contracts/refs live in Mongo/Postgres                                                       |
-| **OpenTelemetry**                | Temporal/OpenAI Agents plugin tracing hooks                                                                                                                                                              | Observability only                                                                                                                |
+## Runtime roles
 
-## Authority by concern
+- **Temporal is the sole production macro-workflow runtime.** It owns durable execution
+  mechanics: workflow history, child workflows, activities, messages, timers, retries,
+  cancellation, replay, and Continue-As-New. It does not own BellLabs semantics.
+- **LangGraph and Deep Agents provide bounded operation cognition** under an exact frozen
+  assembly. Planning, tools, skills, filesystems, subagents, and checkpoints remain subordinate
+  to `OperationWorkflow` and BellLabs acceptance/settlement.
+- **LangSmith provides traces, evaluations, sandboxes, development/registration, and selected
+  bounded remote deployments.** It is evidence/provider infrastructure, never a competing macro
+  scheduler or product authority.
+- **FastAPI/Socket.IO and MCP are transport facets of the BellLabs API.** They invoke the same
+  application commands and queries; neither is an alternate control plane.
 
-| Concern                                   | Authoritative store   | Notes                                                         |
-| ----------------------------------------- | --------------------- | ------------------------------------------------------------- |
-| Workflow Run lifecycle, budgets, commands | Application Postgres  | Reducer + outbox in `domain/run_control`                      |
-| Published definitions, ERC, aliases       | MongoDB               | Large bodies may externalize to S3                            |
-| Linked-run composition, admission         | Application Postgres  | Child runs still compile/admit separately                     |
-| Operation bindings, settlements           | MongoDB               | Exact prompt/model/tool/MCP/skill/plugin bindings             |
-| Sandbox snapshots, clone lineage          | MongoDB               | Compatibility assessed in application layer                   |
-| Agent runtime session/events/approvals    | Application Postgres  | Redis wakes clients; Postgres is durable                      |
-| Schema catalog bundles                    | S3 (+ Mongo metadata) | Content-addressed, default-deny graph access                  |
-| Schema grounding records, query intents   | MongoDB               | Neo4j results are validated projections, not free-form writes |
-| Graph canonical knowledge                 | Neo4j                 | Read through bounded executor + workspace binding gates       |
+## Data authority
 
-## Hard rules
+- **Application PostgreSQL:** authoritative run lifecycle, admission, commands, budgets,
+  approvals, runtime binding records, inbox/ledger/outbox, claims, effects, settlements, product
+  projections, and durable BellLabs events according to Stage 1 and current contracts.
+- **Temporal PostgreSQL:** separate Temporal persistence only. Never query or mutate it as the
+  BellLabs product model, and never combine it with application PostgreSQL.
+- **MongoDB/Beanie:** only already-assigned immutable semantic definitions, ERC/configuration
+  records, immutable binding-definition records, document payloads, snapshot/manifest metadata,
+  schema-grounding records, and artifact metadata. It does not own runtime bindings or
+  command/runtime authority.
+- **S3/object storage:** large immutable payload/blob authority; durable metadata and digests
+  remain in assigned BellLabs stores.
+- **Neo4j:** approved graph knowledge, accessed only through bounded, validated,
+  purpose-specific projections—never arbitrary agent Cypher.
+- **Redis:** fan-out/wake optimization only. It is not durable authority.
+- **Provider state, model output, traces, prompts, skills, MCP tools, checkpoints, sandboxes,
+  filesystems, and experiments:** never authority merely because they exist.
 
-- Temporal, Redis, Socket.IO, model output, and experiment folders must **not** be the system of record for run lifecycle, budgets, or admissions.
-- Prompts, skills, MCP tools, plugins, memory packs, Tavily results, and agent output are **never** authority merely because they exist (catalog + exact bindings required where specs say so).
-- Graph access is default-deny: require matching catalog deployment manifest, workspace binding, graph-authority grant, and purpose-bound projection before Neo4j reads.
-- When unsure where state lives, check the matching `F*`/`C*` spec in `../biotech-meta/docs/specs/pre-research/` and `docs/CODEBASE_DOMAIN_WORKFLOW_GUIDE.md` before coding.
+Temporal history is replay truth, not the client-facing event model. BellLabs durable
+inbox/ledger/outbox records and accepted product events remain authoritative.
+
+## Five logical worker pools
+
+1. coordinator/family-workflow;
+2. agent/cognitive-operation;
+3. ingestion/I/O;
+4. sandbox-control/external-job;
+5. verification/reconciliation.
+
+Queue routing comes from exact compiled bindings and currently assigned queue modules/contracts.
+The projected task-queue registry requires active-package authorization before creation or a move.
+Providers, models, and workflows cannot select undeclared queues. Exact queue names, counts, sizes,
+and AWS placement remain Stage 8 decisions.

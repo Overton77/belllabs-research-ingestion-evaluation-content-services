@@ -1,60 +1,36 @@
 ---
-description: App layout, layering, and where specs/issues/scratch live (2026-07-25 snapshot)
+description: Canonical application ownership, layering, and migration reading order
 alwaysApply: true
 ---
 
 # Project organization
 
-**Phase focus:** control-plane foundations and capabilities (`F*` / `C*`) are largely implemented — Workflow Type/Implementation definitions, compilation, Effective Run Configuration, linked runs, operation bindings, sandbox snapshots, and schema grounding. Current work extends **discovery/launch surfaces**, schema-bearing contracts, and governed execution paths (including goal-directed live experiments). Prefer extending existing packages over new top-level folders. Domain authority lives in `domain` / `application`; Temporal, Docker, Redis fan-out, and Agents SDK are mechanics, not truth. Vocabulary/specs: prefer `biotech-meta` over inventing names.
-
-Architecture alignment: `docs/workflow-control-plane-current-state-and-next-slices.md`, `../biotech-meta/docs/workflow-catalog-configuration-composition-and-agent-entry.md`.
-
-## Layout
-
-| Path | Role |
-|------|------|
-| `app/domain/` | Pure contracts / invariants (no I/O). Packages: `control_plane`, `run_control`, `composition`, `orchestration`, `operation_execution`, `schema_catalog`, `schema_context`, `schema_grounding` |
-| `app/application/` | Use-cases, ports, and store adapters. Control plane (`control_plane*`), run control (`run_control*`), linked runs, operation execution/submission, sandbox snapshots, workspace materialization, schema catalog/grounding/context, orchestration, goal-directed live |
-| `app/api/` | FastAPI routers: `control_plane` (`/control-plane/v1`), `run_control` (`/run-control/v1`), `schema_grounding` (`/schema-grounding/v1`) |
-| `app/models/` | Beanie document shapes: control-plane definitions/ERC, operation bindings/settlements, sandbox snapshots, workspace materialization, artifact promotion, schema grounding records |
-| `app/integrations/` | Vendor adapters — Mongo, Postgres, Neo4j, S3, Supabase, Temporal, OpenAI Agents SDK, realtime bus, filesystem workspace, schema agent/Neo4j executors |
-| `app/temporal/` | Workflows, activities, workers, and CLI entry scripts (`run_probe`, `run_operation_probe`, `run_goal_directed_live`, …) |
-| `app/experiments/` | Diagnostic adapters (e.g. `schema_context_selection`) — **not** imported by production code |
-| `app/migrations/` | Application Postgres schema migrations (`0001`–`0004`) |
-| `app/middleware/` | ASGI/HTTP middleware (`body_limit`) |
-| `app/config.py` | Typed settings / env contract |
-| `app/server.py` | FastAPI + Socket.IO ASGI entry |
-| `app/preflight.py` | External-system connectivity checks |
-| `app/personal_code/` | Reserved local scratch inside `app/` — not product authority |
-| `tests/` | Unit + integration tests |
-| `infra/` | Compose-adjacent init/scripts (application-postgres, temporal, sandbox) |
-| `docs/` | Local diagrams / operator notes — not product authority. Key traces: `CODEBASE_DOMAIN_WORKFLOW_GUIDE.md`, `SCHEMA_GROUNDING_PIPELINE.md`, `workflow-control-plane-current-state-and-next-slices.md` |
-| `sandbox-work/` | Disposable live-run artifacts (goal-directed probes, etc.) — not product authority |
-| `scripts/` | Operator/dev scripts |
-| `.scratch/` | Working issues, handoffs, lifecycle — NOT durable product docs |
-| `.scratch/control-plane-foundations-and-capabilities/issues/` | Active control-plane ticket mirrors |
-| `../biotech-meta/docs/specs/` | Accepted specifications |
-| `../biotech-meta/docs/checkpoints/` | Interview/architecture checkpoints |
-
-## Domain map (what lives where)
-
-| Concern | Domain | Application | API |
-|---------|--------|-------------|-----|
-| Definition publish/compile/ERC | `domain/control_plane` | `application/control_plane*` | `api/control_plane` |
-| Run lifecycle, budgets, commands | `domain/run_control` | `application/run_control*` | `api/run_control` |
-| Parent/child links, admission | `domain/composition` | `application/linked_runs` | via run control |
-| StageGraph / GoalDirected interpretation | `domain/orchestration` | `application/orchestration`, `goal_directed_live`, `goal_workspace` | — |
-| Exact operation bindings, delegation | `domain/operation_execution` | `application/operation_execution*`, `operation_submission` | via run control |
-| Snapshot compatibility / restore | — | `application/sandbox_snapshots*` | — |
-| Schema catalog/context/grounding | `domain/schema_*` | `application/schema_*`, `supporting_graph_reconciliation` | `api/schema_grounding` |
-
-Temporal workflow names (mechanics): `belllabs.stagegraph`, `belllabs.goal-directed`, `belllabs.linked-run`, `belllabs.operation-execution`, `belllabs.generic-artifact`, plus probe/diagnostic workflows.
-
 ## Hard rules
 
-- Do not treat `.scratch/`, `sandbox-work/`, `app/experiments/`, `app/personal_code/`, or local `docs/` as production contracts.
-- Put business truth in `app/domain/` and `app/application/`; keep I/O and vendors in `integrations` / `temporal` / `api`.
-- Production code must not import `app/experiments/`; promote accepted behavior into `domain` / `application` first.
-- When naming or deciding scope, check `biotech-meta` specs/checkpoints before inventing terms or new top-level structure.
-- Internal models exist for Workflow Types, Implementations, bindings, and schema grounding; do not add caller-facing catalog/discovery/launch APIs without an accepted spec/ticket. Extend existing `control_plane` / `sandbox_snapshots` packages per `docs/workflow-control-plane-current-state-and-next-slices.md`.
-- Create a new `app/domain/*` package only when it owns a distinct lifecycle; query DTOs belong in existing packages.
+- Read in order: `00_MAIN_GOAL_AND_INDEX.md`; `01_GLOBAL_HANDOFF_AND_STAGE_GATE_RULES.md`;
+  `02A_OWNER_AMENDMENTS_FOR_STAGES_3_TO_6.md` when applicable; canonical organization; the
+  complete active package and dependencies; accepted architecture/contract docs; then the
+  as-built guide, code, and tests.
+- Follow `docs/CANONICAL_APPLICATION_CODEBASE_ORGANIZATION.md` for projected target paths,
+  ownership, status labels, staged moves, and document lifecycle. If a projected path differs,
+  the active package remains implementation authority.
+- Keep the application here in `app/`; create no sibling application repository, Agent Server
+  app root, or multi-package split without accepted evidence and a new architecture decision.
+- Preserve dependency direction:
+  `app/domain <- app/application <- app/api | app/temporal | app/integrations`.
+- Domain owns contract meaning, including journal, effect, and settlement semantics.
+  Application owns use-case coordination and persistence through ports/adapters.
+- API is transport. Temporal is the sole macro runtime. Integrations are provider/persistence
+  adapters. None may own semantics, lifecycle, readiness, convergence, or terminality.
+- `app/server.py` remains the composition root and the BellLabs API the governed public facade.
+- Agent Server and LangGraph/Deep Agents assets are bounded operation, qualification, or
+  development surfaces—not competing macro schedulers.
+- Application PostgreSQL owns durable run/control events and inbox/ledger/outbox state.
+  Temporal PostgreSQL is separate runtime persistence. MongoDB keeps its assigned immutable
+  document authorities.
+- Extend current modules by default; do not add bridge seams automatically. Create projected
+  target paths only when the active package or an accepted spec-ticket explicitly authorizes them.
+- Do not duplicate domain contracts, interpreters, API authority, MCP control paths, or task
+  queue definitions. Promote accepted experiment behavior before production imports it.
+- Treat `docs/CODEBASE_DOMAIN_WORKFLOW_GUIDE.md` as as-built reference. Historical plans,
+  experiments, scratch files, and superseded recommendations are non-normative.

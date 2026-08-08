@@ -1,18 +1,19 @@
 # Stage 3 handoff — durable runtime kernel
 
-Status: READY_FOR_REVIEW
+Status: ACCEPTED
 Prepared by: GPT-5.6 Sol implementing agent
 Prepared at: 2026-08-06
-Repository/worktree: `biotech-research-ingestion-evaluation-system`, branch `main`, dirty worktree
+Repository/worktree: `biotech-research-ingestion-evaluation-system`, branch `main`, clean at acceptance
 Base revision: `d40d5862b06bb74789a349087112162f0a879094`
-Result revision or diff ref: uncommitted Stage 3 implementation
+Result revision or diff ref: `135dc90`
+Accepted by: owner
+Accepted at: 2026-08-06
 
 ## Outcome
 
-The Stage 3 durable runtime kernel is implemented. Its deterministic, PostgreSQL, static-analysis,
-and full-regression gates pass, and independent durability and security re-reviews report no
-remaining mandatory finding. Only the owner or appointed gate reviewer may change this handoff
-from `READY_FOR_REVIEW` to `ACCEPTED`.
+The Stage 3 durable runtime kernel is implemented and accepted. Its deterministic, PostgreSQL,
+static-analysis, and full-regression gates pass, and independent durability and security
+re-reviews report no remaining mandatory finding. The owner accepted this handoff on 2026-08-06.
 
 The kernel now supplies frozen V3 dispatch, exact deployment binding, common authority bootstrap,
 canonical lineage, hierarchical leases, durable decisions, typed steering, cancellation/fork
@@ -238,8 +239,8 @@ lifecycle fields.
 | `uv run ruff check app tests` | local locked environment | passed |
 | `uv run mypy app` | local locked environment | passed, 286 source files |
 | Persistent restart/interrupt/cancel/fork/tenant drills | accepted pre-Stage 3 Block C N/N+1 deployments | passed |
-| Independent durability re-review | current uncommitted diff | approved; no mandatory finding |
-| Independent security re-review | current uncommitted diff | clean; no gate blocker |
+| Independent durability re-review | accepted Stage 3 implementation at `135dc90` | approved; no mandatory finding |
+| Independent security re-review | accepted Stage 3 implementation at `135dc90` | clean; no gate blocker |
 
 The DSN value is intentionally omitted. The integration guard accepted only the known disposable
 localhost database.
@@ -285,12 +286,13 @@ localhost database.
 | Full regression/static gates pass | Yes | 528 passed; Ruff/Mypy pass |
 | Optional later-stage capabilities remain disabled | Yes | readiness/governance and explicit failure paths |
 | Independent technical/security review complete | Yes | durability approved; security clean |
-| Stage 3 accepted by owner/gate reviewer | No | implementing agent may record only `READY_FOR_REVIEW` |
-| Stage 4 may begin | No | requires independent review and `ACCEPTED` handoff |
+| Stage 3 accepted by owner/gate reviewer | Yes | owner accepted the handoff on 2026-08-06 |
+| Stage 4 may begin | Yes | accepted Stage 3 kernel and handoff authorize Stage 4 entry |
 
 ## Gate recommendation
 
-READY FOR OWNER/GATE REVIEW. DO NOT BEGIN STAGE 4 UNTIL `ACCEPTED`.
+ACCEPTED. STAGE 4 MAY BEGIN.
 
-An independent reviewer should verify the diff and evidence, resolve any mandatory finding, then
-change the handoff to `ACCEPTED` or return it to `IMPLEMENTING`.
+The Stage 4 implementing agent must preserve the accepted runtime, HITL, resume, steering,
+cancellation, reconciliation, compatibility-routing, lineage, and resource-lease contracts in
+this handoff and the normative Stages 3–6 shared execution contract.
