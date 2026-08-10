@@ -67,6 +67,8 @@ class DefinitionAliasMovementDocument(Document):
 
 
 class PublishedDefinitionDocument(Document):
+    contract_id: str = "CON-CP-DEFINITION-REF-V1"
+    schema_version: str = "1"
     kind: str
     logical_id: str
     revision: int = Field(ge=1)
@@ -74,6 +76,8 @@ class PublishedDefinitionDocument(Document):
     definition: dict[str, Any]
     published_at: datetime
     published_by: str
+    lifecycle_status: str = "published"
+    payload_ref: dict[str, Any] | None = None
 
     class Settings:
         name = "control_plane_published_definitions"
@@ -105,6 +109,8 @@ class DefinitionRetirementDocument(Document):
 
 
 class EffectiveRunConfigurationDocument(Document):
+    contract_id: str = "CON-CP-ERC-V1"
+    schema_version: str = "1"
     digest: str
     compiler_version: str
     compilation_id: str

@@ -130,6 +130,7 @@ class LifecycleCommandOutcome:
     obligation_revision: str = ""
     accepted_obligation_evidence_digest: str = ""
     required_obligations_accepted: bool = False
+    workflow_type_digest: str = ""
     terminal_outcome: RunOutcome | None = None
 
 

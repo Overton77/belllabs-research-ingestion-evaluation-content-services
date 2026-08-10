@@ -36,6 +36,8 @@ from app.domain.run_control.contracts import (
     AdmissionDecision,
     BudgetState,
     CommandResult,
+    EffectLedgerEntry,
+    EffectLedgerState,
     LifecycleCommand,
     LifecycleTransitionRecord,
     OutboxRecord,
@@ -64,6 +66,12 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             "workflow_run.reserve_budget",
             "workflow_run.report_usage",
             "workflow_run.settle_usage",
+            "workflow_run.claim_effect",
+            "workflow_run.observe_effect",
+            "workflow_run.settle_effect",
+            "workflow_run.register_async_child",
+            "workflow_run.observe_async_child",
+            "workflow_run.decide_async_child",
             "workflow_run.propose_continuation",
             "workflow_run.decide_continuation",
             "workflow_run.accept_finalization",
@@ -83,6 +91,11 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             "workflow_run.reserve_budget",
             "workflow_run.report_usage",
             "workflow_run.settle_usage",
+            "workflow_run.claim_effect",
+            "workflow_run.observe_effect",
+            "workflow_run.settle_effect",
+            "workflow_run.register_async_child",
+            "workflow_run.observe_async_child",
             "workflow_run.propose_continuation",
             "workflow_run.accept_finalization",
             "workflow_run.record_finalization",
@@ -307,6 +320,27 @@ async def get_budget(
     return await service.get_budget(request_scope, run_id)
 
 
+@router.get("/runs/{run_id}/effects", response_model=EffectLedgerState)
+async def get_effects(
+    run_id: str, request_scope: str, principal: Principal, service: Service
+) -> EffectLedgerState:
+    _authorize_read(principal)
+    _authorize_scope(principal, request_scope)
+    return await service.get_effects(request_scope, run_id)
+
+
+@router.get(
+    "/runs/{run_id}/effect-ledger",
+    response_model=tuple[EffectLedgerEntry, ...],
+)
+async def get_effect_ledger(
+    run_id: str, request_scope: str, principal: Principal, service: Service
+) -> tuple[EffectLedgerEntry, ...]:
+    _authorize_read(principal)
+    _authorize_scope(principal, request_scope)
+    return await service.list_effect_ledger(request_scope, run_id)
+
+
 @router.get(
     "/runs/{run_id}/transitions",
     response_model=tuple[LifecycleTransitionRecord, ...],
@@ -338,6 +372,7 @@ async def run_control_schemas() -> dict[str, object]:
         "command_result": CommandResult.model_json_schema(),
         "run_projection": RunProjection.model_json_schema(),
         "budget_state": BudgetState.model_json_schema(),
+        "effect_ledger_state": EffectLedgerState.model_json_schema(),
         "transition": LifecycleTransitionRecord.model_json_schema(),
         "outbox_record": OutboxRecord.model_json_schema(),
         "generic_artifact_workflow": GenericArtifactWorkflowRequest.model_json_schema(),

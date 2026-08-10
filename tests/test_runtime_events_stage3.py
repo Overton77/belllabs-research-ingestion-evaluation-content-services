@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+from pydantic import ValidationError
 
 from app.application.runtime_events import (
     OperatorDebugAuthorization,
@@ -39,11 +40,8 @@ def record(
         or {
             "status": "running",
             "result_manifest_ref": "result:1",
-            "secret": "must-not-stream",
             "secret_id": "must-not-stream",
-            "patient_id": "synthetic-phi-must-not-stream",
             "token_digest": "must-not-stream",
-            "raw_output": "must-not-stream",
             "node_name": "operator-only-node",
         },
     )
@@ -135,3 +133,8 @@ async def test_stream_payload_is_reference_only_and_debug_is_operator_gated() ->
                 approved=True,
             ),
         )
+
+
+def test_outbox_contract_rejects_raw_secret_phi_and_content_payloads() -> None:
+    with pytest.raises(ValidationError, match="raw secrets, PHI, or content"):
+        record(1, payload={"raw_output": "must-not-enter-the-outbox"})

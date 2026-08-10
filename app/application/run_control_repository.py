@@ -18,6 +18,8 @@ from app.domain.run_control.contracts import (
     ConsumerApplyStatus,
     ConsumerCursor,
     DomainEventEnvelope,
+    EffectLedgerEntry,
+    EffectLedgerState,
     LifecycleTransitionRecord,
     OutboxCursor,
     OutboxRecord,
@@ -35,8 +37,10 @@ class AdmissionMutation:
     decision: AdmissionDecision
     projection: RunProjection | None = None
     budget: BudgetState | None = None
+    effects: EffectLedgerState | None = None
     transition: LifecycleTransitionRecord | None = None
     ledger_entries: tuple[BudgetLedgerEntry, ...] = ()
+    effect_entries: tuple[EffectLedgerEntry, ...] = ()
     events: tuple[DomainEventEnvelope, ...] = ()
 
 
@@ -47,8 +51,10 @@ class CommandMutation:
     expected_version: int
     projection: RunProjection | None = None
     budget: BudgetState | None = None
+    effects: EffectLedgerState | None = None
     transition: LifecycleTransitionRecord | None = None
     ledger_entries: tuple[BudgetLedgerEntry, ...] = ()
+    effect_entries: tuple[EffectLedgerEntry, ...] = ()
     events: tuple[DomainEventEnvelope, ...] = ()
 
 
@@ -71,6 +77,8 @@ class RunControlRepository(Protocol):
 
     async def get_budget(self, request_scope: str, run_id: str) -> BudgetState: ...
 
+    async def get_effects(self, request_scope: str, run_id: str) -> EffectLedgerState: ...
+
     async def commit_command(self, mutation: CommandMutation) -> CommandResult: ...
 
     async def list_transitions(
@@ -80,6 +88,10 @@ class RunControlRepository(Protocol):
     async def list_budget_ledger(
         self, request_scope: str, run_id: str
     ) -> tuple[BudgetLedgerEntry, ...]: ...
+
+    async def list_effect_ledger(
+        self, request_scope: str, run_id: str
+    ) -> tuple[EffectLedgerEntry, ...]: ...
 
     async def list_outbox(
         self,
@@ -107,8 +119,10 @@ class InMemoryRunControlRepository:
         self._commands: dict[tuple[str, str, str], CommandResult] = {}
         self._runs: dict[str, RunProjection] = {}
         self._budgets: dict[str, BudgetState] = {}
+        self._effects: dict[str, EffectLedgerState] = {}
         self._transitions: dict[str, list[LifecycleTransitionRecord]] = {}
         self._ledger: dict[str, list[BudgetLedgerEntry]] = {}
+        self._effect_ledger: dict[str, list[EffectLedgerEntry]] = {}
         self._outbox: dict[str, OutboxRecord] = {}
         self._next_outbox_position = 1
         self._cursors: dict[tuple[str, str], ConsumerCursor] = {}
@@ -139,6 +153,7 @@ class InMemoryRunControlRepository:
                     raise IdempotencyConflict("workflow run identity already exists")
             if mutation.projection is not None:
                 assert mutation.budget is not None
+                assert mutation.effects is not None
                 assert mutation.transition is not None
                 run_id = mutation.projection.run_id
                 self._apply_parent_rollup(
@@ -149,8 +164,10 @@ class InMemoryRunControlRepository:
                 )
                 self._runs[run_id] = deepcopy(mutation.projection)
                 self._budgets[run_id] = deepcopy(mutation.budget)
+                self._effects[run_id] = deepcopy(mutation.effects)
                 self._transitions[run_id] = [deepcopy(mutation.transition)]
                 self._ledger[run_id] = list(deepcopy(mutation.ledger_entries))
+                self._effect_ledger[run_id] = list(deepcopy(mutation.effect_entries))
                 self._insert_events(mutation.events)
             self._admissions[key] = deepcopy(mutation.decision)
             return deepcopy(mutation.decision)
@@ -178,6 +195,13 @@ class InMemoryRunControlRepository:
             return deepcopy(self._budgets[run_id])
         except KeyError as exc:
             raise RunControlNotFound(f"budget account not found for run: {run_id}") from exc
+
+    async def get_effects(self, request_scope: str, run_id: str) -> EffectLedgerState:
+        self._require_scope(request_scope, run_id)
+        try:
+            return deepcopy(self._effects[run_id])
+        except KeyError as exc:
+            raise RunControlNotFound(f"effect ledger not found for run: {run_id}") from exc
 
     async def commit_command(self, mutation: CommandMutation) -> CommandResult:
         key = (
@@ -230,6 +254,7 @@ class InMemoryRunControlRepository:
             if mutation.projection is not None:
                 self._validate_accepted_command(mutation)
                 assert mutation.budget is not None
+                assert mutation.effects is not None
                 assert mutation.transition is not None
                 self._apply_parent_rollup(
                     self._budgets[mutation.result.run_id],
@@ -239,8 +264,12 @@ class InMemoryRunControlRepository:
                 )
                 self._runs[mutation.result.run_id] = deepcopy(mutation.projection)
                 self._budgets[mutation.result.run_id] = deepcopy(mutation.budget)
+                self._effects[mutation.result.run_id] = deepcopy(mutation.effects)
                 self._transitions[mutation.result.run_id].append(deepcopy(mutation.transition))
                 self._ledger[mutation.result.run_id].extend(deepcopy(mutation.ledger_entries))
+                self._effect_ledger[mutation.result.run_id].extend(
+                    deepcopy(mutation.effect_entries)
+                )
                 self._insert_events(mutation.events)
             self._commands[key] = deepcopy(mutation.result)
             return deepcopy(mutation.result)
@@ -256,6 +285,12 @@ class InMemoryRunControlRepository:
     ) -> tuple[BudgetLedgerEntry, ...]:
         self._require_scope(request_scope, run_id)
         return tuple(deepcopy(self._ledger[run_id]))
+
+    async def list_effect_ledger(
+        self, request_scope: str, run_id: str
+    ) -> tuple[EffectLedgerEntry, ...]:
+        self._require_scope(request_scope, run_id)
+        return tuple(deepcopy(self._effect_ledger[run_id]))
 
     async def list_outbox(
         self,
@@ -413,10 +448,20 @@ class InMemoryRunControlRepository:
 
     @staticmethod
     def _validate_accepted_admission(mutation: AdmissionMutation) -> None:
-        if mutation.budget is None or mutation.transition is None or not mutation.events:
+        if (
+            mutation.budget is None
+            or mutation.effects is None
+            or mutation.transition is None
+            or not mutation.events
+        ):
             raise ValueError("accepted admission must include all transactional effects")
 
     @staticmethod
     def _validate_accepted_command(mutation: CommandMutation) -> None:
-        if mutation.budget is None or mutation.transition is None or not mutation.events:
+        if (
+            mutation.budget is None
+            or mutation.effects is None
+            or mutation.transition is None
+            or not mutation.events
+        ):
             raise ValueError("accepted command must include all transactional effects")

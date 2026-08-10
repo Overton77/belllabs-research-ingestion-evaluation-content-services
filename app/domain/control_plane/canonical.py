@@ -24,7 +24,9 @@ def _normalize(value: Any) -> Any:
     if isinstance(value, Enum):
         return value.value
     if isinstance(value, dict):
-        return {str(key): _normalize(item) for key, item in value.items()}
+        if any(not isinstance(key, str) for key in value):
+            raise ValueError("canonical JSON object keys must be strings after validation")
+        return {key: _normalize(item) for key, item in value.items()}
     if isinstance(value, frozenset | set):
         normalized = [_normalize(item) for item in value]
         return sorted(
@@ -52,7 +54,7 @@ def canonical_json(value: Any) -> bytes:
         separators=(",", ":"),
         ensure_ascii=False,
         allow_nan=False,
-    ).encode()
+    ).encode("utf-8")
 
 
 def sha256_digest(value: Any) -> str:

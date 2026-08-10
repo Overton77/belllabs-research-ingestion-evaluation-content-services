@@ -22,18 +22,26 @@ from app.domain.operation_execution.journal import (
 from app.domain.run_control.contracts import (
     ActorContext,
     BudgetState,
+    ClaimEffectAction,
+    CommandResult,
+    CommandStatus,
     DomainEventEnvelope,
+    EffectDisposition,
+    EffectSettlementOutcome,
     LifecycleCommand,
+    ObserveEffectAction,
     RecordUsageAction,
     RunProjection,
+    SettleEffectAction,
 )
-from app.domain.run_control.reducer import reduce_lifecycle
 
 
 class JournalRunControlReader(Protocol):
     async def get_run(self, request_scope: str, run_id: str) -> RunProjection: ...
 
     async def get_budget(self, request_scope: str, run_id: str) -> BudgetState: ...
+
+    async def execute(self, command: LifecycleCommand) -> CommandResult: ...
 
 
 class ResultPayloadStore(Protocol):
@@ -72,11 +80,38 @@ class JournaledOperationExecutionCoordinator:
         claimed_by: str,
     ) -> OperationClaimResult:
         claim = _claim_for(binding, claimed_by=claimed_by)
+        claimed = await self._run_control.execute(
+            LifecycleCommand(
+                command_id=f"operation-effect-claim:{claim.effect_claim_id}",
+                idempotency_issuer="operation-journal",
+                request_scope=binding.request_scope,
+                run_id=binding.run_id,
+                expected_run_version=binding.run_control_revision,
+                actor=self._actor,
+                action=ClaimEffectAction(
+                    effect_id=claim.effect_claim_id,
+                    effect_kind="operation.runtime",
+                    operation_ref=binding.binding_id,
+                    provider_idempotency_key=binding.side_effect_key,
+                    reservation_id=binding.budget_reservation_id,
+                ),
+                reason="Claim consequential operation effect before provider dispatch",
+                evidence_refs=(binding.binding_id,),
+                occurred_at=claim.claimed_at,
+                correlation_id=f"operation:{binding.semantic_attempt_key}",
+                causation_id=binding.binding_id,
+            )
+        )
+        if claimed.status != CommandStatus.ACCEPTED:
+            return OperationClaimResult(
+                status="shadow_denied",
+                reason=f"run-control effect claim rejected: {claimed.reason_code}",
+            )
         return await self._journal.commit(
             OperationJournalMutation(
                 request_scope=binding.request_scope,
                 belllabs_run_id=binding.run_id,
-                expected_run_version=binding.run_control_revision,
+                expected_run_version=claimed.resulting_run_version,
                 claim=claim,
             )
         )
@@ -140,10 +175,6 @@ class JournaledOperationExecutionCoordinator:
             media_type="application/vnd.belllabs.operation-settlement+json",
         )
         current_run = await self._run_control.get_run(binding.request_scope, binding.run_id)
-        current_budget = await self._run_control.get_budget(
-            binding.request_scope,
-            binding.run_id,
-        )
         release_amounts = {
             dimension: limit
             - min(
@@ -156,12 +187,66 @@ class JournaledOperationExecutionCoordinator:
             > settlement.usage.amounts.get(dimension, 0)
             + settlement.usage.pending_external_amounts.get(dimension, 0)
         }
+        disposition = (
+            EffectDisposition.SUCCEEDED
+            if settlement.status == "completed"
+            else EffectDisposition.CANCELLED
+            if settlement.status == "cancelled"
+            else EffectDisposition.FAILED
+        )
+        observation = await self._run_control.execute(
+            LifecycleCommand(
+                command_id=f"operation-effect-observation:{settlement.settlement_id}",
+                idempotency_issuer="operation-journal",
+                request_scope=binding.request_scope,
+                run_id=binding.run_id,
+                expected_run_version=current_run.version,
+                actor=self._actor,
+                action=ObserveEffectAction(
+                    effect_id=claim.effect_claim_id,
+                    observation_id=f"observation:{settlement.settlement_id}",
+                    disposition=disposition,
+                    provider_effect_ref=settlement.provider_run_id,
+                    evidence_refs=(address.object_ref,),
+                ),
+                reason="Reconcile provider completion as an observed effect fact",
+                evidence_refs=(binding.binding_id, address.object_ref),
+                occurred_at=settlement.settled_at,
+                correlation_id=f"operation:{binding.semantic_attempt_key}",
+                causation_id=claim.effect_claim_id,
+            )
+        )
+        _require_accepted(observation, "effect observation")
+        effect_settlement = await self._run_control.execute(
+            LifecycleCommand(
+                command_id=f"operation-effect-settlement:{settlement.settlement_id}",
+                idempotency_issuer="operation-journal",
+                request_scope=binding.request_scope,
+                run_id=binding.run_id,
+                expected_run_version=observation.resulting_run_version,
+                actor=self._actor,
+                action=SettleEffectAction(
+                    effect_id=claim.effect_claim_id,
+                    settlement_id=settlement.settlement_id,
+                    observation_id=f"observation:{settlement.settlement_id}",
+                    outcome=EffectSettlementOutcome(disposition.value),
+                    usage_settlement_ref=settlement.settlement_id,
+                    evidence_refs=(address.object_ref,),
+                ),
+                reason="Accept exactly one BellLabs effect settlement",
+                evidence_refs=(binding.binding_id, address.object_ref),
+                occurred_at=settlement.settled_at,
+                correlation_id=f"operation:{binding.semantic_attempt_key}",
+                causation_id=claim.effect_claim_id,
+            )
+        )
+        _require_accepted(effect_settlement, "effect settlement")
         command = LifecycleCommand(
-            command_id=f"operation-budget:{settlement.settlement_id}:v{current_run.version}",
+            command_id=f"operation-budget:{settlement.settlement_id}",
             idempotency_issuer="operation-journal",
             request_scope=binding.request_scope,
             run_id=binding.run_id,
-            expected_run_version=current_run.version,
+            expected_run_version=effect_settlement.resulting_run_version,
             actor=self._actor,
             action=RecordUsageAction(
                 usage_id=settlement.settlement_id,
@@ -176,15 +261,8 @@ class JournaledOperationExecutionCoordinator:
             correlation_id=f"operation:{binding.semantic_attempt_key}",
             causation_id=claim.effect_claim_id,
         )
-        command_fingerprint = sha256_digest(
-            command.model_dump(mode="json", exclude={"occurred_at"})
-        )
-        reduction = reduce_lifecycle(
-            current_run,
-            current_budget,
-            command,
-            command_fingerprint,
-        )
+        usage_result = await self._run_control.execute(command)
+        _require_accepted(usage_result, "operation usage settlement")
         technical_attempt = OperationTechnicalAttempt(
             operation_attempt_id=str(
                 uuid5(NAMESPACE_URL, f"operation-technical:{settlement.settlement_id}")
@@ -223,35 +301,14 @@ class JournaledOperationExecutionCoordinator:
             detail={"schema_version": "1"},
             settled_at=settlement.settled_at,
         )
-        runtime_events = _runtime_outbox_events(
-            binding=binding,
-            settlement=settlement,
-            claim=claim,
-            result_manifest_ref=address.object_ref,
-            aggregate_version=reduction.projection.version,
-            actor=self._actor,
-            correlation_id=command.correlation_id,
-        )
-        lifecycle_events = reduction.events
-        if runtime_events:
-            lifecycle_events = tuple(
-                event.model_copy(update={"is_version_final": False})
-                for event in lifecycle_events
-            )
         await self._journal.commit(
             OperationJournalMutation(
                 request_scope=binding.request_scope,
                 belllabs_run_id=binding.run_id,
-                expected_run_version=current_run.version,
+                expected_run_version=usage_result.resulting_run_version,
                 claim=claim,
                 attempt=technical_attempt,
                 settlement=journal_settlement,
-                command_result=reduction.result,
-                resulting_run=reduction.projection,
-                resulting_budget=reduction.budget,
-                transition=reduction.transition,
-                ledger_entries=reduction.ledger_entries,
-                outbox_events=lifecycle_events + runtime_events,
             )
         )
         return settlement
@@ -260,6 +317,11 @@ class JournaledOperationExecutionCoordinator:
 def _effect_claim_id(binding: OperationExecutionBinding) -> str:
     identity = f"operation-effect:{binding.request_scope}:{binding.binding_id}"
     return str(uuid5(NAMESPACE_URL, identity))
+
+
+def _require_accepted(result: CommandResult, subject: str) -> None:
+    if result.status != CommandStatus.ACCEPTED:
+        raise RuntimeError(f"{subject} rejected by run control: {result.reason_code}")
 
 
 def _claim_for(

@@ -15,7 +15,12 @@ from app.domain.composition.contracts import (
     RunDependencyClass,
     RunDependencyRevision,
 )
-from app.domain.run_control.contracts import CancelAction, CommandStatus, DecisionStatus
+from app.domain.run_control.contracts import (
+    CancelAction,
+    ClaimEffectAction,
+    CommandStatus,
+    DecisionStatus,
+)
 from app.integrations.postgres import apply_application_migrations
 from tests.test_run_control import command, request, service
 
@@ -39,6 +44,7 @@ async def test_postgres_atomic_rollback_and_concurrent_version_conflict(
             } >= {
                 "0012_graph_runtime_operation_journal.sql",
                 "0013_legacy_operation_journal_backfill.sql",
+                "0015_transactional_run_control_v1.sql",
             }
 
         async def fail_admission(boundary: str) -> None:
@@ -197,6 +203,33 @@ async def test_postgres_atomic_rollback_and_concurrent_version_conflict(
         assert (await run_service.admit(over_cap)).status == DecisionStatus.REJECTED
 
         await run_service.execute(command(admitted.run_id, 1, "start", {"kind": "start"}))
+
+        async def fail_effect_command(boundary: str) -> None:
+            if boundary == "command":
+                raise RuntimeError("injected effect transaction failure")
+
+        failing_command_service, _ = service(
+            PostgresRunControlRepository(pool, before_commit=fail_effect_command)  # type: ignore[arg-type]
+        )
+        with pytest.raises(RuntimeError, match="effect transaction failure"):
+            await failing_command_service.execute(
+                command(
+                    admitted.run_id,
+                    2,
+                    "claim-effect-rollback",
+                    ClaimEffectAction(
+                        effect_id="effect:rollback",
+                        effect_kind="external.test",
+                        operation_ref="operation:rollback",
+                        provider_idempotency_key="provider-key:rollback",
+                        reservation_id="baseline",
+                    ),
+                )
+            )
+        assert (await run_service.get_run("tenant-1", admitted.run_id)).version == 2
+        assert (await run_service.get_effects("tenant-1", admitted.run_id)).claims == {}
+        assert await run_service.list_effect_ledger("tenant-1", admitted.run_id) == ()
+
         first, second = await asyncio.gather(
             run_service.execute(command(admitted.run_id, 2, "cancel-a", CancelAction())),
             run_service.execute(command(admitted.run_id, 2, "cancel-b", CancelAction())),

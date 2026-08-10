@@ -25,6 +25,8 @@ from app.domain.run_control.contracts import (
     ConsumerApplyResult,
     DecisionStatus,
     DomainEventEnvelope,
+    EffectLedgerEntry,
+    EffectLedgerState,
     LifecycleCommand,
     LifecycleTransitionRecord,
     OutboxCursor,
@@ -76,6 +78,10 @@ REQUIRED_SHARED_BUDGET_DIMENSIONS = frozenset(
 
 class RunConfigurationVerifier(Protocol):
     async def verify(self, request: RunRequest) -> VerifiedRunConfiguration: ...
+
+
+class DomainEventPublisher(Protocol):
+    async def publish(self, envelope: DomainEventEnvelope) -> None: ...
 
 
 class F1RunConfigurationVerifier:
@@ -227,6 +233,7 @@ class RunControlService:
             reserved=dict(request.budget_envelope.baseline_reservations),
             reservations=reservations,
         )
+        effects = EffectLedgerState(run_id=run_id)
         ledger = (
             BudgetLedgerEntry(
                 entry_id=_stable_id("ledger", account_id, "baseline"),
@@ -304,6 +311,7 @@ class RunControlService:
                     decision=decision,
                     projection=projection,
                     budget=budget,
+                    effects=effects,
                     transition=transition,
                     ledger_entries=ledger,
                     events=events,
@@ -347,8 +355,9 @@ class RunControlService:
                 f"{projection.version}",
             )
         budget = await self._repository.get_budget(command.request_scope, command.run_id)
+        effects = await self._repository.get_effects(command.request_scope, command.run_id)
         try:
-            reduction = reduce_lifecycle(projection, budget, command, fingerprint)
+            reduction = reduce_lifecycle(projection, budget, effects, command, fingerprint)
         except ReductionRejected as error:
             return await self._commit_non_transition_result(
                 command,
@@ -368,8 +377,10 @@ class RunControlService:
             expected_version=projection.version,
             projection=reduction.projection,
             budget=reduction.budget,
+            effects=reduction.effects,
             transition=reduction.transition,
             ledger_entries=reduction.ledger_entries,
+            effect_entries=reduction.effect_entries,
             events=reduction.events,
         )
         try:
@@ -400,6 +411,14 @@ class RunControlService:
 
     async def get_budget(self, request_scope: str, run_id: str) -> BudgetState:
         return await self._repository.get_budget(request_scope, run_id)
+
+    async def get_effects(self, request_scope: str, run_id: str) -> EffectLedgerState:
+        return await self._repository.get_effects(request_scope, run_id)
+
+    async def list_effect_ledger(
+        self, request_scope: str, run_id: str
+    ) -> tuple[EffectLedgerEntry, ...]:
+        return await self._repository.list_effect_ledger(request_scope, run_id)
 
     async def reconstruct_projection(self, request_scope: str, run_id: str) -> RunProjection:
         transitions = await self._repository.list_transitions(request_scope, run_id)
@@ -607,3 +626,35 @@ def _event(
         causation_id=causation_id,
         payload=payload,
     )
+
+
+class RunControlOutboxRelay:
+    """At-least-once relay; ambiguous publish/ack failures remain durably redeliverable."""
+
+    def __init__(self, service: RunControlService, publisher: DomainEventPublisher) -> None:
+        self._service = service
+        self._publisher = publisher
+
+    async def relay_pending(
+        self,
+        request_scope: str,
+        *,
+        after: OutboxCursor | None = None,
+        limit: int = 100,
+        delivered_at: datetime,
+    ) -> tuple[str, ...]:
+        records = await self._service.pending_outbox(
+            request_scope,
+            after=after,
+            limit=limit,
+        )
+        delivered: list[str] = []
+        for record in records:
+            await self._publisher.publish(record.envelope)
+            await self._service.mark_delivered(
+                request_scope,
+                record.envelope.event_id,
+                delivered_at,
+            )
+            delivered.append(record.envelope.event_id)
+        return tuple(delivered)

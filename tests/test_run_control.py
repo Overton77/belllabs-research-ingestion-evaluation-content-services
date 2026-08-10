@@ -64,6 +64,12 @@ ALL_PERMISSIONS = frozenset(
         "workflow_run.reserve_budget",
         "workflow_run.report_usage",
         "workflow_run.settle_usage",
+        "workflow_run.claim_effect",
+        "workflow_run.observe_effect",
+        "workflow_run.settle_effect",
+        "workflow_run.register_async_child",
+        "workflow_run.observe_async_child",
+        "workflow_run.decide_async_child",
         "workflow_run.propose_continuation",
         "workflow_run.decide_continuation",
         "workflow_run.accept_finalization",
@@ -426,6 +432,8 @@ async def test_budget_dimensions_enforce_hard_caps_and_cancellation_waits_for_se
             TerminalizeAction(
                 proposal=TerminalizationProposal(
                     proposal_id="terminal-1",
+                    expected_run_version=5,
+                    workflow_type_digest=WORKFLOW_DIGEST,
                     obligation_revision="obligations:1",
                     evidence_frontier_digest=INITIAL_EVIDENCE_FRONTIER,
                     accepted_obligation_evidence_digest=EMPTY_EVIDENCE_DIGEST,
@@ -433,6 +441,7 @@ async def test_budget_dimensions_enforce_hard_caps_and_cancellation_waits_for_se
                     required_obligations_accepted=True,
                     cancellation_settled=True,
                     budget_settled=True,
+                    effects_settled=True,
                     proposed_at=NOW,
                 )
             ),
@@ -478,6 +487,8 @@ async def test_budget_dimensions_enforce_hard_caps_and_cancellation_waits_for_se
             TerminalizeAction(
                 proposal=TerminalizationProposal(
                     proposal_id="terminal-2",
+                    expected_run_version=7,
+                    workflow_type_digest=WORKFLOW_DIGEST,
                     obligation_revision="obligations:1",
                     evidence_frontier_digest=output_frontier,
                     accepted_obligation_evidence_digest=EMPTY_EVIDENCE_DIGEST,
@@ -486,6 +497,7 @@ async def test_budget_dimensions_enforce_hard_caps_and_cancellation_waits_for_se
                     valid_output_refs=("artifact:partial",),
                     cancellation_settled=True,
                     budget_settled=True,
+                    effects_settled=True,
                     proposed_at=NOW,
                 )
             ),
@@ -523,6 +535,8 @@ async def test_typed_execution_failure_terminalizes_as_failed() -> None:
             TerminalizeAction(
                 proposal=TerminalizationProposal(
                     proposal_id="terminal-execution-failure",
+                    expected_run_version=3,
+                    workflow_type_digest=WORKFLOW_DIGEST,
                     obligation_revision="obligations:1",
                     evidence_frontier_digest=INITIAL_EVIDENCE_FRONTIER,
                     accepted_obligation_evidence_digest=EMPTY_EVIDENCE_DIGEST,
@@ -530,6 +544,7 @@ async def test_typed_execution_failure_terminalizes_as_failed() -> None:
                     required_obligations_accepted=True,
                     execution_failure_refs=("evaluation:workflow:failed",),
                     budget_settled=True,
+                    effects_settled=True,
                     proposed_at=NOW,
                 )
             ),
@@ -746,12 +761,15 @@ async def test_terminalization_binds_authoritatively_accepted_obligation_evidenc
             TerminalizeAction(
                 proposal=TerminalizationProposal(
                     proposal_id="terminal-evidence",
+                    expected_run_version=4,
+                    workflow_type_digest=WORKFLOW_DIGEST,
                     obligation_revision="obligations:1",
                     evidence_frontier_digest=evidence_frontier,
                     accepted_obligation_evidence_digest=evidence_digest,
                     proposing_execution_binding_ref="execution:test",
                     required_obligations_accepted=True,
                     budget_settled=True,
+                    effects_settled=True,
                     proposed_at=NOW,
                 )
             ),

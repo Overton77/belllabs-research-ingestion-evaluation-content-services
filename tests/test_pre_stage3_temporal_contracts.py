@@ -192,7 +192,7 @@ def test_temporal_contracts_are_versioned_without_mutating_published_v2() -> Non
         "sha256:d8dcb93c0c9e47c16a63c8adab397bb493ed2a42354028b90081cf83c8aa754d"
     )
     assert sha256_digest(schemas["run_plan_v3"]) == (
-        "sha256:b4cad59dc2d3a8d164e4f1dec9e18cd3273bdd60fd18c965eb4af7bf4b021532"
+        "sha256:b97ee980bc34118a947b0b56d514b8f8578658fde063cfb7f1e60d26068a0f4d"
     )
     assert sha256_digest(schemas["operation_execution_outcome"]) == (
         "sha256:b53b176f42d9cb4ee6a4068907b41e783b116ac8c5ab2fe6562fa35f51119fd1"

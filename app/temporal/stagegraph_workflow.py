@@ -524,6 +524,8 @@ class StageGraphWorkflow:
                             f"terminal:{run_input.run_id}:epoch:"
                             f"{run_input.execution_epoch}:{state.workflow_cycle}"
                         ),
+                        "expected_run_version": state.run_version,
+                        "workflow_type_digest": lifecycle.workflow_type_digest,
                         "obligation_revision": lifecycle.obligation_revision,
                         "evidence_frontier_digest": lifecycle.evidence_frontier_digest,
                         "accepted_obligation_evidence_digest": (
@@ -549,6 +551,7 @@ class StageGraphWorkflow:
                         ),
                         "cancellation_settled": False,
                         "budget_settled": True,
+                        "effects_settled": True,
                         "pending_wait_or_link_ids": (),
                         "proposed_at": workflow.now(),
                     },

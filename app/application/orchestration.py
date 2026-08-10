@@ -460,5 +460,6 @@ class RunControlLifecycleGateway:
             accepted_obligation_evidence_digest=sha256_digest(evidence_payload),
             required_obligations_accepted=projection.required_obligation_refs
             <= {item.obligation_ref for item in projection.accepted_obligation_evidence},
+            workflow_type_digest=projection.workflow_type_ref.digest,
             terminal_outcome=projection.terminal_outcome,
         )

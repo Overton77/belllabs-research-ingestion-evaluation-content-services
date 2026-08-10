@@ -39,13 +39,34 @@ class DefinitionKind(StrEnum):
     MCP_SERVER = "mcp_server"
     MCP_TOOL = "mcp_tool"
     PLUGIN_PACKAGE = "plugin_package"
+    MODEL = "model"
+    MIDDLEWARE = "middleware"
+    SANDBOX_PROFILE = "sandbox_profile"
+    TOOL = "tool"
+    DEEP_AGENT_PLACEMENT = "deep_agent_placement"
+
+
+class DefinitionLifecycleStatus(StrEnum):
+    PUBLISHED = "published"
+    RETIRED = "retired"
+
+
+class ImmutablePayloadRef(Contract):
+    schema_id: str = Field(min_length=1)
+    digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    media_type: str = Field(min_length=1)
+    size_bytes: int = Field(ge=0)
+    uri: str = Field(min_length=1)
 
 
 class ExactDefinitionRef(Contract):
     kind: DefinitionKind
     logical_id: str = Field(min_length=1, pattern=r"^[a-z0-9][a-z0-9._:-]*$")
+    schema_version: Literal["1"] = "1"
     revision: int = Field(ge=1)
     digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    lifecycle_status: DefinitionLifecycleStatus = DefinitionLifecycleStatus.PUBLISHED
+    payload_ref: ImmutablePayloadRef | None = None
 
 
 class AliasRef(Contract):
@@ -75,6 +96,51 @@ class DefinitionBase(Contract):
     logical_id: str = Field(min_length=1, pattern=r"^[a-z0-9][a-z0-9._:-]*$")
     title: str = Field(min_length=1)
     description: str = Field(min_length=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_embedded_secret_values(cls, value: object) -> object:
+        """Definition documents may contain typed references, never credential values."""
+        sensitive_keys = {
+            "apikey",
+            "apitoken",
+            "accesstoken",
+            "authtoken",
+            "credential",
+            "credentials",
+            "password",
+            "secret",
+            "secretvalue",
+            "token",
+        }
+
+        def is_ref(subject: object) -> bool:
+            if isinstance(subject, dict):
+                keys = set(subject)
+                return (
+                    "provider" in keys and "key" in keys and keys <= {"provider", "key", "version"}
+                )
+            if isinstance(subject, list | tuple):
+                return all(is_ref(item) for item in subject)
+            return False
+
+        def inspect(subject: object) -> None:
+            if isinstance(subject, dict):
+                for key, item in subject.items():
+                    normalized = re.sub(r"[^a-z0-9]", "", str(key).lower())
+                    if normalized in sensitive_keys:
+                        if item in (None, (), [], {}) or is_ref(item):
+                            continue
+                        raise ValueError(
+                            "secret values are forbidden in definitions; use typed SecretRef values"
+                        )
+                    inspect(item)
+            elif isinstance(subject, list | tuple):
+                for item in subject:
+                    inspect(item)
+
+        inspect(value)
+        return value
 
 
 class NamespacedExtension(Contract):
@@ -151,6 +217,7 @@ class EnvironmentAvailability(Contract):
     capabilities: frozenset[str] = Field(default_factory=frozenset)
     runtime_bindings: frozenset[str] = Field(default_factory=frozenset)
     secret_refs: tuple[SecretRef, ...] = ()
+    exact_capabilities: tuple[AvailableCapability, ...] = ()
 
 
 class AvailabilityRequirement(Contract):
@@ -408,18 +475,12 @@ class GoalDirectedBlueprint(DefinitionBase):
         min_length=1,
     )
     allowed_operation_classes: frozenset[str] = frozenset({"goal_iteration"})
-    session_policy: GoalSessionRolloverPolicy = Field(
-        default_factory=GoalSessionRolloverPolicy
-    )
+    session_policy: GoalSessionRolloverPolicy = Field(default_factory=GoalSessionRolloverPolicy)
     workspace_policy: GoalWorkspaceSnapshotPolicy = Field(
         default_factory=GoalWorkspaceSnapshotPolicy
     )
-    convergence_policy: GoalConvergencePolicy = Field(
-        default_factory=GoalConvergencePolicy
-    )
-    iteration_reservation: dict[str, int] = Field(
-        default_factory=lambda: {"goal.iterations": 1}
-    )
+    convergence_policy: GoalConvergencePolicy = Field(default_factory=GoalConvergencePolicy)
+    iteration_reservation: dict[str, int] = Field(default_factory=lambda: {"goal.iterations": 1})
     protected_scope_policy: GoalProtectedScopePolicy = Field(
         default_factory=GoalProtectedScopePolicy
     )
@@ -542,6 +603,14 @@ class RuntimeProfileDefinition(DefinitionBase):
     required_secrets: tuple[SecretRef, ...] = ()
     # TODO(ticket 06/09): operation and agent runtime semantics are separate pinned assets.
     operation_binding_refs: frozenset[ExactDefinitionRef] = Field(default_factory=frozenset)
+    operation_assemblies: tuple[OperationAssemblyDefinition, ...] = ()
+
+    @model_validator(mode="after")
+    def unique_assemblies(self) -> RuntimeProfileDefinition:
+        identities = [item.assembly_id for item in self.operation_assemblies]
+        if len(identities) != len(set(identities)):
+            raise ValueError("operation assembly identities must be unique")
+        return self
 
 
 class WorkspaceTemplateDefinition(DefinitionBase):
@@ -588,9 +657,7 @@ class OutputContractRealization(Contract):
 class WorkflowImplementationBindingDefinition(DefinitionBase):
     """One approved, exact implementation of a semantic Workflow Type revision."""
 
-    kind: Literal[DefinitionKind.WORKFLOW_IMPLEMENTATION] = (
-        DefinitionKind.WORKFLOW_IMPLEMENTATION
-    )
+    kind: Literal[DefinitionKind.WORKFLOW_IMPLEMENTATION] = DefinitionKind.WORKFLOW_IMPLEMENTATION
     workflow_type_ref: ExactDefinitionRef
     blueprint_ref: ExactDefinitionRef
     control_profile_ref: ExactDefinitionRef
@@ -599,9 +666,7 @@ class WorkflowImplementationBindingDefinition(DefinitionBase):
     evaluation_profile_ref: ExactDefinitionRef
     workflow_configuration_ref: ExactDefinitionRef | None = None
     obligation_realizations: tuple[ObligationRealization, ...] = Field(min_length=1)
-    output_contract_realizations: tuple[OutputContractRealization, ...] = Field(
-        min_length=1
-    )
+    output_contract_realizations: tuple[OutputContractRealization, ...] = Field(min_length=1)
     conformance_evidence_refs: frozenset[str] = Field(min_length=1)
     approval_status: Literal["approved"] = "approved"
 
@@ -619,16 +684,11 @@ class WorkflowImplementationBindingDefinition(DefinitionBase):
             raise ValueError("Workflow Implementation contains a reference of the wrong family")
         if (
             self.workflow_configuration_ref is not None
-            and self.workflow_configuration_ref.kind
-            != DefinitionKind.WORKFLOW_CONFIGURATION
+            and self.workflow_configuration_ref.kind != DefinitionKind.WORKFLOW_CONFIGURATION
         ):
-            raise ValueError(
-                "Workflow Implementation configuration reference has the wrong family"
-            )
+            raise ValueError("Workflow Implementation configuration reference has the wrong family")
         obligations = [item.obligation_ref for item in self.obligation_realizations]
-        outputs = [
-            item.output_contract_ref for item in self.output_contract_realizations
-        ]
+        outputs = [item.output_contract_ref for item in self.output_contract_realizations]
         if len(obligations) != len(set(obligations)):
             raise ValueError("Workflow Implementation obligation realizations must be unique")
         if len(outputs) != len(set(outputs)):
@@ -729,6 +789,12 @@ class SkillDefinition(DefinitionBase):
     compatibility: SkillCompatibility = Field(default_factory=SkillCompatibility)
     source_provenance: SourceProvenance
     review_status: Literal["reviewed", "approved"] = "reviewed"
+    maturity: Literal["experimental", "qualified", "accepted"] = "qualified"
+    attachment_targets: frozenset[str] = Field(default_factory=lambda: frozenset({"agent.main"}))
+    compatible_compiler_versions: frozenset[str] = Field(
+        default_factory=lambda: frozenset({"control-plane-definitions/1"})
+    )
+    conflicts_with: frozenset[ExactDefinitionRef] = Field(default_factory=frozenset)
 
     @model_validator(mode="after")
     def validate_manifest(self) -> SkillDefinition:
@@ -761,6 +827,12 @@ class MCPServerDefinition(DefinitionBase):
     schema_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     source_provenance: SourceProvenance
     review_status: Literal["reviewed", "approved"] = "reviewed"
+    maturity: Literal["experimental", "qualified", "accepted"] = "qualified"
+    attachment_targets: frozenset[str] = Field(default_factory=lambda: frozenset({"agent.main"}))
+    compatible_compiler_versions: frozenset[str] = Field(
+        default_factory=lambda: frozenset({"control-plane-definitions/1"})
+    )
+    conflicts_with: frozenset[ExactDefinitionRef] = Field(default_factory=frozenset)
 
     @model_validator(mode="after")
     def validate_transport_recipe(self) -> MCPServerDefinition:
@@ -794,6 +866,12 @@ class MCPToolDefinition(DefinitionBase):
     annotations: dict[str, object] = Field(default_factory=dict)
     schema_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     side_effect_class: Literal["read_only", "bounded_write", "consequential"]
+    maturity: Literal["experimental", "qualified", "accepted"] = "qualified"
+    attachment_targets: frozenset[str] = Field(default_factory=lambda: frozenset({"agent.main"}))
+    compatible_compiler_versions: frozenset[str] = Field(
+        default_factory=lambda: frozenset({"control-plane-definitions/1"})
+    )
+    conflicts_with: frozenset[ExactDefinitionRef] = Field(default_factory=frozenset)
 
     @model_validator(mode="after")
     def validate_server_ref(self) -> MCPToolDefinition:
@@ -808,6 +886,125 @@ class ModelPolicy(Contract):
     settings: dict[str, object] = Field(default_factory=dict)
 
 
+class CapabilityKind(StrEnum):
+    MCP = "mcp"
+    SKILL = "skill"
+    SANDBOX = "sandbox"
+    MODEL = "model"
+    MIDDLEWARE = "middleware"
+    TOOL = "tool"
+
+
+class CapabilityRequirement(Contract):
+    requirement_id: str = Field(pattern=r"^[a-z][a-z0-9._-]*$")
+    capability_kind: CapabilityKind
+    allowed_refs: frozenset[ExactDefinitionRef] = Field(min_length=1)
+    attachment_target: str = Field(min_length=1)
+    required: bool = True
+    when_unavailable: Literal["reject", "omit", "degrade"] = "reject"
+    degraded_ref: ExactDefinitionRef | None = None
+
+    @model_validator(mode="after")
+    def validate_policy(self) -> CapabilityRequirement:
+        if self.required and self.when_unavailable != "reject":
+            raise ValueError("required capabilities must fail closed")
+        if (self.when_unavailable == "degrade") != (self.degraded_ref is not None):
+            raise ValueError("degradation requires exactly one authored degraded_ref")
+        allowed_kinds = {
+            CapabilityKind.MCP: {DefinitionKind.MCP_SERVER, DefinitionKind.MCP_TOOL},
+            CapabilityKind.SKILL: {DefinitionKind.SKILL},
+            CapabilityKind.SANDBOX: {DefinitionKind.SANDBOX_PROFILE},
+            CapabilityKind.MODEL: {DefinitionKind.MODEL},
+            CapabilityKind.MIDDLEWARE: {DefinitionKind.MIDDLEWARE},
+            CapabilityKind.TOOL: {DefinitionKind.TOOL, DefinitionKind.MCP_TOOL},
+        }[self.capability_kind]
+        refs = set(self.allowed_refs)
+        if self.degraded_ref is not None:
+            refs.add(self.degraded_ref)
+        if any(ref.kind not in allowed_kinds for ref in refs):
+            raise ValueError("capability requirement contains a reference of the wrong family")
+        return self
+
+
+class AvailableCapability(Contract):
+    ref: ExactDefinitionRef
+
+
+class ResolvedCapabilityAttachment(Contract):
+    requirement_id: str
+    capability_kind: CapabilityKind
+    selected_ref: ExactDefinitionRef | None = None
+    attachment_target: str
+    status: Literal["accepted", "omitted", "degraded"]
+    reason: str
+
+
+class ProfileComponent(Contract):
+    slot: str = Field(pattern=r"^[a-z][a-z0-9._-]*$")
+    ref: ExactDefinitionRef
+
+
+class OperationAssemblyDefinition(Contract):
+    assembly_id: str = Field(pattern=r"^[a-z][a-z0-9._-]*$")
+    deep_agent_profile_ref: ExactDefinitionRef
+    placement_ref: ExactDefinitionRef
+    capability_requirements: tuple[CapabilityRequirement, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_families(self) -> OperationAssemblyDefinition:
+        if self.deep_agent_profile_ref.kind != DefinitionKind.AGENT_PROFILE:
+            raise ValueError("operation assembly profile must be an Agent Profile revision")
+        if self.placement_ref.kind != DefinitionKind.DEEP_AGENT_PLACEMENT:
+            raise ValueError("operation assembly placement must be exact")
+        ids = [item.requirement_id for item in self.capability_requirements]
+        if len(ids) != len(set(ids)):
+            raise ValueError("capability requirement identities must be unique per assembly")
+        return self
+
+
+class DeepAgentPlacementDefinition(DefinitionBase):
+    kind: Literal[DefinitionKind.DEEP_AGENT_PLACEMENT] = DefinitionKind.DEEP_AGENT_PLACEMENT
+    deep_agents_version: str = Field(min_length=1)
+    placement: Literal["local_worker", "langsmith_remote"]
+    runtime_binding: str = Field(min_length=1)
+    sandbox_ref: ExactDefinitionRef
+
+    @model_validator(mode="after")
+    def sandbox_is_exact(self) -> DeepAgentPlacementDefinition:
+        if self.sandbox_ref.kind != DefinitionKind.SANDBOX_PROFILE:
+            raise ValueError("Deep Agent placement requires an exact sandbox profile")
+        return self
+
+
+class CapabilityDefinition(DefinitionBase):
+    kind: Literal[
+        DefinitionKind.MODEL,
+        DefinitionKind.MIDDLEWARE,
+        DefinitionKind.SANDBOX_PROFILE,
+        DefinitionKind.TOOL,
+    ]
+    capability_kind: CapabilityKind
+    maturity: Literal["experimental", "qualified", "accepted"]
+    attachment_targets: frozenset[str] = Field(min_length=1)
+    compatible_compiler_versions: frozenset[str] = Field(default_factory=frozenset)
+    conflicts_with: frozenset[ExactDefinitionRef] = Field(default_factory=frozenset)
+
+    @model_validator(mode="after")
+    def capability_family_matches_definition_kind(self) -> CapabilityDefinition:
+        expected = {
+            DefinitionKind.MODEL: CapabilityKind.MODEL,
+            DefinitionKind.MIDDLEWARE: CapabilityKind.MIDDLEWARE,
+            DefinitionKind.SANDBOX_PROFILE: CapabilityKind.SANDBOX,
+            DefinitionKind.TOOL: CapabilityKind.TOOL,
+        }[self.kind]
+        if self.capability_kind != expected:
+            raise ValueError(
+                f"capability_kind must be {expected.value!r} for definition kind "
+                f"{self.kind.value!r}"
+            )
+        return self
+
+
 class AgentProfileDefinition(DefinitionBase):
     kind: Literal[DefinitionKind.AGENT_PROFILE] = DefinitionKind.AGENT_PROFILE
     prompt_refs: frozenset[ExactDefinitionRef] = Field(default_factory=frozenset)
@@ -818,6 +1015,12 @@ class AgentProfileDefinition(DefinitionBase):
     guardrail_refs: frozenset[str] = Field(default_factory=frozenset)
     output_schema_ref: str | None = Field(default=None, min_length=1)
     maximum_capability_request: AuthorityCeiling
+    parent_profile_refs: tuple[ExactDefinitionRef, ...] = ()
+    components: tuple[ProfileComponent, ...] = ()
+    model_ref: ExactDefinitionRef | None = None
+    middleware_refs: frozenset[ExactDefinitionRef] = Field(default_factory=frozenset)
+    sandbox_profile_ref: ExactDefinitionRef | None = None
+    capability_requirements: tuple[CapabilityRequirement, ...] = ()
 
     @model_validator(mode="after")
     def validate_ref_families(self) -> AgentProfileDefinition:
@@ -829,6 +1032,19 @@ class AgentProfileDefinition(DefinitionBase):
         )
         if any(ref.kind != kind for refs, kind in expected for ref in refs):
             raise ValueError("Agent Profile contains a catalog reference of the wrong family")
+        if any(ref.kind != DefinitionKind.AGENT_PROFILE for ref in self.parent_profile_refs):
+            raise ValueError("Agent Profile parents must be exact Agent Profile revisions")
+        if self.model_ref is not None and self.model_ref.kind != DefinitionKind.MODEL:
+            raise ValueError("Agent Profile model must be an exact Model revision")
+        if any(ref.kind != DefinitionKind.MIDDLEWARE for ref in self.middleware_refs):
+            raise ValueError("Agent Profile middleware must be exact revisions")
+        if self.sandbox_profile_ref is not None and (
+            self.sandbox_profile_ref.kind != DefinitionKind.SANDBOX_PROFILE
+        ):
+            raise ValueError("Agent Profile sandbox must be an exact revision")
+        slots = [component.slot for component in self.components]
+        if len(slots) != len(set(slots)):
+            raise ValueError("Agent Profile component slots must be unique")
         return self
 
 
@@ -847,6 +1063,8 @@ Definition = (
     | MCPServerDefinition
     | MCPToolDefinition
     | AgentProfileDefinition
+    | DeepAgentPlacementDefinition
+    | CapabilityDefinition
 )
 
 
@@ -856,6 +1074,17 @@ class PublishedDefinition(Contract):
     published_at: AwareDatetime
     published_by: str
     retired_at: AwareDatetime | None = None
+
+    @model_validator(mode="after")
+    def lifecycle_matches_reference(self) -> PublishedDefinition:
+        expected = (
+            DefinitionLifecycleStatus.RETIRED
+            if self.retired_at is not None
+            else DefinitionLifecycleStatus.PUBLISHED
+        )
+        if self.ref.lifecycle_status != expected:
+            raise ValueError("definition reference lifecycle status does not match its record")
+        return self
 
 
 class RunOverlay(Contract):
@@ -917,6 +1146,7 @@ class ResolvedDefinitions(Contract):
     evaluation_profile: EvaluationProfileDefinition
     workflow_configuration: WorkflowConfigurationDefinition | None = None
     published_records: tuple[PublishedDefinition, ...]
+    agent_profiles: tuple[AgentProfileDefinition, ...] = ()
 
 
 class EffectiveRunConfiguration(Contract):
@@ -940,6 +1170,27 @@ class EffectiveRunConfiguration(Contract):
     linked_run_slots: tuple[LinkedRunSlotConstraint, ...]
     extensions: tuple[NamespacedExtension, ...] = ()
     overlay_decisions: tuple[OverlayDecision, ...]
+    operation_assemblies: tuple[OperationAssemblyDefinition, ...] = ()
+    flattened_agent_bindings: tuple[FlattenedDeepAgentBinding, ...] = ()
+    capability_attachment_plan: tuple[ResolvedCapabilityAttachment, ...] = ()
+
+
+class FlattenedDeepAgentBinding(Contract):
+    assembly_id: str
+    profile_ref: ExactDefinitionRef
+    placement_ref: ExactDefinitionRef
+    flattened_components: tuple[ProfileComponent, ...]
+    prompt_refs: tuple[ExactDefinitionRef, ...] = ()
+    skill_refs: tuple[ExactDefinitionRef, ...] = ()
+    mcp_server_refs: tuple[ExactDefinitionRef, ...] = ()
+    tool_refs: tuple[ExactDefinitionRef, ...] = ()
+    model_policy: ModelPolicy
+    guardrail_refs: tuple[str, ...] = ()
+    output_schema_ref: str | None = None
+    maximum_capability_request: AuthorityCeiling
+    model_ref: ExactDefinitionRef | None = None
+    middleware_refs: tuple[ExactDefinitionRef, ...] = ()
+    sandbox_profile_ref: ExactDefinitionRef | None = None
 
 
 class AuthoringHead(Contract):

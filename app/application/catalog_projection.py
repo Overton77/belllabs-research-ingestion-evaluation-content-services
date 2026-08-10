@@ -198,7 +198,12 @@ class CatalogProjector:
     ) -> _PreparedProjection | CatalogProjectionResult:
         ref = request.ref
         published = await self._definitions.get(ref)
-        if published.ref != ref or sha256_digest(published.definition) != ref.digest:
+        published_identity = published.ref.model_dump(exclude={"lifecycle_status"})
+        requested_identity = ref.model_dump(exclude={"lifecycle_status"})
+        if (
+            published_identity != requested_identity
+            or sha256_digest(published.definition) != ref.digest
+        ):
             raise CatalogProjectionError(
                 "authoritative definition does not match the projection source reference"
             )

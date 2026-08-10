@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import uuid4
 
+import pytest
 from beanie import init_beanie
 from pymongo import AsyncMongoClient
 
@@ -18,6 +19,7 @@ from app.domain.control_plane.contracts import (
     RetireRequest,
     SaveDraftRequest,
 )
+from app.domain.control_plane.errors import DefinitionConflict
 from app.domain.control_plane.extensions import ExtensionRegistry
 from app.integrations.control_plane_payloads import InMemoryPayloadStore
 from app.integrations.mongodb import BEANIE_MODELS
@@ -72,6 +74,13 @@ async def test_real_mongodb_published_revision_is_immutable_and_readable(
         loaded = await repository.get(published.ref)
         assert loaded == published
         assert loaded.definition == definition
+        with pytest.raises(DefinitionConflict):
+            await repository.publish(
+                definition.model_copy(update={"description": "forbidden mutation"}),
+                "integration-mutator",
+                now,
+                expected_head_revision=0,
+            )
         retired = await service.retire(
             RetireRequest(
                 ref=published.ref,

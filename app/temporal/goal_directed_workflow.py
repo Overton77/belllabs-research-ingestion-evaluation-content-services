@@ -340,6 +340,8 @@ class GoalDirectedWorkflow:
                             f"terminal:{run_input.run_id}:epoch:"
                             f"{run_input.execution_epoch}:{result.stop_reason}"
                         ),
+                        "expected_run_version": run_version,
+                        "workflow_type_digest": lifecycle.workflow_type_digest,
                         "obligation_revision": lifecycle.obligation_revision,
                         "evidence_frontier_digest": lifecycle.evidence_frontier_digest,
                         "accepted_obligation_evidence_digest": (
@@ -364,6 +366,7 @@ class GoalDirectedWorkflow:
                         ),
                         "cancellation_settled": False,
                         "budget_settled": True,
+                        "effects_settled": True,
                         "pending_wait_or_link_ids": (),
                         "proposed_at": workflow.now(),
                     },

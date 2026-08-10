@@ -14,9 +14,11 @@ from app.domain.control_plane.contracts import (
     AliasBinding,
     AliasRef,
     AuthoringHead,
+    CapabilityDefinition,
     CompilationRequest,
     CompileInvocation,
     ControlProfileDefinition,
+    DeepAgentPlacementDefinition,
     Definition,
     DefinitionKind,
     DefinitionSelector,
@@ -120,9 +122,7 @@ class ControlPlaneService:
         return await self._repository.retire(request.ref, request.actor_id, request.retired_at)
 
     async def compile(self, invocation: CompileInvocation) -> EffectiveRunConfiguration:
-        workflow_ref, workflow_alias = await self._resolve_selector(
-            invocation.workflow_type
-        )
+        workflow_ref, workflow_alias = await self._resolve_selector(invocation.workflow_type)
         evidence: list[AliasBinding] = []
         if workflow_alias is not None:
             evidence.append(workflow_alias)
@@ -151,9 +151,7 @@ class ControlPlaneService:
                         alias="default",
                     )
                 )
-            implementation_ref, alias = await self._resolve_selector(
-                implementation_selector
-            )
+            implementation_ref, alias = await self._resolve_selector(implementation_selector)
             if alias is not None:
                 evidence.append(alias)
             implementation_record = await self._selectable(implementation_ref)
@@ -173,9 +171,7 @@ class ControlPlaneService:
             if implementation.workflow_configuration_ref is not None:
                 refs.append(implementation.workflow_configuration_ref)
         else:
-            selectors = tuple(
-                selector for selector in component_selectors if selector is not None
-            )
+            selectors = tuple(selector for selector in component_selectors if selector is not None)
             refs = [workflow_ref]
             for selector in selectors:
                 ref, alias = await self._resolve_selector(selector)
@@ -183,9 +179,7 @@ class ControlPlaneService:
                 if alias is not None:
                     evidence.append(alias)
             if invocation.workflow_configuration is not None:
-                ref, alias = await self._resolve_selector(
-                    invocation.workflow_configuration
-                )
+                ref, alias = await self._resolve_selector(invocation.workflow_configuration)
                 refs.append(ref)
                 if alias is not None:
                     evidence.append(alias)
@@ -197,6 +191,14 @@ class ControlPlaneService:
             raise CompilationRejected(
                 f"expected workflow blueprint, got {type(blueprint).__name__}"
             )
+        runtime_profile = self._expect(
+            published[offset + 2].definition,
+            RuntimeProfileDefinition,
+        )
+        core_count = len(published)
+        runtime_dependencies = await self._resolve_runtime_dependencies(runtime_profile)
+        known_refs = {record.ref for record in published}
+        published.extend(record for record in runtime_dependencies if record.ref not in known_refs)
         definitions = ResolvedDefinitions(
             workflow_type=workflow_type,
             implementation_binding=implementation,
@@ -205,10 +207,7 @@ class ControlPlaneService:
                 published[offset + 1].definition,
                 ControlProfileDefinition,
             ),
-            runtime_profile=self._expect(
-                published[offset + 2].definition,
-                RuntimeProfileDefinition,
-            ),
+            runtime_profile=runtime_profile,
             workspace_template=self._expect(
                 published[offset + 3].definition,
                 WorkspaceTemplateDefinition,
@@ -222,10 +221,32 @@ class ControlPlaneService:
                     published[offset + 5].definition,
                     WorkflowConfigurationDefinition,
                 )
-                if len(published) == offset + 6
+                if core_count == offset + 6
                 else None
             ),
             published_records=tuple(published),
+            agent_profiles=tuple(
+                record.definition
+                for record in published
+                if isinstance(record.definition, AgentProfileDefinition)
+            ),
+        )
+        allowed_overlay_extensions = {
+            (item.namespace, item.schema_version, item.discriminator)
+            for item in workflow_type.allowed_overlay_extensions
+        }
+        for extension in invocation.overlay.extensions:
+            identity = (
+                extension.namespace,
+                extension.schema_version,
+                extension.discriminator,
+            )
+            if identity not in allowed_overlay_extensions:
+                raise CompilationRejected(
+                    f"overlay extension is not allowed by the Workflow Type: {identity}"
+                )
+        validated_overlay = invocation.overlay.model_copy(
+            update={"extensions": self._extensions.validate_all(invocation.overlay.extensions)}
         )
         request = CompilationRequest(
             workflow_type_ref=workflow_ref,
@@ -235,18 +256,16 @@ class ControlPlaneService:
             runtime_profile_ref=refs[offset + 2],
             workspace_template_ref=refs[offset + 3],
             evaluation_profile_ref=refs[offset + 4],
-            workflow_configuration_ref=(
-                refs[offset + 5] if len(refs) == offset + 6 else None
-            ),
+            workflow_configuration_ref=(refs[offset + 5] if len(refs) == offset + 6 else None),
             input_manifest=invocation.input_manifest,
-            overlay=invocation.overlay,
+            overlay=validated_overlay,
             caller_authority=invocation.caller_authority,
             parent_authority=invocation.parent_authority,
             environment=invocation.environment,
             context=invocation.context,
             alias_evidence=tuple(evidence),
         )
-        erc = compile_effective_run_configuration(request, definitions, self._extensions)
+        erc = compile_effective_run_configuration(request, definitions)
         await self._persist_erc(erc)
         return erc
 
@@ -282,6 +301,10 @@ class ControlPlaneService:
 
     async def _validate_publication(self, definition: Definition) -> None:
         await self._validate_definition_shape(definition)
+        if isinstance(definition, CapabilityDefinition):
+            # Revalidate at the publication boundary so model_copy/ORM-created instances
+            # cannot bypass the definition-kind/capability-family invariant.
+            CapabilityDefinition.model_validate(definition.model_dump(mode="python"))
         if isinstance(definition, WorkflowTypeDefinition):
             self._extensions.validate_all(definition.required_extensions)
             refs = (
@@ -373,6 +396,11 @@ class ControlPlaneService:
                         raise CompilationRejected(
                             "Agent Profile tool selection requires its exact parent MCP Server"
                         )
+            await self._resolve_profile_dependencies(definition)
+        elif isinstance(definition, RuntimeProfileDefinition):
+            await self._resolve_runtime_dependencies(definition)
+        elif isinstance(definition, DeepAgentPlacementDefinition):
+            await self._selectable(definition.sandbox_ref)
 
     async def _validate_definition_shape(self, definition: Definition) -> None:
         if isinstance(definition, WorkflowTypeDefinition):
@@ -406,9 +434,7 @@ class ControlPlaneService:
                 "Workflow Implementation control profile selects a different blueprint"
             )
         if binding.workflow_configuration_ref is not None:
-            configuration_record = await self._selectable(
-                binding.workflow_configuration_ref
-            )
+            configuration_record = await self._selectable(binding.workflow_configuration_ref)
             configuration = self._expect(
                 configuration_record.definition,
                 WorkflowConfigurationDefinition,
@@ -417,16 +443,13 @@ class ControlPlaneService:
                 raise CompilationRejected(
                     "Workflow Implementation configuration targets a different Workflow Type"
                 )
-        realized_obligations = {
-            item.obligation_ref for item in binding.obligation_realizations
-        }
+        realized_obligations = {item.obligation_ref for item in binding.obligation_realizations}
         if not workflow.obligations <= realized_obligations:
             raise CompilationRejected(
                 "Workflow Implementation does not realize every Workflow Type obligation"
             )
         realized_outputs = {
-            item.output_contract_ref
-            for item in binding.output_contract_realizations
+            item.output_contract_ref for item in binding.output_contract_realizations
         }
         if not workflow.output_contracts <= realized_outputs:
             raise CompilationRejected(
@@ -460,6 +483,96 @@ class ControlPlaneService:
         binding = await self._repository.resolve(selector.alias)
         return binding.target, binding
 
+    async def _resolve_profile_dependencies(
+        self,
+        profile: AgentProfileDefinition,
+        *,
+        seen: frozenset[ExactDefinitionRef] = frozenset(),
+    ) -> tuple[PublishedDefinition, ...]:
+        refs = set(profile.parent_profile_refs)
+        refs.update(profile.prompt_refs)
+        refs.update(profile.skill_refs)
+        refs.update(profile.mcp_server_refs)
+        refs.update(profile.tool_refs)
+        refs.update(component.ref for component in profile.components)
+        refs.update(profile.middleware_refs)
+        refs.update(
+            requirement_ref
+            for requirement in profile.capability_requirements
+            for requirement_ref in requirement.allowed_refs
+        )
+        refs.update(
+            requirement.degraded_ref
+            for requirement in profile.capability_requirements
+            if requirement.degraded_ref is not None
+        )
+        refs.update(
+            ref for ref in (profile.model_ref, profile.sandbox_profile_ref) if ref is not None
+        )
+        records: list[PublishedDefinition] = []
+        for ref in sorted(
+            refs - seen, key=lambda item: (item.kind.value, item.logical_id, item.revision)
+        ):
+            record = await self._selectable(ref)
+            records.append(record)
+            if isinstance(record.definition, AgentProfileDefinition):
+                records.extend(
+                    await self._resolve_profile_dependencies(
+                        record.definition,
+                        seen=seen | frozenset({ref}),
+                    )
+                )
+        unique = {record.ref: record for record in records}
+        return tuple(
+            unique[ref]
+            for ref in sorted(
+                unique, key=lambda item: (item.kind.value, item.logical_id, item.revision)
+            )
+        )
+
+    async def _resolve_runtime_dependencies(
+        self, runtime: RuntimeProfileDefinition
+    ) -> tuple[PublishedDefinition, ...]:
+        records: list[PublishedDefinition] = []
+        for assembly in sorted(runtime.operation_assemblies, key=lambda item: item.assembly_id):
+            profile_record = await self._selectable(assembly.deep_agent_profile_ref)
+            profile = self._expect(profile_record.definition, AgentProfileDefinition)
+            placement_record = await self._selectable(assembly.placement_ref)
+            placement = self._expect(
+                placement_record.definition,
+                DeepAgentPlacementDefinition,
+            )
+            records.extend(
+                (profile_record, placement_record, await self._selectable(placement.sandbox_ref))
+            )
+            records.extend(await self._resolve_profile_dependencies(profile))
+            capability_refs = {
+                ref
+                for requirement in assembly.capability_requirements
+                for ref in requirement.allowed_refs
+            }
+            capability_refs.update(
+                requirement.degraded_ref
+                for requirement in assembly.capability_requirements
+                if requirement.degraded_ref is not None
+            )
+            records.extend(
+                [
+                    await self._selectable(ref)
+                    for ref in sorted(
+                        capability_refs,
+                        key=lambda item: (item.kind.value, item.logical_id, item.revision),
+                    )
+                ]
+            )
+        unique = {record.ref: record for record in records}
+        return tuple(
+            unique[ref]
+            for ref in sorted(
+                unique, key=lambda item: (item.kind.value, item.logical_id, item.revision)
+            )
+        )
+
     async def _selectable(self, ref: ExactDefinitionRef) -> PublishedDefinition:
         definition = await self._repository.get(ref)
         if definition.retired_at is not None:
@@ -482,6 +595,8 @@ class ControlPlaneService:
             ensure_ascii=False,
         ).encode()
         record: dict[str, object] = {
+            "contract_id": "CON-CP-ERC-V1",
+            "schema_version": erc.schema_version,
             "digest": erc.digest,
             "compiler_version": erc.compiler_version,
             "compilation_id": erc.context.compilation_id,

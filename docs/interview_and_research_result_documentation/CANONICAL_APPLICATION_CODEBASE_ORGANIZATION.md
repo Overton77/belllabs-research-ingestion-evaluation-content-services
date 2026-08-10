@@ -1,9 +1,18 @@
 # Canonical application codebase organization
 
-Status: **accepted target organization (normative)**
+Status: **accepted target organization; migration posture amended by v2 work packages**
 Recorded: 2026-08-08
 Scope: this repository through Stage 8
-Implementation posture: evolve in place; do not perform speculative bulk moves
+Implementation posture: replace the prototype runtime through authorized v2 package slices
+
+> **2026-08-10 amendment:** The active
+> [v2 work-package index](../migrations_instructions/implementation_work_packages_v2/README.md)
+> and its [implementation readiness contract](../migrations_instructions/implementation_work_packages_v2/IMPLEMENTATION_READINESS.md)
+> supersede this document's old Stage 0-8 sequencing, compatibility, parity-before-deletion,
+> `RETIRE AFTER GATE`, and path-authorization caveats. BellLabs is pre-production. The v2 packages
+> authorize their listed target paths and direct replacement of prototype schemas and runtime
+> paths. This document remains normative for package location, ownership, and inward dependency
+> direction only.
 
 ## 1. Current code versus accepted target
 
@@ -15,10 +24,10 @@ exists today.
   [`CODEBASE_DOMAIN_WORKFLOW_GUIDE.md`](CODEBASE_DOMAIN_WORKFLOW_GUIDE.md) describe what runs
   now.
 - **Target / end-state:** this document and the
-  [implementation work-package index](migrations_instructions/implementation_work_packages/00_MAIN_GOAL_AND_INDEX.md)
-  govern organization of new migration work.
-- When target and current state differ, preserve current behavior and migrate incrementally
-  behind tests and package gates. A target path does not authorize an immediate source move.
+  [v2 implementation work-package index](../migrations_instructions/implementation_work_packages_v2/README.md)
+  govern organization of replacement work.
+- When target and current state differ, the active v2 package may replace the current path directly
+  and authorizes the exact paths named by that package and its readiness contract.
 
 The application remains in this repository and in the canonical Python package **`app/`**.
 Create no sibling application repository, no Agent Server application root, and no multi-package
@@ -55,10 +64,9 @@ Dependencies may point inward, never outward:
 
 ## 3. Accepted Stage 8 target tree
 
-Names below are an **illustrative target projection**, not authorized creation paths. Existing
-flat modules move only when touched by an authorized stage slice and protected by
-import-compatibility tests. Packages `06B`/`06C`, or an accepted package amendment/spec-ticket,
-must freeze exact filenames before any projected module is created.
+Names below describe the target ownership projection. Exact control-plane paths are frozen by the
+v2 implementation readiness contract. Existing flat modules move or are deleted only in the owning
+v2 package slice; import compatibility for superseded prototype runtime paths is not required.
 
 ```text
 app/
@@ -177,15 +185,18 @@ amendment/spec-ticket, must freeze their exact paths before creation.
 | `deploy/` | **PROPOSED TARGET** | Create only when Stage 8 selects and proves deployment topology |
 | sibling app repository / Agent Server application root / package split | **DO NOT CREATE** | Rejected target; any future exception requires evidence and a new accepted decision |
 
+Historical status labels below describe the 2026-08-08 projection. Where they conflict with the
+v2 readiness contract, the v2 replacement/deletion gate controls.
+
 Allowed statuses mean:
 
 - **KEEP**: preserve the existing path and ownership;
 - **REFACTOR LATER**: change only in an authorized package slice;
 - **PROPOSED TARGET**: illustrative destination that is not a creation instruction;
 - **REPURPOSE**: retain an existing path but narrow its accepted role;
-- **RETIRE AFTER GATE**: preserve an existing path and its evidence until its named replacement
-  passes semantic parity, failure/recovery, and decommission gates; it does not authorize deletion
-  now;
+- **RETIRE AFTER GATE**: under the v2 amendment, disconnect and delete the executable path when its
+  replacement package passes its canonical acceptance gate; no legacy parity or compatibility
+  runtime is required;
 - **DO NOT CREATE**: rejected nonexistent target; creation requires a new accepted decision.
 
 ## 5. Canonical module ownership
@@ -280,10 +291,9 @@ surfaces.
 
 ## 8. Illustrative target after package authorization
 
-This is an illustrative target projection, not an implementation instruction. After Stage 3 entry
-gates pass, `06B`/`06C` or an accepted package amendment/spec-ticket must freeze the exact paths.
-Until then, implementation defaults to extending current flat modules in place. The smallest likely
-production-shaped target after that authorization is:
+The v2 implementation readiness contract now authorizes this production-shaped control-plane
+target. Implement it only through the owning v2 package slice; broad unrelated reorganization is
+still out of scope.
 
 ```text
 app/domain/orchestration/              # extend root/family semantic contracts
@@ -315,22 +325,28 @@ tests/replay/
 tests/acceptance/stage_3/
 ```
 
-No shown filename is frozen by this document. Packages `06B`/`06C`, or an accepted package
-amendment/spec-ticket, must authorize exact creation paths without inverting ownership.
+The control-plane filenames shown above are frozen by the v2 implementation readiness contract.
+Other projected filenames remain illustrative unless an active package names them.
 
 ## 9. Canonical context and document lifecycle
 
 Read before implementing, in this order:
 
-1. [Main goal and work-package index](migrations_instructions/implementation_work_packages/00_MAIN_GOAL_AND_INDEX.md)
+> **V2 replacement order:** first read canonical `ADR-0003`, `SPEC-CP-*`, and `SPEC-BP-*` in
+> `biotech-meta`; then the [v2 index](../migrations_instructions/implementation_work_packages_v2/README.md),
+> [implementation readiness contract](../migrations_instructions/implementation_work_packages_v2/IMPLEMENTATION_READINESS.md),
+> and complete active `WP-*`; then use this document for ownership and dependency direction. The
+> older Stage 0-8 list below is historical and no longer authorizes implementation.
+
+1. [Main goal and work-package index](../migrations_instructions/implementation_work_packages/00_MAIN_GOAL_AND_INDEX.md)
    (`00`) — accepted target, dependencies, and active package selection.
-2. [Global handoff and stage-gate rules](migrations_instructions/implementation_work_packages/01_GLOBAL_HANDOFF_AND_STAGE_GATE_RULES.md)
+2. [Global handoff and stage-gate rules](../migrations_instructions/implementation_work_packages/01_GLOBAL_HANDOFF_AND_STAGE_GATE_RULES.md)
    (`01`) — evidence and handoff rules.
-3. [Owner amendments for Stages 3–6](migrations_instructions/implementation_work_packages/02A_OWNER_AMENDMENTS_FOR_STAGES_3_TO_6.md)
+3. [Owner amendments for Stages 3–6](../migrations_instructions/implementation_work_packages/02A_OWNER_AMENDMENTS_FOR_STAGES_3_TO_6.md)
    (`02A`) when applicable — accepted supersessions.
 4. **This canonical organization document** for path and ownership decisions.
 5. The complete active stage package and all declared dependencies; for the first implementation slice, start with
-   [Stage 3 Temporal workflow foundation](migrations_instructions/implementation_work_packages/06B_STAGE_3_TEMPORAL_WORKFLOW_FOUNDATION.md)
+   [Stage 3 Temporal workflow foundation](../migrations_instructions/implementation_work_packages/06B_STAGE_3_TEMPORAL_WORKFLOW_FOUNDATION.md)
    plus its declared dependencies. If a projected path differs, the active package's exact path
    authorization remains implementation authority.
 6. The accepted [Temporal, LangSmith, and Deep Agents architecture proposal](TEMPORAL_LANGSMITH_DEEPAGENTS_BELLLABS_BACKEND_ARCHITECTURE_PROPOSAL.md),

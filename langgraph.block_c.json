@@ -1,0 +1,18 @@
+{
+  "$schema": "https://langgra.ph/schema.json",
+  "dependencies": ["."],
+  "graphs": {
+    "block_c_qualification": "app.agent_server.block_c_qualification.graph:graph",
+    "block_c_qualification_n1": "app.agent_server.block_c_qualification.graph_n1:graph",
+    "block_c_wait": "app.agent_server.block_c_qualification.wait_graph:graph"
+  },
+  "env": "langgraph.block_c.env",
+  "auth": {
+    "path": "app.agent_server.block_c_qualification.auth:auth",
+    "disable_studio_auth": true
+  },
+  "http": {
+    "app": "app.agent_server.block_c_qualification.http_app:app"
+  },
+  "python_version": "3.12"
+}

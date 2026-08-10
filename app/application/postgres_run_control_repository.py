@@ -23,6 +23,8 @@ from app.domain.run_control.contracts import (
     ConsumerApplyStatus,
     ConsumerCursor,
     DomainEventEnvelope,
+    EffectLedgerEntry,
+    EffectLedgerState,
     LifecycleTransitionRecord,
     OutboxCursor,
     OutboxRecord,
@@ -103,7 +105,12 @@ class PostgresRunControlRepository:
                 decision.recorded_at,
             )
             if mutation.projection is not None:
-                if mutation.budget is None or mutation.transition is None or not mutation.events:
+                if (
+                    mutation.budget is None
+                    or mutation.effects is None
+                    or mutation.transition is None
+                    or not mutation.events
+                ):
                     raise ValueError("accepted admission is missing transactional effects")
                 await self._insert_run(connection, mutation.projection)
                 await self._apply_parent_rollup(
@@ -114,8 +121,10 @@ class PostgresRunControlRepository:
                     occurred_at=decision.recorded_at,
                 )
                 await self._insert_budget(connection, mutation.budget, decision.recorded_at)
+                await self._insert_effects(connection, mutation.effects, decision.recorded_at)
                 await self._insert_transition(connection, mutation.transition)
                 await self._insert_ledger(connection, mutation.ledger_entries)
+                await self._insert_effect_ledger(connection, mutation.effect_entries)
                 await self._insert_events(connection, mutation.events)
             await self._inject("admission")
             return decision
@@ -173,6 +182,23 @@ class PostgresRunControlRepository:
         if row is None:
             raise RunControlNotFound(f"budget account not found for run: {run_id}")
         return BudgetState.model_validate(_json(row["state"]))
+
+    async def get_effects(self, request_scope: str, run_id: str) -> EffectLedgerState:
+        async with self._pool.acquire() as connection, connection.transaction():
+            await _set_scope(connection, request_scope)
+            row = await connection.fetchrow(
+                """
+                SELECT effects.state
+                FROM belllabs_control.effect_ledgers effects
+                JOIN belllabs_control.workflow_runs run USING (run_id)
+                WHERE effects.run_id = $1 AND run.request_scope = $2
+                """,
+                run_id,
+                request_scope,
+            )
+        if row is None:
+            raise RunControlNotFound(f"effect ledger not found for run: {run_id}")
+        return EffectLedgerState.model_validate(_json(row["state"]))
 
     async def commit_command(self, mutation: CommandMutation) -> CommandResult:
         result = mutation.result
@@ -260,7 +286,12 @@ class PostgresRunControlRepository:
                 result.recorded_at,
             )
             if mutation.projection is not None:
-                if mutation.budget is None or mutation.transition is None or not mutation.events:
+                if (
+                    mutation.budget is None
+                    or mutation.effects is None
+                    or mutation.transition is None
+                    or not mutation.events
+                ):
                     raise ValueError("accepted command is missing transactional effects")
                 await connection.execute(
                     """
@@ -299,8 +330,19 @@ class PostgresRunControlRepository:
                     _dump(mutation.budget),
                     mutation.projection.updated_at,
                 )
+                await connection.execute(
+                    """
+                    UPDATE belllabs_control.effect_ledgers
+                    SET state = $2::jsonb, updated_at = $3
+                    WHERE run_id = $1
+                    """,
+                    mutation.projection.run_id,
+                    _dump(mutation.effects),
+                    mutation.projection.updated_at,
+                )
                 await self._insert_transition(connection, mutation.transition)
                 await self._insert_ledger(connection, mutation.ledger_entries)
+                await self._insert_effect_ledger(connection, mutation.effect_entries)
                 await self._insert_events(connection, mutation.events)
             await self._inject("command")
             return result
@@ -342,6 +384,24 @@ class PostgresRunControlRepository:
         if not rows and not await self._run_exists(request_scope, run_id):
             raise RunControlNotFound(f"workflow run not found: {run_id}")
         return tuple(BudgetLedgerEntry.model_validate(_json(row["entry"])) for row in rows)
+
+    async def list_effect_ledger(
+        self, request_scope: str, run_id: str
+    ) -> tuple[EffectLedgerEntry, ...]:
+        async with self._pool.acquire() as connection, connection.transaction():
+            await _set_scope(connection, request_scope)
+            rows = await connection.fetch(
+                """
+                SELECT entry
+                FROM belllabs_control.effect_ledger_entries
+                WHERE run_id = $1
+                ORDER BY occurred_at, entry_id
+                """,
+                run_id,
+            )
+        if not rows and not await self._run_exists(request_scope, run_id):
+            raise RunControlNotFound(f"workflow run not found: {run_id}")
+        return tuple(EffectLedgerEntry.model_validate(_json(row["entry"])) for row in rows)
 
     async def list_outbox(
         self,
@@ -554,6 +614,22 @@ class PostgresRunControlRepository:
             recorded_at,
         )
 
+    async def _insert_effects(
+        self,
+        connection: asyncpg.Connection,
+        effects: EffectLedgerState,
+        recorded_at: datetime,
+    ) -> None:
+        await connection.execute(
+            """
+            INSERT INTO belllabs_control.effect_ledgers (run_id, state, updated_at)
+            VALUES ($1, $2::jsonb, $3)
+            """,
+            effects.run_id,
+            _dump(effects),
+            recorded_at,
+        )
+
     async def _insert_transition(
         self, connection: asyncpg.Connection, transition: LifecycleTransitionRecord
     ) -> None:
@@ -590,6 +666,27 @@ class PostgresRunControlRepository:
                 entry.run_id,
                 entry.idempotency_id,
                 entry.kind.value,
+                _dump(entry),
+                entry.occurred_at,
+            )
+
+    async def _insert_effect_ledger(
+        self,
+        connection: asyncpg.Connection,
+        entries: tuple[EffectLedgerEntry, ...],
+    ) -> None:
+        for entry in entries:
+            await connection.execute(
+                """
+                INSERT INTO belllabs_control.effect_ledger_entries
+                    (entry_id, run_id, effect_id, kind, idempotency_id, entry, occurred_at)
+                VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
+                """,
+                entry.entry_id,
+                entry.run_id,
+                entry.effect_id,
+                entry.kind,
+                entry.idempotency_id,
                 _dump(entry),
                 entry.occurred_at,
             )

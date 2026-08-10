@@ -37,6 +37,27 @@ class Contract(BaseModel):
                 if len(item) > 1_024:
                     raise ValueError("run-control mappings cannot exceed 1024 entries")
                 for key, nested in item.items():
+                    if isinstance(key, str):
+                        normalized = key.lower().replace("-", "_")
+                        secret_keys = {
+                            "secret",
+                            "password",
+                            "api_key",
+                            "access_token",
+                            "refresh_token",
+                            "authorization",
+                            "cookie",
+                            "patient_id",
+                            "phi",
+                            "raw_content",
+                            "raw_output",
+                        }
+                        if normalized in secret_keys or normalized.endswith(
+                            ("_password", "_api_key", "_access_token", "_refresh_token")
+                        ):
+                            raise ValueError(
+                                "run-control records cannot contain raw secrets, PHI, or content"
+                            )
                     inspect(key, depth + 1)
                     inspect(nested, depth + 1)
             elif isinstance(item, list | tuple | set | frozenset):
@@ -101,6 +122,34 @@ class ConsumerApplyStatus(StrEnum):
     APPLIED = "applied"
     DUPLICATE = "duplicate"
     GAP = "gap"
+
+
+class EffectDisposition(StrEnum):
+    CLAIMED = "claimed"
+    PENDING = "pending"
+    AMBIGUOUS = "ambiguous"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class EffectSettlementOutcome(StrEnum):
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class AsyncChildDependencyClass(StrEnum):
+    REQUIRED = "required"
+    DEGRADABLE = "degradable"
+    OPTIONAL = "optional"
+    ADVISORY = "advisory"
+
+
+class AsyncChildDecisionOutcome(StrEnum):
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    DEFERRED = "deferred"
 
 
 class ActorContext(Contract):
@@ -253,6 +302,8 @@ class FinalizationPlan(Contract):
 
 class TerminalizationProposal(Contract):
     proposal_id: str = Field(min_length=1)
+    expected_run_version: int = Field(ge=1)
+    workflow_type_digest: str = Field(pattern=DIGEST_PATTERN)
     obligation_revision: str = Field(min_length=1)
     evidence_frontier_digest: str = Field(pattern=DIGEST_PATTERN)
     accepted_obligation_evidence_digest: str = Field(pattern=DIGEST_PATTERN)
@@ -263,6 +314,7 @@ class TerminalizationProposal(Contract):
     valid_output_refs: tuple[str, ...] = ()
     cancellation_settled: bool = False
     budget_settled: bool
+    effects_settled: bool
     pending_wait_or_link_ids: tuple[str, ...] = ()
     proposed_at: AwareDatetime
     finalization_plan: FinalizationPlan | None = None
@@ -337,6 +389,67 @@ class SettlePendingUsageAction(Contract):
     settlement_id: str = Field(min_length=1)
     actual_amounts: dict[str, int]
     pending_release_amounts: dict[str, int] = Field(default_factory=dict)
+
+
+class ClaimEffectAction(Contract):
+    kind: Literal["claim_effect"] = "claim_effect"
+    effect_id: str = Field(min_length=1)
+    effect_kind: str = Field(min_length=1)
+    operation_ref: str = Field(min_length=1)
+    provider_idempotency_key: str = Field(min_length=1)
+    reservation_id: str = Field(min_length=1)
+
+
+class ObserveEffectAction(Contract):
+    kind: Literal["observe_effect"] = "observe_effect"
+    effect_id: str = Field(min_length=1)
+    observation_id: str = Field(min_length=1)
+    disposition: Literal[
+        EffectDisposition.PENDING,
+        EffectDisposition.AMBIGUOUS,
+        EffectDisposition.SUCCEEDED,
+        EffectDisposition.FAILED,
+        EffectDisposition.CANCELLED,
+    ]
+    provider_effect_ref: str | None = Field(default=None, min_length=1)
+    evidence_refs: tuple[str, ...] = ()
+
+
+class SettleEffectAction(Contract):
+    kind: Literal["settle_effect"] = "settle_effect"
+    effect_id: str = Field(min_length=1)
+    settlement_id: str = Field(min_length=1)
+    observation_id: str = Field(min_length=1)
+    outcome: EffectSettlementOutcome
+    usage_settlement_ref: str = Field(min_length=1)
+    evidence_refs: tuple[str, ...] = ()
+
+
+class RegisterAsyncChildAction(Contract):
+    kind: Literal["register_async_child"] = "register_async_child"
+    child_execution_id: str = Field(min_length=1)
+    parent_operation_ref: str = Field(min_length=1)
+    dependency_class: AsyncChildDependencyClass
+    reservation_id: str = Field(min_length=1)
+
+
+class RecordAsyncChildFactAction(Contract):
+    kind: Literal["record_async_child_fact"] = "record_async_child_fact"
+    fact_id: str = Field(min_length=1)
+    child_execution_id: str = Field(min_length=1)
+    fact_kind: Literal["lifecycle", "result", "cancellation", "settlement"]
+    lifecycle_status: str | None = Field(default=None, min_length=1)
+    result_manifest_ref: str | None = Field(default=None, min_length=1)
+    evidence_refs: tuple[str, ...] = ()
+
+
+class DecideAsyncChildFactAction(Contract):
+    kind: Literal["decide_async_child_fact"] = "decide_async_child_fact"
+    decision_id: str = Field(min_length=1)
+    fact_id: str = Field(min_length=1)
+    outcome: AsyncChildDecisionOutcome
+    authority_ref: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
 
 
 class ProposeContinuationAction(Contract):
@@ -416,6 +529,12 @@ LifecycleAction = Annotated[
     | ReserveBudgetAction
     | RecordUsageAction
     | SettlePendingUsageAction
+    | ClaimEffectAction
+    | ObserveEffectAction
+    | SettleEffectAction
+    | RegisterAsyncChildAction
+    | RecordAsyncChildFactAction
+    | DecideAsyncChildFactAction
     | ProposeContinuationAction
     | DecideContinuationAction
     | AcceptFinalizationPlanAction
@@ -470,6 +589,7 @@ class RunProjection(Contract):
     finalization_plan: FinalizationPlan | None = None
     finalization_output_refs: tuple[str, ...] = ()
     finalization_omission_reason: str | None = None
+    async_children: tuple[AsyncChildAuthorityState, ...] = ()
     updated_at: AwareDatetime
 
     @model_validator(mode="after")
@@ -480,6 +600,7 @@ class RunProjection(Contract):
 
 
 class BudgetState(Contract):
+    schema_version: Literal["1"] = "1"
     account_id: str
     run_id: str
     parent_account_id: str | None = None
@@ -493,6 +614,7 @@ class BudgetState(Contract):
 
 
 class BudgetLedgerEntry(Contract):
+    schema_version: Literal["1"] = "1"
     entry_id: str
     account_id: str
     run_id: str
@@ -501,6 +623,108 @@ class BudgetLedgerEntry(Contract):
     amounts: dict[str, int]
     occurred_at: AwareDatetime
     parent_account_id: str | None = None
+
+
+class EffectObservation(Contract):
+    schema_version: Literal["1"] = "1"
+    observation_id: str = Field(min_length=1)
+    disposition: EffectDisposition
+    provider_effect_ref: str | None = Field(default=None, min_length=1)
+    evidence_refs: tuple[str, ...] = ()
+    observed_at: AwareDatetime
+
+
+class EffectSettlement(Contract):
+    schema_version: Literal["1"] = "1"
+    settlement_id: str = Field(min_length=1)
+    observation_id: str = Field(min_length=1)
+    outcome: EffectSettlementOutcome
+    usage_settlement_ref: str = Field(min_length=1)
+    evidence_refs: tuple[str, ...] = ()
+    settled_at: AwareDatetime
+
+
+class ConsequentialEffectClaim(Contract):
+    schema_version: Literal["1"] = "1"
+    effect_id: str = Field(min_length=1)
+    run_id: str = Field(min_length=1)
+    effect_kind: str = Field(min_length=1)
+    operation_ref: str = Field(min_length=1)
+    provider_idempotency_key: str = Field(min_length=1)
+    reservation_id: str = Field(min_length=1)
+    disposition: EffectDisposition = EffectDisposition.CLAIMED
+    claimed_at: AwareDatetime
+    observations: tuple[EffectObservation, ...] = ()
+    settlement: EffectSettlement | None = None
+
+    @model_validator(mode="after")
+    def settlement_matches_disposition(self) -> ConsequentialEffectClaim:
+        terminal = {
+            EffectDisposition.SUCCEEDED,
+            EffectDisposition.FAILED,
+            EffectDisposition.CANCELLED,
+        }
+        if (self.settlement is not None) != (self.disposition in terminal):
+            raise ValueError("only a settled effect has a terminal disposition")
+        if self.settlement is not None and self.settlement.outcome.value != self.disposition.value:
+            raise ValueError("effect settlement outcome must match its disposition")
+        return self
+
+
+class EffectLedgerState(Contract):
+    schema_version: Literal["1"] = "1"
+    run_id: str = Field(min_length=1)
+    claims: dict[str, ConsequentialEffectClaim] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def claim_keys_are_exact(self) -> EffectLedgerState:
+        if any(
+            key != claim.effect_id or claim.run_id != self.run_id
+            for key, claim in self.claims.items()
+        ):
+            raise ValueError("effect ledger keys and run identities must match claims")
+        return self
+
+
+class EffectLedgerEntry(Contract):
+    schema_version: Literal["1"] = "1"
+    entry_id: str = Field(min_length=1)
+    run_id: str = Field(min_length=1)
+    effect_id: str = Field(min_length=1)
+    kind: Literal["claim", "observation", "settlement"]
+    idempotency_id: str = Field(min_length=1)
+    record: ConsequentialEffectClaim | EffectObservation | EffectSettlement
+    occurred_at: AwareDatetime
+
+
+class AsyncChildObservedFact(Contract):
+    schema_version: Literal["1"] = "1"
+    fact_id: str = Field(min_length=1)
+    fact_kind: Literal["lifecycle", "result", "cancellation", "settlement"]
+    lifecycle_status: str | None = Field(default=None, min_length=1)
+    result_manifest_ref: str | None = Field(default=None, min_length=1)
+    evidence_refs: tuple[str, ...] = ()
+    observed_at: AwareDatetime
+
+
+class AsyncChildFactDecision(Contract):
+    schema_version: Literal["1"] = "1"
+    decision_id: str = Field(min_length=1)
+    fact_id: str = Field(min_length=1)
+    outcome: AsyncChildDecisionOutcome
+    authority_ref: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+    decided_at: AwareDatetime
+
+
+class AsyncChildAuthorityState(Contract):
+    schema_version: Literal["1"] = "1"
+    child_execution_id: str = Field(min_length=1)
+    parent_operation_ref: str = Field(min_length=1)
+    dependency_class: AsyncChildDependencyClass
+    reservation_id: str = Field(min_length=1)
+    facts: tuple[AsyncChildObservedFact, ...] = ()
+    decisions: tuple[AsyncChildFactDecision, ...] = ()
 
 
 class LifecycleTransitionRecord(Contract):

@@ -1,8 +1,13 @@
 # Supplement — codebase organization compass
 
-Status: compact implementation aid; non-authorizing companion to the accepted work packages  
+Status: **frozen historical implementation aid; superseded for active work**
+
 Audience: implementation agents working sequentially from Stage 3 through Stage 8  
 Last reconciled: 2026-08-08
+
+> Active v2 work uses the
+> [canonical implementation supplement](../implementation_work_packages_v2/SUPPLEMENT_CODEBASE_ORGANIZATION.md).
+> This Stage 0–8 compass remains provenance and cannot authorize implementation.
 
 ## 1. Purpose and precedence
 

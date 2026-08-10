@@ -574,10 +574,13 @@ async def main() -> None:
                     journal=OperationJournalService(
                         PostgresAtomicOperationJournalRepository(postgres_pool)
                     ),
-                    run_control=run_control_repository,
+                    run_control=run_control,
                     results=operation_result_payloads,
                     actor=_actor(
                         "workflow_run.report_usage",
+                        "workflow_run.claim_effect",
+                        "workflow_run.observe_effect",
+                        "workflow_run.settle_effect",
                     ),
                 ),
             )

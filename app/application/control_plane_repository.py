@@ -173,7 +173,13 @@ class InMemoryDefinitionRepository:
         _verify_published(ref, published)
         retirement = self._retirements.get(key)
         if retirement is not None:
-            published = published.model_copy(update={"retired_at": retirement[0]})
+            published = PublishedDefinition(
+                ref=published.ref.model_copy(update={"lifecycle_status": "retired"}),
+                definition=published.definition,
+                published_at=published.published_at,
+                published_by=published.published_by,
+                retired_at=retirement[0],
+            )
         return published.model_copy(deep=True)
 
     async def resolve(self, alias: AliasRef, *, selectable: bool = True) -> AliasBinding:
@@ -215,7 +221,7 @@ class InMemoryDefinitionRepository:
         self._retirements[key] = (retired_at, actor_id)
         event = _projection_event_record(ref, "retire", retired_at)
         self._projection_events[str(event["event_id"])] = event
-        return current.model_copy(update={"retired_at": retired_at})
+        return await self.get(ref)
 
     async def save_erc_record(self, record: dict[str, Any]) -> None:
         digest = str(record["digest"])
@@ -342,6 +348,8 @@ class BeanieDefinitionRepository:
                         digest=sha256_digest(definition),
                     )
                     document = PublishedDefinitionDocument(
+                        contract_id="CON-CP-DEFINITION-REF-V1",
+                        schema_version=ref.schema_version,
                         kind=ref.kind.value,
                         logical_id=ref.logical_id,
                         revision=ref.revision,
@@ -349,6 +357,12 @@ class BeanieDefinitionRepository:
                         definition=definition.model_dump(mode="json"),
                         published_at=published_at,
                         published_by=actor_id,
+                        lifecycle_status=ref.lifecycle_status.value,
+                        payload_ref=(
+                            ref.payload_ref.model_dump(mode="json")
+                            if ref.payload_ref is not None
+                            else None
+                        ),
                     )
                     await document.insert(session=session)
                     projection_event = CatalogProjectionEventDocument.model_validate(
@@ -377,7 +391,13 @@ class BeanieDefinitionRepository:
             DefinitionRetirementDocument.revision == ref.revision,
         )
         if retirement is not None:
-            published = published.model_copy(update={"retired_at": retirement.retired_at})
+            published = PublishedDefinition(
+                ref=published.ref.model_copy(update={"lifecycle_status": "retired"}),
+                definition=published.definition,
+                published_at=published.published_at,
+                published_by=published.published_by,
+                retired_at=retirement.retired_at,
+            )
         return published
 
     async def resolve(self, alias: AliasRef, *, selectable: bool = True) -> AliasBinding:
@@ -522,8 +542,11 @@ def _published_from_document(document: PublishedDefinitionDocument) -> Published
         ref=ExactDefinitionRef(
             kind=definition.kind,
             logical_id=document.logical_id,
+            schema_version=document.schema_version,
             revision=document.revision,
             digest=document.digest,
+            lifecycle_status=document.lifecycle_status,
+            payload_ref=document.payload_ref,
         ),
         definition=definition,
         published_at=document.published_at,
@@ -584,7 +607,9 @@ def _head_from_mapping(head: dict[str, Any]) -> AuthoringHead:
 
 
 def _verify_published(ref: ExactDefinitionRef, published: PublishedDefinition) -> None:
-    if published.ref != ref:
+    requested_identity = ref.model_dump(exclude={"lifecycle_status"})
+    stored_identity = published.ref.model_dump(exclude={"lifecycle_status"})
+    if stored_identity != requested_identity:
         raise ReferenceMismatch("requested exact reference does not match stored revision")
     actual = sha256_digest(published.definition)
     if actual != ref.digest:

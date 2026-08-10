@@ -9,28 +9,44 @@ from app.domain.run_control.contracts import (
     AcceptedObligationEvidence,
     AcceptedOutputEvidence,
     AcceptFinalizationPlanAction,
+    AsyncChildAuthorityState,
+    AsyncChildDecisionOutcome,
+    AsyncChildDependencyClass,
+    AsyncChildFactDecision,
+    AsyncChildObservedFact,
     BudgetApplicability,
     BudgetDimensionLimit,
     BudgetLedgerEntry,
     BudgetLedgerKind,
     BudgetState,
     CancelAction,
+    ClaimEffectAction,
     CommandResult,
     CommandStatus,
+    ConsequentialEffectClaim,
     ContinuationProposal,
+    DecideAsyncChildFactAction,
     DecideContinuationAction,
     DomainEventEnvelope,
+    EffectDisposition,
+    EffectLedgerEntry,
+    EffectLedgerState,
+    EffectObservation,
+    EffectSettlement,
     LifecycleCommand,
     LifecycleTransitionRecord,
+    ObserveEffectAction,
     OutputReadinessDecision,
     PauseAction,
     PauseDecision,
     ProposeContinuationAction,
+    RecordAsyncChildFactAction,
     RecordFinalizationResultAction,
     RecordObligationEvidenceAction,
     RecordOutputEvidenceAction,
     RecordReadinessAction,
     RecordUsageAction,
+    RegisterAsyncChildAction,
     ReserveBudgetAction,
     ResumeAction,
     ResumeDecision,
@@ -38,6 +54,7 @@ from app.domain.run_control.contracts import (
     RunPhase,
     RunProjection,
     SatisfyWaitAction,
+    SettleEffectAction,
     SettlePendingUsageAction,
     SetWaitAction,
     StartAction,
@@ -57,9 +74,11 @@ class ReductionRejected(ValueError):
 class Reduction:
     projection: RunProjection
     budget: BudgetState
+    effects: EffectLedgerState
     transition: LifecycleTransitionRecord
     result: CommandResult
     ledger_entries: tuple[BudgetLedgerEntry, ...]
+    effect_entries: tuple[EffectLedgerEntry, ...]
     events: tuple[DomainEventEnvelope, ...]
 
 
@@ -73,6 +92,12 @@ ACTION_PERMISSIONS: dict[str, str] = {
     "reserve_budget": "workflow_run.reserve_budget",
     "record_usage": "workflow_run.report_usage",
     "settle_pending_usage": "workflow_run.settle_usage",
+    "claim_effect": "workflow_run.claim_effect",
+    "observe_effect": "workflow_run.observe_effect",
+    "settle_effect": "workflow_run.settle_effect",
+    "register_async_child": "workflow_run.register_async_child",
+    "record_async_child_fact": "workflow_run.observe_async_child",
+    "decide_async_child_fact": "workflow_run.decide_async_child",
     "propose_continuation": "workflow_run.propose_continuation",
     "decide_continuation": "workflow_run.decide_continuation",
     "accept_finalization_plan": "workflow_run.accept_finalization",
@@ -87,6 +112,7 @@ ACTION_PERMISSIONS: dict[str, str] = {
 def reduce_lifecycle(
     projection: RunProjection,
     budget: BudgetState,
+    effects: EffectLedgerState,
     command: LifecycleCommand,
     command_fingerprint: str,
 ) -> Reduction:
@@ -120,9 +146,12 @@ def reduce_lifecycle(
     finalization_omission_reason = projection.finalization_omission_reason
     obligation_evidence = list[AcceptedObligationEvidence](projection.accepted_obligation_evidence)
     output_evidence = list[AcceptedOutputEvidence](projection.accepted_output_evidence)
+    async_children = list[AsyncChildAuthorityState](projection.async_children)
     evidence_frontier_digest = projection.evidence_frontier_digest
     next_budget = budget
+    next_effects = effects
     ledger: list[BudgetLedgerEntry] = []
+    effect_entries: list[EffectLedgerEntry] = []
     event_type = f"workflow_run.{action.kind}"
 
     if isinstance(action, StartAction):
@@ -181,6 +210,74 @@ def reduce_lifecycle(
         ledger.extend(entries)
         pending_proposals = _add_soft_limit_proposal(
             projection.run_id, next_budget, pending_proposals
+        )
+    elif isinstance(action, ClaimEffectAction):
+        next_effects, effect_entry = _claim_effect(next_effects, next_budget, action, command)
+        effect_entries.append(effect_entry)
+    elif isinstance(action, ObserveEffectAction):
+        next_effects, effect_entry = _observe_effect(next_effects, action, command)
+        effect_entries.append(effect_entry)
+    elif isinstance(action, SettleEffectAction):
+        next_effects, effect_entry = _settle_effect(next_effects, action, command)
+        effect_entries.append(effect_entry)
+    elif isinstance(action, RegisterAsyncChildAction):
+        if action.reservation_id not in next_budget.reservations:
+            raise ReductionRejected(
+                "async_child_reservation_missing",
+                "async child registration requires an authoritative reservation",
+            )
+        if any(item.child_execution_id == action.child_execution_id for item in async_children):
+            raise ReductionRejected("async_child_exists", "async child identity already exists")
+        async_children.append(
+            AsyncChildAuthorityState(
+                child_execution_id=action.child_execution_id,
+                parent_operation_ref=action.parent_operation_ref,
+                dependency_class=action.dependency_class,
+                reservation_id=action.reservation_id,
+            )
+        )
+    elif isinstance(action, RecordAsyncChildFactAction):
+        index, child = _async_child(async_children, action.child_execution_id)
+        if any(fact.fact_id == action.fact_id for fact in child.facts):
+            raise ReductionRejected("async_child_fact_exists", "async child fact already exists")
+        fact = AsyncChildObservedFact(
+            fact_id=action.fact_id,
+            fact_kind=action.fact_kind,
+            lifecycle_status=action.lifecycle_status,
+            result_manifest_ref=action.result_manifest_ref,
+            evidence_refs=action.evidence_refs,
+            observed_at=command.occurred_at,
+        )
+        async_children[index] = child.model_copy(update={"facts": (*child.facts, fact)})
+    elif isinstance(action, DecideAsyncChildFactAction):
+        if action.authority_ref not in command.actor.authority_refs:
+            raise ReductionRejected(
+                "invalid_async_child_authority",
+                "async child fact decision authority was not granted",
+            )
+        index, child, fact = _async_child_for_fact(async_children, action.fact_id)
+        if any(item.decision_id == action.decision_id for item in child.decisions):
+            raise ReductionRejected(
+                "async_child_decision_exists", "async child decision already exists"
+            )
+        if any(
+            item.fact_id == action.fact_id
+            and item.outcome != AsyncChildDecisionOutcome.DEFERRED
+            for item in child.decisions
+        ):
+            raise ReductionRejected(
+                "async_child_fact_decided", "async child fact already has a final decision"
+            )
+        decision = AsyncChildFactDecision(
+            decision_id=action.decision_id,
+            fact_id=fact.fact_id,
+            outcome=action.outcome,
+            authority_ref=action.authority_ref,
+            reason=action.reason,
+            decided_at=command.occurred_at,
+        )
+        async_children[index] = child.model_copy(
+            update={"decisions": (*child.decisions, decision)}
         )
     elif isinstance(action, ProposeContinuationAction):
         _validate_continuation_dimensions(next_budget, action.proposal)
@@ -293,7 +390,10 @@ def reduce_lifecycle(
             output_evidence,
         )
     elif isinstance(action, TerminalizeAction):
-        outcome = _terminal_outcome(projection, next_budget, action)
+        terminal_projection = projection.model_copy(
+            update={"async_children": tuple(async_children)}
+        )
+        outcome = _terminal_outcome(terminal_projection, next_budget, next_effects, action)
         phase = RunPhase.TERMINAL
     elif isinstance(action, RecordReadinessAction):
         if phase != RunPhase.TERMINAL:
@@ -321,6 +421,7 @@ def reduce_lifecycle(
             "finalization_omission_reason": finalization_omission_reason,
             "accepted_obligation_evidence": tuple(obligation_evidence),
             "accepted_output_evidence": tuple(output_evidence),
+            "async_children": tuple(async_children),
             "evidence_frontier_digest": evidence_frontier_digest,
             "updated_at": command.occurred_at,
         }
@@ -377,9 +478,11 @@ def reduce_lifecycle(
     return Reduction(
         projection=next_projection,
         budget=next_budget,
+        effects=next_effects,
         transition=transition,
         result=result,
         ledger_entries=tuple(ledger),
+        effect_entries=tuple(effect_entries),
         events=(event,),
     )
 
@@ -583,6 +686,164 @@ def _settle_pending(
     return updated, tuple(entries)
 
 
+def _claim_effect(
+    state: EffectLedgerState,
+    budget: BudgetState,
+    action: ClaimEffectAction,
+    command: LifecycleCommand,
+) -> tuple[EffectLedgerState, EffectLedgerEntry]:
+    if action.effect_id in state.claims:
+        raise ReductionRejected("effect_claim_exists", "effect identity already has a claim")
+    if action.reservation_id not in budget.reservations:
+        raise ReductionRejected(
+            "effect_reservation_missing", "consequential effects require a prior reservation"
+        )
+    if any(
+        claim.provider_idempotency_key == action.provider_idempotency_key
+        for claim in state.claims.values()
+    ):
+        raise ReductionRejected(
+            "effect_idempotency_conflict", "provider idempotency identity is already claimed"
+        )
+    claim = ConsequentialEffectClaim(
+        effect_id=action.effect_id,
+        run_id=state.run_id,
+        effect_kind=action.effect_kind,
+        operation_ref=action.operation_ref,
+        provider_idempotency_key=action.provider_idempotency_key,
+        reservation_id=action.reservation_id,
+        claimed_at=command.occurred_at,
+    )
+    updated = state.model_copy(update={"claims": {**state.claims, action.effect_id: claim}})
+    return updated, EffectLedgerEntry(
+        entry_id=_stable_id("effect-entry", state.run_id, action.effect_id, "claim"),
+        run_id=state.run_id,
+        effect_id=action.effect_id,
+        kind="claim",
+        idempotency_id=action.effect_id,
+        record=claim,
+        occurred_at=command.occurred_at,
+    )
+
+
+def _observe_effect(
+    state: EffectLedgerState,
+    action: ObserveEffectAction,
+    command: LifecycleCommand,
+) -> tuple[EffectLedgerState, EffectLedgerEntry]:
+    claim = state.claims.get(action.effect_id)
+    if claim is None:
+        raise ReductionRejected(
+            "effect_claim_not_found", "effect must be claimed before observation"
+        )
+    if claim.settlement is not None:
+        raise ReductionRejected("effect_already_settled", "settled effects are immutable")
+    if any(item.observation_id == action.observation_id for item in claim.observations):
+        raise ReductionRejected("effect_observation_exists", "effect observation already exists")
+    observation = EffectObservation(
+        observation_id=action.observation_id,
+        disposition=action.disposition,
+        provider_effect_ref=action.provider_effect_ref,
+        evidence_refs=action.evidence_refs,
+        observed_at=command.occurred_at,
+    )
+    updated_claim = claim.model_copy(
+        update={
+            "disposition": (
+                action.disposition
+                if action.disposition in {EffectDisposition.PENDING, EffectDisposition.AMBIGUOUS}
+                else EffectDisposition.PENDING
+            ),
+            "observations": (*claim.observations, observation),
+        }
+    )
+    updated = state.model_copy(
+        update={"claims": {**state.claims, action.effect_id: updated_claim}}
+    )
+    return updated, EffectLedgerEntry(
+        entry_id=_stable_id(
+            "effect-entry", state.run_id, action.effect_id, "observation", action.observation_id
+        ),
+        run_id=state.run_id,
+        effect_id=action.effect_id,
+        kind="observation",
+        idempotency_id=action.observation_id,
+        record=observation,
+        occurred_at=command.occurred_at,
+    )
+
+
+def _settle_effect(
+    state: EffectLedgerState,
+    action: SettleEffectAction,
+    command: LifecycleCommand,
+) -> tuple[EffectLedgerState, EffectLedgerEntry]:
+    claim = state.claims.get(action.effect_id)
+    if claim is None:
+        raise ReductionRejected(
+            "effect_claim_not_found", "effect must be claimed before settlement"
+        )
+    if claim.settlement is not None:
+        raise ReductionRejected("effect_already_settled", "effect has exactly one settlement")
+    observation = next(
+        (item for item in claim.observations if item.observation_id == action.observation_id),
+        None,
+    )
+    if observation is None:
+        raise ReductionRejected(
+            "effect_observation_not_found", "settlement must bind an accepted observation"
+        )
+    if observation.disposition.value != action.outcome.value:
+        raise ReductionRejected(
+            "effect_settlement_mismatch", "settlement outcome must match the bound observation"
+        )
+    settlement = EffectSettlement(
+        settlement_id=action.settlement_id,
+        observation_id=action.observation_id,
+        outcome=action.outcome,
+        usage_settlement_ref=action.usage_settlement_ref,
+        evidence_refs=action.evidence_refs,
+        settled_at=command.occurred_at,
+    )
+    updated_claim = claim.model_copy(
+        update={"disposition": EffectDisposition(action.outcome.value), "settlement": settlement}
+    )
+    updated_claim = ConsequentialEffectClaim.model_validate(updated_claim.model_dump(mode="python"))
+    updated = state.model_copy(
+        update={"claims": {**state.claims, action.effect_id: updated_claim}}
+    )
+    return updated, EffectLedgerEntry(
+        entry_id=_stable_id(
+            "effect-entry", state.run_id, action.effect_id, "settlement", action.settlement_id
+        ),
+        run_id=state.run_id,
+        effect_id=action.effect_id,
+        kind="settlement",
+        idempotency_id=action.settlement_id,
+        record=settlement,
+        occurred_at=command.occurred_at,
+    )
+
+
+def _async_child(
+    children: list[AsyncChildAuthorityState], child_execution_id: str
+) -> tuple[int, AsyncChildAuthorityState]:
+    for index, child in enumerate(children):
+        if child.child_execution_id == child_execution_id:
+            return index, child
+    raise ReductionRejected("async_child_not_found", "async child is not registered")
+
+
+def _async_child_for_fact(
+    children: list[AsyncChildAuthorityState], fact_id: str
+) -> tuple[int, AsyncChildAuthorityState, AsyncChildObservedFact]:
+    for index, child in enumerate(children):
+        fact = next((item for item in child.facts if item.fact_id == fact_id), None)
+        if fact is not None:
+            return index, child, fact
+    raise ReductionRejected("async_child_fact_not_found", "async child fact was not observed")
+
+
 def _validate_continuation_dimensions(state: BudgetState, proposal: ContinuationProposal) -> None:
     declared = {item.dimension for item in state.limits}
     if not proposal.triggered_dimensions <= declared:
@@ -626,7 +887,10 @@ def _add_soft_limit_proposal(
 
 
 def _terminal_outcome(
-    projection: RunProjection, budget: BudgetState, action: TerminalizeAction
+    projection: RunProjection,
+    budget: BudgetState,
+    effects: EffectLedgerState,
+    action: TerminalizeAction,
 ) -> RunOutcome:
     proposal = action.proposal
     if projection.phase == RunPhase.PENDING:
@@ -635,6 +899,14 @@ def _terminal_outcome(
         raise ReductionRejected(
             "active_pause",
             "non-cancellation terminalization requires every pause to be resumed",
+        )
+    if proposal.expected_run_version != projection.version:
+        raise ReductionRejected(
+            "stale_control_revision", "proposal run-control revision is stale"
+        )
+    if proposal.workflow_type_digest != projection.workflow_type_ref.digest:
+        raise ReductionRejected(
+            "stale_workflow_type_revision", "proposal Workflow Type revision is stale"
         )
     if proposal.obligation_revision != projection.obligation_revision:
         raise ReductionRejected(
@@ -663,6 +935,22 @@ def _terminal_outcome(
         )
     if proposal.pending_wait_or_link_ids or projection.active_waits:
         raise ReductionRejected("unresolved_terminal_dependencies", "terminal dependencies remain")
+    unresolved_children = [
+        child.child_execution_id
+        for child in projection.async_children
+        if child.dependency_class
+        in {AsyncChildDependencyClass.REQUIRED, AsyncChildDependencyClass.DEGRADABLE}
+        and not any(
+            decision.outcome
+            in {AsyncChildDecisionOutcome.ACCEPTED, AsyncChildDecisionOutcome.REJECTED}
+            for decision in child.decisions
+        )
+    ]
+    if unresolved_children:
+        raise ReductionRejected(
+            "unresolved_async_children",
+            "required or degradable async child decisions remain",
+        )
     if proposal.finalization_plan != projection.finalization_plan:
         raise ReductionRejected(
             "finalization_plan_mismatch",
@@ -697,6 +985,9 @@ def _terminal_outcome(
     )
     if not proposal.budget_settled or not budget_is_settled:
         raise ReductionRejected("budget_not_settled", "budget reservations or charges remain")
+    effects_are_settled = all(claim.settlement is not None for claim in effects.claims.values())
+    if not proposal.effects_settled or not effects_are_settled:
+        raise ReductionRejected("effects_not_settled", "effect claims remain unsettled")
     if projection.phase == RunPhase.CANCELLING:
         if not proposal.cancellation_settled:
             raise ReductionRejected("cancellation_not_settled", "cancellation effects remain")
