@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import os
+import sys
 
 import pytest
 
@@ -8,6 +10,19 @@ from app.application.control_plane import ControlPlaneService
 from app.application.control_plane_repository import InMemoryDefinitionRepository
 from app.domain.control_plane.extensions import ExtensionRegistry
 from app.integrations.control_plane_payloads import InMemoryPayloadStore
+
+
+def pytest_asyncio_loop_factories(config, item):  # type: ignore[no-untyped-def]
+    """Keep Psycopg's Windows selector requirement local to its experiment module."""
+
+    del config
+    if (
+        sys.platform == "win32"
+        and item.path.name == "test_langgraph_temporal_stagegraph.py"
+        and item.path.parent.name == "experiments"
+    ):
+        return {"windows-selector": asyncio.SelectorEventLoop}
+    return {"default": asyncio.new_event_loop}
 
 
 def _required_external_test_service(name: str) -> str:

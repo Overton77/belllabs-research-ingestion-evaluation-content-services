@@ -134,6 +134,7 @@ async def execute_swarm_stage(request: TemporalStageInput) -> TemporalStageResul
     activity.heartbeat("swarm-stage-started")
     payload = json.loads(request.prompt)
     kind = payload["kind"]
+    output: SourceBundle | MissionPlan | ResearchUnitResult | FinalSynthesis
     if kind == "bootstrap":
         output = await _tavily_search(
             payload["objective"], unit_id="bootstrap", limit=payload["max_sources"]

@@ -245,7 +245,7 @@ Three Workflow Types are fully defined for production/coordinator paths. All rev
 | Composition / linked runs | `app/domain/composition/contracts.py`, `app/application/linked_runs.py` |
 | StageGraph / GoalDirected runtime contracts | `app/domain/orchestration/contracts.py` |
 | Operation execution bindings | `app/domain/operation_execution/contracts.py` |
-| Domain workflow guide (longer narrative) | `docs/CODEBASE_DOMAIN_WORKFLOW_GUIDE.md` |
+| Domain workflow guide (longer narrative) | `docs/interview_and_research_result_documentation/CODEBASE_DOMAIN_WORKFLOW_GUIDE.md` |
 
 **JSON Schemas exported today:**
 

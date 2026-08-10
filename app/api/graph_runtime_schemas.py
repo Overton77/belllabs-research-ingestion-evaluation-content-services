@@ -4,7 +4,10 @@ from fastapi import APIRouter
 from pydantic import BaseModel, TypeAdapter
 
 from app.agent_server.common_state import CommonStateMetadata
-from app.application.operation_executor import OperationExecutionOutcome
+from app.application.operation_executor import (
+    OperationExecutionOutcome,
+    OperationExecutionOutcomeV2,
+)
 from app.domain.graph_runtime.contracts import (
     BellLabsErrorEnvelope,
     BellLabsStreamEvent,
@@ -28,26 +31,37 @@ from app.domain.graph_runtime.contracts import (
 from app.domain.graph_runtime.definitions import (
     AgentHarnessDefinition,
     CapabilityManifestDefinition,
+    CompatibilityManifestRef,
     ContextAssemblySpec,
     ContextPolicyDefinition,
     DelegationPolicyDefinition,
     EvaluationProfileDefinition,
     ExecutionEnvironmentDefinition,
     ExecutionLineageEnvelope,
+    ExecutionLineageEnvelopeV2,
     ExecutionResourceEnvelope,
+    ExecutionResourceEnvelopeRef,
+    ExecutionResourceEnvelopeV2,
     GraphAssemblyDefinition,
     GraphAssemblySpec,
     GraphAssemblySpecV2,
+    GraphAssemblySpecV3,
     InterpreterProfileDefinition,
     MCPServerDefinition,
     MiddlewareStackDefinition,
+    OperationAssemblyRef,
     OperationAssemblySpec,
+    OperationAssemblySpecV3,
     PromptContextBinding,
     RunPlan,
     RunPlanV3,
+    RunPlanV4,
     SandboxProfileDefinition,
     StageCapabilityRequirement,
+    StageCapabilityRequirementRef,
     StageExecutionBinding,
+    StageExecutionBindingV2,
+    TemporalExecutionProfileRef,
     UnavailableStageSurface,
 )
 from app.domain.graph_runtime.governance import field_governance_schema
@@ -58,7 +72,9 @@ from app.domain.graph_runtime.kernel import (
     LineageParentEdge,
     ProviderQualifiedLineageRecord,
     ResourceLeaseRecord,
+    ResourceLeaseRecordV2,
     ResourceLeaseRequest,
+    ResourceLeaseRequestV2,
     WaitLeaseProjection,
 )
 from app.domain.operation_execution.journal import (
@@ -115,6 +131,17 @@ def graph_runtime_contract_schemas() -> dict[str, object]:
         "unavailable_stage_surface": UnavailableStageSurface,
         "graph_assembly_spec_v2": GraphAssemblySpecV2,
         "run_plan_v3": RunPlanV3,
+        "operation_assembly_spec_v3": OperationAssemblySpecV3,
+        "stage_execution_binding_v2": StageExecutionBindingV2,
+        "execution_resource_envelope_v2": ExecutionResourceEnvelopeV2,
+        "execution_lineage_envelope_v2": ExecutionLineageEnvelopeV2,
+        "graph_assembly_spec_v3": GraphAssemblySpecV3,
+        "run_plan_v4": RunPlanV4,
+        "stage_capability_requirement_ref": StageCapabilityRequirementRef,
+        "operation_assembly_ref": OperationAssemblyRef,
+        "execution_resource_envelope_ref": ExecutionResourceEnvelopeRef,
+        "temporal_execution_profile_ref": TemporalExecutionProfileRef,
+        "compatibility_manifest_ref": CompatibilityManifestRef,
         "common_state_metadata": CommonStateMetadata,
         "decision_request": DecisionRequest,
         "decision_response": DecisionResponse,
@@ -122,6 +149,8 @@ def graph_runtime_contract_schemas() -> dict[str, object]:
         "lineage_parent_edge": LineageParentEdge,
         "resource_lease_request": ResourceLeaseRequest,
         "resource_lease_record": ResourceLeaseRecord,
+        "resource_lease_request_v2": ResourceLeaseRequestV2,
+        "resource_lease_record_v2": ResourceLeaseRecordV2,
         "wait_lease_projection": WaitLeaseProjection,
         "cancellation_context": CancellationContext,
         "operation_effect_claim": OperationEffectClaim,
@@ -135,6 +164,9 @@ def graph_runtime_contract_schemas() -> dict[str, object]:
     schemas["runtime_intervention"] = TypeAdapter(RuntimeIntervention).json_schema()
     schemas["operation_execution_outcome"] = TypeAdapter(
         OperationExecutionOutcome
+    ).json_schema()
+    schemas["operation_execution_outcome_v2"] = TypeAdapter(
+        OperationExecutionOutcomeV2
     ).json_schema()
     schemas["field_governance"] = field_governance_schema()
     return schemas

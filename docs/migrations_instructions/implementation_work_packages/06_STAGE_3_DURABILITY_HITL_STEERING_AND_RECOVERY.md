@@ -51,9 +51,18 @@ scheduling:
 1. preserve exact operation assemblies, hierarchical resources, concurrency, lineage, journal,
    effect claims, usage, and deterministic settlement in `06A`;
 2. establish the Temporal root/family/operation hierarchy and recovery foundation in `06B`;
-3. establish the PostgreSQL-authoritative communication and intervention protocol in `06C`;
-4. prove process loss, replay, duplicate delivery, intervention, cancellation, and reconciliation
+3. establish PostgreSQL-authoritative command transport and durable waits in `06C`, while defining
+   later adapter-level intervention contracts without claiming them prematurely;
+4. execute durable skeleton increments of both Q and D through the real BellLabs application,
+   persistence, Temporal, Activity, and worker seams;
+5. prove process loss, replay, duplicate delivery, fixture intervention, cancellation, and reconciliation
    cannot bypass BellLabs authority or duplicate a consequential effect.
+
+Stage 3 is therefore a vertical durable-execution kernel, not a general proof that every agent
+runtime is steerable. Deterministic Q/D fixture operations prove replay and recovery. Optional
+bounded live retrieval or tiny LLM operations prove configured integration only through an exact
+Stage 2 binding. Model-visible safe points qualify with the real local adapter in Stage 4; reusable
+and disruptive local steering completes in Stage 5 and remote equivalence in Stage 6.
 
 Self-hosted Temporal on AWS is the accepted initial production direction. Stage 3 uses a
 self-hosted local Temporal service for deterministic qualification without selecting or encoding
@@ -107,10 +116,13 @@ Then implement and prove:
 - PostgreSQL message/command ledger with inbox and transactional outbox;
 - exact target attempt, monotonic sequence, immutable ordered batches, receipts, claims, leases, and
   idempotent redelivery;
-- certified post-model/pre-tool intervention safe point;
+- core accepted/routed/runtime-observed receipts and durable decision wait/resume;
+- the cross-stage post-model/pre-tool intervention contract, first certified by Stage 4's exact
+  local adapter rather than a Stage 3 fixture;
 - typed peer messages and privileged prompt-role changes;
 - durable agent waits only through `OperationWorkflow`;
-- disruptive cancel/reconcile/restart with late-output quarantine.
+- generic cancellation/restart generation fencing and quarantine fixtures; full local agent
+  disruptive-restart qualification is a Stage 5 gate.
 
 After the contract-defining sections of `06` and `06A` are reviewed, versioned, mutually
 consistent, and backed by the shared contract-conformance record, the gate authority records
@@ -164,10 +176,28 @@ only after these dependencies are satisfied. Aggregate Stage 3 acceptance is rec
 - persist commands/messages before runtime delivery;
 - claim and route bounded batches through an authorized service;
 - prove receipt progression and stale-target rejection;
-- checkpoint injected model-visible batches and safely invalidate superseded tool calls;
-- prove disruptive recovery and quarantine.
+- prove accepted/routed/runtime-observed receipts, durable wait/resume, and explicit unsupported
+  dispositions for unqualified model-visible steering;
+- implement generic generation fencing/quarantine primitives and publish the adapter conformance
+  suite that Stages 4–6 run against exact implementations.
 
-### 7.4 Recovery and compatibility slice
+### 7.4 Reference blueprint execution slice
+
+This aggregate slice is implemented concretely by package `06B` §11, using
+[`REFERENCE_BLUEPRINT_STAGE3_MAPPING.md`](../stage2_evidence/REFERENCE_BLUEPRINT_STAGE3_MAPPING.md)
+as its supporting Q/D input. The mapping file is evidence, not an additional numbered work package.
+Package `06C` subsequently owns persisted command, receipt, and durable-wait qualification.
+
+- compile immutable Stage 3 Q/D skeleton implementations from the Stage 1 blueprint contracts;
+- run both via BellLabs application/API entry points into `BellLabsRunWorkflow`, fixture family
+  workflows, and generic `OperationWorkflow` children;
+- use deterministic tiny operations for the mandatory crash/replay gate and optional bounded live
+  retrieval/LLM only through an exact declared binding;
+- exercise Query, persisted Update command, Signal wake-up, durable decision wait, cancellation,
+  worker loss, and result settlement across the two runs;
+- publish a comparison against Stage 2 and prove no demo-only path or contract fork exists.
+
+### 7.5 Recovery and compatibility slice
 
 - capture histories for replay;
 - qualify current code (`N`) against `N` histories and compatible next code (`N+1`) against `N`
@@ -207,8 +237,9 @@ only after these dependencies are satisfied. Aggregate Stage 3 acceptance is rec
 - duplicate, delayed, and out-of-order delivery preserves per-target sequence and idempotency;
 - stale target, wrong tenant, wrong actor, expired, and superseded commands fail closed;
 - every receipt transition is queryable and immutable;
-- post-model/pre-tool injection checkpoints the response and prevents superseded calls from running;
-- late output from an old execution generation is quarantined and cannot settle;
+- an unqualified post-model/pre-tool command returns an explicit unsupported disposition;
+- generic restart increments generation and late fixture output from the old generation is
+  quarantined and cannot settle;
 - neither tests nor documentation claim atomic cancellation/injection or exactly-once transport.
 
 ### Security and payloads
@@ -231,6 +262,10 @@ Stage 3 passes only when:
 - replay and N/N+1 evidence is accepted;
 - process-loss, duplicate-delivery, cancellation, wait, intervention, effect, and reconciliation
   suites pass against local self-hosted Temporal;
+- deterministic Q and D skeleton runs traverse the real API/application, persistence, workflow,
+  Activity, and worker seams, with bounded live evidence or explicit skip reasons;
+- no package claims `model_visible`, `applied`, post-model/pre-tool, tool-interrupt, or disruptive
+  agent-restart capability before the exact later-stage adapter proof;
 - history and payload inspections pass redaction and size limits;
 - Stage 4 receives stable child-lifecycle, executor, resource, lineage, settlement, and
   communication contracts.
@@ -245,6 +280,8 @@ Stage 3 passes only when:
 - Do not use Temporal Reset as a BellLabs fork or use checkpoint editing as rollback.
 - Do not certify the remote post-model/pre-tool intervention safe point; that proof is deferred to
   Stage 6.
+- Do not certify local model-visible steering merely from fixture message delivery; the first exact
+  local adapter proof belongs to Stage 4 and the reusable/disruptive proof to Stage 5.
 
 ## 11. Outgoing handoff
 
@@ -257,6 +294,7 @@ Publish:
 - task-queue and timeout/retry/heartbeat profiles;
 - resource lease and wait matrix;
 - journal/effect/settlement and reconciliation catalog;
-- communication receipts and certified-safe-point evidence;
+- Stage 3 transport receipts, unsupported adapter-safe-point dispositions, and the conformance
+  vectors handed to Stages 4–6;
 - replay histories, N/N+1 report, payload inspection, and process-loss results;
 - exact Stage 4 entry APIs and forbidden shortcuts.

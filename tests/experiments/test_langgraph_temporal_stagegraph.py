@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import asyncio
-import sys
 import uuid
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -22,9 +20,6 @@ from app.experiments.langgraph_temporal_stagegraph.repository import (
     ExperimentRepository,
     prepare_database,
 )
-
-if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 
 def test_any_join_and_deterministic_frozen_selection() -> None:

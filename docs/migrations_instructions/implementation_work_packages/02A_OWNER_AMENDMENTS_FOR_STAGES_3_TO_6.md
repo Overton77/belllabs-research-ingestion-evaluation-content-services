@@ -64,7 +64,7 @@ These owner decisions remain accepted, with “scheduler” and “runtime” in
 | D-24 | Temporal is the sole macro runtime; `BellLabsRunWorkflow` is a distinct root with family children and generic `OperationWorkflow` children. | No Agent Server macro fallback. Root, family, operation input/result, parent-close, cancellation, replay, repair, and compatibility contracts are explicit. |
 | D-25 | BellLabs API is the sole governed public facade. | All public commands, queries, streams, interventions, and results pass common application auth/tenant/policy ports. Provider, Temporal, Agent Server, and sandbox endpoints are subordinate/private. |
 | D-26 | BellLabs owns authoritative per-attempt inbox, ledger, and outbox. | Signals, Updates, callbacks, polling, and agent messages carry typed deduplicated facts; handlers do not directly grant lifecycle or settlement transitions. |
-| D-27 | Exact post-model/pre-tool communication injection is required and separately certified by placement. | Stage 3 certifies local execution; Stage 6 certifies selected remote LangSmith deployment execution. Uncertified placement reports unsupported capability. |
+| D-27 | Exact post-model/pre-tool communication injection is required and separately certified by placement. | Stage 3 defines the contract and certifies authoritative transport/durable waits. Stage 4 certifies its first local adapter, Stage 5 completes reusable local qualification, and Stage 6 certifies selected remote LangSmith deployment execution. Uncertified placement reports unsupported capability. |
 | D-28 | Disruptive intervention is a governed saga. | Authorize/journal, quiesce or cancel, reconcile ambiguous effects, apply typed mutation, rebind/resume, and emit durable outcome facts with compensation/recovery evidence. |
 | D-29 | Peer/subordinate communication is typed input, never readiness by itself. | No message affects StageGraph readiness or GoalDirected convergence until resulting evidence is accepted, settled, projected, and consumed by the pure interpreter. |
 | D-30 | Delegation is classified by lifecycle. | Built-in sync subagents are operation-local. Independent lifecycle/cancellation/capacity/settlement uses custom Temporal delegation. Provider async is a subordinate adapter. |
@@ -73,6 +73,8 @@ These owner decisions remain accepted, with “scheduler” and “runtime” in
 | D-33 | Product durable events are authoritative. | Clients and downstream systems consume BellLabs outbox/projections. Temporal history/Queries and LangSmith traces are diagnostic/runtime evidence, not the product event stream. |
 | D-34 | Initial and final deployment decisions are separated. | Implement and qualify against self-hosted Temporal initially. Stage 8 selects the final AWS self-host topology and proves it without changing semantic contracts. |
 | D-35 | Five logical worker-pool classes are required. | Coordinator/family, agent/cognitive, ingestion/I/O, sandbox-control/external-job, and verification/reconciliation classes have isolated queues/capacity. Stage 8 chooses exact AWS services/counts/sizes. |
+| D-36 | Q/D reference workflows are mandatory cumulative verticals. | Every stage executes the applicable immutable increment from `00A`; infrastructure is extracted from running verticals rather than accepted as a disconnected horizontal layer. |
+| D-37 | Deterministic and live evidence are separate. | Sanitized fixtures gate replay/compatibility/CI; bounded live canaries prove current source/provider integration without treating changing web results as fixed regression oracles. |
 
 ## 6. Stage/package amendments
 
@@ -83,25 +85,38 @@ Stage 3 is split into four coordinated packages:
 - `06` becomes the overview and root/family/operation, message, continuity, intervention, and recovery contract owner.
 - `06A` remains the cross-stage exact operation assembly, concurrency, lineage, journal, effect, and settlement contract.
 - `06B_STAGE_3_TEMPORAL_WORKFLOW_FOUNDATION.md` implements self-host Temporal, the distinct root, family children, generic operation child, replay/recovery, Continue-As-New, and five logical worker classes.
-- `06C_STAGE_3_COMMUNICATION_AND_INTERVENTION_QUALIFICATION.md` qualifies inbox/ledger/outbox, local exact injection, typed peer input, disruptive intervention, dedupe, settlement-before-readiness, and authoritative product events.
+- `06C_STAGE_3_COMMUNICATION_AND_INTERVENTION_QUALIFICATION.md` qualifies inbox/ledger/outbox,
+  typed command transport, durable waits, dedupe, stale-target behavior, and
+  settlement-before-readiness. It defines later model-visible/disruptive contracts but does not
+  claim them before a real local adapter exists.
 
-Stage 3 cannot hand off until all four package gates pass.
+Stage 3 cannot hand off until all four package gates pass and durable skeleton increments of both Q
+and D execute through the same application, persistence, workflow, Activity, and worker seams that
+Stage 4 will extend.
 
 ### Stage 4
 
 Implement a Temporal-native `StageGraphWorkflow` around the pure `StageGraphInterpreter`. Launch generic operation child workflows independently and process completion facts incrementally. Prove `all`, `any`, and `minimum(k)`, slow-sibling policy, bounded capacity, cycles/waits/reuse, deterministic settlement, and complete lineage.
 
-The first vertical is a small heterogeneous StageGraph with materially different exact assemblies. Direct frontier `asyncio.gather()` and a production Agent Server StageGraph are rejected.
+The first vertical is Q as a small heterogeneous StageGraph with materially different exact
+assemblies and the first local post-model/pre-tool steering proof. A deterministic D compatibility
+slice remains green. Direct frontier `asyncio.gather()` and a production Agent Server StageGraph
+are rejected.
 
 ### Stage 5
 
 Implement the reusable bounded Deep Agents operation harness and `GoalDirectedWorkflow`. Goal iterations, independent verification, revision, subgoals, pause/cancel, context rollover, and convergence remain pure-interpreter semantics coordinated by Temporal.
 
-The second vertical is GoalDirected research. It must reuse the same operation adapter path already available to StageGraph.
+The second vertical is D GoalDirected ownership research. It must reuse and complete the same
+operation adapter path already available to StageGraph, qualify tool HITL and disruptive restart,
+and rerun Q with the completed harness.
 
 ### Stage 6
 
-Qualify advanced capabilities, selected remote LangSmith deployments, sandboxes, MCP/skills, provider-async adapters, optional interpreter features, and heterogeneous composition. Remote execution must use start-bind-wait/reconcile and independently pass exact post-model/pre-tool injection.
+Qualify advanced capabilities, selected remote LangSmith deployments, sandboxes, MCP/skills,
+provider-async adapters, optional interpreter features, and heterogeneous implementations of both
+Q and D. Remote execution must use start-bind-wait/reconcile and independently pass exact
+post-model/pre-tool injection.
 
 Stage 6 includes mandatory hours-long failure tests covering worker loss, remote ambiguity, provider failure, callback/poll races, cancellation, reconciliation, capacity, lineage, effects, and no duplicate settlement.
 
@@ -132,7 +147,8 @@ Do not finish an unfinished Agent Server macro graph as a production fallback. D
 - replay-safe self-host Temporal workflows and N/N+1 history fixtures;
 - crash/restart proof before and after consequential boundaries;
 - independently durable operation start and incremental completion proof;
-- local Stage 3 and remote Stage 6 post-model/pre-tool injection certification;
+- Stage 3 transport/durable-wait proof, Stage 4 first-local, Stage 5 reusable/disruptive-local, and
+  Stage 6 remote post-model/pre-tool certification;
 - inbox/ledger/outbox dedupe and disruptive-saga failure/compensation evidence;
 - proof that typed peer input cannot alter readiness before settlement;
 - Continue-As-New same-run/same-epoch/new-segment proof and fork new-run/epoch-1 proof;

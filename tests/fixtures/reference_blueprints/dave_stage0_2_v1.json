@@ -1,0 +1,84 @@
+{
+  "family_id": "reference.dave-asprey.current-company-ownership",
+  "as_of": "2026-01-15T12:00:00Z",
+  "evidence_rule": "current ownership requires affirmative accepted evidence; founding, association, or absence never proves ownership or non-ownership",
+  "sources": [
+    {
+      "source_id": "d-source-current-control",
+      "url": "https://example.test/company/upgrade-labs/governance",
+      "authority": "first_party_corporate",
+      "observed_at": "2026-01-15T11:55:00Z",
+      "excerpt": "Sanitized fixture: current governance statement identifies control."
+    },
+    {
+      "source_id": "d-source-founder-only",
+      "url": "https://example.test/company/bulletproof/history",
+      "authority": "first_party_corporate",
+      "observed_at": "2026-01-15T11:56:00Z",
+      "excerpt": "Sanitized fixture: company history identifies a founder but gives no current ownership evidence."
+    },
+    {
+      "source_id": "d-source-former-sale",
+      "url": "https://example.test/company/forty-years/history",
+      "authority": "high_quality_secondary",
+      "observed_at": "2026-01-15T11:57:00Z",
+      "excerpt": "Sanitized fixture: historical report states the association ended."
+    },
+    {
+      "source_id": "d-source-affiliation",
+      "url": "https://example.test/company/ambiguous-brand/profile",
+      "authority": "high_quality_secondary",
+      "observed_at": "2026-01-15T11:58:00Z",
+      "excerpt": "Sanitized fixture: public profile states an affiliation but not ownership."
+    },
+    {
+      "source_id": "d-source-affiliation-contrary",
+      "url": "https://example.test/company/ambiguous-brand/filing",
+      "authority": "regulatory_or_legal",
+      "observed_at": "2026-01-15T11:59:00Z",
+      "excerpt": "Sanitized fixture: filing does not resolve the extent of control."
+    }
+  ],
+  "companies": [
+    {
+      "record_id": "d-company-upgrade-labs",
+      "company": "Upgrade Labs",
+      "asserted_relationship": "currently_owns_or_controls",
+      "explicit_current_control_evidence": true,
+      "explicit_former_evidence": false,
+      "source_refs": ["d-source-current-control"],
+      "contrary_source_refs": [],
+      "jurisdiction_or_context": "sanitized fixture jurisdiction"
+    },
+    {
+      "record_id": "d-company-bulletproof",
+      "company": "Bulletproof 360",
+      "asserted_relationship": "founder_but_current_ownership_unverified",
+      "explicit_current_control_evidence": false,
+      "explicit_former_evidence": false,
+      "source_refs": ["d-source-founder-only"],
+      "contrary_source_refs": [],
+      "jurisdiction_or_context": null
+    },
+    {
+      "record_id": "d-company-forty-years",
+      "company": "40 Years of Zen",
+      "asserted_relationship": "former_or_historical_association",
+      "explicit_current_control_evidence": false,
+      "explicit_former_evidence": true,
+      "source_refs": ["d-source-former-sale"],
+      "contrary_source_refs": [],
+      "jurisdiction_or_context": null
+    },
+    {
+      "record_id": "d-company-ambiguous-brand",
+      "company": "Ambiguous Brand",
+      "asserted_relationship": "brand_endorsement_or_affiliation",
+      "explicit_current_control_evidence": false,
+      "explicit_former_evidence": false,
+      "source_refs": ["d-source-affiliation"],
+      "contrary_source_refs": ["d-source-affiliation-contrary"],
+      "jurisdiction_or_context": null
+    }
+  ]
+}

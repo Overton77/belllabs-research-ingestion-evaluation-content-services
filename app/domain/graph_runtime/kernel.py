@@ -32,6 +32,22 @@ class OperationFailureClass(StrEnum):
     INTERNAL_INVARIANT_VIOLATION = "internal_invariant_violation"
 
 
+class OperationFailureClassV2(StrEnum):
+    AUTHORITY_DENIED = "authority_denied"
+    CAPABILITY_UNAVAILABLE = "capability_unavailable"
+    CAPABILITY_DRIFT = "capability_drift"
+    RESOURCE_EXHAUSTED = "resource_exhausted"
+    BUDGET_EXHAUSTED = "budget_exhausted"
+    APPROVAL_REQUIRED = "approval_required"
+    TRANSIENT_PROVIDER_FAILURE = "transient_provider_failure"
+    AMBIGUOUS_EXTERNAL_EFFECT = "ambiguous_external_effect"
+    INVALID_RESULT_CONTRACT = "invalid_result_contract"
+    INCOMPATIBLE_RESUME = "incompatible_resume"
+    STALE_EXECUTION_GENERATION = "stale_execution_generation"
+    CANCELLED = "cancelled"
+    INTERNAL_INVARIANT_VIOLATION = "internal_invariant_violation"
+
+
 class LineageKind(StrEnum):
     BELL_LABS_RUN = "belllabs_run"
     EXECUTION_EPOCH = "execution_epoch"
@@ -182,6 +198,82 @@ class ResourceLeaseRecord(KernelContract):
 
     @model_validator(mode="after")
     def status_has_consistent_timestamps(self) -> ResourceLeaseRecord:
+        if self.status in {ResourceLeaseStatus.ACQUIRED, ResourceLeaseStatus.RETAINED} and (
+            self.acquired_at is None or self.expires_at is None
+        ):
+            raise ValueError("acquired leases require acquisition and expiry times")
+        if self.status == ResourceLeaseStatus.RELEASED and self.released_at is None:
+            raise ValueError("released leases require a release time")
+        return self
+
+
+class ResourceKindV2(StrEnum):
+    TENANT = "tenant"
+    ENVIRONMENT = "environment"
+    WORKFLOW_RUN = "workflow_run"
+    FAMILY_SCHEDULER = "family_scheduler"
+    STAGE = "stage"
+    OPERATION_WORKFLOW = "operation_workflow"
+    OPERATION_WORKER = "operation_worker"
+    RESUMPTION = "resumption"
+    MODEL_CALL = "model_call"
+    TOOL_CALL = "tool_call"
+    MCP_CALL = "mcp_call"
+    SYNC_SUBAGENT = "sync_subagent"
+    ASYNC_CHILD = "async_child"
+    LINKED_RUN = "linked_run"
+    PROVIDER_QUOTA = "provider_quota"
+    BUDGET_RESERVATION = "budget_reservation"
+
+
+RESOURCE_ACQUISITION_ORDER_V2: tuple[ResourceKindV2, ...] = tuple(ResourceKindV2)
+
+
+class ResourceLeaseRequestV2(KernelContract):
+    schema_version: Literal["belllabs.resource-lease-request.v2"] = (
+        "belllabs.resource-lease-request.v2"
+    )
+    lease_id: str = Field(pattern=IDENTIFIER_PATTERN)
+    request_scope: str = Field(min_length=1, max_length=256)
+    semantic_identity: str = Field(min_length=1, max_length=1_024)
+    envelope_digest: str = Field(pattern=DIGEST_PATTERN)
+    resources: tuple[ResourceKindV2, ...] = Field(min_length=1)
+    requested_at: AwareDatetime
+    deadline: AwareDatetime
+    ttl_seconds: int = Field(ge=1, le=86_400)
+
+    @field_validator("resources")
+    @classmethod
+    def resources_are_canonical_and_unique(
+        cls, value: tuple[ResourceKindV2, ...]
+    ) -> tuple[ResourceKindV2, ...]:
+        if len(value) != len(set(value)):
+            raise ValueError("resource lease requests cannot acquire a resource twice")
+        ordered = tuple(sorted(value, key=RESOURCE_ACQUISITION_ORDER_V2.index))
+        if value != ordered:
+            raise ValueError("resource lease requests must use canonical acquisition order")
+        return value
+
+    @model_validator(mode="after")
+    def deadline_is_after_request(self) -> ResourceLeaseRequestV2:
+        if self.deadline <= self.requested_at:
+            raise ValueError("resource lease deadline must be after its request")
+        return self
+
+
+class ResourceLeaseRecordV2(KernelContract):
+    schema_version: Literal["belllabs.resource-lease-record.v2"] = (
+        "belllabs.resource-lease-record.v2"
+    )
+    request: ResourceLeaseRequestV2
+    status: ResourceLeaseStatus
+    acquired_at: AwareDatetime | None = None
+    expires_at: AwareDatetime | None = None
+    released_at: AwareDatetime | None = None
+    canonical_digest: str = Field(pattern=DIGEST_PATTERN)
+
+    @model_validator(mode="after")
+    def status_has_consistent_timestamps(self) -> ResourceLeaseRecordV2:
         if self.status in {ResourceLeaseStatus.ACQUIRED, ResourceLeaseStatus.RETAINED} and (
             self.acquired_at is None or self.expires_at is None
         ):

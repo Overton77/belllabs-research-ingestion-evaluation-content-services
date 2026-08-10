@@ -18,4 +18,5 @@ BellLabs is both a biotech research/ingestion/evaluation service and a frontier 
 - Select a runtime per exact Workflow Implementation or operation binding; never create multiple authorities for one BellLabs run or allow runtime state to bypass admission and settlement.
 - Preserve the distinction between researched evidence and approved ingestion. No framework may write canonical knowledge without BellLabs validation, provenance, policy, and review gates.
 
-Detailed intent: `docs/AGENT_FRAMEWORK_COEXISTENCE_STRATEGY.md`.
+Detailed intent:
+`docs/interview_and_research_result_documentation/AGENT_FRAMEWORK_COEXISTENCE_STRATEGY.md`.

@@ -27,6 +27,11 @@ There is no Agent Server macro-scheduler. LangSmith-hosted graphs are bounded re
 
 ## 2. Required workflow
 
+This proof is the Stage 6 heterogeneous implementation of Blueprint Q from `00A`, reduced only as
+necessary to keep failure injection bounded. It is not a synthetic graph unrelated to the reference
+product-catalog question. Blueprint D is proven in aggregate package `09`; this internal proof
+focuses on Q because it directly stresses heterogeneous StageGraph scheduling.
+
 Publish one test Workflow Implementation with this minimum shape:
 
 ```mermaid
@@ -221,6 +226,9 @@ Cancel while each operation is starting, active, waiting, settling, and crossing
 Exercise every shared failure class with authored retry/wait/fallback/degrade/escalate behavior. Missing optional capability affects only implementations requiring it. Required heterogeneous surfaces cannot silently collapse to a plain agent, local substitute, or ungoverned background task.
 
 ## 12. Acceptance gate and evidence bundle
+
+The bundle includes exact Q blueprint/implementation versions, current-offer inclusion policy,
+deterministic fixture results, bounded live-canary results, and comparison with Stage 4/5 Q.
 
 This is the internal exit proof consumed by package `09`. Passing it supplies evidence for the
 aggregate Stage 6 gate; it does not presuppose or separately create an already-accepted Stage 6.

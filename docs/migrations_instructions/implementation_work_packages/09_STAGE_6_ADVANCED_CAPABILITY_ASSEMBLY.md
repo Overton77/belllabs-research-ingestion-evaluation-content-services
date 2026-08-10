@@ -23,6 +23,12 @@ LangSmith is required for tracing, evaluation, sandbox integration, and selected
 
 All qualified deployment types may be used. Only graph deployments that pass the remote command-injection certification may promise post-model/pre-tool injection. Others must expose only their certified intervention boundaries.
 
+The product-shaped consumers are immutable heterogeneous implementations of both `00A` reference
+blueprints: Q exercises mixed acquisition/extraction/verification/materialization under StageGraph;
+D exercises mixed research/verifier/follow-up under GoalDirected. Advanced adapters are added only
+where a blueprint requirement justifies them and the exact compatibility key can be qualified,
+never merely because a provider is installed.
+
 ## 2. Implementation order
 
 1. **6A — provider-neutral capability completion:** MCP, tools/effects, skills, context, readiness, and sandbox gateway.
@@ -238,6 +244,11 @@ qualification_expiry
 
 Revalidate before start and reconciliation. Drift in model, graph, tool/MCP schema, skill digest, sandbox image, endpoint, or intervention capability never silently substitutes a new variant. Only affected implementations block/degrade according to authored policy.
 
+Every promotion names the exact Q/D operation and evidence that exercised it. The same capability
+under another model, prompt, tool, MCP server, remote deployment, sandbox policy, or safe point is a
+different candidate unless explicit compatibility evidence says otherwise. Both deterministic
+fixtures and bounded live canaries rerun after material binding changes.
+
 ## 11. QuickJS/PTC/dynamic track — optional and gated
 
 QuickJS remains disabled unless the exact pinned engine/bridge passes an independent gate. Start only with pure transforms:
@@ -288,6 +299,11 @@ preceding Stage 6 slices, not on accepted Stage 6. Package `09` cannot record ag
 acceptance until `09A` passes.
 
 Stage 6 passes when:
+
+- heterogeneous Q and D implementations execute through their unchanged family interpreters and
+  generic `OperationWorkflow` boundary, with comparison manifests against Stages 4–5;
+- live research outputs retain Q current-offer and D current-ownership classification discipline,
+  explicit `as_of`, citations, unknowns, and contrary evidence rather than prompt-only conclusions;
 
 - LangSmith tracing/evaluation/sandboxes and selected bounded deployments meet exact contracts;
 - local and remote variants are independently frozen, evaluated, and certified;

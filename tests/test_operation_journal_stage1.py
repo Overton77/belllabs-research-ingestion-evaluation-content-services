@@ -217,6 +217,37 @@ async def test_postgres_journal_crash_rolls_back_claim_attempt_and_settlement(
         assert (await repository.commit(mutation)).status == "existing"
         persisted = await repository.get_settlement("tenant-1", "claim-1")
         assert persisted == settlement()
+        with pytest.raises(IdempotencyConflict, match="conflicting immutable intent"):
+            await repository.commit(
+                OperationJournalMutation(
+                    request_scope="tenant-1",
+                    belllabs_run_id=admitted.run_id,
+                    expected_run_version=1,
+                    claim=claim(
+                        run_id=admitted.run_id,
+                        request_digest="sha256:" + "b" * 64,
+                    ),
+                )
+            )
+        revised_values = settlement().model_dump(exclude={"settlement_digest"})
+        revised_values.update(
+            {
+                "settlement_id": "settlement-2",
+                "settlement_revision": 2,
+                "status": "completed",
+                "failure_code": None,
+            }
+        )
+        with pytest.raises(IdempotencyConflict, match="terminal"):
+            await repository.commit(
+                OperationJournalMutation(
+                    request_scope="tenant-1",
+                    belllabs_run_id=admitted.run_id,
+                    expected_run_version=1,
+                    claim=operation_claim,
+                    settlement=OperationJournalSettlement.create(**revised_values),
+                )
+            )
 
         async with pool.acquire() as connection, connection.transaction():
             await connection.execute("SET LOCAL ROLE belllabs_control_runtime")

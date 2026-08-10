@@ -453,10 +453,10 @@ app/
 
 Useful implementation guides:
 
-- [`docs/CODEBASE_DOMAIN_WORKFLOW_GUIDE.md`](docs/CODEBASE_DOMAIN_WORKFLOW_GUIDE.md)
-- [`docs/SCHEMA_GROUNDING_PIPELINE.md`](docs/SCHEMA_GROUNDING_PIPELINE.md)
-- [`docs/workflow-control-plane-current-state-and-next-slices.md`](docs/workflow-control-plane-current-state-and-next-slices.md)
-- [`docs/WORKFLOW_IMPLEMENTATION_BINDINGS_PROTOTYPE.md`](docs/WORKFLOW_IMPLEMENTATION_BINDINGS_PROTOTYPE.md)
+- [`docs/interview_and_research_result_documentation/CODEBASE_DOMAIN_WORKFLOW_GUIDE.md`](docs/interview_and_research_result_documentation/CODEBASE_DOMAIN_WORKFLOW_GUIDE.md)
+- [`docs/interview_and_research_result_documentation/SCHEMA_GROUNDING_PIPELINE.md`](docs/interview_and_research_result_documentation/SCHEMA_GROUNDING_PIPELINE.md)
+- [`docs/interview_and_research_result_documentation/workflow-control-plane-current-state-and-next-slices.md`](docs/interview_and_research_result_documentation/workflow-control-plane-current-state-and-next-slices.md)
+- [`docs/interview_and_research_result_documentation/WORKFLOW_IMPLEMENTATION_BINDINGS_PROTOTYPE.md`](docs/interview_and_research_result_documentation/WORKFLOW_IMPLEMENTATION_BINDINGS_PROTOTYPE.md)
 
 ## Current API and MCP surfaces
 

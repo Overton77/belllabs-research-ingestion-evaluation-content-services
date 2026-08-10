@@ -409,6 +409,132 @@ async def test_multitask_strategy_reject_and_enqueue(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("strategy", ["interrupt", "rollback"])
+async def test_multitask_replacement_strategies_stop_the_active_run(
+    tenant_a_client,
+    wait_assistant_id: str,
+    strategy: str,
+) -> None:
+    thread = await tenant_a_client.threads.create(
+        metadata={
+            "request_scope": "tenant-a",
+            "belllabs_run_id": f"qual-multitask-{strategy}-{uuid4().hex}",
+        },
+    )
+    thread_id = str(thread["thread_id"])
+    active = await tenant_a_client.runs.create(
+        thread_id,
+        wait_assistant_id,
+        input=_wait_input(hold_seconds=120),
+        multitask_strategy="reject",
+    )
+    active_id = str(active["run_id"])
+    await wait_run_status(
+        tenant_a_client,
+        thread_id,
+        active_id,
+        statuses={"running"},
+        timeout_seconds=30,
+    )
+    await wait_thread_values(
+        tenant_a_client,
+        thread_id,
+        predicate=lambda values, _state: (
+            values.get("wait_status") == "waiting" and values.get("resource_open") is True
+        ),
+        timeout_seconds=30,
+    )
+    active_state = await tenant_a_client.threads.get_state(thread_id)
+    active_checkpoint = active_state.get("checkpoint") or {}
+    active_checkpoint_id = str(
+        active_checkpoint.get("checkpoint_id")
+        or active_state.get("checkpoint_id")
+        or ""
+    )
+    assert active_checkpoint_id
+
+    replacement = await tenant_a_client.runs.create(
+        thread_id,
+        wait_assistant_id,
+        input=_wait_input(hold_seconds=0.01),
+        multitask_strategy=strategy,
+    )
+    replacement_id = str(replacement["run_id"])
+    terminal_replacement = await wait_run_status(
+        tenant_a_client,
+        thread_id,
+        replacement_id,
+        statuses={"success", "error", "interrupted"},
+        timeout_seconds=30,
+    )
+    assert str(terminal_replacement.get("status")) == "success"
+    replaced = await tenant_a_client.runs.get(thread_id, active_id)
+    assert str(replaced.get("status")) != "running"
+    final = await tenant_a_client.threads.get_state(thread_id)
+    final_values = final.get("values") or {}
+    assert final_values.get("resource_open") is False
+    assert final_values.get("wait_status") == "completed"
+    final_events = final_values.get("events") or ()
+    assert "wait-resource-opened" in final_events
+    assert "wait-resource-closed-completed" in final_events
+    final_history = await tenant_a_client.threads.get_history(thread_id, limit=50)
+    final_checkpoint_ids = {
+        str((item.get("checkpoint") or {}).get("checkpoint_id") or item.get("checkpoint_id") or "")
+        for item in final_history
+    }
+    if strategy == "rollback":
+        assert active_checkpoint_id not in final_checkpoint_ids
+    else:
+        assert active_checkpoint_id in final_checkpoint_ids
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("placement", ["before", "after"])
+async def test_operation_level_interrupt_before_and_after_are_resumable(
+    tenant_a_client,
+    wait_assistant_id: str,
+    placement: str,
+) -> None:
+    thread = await tenant_a_client.threads.create(
+        metadata={
+            "request_scope": "tenant-a",
+            "belllabs_run_id": f"qual-breakpoint-{placement}-{uuid4().hex}",
+        },
+    )
+    thread_id = str(thread["thread_id"])
+    interrupt_kwargs = (
+        {"interrupt_before": ["enter_wait"]}
+        if placement == "before"
+        else {"interrupt_after": ["enter_wait"]}
+    )
+    await tenant_a_client.runs.wait(
+        thread_id,
+        wait_assistant_id,
+        input=_wait_input(hold_seconds=0.01),
+        **interrupt_kwargs,
+    )
+    await wait_thread_status(tenant_a_client, thread_id, statuses={"interrupted"})
+    interrupted = await tenant_a_client.threads.get_state(thread_id)
+    interrupted_values = interrupted.get("values") or {}
+    if placement == "before":
+        assert interrupted_values.get("resource_open") is False
+        assert interrupted_values.get("wait_status") == "idle"
+    else:
+        assert interrupted_values.get("resource_open") is True
+        assert interrupted_values.get("wait_status") == "waiting"
+
+    await tenant_a_client.runs.wait(
+        thread_id,
+        wait_assistant_id,
+        command={"resume": None},
+    )
+    await wait_thread_status(tenant_a_client, thread_id, statuses={"idle"})
+    final_values = (await tenant_a_client.threads.get_state(thread_id)).get("values") or {}
+    assert final_values.get("resource_open") is False
+    assert final_values.get("wait_status") == "completed"
+
+
+@pytest.mark.asyncio
 async def test_thread_copy_fork_does_not_mutate_parent(
     tenant_a_client,
     qualification_assistant_id: str,
@@ -523,6 +649,79 @@ async def test_cancellation_leaves_typed_cancelled_cleanup_state(
     assert "wait-resource-closed-cancelled" in (cleaned["values"].get("events") or ())
     assert cleaned["values"].get("wait_status") == "cancelled"
     assert cleaned["values"].get("resource_open") is False
+
+
+@pytest.mark.asyncio
+async def test_rollback_cancellation_removes_active_run_state_and_completed_run_is_immutable(
+    tenant_a_client,
+    wait_assistant_id: str,
+) -> None:
+    thread = await tenant_a_client.threads.create(
+        metadata={
+            "request_scope": "tenant-a",
+            "belllabs_run_id": f"qual-cancel-rollback-{uuid4().hex}",
+        },
+    )
+    thread_id = str(thread["thread_id"])
+    pre_run_state = await tenant_a_client.threads.get_state(thread_id)
+    pre_run_values = dict(pre_run_state.get("values") or {})
+    pre_run_history = await tenant_a_client.threads.get_history(thread_id, limit=50)
+    active = await tenant_a_client.runs.create(
+        thread_id,
+        wait_assistant_id,
+        input=_wait_input(hold_seconds=120),
+        multitask_strategy="reject",
+    )
+    active_id = str(active["run_id"])
+    await wait_thread_values(
+        tenant_a_client,
+        thread_id,
+        predicate=lambda values, _state: (
+            values.get("wait_status") == "waiting" and values.get("resource_open") is True
+        ),
+        timeout_seconds=30,
+    )
+    await tenant_a_client.runs.cancel(
+        thread_id,
+        active_id,
+        wait=True,
+        action="rollback",
+    )
+    rolled_back = await tenant_a_client.threads.get_state(thread_id)
+    rolled_back_values = rolled_back.get("values") or {}
+    assert rolled_back_values == pre_run_values
+    assert await tenant_a_client.threads.get_history(
+        thread_id, limit=50
+    ) == pre_run_history
+
+    completed = await tenant_a_client.runs.create(
+        thread_id,
+        wait_assistant_id,
+        input=_wait_input(hold_seconds=0.01),
+        multitask_strategy="reject",
+    )
+    completed_id = str(completed["run_id"])
+    completed_run = await wait_run_status(
+        tenant_a_client,
+        thread_id,
+        completed_id,
+        statuses={"success", "error", "interrupted"},
+        timeout_seconds=30,
+    )
+    assert str(completed_run.get("status")) == "success"
+    completed_state = await tenant_a_client.threads.get_state(thread_id)
+    completed_history = await tenant_a_client.threads.get_history(thread_id, limit=50)
+    with pytest.raises(APIStatusError):
+        await tenant_a_client.runs.cancel(
+            thread_id,
+            completed_id,
+            wait=True,
+            action="rollback",
+        )
+    assert await tenant_a_client.threads.get_state(thread_id) == completed_state
+    assert await tenant_a_client.threads.get_history(
+        thread_id, limit=50
+    ) == completed_history
 
 
 @pytest.mark.asyncio
@@ -895,14 +1094,14 @@ async def test_nn1_deployment_direct_resume_on_n1_is_fail_closed_or_isolated(
             or provider_error.status_code in {404, 400, 409, 422}
         )
         after_state = await tenant_a_client.threads.get_state(thread_id)
-        after_values = dict(after_state.get("values") or {})
-        assert after_values == before_values
+        unchanged_values = dict(after_state.get("values") or {})
+        assert unchanged_values == before_values
         assert (after_state.get("checkpoint") or after_state.get("checkpoint_id")) == (
             before_checkpoint
         )
         assert await get_thread_status(tenant_a_client, thread_id) == "interrupted"
-        assert "should-not-apply" not in (after_values.get("decisions") or [])
-        assert "claim_tokens_v2" not in after_values
+        assert "should-not-apply" not in (unchanged_values.get("decisions") or [])
+        assert "claim_tokens_v2" not in unchanged_values
         return
 
     # Fail-open path (not expected on separate N+1-only deployment): isolate mutation.

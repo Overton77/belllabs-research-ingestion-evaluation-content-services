@@ -27,6 +27,11 @@ No client, coordinator, callback handler, provider gateway, Agent Server route, 
 
 This stage is the final pre-production qualification gate. It does not route broad production traffic.
 
+Both immutable `00A` reference workflows must now be usable exclusively through the governed
+facade. Q and D are not special endpoints or demo routes: clients prepare/admit/start/query, stream,
+intervene, cancel, and retrieve typed results through the same versioned resources, coordinator,
+and authorization policy as every other Workflow Blueprint.
+
 ## 2. Required inputs and owner decisions
 
 Required inputs:
@@ -201,6 +206,11 @@ Required end-to-end contract coverage includes discover, compare, compile, prepa
 
 Required compatibility routes may coexist temporarily, but each must delegate to the same BellLabs services. No legacy route may silently choose a runtime or call a provider before BellLabs admission.
 
+Public Q/D examples and contract tests use blueprint/implementation refs, explicit `as_of`, source
+policy, budget, and intervention capability requirements. They cannot select raw provider, model,
+tool, or task queue names except through an explicitly authorized contract that still compiles and
+freezes an exact binding.
+
 ## 5. Correlation and observability
 
 ### 5.1 Required identity taxonomy
@@ -249,6 +259,10 @@ Authorized product status includes BellLabs lifecycle state, projection freshnes
 - the exact Agent Server operation or sandbox/job when policy allows.
 
 Links are enrichment only. Histories, traces, and provider dashboards never override BellLabs durable facts.
+
+Dashboards and traces include separate deterministic-fixture and bounded-live Q/D cohorts. They
+classify result changes as blueprint, implementation, provider, or live-source changes and never
+label a changed current catalog/ownership answer as a regression without claim-level evaluation.
 
 ## 6. LangSmith tracing and evaluation
 
@@ -399,6 +413,12 @@ Stage 7 passes only when all of the following have durable evidence:
 - production-shaped images, authenticated end-to-end tests, backup/restore evidence, and runbooks are accepted.
 
 Any missing item is a Stage 8 blocker; it may not be converted into an undocumented deployment assumption.
+
+The Stage 7 gate additionally requires authenticated end-to-end Q and D runs through the real
+coordinator, compiler, stores, Temporal workers, adapters, streams, evaluations, and result APIs;
+negative direct-access tests for Temporal/providers/Agent Server/tools/sandboxes; and tenant-scoped
+queryability of deterministic/live cohort evidence, citations, unknowns, costs, interventions, and
+complete lineage.
 
 ## 12. Explicit non-goals
 

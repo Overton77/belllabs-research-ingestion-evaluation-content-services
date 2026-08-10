@@ -1,0 +1,85 @@
+{
+  "family_id": "reference.qualia-life.current-supplement-products",
+  "as_of": "2026-01-15T12:00:00Z",
+  "source_authority_policy": ["official_commerce", "first_party_corporate"],
+  "inclusion_policy": {
+    "supplements": true,
+    "bundles": false,
+    "subscriptions": true,
+    "unavailable_or_out_of_stock": false,
+    "third_party_listings": false,
+    "historical_products": false
+  },
+  "sources": [
+    {
+      "source_id": "q-source-official-catalog",
+      "url": "https://example.test/qualia/catalog",
+      "authority": "official_commerce",
+      "observed_at": "2026-01-15T11:58:00Z",
+      "excerpt": "Sanitized fixture: official catalog lists Qualia Mind as available."
+    },
+    {
+      "source_id": "q-source-official-senolytic",
+      "url": "https://example.test/qualia/senolytic",
+      "authority": "official_commerce",
+      "observed_at": "2026-01-15T11:58:30Z",
+      "excerpt": "Sanitized fixture: product page is marked out of stock."
+    },
+    {
+      "source_id": "q-source-official-bundle",
+      "url": "https://example.test/qualia/bundle",
+      "authority": "official_commerce",
+      "observed_at": "2026-01-15T11:59:00Z",
+      "excerpt": "Sanitized fixture: collection page describes a bundle."
+    },
+    {
+      "source_id": "q-source-third-party-focus",
+      "url": "https://example.test/reseller/qualia-focus",
+      "authority": "third_party_listing",
+      "observed_at": "2026-01-15T11:59:30Z",
+      "excerpt": "Sanitized fixture: reseller claims a current product without official corroboration."
+    }
+  ],
+  "candidates": [
+    {
+      "record_id": "q-product-mind",
+      "name": "Qualia Mind",
+      "canonical_product_url": "https://example.test/qualia/mind",
+      "item_kind": "supplement",
+      "availability": "available",
+      "seller": "Qualia Life",
+      "source_refs": ["q-source-official-catalog"],
+      "historical": false
+    },
+    {
+      "record_id": "q-product-senolytic",
+      "name": "Qualia Senolytic",
+      "canonical_product_url": "https://example.test/qualia/senolytic",
+      "item_kind": "supplement",
+      "availability": "out_of_stock",
+      "seller": "Qualia Life",
+      "source_refs": ["q-source-official-senolytic"],
+      "historical": false
+    },
+    {
+      "record_id": "q-product-bundle",
+      "name": "Qualia Starter Bundle",
+      "canonical_product_url": "https://example.test/qualia/bundle",
+      "item_kind": "bundle",
+      "availability": "available",
+      "seller": "Qualia Life",
+      "source_refs": ["q-source-official-bundle"],
+      "historical": false
+    },
+    {
+      "record_id": "q-product-focus",
+      "name": "Qualia Focus",
+      "canonical_product_url": null,
+      "item_kind": "supplement",
+      "availability": "unknown",
+      "seller": null,
+      "source_refs": ["q-source-third-party-focus"],
+      "historical": false
+    }
+  ]
+}

@@ -10,6 +10,7 @@ from app.domain.graph_runtime.identities import DIGEST_PATTERN
 from app.domain.graph_runtime.kernel import (
     CancellationContext,
     OperationFailureClass,
+    OperationFailureClassV2,
     ResourceLeaseRecord,
     WaitLeaseProjection,
 )
@@ -78,6 +79,27 @@ OperationExecutionOutcome = Annotated[
 ]
 operation_execution_outcome_adapter: TypeAdapter[OperationExecutionOutcome] = TypeAdapter(
     OperationExecutionOutcome
+)
+
+
+class FailedOperationOutcomeV2(ExecutorContract):
+    kind: Literal["failed"] = "failed"
+    failure_class: OperationFailureClassV2
+    retryability: Literal["never", "safe", "reconcile"]
+    evidence_refs: tuple[str, ...] = ()
+
+
+OperationExecutionOutcomeV2 = Annotated[
+    CompletedOperationOutcome
+    | WaitingOperationOutcome
+    | PausedOperationOutcome
+    | DegradedOperationOutcome
+    | FailedOperationOutcomeV2
+    | CancelledOperationOutcome,
+    Field(discriminator="kind"),
+]
+operation_execution_outcome_v2_adapter: TypeAdapter[OperationExecutionOutcomeV2] = TypeAdapter(
+    OperationExecutionOutcomeV2
 )
 
 

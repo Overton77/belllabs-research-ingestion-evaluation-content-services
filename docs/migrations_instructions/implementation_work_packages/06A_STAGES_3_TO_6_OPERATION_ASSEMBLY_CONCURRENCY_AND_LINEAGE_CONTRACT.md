@@ -33,6 +33,11 @@ per adapter. Local library/in-process execution and remote Agent Server executio
 adapter variants with distinct bindings, manifests, task-queue needs, recovery behavior, and
 compatibility keys.
 
+The Q/D reference workflows from `00A` are continuous consumers of this contract. Each stage
+publishes immutable implementations while preserving blueprint lineage; neither blueprint may
+receive special-case assembly logic. If the general compiler cannot express a required Q/D
+operation, extend and version the general contract before executing it.
+
 ## 2. Ownership
 
 - Workflow definitions, RunPlans, assemblies, lifecycle, budgets, approvals, leases, effects,
@@ -367,6 +372,11 @@ retry and unlimited expensive retries are forbidden.
    stubs, and GoalDirected consumption of the same child boundary.
 4. Stage 6 implements and qualifies remote LangSmith adapters, then completes MCP, sandbox,
    external jobs, async children, heterogeneous composition, and remote intervention safe points.
+
+At every step, capability maturity is recorded for the exact compatibility key as
+`declared -> fixture_proven -> live_canary_proven -> qualified -> production_observed`. Installed
+code, configured credentials, or success under another adapter never advances maturity. The Q/D
+comparison manifest records which exact operation promoted or failed each capability.
 
 ## 11. Mandatory tests and handoff gate
 

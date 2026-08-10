@@ -1,5 +1,10 @@
 # Architecture and implementation traceability matrix
 
+This matrix is exercised continuously by the immutable Q/D reference workflows defined in
+[`00A`](00A_REFERENCE_RESEARCH_BLUEPRINTS_AND_INCREMENTAL_PROOFS.md). Every row must eventually name
+the Q/D operation, deterministic fixture, and bounded live canary that traverses the architecture
+seam; document-only traceability is insufficient once the owning stage is executable.
+
 Status: cross-stage coverage checklist  
 Purpose: prove that high-detail architecture requirements are owned by a stage and cannot disappear between handoffs
 
@@ -161,5 +166,8 @@ At each stage handoff, review every row assigned to that stage and record one of
 - `deferred_optional_feature_disabled`;
 - `owner_amended` with a decision link;
 - `failed_gate`.
+
+The audit also compares the current Q/D blueprint and implementation digests with the preceding
+accepted increment, classifying semantic, implementation, live-source, and provider differences.
 
 No row may disappear or be marked “not applicable” without an owner decision explaining the architecture change.

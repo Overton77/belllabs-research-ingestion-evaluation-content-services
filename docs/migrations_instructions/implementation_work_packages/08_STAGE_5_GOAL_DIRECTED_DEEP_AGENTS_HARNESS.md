@@ -7,7 +7,9 @@ Depends on: accepted Stage 4 and [06A_STAGES_3_TO_6_OPERATION_ASSEMBLY_CONCURREN
 
 ## 1. Mission and accepted architecture
 
-Complete the reusable exact Deep Agents operation harness introduced by the Stage 4 vertical slice, then implement GoalDirected as a Temporal workflow family under `BellLabsRunWorkflow`.
+Complete the reusable exact Deep Agents operation harness introduced by the Stage 4 Q vertical,
+rerun Q through that completed harness, then implement Blueprint D from `00A` as a GoalDirected
+Temporal workflow family under `BellLabsRunWorkflow`.
 
 BellLabs PostgreSQL/application services own admission, lifecycle authority, accepted goal-revision
 facts, settlement, and terminality. `BellLabsRunWorkflow` and `GoalDirectedWorkflow` coordinate,
@@ -53,6 +55,9 @@ One agent thread corresponds to one semantic operation attempt. Runtime retry ma
 4. **5D — GoalDirected research vertical proof:** run a production-shaped multi-iteration research case after StageGraph proof passes.
 
 Repair the shared `OperationWorkflow`/executor abstraction if either workflow needs special-case provider mechanics.
+
+For this package, the StageGraph completion proof is Q and the GoalDirected research proof is D;
+generic placeholder research cases do not satisfy either vertical gate.
 
 ## 4. Exact capability compiler
 
@@ -206,9 +211,16 @@ Use `BellLabsRunWorkflow` as the stable external target and the `06C` envelope/d
 
 Commands are authorized, deduplicated, journaled, and version-checked. Agent injection is admitted into the next safe context assembly; it is not spliced into an in-flight model response. Built-in synchronous subagents remain non-addressable.
 
-## 12. GoalDirected research vertical proof
+Stage 5 completes local `06C` qualification: tool-approval LangGraph interrupts, ordered
+same-generation message injection, durable pause/resume, and cancel/reconcile/checkpoint-derived
+restart with a new execution generation. The D live canary includes at least one governed scope or
+evidence intervention when safely reproducible. Old-generation results are quarantined, effects and
+usage from both generations are reconciled, and no original command is silently retargeted.
 
-After the StageGraph harness proof, publish a research Workflow Implementation that demonstrates:
+## 12. Blueprint D GoalDirected ownership-research vertical proof
+
+After the Q StageGraph harness proof, publish an immutable D Workflow Implementation asking which
+companies Dave Asprey currently owns as of an explicit time and demonstrating:
 
 - immutable protected research objective and acceptance contract;
 - at least two significant iterations, each a distinct `OperationWorkflow`;
@@ -219,6 +231,16 @@ After the StageGraph harness proof, publish a research Workflow Implementation t
 - context rollover distinct from parent Continue-As-New;
 - inbox evidence injection and pause/resume;
 - typed cited result, usage/effect settlement, and complete lineage.
+- explicit relationship classes for current owner/control, founder with ownership unverified,
+  investor/shareholder extent unknown, advisor/board, endorsement/affiliation,
+  former/historical, and conflicting/insufficient evidence;
+- no conversion of “founded,” “associated with,” or absence of public evidence into a current
+  ownership conclusion;
+- primary/high-quality evidence, contrary-evidence refs, observation timestamps, and targeted
+  follow-up for gaps or contradictions;
+- deterministic company/evidence snapshots as the regression gate and a bounded live research
+  canary evaluated for support and classification discipline rather than fixed company-list equality;
+- Q rerun through the completed harness with its StageGraph semantics unchanged.
 
 Use fixture providers where live effects are unsafe, plus one owner-approved live evaluation path. Semantic acceptance uses explicit quality/citation thresholds, not provider/token/trace equality with legacy.
 
@@ -261,14 +283,20 @@ Use fixture providers where live effects are unsafe, plus one owner-approved liv
 ### E2E
 
 - StageGraph full-harness proof remains green;
-- GoalDirected research prepare/admit/iterate/verify/repair/delegate/rollover/intervene/result;
+- D ownership research prepare/admit/iterate/verify/repair/delegate/rollover/intervene/result;
+- deterministic and bounded-live D evidence plus Q comparison evidence;
 - process loss at every durable boundary;
 - compact histories/checkpoints and no prohibited data;
 - trace/evaluation hierarchy and end-to-end lineage query.
 
 ## 14. Gate and handoff
 
-Stage 5 passes when the exact reusable harness is reproducible; StageGraph still runs through Temporal `OperationWorkflow` children; GoalDirected iterations and independent verifiers are Temporal children; model turns remain internal; built-in subagents are operation-local/non-addressable; independent lifecycle uses BellLabs Temporal delegation; rollover and Continue-As-New remain distinct; the GoalDirected research proof passes; and only BellLabs authority terminalizes.
+Stage 5 passes when the exact reusable harness is reproducible; Q StageGraph still runs through
+Temporal `OperationWorkflow` children; D GoalDirected iterations and independent verifiers are
+Temporal children; model turns remain internal; built-in subagents are operation-local/non-addressable;
+independent lifecycle uses BellLabs Temporal delegation; rollover and Continue-As-New remain
+distinct; local tool HITL and disruptive restart pass; both reference comparisons pass; and only
+BellLabs authority terminalizes.
 
 QuickJS, programmatic tool calling, provider async subagents, remote LangSmith deployments, and broad production cutover remain disabled for Stage 6.
 

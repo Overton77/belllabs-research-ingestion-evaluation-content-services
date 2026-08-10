@@ -4,14 +4,18 @@ import asyncio
 from collections import Counter
 from copy import deepcopy
 from datetime import datetime, timedelta
+from typing import cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.graph_runtime.kernel import (
     ResourceKind,
+    ResourceKindV2,
     ResourceLeaseRecord,
+    ResourceLeaseRecordV2,
     ResourceLeaseRequest,
+    ResourceLeaseRequestV2,
     ResourceLeaseStatus,
     WaitLeaseProjection,
 )
@@ -21,7 +25,7 @@ from app.domain.run_control.errors import IdempotencyConflict
 class ResourceCapacity(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    limits: dict[ResourceKind, int] = Field(default_factory=dict)
+    limits: dict[ResourceKind | ResourceKindV2, int] = Field(default_factory=dict)
 
 
 class ResourceExhausted(RuntimeError):
@@ -34,15 +38,17 @@ class InMemoryResourceLeaseJournal:
     def __init__(self, capacity: ResourceCapacity) -> None:
         self._capacity = capacity
         self._lock = asyncio.Lock()
-        self._records: dict[tuple[str, str], ResourceLeaseRecord] = {}
+        self._records: dict[
+            tuple[str, str], ResourceLeaseRecord | ResourceLeaseRecordV2
+        ] = {}
         self._semantic: dict[tuple[str, str], str] = {}
 
     async def acquire(
         self,
-        request: ResourceLeaseRequest,
+        request: ResourceLeaseRequest | ResourceLeaseRequestV2,
         *,
         now: datetime,
-    ) -> ResourceLeaseRecord:
+    ) -> ResourceLeaseRecord | ResourceLeaseRecordV2:
         if now >= request.deadline:
             raise TimeoutError("resource lease deadline elapsed before acquisition")
         key = (request.request_scope, request.lease_id)
@@ -61,7 +67,8 @@ class InMemoryResourceLeaseJournal:
                 raise IdempotencyConflict("resource lease identity was reused")
             active = self._active_counts(request.request_scope, now=now)
             requested = Counter(request.resources)
-            for resource, units in requested.items():
+            for resource_value, units in requested.items():
+                resource = cast(ResourceKind | ResourceKindV2, resource_value)
                 limit = self._capacity.limits.get(resource, 0)
                 if active[resource] + units > limit:
                     raise ResourceExhausted(f"capacity exhausted for {resource.value}")
@@ -69,13 +76,22 @@ class InMemoryResourceLeaseJournal:
                 request.deadline,
                 now + timedelta(seconds=request.ttl_seconds),
             )
-            record = ResourceLeaseRecord(
-                request=request,
-                status=ResourceLeaseStatus.ACQUIRED,
-                acquired_at=now,
-                expires_at=expires_at,
-                canonical_digest=canonical_digest,
-            )
+            if isinstance(request, ResourceLeaseRequestV2):
+                record: ResourceLeaseRecord | ResourceLeaseRecordV2 = ResourceLeaseRecordV2(
+                    request=request,
+                    status=ResourceLeaseStatus.ACQUIRED,
+                    acquired_at=now,
+                    expires_at=expires_at,
+                    canonical_digest=canonical_digest,
+                )
+            else:
+                record = ResourceLeaseRecord(
+                    request=request,
+                    status=ResourceLeaseStatus.ACQUIRED,
+                    acquired_at=now,
+                    expires_at=expires_at,
+                    canonical_digest=canonical_digest,
+                )
             self._records[key] = record
             self._semantic[semantic_key] = request.lease_id
             return deepcopy(record)
@@ -87,7 +103,7 @@ class InMemoryResourceLeaseJournal:
         lease_id: str,
         expected_digest: str,
         now: datetime,
-    ) -> ResourceLeaseRecord:
+    ) -> ResourceLeaseRecord | ResourceLeaseRecordV2:
         key = (request_scope, lease_id)
         async with self._lock:
             prior = self._require(key)
@@ -119,7 +135,7 @@ class InMemoryResourceLeaseJournal:
         lease_id: str,
         expected_digest: str,
         now: datetime,
-    ) -> ResourceLeaseRecord:
+    ) -> ResourceLeaseRecord | ResourceLeaseRecordV2:
         key = (request_scope, lease_id)
         async with self._lock:
             prior = self._require(key)
@@ -174,8 +190,8 @@ class InMemoryResourceLeaseJournal:
         *,
         request_scope: str,
         now: datetime,
-    ) -> tuple[ResourceLeaseRecord, ...]:
-        expired: list[ResourceLeaseRecord] = []
+    ) -> tuple[ResourceLeaseRecord | ResourceLeaseRecordV2, ...]:
+        expired: list[ResourceLeaseRecord | ResourceLeaseRecordV2] = []
         async with self._lock:
             for key, prior in tuple(self._records.items()):
                 if key[0] != request_scope:
@@ -190,8 +206,10 @@ class InMemoryResourceLeaseJournal:
                     expired.append(deepcopy(updated))
         return tuple(expired)
 
-    def _active_counts(self, request_scope: str, *, now: datetime) -> Counter[ResourceKind]:
-        counts: Counter[ResourceKind] = Counter()
+    def _active_counts(
+        self, request_scope: str, *, now: datetime
+    ) -> Counter[ResourceKind | ResourceKindV2]:
+        counts: Counter[ResourceKind | ResourceKindV2] = Counter()
         for (scope, _), record in self._records.items():
             if scope != request_scope:
                 continue
@@ -205,13 +223,18 @@ class InMemoryResourceLeaseJournal:
             counts.update(record.request.resources)
         return counts
 
-    def _require(self, key: tuple[str, str]) -> ResourceLeaseRecord:
+    def _require(
+        self, key: tuple[str, str]
+    ) -> ResourceLeaseRecord | ResourceLeaseRecordV2:
         try:
             return self._records[key]
         except KeyError as error:
             raise LookupError("resource lease not found in request scope") from error
 
     @staticmethod
-    def _require_digest(record: ResourceLeaseRecord, expected_digest: str) -> None:
+    def _require_digest(
+        record: ResourceLeaseRecord | ResourceLeaseRecordV2,
+        expected_digest: str,
+    ) -> None:
         if record.canonical_digest != expected_digest:
             raise IdempotencyConflict("resource lease digest does not match")

@@ -22,7 +22,12 @@ fan-out, and no gather barrier. The StageGraph workflow processes child completi
 requests authoritative CAS settlement through BellLabs application services, and recomputes the
 frontier from the resulting accepted projection after every settlement or intervention.
 
-The first proof is deliberately heterogeneous: a small StageGraph containing a native operation and a local Deep Agent operation, an early join, inbox command injection, and cancellation. This pulls the smallest exact Deep Agents operation adapter needed for composition into Stage 4; the full reusable harness and GoalDirected proof remain Stage 5.
+The first proof is Blueprint Q from `00A`: a deliberately small heterogeneous StageGraph containing
+native operations and one local Deep Agent operation, an early join, inbox command injection, and
+cancellation. This replaces only the Stage 3 Q fixture-family semantics while preserving the same
+root, operation, API, journal, command, worker, and result contracts. It pulls the smallest exact
+Deep Agents operation adapter needed for composition into Stage 4; the full reusable harness and
+GoalDirected D proof remain Stage 5. A deterministic D skeleton compatibility run remains green.
 
 ## 2. Authority and topology
 
@@ -127,28 +132,35 @@ The shared adapter contract includes completed, waiting-on-decision, waiting-on-
 
 Runtime replay preserves semantic identity. A new semantic retry exists only when the pure interpreter and authoritative domain transition create it.
 
-## 7. First heterogeneous vertical proof
+## 7. Blueprint Q heterogeneous vertical proof
 
 Publish a small production-shaped Workflow Implementation:
 
 ```mermaid
 flowchart LR
-    H["hydrate input"] --> N["native normalize"]
-    H --> D["local Deep Agent research"]
+    H["normalize request and as-of policy"] --> N["native catalog normalization"]
+    H --> D["local Deep Agent product research"]
     N --> J{"any(1) early join"}
     D --> J
-    J --> M["native materialize"]
+    J --> M["verify sold-by/current-offer and materialize"]
 ```
 
 Requirements:
 
 - `N` is a deterministic/native operation.
-- `D` uses an exact local Deep Agents binding with bounded model turns, context, middleware, tools, reviewed skill refs, filesystem policy, and typed output.
+- `D` uses an exact local Deep Agents binding with bounded model turns, context, middleware, tools,
+  reviewed skill refs, filesystem policy, and the typed Q product/evidence output.
 - `N` and `D` overlap under controlled clocks.
 - The fast branch satisfies `any(1)` and starts `M` while the slow branch remains active.
 - An inbox command is sent to `BellLabsRunWorkflow`, durably classified, authorized, deduplicated, and routed to the addressable target.
 - A cancellation case proves cooperative child cancellation, late-completion handling, observed-usage settlement, and stable terminal lineage.
 - The Deep Agent remains operation-local; it does not own StageGraph scheduling or BellLabs terminality.
+- deterministic Q snapshots prove product extraction, dedupe, availability policy, citation
+  attachment, and ambiguity handling; a bounded live canary researches current Qualia Life catalog
+  surfaces through the same assemblies and evaluates claims rather than exact product-list equality;
+- bundles, subscriptions, out-of-stock pages, third-party listings, and historical products follow
+  the versioned Q inclusion policy rather than prompt improvisation;
+- the D Stage 3 skeleton reruns unchanged to detect root/operation/command/result contract drift.
 
 ## 8. Communication and intervention
 
@@ -161,6 +173,13 @@ Use the exact message envelope, target identity, dedupe key, authorization, and 
 - Unsupported target, stale generation, invalid authority, conflicting duplicate, and terminal-run intervention fail with typed dispositions.
 - Operation-addressed injection is delivered through a durable child signal/update or authoritative inbox ref; it is never appended directly to an agent transcript.
 - Pause, resume, cancel, revise, evidence injection, and decision response retain distinct command types.
+
+This stage owns the first exact local post-model/pre-tool qualification from `06C`. The Q agent must
+produce a real proposed tool call; an authorized “restrict to official currently offered supplement
+product pages” message is persisted and delivered before tool execution; the old call is explicitly
+retained, rejected, or superseded; checkpoint/batch evidence advances receipts to `model_visible`
+and `applied`. Qualification attaches only to this exact adapter compatibility key. Tool-approval
+interrupts and disruptive checkpoint-derived restart remain Stage 5 unless separately proven here.
 
 ## 9. Waits, cycles, reuse, and invalidation
 
@@ -230,6 +249,9 @@ No child is duplicated merely because the parent continued. Parent Close Policy 
 ### Communication and vertical E2E
 
 - prepare/admit/start/signal/update/query/stream/cancel/result through authenticated APIs;
+- deterministic and bounded-live Q executions through the same public/application path, plus the D
+  compatibility skeleton;
+- real Q post-model/pre-tool injection with proposed-call supersession and receipt evidence;
 - accepted, duplicate, stale, unauthorized, and conflicting inbox commands;
 - local Deep Agent injection at a declared safe boundary;
 - native plus Deep Agent early-join proof;
@@ -246,6 +268,8 @@ Stage 4 passes when:
 - incremental completion handling proves early `any(1)`/`minimum(k)` progress;
 - deterministic same-time ordering, slow siblings, waits, cycles, reuse, invalidation, cancellation, and Continue-As-New reconciliation pass;
 - the native + local Deep Agent + early join + inbox injection/cancellation proof passes;
+- the immutable Q blueprint/implementation comparison passes, D compatibility remains green, and
+  the exact local safe-point capability is promoted only for the proven adapter;
 - exact bindings, resource envelopes, effect ownership, compact state, and full lineage pass;
 - outgoing handoff is accepted.
 

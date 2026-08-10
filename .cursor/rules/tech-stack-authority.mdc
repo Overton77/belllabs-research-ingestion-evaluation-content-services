@@ -5,7 +5,7 @@ alwaysApply: false
 
 # Tech stack & data authority
 
-Use `docs/CANONICAL_APPLICATION_CODEBASE_ORGANIZATION.md` and
+Use `docs/interview_and_research_result_documentation/CANONICAL_APPLICATION_CODEBASE_ORGANIZATION.md` and
 `docs/migrations_instructions/implementation_work_packages/00_MAIN_GOAL_AND_INDEX.md` for
 accepted target decisions. Do not invent stores, runtimes, or public control paths.
 

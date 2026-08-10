@@ -12,6 +12,13 @@ PostgreSQL owns the BellLabs message/command ledger. Temporal provides durable r
 observation. The agent runtime receives only authorized, ordered, bounded batches at certified safe
 points.
 
+This package has a **Stage 3 core gate** and a **cross-stage adapter conformance contract**. Stage 3
+must implement and prove persistence, authorization, routing, ordering, dedupe, target/version
+checks, runtime observation, durable waits, generic generation fencing, and explicit unsupported
+dispositions. It must not claim model-visible or applied steering from fixture delivery alone.
+Stage 4 first certifies the exact local post-model/pre-tool adapter, Stage 5 completes reusable local
+HITL/disruptive restart, and Stage 6 certifies exact remote placements.
+
 This contract does not claim atomic cancellation/injection, exactly-once transport, or arbitrary
 mid-token/mid-tool mutation. It provides at-least-once delivery with durable deduplication,
 monotonic ordering, explicit receipts, safe-point application, and reconciliation.
@@ -126,6 +133,12 @@ Meanings:
 Receipt transitions are monotonic and idempotent. `routed` is not `runtime_observed`;
 `runtime_observed` is not `model_visible`; `model_visible` is not `applied`.
 
+Stage 3 qualifies through `runtime_observed` plus terminal dispositions. `model_visible` and
+`applied` remain declared-but-unsupported for a fixture adapter and cannot appear without an exact
+agent checkpoint/batch evidence reference. Stage 4 qualifies those states for its first local
+adapter; Stage 5 generalizes them across the reusable local harness; Stage 6 repeats qualification
+for each selected remote placement.
+
 ## 5. Targeting and stale-target behavior
 
 Before runtime observation and again before model visibility, validate:
@@ -170,11 +183,12 @@ Messages and receipts do not satisfy StageGraph dependencies, joins, obligations
 Only settlement of a typed accepted `OperationExecutionOutcome` through BellLabs application
 services may update the StageGraph semantic projection.
 
-## 8. Certified intervention safe point
+## 8. Cross-stage certified intervention safe point
 
-### 8.1 Required local safe point
+### 8.1 Required exact local safe point — Stage 4 first proof, Stage 5 reusable proof
 
-Stage 3 must certify the local exact adapter at **post-model/pre-tool**:
+The first real local adapter in Stage 4 and the completed reusable harness in Stage 5 must certify
+**post-model/pre-tool**:
 
 1. receive and checkpoint the model response, including proposed tool calls;
 2. pause before executing any proposed tool;
@@ -193,15 +207,24 @@ Checkpoint commit and BellLabs receipt update are not one distributed atomic tra
 reconciles by message ID, batch digest, checkpoint ref, generation, and tool-call/effect identity.
 Duplicate injection produces the same checkpointed batch effect or fails closed.
 
-### 8.2 Remote adapter posture
+Stage 3 publishes deterministic conformance vectors for these boundaries and proves that a fixture
+adapter rejects this capability as unsupported. Passing those vectors without an actual model
+response, proposed tool call, and adapter checkpoint does not qualify the safe point.
 
-Stage 3 defines the same contract for the remote exact adapter but does not certify it. Remote
+### 8.2 Remote adapter posture — Stage 6 proof
+
+This package defines the same contract for the remote exact adapter but does not certify it. Remote
 Agent Server post-model/pre-tool proof is deferred to Stage 6 because it depends on the deployed
 graph/runtime interception surface. Until that proof passes, remote exact assemblies must declare
 intervention capability unsupported, use a less disruptive authored policy, or reject such
 commands; they may not claim local-equivalent steering.
 
 ## 9. Non-disruptive and disruptive intervention
+
+Stage 3 implements the generic command, cancellation, generation, fencing, and quarantine
+primitives with deterministic operations. Stage 5 must run the full saga below against the real
+local agent/checkpoint/effect path before local disruptive steering becomes qualified. Stage 6 does
+the same for each remote placement that advertises it.
 
 ### Non-disruptive
 
@@ -263,6 +286,9 @@ incident and stops semantic acceptance.
 
 ## 11. Acceptance tests
 
+Unless a subsection explicitly names a later stage, Stage 3 runs it. Adapter-dependent tests are
+published now as reusable conformance cases but become blocking only at the owning stage.
+
 ### Ledger and delivery
 
 - transaction rollback creates neither ledger record nor outbox;
@@ -283,6 +309,9 @@ incident and stops semantic acceptance.
 
 ### Local certified safe point
 
+Blocking in Stage 4 for the first exact local adapter and in Stage 5 for the reusable harness, not
+in the Stage 3 core gate:
+
 - inject after model response but before pure, idempotent, and consequential proposed tools;
 - checkpoint response and injected batch before tool execution;
 - superseded calls never execute;
@@ -291,6 +320,9 @@ incident and stops semantic acceptance.
 - batches remain bounded and ordered under sustained concurrent senders.
 
 ### Disruptive recovery
+
+Stage 3 blocks on deterministic generation/fencing/quarantine mechanics. Stage 5 blocks on the
+same cases with real local agent calls, checkpoints, tool/effect boundaries, and context restart:
 
 - cancellation races with model completion, tool start, provider completion, and checkpoint commit;
 - same semantic attempt restarts with new generation/thread;
@@ -314,10 +346,15 @@ incident and stops semantic acceptance.
 - payload retrieval enforces exact tenant/target/actor purpose;
 - redacted diagnostics preserve IDs/digests without content leakage.
 
-## 12. Handoff gate
+## 12. Stage 3 core handoff and later qualification gates
 
-`06C` passes when the PostgreSQL ledger, inbox/outbox, claims, ordered batches, full receipt machine,
-stale-target rejection, local certified safe point, disruptive saga, generation fencing, quarantine,
-and reconciliation tests pass on the `06B` local Temporal environment. The handoff must explicitly
-record remote safe-point proof as deferred to Stage 6 and must not represent remote steering as
-qualified before that gate.
+The Stage 3 core of `06C` passes when the PostgreSQL ledger, inbox/outbox, claims, ordered batches,
+receipts through `runtime_observed`, stale-target rejection, durable wait/resume, deterministic
+generation fencing/quarantine, settlement-before-readiness, explicit unsupported adapter steering,
+and reconciliation tests pass on the `06B` Q/D local Temporal environment.
+
+Stage 4 promotes `model_visible`, `applied`, and post-model/pre-tool capability only for its exact Q
+local adapter after the corresponding tests pass. Stage 5 qualifies the reusable local harness and
+full disruptive agent saga through D while rerunning Q. Stage 6 qualifies remote variants
+individually. The handoff records all unqualified states as unsupported and may not imply that
+transport proof equals cognition safe-point proof.

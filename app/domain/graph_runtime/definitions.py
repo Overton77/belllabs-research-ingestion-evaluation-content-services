@@ -42,6 +42,45 @@ class ContentAddressedRef(Contract):
     content_uri: str | None = Field(default=None, min_length=1)
 
 
+class VersionedContractRef(Contract):
+    """Content-addressed reference for versioned contracts not present in the legacy kind enum."""
+
+    kind: str
+    logical_id: str = Field(pattern=r"^[a-z0-9][a-z0-9._:-]*$")
+    schema_version: str = Field(min_length=1, max_length=64)
+    digest: str = Field(pattern=DIGEST_PATTERN)
+    content_uri: str | None = Field(default=None, min_length=1)
+
+
+class StageCapabilityRequirementRef(VersionedContractRef):
+    kind: Literal["stage_capability_requirement"] = "stage_capability_requirement"
+    schema_version: Literal["belllabs.stage-capability-requirement.v1"] = (
+        "belllabs.stage-capability-requirement.v1"
+    )
+
+
+class OperationAssemblyRef(VersionedContractRef):
+    kind: Literal["operation_assembly"] = "operation_assembly"
+    schema_version: Literal["belllabs.operation-assembly.v3"] = (
+        "belllabs.operation-assembly.v3"
+    )
+
+
+class ExecutionResourceEnvelopeRef(VersionedContractRef):
+    kind: Literal["execution_resource_envelope"] = "execution_resource_envelope"
+    schema_version: Literal["belllabs.execution-resource-envelope.v2"] = (
+        "belllabs.execution-resource-envelope.v2"
+    )
+
+
+class TemporalExecutionProfileRef(VersionedContractRef):
+    kind: Literal["temporal_execution_profile"] = "temporal_execution_profile"
+
+
+class CompatibilityManifestRef(VersionedContractRef):
+    kind: Literal["compatibility_manifest"] = "compatibility_manifest"
+
+
 class RuntimeDefinition(Contract):
     schema_version: Literal["belllabs.graph-runtime.v1"] = "belllabs.graph-runtime.v1"
     logical_id: str = Field(pattern=r"^[a-z0-9][a-z0-9._:-]*$")
@@ -725,6 +764,206 @@ class RunPlanV3(Contract):
 
     @classmethod
     def create(cls, **values: object) -> RunPlanV3:
+        draft = cast(Any, cls).model_construct(**values, plan_digest=DIGEST_PLACEHOLDER)
+        digest = sha256_digest(_model_content(draft, exclude={"plan_digest"}))
+        return cls(**values, plan_digest=digest)
+
+
+class ExecutionResourceEnvelopeV2(Contract):
+    """Temporal-aligned hierarchy; the published unversioned envelope stays readable."""
+
+    schema_version: Literal["belllabs.execution-resource-envelope.v2"] = (
+        "belllabs.execution-resource-envelope.v2"
+    )
+    tenant_limit_ref: str = Field(min_length=1)
+    environment_limit_ref: str = Field(min_length=1)
+    workflow_run_slots: int = Field(ge=0)
+    family_scheduler_slots: int = Field(ge=0)
+    stage_slots: int = Field(ge=0)
+    operation_workflow_slots: int = Field(ge=0)
+    operation_worker_slots: int = Field(ge=0)
+    model_call_slots: int = Field(ge=0)
+    tool_call_slots: int = Field(ge=0)
+    mcp_call_slots: int = Field(ge=0)
+    sync_subagent_slots: int = Field(ge=0)
+    async_child_slots: int = Field(ge=0)
+    linked_run_slots: int = Field(ge=0)
+    provider_quota_refs: tuple[str, ...] = ()
+    budget_reservation_refs: tuple[str, ...] = ()
+    deadline: str = Field(min_length=1)
+    lease_ttl: str = Field(min_length=1)
+    resumption_reserve: int = Field(ge=0)
+    release_policy: str = Field(min_length=1)
+
+
+class OperationAssemblySpecV3(Contract):
+    """Exact operation assembly with an explicit adapter and Temporal execution profile."""
+
+    schema_version: Literal["belllabs.operation-assembly.v3"] = (
+        "belllabs.operation-assembly.v3"
+    )
+    operation_assembly_id: str = Field(min_length=1)
+    operation_contract_ref: str = Field(min_length=1)
+    implementation_kind: Literal[
+        "native", "agent_harness", "compiled_graph", "async_child", "linked_run"
+    ]
+    adapter_variant: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    implementation_ref: ContentAddressedRef
+    model_policy_ref: ContentAddressedRef
+    prompt_manifest_ref: ContentAddressedRef
+    middleware_manifest_ref: ContentAddressedRef
+    tool_manifest_ref: ContentAddressedRef
+    mcp_manifest_ref: ContentAddressedRef
+    skill_manifest_ref: ContentAddressedRef
+    context_assembly_ref: ContentAddressedRef
+    delegation_policy_ref: ContentAddressedRef
+    synchronous_subagent_refs: tuple[ContentAddressedRef, ...] = ()
+    async_subagent_target_refs: tuple[ContentAddressedRef, ...] = ()
+    workspace_policy_ref: ContentAddressedRef
+    sandbox_profile_ref: ContentAddressedRef
+    verifier_ref: ContentAddressedRef
+    resource_envelope_ref: ExecutionResourceEnvelopeRef
+    effect_policy_ref: ContentAddressedRef
+    fallback_policy_ref: ContentAddressedRef
+    trace_redaction_policy_ref: ContentAddressedRef
+    capability_manifest_ref: ContentAddressedRef
+    temporal_execution_profile_ref: TemporalExecutionProfileRef
+    compatibility_manifest_ref: CompatibilityManifestRef
+    operation_assembly_digest: str = Field(pattern=DIGEST_PATTERN)
+
+    @model_validator(mode="after")
+    def assembly_digest_matches_content(self) -> OperationAssemblySpecV3:
+        if sha256_digest(_model_content(self, exclude={"operation_assembly_digest"})) != (
+            self.operation_assembly_digest
+        ):
+            raise ValueError("operation assembly digest mismatch")
+        return self
+
+    @classmethod
+    def create(cls, **values: object) -> OperationAssemblySpecV3:
+        draft = cast(Any, cls).model_construct(
+            **values, operation_assembly_digest=DIGEST_PLACEHOLDER
+        )
+        digest = sha256_digest(_model_content(draft, exclude={"operation_assembly_digest"}))
+        return cls(**values, operation_assembly_digest=digest)
+
+
+class StageExecutionBindingV2(Contract):
+    schema_version: Literal["belllabs.stage-execution-binding.v2"] = (
+        "belllabs.stage-execution-binding.v2"
+    )
+    stage_id: str = Field(pattern=r"^[a-z][a-z0-9_-]*$")
+    variant_name: str = Field(default="default", pattern=r"^[a-z][a-z0-9_-]*$")
+    stage_requirement_ref: StageCapabilityRequirementRef
+    operation_assembly_ref: OperationAssemblyRef
+    operation_assembly_digest: str = Field(pattern=DIGEST_PATTERN)
+    input_projection_ref: str = Field(min_length=1)
+    output_projection_ref: str = Field(min_length=1)
+    resource_envelope_ref: ExecutionResourceEnvelopeRef
+    temporal_execution_profile_ref: TemporalExecutionProfileRef
+    compatibility_key: str = Field(min_length=1)
+
+
+class ExecutionLineageEnvelopeV2(Contract):
+    """Canonical semantic, Temporal, agent, data, effect, and settlement lineage."""
+
+    schema_version: Literal["belllabs.execution-lineage-envelope.v2"] = (
+        "belllabs.execution-lineage-envelope.v2"
+    )
+    request_scope: str = Field(min_length=1)
+    belllabs_run_id: str = Field(min_length=1)
+    execution_epoch: int = Field(ge=1)
+    technical_segment: int = Field(ge=1)
+    workflow_implementation_ref: str = Field(min_length=1)
+    graph_assembly_digest: str = Field(pattern=DIGEST_PATTERN)
+    workflow_cycle: int = Field(ge=0)
+    stage_id: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_-]*$")
+    stage_cycle: int | None = Field(default=None, ge=0)
+    semantic_operation_attempt_id: str | None = None
+    execution_generation: int | None = Field(default=None, ge=1)
+    runtime_attempt_id: str | None = None
+    operation_binding_id: str | None = None
+    operation_assembly_digest: str | None = Field(default=None, pattern=DIGEST_PATTERN)
+    temporal_namespace_ref: str | None = None
+    root_workflow_id: str | None = None
+    root_temporal_run_id: str | None = None
+    family_workflow_id: str | None = None
+    family_temporal_run_id: str | None = None
+    operation_workflow_id: str | None = None
+    operation_temporal_run_id: str | None = None
+    activity_id: str | None = None
+    activity_attempt: int | None = Field(default=None, ge=1)
+    task_queue_id: str | None = None
+    worker_build_id: str | None = None
+    agent_invocation_id: str | None = None
+    agent_thread_id: str | None = None
+    agent_checkpoint_ref: str | None = None
+    parent_lineage_id: str | None = None
+    delegation_mode: Literal["sync", "async", "linked_run"] | None = None
+    child_task_id: str | None = None
+    child_thread_id: str | None = None
+    child_run_id: str | None = None
+    external_job_id: str | None = None
+    input_manifest_digest: str | None = Field(default=None, pattern=DIGEST_PATTERN)
+    context_manifest_digest: str | None = Field(default=None, pattern=DIGEST_PATTERN)
+    intervention_batch_refs: tuple[str, ...] = ()
+    effect_claim_ids: tuple[str, ...] = ()
+    result_manifest_ref: str | None = None
+    evidence_refs: tuple[str, ...] = ()
+    usage_settlement_refs: tuple[str, ...] = ()
+    effect_settlement_refs: tuple[str, ...] = ()
+    trace_ref: str | None = None
+
+
+class GraphAssemblySpecV3(Contract):
+    """Temporal-aligned graph assembly without mutating the published v2 schema."""
+
+    schema_version: Literal["belllabs.graph-assembly-spec.v3"] = (
+        "belllabs.graph-assembly-spec.v3"
+    )
+    graph_assembly_ref: ContentAddressedRef
+    state_schema_digest: str = Field(pattern=DIGEST_PATTERN)
+    reducer_registry_digest: str = Field(pattern=DIGEST_PATTERN)
+    operation_registry_digest: str = Field(pattern=DIGEST_PATTERN)
+    stage_requirements: tuple[StageCapabilityRequirement, ...]
+    stage_execution_bindings: tuple[StageExecutionBindingV2, ...]
+    compatibility_manifest_digest: str = Field(pattern=DIGEST_PATTERN)
+
+    @model_validator(mode="after")
+    def requirements_and_bindings_are_one_to_one(self) -> GraphAssemblySpecV3:
+        requirement_keys = {(item.stage_id, item.variant_name) for item in self.stage_requirements}
+        binding_keys = {
+            (item.stage_id, item.variant_name) for item in self.stage_execution_bindings
+        }
+        if len(requirement_keys) != len(self.stage_requirements):
+            raise ValueError("stage capability requirements must be unique")
+        if len(binding_keys) != len(self.stage_execution_bindings):
+            raise ValueError("stage execution bindings must be unique")
+        if requirement_keys != binding_keys:
+            raise ValueError("every stage requirement requires exactly one execution binding")
+        return self
+
+
+class RunPlanV4(Contract):
+    """Temporal-aligned exact plan; v2/v3 plans remain readable compatibility contracts."""
+
+    schema_version: Literal["belllabs.run-plan.v4"] = "belllabs.run-plan.v4"
+    plan_id: str = Field(min_length=1)
+    effective_run_configuration_digest: str = Field(pattern=DIGEST_PATTERN)
+    semantic_binding_ref: str = Field(min_length=1)
+    workflow_implementation_ref: ExactDefinitionRef
+    graph_assembly: GraphAssemblySpecV3
+    alias_evidence_digest: str = Field(pattern=DIGEST_PATTERN)
+    plan_digest: str = Field(pattern=DIGEST_PATTERN)
+
+    @model_validator(mode="after")
+    def plan_digest_matches_frozen_content(self) -> RunPlanV4:
+        if sha256_digest(_model_content(self, exclude={"plan_digest"})) != self.plan_digest:
+            raise ValueError("RunPlan v4 digest mismatch")
+        return self
+
+    @classmethod
+    def create(cls, **values: object) -> RunPlanV4:
         draft = cast(Any, cls).model_construct(**values, plan_digest=DIGEST_PLACEHOLDER)
         digest = sha256_digest(_model_content(draft, exclude={"plan_digest"}))
         return cls(**values, plan_digest=digest)

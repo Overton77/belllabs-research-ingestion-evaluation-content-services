@@ -28,6 +28,13 @@ Every package gate must affirm all applicable guardrails:
 - **No premature handoff.** A dependent package cannot begin merely because code exists or broad tests pass. Every direct package gate, evidence manifest, and acceptance record must exist.
 - **No contract erosion.** Exact assemblies, capabilities, resource envelopes, canonical lineage, journals, effect claims, evidence, usage, and settlement identities must be preserved or deliberately versioned with compatibility evidence.
 - **No secrets or PHI.** Never commit secrets, credentials, PHI, raw private payloads, unrestricted traces, sandbox dumps, or Temporal histories containing sensitive data.
+- **No horizontal-only handoff.** Every package executes the applicable immutable Q/D reference
+  blueprint increment from `00A`; schemas, mocks, imports, or unit tests alone do not prove an
+  executable capability.
+- **No demo fork.** Reference runs use the same application ports, compiler, stores, workers, and
+  runtime path being prepared for production at that stage.
+- **No live-web oracle.** Deterministic sanitized fixtures gate compatibility and replay. Bounded
+  live canaries separately prove integrations and time-indexed research behavior.
 
 Violation of a guardrail is `REWORK_REQUIRED`, not a deferrable documentation issue.
 
@@ -110,6 +117,8 @@ At package start, select and record stable repository-relative paths for:
 - known-risk/deferred-work register;
 - rollback/recovery runbook or note;
 - trace, evaluation, replay-history, snapshot, build, and deployment references, if applicable.
+- reference Q/D blueprint and implementation versions, fixture/live execution logs, comparison
+  manifest, and capability-maturity delta.
 
 The handoff must link the exact path to every artifact. “See tests,” “see logs,” glob-only references, uncommitted terminal scrollback, or links without environment/revision identity are not evidence manifests.
 
@@ -147,6 +156,10 @@ Rules:
 - Every changed contract maps to schema, migration/compatibility, producer, consumer, and test evidence.
 - Optional features may defer only when disabled by default, with unsupported-capability behavior and fallback proof.
 - Any failed or missing mandatory row prevents `READY_FOR_REVIEW`.
+- Every capability row names the Q/D operation that exercises it, or explains why it is
+  infrastructure-only and names the smallest executable fixture that proves it.
+- Capability maturity attaches to an exact compatibility key; evidence for one adapter, provider,
+  safe point, or implementation version cannot qualify another.
 
 ## 7. Cross-package contract preservation
 
@@ -177,7 +190,12 @@ Any package touching communication must prove:
 9. provider async is a subordinate adapter;
 10. remote lifecycle follows start-bind-wait/reconcile, with optional callback completion converging on the same journal.
 
-Stage 3 must certify exact post-model/pre-tool injection locally. Stage 6 must separately certify it for selected remote LangSmith deployments. Until the applicable certification passes, the API must report the capability as unsupported rather than promise best-effort intervention.
+Qualification is incremental. Stage 3 certifies persisted command transport, deduplication,
+target/version checks, durable waits, and runtime observation. Stage 4 certifies exact
+post-model/pre-tool injection for its first local adapter; Stage 5 completes local disruptive
+restart and reusable agent HITL/steering qualification; Stage 6 separately certifies selected
+remote LangSmith placements. Until the applicable certification passes, the API reports the exact
+capability as unsupported rather than promising best-effort intervention.
 
 ## 9. Change discipline
 
@@ -204,6 +222,8 @@ Use proportionate evidence:
 6. remote LangSmith deployment/sandbox/evaluation qualification;
 7. BellLabs API authenticated E2E and negative-bypass tests;
 8. production-like AWS staging, shadow/canary, rollback, and failure drills.
+9. Q/D reference vertical comparison at the package's declared maturity, with deterministic fixture
+   evidence and a bounded live canary or explicit skip reason.
 
 Do not replace missing lower-level invariants with a happy-path E2E.
 
@@ -222,10 +242,16 @@ The package may iterate with scoped checks, but exit requires the accepted full 
 - **Stages 0–2 reconciliation:** retain decision history, identify still-valid evidence, and explicitly supersede Agent Server-primary assumptions.
 - **Stage 3 / `06-contract-frozen`:** reviewed and versioned `06` root/family/operation, identity, command/fact, continuity, intervention, and recovery contract sections plus `06A` exact assembly, hierarchical capacity, canonical lineage, journal, effect, and settlement conformance. This gate authorizes implementation but does not accept Stage 3.
 - **Stage 3 / 06B:** distinct `BellLabsRunWorkflow`, family children, generic `OperationWorkflow`, self-host Temporal replay/restart, five pool classes, independent-operation progress, and same-epoch/new-segment Continue-As-New.
-- **Stage 3 / 06C:** local post-model/pre-tool injection, inbox/ledger/outbox, disruptive saga, typed peer input, settlement-before-readiness, dedupe, and product-event proof.
+- **Stage 3 / 06C:** inbox/ledger/outbox, typed command transport, durable wait/resume,
+  settlement-before-readiness, dedupe, stale-target rejection, runtime observation, and explicit
+  unsupported posture for adapter-level steering not yet qualified.
 - **Stage 3 aggregate:** accepted only after `06-contract-frozen`, 06B, and 06C all pass and the combined `06` handoff is accepted.
-- **Stage 4:** small heterogeneous Temporal-native StageGraph first; `all`, `any`, and `minimum(k)` incremental scheduling; slow-sibling policy; no direct-gather frontier barrier.
-- **Stage 5:** GoalDirected research second; reusable Deep Agents operation harness; independent verifier; subgoals/revisions; context rollover; no private macro scheduler.
+- **Stage 4:** Q small heterogeneous Temporal-native StageGraph first; `all`, `any`, and
+  `minimum(k)` incremental scheduling; slow-sibling policy; first local safe-point steering proof;
+  no direct-gather frontier barrier.
+- **Stage 5:** D GoalDirected research second; reusable Deep Agents operation harness; independent
+  verifier; subgoals/revisions; context rollover; tool HITL and disruptive restart; Q remains green;
+  no private macro scheduler.
 - **Stage 6:** advanced capability, remote LangSmith start-bind-wait/reconcile, remote injection, sandbox, optional async completion, and stable candidate adapters, followed by the internal `09A` heterogeneous and hours-long injected-failure exit proof.
 - **Stage 7:** modular BellLabs API as sole facade, coordinator integration, durable product events, auth/tenant/redaction, observability/evaluation, and provider-bypass negative tests.
 - **Stage 8:** owner selection and proof of final AWS self-host topology, five isolated pool classes, hours-long topology failure/recovery, N/N+1 replay, canary, rollback, cutover, and drain.
@@ -262,6 +288,13 @@ Evidence manifest path and digest:
 ## Security and data handling
 ## Runtime authority and bypass audit
 ## Operations, recovery, and rollback
+## Reference blueprint increment
+Q/D blueprint and implementation versions:
+Deterministic commands and evidence:
+Bounded live commands/evidence or skip reasons:
+API/contracts/stores/workflows/Activities/workers/adapters traversed:
+Capability promotions and unsupported surfaces:
+Comparison with preceding accepted increment:
 ## Next-package entry assessment
 ## Recommended first actions
 ## Gate recommendation

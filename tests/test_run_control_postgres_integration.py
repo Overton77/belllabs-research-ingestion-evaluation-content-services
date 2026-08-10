@@ -56,6 +56,9 @@ async def test_postgres_atomic_rollback_and_concurrent_version_conflict(
         assert admitted.status == DecisionStatus.ACCEPTED
         assert admitted.run_id is not None
         assert len(await run_service.pending_outbox("tenant-1")) == 2
+        replayed_admission = await run_service.admit(request())
+        assert replayed_admission == admitted
+        assert len(await run_service.pending_outbox("tenant-1")) == 2
         first_page = await run_service.pending_outbox("tenant-1", limit=1)
         second_page = await run_service.pending_outbox(
             "tenant-1", after=first_page[0].cursor, limit=1

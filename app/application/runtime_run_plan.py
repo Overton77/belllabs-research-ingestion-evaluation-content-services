@@ -13,11 +13,15 @@ from app.domain.graph_runtime.definitions import (
     ContentAddressedRef,
     GraphAssemblySpec,
     GraphAssemblySpecV2,
+    GraphAssemblySpecV3,
     OperationAssemblySpec,
+    OperationAssemblySpecV3,
     RunPlan,
     RunPlanV3,
+    RunPlanV4,
     StageCapabilityRequirement,
     StageExecutionBinding,
+    StageExecutionBindingV2,
     UnavailableStageSurface,
 )
 
@@ -292,7 +296,7 @@ def _unavailable_surface(
 
 def _validate_delegation(
     requirement: StageCapabilityRequirement,
-    assembly: OperationAssemblySpec,
+    assembly: OperationAssemblySpec | OperationAssemblySpecV3,
 ) -> None:
     allowed = requirement.delegation_modes_allowed
     if assembly.synchronous_subagent_refs and "sync" not in allowed:
@@ -329,6 +333,179 @@ def compile_run_plan_v3(
     if implementation_source is not None and implementation_source != workflow_implementation_ref:
         raise ValueError("RunPlan v3 Workflow Implementation differs from the compiled ERC")
     return RunPlanV3.create(
+        plan_id=plan_id,
+        effective_run_configuration_digest=effective_configuration.digest,
+        semantic_binding_ref=semantic_binding_ref,
+        workflow_implementation_ref=workflow_implementation_ref,
+        graph_assembly=graph_assembly,
+        alias_evidence_digest=sha256_digest(
+            [item.model_dump(mode="json") for item in effective_configuration.alias_evidence]
+        ),
+    )
+
+
+def compile_structural_graph_assembly_v3(
+    *,
+    blueprint: StageGraphBlueprint,
+    effective_configuration: EffectiveRunConfiguration,
+    graph_assembly_ref: ContentAddressedRef,
+    state_schema_digest: str,
+    reducer_registry_digest: str,
+    operation_registry_digest: str,
+    requirements: tuple[StageCapabilityRequirement, ...],
+    bindings: tuple[StageExecutionBindingV2, ...],
+    assemblies: dict[str, OperationAssemblySpecV3],
+    compatibility_manifest_digest: str,
+    capability_manifest_ref: ContentAddressedRef,
+    capability_manifest: CapabilityManifestDefinition,
+    capability_readiness: tuple[RuntimeCapabilityReadiness, ...],
+    disabled_capability_ids: frozenset[str] = frozenset(),
+) -> tuple[GraphAssemblySpecV3, tuple[UnavailableStageSurface, ...]]:
+    """Compile the Temporal-aligned contract without reinterpreting the published v2 graph."""
+
+    graph_assembly_ref = ContentAddressedRef.model_validate(
+        graph_assembly_ref.model_dump(mode="python")
+    )
+    requirements = tuple(
+        StageCapabilityRequirement.model_validate(item.model_dump(mode="python"))
+        for item in requirements
+    )
+    bindings = tuple(
+        StageExecutionBindingV2.model_validate(item.model_dump(mode="python"))
+        for item in bindings
+    )
+    assemblies = {
+        key: OperationAssemblySpecV3.model_validate(value.model_dump(mode="python"))
+        for key, value in assemblies.items()
+    }
+    capability_manifest_ref = ContentAddressedRef.model_validate(
+        capability_manifest_ref.model_dump(mode="python")
+    )
+    capability_manifest = CapabilityManifestDefinition.model_validate(
+        capability_manifest.model_dump(mode="python")
+    )
+    capability_readiness = tuple(
+        RuntimeCapabilityReadiness.model_validate(item.model_dump(mode="python"))
+        for item in capability_readiness
+    )
+    if any(key != assembly.operation_assembly_id for key, assembly in assemblies.items()):
+        raise ValueError("operation assembly registry key differs from exact assembly identity")
+    if graph_assembly_ref.kind.value != "graph_assembly":
+        raise ValueError("graph assembly reference has the wrong definition kind")
+    if (
+        capability_manifest_ref.kind.value != "capability_manifest"
+        or capability_manifest_ref.logical_id != capability_manifest.logical_id
+        or capability_manifest_ref.schema_version != capability_manifest.schema_version
+        or capability_manifest_ref.digest != capability_manifest.digest
+    ):
+        raise ValueError("capability manifest reference is not exact")
+    allowed_capability_ids, readiness_by_id = _effective_capability_ids(
+        effective_configuration=effective_configuration,
+        manifest=capability_manifest,
+        readiness=capability_readiness,
+        disabled_capability_ids=disabled_capability_ids,
+    )
+    expected = {
+        (stage.stage_id, variant)
+        for stage in blueprint.stages
+        for variant in (stage.variant_names or frozenset({"default"}))
+    }
+    requirement_by_key = {(item.stage_id, item.variant_name): item for item in requirements}
+    binding_by_key = {(item.stage_id, item.variant_name): item for item in bindings}
+    if len(requirement_by_key) != len(requirements) or set(requirement_by_key) != expected:
+        raise ValueError(
+            "stage requirements do not cover every declared stage variant exactly once"
+        )
+    if len(binding_by_key) != len(bindings) or set(binding_by_key) != expected:
+        raise ValueError(
+            "stage execution bindings do not cover every declared stage variant exactly once"
+        )
+
+    unavailable: list[UnavailableStageSurface] = []
+    for key in sorted(expected):
+        requirement = requirement_by_key[key]
+        binding = binding_by_key[key]
+        expected_requirement_id = f"stage-requirement:{key[0]}:{key[1]}"
+        if (
+            binding.stage_requirement_ref.logical_id != expected_requirement_id
+            or binding.stage_requirement_ref.digest
+            != sha256_digest(requirement.model_dump(mode="json"))
+        ):
+            raise ValueError("stage requirement reference digest drift")
+        assembly = assemblies.get(binding.operation_assembly_ref.logical_id)
+        if assembly is None:
+            raise ValueError("stage binding refers to an unknown exact operation assembly")
+        if (
+            binding.operation_assembly_ref.logical_id != assembly.operation_assembly_id
+            or binding.operation_assembly_ref.digest != assembly.operation_assembly_digest
+            or binding.operation_assembly_digest != assembly.operation_assembly_digest
+        ):
+            raise ValueError("stage binding operation assembly digest drift")
+        if assembly.operation_contract_ref != requirement.operation_contract_ref:
+            raise ValueError("stage binding operation contract is incompatible with requirement")
+        if binding.resource_envelope_ref != assembly.resource_envelope_ref:
+            raise ValueError("stage binding and operation assembly resource envelopes differ")
+        if (
+            binding.temporal_execution_profile_ref
+            != assembly.temporal_execution_profile_ref
+        ):
+            raise ValueError(
+                "stage binding and operation assembly Temporal execution profiles differ"
+            )
+        if assembly.compatibility_manifest_ref.digest != compatibility_manifest_digest:
+            raise ValueError("operation assembly compatibility manifest differs from graph")
+        if assembly.capability_manifest_ref != capability_manifest_ref:
+            raise ValueError("operation assembly capability manifest differs from graph")
+        _validate_delegation(requirement, assembly)
+        for capability_id in sorted(requirement.required_capability_ids):
+            prediction = _unavailable_surface(
+                stage_id=key[0],
+                variant_name=key[1],
+                capability_id=capability_id,
+                allowed_capability_ids=allowed_capability_ids,
+                disabled_capability_ids=disabled_capability_ids,
+                readiness=readiness_by_id.get(capability_id),
+            )
+            if prediction is not None:
+                unavailable.append(prediction)
+
+    return (
+        GraphAssemblySpecV3(
+            graph_assembly_ref=graph_assembly_ref,
+            state_schema_digest=state_schema_digest,
+            reducer_registry_digest=reducer_registry_digest,
+            operation_registry_digest=operation_registry_digest,
+            stage_requirements=requirements,
+            stage_execution_bindings=bindings,
+            compatibility_manifest_digest=compatibility_manifest_digest,
+        ),
+        tuple(unavailable),
+    )
+
+
+def compile_run_plan_v4(
+    *,
+    plan_id: str,
+    effective_configuration: EffectiveRunConfiguration,
+    semantic_binding_ref: str,
+    workflow_implementation_ref: ExactDefinitionRef,
+    graph_assembly: GraphAssemblySpecV3,
+) -> RunPlanV4:
+    """Freeze a Temporal-aligned exact plan while retaining v2/v3 deserialization."""
+
+    if workflow_implementation_ref.kind != DefinitionKind.WORKFLOW_IMPLEMENTATION:
+        raise ValueError("RunPlan v4 requires an exact Workflow Implementation reference")
+    implementation_source = next(
+        (
+            ref
+            for ref in effective_configuration.source_refs
+            if ref.kind == DefinitionKind.WORKFLOW_IMPLEMENTATION
+        ),
+        None,
+    )
+    if implementation_source is not None and implementation_source != workflow_implementation_ref:
+        raise ValueError("RunPlan v4 Workflow Implementation differs from the compiled ERC")
+    return RunPlanV4.create(
         plan_id=plan_id,
         effective_run_configuration_digest=effective_configuration.digest,
         semantic_binding_ref=semantic_binding_ref,

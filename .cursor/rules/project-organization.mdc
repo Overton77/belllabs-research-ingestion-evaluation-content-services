@@ -11,7 +11,7 @@ alwaysApply: true
   `02A_OWNER_AMENDMENTS_FOR_STAGES_3_TO_6.md` when applicable; canonical organization; the
   complete active package and dependencies; accepted architecture/contract docs; then the
   as-built guide, code, and tests.
-- Follow `docs/CANONICAL_APPLICATION_CODEBASE_ORGANIZATION.md` for projected target paths,
+- Follow `docs/interview_and_research_result_documentation/CANONICAL_APPLICATION_CODEBASE_ORGANIZATION.md` for projected target paths,
   ownership, status labels, staged moves, and document lifecycle. If a projected path differs,
   the active package remains implementation authority.
 - Keep the application here in `app/`; create no sibling application repository, Agent Server
@@ -32,5 +32,5 @@ alwaysApply: true
   target paths only when the active package or an accepted spec-ticket explicitly authorizes them.
 - Do not duplicate domain contracts, interpreters, API authority, MCP control paths, or task
   queue definitions. Promote accepted experiment behavior before production imports it.
-- Treat `docs/CODEBASE_DOMAIN_WORKFLOW_GUIDE.md` as as-built reference. Historical plans,
+- Treat `docs/interview_and_research_result_documentation/CODEBASE_DOMAIN_WORKFLOW_GUIDE.md` as as-built reference. Historical plans,
   experiments, scratch files, and superseded recommendations are non-normative.

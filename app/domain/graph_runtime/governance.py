@@ -56,6 +56,11 @@ _IDENTITY_MODELS: tuple[type[BaseModel], ...] = (
 
 _DEFINITION_MODELS: tuple[type[BaseModel], ...] = (
     definitions.ContentAddressedRef,
+    definitions.StageCapabilityRequirementRef,
+    definitions.OperationAssemblyRef,
+    definitions.ExecutionResourceEnvelopeRef,
+    definitions.TemporalExecutionProfileRef,
+    definitions.CompatibilityManifestRef,
     definitions.MiddlewareBinding,
     definitions.MiddlewareStackDefinition,
     definitions.AgentHarnessDefinition,
@@ -92,6 +97,12 @@ _DEFINITION_MODELS: tuple[type[BaseModel], ...] = (
     definitions.UnavailableStageSurface,
     definitions.GraphAssemblySpecV2,
     definitions.RunPlanV3,
+    definitions.OperationAssemblySpecV3,
+    definitions.StageExecutionBindingV2,
+    definitions.ExecutionResourceEnvelopeV2,
+    definitions.ExecutionLineageEnvelopeV2,
+    definitions.GraphAssemblySpecV3,
+    definitions.RunPlanV4,
 )
 
 _RUNTIME_MODELS: tuple[type[BaseModel], ...] = (

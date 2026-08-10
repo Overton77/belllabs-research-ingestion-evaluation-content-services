@@ -27,6 +27,11 @@ Then compare the legacy direct-activity/OpenAI execution paths with the new Temp
 
 This stage contains external and potentially irreversible changes. Separate owner approvals are required for production-shaped infrastructure creation, shadow with production data/effects, production canary, default routing, stopping legacy admission, and each decommission package.
 
+Q and D from `00A` are mandatory release sentinels. Their deterministic cohorts gate artifact,
+replay, contract, and rollback compatibility; tightly budgeted live cohorts prove current web,
+provider, worker, and evaluation behavior. They run through ordinary admission and never receive a
+deployment-only shortcut or privileged provider path.
+
 ## 2. Non-negotiable boundaries
 
 ### 2.1 Sole external facade
@@ -240,6 +245,11 @@ Measure against accepted thresholds:
 - tracing/evaluation ingestion lag and cost;
 - full AWS and third-party cost by service, workflow family, operation class, and tenant where required.
 
+Execute both Q and D with the exact release candidate. Capture root/family/operation topology,
+worker placement, autoscaling, command/steering behavior, citations, claims, usage/cost, tenant
+isolation, and result lineage. Deterministic cohorts reproduce accepted invariants; live cohorts are
+compared at claim/evidence level under their observation times.
+
 ## 8. Replay and worker compatibility gates
 
 ### 8.1 Replay corpus
@@ -328,6 +338,11 @@ Shadow gate passes only when:
 - every mismatch has an owner and accepted disposition;
 - security/redaction checks pass;
 - duplicate consequential effect count is zero.
+
+Q/D shadow comparison separates semantic parity from answer equality: changing catalog or company
+evidence may legitimately change the answer. Compare normalized claims, source support,
+classification policy, unknown handling, safety, cost, latency, and lineage. Any implementation
+that appears better only because it silently broadens sold-by or ownership semantics fails.
 
 ## 11. Canary and cutover gates
 
@@ -467,6 +482,9 @@ The migration is complete only when all of the following are evidenced and appro
 
 Any failed criterion leaves the relevant rollout or decommission transition blocked. Traffic percentage, elapsed time, or lack of observed incidents cannot substitute for the required test evidence.
 
+Production acceptance additionally requires Q and D deterministic, live-canary, worker-loss,
+rollback, and lineage sentinels to pass through the selected topology with no special-case route.
+
 ## 16. Explicit non-goals
 
 - Do not prematurely mandate Kubernetes.
@@ -496,4 +514,3 @@ Include:
 - decommission packages and retained-component inventory;
 - security/redaction, evaluation, SLO, queue, recovery, and cost evidence;
 - alerts, dashboards, on-call, reconciliation, backup, retention/legal, and owner approvals.
-

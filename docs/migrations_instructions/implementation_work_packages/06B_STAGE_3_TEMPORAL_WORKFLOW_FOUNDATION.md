@@ -296,7 +296,43 @@ The suite must:
 - retain sanitized histories for replay;
 - cleanly isolate test tenants/namespaces and remove no evidence needed by the handoff.
 
-## 11. Acceptance tests
+## 11. Q/D durable skeleton implementation
+
+**Exact supporting input:**
+[`REFERENCE_BLUEPRINT_STAGE3_MAPPING.md`](../stage2_evidence/REFERENCE_BLUEPRINT_STAGE3_MAPPING.md).
+That file is not another work package. Its operation table and Q/D identities belong to this
+section (§11), its Temporal assertions are verified under §12, and its resulting evidence is named
+in the §13 handoff. Persisted command delivery and receipt qualification remain package `06C` work.
+
+Implement immutable Stage 3 versions of both `00A` reference blueprints. They are intentionally
+small but run through production-shaped seams:
+
+```text
+BellLabs application/API command
+  -> admission and frozen implementation
+  -> BellLabsRunWorkflow
+  -> explicit fixture family workflow
+  -> generic OperationWorkflow
+  -> deterministic native/small exact Activity
+  -> authoritative journal/evidence/usage/result settlement
+```
+
+Q must at minimum normalize a tiny catalog fixture, classify current-offer evidence, wait for or
+receive one typed human decision, and publish a typed product result. D must classify a tiny
+company-relationship fixture, preserve an ambiguous ownership claim as unknown, accept one typed
+evidence/wake fact, and publish a typed ownership result. Between the two runs exercise Query,
+Signal, Update, cancellation, worker loss, open wait recovery, and Continue-As-New.
+
+Mandatory replay/crash assertions use deterministic fixtures. A bounded live Tavily retrieval or
+tiny exact LLM Activity may be included only if its binding, secret reference, budget, result
+schema, and non-replay execution boundary are explicit. It cannot be the deterministic oracle and
+there is no silent OpenAI/Anthropic/Tavily fallback.
+
+The fixture family workflows exist only to prove common lifecycle mechanics and are replaced by
+the real `StageGraphWorkflow`/`GoalDirectedWorkflow` without changing root, operation, journal,
+command, or result contracts.
+
+## 12. Acceptance tests
 
 - stable IDs and conflict policies under duplicate/ambiguous start;
 - root starts one exact family and rejects incompatible family rebinding;
@@ -312,10 +348,15 @@ The suite must:
 - rehydration repairs every injected recoverable mismatch and escalates unsafe conflicts;
 - no large document, transcript, secret, credential, PHI, or unrestricted command body appears in
   history, memo, search attributes, heartbeat, log, or error.
+- both Q and D skeletons execute through the registered workers and real application/persistence
+  ports, publish comparison manifests, and have no direct provider or demo-runtime bypass;
+- configured-key checks reveal only presence/absence and never emit secret values.
 
-## 12. Handoff gate
+## 13. Handoff gate
 
 `06B` passes when the generic root/family/operation foundation runs on local self-hosted Temporal,
 all acceptance tests pass, replay histories and worker manifests are published, active-child
 continuity is proven, and `06C` can route persisted commands without inventing a second runtime or
-authority channel.
+authority channel. The handoff names exact Q/D versions, commands, histories, worker paths,
+deterministic evidence, live-canary evidence or skip reason, and the Stage 4 seams that replace only
+fixture family semantics.

@@ -154,7 +154,8 @@ def compile_swarm_graph(
             state, repository=repository, temporal=temporal, settings=settings
         )
 
-    async def after_launch(_state: SwarmState) -> dict[str, Any]:
+    async def after_launch(state: SwarmState) -> dict[str, Any]:
+        del state
         return {"dispatch_batch": ()}
 
     async def reconcile(state: SwarmState) -> dict[str, Any]:
@@ -227,6 +228,8 @@ def compile_swarm_graph(
             if all_research_admitted and synthesis is None:
                 accepted: list[AcceptedClaim] = []
                 for item in research_attempts:
+                    if item is None:
+                        raise RuntimeError("admitted research attempt is missing")
                     result = ResearchUnitResult.model_validate_json(item["output_text"])
                     evaluations = evaluate_unit(state["run_id"], result)
                     await evidence_repository.save_unit_evidence(

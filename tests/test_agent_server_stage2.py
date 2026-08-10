@@ -76,7 +76,7 @@ def test_accepted_dependency_and_runtime_surfaces_are_locked() -> None:
     assert version("langgraph-sdk") == "0.4.2"
     assert version("langgraph-api") == "0.12.0"
     assert version("langgraph-runtime-inmem") == "0.32.0"
-    assert version("deepagents") == "0.7.4"
+    assert version("deepagents") == "0.7.5"
     assert version("mcp") == "1.29.0"
     assert callable(create_agent)
     assert callable(create_deep_agent)

@@ -329,7 +329,9 @@ Transport handlers should authorize and delegate. Domain/application services re
 Start with these exact sources; line numbers identify the relevant contract or boundary in the current worktree.
 
 - Migration goal and ownership: `docs/migrations_instructions/implementation_work_packages/00_MAIN_GOAL_AND_INDEX.md:10`, `:22`, `:46`.
-- Coexistence and runtime-neutral authority: `docs/AGENT_FRAMEWORK_COEXISTENCE_STRATEGY.md:47`, `:68`, `:88`, `:163`.
+- Coexistence and runtime-neutral authority:
+  `docs/interview_and_research_result_documentation/AGENT_FRAMEWORK_COEXISTENCE_STRATEGY.md:47`,
+  `:68`, `:88`, `:163`.
 - Core control-plane contracts: `app/domain/control_plane/contracts.py:224` (`StageNode`), `:259` (`StageGraphBlueprint`), `:400` (`GoalDirectedBlueprint`), `:477` (`WorkflowTypeDefinition`), `:588` (implementation binding), `:720` (skill), `:749` (MCP), `:811` (agent profile), `:922` (ERC).
 - Target graph runtime contracts: `app/domain/graph_runtime/definitions.py:102` (harness), `:139` (context policy), `:245` (delegation), `:273` (MCP), `:315` (snapshot policy), `:392` (graph assembly), `:437` (operation implementation variants), `:490` (RunPlan); `app/domain/graph_runtime/identities.py:15` and `:31`-`:83` (qualified identities).
 - Operation binding and workspace/snapshot contracts: `app/domain/operation_execution/contracts.py:25`, `:105`, `:157`, `:185`, `:234`, `:314`, `:689`, `:786`, `:816`, `:842`.

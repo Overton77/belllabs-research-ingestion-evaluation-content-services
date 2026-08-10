@@ -3,16 +3,22 @@
 ## Canonical architecture and reading order
 
 - The application stays in this repository under the canonical Python package `app/`.
-- [Canonical application codebase organization](docs/CANONICAL_APPLICATION_CODEBASE_ORGANIZATION.md)
+- [Canonical application codebase organization](docs/interview_and_research_result_documentation/CANONICAL_APPLICATION_CODEBASE_ORGANIZATION.md)
   is the accepted target for paths, ownership, dependency direction, and staged refactoring.
-- Read migration guidance in this order: the
-  [main index](docs/migrations_instructions/implementation_work_packages/00_MAIN_GOAL_AND_INDEX.md);
-  global gates; owner amendments when applicable; canonical organization; the complete active
-  package and dependencies; accepted architecture/contract docs; then as-built guidance, code,
-  and tests. The active package remains implementation authority if a projected path differs.
+- The Stage 0–8 package system under `docs/migrations_instructions/implementation_work_packages/`
+  is frozen historical provenance and cannot authorize implementation.
+- Read new control-plane migration guidance in this order: the canonical specifications in
+  `../biotech-meta/docs/specs/control-plane-foundations/` and
+  `../biotech-meta/docs/specs/workflow-blueprints/`; the
+  [replacement work-package index](docs/migrations_instructions/implementation_work_packages_v2/README.md);
+  the complete active `WP-*` and its dependencies; then as-built guidance, code, tests, and
+  evidence. Requirements belong to their canonical `SPEC-*`; a work package cannot amend them.
 - Temporal is the sole production macro-workflow runtime. The BellLabs API is the sole governed
   public facade. Agent Server is bounded to operation, qualification, development, and shared
   support assets; it is not an application root or competing scheduler.
+- Deep Agents is the primary bounded cognitive framework. The OpenAI Agents SDK is removed from the
+  current target; any future adapter requires explicit qualification and cannot change domain or
+  macro-runtime authority.
 - Preserve `domain <- application <- api/temporal/integrations`. Providers and runtime adapters
   cannot own BellLabs semantics or durable product authority.
 - Current/as-built guides and executable code explain current behavior. Historical migration
