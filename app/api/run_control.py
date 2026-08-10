@@ -18,8 +18,11 @@ from app.application.postgres_run_control_repository import PostgresRunControlRe
 from app.application.run_control import (
     AdmissionPolicyRegistry,
     F1RunConfigurationVerifier,
+    FamilyAdmissionRegistry,
+    RunConfigurationVerifier,
     RunControlService,
 )
+from app.application.run_control_repository import RunControlRepository
 from app.application.schema_grounding_admission import (
     register_schema_grounding_admission_policies,
 )
@@ -47,6 +50,7 @@ from app.domain.run_control.contracts import (
 )
 from app.integrations.postgres import (
     apply_application_migrations,
+    create_application_family_writer_pool,
     create_application_migration_pool,
     create_application_postgres_pool,
 )
@@ -109,6 +113,42 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
 }
 
 
+def configure_family_admission_registry(
+    application: FastAPI,
+    registry: FamilyAdmissionRegistry,
+) -> None:
+    """Inject exact family mutation policies before API service composition."""
+
+    state = application.state
+    if getattr(state, "run_control_service", None) is not None:
+        raise RuntimeError("family admission registry must be configured before run control")
+    prior = getattr(state, "run_control_family_admission_registry", None)
+    if prior is not None and prior is not registry:
+        raise RuntimeError("family admission registry is already configured")
+    state.run_control_family_admission_registry = registry
+
+
+def compose_api_run_control_service(
+    application: FastAPI,
+    repository: RunControlRepository,
+    configuration_verifier: RunConfigurationVerifier,
+    policies: AdmissionPolicyRegistry,
+) -> RunControlService:
+    """Build API run control with the public, optional family registry hook."""
+
+    family_admissions = getattr(
+        application.state,
+        "run_control_family_admission_registry",
+        None,
+    )
+    return RunControlService(
+        repository,
+        configuration_verifier,
+        policies,
+        family_admissions,
+    )
+
+
 async def initialize_run_control_resources(application: FastAPI) -> None:
     state = application.state
     if getattr(state, "run_control_postgres_pool", None) is not None:
@@ -125,7 +165,15 @@ async def initialize_run_control_resources(application: FastAPI) -> None:
         finally:
             await migration_pool.close()
         pool = await create_application_postgres_pool(settings)
+        family_writer_pool = None
+        if settings.has_application_family_writer_postgres:
+            try:
+                family_writer_pool = await create_application_family_writer_pool(settings)
+            except Exception:
+                await pool.close()
+                raise
         state.run_control_postgres_pool = pool
+        state.run_control_family_writer_pool = family_writer_pool
 
 
 async def get_run_control_service(request: Request) -> RunControlService:
@@ -150,8 +198,14 @@ async def get_run_control_service(request: Request) -> RunControlService:
             register_schema_grounding_admission_policies(policies)
             register_web_research_admission_policies(policies)
             request.app.state.admission_policy_registry = policies
-        service = RunControlService(
-            PostgresRunControlRepository(pool),
+        service = compose_api_run_control_service(
+            request.app,
+            PostgresRunControlRepository(
+                pool,
+                family_writer_pool=getattr(
+                    request.app.state, "run_control_family_writer_pool", None
+                ),
+            ),
             F1RunConfigurationVerifier(control_plane),
             policies,
         )
@@ -177,6 +231,10 @@ async def close_run_control_resources(application: FastAPI) -> None:
     if pool is not None:
         await pool.close()
         state.run_control_postgres_pool = None
+    family_writer_pool = getattr(state, "run_control_family_writer_pool", None)
+    if family_writer_pool is not None:
+        await family_writer_pool.close()
+        state.run_control_family_writer_pool = None
 
 
 def _principal_permissions(principal: ControlPlanePrincipal) -> frozenset[str]:

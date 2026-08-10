@@ -4,14 +4,16 @@ import inspect
 import json
 from collections.abc import Awaitable, Callable
 from datetime import datetime
-from typing import Any
+from typing import Any, TypeVar
 
 import asyncpg
 
 from app.application.run_control_repository import (
     AdmissionMutation,
     CommandMutation,
+    FamilyAdmissionCommit,
 )
+from app.domain.control_plane.canonical import sha256_digest
 from app.domain.run_control.budget import roll_up_child_budget
 from app.domain.run_control.contracts import (
     AdmissionDecision,
@@ -35,15 +37,31 @@ from app.domain.run_control.errors import (
     RunControlNotFound,
     RunVersionConflict,
 )
+from app.domain.run_control.family_admission import (
+    AtomicFamilyMutation,
+    AuthorityStateConflict,
+    FamilyAdmissionReceipt,
+    FamilyVersionConflict,
+)
 
 FailureHook = Callable[[str], Awaitable[None] | None]
+M = TypeVar("M", bound=AtomicFamilyMutation)
 
 
 class PostgresRunControlRepository:
     """Single-transaction PostgreSQL authority for run-control mutations."""
 
-    def __init__(self, pool: asyncpg.Pool, *, before_commit: FailureHook | None = None) -> None:
+    def __init__(
+        self,
+        pool: asyncpg.Pool,
+        *,
+        family_writer_pool: asyncpg.Pool | None = None,
+        before_commit: FailureHook | None = None,
+    ) -> None:
+        if family_writer_pool is pool:
+            raise ValueError("family writer pool must be distinct from the normal application pool")
         self._pool = pool
+        self._family_writer_pool = family_writer_pool
         self._before_commit = before_commit
 
     async def get_admission_decision(
@@ -138,6 +156,23 @@ class PostgresRunControlRepository:
     ) -> CommandResult | None:
         async with self._pool.acquire() as connection, connection.transaction():
             await _set_scope(connection, request_scope)
+            combined = await connection.fetchval(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM belllabs_control.family_admission_results
+                    WHERE request_scope = $1 AND run_id = $2
+                      AND idempotency_issuer = $3 AND command_id = $4
+                )
+                """,
+                request_scope,
+                run_id,
+                idempotency_issuer,
+                command_id,
+            )
+            if combined:
+                raise IdempotencyConflict(
+                    "combined family command identity cannot be replayed as a plain command"
+                )
             row = await connection.fetchrow(
                 """
                 SELECT result
@@ -217,6 +252,23 @@ class PostgresRunControlRepository:
                 result.command_id,
             )
             if prior:
+                combined = await connection.fetchval(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1 FROM belllabs_control.family_admission_results
+                        WHERE request_scope = $1 AND run_id = $2
+                          AND idempotency_issuer = $3 AND command_id = $4
+                    )
+                    """,
+                    mutation.request_scope,
+                    result.run_id,
+                    result.idempotency_issuer,
+                    result.command_id,
+                )
+                if combined:
+                    raise IdempotencyConflict(
+                        "combined family command identity cannot be replayed as a plain command"
+                    )
                 if prior["command_fingerprint"] != result.command_fingerprint:
                     raise IdempotencyConflict(
                         "lifecycle command identity was reused with a conflicting payload"
@@ -235,6 +287,31 @@ class PostgresRunControlRepository:
                 raise RunControlNotFound(f"workflow run not found: {result.run_id}")
             current_projection = RunProjection.model_validate(_json(current["projection"]))
             current_version = current_projection.version
+            prior_budget_raw = await connection.fetchval(
+                """
+                SELECT state FROM belllabs_control.budget_accounts
+                WHERE run_id = $1 FOR UPDATE
+                """,
+                result.run_id,
+            )
+            prior_budget = BudgetState.model_validate(_json(prior_budget_raw))
+            prior_effects_raw = await connection.fetchval(
+                """
+                SELECT state FROM belllabs_control.effect_ledgers
+                WHERE run_id = $1 FOR UPDATE
+                """,
+                result.run_id,
+            )
+            prior_effects = EffectLedgerState.model_validate(_json(prior_effects_raw))
+            if (
+                mutation.expected_budget_digest
+                != sha256_digest(prior_budget.model_dump(mode="json"))
+                or mutation.expected_effects_digest
+                != sha256_digest(prior_effects.model_dump(mode="json"))
+            ):
+                raise AuthorityStateConflict(
+                    "budget or effect authority changed while the command was being decided"
+                )
             if mutation.projection is None:
                 raced = current_version != mutation.expected_version
                 result = result.model_copy(
@@ -265,6 +342,8 @@ class PostgresRunControlRepository:
                         result=result,
                         request_scope=mutation.request_scope,
                         expected_version=current_version,
+                        expected_budget_digest=mutation.expected_budget_digest,
+                        expected_effects_digest=mutation.expected_effects_digest,
                     )
                 else:
                     raise RunVersionConflict(
@@ -305,14 +384,6 @@ class PostgresRunControlRepository:
                     _dump(mutation.projection),
                     mutation.projection.updated_at,
                 )
-                prior_budget_raw = await connection.fetchval(
-                    """
-                    SELECT state FROM belllabs_control.budget_accounts
-                    WHERE run_id = $1 FOR UPDATE
-                    """,
-                    mutation.projection.run_id,
-                )
-                prior_budget = BudgetState.model_validate(_json(prior_budget_raw))
                 await self._apply_parent_rollup(
                     connection,
                     prior_budget,
@@ -346,6 +417,326 @@ class PostgresRunControlRepository:
                 await self._insert_events(connection, mutation.events)
             await self._inject("command")
             return result
+
+    async def get_family_admission_receipt(
+        self,
+        request_scope: str,
+        run_id: str,
+        idempotency_issuer: str,
+        command_id: str,
+    ) -> FamilyAdmissionReceipt | None:
+        async with self._pool.acquire() as connection, connection.transaction():
+            await _set_scope(connection, request_scope)
+            if not await _run_exists_on(connection, request_scope, run_id):
+                raise RunControlNotFound(f"workflow run not found: {run_id}")
+            raw = await connection.fetchval(
+                """
+                SELECT receipt
+                FROM belllabs_control.family_admission_results
+                WHERE request_scope = $1 AND run_id = $2
+                  AND idempotency_issuer = $3 AND command_id = $4
+                """,
+                request_scope,
+                run_id,
+                idempotency_issuer,
+                command_id,
+            )
+        return FamilyAdmissionReceipt.model_validate(_json(raw)) if raw is not None else None
+
+    async def get_family_head(
+        self,
+        request_scope: str,
+        run_id: str,
+        family_kind: str,
+        mutation_type: type[M],
+    ) -> M | None:
+        async with self._pool.acquire() as connection, connection.transaction():
+            await _set_scope(connection, request_scope)
+            if not await _run_exists_on(connection, request_scope, run_id):
+                raise RunControlNotFound(f"workflow run not found: {run_id}")
+            raw = await connection.fetchval(
+                """
+                SELECT mutation
+                FROM belllabs_control.family_admission_heads
+                WHERE request_scope = $1 AND run_id = $2 AND family_kind = $3
+                """,
+                request_scope,
+                run_id,
+                family_kind,
+            )
+        return mutation_type.model_validate(_json(raw)) if raw is not None else None
+
+    async def commit_family_admission(
+        self, commit: FamilyAdmissionCommit
+    ) -> FamilyAdmissionReceipt:
+        commit.__post_init__()
+        if self._family_writer_pool is None:
+            raise RuntimeError(
+                "atomic family admission requires a distinct family repository writer pool"
+            )
+        mutation = commit.family_mutation
+        command = commit.command
+        result = command.result
+        async with self._family_writer_pool.acquire() as connection, connection.transaction():
+            await _set_scope(connection, mutation.request_scope)
+            await _advisory_lock(connection, f"run:{mutation.run_id}")
+            prior = await connection.fetchrow(
+                """
+                SELECT command_fingerprint, family_mutation_fingerprint, receipt
+                FROM belllabs_control.family_admission_results
+                WHERE request_scope = $1 AND run_id = $2
+                  AND idempotency_issuer = $3 AND command_id = $4
+                """,
+                mutation.request_scope,
+                mutation.run_id,
+                result.idempotency_issuer,
+                result.command_id,
+            )
+            if prior:
+                if (
+                    prior["command_fingerprint"] != result.command_fingerprint
+                    or prior["family_mutation_fingerprint"]
+                    != commit.family_mutation_fingerprint
+                ):
+                    raise IdempotencyConflict(
+                        "family admission identity was reused with conflicting content"
+                    )
+                return FamilyAdmissionReceipt.model_validate(_json(prior["receipt"]))
+            plain = await connection.fetchval(
+                """
+                SELECT command_fingerprint
+                FROM belllabs_control.lifecycle_command_results
+                WHERE run_id = $1 AND idempotency_issuer = $2 AND command_id = $3
+                """,
+                mutation.run_id,
+                result.idempotency_issuer,
+                result.command_id,
+            )
+            if plain is not None:
+                raise IdempotencyConflict(
+                    "plain lifecycle command identity cannot acquire a family mutation"
+                )
+            current_raw = await connection.fetchval(
+                """
+                SELECT projection FROM belllabs_control.workflow_runs
+                WHERE run_id = $1 AND request_scope = $2 FOR UPDATE
+                """,
+                mutation.run_id,
+                mutation.request_scope,
+            )
+            if current_raw is None:
+                raise RunControlNotFound(f"workflow run not found: {mutation.run_id}")
+            current_projection = RunProjection.model_validate(_json(current_raw))
+            current_version = current_projection.version
+            prior_budget_raw = await connection.fetchval(
+                "SELECT state FROM belllabs_control.budget_accounts "
+                "WHERE run_id = $1 FOR UPDATE",
+                mutation.run_id,
+            )
+            prior_budget = BudgetState.model_validate(_json(prior_budget_raw))
+            prior_effects_raw = await connection.fetchval(
+                "SELECT state FROM belllabs_control.effect_ledgers "
+                "WHERE run_id = $1 FOR UPDATE",
+                mutation.run_id,
+            )
+            prior_effects = EffectLedgerState.model_validate(_json(prior_effects_raw))
+            if (
+                command.expected_budget_digest
+                != sha256_digest(prior_budget.model_dump(mode="json"))
+                or command.expected_effects_digest
+                != sha256_digest(prior_effects.model_dump(mode="json"))
+            ):
+                raise AuthorityStateConflict(
+                    "budget or effect authority changed while the command was being decided"
+                )
+            if command.projection is None:
+                raced = current_version != command.expected_version
+                result = result.model_copy(
+                    update={
+                        "status": (
+                            CommandStatus.STALE
+                            if raced and result.status == CommandStatus.REJECTED
+                            else result.status
+                        ),
+                        "resulting_run_version": current_version,
+                        "phase": current_projection.phase,
+                        "terminal_outcome": current_projection.terminal_outcome,
+                        "reason_code": (
+                            "stale_run_version"
+                            if raced and result.status == CommandStatus.REJECTED
+                            else result.reason_code
+                        ),
+                    }
+                )
+                if result != commit.receipt.command_result:
+                    raise RunVersionConflict("combined command result changed while committing")
+            elif current_version != command.expected_version:
+                raise RunVersionConflict(
+                    f"expected version {command.expected_version}, current version is "
+                    f"{current_version}"
+                )
+
+            accepted = commit.receipt.family_receipt is not None
+            if accepted:
+                collision = await connection.fetchrow(
+                    """
+                    SELECT mutation_fingerprint
+                    FROM belllabs_control.family_admission_journal
+                    WHERE request_scope = $1 AND run_id = $2
+                      AND family_kind = $3 AND mutation_id = $4
+                    """,
+                    mutation.request_scope,
+                    mutation.run_id,
+                    mutation.family_kind,
+                    mutation.mutation_id,
+                )
+                if collision is not None:
+                    if (
+                        collision["mutation_fingerprint"]
+                        == commit.family_mutation_fingerprint
+                    ):
+                        raise IdempotencyConflict(
+                            "family mutation identity was reused by another command"
+                        )
+                    raise IdempotencyConflict(
+                        "family mutation identity was reused with conflicting content"
+                    )
+                prior_head = await connection.fetchrow(
+                    """
+                    SELECT family_version
+                    FROM belllabs_control.family_admission_heads
+                    WHERE request_scope = $1 AND run_id = $2 AND family_kind = $3
+                    FOR UPDATE
+                    """,
+                    mutation.request_scope,
+                    mutation.run_id,
+                    mutation.family_kind,
+                )
+                current_family_version = prior_head["family_version"] if prior_head else 0
+                if mutation.expected_family_version != current_family_version:
+                    raise FamilyVersionConflict(
+                        f"expected family version {mutation.expected_family_version}, "
+                        f"current version is {current_family_version}"
+                    )
+
+            await connection.execute(
+                """
+                INSERT INTO belllabs_control.lifecycle_command_results
+                    (run_id, idempotency_issuer, command_id,
+                     command_fingerprint, result, recorded_at)
+                VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+                """,
+                result.run_id,
+                result.idempotency_issuer,
+                result.command_id,
+                result.command_fingerprint,
+                _dump(result),
+                result.recorded_at,
+            )
+            if command.projection is not None:
+                if (
+                    command.budget is None
+                    or command.effects is None
+                    or command.transition is None
+                    or not command.events
+                ):
+                    raise ValueError("accepted command is missing transactional effects")
+                await connection.execute(
+                    """
+                    UPDATE belllabs_control.workflow_runs
+                    SET version = $2, phase = $3, projection = $4::jsonb, updated_at = $5
+                    WHERE run_id = $1
+                    """,
+                    command.projection.run_id,
+                    command.projection.version,
+                    command.projection.phase.value,
+                    _dump(command.projection),
+                    command.projection.updated_at,
+                )
+                await self._apply_parent_rollup(
+                    connection,
+                    prior_budget,
+                    command.budget,
+                    idempotency_id=f"command:{result.command_id}",
+                    occurred_at=result.recorded_at,
+                )
+                await connection.execute(
+                    "UPDATE belllabs_control.budget_accounts "
+                    "SET state = $2::jsonb, updated_at = $3 WHERE run_id = $1",
+                    command.projection.run_id,
+                    _dump(command.budget),
+                    command.projection.updated_at,
+                )
+                await connection.execute(
+                    "UPDATE belllabs_control.effect_ledgers "
+                    "SET state = $2::jsonb, updated_at = $3 WHERE run_id = $1",
+                    command.projection.run_id,
+                    _dump(command.effects),
+                    command.projection.updated_at,
+                )
+                await self._insert_transition(connection, command.transition)
+                await self._insert_ledger(connection, command.ledger_entries)
+                await self._insert_effect_ledger(connection, command.effect_entries)
+                await self._insert_events(connection, command.events)
+            await self._inject("family_admission.after_run_control")
+            if accepted:
+                await connection.execute(
+                    """
+                    INSERT INTO belllabs_control.family_admission_journal
+                        (request_scope, run_id, family_kind, family_version,
+                         mutation_kind, mutation_id, mutation_fingerprint,
+                         mutation, decided_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
+                    """,
+                    mutation.request_scope,
+                    mutation.run_id,
+                    mutation.family_kind,
+                    mutation.expected_family_version + 1,
+                    mutation.mutation_kind,
+                    mutation.mutation_id,
+                    commit.family_mutation_fingerprint,
+                    _dump(mutation),
+                    mutation.decided_at,
+                )
+                await connection.execute(
+                    """
+                    INSERT INTO belllabs_control.family_admission_heads
+                        (request_scope, run_id, family_kind, family_version,
+                         mutation_fingerprint, mutation, updated_at)
+                    VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
+                    ON CONFLICT (request_scope, run_id, family_kind)
+                    DO UPDATE SET family_version = EXCLUDED.family_version,
+                                  mutation_fingerprint = EXCLUDED.mutation_fingerprint,
+                                  mutation = EXCLUDED.mutation,
+                                  updated_at = EXCLUDED.updated_at
+                    """,
+                    mutation.request_scope,
+                    mutation.run_id,
+                    mutation.family_kind,
+                    mutation.expected_family_version + 1,
+                    commit.family_mutation_fingerprint,
+                    _dump(mutation),
+                    mutation.decided_at,
+                )
+            await connection.execute(
+                """
+                INSERT INTO belllabs_control.family_admission_results
+                    (request_scope, run_id, idempotency_issuer, command_id,
+                     command_fingerprint, family_mutation_fingerprint,
+                     receipt, recorded_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
+                """,
+                mutation.request_scope,
+                mutation.run_id,
+                result.idempotency_issuer,
+                result.command_id,
+                result.command_fingerprint,
+                commit.family_mutation_fingerprint,
+                _dump(commit.receipt),
+                result.recorded_at,
+            )
+            await self._inject("family_admission.after_family")
+            return commit.receipt
 
     async def list_transitions(
         self, request_scope: str, run_id: str
@@ -746,6 +1137,21 @@ async def _set_scope(connection: asyncpg.Connection, request_scope: str) -> None
     await connection.execute(
         "SELECT set_config('belllabs.request_scope', $1, true)",
         request_scope,
+    )
+
+
+async def _run_exists_on(
+    connection: asyncpg.Connection,
+    request_scope: str,
+    run_id: str,
+) -> bool:
+    return bool(
+        await connection.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM belllabs_control.workflow_runs "
+            "WHERE run_id = $1 AND request_scope = $2)",
+            run_id,
+            request_scope,
+        )
     )
 
 

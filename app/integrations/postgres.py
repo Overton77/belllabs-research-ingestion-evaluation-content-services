@@ -42,7 +42,10 @@ async def create_application_postgres_pool(settings: Settings) -> asyncpg.Pool:
                 SELECT role.rolsuper, role.rolbypassrls,
                        pg_has_role(
                            current_user, 'belllabs_control_runtime', 'member'
-                       ) AS runtime_member
+                       ) AS runtime_member,
+                       pg_has_role(
+                           current_user, 'belllabs_family_repository_writer', 'member'
+                       ) AS family_writer_member
                 FROM pg_roles role
                 WHERE role.rolname = current_user
                 """
@@ -52,10 +55,53 @@ async def create_application_postgres_pool(settings: Settings) -> asyncpg.Pool:
                 or identity["rolsuper"]
                 or identity["rolbypassrls"]
                 or not identity["runtime_member"]
+                or identity["family_writer_member"]
             ):
                 raise RuntimeError(
                     "application PostgreSQL runtime identity must be a non-privileged "
-                    "member of belllabs_control_runtime"
+                    "member of belllabs_control_runtime and must not hold family writer authority"
+                )
+    except Exception:
+        await pool.close()
+        raise
+    return pool
+
+
+async def create_application_family_writer_pool(settings: Settings) -> asyncpg.Pool:
+    """Connect with the distinct least-privilege atomic-family repository identity."""
+
+    pool = await asyncpg.create_pool(
+        dsn=settings.application_family_writer_postgres_dsn,
+        min_size=1,
+        max_size=4,
+        command_timeout=30,
+    )
+    try:
+        async with pool.acquire() as connection:
+            identity = await connection.fetchrow(
+                """
+                SELECT role.rolsuper, role.rolbypassrls,
+                       pg_has_role(
+                           current_user, 'belllabs_control_runtime', 'member'
+                       ) AS runtime_member,
+                       pg_has_role(
+                           current_user, 'belllabs_family_repository_writer', 'member'
+                       ) AS family_writer_member
+                FROM pg_roles role
+                WHERE role.rolname = current_user
+                """
+            )
+            if (
+                identity is None
+                or identity["rolsuper"]
+                or identity["rolbypassrls"]
+                or identity["runtime_member"]
+                or not identity["family_writer_member"]
+            ):
+                raise RuntimeError(
+                    "family writer PostgreSQL identity must be non-privileged, distinct from "
+                    "belllabs_control_runtime, and a member of "
+                    "belllabs_family_repository_writer"
                 )
     except Exception:
         await pool.close()

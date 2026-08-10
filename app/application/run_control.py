@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 from uuid import NAMESPACE_URL, uuid5
@@ -10,6 +11,7 @@ from app.application.control_plane import ControlPlaneService
 from app.application.run_control_repository import (
     AdmissionMutation,
     CommandMutation,
+    FamilyAdmissionCommit,
     RunControlRepository,
 )
 from app.domain.control_plane.canonical import sha256_digest
@@ -42,6 +44,12 @@ from app.domain.run_control.errors import (
     ConfigurationVerificationFailed,
     IdempotencyConflict,
     RunVersionConflict,
+)
+from app.domain.run_control.family_admission import (
+    AtomicFamilyMutation,
+    AuthorityStateConflict,
+    FamilyAdmissionReceipt,
+    FamilyMutationReceipt,
 )
 from app.domain.run_control.reducer import (
     ACTION_PERMISSIONS,
@@ -150,16 +158,84 @@ class AdmissionPolicyRegistry:
                 raise AdmissionRejected(f"{contract_ref}: {reason}")
 
 
+@dataclass(frozen=True)
+class FamilyAdmissionPolicy:
+    mutation_type: type[AtomicFamilyMutation]
+    family_kind: str
+    mutation_kind: str
+    required_permission: str
+    allowed_action_kinds: frozenset[str]
+
+
+class FamilyAdmissionRegistry:
+    """Closed exact-type registry for family mutations admitted by run control."""
+
+    def __init__(self) -> None:
+        self._policies: dict[type[AtomicFamilyMutation], FamilyAdmissionPolicy] = {}
+
+    def register(
+        self,
+        mutation_type: type[AtomicFamilyMutation],
+        *,
+        family_kind: str,
+        mutation_kind: str,
+        required_permission: str,
+        allowed_action_kinds: frozenset[str],
+    ) -> None:
+        if not issubclass(mutation_type, AtomicFamilyMutation):
+            raise TypeError(
+                "family mutation registration requires an AtomicFamilyMutation subclass"
+            )
+        if mutation_type is AtomicFamilyMutation:
+            raise ValueError("the abstract family mutation envelope cannot be registered")
+        if mutation_type in self._policies:
+            raise ValueError(f"family mutation type already registered: {mutation_type.__name__}")
+        if not family_kind or not mutation_kind:
+            raise ValueError("family mutation policy must bind exact family and mutation kinds")
+        if not required_permission or not allowed_action_kinds:
+            raise ValueError("family mutation policy must declare permission and allowed actions")
+        unknown_actions = allowed_action_kinds - ACTION_PERMISSIONS.keys()
+        if unknown_actions:
+            raise ValueError(
+                "family mutation policy contains unknown lifecycle actions: "
+                + ", ".join(sorted(unknown_actions))
+            )
+        self._policies[mutation_type] = FamilyAdmissionPolicy(
+            mutation_type=mutation_type,
+            family_kind=family_kind,
+            mutation_kind=mutation_kind,
+            required_permission=required_permission,
+            allowed_action_kinds=frozenset(allowed_action_kinds),
+        )
+
+    def resolve(self, mutation: AtomicFamilyMutation) -> FamilyAdmissionPolicy:
+        policy = self._policies.get(type(mutation))
+        if policy is None:
+            raise CommandRejected(
+                f"no exact family mutation registration for {type(mutation).__name__}"
+            )
+        if (
+            mutation.family_kind != policy.family_kind
+            or mutation.mutation_kind != policy.mutation_kind
+        ):
+            raise CommandRejected(
+                "family mutation kinds do not match their exact registered policy"
+            )
+        return policy
+
+
 class RunControlService:
     def __init__(
         self,
         repository: RunControlRepository,
         configuration_verifier: RunConfigurationVerifier,
         policies: AdmissionPolicyRegistry,
+        family_admissions: FamilyAdmissionRegistry | None = None,
     ) -> None:
         self._repository = repository
         self._configuration_verifier = configuration_verifier
         self._policies = policies
+        self._family_admissions = family_admissions or FamilyAdmissionRegistry()
 
     async def admit(self, request: RunRequest) -> AdmissionDecision:
         if "workflow_run.admit" not in request.actor.permissions:
@@ -329,6 +405,16 @@ class RunControlService:
             return await self._repository.commit_admission(AdmissionMutation(decision=rejected))
 
     async def execute(self, command: LifecycleCommand) -> CommandResult:
+        for _attempt in range(8):
+            try:
+                return await self._execute_once(command)
+            except (RunVersionConflict, AuthorityStateConflict):
+                continue
+        raise AuthorityStateConflict(
+            "lifecycle command authority changed during every deterministic retry"
+        )
+
+    async def _execute_once(self, command: LifecycleCommand) -> CommandResult:
         required_permission = ACTION_PERMISSIONS[command.action.kind]
         if required_permission not in command.actor.permissions:
             raise CommandRejected(f"actor lacks {required_permission} permission")
@@ -344,18 +430,20 @@ class RunControlService:
             return prior
 
         projection = await self._repository.get_run(command.request_scope, command.run_id)
+        budget = await self._repository.get_budget(command.request_scope, command.run_id)
+        effects = await self._repository.get_effects(command.request_scope, command.run_id)
         if command.expected_run_version != projection.version:
             return await self._commit_non_transition_result(
                 command,
                 fingerprint,
                 projection,
+                budget,
+                effects,
                 CommandStatus.STALE,
                 "stale_run_version",
                 f"expected version {command.expected_run_version}, current version is "
                 f"{projection.version}",
             )
-        budget = await self._repository.get_budget(command.request_scope, command.run_id)
-        effects = await self._repository.get_effects(command.request_scope, command.run_id)
         try:
             reduction = reduce_lifecycle(projection, budget, effects, command, fingerprint)
         except ReductionRejected as error:
@@ -363,6 +451,8 @@ class RunControlService:
                 command,
                 fingerprint,
                 projection,
+                budget,
+                effects,
                 (
                     CommandStatus.STALE
                     if error.code == "stale_run_version"
@@ -375,6 +465,8 @@ class RunControlService:
             result=reduction.result,
             request_scope=command.request_scope,
             expected_version=projection.version,
+            expected_budget_digest=_fingerprint(budget, exclude=set()),
+            expected_effects_digest=_fingerprint(effects, exclude=set()),
             projection=reduction.projection,
             budget=reduction.budget,
             effects=reduction.effects,
@@ -390,21 +482,184 @@ class RunControlService:
                 command,
                 fingerprint,
                 projection,
+                budget,
+                effects,
                 CommandStatus.REJECTED,
                 error.code,
                 error.message,
             )
         except RunVersionConflict:
             current = await self._repository.get_run(command.request_scope, command.run_id)
+            current_budget = await self._repository.get_budget(
+                command.request_scope, command.run_id
+            )
+            current_effects = await self._repository.get_effects(
+                command.request_scope, command.run_id
+            )
             return await self._commit_non_transition_result(
                 command,
                 fingerprint,
                 current,
+                current_budget,
+                current_effects,
                 CommandStatus.STALE,
                 "stale_run_version",
                 f"expected version {command.expected_run_version}, current version is "
                 f"{current.version}",
             )
+
+    async def execute_family_admission(
+        self,
+        command: LifecycleCommand,
+        family_mutation: AtomicFamilyMutation,
+    ) -> FamilyAdmissionReceipt:
+        for _attempt in range(8):
+            try:
+                return await self._execute_family_admission_once(command, family_mutation)
+            except (RunVersionConflict, AuthorityStateConflict):
+                continue
+        raise AuthorityStateConflict(
+            "family admission authority changed during every deterministic retry"
+        )
+
+    async def _execute_family_admission_once(
+        self,
+        command: LifecycleCommand,
+        family_mutation: AtomicFamilyMutation,
+    ) -> FamilyAdmissionReceipt:
+        policy = self._family_admissions.resolve(family_mutation)
+        action_permission = ACTION_PERMISSIONS[command.action.kind]
+        if action_permission not in command.actor.permissions:
+            raise CommandRejected(f"actor lacks {action_permission} permission")
+        if policy.required_permission not in command.actor.permissions:
+            raise CommandRejected(f"actor lacks {policy.required_permission} permission")
+        if command.action.kind not in policy.allowed_action_kinds:
+            raise CommandRejected(
+                f"lifecycle action {command.action.kind} is not allowed for family admission"
+            )
+        if (
+            family_mutation.request_scope != command.request_scope
+            or family_mutation.run_id != command.run_id
+        ):
+            raise CommandRejected("family mutation scope and run must match the lifecycle command")
+
+        command_fingerprint = _fingerprint(command, exclude={"occurred_at"})
+        family_fingerprint = _fingerprint(family_mutation, exclude={"decided_at"})
+        prior = await self._repository.get_family_admission_receipt(
+            command.request_scope,
+            command.run_id,
+            command.idempotency_issuer,
+            command.command_id,
+        )
+        if prior is not None:
+            _require_same_fingerprint(
+                prior.command_result.command_fingerprint,
+                command_fingerprint,
+                "lifecycle command",
+            )
+            _require_same_fingerprint(
+                prior.family_mutation_fingerprint,
+                family_fingerprint,
+                "family mutation",
+            )
+            return prior
+
+        projection = await self._repository.get_run(command.request_scope, command.run_id)
+        budget = await self._repository.get_budget(command.request_scope, command.run_id)
+        effects = await self._repository.get_effects(command.request_scope, command.run_id)
+        budget_digest = _fingerprint(budget, exclude=set())
+        effects_digest = _fingerprint(effects, exclude=set())
+        if command.expected_run_version != projection.version:
+            result = self._non_transition_result(
+                command,
+                command_fingerprint,
+                projection,
+                CommandStatus.STALE,
+                "stale_run_version",
+                f"expected version {command.expected_run_version}, current version is "
+                f"{projection.version}",
+            )
+            mutation = CommandMutation(
+                result=result,
+                request_scope=command.request_scope,
+                expected_version=projection.version,
+                expected_budget_digest=budget_digest,
+                expected_effects_digest=effects_digest,
+            )
+            receipt = FamilyAdmissionReceipt(
+                command_result=result,
+                family_mutation_fingerprint=family_fingerprint,
+            )
+        else:
+            try:
+                reduction = reduce_lifecycle(
+                    projection, budget, effects, command, command_fingerprint
+                )
+            except ReductionRejected as error:
+                result = self._non_transition_result(
+                    command,
+                    command_fingerprint,
+                    projection,
+                    CommandStatus.REJECTED,
+                    error.code,
+                    error.message,
+                )
+                mutation = CommandMutation(
+                    result=result,
+                    request_scope=command.request_scope,
+                    expected_version=projection.version,
+                    expected_budget_digest=budget_digest,
+                    expected_effects_digest=effects_digest,
+                )
+                receipt = FamilyAdmissionReceipt(
+                    command_result=result,
+                    family_mutation_fingerprint=family_fingerprint,
+                )
+            else:
+                family_version = family_mutation.expected_family_version + 1
+                events = self._compose_family_admission_events(
+                    reduction.events,
+                    command,
+                    family_mutation,
+                    family_fingerprint,
+                    family_version,
+                )
+                mutation = CommandMutation(
+                    result=reduction.result,
+                    request_scope=command.request_scope,
+                    expected_version=projection.version,
+                    expected_budget_digest=budget_digest,
+                    expected_effects_digest=effects_digest,
+                    projection=reduction.projection,
+                    budget=reduction.budget,
+                    effects=reduction.effects,
+                    transition=reduction.transition,
+                    ledger_entries=reduction.ledger_entries,
+                    effect_entries=reduction.effect_entries,
+                    events=events,
+                )
+                receipt = FamilyAdmissionReceipt(
+                    command_result=reduction.result,
+                    family_mutation_fingerprint=family_fingerprint,
+                    family_receipt=FamilyMutationReceipt(
+                        family_kind=family_mutation.family_kind,
+                        mutation_kind=family_mutation.mutation_kind,
+                        mutation_id=family_mutation.mutation_id,
+                        mutation_fingerprint=family_fingerprint,
+                        family_version=family_version,
+                        exact_operation_request_ref=(
+                            family_mutation.exact_operation_request_ref
+                        ),
+                    ),
+                )
+        return await self._repository.commit_family_admission(
+            FamilyAdmissionCommit(
+                command=mutation,
+                family_mutation=family_mutation,
+                family_mutation_fingerprint=family_fingerprint,
+                receipt=receipt,
+            )
+        )
 
     async def get_run(self, request_scope: str, run_id: str) -> RunProjection:
         return await self._repository.get_run(request_scope, run_id)
@@ -484,6 +739,8 @@ class RunControlService:
         command: LifecycleCommand,
         fingerprint: str,
         projection: RunProjection,
+        budget: BudgetState,
+        effects: EffectLedgerState,
         status: CommandStatus,
         reason_code: str,
         reason: str,
@@ -506,8 +763,69 @@ class RunControlService:
                 result=result,
                 request_scope=command.request_scope,
                 expected_version=projection.version,
+                expected_budget_digest=_fingerprint(budget, exclude=set()),
+                expected_effects_digest=_fingerprint(effects, exclude=set()),
             )
         )
+
+    @staticmethod
+    def _non_transition_result(
+        command: LifecycleCommand,
+        fingerprint: str,
+        projection: RunProjection,
+        status: CommandStatus,
+        reason_code: str,
+        reason: str,
+    ) -> CommandResult:
+        return CommandResult(
+            command_id=command.command_id,
+            idempotency_issuer=command.idempotency_issuer,
+            run_id=command.run_id,
+            command_fingerprint=fingerprint,
+            status=status,
+            resulting_run_version=projection.version,
+            phase=projection.phase,
+            terminal_outcome=projection.terminal_outcome,
+            reason_code=reason_code,
+            reason=reason,
+            recorded_at=command.occurred_at,
+        )
+
+    @staticmethod
+    def _compose_family_admission_events(
+        events: tuple[DomainEventEnvelope, ...],
+        command: LifecycleCommand,
+        mutation: AtomicFamilyMutation,
+        mutation_fingerprint: str,
+        family_version: int,
+    ) -> tuple[DomainEventEnvelope, ...]:
+        if not events:
+            raise ValueError("accepted family admission requires a lifecycle event")
+        lifecycle_events = tuple(
+            event.model_copy(update={"is_version_final": False}) for event in events
+        )
+        version = lifecycle_events[-1].aggregate_version
+        family_event = _event(
+            command.run_id,
+            version,
+            max(event.sequence for event in lifecycle_events) + 1,
+            "workflow_run.family_admission_committed",
+            command.occurred_at,
+            command.actor,
+            command.correlation_id,
+            command.causation_id or command.command_id,
+            {
+                "family_kind": mutation.family_kind,
+                "mutation_kind": mutation.mutation_kind,
+                "mutation_id": mutation.mutation_id,
+                "mutation_fingerprint": mutation_fingerprint,
+                "family_version": family_version,
+                "operation_request_ref_digest": sha256_digest(
+                    mutation.exact_operation_request_ref
+                ),
+            },
+        )
+        return (*lifecycle_events, family_event)
 
     @staticmethod
     def _validate_configuration_binding(

@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     application_database_url: SecretStr | None = None
     application_migration_database_direct: SecretStr | None = None
     application_backfill_database_direct: SecretStr | None = None
+    application_family_writer_database_direct: SecretStr | None = None
 
     supabase_url: str
     supabase_publishable_key: SecretStr
@@ -239,6 +240,18 @@ class Settings(BaseSettings):
         if self.application_backfill_database_direct is None:
             raise ValueError("APPLICATION_BACKFILL_DATABASE_DIRECT is required for backfill")
         return self.application_backfill_database_direct.get_secret_value()
+
+    @property
+    def has_application_family_writer_postgres(self) -> bool:
+        return self.application_family_writer_database_direct is not None
+
+    @property
+    def application_family_writer_postgres_dsn(self) -> str:
+        if self.application_family_writer_database_direct is None:
+            raise ValueError(
+                "APPLICATION_FAMILY_WRITER_DATABASE_DIRECT is required for atomic family admission"
+            )
+        return self.application_family_writer_database_direct.get_secret_value()
 
     @property
     def cors_origins(self) -> list[str]:

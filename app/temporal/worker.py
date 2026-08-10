@@ -14,8 +14,11 @@ from app.application.postgres_run_control_repository import PostgresRunControlRe
 from app.application.run_control import (
     AdmissionPolicyRegistry,
     F1RunConfigurationVerifier,
+    FamilyAdmissionRegistry,
+    RunConfigurationVerifier,
     RunControlService,
 )
+from app.application.run_control_repository import RunControlRepository
 from app.application.schema_catalog_build import SchemaCatalogBuildService
 from app.application.schema_context_derivation import SchemaContextDerivationService
 from app.application.schema_grounding_admission import (
@@ -41,7 +44,10 @@ from app.integrations.control_plane_payloads import (
 )
 from app.integrations.langsmith_tracing import configure_langsmith_tracing
 from app.integrations.mongodb import create_mongodb
-from app.integrations.postgres import create_application_postgres_pool
+from app.integrations.postgres import (
+    create_application_family_writer_pool,
+    create_application_postgres_pool,
+)
 from app.integrations.schema_catalog_payloads import schema_catalog_payload_store
 from app.integrations.schema_neo4j_executor import (
     Neo4jBoundedReadExecutorFactory,
@@ -88,8 +94,25 @@ class WorkerActivityCompositionFactory(Protocol):
     ) -> WorkerActivityComposition: ...
 
 
+def compose_worker_run_control_service(
+    repository: RunControlRepository,
+    configuration_verifier: RunConfigurationVerifier,
+    policies: AdmissionPolicyRegistry,
+    family_admission_registry: FamilyAdmissionRegistry | None = None,
+) -> RunControlService:
+    """Build worker run control with an optional exact family-policy registry."""
+
+    return RunControlService(
+        repository,
+        configuration_verifier,
+        policies,
+        family_admission_registry,
+    )
+
+
 async def main(
     composition_factory: WorkerActivityCompositionFactory | None = None,
+    family_admission_registry: FamilyAdmissionRegistry | None = None,
 ) -> None:
     settings = get_settings()
     if settings.coordinator_launch_enabled and composition_factory is None:
@@ -101,7 +124,10 @@ async def main(
     client = await create_temporal_client(settings)
     mongo_client, _database = await create_mongodb(settings)
     postgres_pool = await create_application_postgres_pool(settings)
+    family_writer_pool = None
     try:
+        if settings.has_application_family_writer_postgres:
+            family_writer_pool = await create_application_family_writer_pool(settings)
         control_plane_payload_store = (
             S3PayloadStore(settings, settings.s3_bucket)
             if settings.s3_bucket
@@ -119,10 +145,14 @@ async def main(
         policies = AdmissionPolicyRegistry()
         register_schema_grounding_admission_policies(policies)
         register_web_research_admission_policies(policies)
-        run_control = RunControlService(
-            PostgresRunControlRepository(postgres_pool),
+        run_control = compose_worker_run_control_service(
+            PostgresRunControlRepository(
+                postgres_pool,
+                family_writer_pool=family_writer_pool,
+            ),
             F1RunConfigurationVerifier(control_plane),
             policies,
+            family_admission_registry,
         )
         coordinator_workers = None
         operation_worker = None
@@ -195,6 +225,8 @@ async def main(
             workers.append(operation_worker)
         await asyncio.gather(*(worker.run() for worker in workers))
     finally:
+        if family_writer_pool is not None:
+            await family_writer_pool.close()
         await postgres_pool.close()
         await mongo_client.close()
 

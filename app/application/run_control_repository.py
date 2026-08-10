@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+import inspect
+import re
+from collections.abc import Awaitable, Callable, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
+from typing import Protocol, TypeVar
 
+from app.domain.control_plane.canonical import sha256_digest
 from app.domain.run_control.budget import roll_up_child_budget
 from app.domain.run_control.contracts import (
     AdmissionDecision,
@@ -30,6 +33,15 @@ from app.domain.run_control.errors import (
     RunControlNotFound,
     RunVersionConflict,
 )
+from app.domain.run_control.family_admission import (
+    AtomicFamilyMutation,
+    AuthorityStateConflict,
+    FamilyAdmissionReceipt,
+    FamilyVersionConflict,
+)
+
+M = TypeVar("M", bound=AtomicFamilyMutation)
+FailureHook = Callable[[str], Awaitable[None] | None]
 
 
 @dataclass(frozen=True)
@@ -49,6 +61,8 @@ class CommandMutation:
     result: CommandResult
     request_scope: str
     expected_version: int
+    expected_budget_digest: str | None = None
+    expected_effects_digest: str | None = None
     projection: RunProjection | None = None
     budget: BudgetState | None = None
     effects: EffectLedgerState | None = None
@@ -56,6 +70,109 @@ class CommandMutation:
     ledger_entries: tuple[BudgetLedgerEntry, ...] = ()
     effect_entries: tuple[EffectLedgerEntry, ...] = ()
     events: tuple[DomainEventEnvelope, ...] = ()
+
+
+@dataclass(frozen=True)
+class FamilyAdmissionCommit:
+    command: CommandMutation
+    family_mutation: AtomicFamilyMutation
+    family_mutation_fingerprint: str
+    receipt: FamilyAdmissionReceipt
+
+    def __post_init__(self) -> None:
+        command = self.command
+        mutation = self.family_mutation
+        result = command.result
+        receipt = self.receipt
+        digests = (
+            command.expected_budget_digest,
+            command.expected_effects_digest,
+            self.family_mutation_fingerprint,
+        )
+        if any(
+            item is None or re.fullmatch(r"sha256:[0-9a-f]{64}", item) is None
+            for item in digests
+        ):
+            raise ValueError("family admission commit contains an invalid authority digest")
+        expected_family_fingerprint = sha256_digest(
+            mutation.model_dump(mode="json", exclude={"decided_at"})
+        )
+        if self.family_mutation_fingerprint != expected_family_fingerprint:
+            raise ValueError("family mutation fingerprint does not match mutation content")
+        if (
+            command.request_scope != mutation.request_scope
+            or result.run_id != mutation.run_id
+            or receipt.command_result != result
+            or receipt.family_mutation_fingerprint != self.family_mutation_fingerprint
+        ):
+            raise ValueError("family admission command, mutation, and receipt identities differ")
+        accepted = result.status == CommandStatus.ACCEPTED
+        if accepted != (command.projection is not None):
+            raise ValueError("only accepted family commands may carry a run-control mutation")
+        family_receipt = receipt.family_receipt
+        if accepted:
+            projection = command.projection
+            transition = command.transition
+            if (
+                projection is None
+                or command.budget is None
+                or command.effects is None
+                or transition is None
+                or not command.events
+                or projection.run_id != mutation.run_id
+                or projection.request_scope != mutation.request_scope
+                or projection.version != command.expected_version + 1
+                or result.resulting_run_version != projection.version
+                or command.budget.run_id != mutation.run_id
+                or command.effects.run_id != mutation.run_id
+                or transition.command_id != result.command_id
+                or transition.run_id != mutation.run_id
+                or transition.prior_version != command.expected_version
+                or transition.resulting_projection != projection
+            ):
+                raise ValueError("accepted family command mutation is internally inconsistent")
+            if family_receipt is None or (
+                family_receipt.family_kind != mutation.family_kind
+                or family_receipt.mutation_kind != mutation.mutation_kind
+                or family_receipt.mutation_id != mutation.mutation_id
+                or family_receipt.mutation_fingerprint
+                != self.family_mutation_fingerprint
+                or family_receipt.family_version
+                != mutation.expected_family_version + 1
+                or family_receipt.exact_operation_request_ref
+                != mutation.exact_operation_request_ref
+            ):
+                raise ValueError("accepted family receipt does not match its mutation")
+            final_event = command.events[-1]
+            expected_reference_digest = sha256_digest(
+                mutation.exact_operation_request_ref
+            )
+            if (
+                final_event.event_type != "workflow_run.family_admission_committed"
+                or final_event.aggregate_id != mutation.run_id
+                or final_event.aggregate_version != projection.version
+                or not final_event.is_version_final
+                or final_event.payload.get("family_kind") != mutation.family_kind
+                or final_event.payload.get("mutation_kind") != mutation.mutation_kind
+                or final_event.payload.get("mutation_id") != mutation.mutation_id
+                or final_event.payload.get("mutation_fingerprint")
+                != self.family_mutation_fingerprint
+                or final_event.payload.get("family_version")
+                != family_receipt.family_version
+                or final_event.payload.get("operation_request_ref_digest")
+                != expected_reference_digest
+            ):
+                raise ValueError("family admission final outbox event is inconsistent")
+        elif any(
+            item is not None
+            for item in (
+                command.projection,
+                command.budget,
+                command.effects,
+                command.transition,
+            )
+        ) or command.events:
+            raise ValueError("non-accepted family command cannot carry authoritative mutations")
 
 
 class RunControlRepository(Protocol):
@@ -80,6 +197,26 @@ class RunControlRepository(Protocol):
     async def get_effects(self, request_scope: str, run_id: str) -> EffectLedgerState: ...
 
     async def commit_command(self, mutation: CommandMutation) -> CommandResult: ...
+
+    async def get_family_admission_receipt(
+        self,
+        request_scope: str,
+        run_id: str,
+        idempotency_issuer: str,
+        command_id: str,
+    ) -> FamilyAdmissionReceipt | None: ...
+
+    async def get_family_head(
+        self,
+        request_scope: str,
+        run_id: str,
+        family_kind: str,
+        mutation_type: type[M],
+    ) -> M | None: ...
+
+    async def commit_family_admission(
+        self, commit: FamilyAdmissionCommit
+    ) -> FamilyAdmissionReceipt: ...
 
     async def list_transitions(
         self, request_scope: str, run_id: str
@@ -113,8 +250,9 @@ class RunControlRepository(Protocol):
 class InMemoryRunControlRepository:
     """Behavioral test adapter with the same atomic boundaries as PostgreSQL."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, before_commit: FailureHook | None = None) -> None:
         self._lock = asyncio.Lock()
+        self._before_commit = before_commit
         self._admissions: dict[tuple[str, str, str], AdmissionDecision] = {}
         self._commands: dict[tuple[str, str, str], CommandResult] = {}
         self._runs: dict[str, RunProjection] = {}
@@ -126,6 +264,11 @@ class InMemoryRunControlRepository:
         self._outbox: dict[str, OutboxRecord] = {}
         self._next_outbox_position = 1
         self._cursors: dict[tuple[str, str], ConsumerCursor] = {}
+        self._family_heads: dict[tuple[str, str, str], AtomicFamilyMutation] = {}
+        self._family_journal: dict[tuple[str, str, str, str], tuple[str, AtomicFamilyMutation]] = {}
+        self._family_results: dict[
+            tuple[str, str, str, str], FamilyAdmissionReceipt
+        ] = {}
 
     async def get_admission_decision(
         self, request_scope: str, idempotency_issuer: str, request_id: str
@@ -180,6 +323,10 @@ class InMemoryRunControlRepository:
         command_id: str,
     ) -> CommandResult | None:
         self._require_scope(request_scope, run_id)
+        if (request_scope, run_id, idempotency_issuer, command_id) in self._family_results:
+            raise IdempotencyConflict(
+                "combined family command identity cannot be replayed as a plain command"
+            )
         return deepcopy(self._commands.get((run_id, idempotency_issuer, command_id)))
 
     async def get_run(self, request_scope: str, run_id: str) -> RunProjection:
@@ -205,74 +352,218 @@ class InMemoryRunControlRepository:
 
     async def commit_command(self, mutation: CommandMutation) -> CommandResult:
         key = (
+            mutation.request_scope,
             mutation.result.run_id,
             mutation.result.idempotency_issuer,
             mutation.result.command_id,
         )
         async with self._lock:
-            prior = self._commands.get(key)
-            if prior is not None:
-                if prior.command_fingerprint != mutation.result.command_fingerprint:
+            if key in self._family_results:
+                raise IdempotencyConflict(
+                    "combined family command identity cannot be replayed as a plain command"
+                )
+            return self._commit_command_unlocked(mutation)
+
+    def _commit_command_unlocked(self, mutation: CommandMutation) -> CommandResult:
+        key = (
+            mutation.result.run_id,
+            mutation.result.idempotency_issuer,
+            mutation.result.command_id,
+        )
+        prior = self._commands.get(key)
+        if prior is not None:
+            if prior.command_fingerprint != mutation.result.command_fingerprint:
+                raise IdempotencyConflict(
+                    "lifecycle command identity was reused with a conflicting payload"
+                )
+            return deepcopy(prior)
+        current = self._runs.get(mutation.result.run_id)
+        if current is None or current.request_scope != mutation.request_scope:
+            raise RunControlNotFound(f"workflow run not found: {mutation.result.run_id}")
+        current_budget_digest = sha256_digest(
+            self._budgets[mutation.result.run_id].model_dump(mode="json")
+        )
+        current_effects_digest = sha256_digest(
+            self._effects[mutation.result.run_id].model_dump(mode="json")
+        )
+        if (
+            mutation.expected_budget_digest != current_budget_digest
+            or mutation.expected_effects_digest != current_effects_digest
+        ):
+            raise AuthorityStateConflict(
+                "budget or effect authority changed while the command was being decided"
+            )
+        if mutation.projection is None:
+            raced = current.version != mutation.expected_version
+            result = mutation.result.model_copy(
+                update={
+                    "status": (
+                        CommandStatus.STALE
+                        if raced and mutation.result.status == CommandStatus.REJECTED
+                        else mutation.result.status
+                    ),
+                    "resulting_run_version": current.version,
+                    "phase": current.phase,
+                    "terminal_outcome": current.terminal_outcome,
+                    "reason_code": (
+                        "stale_run_version"
+                        if raced and mutation.result.status == CommandStatus.REJECTED
+                        else mutation.result.reason_code
+                    ),
+                    "reason": (
+                        "run advanced while the rejected command was being decided"
+                        if raced and mutation.result.status == CommandStatus.REJECTED
+                        else mutation.result.reason
+                    ),
+                }
+            )
+            self._commands[key] = deepcopy(result)
+            return deepcopy(result)
+        if current.version != mutation.expected_version:
+            raise RunVersionConflict(
+                f"expected version {mutation.expected_version}, "
+                f"current version is {current.version}"
+            )
+        self._validate_accepted_command(mutation)
+        assert mutation.budget is not None
+        assert mutation.effects is not None
+        assert mutation.transition is not None
+        self._apply_parent_rollup(
+            self._budgets[mutation.result.run_id],
+            mutation.budget,
+            idempotency_id=f"command:{mutation.result.command_id}",
+            occurred_at=mutation.result.recorded_at,
+        )
+        self._runs[mutation.result.run_id] = deepcopy(mutation.projection)
+        self._budgets[mutation.result.run_id] = deepcopy(mutation.budget)
+        self._effects[mutation.result.run_id] = deepcopy(mutation.effects)
+        self._transitions[mutation.result.run_id].append(deepcopy(mutation.transition))
+        self._ledger[mutation.result.run_id].extend(deepcopy(mutation.ledger_entries))
+        self._effect_ledger[mutation.result.run_id].extend(deepcopy(mutation.effect_entries))
+        self._insert_events(mutation.events)
+        self._commands[key] = deepcopy(mutation.result)
+        return deepcopy(mutation.result)
+
+    async def get_family_admission_receipt(
+        self,
+        request_scope: str,
+        run_id: str,
+        idempotency_issuer: str,
+        command_id: str,
+    ) -> FamilyAdmissionReceipt | None:
+        self._require_scope(request_scope, run_id)
+        return deepcopy(
+            self._family_results.get(
+                (request_scope, run_id, idempotency_issuer, command_id)
+            )
+        )
+
+    async def get_family_head(
+        self,
+        request_scope: str,
+        run_id: str,
+        family_kind: str,
+        mutation_type: type[M],
+    ) -> M | None:
+        self._require_scope(request_scope, run_id)
+        mutation = self._family_heads.get((request_scope, run_id, family_kind))
+        return mutation_type.model_validate(mutation.model_dump()) if mutation is not None else None
+
+    async def commit_family_admission(
+        self, commit: FamilyAdmissionCommit
+    ) -> FamilyAdmissionReceipt:
+        commit.__post_init__()
+        mutation = commit.family_mutation
+        result = commit.command.result
+        result_key = (
+            mutation.request_scope,
+            mutation.run_id,
+            result.idempotency_issuer,
+            result.command_id,
+        )
+        command_key = (mutation.run_id, result.idempotency_issuer, result.command_id)
+        journal_key = (
+            mutation.request_scope,
+            mutation.run_id,
+            mutation.family_kind,
+            mutation.mutation_id,
+        )
+        head_key = (mutation.request_scope, mutation.run_id, mutation.family_kind)
+        async with self._lock:
+            prior_receipt = self._family_results.get(result_key)
+            if prior_receipt is not None:
+                if (
+                    prior_receipt.command_result.command_fingerprint
+                    != result.command_fingerprint
+                    or prior_receipt.family_mutation_fingerprint
+                    != commit.family_mutation_fingerprint
+                ):
                     raise IdempotencyConflict(
-                        "lifecycle command identity was reused with a conflicting payload"
+                        "family admission identity was reused with conflicting content"
                     )
-                return deepcopy(prior)
-            current = self._runs.get(mutation.result.run_id)
+                return deepcopy(prior_receipt)
+            if command_key in self._commands:
+                raise IdempotencyConflict(
+                    "plain lifecycle command identity cannot acquire a family mutation"
+                )
+            prior_mutation = self._family_journal.get(journal_key)
+            if prior_mutation is not None:
+                if prior_mutation[0] != commit.family_mutation_fingerprint:
+                    raise IdempotencyConflict(
+                        "family mutation identity was reused with conflicting content"
+                    )
+                raise IdempotencyConflict(
+                    "family mutation identity was reused by another command"
+                )
+            current = self._runs.get(mutation.run_id)
             if current is None or current.request_scope != mutation.request_scope:
-                raise RunControlNotFound(f"workflow run not found: {mutation.result.run_id}")
-            if mutation.projection is None:
-                raced = current.version != mutation.expected_version
-                result = mutation.result.model_copy(
-                    update={
-                        "status": (
-                            CommandStatus.STALE
-                            if raced and mutation.result.status == CommandStatus.REJECTED
-                            else mutation.result.status
-                        ),
-                        "resulting_run_version": current.version,
-                        "phase": current.phase,
-                        "terminal_outcome": current.terminal_outcome,
-                        "reason_code": (
-                            "stale_run_version"
-                            if raced and mutation.result.status == CommandStatus.REJECTED
-                            else mutation.result.reason_code
-                        ),
-                        "reason": (
-                            "run advanced while the rejected command was being decided"
-                            if raced and mutation.result.status == CommandStatus.REJECTED
-                            else mutation.result.reason
-                        ),
-                    }
+                raise RunControlNotFound(f"workflow run not found: {mutation.run_id}")
+            accepted = commit.receipt.family_receipt is not None
+            if accepted:
+                current_head = self._family_heads.get(head_key)
+                current_family_version = (
+                    current_head.expected_family_version + 1 if current_head is not None else 0
                 )
-                self._commands[key] = deepcopy(result)
-                return deepcopy(result)
-            if current.version != mutation.expected_version:
-                raise RunVersionConflict(
-                    f"expected version {mutation.expected_version}, "
-                    f"current version is {current.version}"
+                if mutation.expected_family_version != current_family_version:
+                    raise FamilyVersionConflict(
+                        f"expected family version {mutation.expected_family_version}, "
+                        f"current version is {current_family_version}"
+                    )
+            state_fields = (
+                "_admissions",
+                "_commands",
+                "_runs",
+                "_budgets",
+                "_effects",
+                "_transitions",
+                "_ledger",
+                "_effect_ledger",
+                "_outbox",
+                "_next_outbox_position",
+                "_cursors",
+                "_family_heads",
+                "_family_journal",
+                "_family_results",
+            )
+            working = object.__new__(type(self))
+            working.__dict__ = {
+                name: deepcopy(getattr(self, name)) for name in state_fields
+            }
+            committed_result = working._commit_command_unlocked(commit.command)
+            if committed_result != commit.receipt.command_result:
+                raise RunVersionConflict("combined command result changed while committing")
+            await self._inject("family_admission.after_run_control")
+            if accepted:
+                working._family_journal[journal_key] = (
+                    commit.family_mutation_fingerprint,
+                    deepcopy(mutation),
                 )
-            if mutation.projection is not None:
-                self._validate_accepted_command(mutation)
-                assert mutation.budget is not None
-                assert mutation.effects is not None
-                assert mutation.transition is not None
-                self._apply_parent_rollup(
-                    self._budgets[mutation.result.run_id],
-                    mutation.budget,
-                    idempotency_id=f"command:{mutation.result.command_id}",
-                    occurred_at=mutation.result.recorded_at,
-                )
-                self._runs[mutation.result.run_id] = deepcopy(mutation.projection)
-                self._budgets[mutation.result.run_id] = deepcopy(mutation.budget)
-                self._effects[mutation.result.run_id] = deepcopy(mutation.effects)
-                self._transitions[mutation.result.run_id].append(deepcopy(mutation.transition))
-                self._ledger[mutation.result.run_id].extend(deepcopy(mutation.ledger_entries))
-                self._effect_ledger[mutation.result.run_id].extend(
-                    deepcopy(mutation.effect_entries)
-                )
-                self._insert_events(mutation.events)
-            self._commands[key] = deepcopy(mutation.result)
-            return deepcopy(mutation.result)
+                working._family_heads[head_key] = deepcopy(mutation)
+            working._family_results[result_key] = deepcopy(commit.receipt)
+            await self._inject("family_admission.after_family")
+            for name in state_fields:
+                setattr(self, name, getattr(working, name))
+            return deepcopy(commit.receipt)
 
     async def list_transitions(
         self, request_scope: str, run_id: str
@@ -445,6 +736,13 @@ class InMemoryRunControlRepository:
                 ),
             )
             self._next_outbox_position += 1
+
+    async def _inject(self, boundary: str) -> None:
+        if self._before_commit is None:
+            return
+        result = self._before_commit(boundary)
+        if inspect.isawaitable(result):
+            await result
 
     @staticmethod
     def _validate_accepted_admission(mutation: AdmissionMutation) -> None:
