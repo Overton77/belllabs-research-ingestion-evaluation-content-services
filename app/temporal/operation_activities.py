@@ -16,8 +16,7 @@ from app.domain.operation_execution.contracts import (
     OperationExecutionResult,
 )
 from app.domain.run_control.errors import IdempotencyConflict
-from app.temporal.workflow_sandbox import coordinator_workflow_runner
-from app.temporal.workflows.operation import OperationWorkflow
+from app.temporal.registration.activities import agent_cognitive_activities
 
 
 class OperationExecutionActivities:
@@ -40,7 +39,7 @@ class OperationExecutionActivities:
         return result.model_dump(mode="json")
 
 
-def create_operation_worker(
+def create_agent_cognitive_worker(
     client: Client,
     *,
     task_queue: str,
@@ -49,9 +48,7 @@ def create_operation_worker(
     return Worker(
         client,
         task_queue=task_queue,
-        workflows=[OperationWorkflow],
-        workflow_runner=coordinator_workflow_runner(),
-        activities=[activities.execute],
+        activities=agent_cognitive_activities(activities),
     )
 
 

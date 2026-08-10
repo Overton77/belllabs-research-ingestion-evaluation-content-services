@@ -4,13 +4,15 @@ title: Implement canonical StageGraph runtime
 status: ready
 implements: [REQ-BP-SG-001, REQ-BP-SG-002, REQ-BP-SG-003, REQ-BP-SG-004, REQ-BP-SG-005, REQ-BP-SG-006, REQ-BP-SG-007, REQ-BP-SG-008, REQ-BP-SG-009, REQ-BP-SG-010]
 governed_by: [ADR-0003, SPEC-BP-STAGEGRAPH]
-contracts: [CON-BP-STAGEGRAPH-V1, CON-BP-STAGE-DECISION-V1]
+contracts: [CON-BP-STAGEGRAPH-V2, CON-BP-STAGE-DECISION-V1]
 blocked_by: [WP-CP-030, WP-CP-040]
 github_issue: null
 evidence: [docs/migrations_instructions/evidence_v2/WP-BP-010/]
 ---
 
 # Implement canonical StageGraph runtime
+
+Canonical metadata revision: `c48867a240d09a98db9cdfb4937f55176f30adf1`
 
 ## Outcome
 
@@ -31,8 +33,8 @@ Blueprint contracts/compiler, interpreter/kernel, Temporal StageGraph workflow, 
 ## Authorized implementation slice
 
 - Replace StageGraph models in `app/domain/control_plane/contracts.py` with the typed dependency,
-  join, scheduler, cycle, late-result, obligation, and completion contracts in
-  `IMPLEMENTATION_READINESS.md`.
+  join, normalization/canonical-ordering, weighted-group-ring, cycle, slow-sibling, late-result,
+  producer-liability, obligation, and completion contracts in `IMPLEMENTATION_READINESS.md`.
 - Replace `app/domain/orchestration/interpreter.py` with a side-effect-free proposal interpreter
   over an exact accepted projection.
 - Implement family mechanics only in `app/temporal/workflows/stagegraph.py`, using
@@ -55,17 +57,30 @@ schema parity is not required.
 ## Acceptance criteria
 
 - [ ] Structural and join validation is complete.
+- [ ] Pre-publication normalization classifies every collection, applies the complete V2 key
+  registry, preserves semantic arrays, rejects duplicate complete keys/non-NFC identifiers, and
+  produces digest-stable canonical bytes.
 - [ ] Readiness is pure and deterministic.
 - [ ] Downstream `any(1)` starts before a slow sibling completes.
-- [ ] Capacity/fairness prevent oversubscription and starvation.
+- [ ] Initial/resumed weighted-group-ring and per-group candidate cursors advance only with
+  authoritative admission and prevent oversubscription/starvation.
+- [ ] Every dependency disposition and `all`/`any`/`minimum(k)` satisfied/pending/impossible case
+  follows the complete V2 truth table.
+- [ ] Slow-sibling action/arrival routing, absolute late-result veto precedence, authored rule
+  precedence, and exact admit/reject/quarantine effects are deterministic.
 - [ ] Technical retry, stage cycle, and workflow cycle identities are distinct.
 - [ ] Minimal invalidation reuses unaffected immutable outputs.
-- [ ] Completion requires current accepted obligation evidence.
+- [ ] Completion requires current accepted obligation evidence and closure of every producer
+  liability, including child quiescence, reservations/usage, effects, cancellation, and exactly one
+  result disposition.
 
 ## Qualification and evidence
 
-Run `QUAL-BP-STAGEGRAPH-SEMANTICS-RECOVERY`, including captured replay, worker loss, waits,
-cancellation, late results, cycles, and Continue-As-New against canonical fixtures.
+Run `QUAL-BP-STAGEGRAPH-SEMANTICS-RECOVERY`, including normalization/digest stability, the complete
+set-like key registry and semantic-array ordering, canonical byte ordering, duplicate rejection,
+initial/resumed fairness cursors, complete joins/dispositions, captured replay, worker loss, waits,
+cancellation, late-result veto precedence, durable liabilities, cycles, and Continue-As-New against
+canonical V2 fixtures.
 
 The qualification also includes a credential-gated live acceptance test. It must submit through
 the BellLabs API, pass through transactional admission and `BellLabsRunWorkflow`, execute the real

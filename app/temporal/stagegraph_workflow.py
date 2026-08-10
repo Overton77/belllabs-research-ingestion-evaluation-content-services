@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import asdict, replace
+from dataclasses import replace
 from datetime import timedelta
 from typing import Any, cast
 
@@ -19,7 +19,6 @@ with workflow.unsafe.imports_passed_through():
         StageGraphResultDetails,
         TerminalWorkflowCompletion,
     )
-    from app.domain.operation_execution.contracts import OperationWorkflowRequest
     from app.domain.orchestration.contracts import (
         ExecutionIdentity,
         LifecycleCommandOutcome,
@@ -37,7 +36,6 @@ with workflow.unsafe.imports_passed_through():
         StageGraphExecutionError,
         StageGraphInterpreter,
     )
-    from app.temporal.workflows.operation import OperationWorkflow
 
 
 @workflow.defn(name="belllabs.stagegraph")
@@ -213,21 +211,12 @@ class StageGraphWorkflow:
                     ]
                 else:
                     if run_input.durable_operation_children:
-                        operation_calls = [
-                            workflow.execute_child_workflow(
-                                OperationWorkflow.run,
-                                OperationWorkflowRequest(
-                                    semantic_attempt_id=request.identity.semantic_key,
-                                    operation_kind="stage_operation",
-                                    payload=asdict(request),
-                                    task_queue=workflow.info().task_queue,
-                                    timeout_seconds=run_input.task_timeout_seconds,
-                                ),
-                                id=f"operation/{request.identity.semantic_key}",
-                                task_queue=workflow.info().task_queue,
-                            )
-                            for request in requests
-                        ]
+                        raise ApplicationError(
+                            "legacy StageGraph cannot construct exact operation V2 bindings; "
+                            "the StageGraph V2 runtime must supply bound operation requests",
+                            type="exact_operation_binding_required",
+                            non_retryable=True,
+                        )
                     else:
                         operation_calls = [
                             workflow.execute_activity(

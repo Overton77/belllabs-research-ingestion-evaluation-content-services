@@ -34,6 +34,7 @@ from app.domain.operation_execution.contracts import (
     DeepAgentSkillComponent,
     MaterializedWorkspace,
     OperationExecutionRequest,
+    OperationWorkflowRequest,
     RuntimeInvocation,
     SubagentContextSlice,
     SubagentStateSlice,
@@ -381,7 +382,11 @@ class SkillReadingModel(BaseChatModel):
 def runtime_invocation(binding: DeepAgentExecutionBinding) -> RuntimeInvocation:
     base = operation_request()
     payload = base.model_dump(mode="python")
-    payload.update(execution_runtime="deep_agent", deep_agent_binding=binding)
+    payload.update(
+        execution_runtime="deep_agent",
+        native_placement=None,
+        deep_agent_binding=binding,
+    )
     request = OperationExecutionRequest.model_validate(payload)
     operation_binding = bind_operation_execution_request(request)
     return RuntimeInvocation(
@@ -396,6 +401,32 @@ def runtime_invocation(binding: DeepAgentExecutionBinding) -> RuntimeInvocation:
             mount_manifest_digest=sha256_digest("mounts"),
         ),
     )
+
+
+def test_operation_workflow_derives_queue_and_rejects_binding_generation_drift() -> None:
+    binding, _profile, _bundle = exact_fixture()
+    payload = operation_request().model_dump(mode="python")
+    payload.update(
+        execution_runtime="deep_agent",
+        native_placement=None,
+        deep_agent_binding=binding,
+    )
+    operation = OperationExecutionRequest.model_validate(payload)
+    request = OperationWorkflowRequest(
+        semantic_attempt_id=operation.identity.semantic_key,
+        execution_generation=binding.execution_generation,
+        operation_kind="bound_operation",
+        operation=operation,
+    )
+
+    assert request.activity_task_queue == binding.task_queue
+    with pytest.raises(ValueError, match="generation"):
+        OperationWorkflowRequest(
+            semantic_attempt_id=operation.identity.semantic_key,
+            execution_generation=binding.execution_generation + 1,
+            operation_kind="bound_operation",
+            operation=operation,
+        )
 
 
 def registry(

@@ -3,6 +3,7 @@
 Status: canonical implementation companion  
 Applies to: every work package in `implementation_work_packages_v2/`  
 Architecture authority: `ADR-0003` and the canonical `SPEC-CP-*` / `SPEC-BP-*` specifications
+Canonical metadata revision: `c48867a240d09a98db9cdfb4937f55176f30adf1`
 
 ## 1. Implementation posture
 
@@ -126,7 +127,7 @@ domain packages.
 | `CON-CP-WORKSPACE-MANIFEST-V1` | `domain/operation_execution` | MongoDB + object storage | workspace gateway | ownership and mount isolation |
 | `CON-CP-ARTIFACT-PROMOTION-V1` | `domain/operation_execution` | PostgreSQL decision + Mongo metadata + object payload | artifact promotion service | retry/conflict/visibility |
 | `CON-CP-SNAPSHOT-V1` | `domain/operation_execution` | MongoDB metadata + object payload | snapshot service | clone, tamper, reauthorization |
-| `CON-BP-STAGEGRAPH-V1` | `domain/control_plane` | MongoDB | compiler + StageGraph interpreter | publication and join truth tables |
+| `CON-BP-STAGEGRAPH-V2` | `domain/control_plane` | MongoDB | compiler + StageGraph interpreter | normalization, canonical ordering, fairness, joins, late results, and liabilities |
 | `CON-BP-STAGE-DECISION-V1` | `domain/orchestration` | PostgreSQL accepted decisions; Mongo detail | interpreter/application decision service | determinism, fairness, invalidation |
 | `CON-BP-GOAL-DIRECTED-V1` | `domain/control_plane` + `domain/orchestration` | MongoDB definitions/revisions + PostgreSQL accepted decisions | compiler + GoalDirected interpreter | envelope, revisions, convergence |
 | `CON-BP-GOAL-HANDOFF-V1` | `domain/orchestration` | MongoDB metadata; object payload when large | handoff/context service | empty-session resume |
@@ -191,83 +192,281 @@ typed command or observed fact
 
 ## 6. StageGraph executable contract
 
-### 6.1 Authored blueprint
+`CON-BP-STAGEGRAPH-V2` is the active contract for newly published StageGraph blueprints. It defines
+stage identities, edges, joins, operation slots, cycles, concurrency/fairness, waits, linked-run
+slots, the obligation matrix, completion policy, and the executable rules below. This mirror is
+recorded from canonical metadata revision `c48867a240d09a98db9cdfb4937f55176f30adf1`.
 
-`CON-BP-STAGEGRAPH-V1` must be represented by versioned strict models containing:
+### 6.1 Pre-publication normalization and canonical ordering
 
-- exact blueprint identity/revision/digest;
-- unique `StageDefinition` records;
-- typed `StageDependency {stage_id, dependency_class}` records;
-- `JoinPolicy {mode: all|any|minimum, minimum?: int}`;
-- declared input slots, output slots, obligation refs, and allowed operation variants;
-- typed failure, skip, degradation, wait, cancellation, and late-result policies;
-- exact stage-cycle and workflow-cycle policies and limits;
-- a scheduler policy with fairness algorithm/version and `max_parallel_stages`;
-- linked-run slots and completion/obligation policy.
+Normalization is a pure compiler phase between authoring validation and immutable publication. It
+MUST complete before canonical serialization, digest calculation, and publication, in this order:
 
-Parallel `depends_on` and `dependency_classes` collections are not canonical. Every edge is one
-typed dependency record. `concurrency_slots` is replaced by `stage_slot_weight`; operation, model,
-tool, MCP, subagent, provider and resumption capacity belong to the exact operation resource
-envelope, not to an ambiguous stage field.
+1. Validate closed enums, scalar types, identifier constraints, references, join cardinalities,
+   policy coverage, and numeric ranges.
+2. Materialize only authored-definition defaults explicitly declared by V2, including the
+   `default` fairness group case below and typed values for absent optional authored fields.
+3. Convert every set-like collection to its contract-defined order, while preserving arrays whose
+   order is explicitly semantic, such as late-policy rule precedence.
+4. Serialize and digest the normalized payload using the canonical serialization decision in
+   `SPEC-CP-DEFINITIONS`, then publish that exact payload and digest.
 
-### 6.2 Dependency and join decisions
+Normalization never reads environment state, aliases, clocks, provider state, or mutable defaults.
+A published blueprint is never normalized, defaulted, reordered, or mutated again; execution
+consumes its exact normalized bytes or a digest-verified immutable reference. If loaded content is
+not byte-consistent with the published digest, execution fails closed rather than repairing it.
 
-An accepted dependency result is one whose applicability matches the current workflow/stage cycle
-and whose evidence/result admission decision is current.
+Unless a field declares numeric ordering, every V2 identifier and ordering string is compared
+lexicographically by its canonical UTF-8 bytes, treating each byte as unsigned. Locale collation,
+case folding, natural-number ordering, platform collation, and runtime Unicode normalization are
+forbidden. Identifiers MUST already be Unicode NFC at authoring validation; a non-NFC identifier is
+rejected rather than silently rewritten. Numeric fields compare by their declared integer value.
+Tuple fields compare left-to-right and stop at the first unequal field.
 
-| Dependency class | Accepted success | Admitted degradation | Failed/skipped/unavailable | Blocks completion |
-|---|---:|---:|---:|---:|
-| `required` | satisfies | no | yes | yes |
-| `degradable` | satisfies | satisfies with degradation | until policy admits degradation | until disposition |
-| `optional` | satisfies | satisfies | does not block after disposition | no |
-| `advisory` | may enrich | may enrich | never blocks | no |
+Every collection in a published V2 blueprint MUST be classified by schema as either **set-like** or
+an **authored semantic array**. Unclassified collections are publication errors. Set-like
+collections are sorted during normalization by the following complete key registry:
 
-Join calculation uses only dependencies with an accepted current disposition:
+| Set-like collection | Canonical ascending ordering key |
+|---|---|
+| `stages` | `(stage_id)` |
+| `stage_mappings` | `(stage_id, mapping_id)` |
+| `joins` | `(consumer_stage_id, join_id)` |
+| `dependencies` / edges | `(consumer_stage_id, join_id, producer_stage_id, producer_output_slot_id, dependency_id)` |
+| stage input slots | `(stage_id, input_slot_id)` |
+| stage output slots | `(stage_id, output_slot_id)` |
+| stage obligation slots | `(stage_id, obligation_slot_id)` |
+| workflow obligation slots | `(obligation_slot_id)` |
+| operation slots | `(stage_id, operation_slot_id)` |
+| allowed operation variants | `(stage_id, operation_slot_id, operation_variant_id)` |
+| linked-run slots | `(owner_stage_presence, owner_stage_id, linked_run_slot_id)` |
+| obligation-matrix rows | `(obligation_scope, owner_stage_presence, owner_stage_id, obligation_slot_id, evidence_slot_id)` |
+| fairness groups | `(group_id)` |
+| policy definitions | `(policy_kind, scope_kind, scope_id, policy_id)` |
+| waits | `(scope_kind, scope_id, wait_id)` |
+| cycle limits / stopping conditions | `(scope_kind, scope_id, condition_kind, condition_id)` |
+| invalidation and reuse declarations | `(scope_kind, scope_id, declaration_kind, declaration_id)` |
+| concurrency, budget, and capacity ceilings | `(scope_kind, scope_id, dimension_kind, dimension_id)` |
+| linked-run dependency declarations | `(linked_run_slot_id, dependency_id)` |
+| completion-obligation references | `(obligation_scope, owner_stage_presence, owner_stage_id, obligation_slot_id)` |
 
-- `all`: every dependency has a satisfying disposition under its class;
-- `any`: the first satisfying dependency releases the stage;
-- `minimum(k)`: the kth satisfying dependency releases the stage;
-- impossibility is detected when remaining undecided dependencies cannot satisfy the join;
-- a late sibling is admitted, rejected, or quarantined by its frozen policy and never revokes an
-  already accepted downstream result implicitly.
+Every textual component in these keys uses the canonical UTF-8 bytewise comparison above. Every
+numeric component uses unsigned integer order. Presence fields use `0` for absent and `1` for
+present; an absent associated identifier is the typed non-user value `NO_OWNER_STAGE`, which sorts
+before every present identifier. Enum-valued key fields (`obligation_scope`, `policy_kind`,
+`scope_kind`, `condition_kind`, `declaration_kind`, and `dimension_kind`) are compared by their
+canonical lowercase schema token as UTF-8 bytes, not implementation enum ordinals.
 
-### 6.3 Deterministic frontier and fairness
+The listed final identity field is the explicit tie-breaker after all preceding scope fields. A
+complete-key collision is a duplicate-identity publication error; authoring order, database
+insertion order, object ID, hash-map iteration, and storage-generated IDs MUST NOT break ties. If a
+V2 extension adds another set-like collection, its accepted schema revision MUST add a total key to
+this registry before publication; a generic runtime fallback sort is forbidden.
 
-The initial fairness algorithm is **weighted round-robin by authored fairness group**, with stable
-ordering by `(priority, group_id, stage_id, mapped_instance_id)`. The accepted projection carries
-the per-group cursor. One decision considers a stable sorted candidate set and admits a stage only
-when every declared capacity and budget dimension can be reserved. A skipped candidate does not
-consume the cursor. This algorithm is versioned in the blueprint/ERC.
+The following arrays have semantic order and MUST preserve their authored element order exactly
+through normalization and digesting rather than be sorted:
 
-The interpreter returns proposals only. Reservation and dispatch occur after the application
-authority accepts the proposed frontier. After each accepted child result, the workflow applies
-simultaneously available results in stable semantic-identity order, reruns the interpreter, and
-launches newly admitted children without waiting for unrelated siblings.
+- `slow_sibling_policy.triggers`, whose first matching trigger wins;
+- `late_result_policy.rules`, whose first matching non-veto rule wins;
+- any explicitly declared operation fallback/selection sequence;
+- any explicitly declared evaluation, repair, or stopping-rule precedence sequence; and
+- any explicitly declared sequential input-binding or output-assembly sequence.
 
-### 6.4 Stage projection and decisions
+Every semantic-array element MUST carry a unique `rule_id`, `step_id`, or other schema-declared
+identity suitable for evidence and diagnostics, but that identity does not reorder the array.
+Collections that merely express membership—including stages, dependencies, slots, obligations,
+groups, allowed variants, declarations, and policy definitions—are set-like even when authored in
+JSON/YAML array syntax. Behavioral order MUST be represented either by one of the semantic arrays
+above or by an explicit numeric rank/ordinal field whose containing set-like collection still uses
+its registered canonical key.
 
-Stage projection states are:
+### 6.2 Authored fairness groups and weighted round-robin
 
-```text
-unavailable | blocked | ready | reserved | running | waiting | paused |
-completed | degraded | failed | cancelled | skipped | invalidated
-```
+Every published V2 blueprint contains a non-empty `fairness_groups` collection. Each entry has a
+unique non-empty `group_id` and an integer `weight` in `[1, 65535]`. An explicitly empty collection
+and boolean, fractional, zero, negative, out-of-range, duplicate, or unknown-group values are
+publication errors.
 
-`CON-BP-STAGE-DECISION-V1` is a discriminated union of:
+Each stage names one fairness group. An omitted stage group means the exact group ID `default`. If
+the author omits the entire fairness block and no stage names a group, compilation materializes
+`[{group_id: "default", weight: 1}]` into the immutable published blueprint. In every other case,
+every referenced group, including `default` when implied by an omitted stage group, MUST have an
+authored weight; the compiler and interpreter MUST NOT invent a missing weight.
 
-```text
-frontier_proposal | stage_result_proposal | wait_proposal | stage_cycle_proposal |
-workflow_cycle_proposal | invalidation_proposal | reuse_proposal |
-skip_proposal | degradation_proposal | completion_proposal | failure_proposal
-```
+The interpreter constructs the immutable weighted group ring as follows:
 
-Every decision carries decision ID, interpreter/schema version, blueprint and accepted-projection
-digests, semantic identities, reason code, applicability/stale frontier, required reservations,
-input/evidence refs, and proposed projection changes.
+1. Sort groups by canonical UTF-8 bytewise `group_id` ascending.
+2. For round `r = 1..max(weight)`, append each sorted group whose weight is at least `r`.
+3. Initialize the group-ring cursor to index `0`. Initialize every per-group candidate cursor to
+   the typed `BEFORE_FIRST` cursor state, which compares before every candidate key and is not a
+   user-representable identity.
 
-Completion requires every required obligation to have accepted current evidence and every required
-dependency, child, reservation, effect, cancellation, and late-result liability to have a declared
-settled disposition.
+A ready candidate has the total typed identity:
+
+`(stage_id, mapped_instance_presence, mapped_instance_id, workflow_cycle_ordinal, stage_cycle_ordinal, operation_slot_id)`
+
+`mapped_instance_presence` is the integer tag `0` when mapping is absent and `1` when present. When
+absent, `mapped_instance_id` is the typed sentinel `NO_MAPPED_INSTANCE`, which is not a valid
+authored ID and sorts before every present mapped ID. Cycle ordinals are unsigned integers.
+`operation_slot_id` identifies the exact declared operation within the stage/cycle; a semantic
+operation-attempt ID is created only after admission and therefore MUST NOT participate in
+pre-admission ordering. The candidate ordering key is `(priority, candidate_identity)`, where lower
+integer priority sorts first and identity fields follow the canonical tuple rules above. This
+identity distinguishes stages, mapped expansions, semantic cycles, and multiple operation slots
+without relying on a runtime-generated attempt ID.
+
+For each frontier selection, ready candidates in a group are sorted by the total candidate ordering
+key. Scanning from `BEFORE_FIRST` starts at the first candidate. Otherwise it starts at the first
+key strictly greater than the stored key and wraps once; if the stored candidate is no longer
+ready, its key remains the exclusive lower bound before wrap. Group slots are scanned from the
+group-ring cursor and wrap once. A candidate is selectable only if all compiled authority,
+capacity, reservation, concurrency, budget, resumption, and policy gates accept it atomically.
+
+On successful authoritative admission, and in the same transaction as its reservations, the
+group-ring cursor advances to `(selected_ring_index + 1) mod ring_length` and that group's candidate
+cursor becomes the admitted candidate's complete ordering key. A candidate that cannot be admitted
+is skipped for that scan and advances neither cursor. If a complete ring scan yields no admission,
+selection stops without cursor movement. After each success the next selection starts from the
+newly accepted cursors and current accepted capacity facts. This produces the authored long-run
+weight ratio whenever groups remain continuously admissible, while a blocked group cannot consume
+turns or prevent another group from being scanned. Simultaneously accepted results are applied by
+their total semantic identity using the same typed UTF-8/numeric tuple rules before this algorithm
+is run again.
+
+### 6.3 Dependency dispositions and joins
+
+An edge has exactly one accepted upstream disposition from this closed set: `unresolved`,
+`fulfilled`, `degraded`, `omitted`, `failed`, `cancelled`, or `invalid`. `fulfilled` requires
+accepted current evidence for the edge's declared output. `degraded`, `omitted`, and `invalid` are
+explicit authoritative decisions, never inferences from provider status, failure, or timeout.
+
+When previously accepted evidence is found stale, malformed, digest-invalid, outside the current
+invalidation frontier, or otherwise inadmissible, authority replaces that edge generation's
+disposition with `invalid`; it never silently returns the same generation to `unresolved`. If
+frozen repair policy permits replacement evidence, the accepted repair/invalidation decision
+creates a new dependency generation with disposition `unresolved` and lineage to the `invalid`
+generation.
+
+The satisfaction truth table is:
+
+| Dependency class | `fulfilled` | `degraded` | `omitted` | `failed` | `cancelled` | `invalid` | `unresolved` |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `required` | satisfies | does not satisfy | does not satisfy | does not satisfy | does not satisfy | does not satisfy | pending |
+| `degradable` | satisfies | satisfies | does not satisfy | does not satisfy | does not satisfy | does not satisfy | pending |
+| `optional` | satisfies | satisfies | satisfies | satisfies | satisfies | satisfies | pending |
+| `advisory` | non-gating | non-gating | non-gating | non-gating | non-gating | non-gating | non-gating |
+
+An accepted upstream failure satisfies a degradable edge only after authority emits the separate
+accepted `degraded` disposition required by that edge's frozen degradation policy. An optional edge
+waits while unresolved but, once settled, its presence or typed absence satisfies the gate.
+Advisory edges are recorded and may inform later evaluations, but are excluded from join
+cardinality and can neither satisfy nor make a join impossible.
+
+For a join, let `N` be its non-advisory edge count, `S` the count that satisfies the table, and `U`
+the count that is unresolved and can still reach a satisfying disposition. All remaining
+non-advisory edges are terminally non-satisfying.
+
+- `all` is satisfied exactly when `S = N`, impossible exactly when `S + U < N`, and pending
+  otherwise.
+- `any` is satisfied exactly when `S >= 1`, impossible exactly when `S = 0` and `U = 0`, and pending
+  otherwise.
+- `minimum(k)` is satisfied exactly when `S >= k`, impossible exactly when `S + U < k`, and pending
+  otherwise.
+
+Publication rejects `any` with `N = 0` and rejects `minimum(k)` unless `N > 0` and `1 <= k <= N`.
+`all` with `N = 0` is vacuously satisfied. Once a join is satisfied, later sibling settlement does
+not revoke work already admitted from that accepted projection; using newly admitted or changed
+evidence requires the frozen invalidation/cycle policy and a new accepted decision.
+
+For linked or otherwise separately admitted results, parent result decisions map deterministically:
+`admit` emits the evidence-backed `fulfilled` or `degraded` disposition declared by the result;
+`conditionally_admit` remains `unresolved` until every recorded condition is accepted; `reject`
+emits `failed` for required/degradable edges, `omitted` for optional edges, and only an advisory
+observation for advisory edges; `defer` remains `unresolved`. Provider completion alone emits none
+of these dispositions.
+
+### 6.4 Slow siblings, late results, and durable liabilities
+
+A **slow sibling** is an unresolved producer whose sibling join has already become satisfied and
+released at least one consumer. Each join MUST freeze a `slow_sibling_policy` containing:
+
+- one or more triggers from `join_released`, `deadline_reached`, `accepted_budget_pressure`, or
+  `cancellation_requested`;
+- trigger precedence in authored list order;
+- an execution action of `continue` or `request_cancel`; and
+- an arrival route of `evaluate_late_result` or `quarantine`.
+
+Triggers are evaluated only from accepted projection facts. `join_released` fires in the transition
+that first admits a consumer from that join; `deadline_reached` uses the frozen deadline and
+accepted time fact; `accepted_budget_pressure` requires an authoritative capacity/budget fact; and
+`cancellation_requested` requires an accepted cancellation command. `continue` leaves the producer
+eligible to finish. `request_cancel` enters the shared cancellation reconciliation saga; it does
+not imply that work stopped or that charges/effects settled.
+
+A result is **late** when it arrives after any frozen late trigger is true. The closed trigger set
+is `consumer_already_admitted`, `dependency_terminally_disposed`, `producer_invalidated`,
+`generation_superseded`, `evidence_invalid`, `run_cancelling`, `terminalization_started`, or
+`run_terminal`.
+
+Late-result decision composition has absolute precedence:
+
+1. Evaluate absolute vetoes in this fixed order before any slow-sibling route or authored
+   late-policy rule: `run_terminal` or `terminalization_started` yields `quarantine`;
+   `generation_superseded`, `producer_invalidated`, or `evidence_invalid` yields `quarantine`;
+   `run_cancelling` yields `quarantine`; `dependency_terminally_disposed` yields `reject`. The first
+   matching veto wins and no authored rule may override it. `evidence_invalid` is true exactly when
+   authority has classified the arriving evidence as stale, malformed, digest-invalid, or outside
+   the current invalidation frontier.
+2. If no absolute veto matched and the applicable slow-sibling policy's arrival route is
+   `quarantine`, the decision is `quarantine`.
+3. If the route is `evaluate_late_result`, evaluate the authored `late_result_policy` in list order
+   and use the first matching `admit`, `reject`, or `quarantine` decision.
+4. If no late trigger is true, use ordinary result-admission rules rather than the late-result
+   policy.
+
+The authored late-result policy covers every reachable non-veto late case, including
+`consumer_already_admitted`; publication rejects uncovered cases. An arrival that matches more than
+one absolute veto uses the fixed order above. An arrival that matches multiple authored predicates
+uses authored list order. Thus absolute safety state dominates slow-sibling routing, and a
+slow-sibling quarantine route dominates discretionary late admission.
+
+The decisions have these exact effects:
+
+- `admit` records current accepted evidence and its dependency disposition, then includes it only
+  in subsequent interpreter calculations. It never changes terminal state or inputs already frozen
+  for admitted work. If consuming it would change such work, the blueprint must authorize a new
+  stage/workflow cycle and invalidation frontier.
+- `reject` records the immutable rejection and reason and contributes no evidence. If the edge is
+  still unresolved, it projects `failed` for a required/degradable edge, `omitted` for an optional
+  edge, or a non-gating observation for an advisory edge; an existing terminal disposition is
+  unchanged.
+- `quarantine` durably stores the result content and reason outside accepted evidence and
+  obligation projections. If the edge is still unresolved, it applies the same class-specific
+  terminal disposition as `reject`, while preserving the quarantined payload for audit or
+  authorized review. Review cannot reopen a terminal run; before terminalization, later use
+  requires a new authorized admission decision and any required cycle/invalidation decision.
+
+Admission, rejection, or quarantine of a result settles only the result-disposition portion of its
+producer liability. Every admitted producer has a durable liability covering child
+quiescence/closure, reservations and observed usage, effect claims, cancellation, and result
+disposition. Early join release never deletes or transfers that liability. The liability closes
+only when the child is terminal or authoritatively quiesced, every reservation and charge is
+settled, every effect claim has an accepted settlement (including an explicitly permitted
+ambiguous settlement), cancellation is reconciled, and the result has exactly one decision.
+
+The interpreter may propose StageGraph completion only when `REQ-BP-SG-010` is satisfied and every
+producer liability is closed. Therefore a continued or cancelling slow sibling may coexist with
+downstream execution but cannot outlive terminalization. A quarantined or rejected result permits
+completion only after its remaining liability fields settle. Terminalization freezes all
+StageGraph projections; later arrivals are retained under the frozen reject/quarantine rule and
+cannot alter outcome, obligations, reuse, or completion evidence.
+
+### 6.5 Stage decision projection
+
+`CON-BP-STAGE-DECISION-V1` defines readiness, frontier admission, stage/workflow evaluation,
+invalidation, reuse, skip/degrade, late-result, and completion proposals. Under a V2 blueprint its
+proposals carry the exact fairness cursors, dependency disposition, matched policy trigger/rule,
+result decision, and liability-settlement references required above.
 
 ## 7. GoalDirected executable contract
 
@@ -360,6 +559,28 @@ the result.
 The workflow follows `prepare -> bind -> execute/reconnect -> reconcile -> persist proposal ->
 settle -> return manifest`. Technical retries reuse the semantic attempt and effect identities.
 
+The V2 workflow input contains one exact typed `OperationExecutionRequest`; deprecated family
+payload kinds are not accepted. For Deep Agent execution, the activity queue is derived only from
+the immutable `DeepAgentExecutionBinding`. Native execution carries one content-addressed,
+qualified native placement in that same operation request. The wrapper does not duplicate or
+override either placement's queue. `OperationWorkflow` is registered only on coordinator/family
+workflow workers; the `agent_cognitive` worker polls only `operation.execute`.
+
+The exact operation envelope is retained in Temporal history because the current canonical
+operation contract requires replay-stable execution intent and no accepted immutable-reference
+repository already replaces it. Deployment therefore requires TLS for Temporal transport,
+encryption at rest for Temporal persistence/history, namespace-level authorization, and worker
+service identities restricted so coordinator/family workers may schedule the declared cognitive
+queue while cognitive workers may poll only that queue. These deployment controls are
+preconditions, not a second BellLabs authority. Secrets and secret values remain forbidden from
+the envelope. The implementation bounds the complete serialized workflow wrapper to 2,000,000
+bytes, prompt segments to 64, semantic/placement/task-queue/frontier/async-child identifier lengths,
+and compact frontier/async-child collections to 1,024 entries. Runtime async-child signals reject
+an invalid identifier or a 1,025th unique child non-retryably; duplicate child signals remain
+idempotent. Signal-with-Start child identities delivered before run initialization are merged after
+the request's authored child order and in signal-delivery order, with deterministic de-duplication
+and the same 1,024-child ceiling; initialization fails closed if the combined set exceeds it.
+
 ### 8.1 Initial async-subagent adapter
 
 Deep Agents `0.7.5` exposes `AsyncSubAgent` and `AsyncSubAgentMiddleware`. The middleware uses the
@@ -385,7 +606,7 @@ The packages delete or disconnect these active paths when their new owner lands:
 | Direct family operation activities | `OperationWorkflow` children | WP-CP-030 acceptance |
 | OpenAI Agents SDK operation runtime and Temporal plugin | Deep Agents adapter/materializer | WP-CP-040 acceptance |
 | Agent Server StageGraph/GoalDirected macro graphs | Temporal family workflows | corresponding WP-BP acceptance |
-| Parallel dependency maps and ambiguous stage concurrency fields | typed StageGraph V1 contracts above | WP-BP-010 contract tests |
+| Parallel dependency maps and ambiguous stage concurrency fields | typed StageGraph V2 contracts above | WP-BP-010 contract tests |
 | Provider/session completion authority | accepted facts + interpreter + reducer | owning package tests |
 | Prototype async-child records tied to remote graphs | `CON-CP-ASYNC-SUBAGENT-V1` | WP-CP-045 acceptance |
 

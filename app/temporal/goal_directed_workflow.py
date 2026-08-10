@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import asdict, replace
 from datetime import timedelta
-from typing import Any, cast
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
@@ -16,15 +15,12 @@ with workflow.unsafe.imports_passed_through():
         GoalDirectedResultDetails,
         TerminalWorkflowCompletion,
     )
-    from app.domain.operation_execution.contracts import OperationWorkflowRequest
     from app.domain.orchestration.contracts import (
-        GoalAgentRunIdentity,
         GoalDirectedRunInput,
         GoalDirectedRunResult,
         GoalExecutionResult,
         GoalHandoffRequest,
         GoalHandoffResult,
-        GoalIterationIdentity,
         GoalVerificationRequest,
         GoalVerificationResult,
         LifecycleCommandOutcome,
@@ -34,7 +30,6 @@ with workflow.unsafe.imports_passed_through():
         GoalDirectedExecutionError,
         GoalDirectedInterpreter,
     )
-    from app.temporal.workflows.operation import OperationWorkflow
 
 
 @workflow.defn(name="belllabs.goal-directed")
@@ -121,27 +116,11 @@ class GoalDirectedWorkflow:
 
             try:
                 if run_input.durable_operation_children:
-                    operation_result = await workflow.execute_child_workflow(
-                        OperationWorkflow.run,
-                        OperationWorkflowRequest(
-                            semantic_attempt_id=claim.identity.semantic_key,
-                            operation_kind="goal_iteration",
-                            payload=asdict(claim),
-                            task_queue=workflow.info().task_queue,
-                            timeout_seconds=run_input.task_timeout_seconds,
-                        ),
-                        id=f"operation/{claim.identity.semantic_key}",
-                        task_queue=workflow.info().task_queue,
-                    )
-                    execution_payload = cast(dict[str, Any], operation_result.result)
-                    execution_identity = cast(dict[str, Any], execution_payload.pop("identity"))
-                    iteration_identity = cast(dict[str, Any], execution_identity.pop("iteration"))
-                    execution = GoalExecutionResult(
-                        identity=GoalAgentRunIdentity(
-                            iteration=GoalIterationIdentity(**iteration_identity),
-                            **execution_identity,
-                        ),
-                        **cast(Any, execution_payload),
+                    raise ApplicationError(
+                        "legacy GoalDirected cannot construct exact operation V2 bindings; "
+                        "the GoalDirected V2 runtime must supply bound operation requests",
+                        type="exact_operation_binding_required",
+                        non_retryable=True,
                     )
                 else:
                     execution = await workflow.execute_activity(
@@ -167,32 +146,11 @@ class GoalDirectedWorkflow:
             )
             try:
                 if run_input.durable_operation_children:
-                    verifier_attempt_id = f"{claim.identity.semantic_key}:verifier"
-                    operation_result = await workflow.execute_child_workflow(
-                        OperationWorkflow.run,
-                        OperationWorkflowRequest(
-                            semantic_attempt_id=verifier_attempt_id,
-                            operation_kind="goal_verification",
-                            payload=asdict(verification_request),
-                            task_queue=workflow.info().task_queue,
-                            timeout_seconds=run_input.task_timeout_seconds,
-                        ),
-                        id=f"operation/{verifier_attempt_id}",
-                        task_queue=workflow.info().task_queue,
-                    )
-                    verification_payload = cast(dict[str, Any], operation_result.result)
-                    verification_identity = cast(
-                        dict[str, Any], verification_payload.pop("identity")
-                    )
-                    iteration_identity = cast(
-                        dict[str, Any], verification_identity.pop("iteration")
-                    )
-                    verification = GoalVerificationResult(
-                        identity=GoalAgentRunIdentity(
-                            iteration=GoalIterationIdentity(**iteration_identity),
-                            **verification_identity,
-                        ),
-                        **cast(Any, verification_payload),
+                    raise ApplicationError(
+                        "legacy GoalDirected cannot construct exact operation V2 bindings; "
+                        "the GoalDirected V2 runtime must supply bound operation requests",
+                        type="exact_operation_binding_required",
+                        non_retryable=True,
                     )
                 else:
                     verification = await workflow.execute_activity(

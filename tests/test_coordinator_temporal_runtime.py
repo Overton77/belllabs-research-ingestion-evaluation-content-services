@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import inspect
+from dataclasses import asdict, dataclass
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -17,6 +18,7 @@ from app.domain.control_plane.contracts import (
 )
 from app.domain.coordinator.launch import BlueprintFamily, WorkflowResultRecord
 from app.domain.orchestration.contracts import (
+    BellLabsRunInput,
     GoalDirectedRunInput,
     GoalExecutionClaim,
     GoalExecutionResult,
@@ -218,7 +220,7 @@ async def test_fastmcp_first_all_application_worker_factories_validate() -> None
     )
     from app.temporal.operation_activities import (
         OperationExecutionActivities,
-        create_operation_worker,
+        create_agent_cognitive_worker,
     )
     from app.temporal.schema_grounding_activities import (
         SchemaGroundingActivities,
@@ -271,7 +273,7 @@ async def test_fastmcp_first_all_application_worker_factories_validate() -> None
                 operations=operations,
                 artifacts=artifacts,
             ),
-            create_operation_worker(
+            create_agent_cognitive_worker(
                 environment.client,
                 task_queue="fastmcp-first-operation",
                 activities=operations,
@@ -294,7 +296,7 @@ async def test_fastmcp_first_all_application_worker_factories_validate() -> None
 
 
 @pytest.mark.asyncio
-async def test_family_submitter_and_worker_set_run_and_replay_both_families() -> None:
+async def test_root_and_family_workers_replay_both_legacy_family_fixtures() -> None:
     try:
         environment = await WorkflowEnvironment.start_time_skipping()
     except RuntimeError as error:
@@ -323,40 +325,46 @@ async def test_family_submitter_and_worker_set_run_and_replay_both_families() ->
             task_queues=queues,
             activities=activities,
         )
-        submitter = TemporalWorkflowSubmitter(
-            environment.client,
-            stagegraph_task_queue=queues.stagegraph,
-            goal_directed_task_queue=queues.goal_directed,
+        stage_input = stagegraph_input(materialize=True)
+        goal_input = goal_directed_input(materialize=True)
+        stage_root = BellLabsRunInput(
+            schema_version="belllabs.temporal-root.v1",
+            run_id=stage_input.run_id,
+            request_scope=stage_input.request_scope,
+            effective_configuration_digest=stage_input.effective_configuration_digest,
+            workflow_type_digest=stage_input.blueprint_digest,
+            family=BlueprintFamily.STAGE_GRAPH.value,
+            family_input=asdict(stage_input),
+            family_task_queue=queues.stagegraph,
+        )
+        goal_root = BellLabsRunInput(
+            schema_version="belllabs.temporal-root.v1",
+            run_id=goal_input.run_id,
+            request_scope=goal_input.request_scope,
+            effective_configuration_digest=goal_input.effective_configuration_digest,
+            workflow_type_digest=goal_input.blueprint_digest,
+            family=BlueprintFamily.GOAL_DIRECTED.value,
+            family_input=asdict(goal_input),
+            family_task_queue=queues.goal_directed,
         )
         async with workers.stagegraph, workers.goal_directed:
-            stage_submission = await submitter.submit(
-                stagegraph_input(materialize=True),
-                workflow_id="coordinator-stagegraph-runtime-test",
-                blueprint_family=BlueprintFamily.STAGE_GRAPH,
+            stage_result = await environment.client.execute_workflow(
+                BellLabsRunWorkflow.run,
+                stage_root,
+                id=stage_root.workflow_id,
+                task_queue=queues.stagegraph,
             )
-            goal_submission = await submitter.submit(
-                goal_directed_input(materialize=True),
-                workflow_id="coordinator-goal-directed-runtime-test",
-                blueprint_family=BlueprintFamily.GOAL_DIRECTED,
-            )
-            stage_result = await environment.client.get_workflow_handle_for(
-                StageGraphWorkflow.run,
-                stage_submission.workflow_id,
-            ).result()
-            goal_result = await environment.client.get_workflow_handle_for(
-                GoalDirectedWorkflow.run,
-                goal_submission.workflow_id,
-            ).result()
-            repeated_stage_submission = await submitter.submit(
-                stagegraph_input(materialize=True),
-                workflow_id=stage_submission.workflow_id,
-                blueprint_family=BlueprintFamily.STAGE_GRAPH,
+            goal_result = await environment.client.execute_workflow(
+                BellLabsRunWorkflow.run,
+                goal_root,
+                id=goal_root.workflow_id,
+                task_queue=queues.goal_directed,
             )
             stage_history = await environment.client.get_workflow_handle(
-                stage_submission.workflow_id
+                stage_root.workflow_id
             ).fetch_history()
             goal_history = await environment.client.get_workflow_handle(
-                goal_submission.workflow_id
+                goal_root.workflow_id
             ).fetch_history()
 
         await Replayer(
@@ -368,11 +376,8 @@ async def test_family_submitter_and_worker_set_run_and_replay_both_families() ->
             workflow_runner=coordinator_workflow_runner(),
         ).replay_workflow(goal_history)
 
-    assert stage_submission.temporal_run_id
-    assert goal_submission.temporal_run_id
-    assert repeated_stage_submission == stage_submission
-    assert stage_result.output_refs == {"execute": ("artifact:execute",)}
-    assert goal_result.stop_reason == "verified_completion"
+    assert stage_result["output_refs"] == {"execute": ["artifact:execute"]}
+    assert goal_result["stop_reason"] == "verified_completion"
     assert {record.blueprint_family for record in completion.records} == {
         BlueprintFamily.STAGE_GRAPH,
         BlueprintFamily.GOAL_DIRECTED,
@@ -392,6 +397,14 @@ async def test_submitter_rejects_family_input_mismatch_before_temporal_call() ->
             workflow_id="wrong-family",
             blueprint_family=BlueprintFamily.GOAL_DIRECTED,
         )
+
+
+def test_legacy_family_durable_paths_fail_closed_without_payload_wrappers() -> None:
+    for family_workflow in (StageGraphWorkflow, GoalDirectedWorkflow):
+        source = inspect.getsource(family_workflow)
+        assert "OperationWorkflowRequest(" not in source
+        assert 'type="exact_operation_binding_required"' in source
+        assert "non_retryable=True" in source
 
 
 @dataclass
@@ -441,5 +454,8 @@ async def test_production_worker_fails_closed_before_startup_without_real_adapte
         "get_settings",
         lambda: SimpleNamespace(coordinator_launch_enabled=True),
     )
-    with pytest.raises(RuntimeError, match="requires concrete StageGraph and GoalDirected"):
+    with pytest.raises(
+        RuntimeError,
+        match="requires a deployment WorkerActivityCompositionFactory",
+    ):
         await production_worker.main()

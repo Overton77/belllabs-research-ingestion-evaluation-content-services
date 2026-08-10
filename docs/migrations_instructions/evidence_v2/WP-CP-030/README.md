@@ -133,3 +133,101 @@ Every WP-CP-030 requirement has executable evidence. Stable root and operation i
 cross-family execution, captured-history replay, ordered messaging, generation rejection,
 cancellation/late-result policy, linked-run admission, continuity, semantic fork, centralized
 registration, drift checks, and shared repository gates pass. WP-CP-030 is accepted.
+
+## Foundation amendment addendum — BP runtime preparation
+
+Recorded: 2026-08-10
+Amendment base: `cfe9db22580678d1dc563e93087283f823579442`
+Canonical metadata revision: `c48867a240d09a98db9cdfb4937f55176f30adf1`
+
+This addendum preserves the historical acceptance evidence above. It repairs the frozen generic
+operation seam required before parallel BP implementation:
+
+- `OperationWorkflowRequest` is versioned as `belllabs.operation-workflow.v2` and contains one
+  exact typed `OperationExecutionRequest`, not an untyped family payload.
+- `OperationWorkflow` is registered as `belllabs.operation.v2`, schedules only
+  `operation.execute`, and derives its activity queue from the exact Deep Agent binding or the
+  content-addressed native placement in the operation request.
+- Deprecated `stage_operation`, `goal_iteration`, and `goal_verification` wrapper kinds fail closed
+  at contract validation. Legacy family modules now fail non-retryably instead of constructing
+  invalid payload wrappers or falling back when durable children are requested. Family semantics
+  remain owned by their BP branches.
+- Coordinator/family workers retain `OperationWorkflow`; the `agent_cognitive` worker registers
+  only `operation.execute`, so it exposes no direct workflow-start surface.
+- Coordinator launch requires a deployment-supplied `WorkerActivityCompositionFactory`. The
+  repository does not claim a runnable production Deep Agent worker when this factory is absent.
+
+Executable amendment evidence is in `tests/test_operation_execution.py` (strict V2 contract,
+complete-wrapper history bounds, bounded async-child signals, Signal-with-Start merge/query/result
+continuity, combined request/signal ceiling rejection, deprecated-kind rejection, and
+production-shaped cross-queue Temporal execution),
+`tests/test_coordinator_temporal_runtime.py` (worker factory/composition guard), and
+`tests/test_web_research_temporal_smoke.py` (root-only forced-durable legacy StageGraph
+non-retryable failure with persisted binding), and
+`tests/acceptance/control_plane/test_wp_cp_030.py` (versioned registry regression). This addendum
+does not reopen or rewrite the original WP-CP-030 disposition.
+
+Amendment code/test paths:
+
+- `app/domain/operation_execution/contracts.py`
+- `app/application/operation_execution.py`
+- `app/application/web_research_coordinator_live.py`
+- `app/temporal/workflows/operation.py`
+- `app/temporal/operation_activities.py`
+- `app/temporal/registration/activities.py`
+- `app/temporal/registration/workflows.py`
+- `app/temporal/worker.py`
+- `app/temporal/stagegraph_workflow.py`
+- `app/temporal/goal_directed_workflow.py`
+- `tests/test_operation_execution.py`
+- `tests/test_web_research_temporal_smoke.py`
+- `tests/test_coordinator_temporal_runtime.py`
+- `tests/acceptance/control_plane/test_wp_cp_030.py`
+- `tests/acceptance/control_plane/test_wp_cp_040.py`
+- `tests/acceptance/control_plane/test_wp_cp_040_live.py`
+
+Amendment verification:
+
+```text
+uv run pytest -q tests/test_operation_execution.py \
+  tests/test_web_research_temporal_smoke.py \
+  tests/acceptance/control_plane/test_wp_cp_030.py \
+  tests/acceptance/control_plane/test_wp_cp_040.py \
+  tests/test_coordinator_temporal_runtime.py
+45 passed; no skips
+
+uv run ruff check app tests
+All checks passed!
+
+uv run mypy app
+Success: no issues found in 321 source files
+
+git diff --check
+exit 0
+
+full applicable offline suite (environment gates applied)
+579 passed, 33 skipped, 5 deselected
+```
+
+The five environment-dependent deselections were explicit and limited to:
+
+- integration tests requiring an available local application PostgreSQL service;
+- workspace-external Node/reviewed-artifact fixtures unavailable inside this isolated worktree; and
+- a test bound to an environment-specific LangSmith project.
+
+The 33 skips are the suite's declared service/credential/platform gates. No fake credentials,
+fallback fixtures, or `.env` values were introduced. The credential-gated WP-CP-040 live vertical
+also passed; its exact sanitized runtime evidence is recorded in the WP-CP-040 amendment addendum.
+
+The focused V2 operation test captures time-skipping history, proves the exact cross-queue activity
+route, and replays that history. The CP-030 root/family regression remains active and replays both
+legacy family fixtures without requesting the prohibited durable payload wrappers.
+
+Temporal production deployment requires TLS, encrypted history persistence, namespace
+authorization, and queue-scoped worker identities. The exact operation envelope remains in history
+because the canonical contract requires replay-stable execution intent and no accepted immutable
+reference repository currently replaces it. Only typed secret references may appear; secret values
+remain forbidden. The complete serialized wrapper is capped at 2,000,000 bytes, identifiers and
+frontier entries have explicit length bounds, and frontier/active-child collections are capped at
+1,024. These deployment protections are stated prerequisites; this amendment does not claim to
+configure production TLS, encryption, namespace ACLs, or worker identities.

@@ -137,3 +137,52 @@ Every non-async WP-CP-040 requirement has executable evidence. Exact materializa
 the actual Deep Agent state and progressive Skill messages were inspected, the MCP and sandbox
 surfaces executed through Temporal, and the superseded OpenAI Agents SDK path is absent. WP-CP-040
 is accepted; asynchronous child lifecycle remains isolated to WP-CP-045.
+
+## Foundation amendment addendum — cognitive worker composition boundary
+
+Recorded: 2026-08-10
+Amendment base: `cfe9db22580678d1dc563e93087283f823579442`
+Canonical metadata revision: `c48867a240d09a98db9cdfb4937f55176f30adf1`
+
+This addendum preserves the historical acceptance evidence above. The accepted
+`OperationExecutionService` and `DeepAgentRuntimeAdapter`/`ExactDeepAgentMaterializer` semantics are
+unchanged. The amendment makes their existing `operation.execute` activity seam explicit in the
+deployment composition boundary:
+
+- the `agent_cognitive` registry surface contains only `operation.execute`;
+- `OperationWorkflow` remains registered only on coordinator/family workflow workers;
+- coordinator launch requires a deployment `WorkerActivityCompositionFactory` that supplies a
+  genuinely wired `OperationExecutionActivities`; no production activation is claimed when that
+  factory is absent; and
+- the activity queue is derived from the exact Deep Agent binding, preventing caller-, provider-,
+  or family-selected fallback routing. Binding execution generation must also match the wrapper.
+
+Contract and worker evidence is in `tests/test_operation_execution.py`,
+`tests/test_coordinator_temporal_runtime.py`, and the credential-gated
+`tests/acceptance/control_plane/test_wp_cp_040_live.py`, whose historical provider/materializer
+assertions remain intact after adapting its wrapper to V2. This addendum does not reopen or rewrite
+the original WP-CP-040 disposition.
+
+Final focused and full applicable offline qualification results are recorded in the WP-CP-030
+addendum. The credential-gated V2 live vertical passed:
+
+```text
+BELLABS_RUN_WP_CP_040_LIVE=1 \
+  uv run pytest tests/acceptance/control_plane/test_wp_cp_040_live.py -q -s
+1 passed in 112.38s
+
+workflow_id: qualification/wp-cp-040/live
+workflow_disposition: completed
+model: gpt-5.6-luna
+binding_id: 1cf750a4-012b-580d-a387-1a821cd93dcd
+binding_digest: sha256:a570a700d63437b21c0ba8c44be6225cef3e87315f73e3ac018e7300eafabfca
+```
+
+This exercised real Temporal with separate workflow and binding-derived cognitive activity queues,
+a real `gpt-5.6-luna` call, exact MCP and Skill materialization, and the LangSmith sandbox. The
+binding identity/digest above are sanitized identifiers already present in the historical live
+output; no credentials or secret values are recorded.
+
+Production requires TLS, encrypted Temporal history persistence, namespace authorization, and
+queue-scoped worker identities; these remain deployment prerequisites and are not claimed as
+configured by this amendment.

@@ -697,6 +697,7 @@ def _binding_for(request: OperationExecutionRequest, fingerprint: str) -> Operat
             if not policy.required and policy.authored_degradation is not None
         ),
         execution_runtime=request.execution_runtime,
+        native_placement=request.native_placement,
         deep_agent_binding=request.deep_agent_binding,
         side_effect_key=request.idempotency_key,
         bound_at=request.requested_at,

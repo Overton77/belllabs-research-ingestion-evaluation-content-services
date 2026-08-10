@@ -18,6 +18,23 @@ from app.domain.control_plane.contracts import ExactDefinitionRef, SecretRef
 
 DIGEST_PATTERN = r"^sha256:[0-9a-f]{64}$"
 PLACEHOLDER_DIGEST = "sha256:" + "0" * 64
+MAX_OPERATION_WORKFLOW_PAYLOAD_BYTES = 2_000_000
+MAX_OPERATION_SEMANTIC_ATTEMPT_ID_LENGTH = 512
+MAX_NATIVE_PLACEMENT_ID_LENGTH = 255
+MAX_TEMPORAL_TASK_QUEUE_LENGTH = 255
+MAX_EFFECT_FRONTIER_ITEMS = 1_024
+MAX_EFFECT_FRONTIER_ITEM_LENGTH = 2_048
+MAX_ACTIVE_ASYNC_CHILDREN = 1_024
+MAX_ASYNC_CHILD_ID_LENGTH = 512
+
+EffectFrontierItem = Annotated[
+    str,
+    Field(min_length=1, max_length=MAX_EFFECT_FRONTIER_ITEM_LENGTH),
+]
+AsyncChildId = Annotated[
+    str,
+    Field(min_length=1, max_length=MAX_ASYNC_CHILD_ID_LENGTH),
+]
 
 
 class Contract(BaseModel):
@@ -970,13 +987,57 @@ class DeepAgentExecutionBinding(Contract):
         return cls(**complete, binding_digest=sha256_digest(complete))
 
 
+class NativeOperationExecutionPlacement(Contract):
+    """Content-addressed placement authority for a native operation activity."""
+
+    schema_version: Literal["belllabs.native-operation-placement.v1"] = (
+        "belllabs.native-operation-placement.v1"
+    )
+    placement_id: str = Field(
+        max_length=MAX_NATIVE_PLACEMENT_ID_LENGTH,
+        pattern=r"^[a-z0-9][a-z0-9._:-]*$",
+    )
+    revision: int = Field(ge=1)
+    execution_runtime: Literal["native"] = "native"
+    task_queue: str = Field(
+        min_length=1,
+        max_length=MAX_TEMPORAL_TASK_QUEUE_LENGTH,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._/-]*$",
+    )
+    qualification_refs: tuple[str, ...] = Field(min_length=1, max_length=64)
+    placement_digest: str = Field(pattern=DIGEST_PATTERN)
+
+    @model_validator(mode="after")
+    def validate_digest(self, info: ValidationInfo) -> NativeOperationExecutionPlacement:
+        if (
+            not (info.context or {}).get("allow_placeholder_digest")
+            and sha256_digest(self.model_dump(mode="python", exclude={"placement_digest"}))
+            != self.placement_digest
+        ):
+            raise ValueError("native operation placement digest mismatch")
+        return self
+
+    @classmethod
+    def create(cls, **values: object) -> NativeOperationExecutionPlacement:
+        payload = dict(values)
+        payload.pop("placement_digest", None)
+        payload.setdefault("schema_version", "belllabs.native-operation-placement.v1")
+        payload.setdefault("execution_runtime", "native")
+        draft = cls.model_validate(
+            {**payload, "placement_digest": PLACEHOLDER_DIGEST},
+            context={"allow_placeholder_digest": True},
+        )
+        complete = draft.model_dump(mode="python", exclude={"placement_digest"})
+        return cls(**complete, placement_digest=sha256_digest(complete))
+
+
 class OperationExecutionRequest(Contract):
     identity: OperationAttemptIdentity
     request_scope: str = Field(min_length=1)
     effective_configuration_digest: str = Field(pattern=DIGEST_PATTERN)
     run_control_revision: int = Field(ge=1)
     operation_contract_ref: str = Field(min_length=1)
-    prompt_segments: tuple[PromptSegment, ...] = Field(min_length=1)
+    prompt_segments: tuple[PromptSegment, ...] = Field(min_length=1, max_length=64)
     model_policy: ModelPolicy
     tools: tuple[ToolBinding, ...] = ()
     mcp_servers: tuple[MCPServerBinding, ...] = ()
@@ -993,6 +1054,7 @@ class OperationExecutionRequest(Contract):
     secret_refs: tuple[SecretRef, ...] = ()
     unsupported_policies: tuple[UnsupportedPolicy, ...] = ()
     execution_runtime: Literal["native", "deep_agent"] = "native"
+    native_placement: NativeOperationExecutionPlacement | None = None
     deep_agent_binding: DeepAgentExecutionBinding | None = None
     budget_reservation_id: str = Field(min_length=1)
     budget_limits: dict[str, int]
@@ -1008,6 +1070,10 @@ class OperationExecutionRequest(Contract):
         if (self.execution_runtime == "deep_agent") != (self.deep_agent_binding is not None):
             raise ValueError(
                 "deep_agent execution requires exactly one canonical Deep Agent binding"
+            )
+        if (self.execution_runtime == "native") != (self.native_placement is not None):
+            raise ValueError(
+                "native execution requires exactly one canonical native placement"
             )
         if self.deep_agent_binding is not None:
             deep_binding = self.deep_agent_binding
@@ -1105,9 +1171,18 @@ class OperationExecutionBinding(Contract):
     snapshot_policy_ref: str
     applied_degradations: tuple[str, ...] = ()
     execution_runtime: Literal["native", "deep_agent"] = "native"
+    native_placement: NativeOperationExecutionPlacement | None = None
     deep_agent_binding: DeepAgentExecutionBinding | None = None
     side_effect_key: str
     bound_at: AwareDatetime
+
+    @model_validator(mode="after")
+    def exact_runtime_placement(self) -> OperationExecutionBinding:
+        if (self.execution_runtime == "deep_agent") != (self.deep_agent_binding is not None):
+            raise ValueError("Deep Agent binding runtime placement is not exact")
+        if (self.execution_runtime == "native") != (self.native_placement is not None):
+            raise ValueError("native binding runtime placement is not exact")
+        return self
 
 
 class MaterializedWorkspace(Contract):
@@ -1209,18 +1284,57 @@ class OperationExecutionResult(Contract):
 class OperationWorkflowRequest(Contract):
     """Typed durable wrapper for exactly one semantic operation attempt."""
 
-    schema_version: Literal["belllabs.operation-workflow.v1"] = "belllabs.operation-workflow.v1"
-    semantic_attempt_id: str = Field(min_length=1)
+    schema_version: Literal["belllabs.operation-workflow.v2"] = "belllabs.operation-workflow.v2"
+    semantic_attempt_id: str = Field(
+        min_length=1,
+        max_length=MAX_OPERATION_SEMANTIC_ATTEMPT_ID_LENGTH,
+    )
     execution_generation: int = Field(default=1, ge=1)
-    operation_kind: Literal[
-        "stage_operation", "goal_iteration", "goal_verification", "bound_operation"
-    ]
-    payload: dict[str, object]
-    task_queue: str = Field(min_length=1)
+    operation_kind: Literal["bound_operation"]
+    operation: OperationExecutionRequest
     timeout_seconds: int = Field(default=300, ge=1, le=86_400)
     message_cursor: int = Field(default=0, ge=0)
-    effect_frontier: tuple[str, ...] = ()
-    active_async_child_ids: tuple[str, ...] = ()
+    effect_frontier: tuple[EffectFrontierItem, ...] = Field(
+        default=(),
+        max_length=MAX_EFFECT_FRONTIER_ITEMS,
+    )
+    active_async_child_ids: tuple[AsyncChildId, ...] = Field(
+        default=(),
+        max_length=MAX_ACTIVE_ASYNC_CHILDREN,
+    )
+
+    @model_validator(mode="after")
+    def exact_bound_operation(self) -> OperationWorkflowRequest:
+        if self.semantic_attempt_id != self.operation.identity.semantic_key:
+            raise ValueError(
+                "operation workflow semantic attempt must match the bound execution request"
+            )
+        binding = self.operation.deep_agent_binding
+        if (
+            binding is not None
+            and self.execution_generation != binding.execution_generation
+        ):
+            raise ValueError(
+                "operation workflow generation must match the exact Deep Agent binding"
+            )
+        if len(set(self.active_async_child_ids)) != len(self.active_async_child_ids):
+            raise ValueError("active async child identities must be unique")
+        if (
+            len(self.model_dump_json().encode("utf-8"))
+            > MAX_OPERATION_WORKFLOW_PAYLOAD_BYTES
+        ):
+            raise ValueError("operation workflow payload exceeds 2,000,000 bytes")
+        return self
+
+    @property
+    def activity_task_queue(self) -> str:
+        binding = self.operation.deep_agent_binding
+        if binding is not None:
+            return binding.task_queue
+        placement = self.operation.native_placement
+        if placement is None:
+            raise ValueError("operation execution has no exact activity placement")
+        return placement.task_queue
 
     @property
     def workflow_id(self) -> str:
@@ -1234,8 +1348,14 @@ class OperationWorkflowResult(Contract):
     disposition: Literal["completed", "cancelled", "failed", "in_doubt"]
     result: dict[str, object] = Field(default_factory=dict)
     message_cursor: int = Field(ge=0)
-    effect_frontier: tuple[str, ...] = ()
-    active_async_child_ids: tuple[str, ...] = ()
+    effect_frontier: tuple[EffectFrontierItem, ...] = Field(
+        default=(),
+        max_length=MAX_EFFECT_FRONTIER_ITEMS,
+    )
+    active_async_child_ids: tuple[AsyncChildId, ...] = Field(
+        default=(),
+        max_length=MAX_ACTIVE_ASYNC_CHILDREN,
+    )
 
 
 class ArtifactCheckEvidence(Contract):

@@ -43,3 +43,9 @@ def coordinator_activities(family: str, activities: Any) -> Sequence[ActivityCal
             activities.materialize_workflow_result,
         )
     raise ValueError(f"undeclared BellLabs activity family: {family}")
+
+
+def agent_cognitive_activities(activities: Any) -> Sequence[ActivityCallable]:
+    """Select the sole family-neutral cognitive operation activity."""
+
+    return (activities.execute,)

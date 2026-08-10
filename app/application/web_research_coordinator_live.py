@@ -139,6 +139,7 @@ from app.domain.operation_execution.contracts import (
     ImmutableAssetBinding,
     MCPServerBinding,
     ModelPolicy,
+    NativeOperationExecutionPlacement,
     OperationAttemptIdentity,
     OperationExecutionRequest,
     PromptSegment,
@@ -637,6 +638,7 @@ async def run_live_coordinator(
             workspace_ref=workspace_record.ref,
             goal=goal,
             created_at=now,
+            operation_task_queue=f"{settings.temporal_task_queue}-agent-cognitive",
         )
         operation_author = SemanticServiceWebResearchOperationBindingAuthor(
             operation_templates,
@@ -1897,6 +1899,7 @@ def _operation_templates(
     workspace_ref: ExactDefinitionRef,
     goal: WebResearchGoal,
     created_at: datetime,
+    operation_task_queue: str,
 ) -> SemanticOperationBindingTemplates:
     refs = tuple(_required_hit_ref(hit) for hit in selected_hits)
     assert isinstance(profile_record.definition, AgentProfileDefinition)
@@ -2037,6 +2040,12 @@ def _operation_templates(
             budget_limits={"tool.calls.total": 10, "operation.attempts": 1},
             tracing_policy_ref="tracing:web-research-live@1",
             sensitive_data_policy_ref="policy:public-web-no-secrets@1",
+            native_placement=NativeOperationExecutionPlacement.create(
+                placement_id="native.web-research",
+                revision=1,
+                task_queue=operation_task_queue,
+                qualification_refs=("QUAL-CP-TEMPORAL-REPLAY-RECOVERY",),
+            ),
             snapshot_policy_ref="snapshot:browser-evidence@1",
             requested_at=created_at,
             idempotency_key=f"web-research:{{run_id}}:{stage_id}:1",

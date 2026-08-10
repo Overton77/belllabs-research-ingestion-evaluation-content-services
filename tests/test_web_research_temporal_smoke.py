@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+from temporalio.client import WorkflowFailureError
+from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
 
 from app.application.orchestration_binding_repository import (
@@ -151,11 +153,8 @@ class Lifecycle:
 
 
 @pytest.mark.asyncio
-async def test_callable_temporal_smoke_runs_exact_stagegraph_and_returns_refs() -> None:
-    try:
-        environment = await WorkflowEnvironment.start_time_skipping()
-    except RuntimeError as error:
-        pytest.skip(f"Temporal test server is unavailable: {error}")
+async def test_legacy_stagegraph_root_smoke_fails_closed_without_direct_fallback() -> None:
+    environment = await WorkflowEnvironment.start_time_skipping()
 
     fixture = web_capability_definitions()
     fixture_records = tuple(
@@ -218,23 +217,39 @@ async def test_callable_temporal_smoke_runs_exact_stagegraph_and_returns_refs() 
     bindings = InMemoryRunSemanticInputBindingRepository()
 
     async with environment:
-        result = await run_web_research_stagegraph_smoke(
-            environment.client,
-            task_queue="web-research-temporal-smoke",
-            workflow_id="web-research-temporal-smoke",
-            run_input=run_input,
-            semantic_binding=binding,
-            bindings=bindings,
-            lifecycle=Lifecycle(),  # type: ignore[arg-type]
-            dependencies=dependencies,
-            operation_bindings=FakeOperationBindingReader(
-                request_scope=binding.request_scope,
-                run_id=binding.run_id,
-                configuration_digest=binding.effective_configuration_digest,
-            ),  # type: ignore[arg-type]
-        )
+        with pytest.raises(WorkflowFailureError) as captured:
+            await run_web_research_stagegraph_smoke(
+                environment.client,
+                task_queue="web-research-temporal-smoke",
+                workflow_id="web-research-temporal-smoke",
+                run_input=run_input,
+                semantic_binding=binding,
+                bindings=bindings,
+                lifecycle=Lifecycle(),  # type: ignore[arg-type]
+                dependencies=dependencies,
+                operation_bindings=FakeOperationBindingReader(
+                    request_scope=binding.request_scope,
+                    run_id=binding.run_id,
+                    configuration_digest=binding.effective_configuration_digest,
+                ),  # type: ignore[arg-type]
+            )
 
-    assert result.temporal_run_id
-    assert result.final_result_ref.startswith("belllabs://web-research/")
-    assert len(result.exact_evidence_refs) == 6
-    assert result.run_result.output_refs["promote_verified_result"] == (result.final_result_ref,)
+    failure: BaseException | None = captured.value
+    application_failure = None
+    while failure is not None:
+        if isinstance(failure, ApplicationError):
+            application_failure = failure
+            break
+        failure = failure.__cause__
+
+    assert application_failure is not None
+    assert application_failure.type == "exact_operation_binding_required"
+    assert application_failure.non_retryable is True
+    assert (
+        await bindings.get(
+            binding.binding_id,
+            request_scope=binding.request_scope,
+            run_id=binding.run_id,
+        )
+        == binding
+    )

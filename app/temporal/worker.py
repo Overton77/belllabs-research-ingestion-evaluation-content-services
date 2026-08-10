@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
+from typing import Protocol
+
+import asyncpg
 
 from app.application.control_plane import ControlPlaneService
 from app.application.control_plane_repository import BeanieDefinitionRepository
@@ -27,7 +31,7 @@ from app.application.supporting_graph_reconciliation import (
 from app.application.web_research_admission import (
     register_web_research_admission_policies,
 )
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.domain.control_plane.extensions import ExtensionRegistry
 from app.domain.run_control.contracts import ActorContext
 from app.domain.schema_grounding.definitions import register_schema_grounding_extensions
@@ -54,31 +58,47 @@ from app.temporal.linked_run_activities import (
     LinkedRunDecisionGateway,
     create_linked_run_worker,
 )
+from app.temporal.operation_activities import (
+    OperationExecutionActivities,
+    create_agent_cognitive_worker,
+)
+from app.temporal.registration.task_queues import BellLabsTaskQueues
 from app.temporal.schema_grounding_activities import (
     SchemaGroundingActivities,
     create_schema_grounding_activity_worker,
 )
 
 
+@dataclass(frozen=True)
+class WorkerActivityComposition:
+    """Deployment-supplied, fully wired activity adapters."""
+
+    coordinator: CoordinatorWorkerActivities
+    operation: OperationExecutionActivities
+
+
+class WorkerActivityCompositionFactory(Protocol):
+    async def build(
+        self,
+        *,
+        settings: Settings,
+        control_plane: ControlPlaneService,
+        run_control: RunControlService,
+        postgres_pool: asyncpg.Pool,
+    ) -> WorkerActivityComposition: ...
+
+
 async def main(
-    coordinator_activities: CoordinatorWorkerActivities | None = None,
+    composition_factory: WorkerActivityCompositionFactory | None = None,
 ) -> None:
     settings = get_settings()
-    if settings.coordinator_launch_enabled and coordinator_activities is None:
+    if settings.coordinator_launch_enabled and composition_factory is None:
         raise RuntimeError(
-            "COORDINATOR_LAUNCH_ENABLED requires concrete StageGraph and "
-            "GoalDirected activity adapters; refusing to advertise unusable workers"
+            "COORDINATOR_LAUNCH_ENABLED requires a deployment WorkerActivityCompositionFactory; "
+            "refusing to advertise injection-only workers as active"
         )
     configure_langsmith_tracing(settings)
     client = await create_temporal_client(settings)
-    coordinator_workers = None
-    if settings.coordinator_launch_enabled:
-        assert coordinator_activities is not None
-        coordinator_workers = create_coordinator_workers(
-            client,
-            task_queues=coordinator_task_queues(settings.temporal_task_queue),
-            activities=coordinator_activities,
-        )
     mongo_client, _database = await create_mongodb(settings)
     postgres_pool = await create_application_postgres_pool(settings)
     try:
@@ -104,6 +124,28 @@ async def main(
             F1RunConfigurationVerifier(control_plane),
             policies,
         )
+        coordinator_workers = None
+        operation_worker = None
+        if settings.coordinator_launch_enabled:
+            assert composition_factory is not None
+            composition = await composition_factory.build(
+                settings=settings,
+                control_plane=control_plane,
+                run_control=run_control,
+                postgres_pool=postgres_pool,
+            )
+            coordinator_workers = create_coordinator_workers(
+                client,
+                task_queues=coordinator_task_queues(settings.temporal_task_queue),
+                activities=composition.coordinator,
+            )
+            operation_worker = create_agent_cognitive_worker(
+                client,
+                task_queue=BellLabsTaskQueues.from_base(
+                    settings.temporal_task_queue
+                ).agent_cognitive,
+                activities=composition.operation,
+            )
         linked_service = LinkedRunService(
             control_plane,
             run_control,
@@ -149,6 +191,8 @@ async def main(
         ]
         if coordinator_workers is not None:
             workers.extend(coordinator_workers.workers)
+        if operation_worker is not None:
+            workers.append(operation_worker)
         await asyncio.gather(*(worker.run() for worker in workers))
     finally:
         await postgres_pool.close()

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import inspect
 
+import pytest
+
 from app.domain.operation_execution.contracts import OperationWorkflowRequest
 from app.domain.orchestration.contracts import (
     RunContinuityState,
@@ -79,18 +81,21 @@ def test_semantic_fork_starts_epoch_one_without_live_children_or_messages() -> N
 
 
 def test_operation_identity_and_single_registries_are_versioned_and_complete() -> None:
-    request = OperationWorkflowRequest(
-        semantic_attempt_id="run-a:stage:collect:attempt:1",
-        operation_kind="stage_operation",
-        payload={"objective": "collect"},
-        task_queue="belllabs-agent-cognitive",
-    )
-    assert request.workflow_id == "operation/run-a:stage:collect:attempt:1"
+    with pytest.raises(ValueError, match="operation_kind"):
+        OperationWorkflowRequest.model_validate(
+            {
+                "semantic_attempt_id": "run-a:stage:collect:attempt:1",
+                "operation_kind": "stage_operation",
+                "payload": {"objective": "collect"},
+                "task_queue": "belllabs-agent-cognitive",
+            }
+        )
 
     workflow_types = tuple(registered_workflows())
     assert BellLabsRunWorkflow in workflow_types
     assert OperationWorkflow in workflow_types
     assert len(workflow_types) == len(set(workflow_types))
+    assert 'name="belllabs.operation.v2"' in inspect.getsource(OperationWorkflow)
 
     queues = BellLabsTaskQueues.from_base("belllabs")
     assert len(set(queues.__dict__.values())) == 5

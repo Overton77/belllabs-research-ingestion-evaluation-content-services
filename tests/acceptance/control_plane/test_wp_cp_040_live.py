@@ -110,6 +110,7 @@ async def test_live_temporal_deep_agent_mcp_skill_and_langsmith_sandbox() -> Non
     payload = base.model_dump(mode="python")
     payload.update(
         execution_runtime="deep_agent",
+        native_placement=None,
         deep_agent_binding=deep_binding,
         secret_refs=(
             SecretRef(provider="environment", key="OPENAI_API_KEY"),
@@ -146,19 +147,25 @@ async def test_live_temporal_deep_agent_mcp_skill_and_langsmith_sandbox() -> Non
     )
 
     async with await WorkflowEnvironment.start_time_skipping() as environment:
-        async with Worker(
-            environment.client,
-            task_queue="wp-cp-040-live",
-            workflows=[OperationWorkflow],
-            activities=[activities.execute],
+        async with (
+            Worker(
+                environment.client,
+                task_queue="wp-cp-040-live",
+                workflows=[OperationWorkflow],
+            ),
+            Worker(
+                environment.client,
+                task_queue=deep_binding.task_queue,
+                activities=[activities.execute],
+            ),
         ):
             workflow_result = await environment.client.execute_workflow(
                 OperationWorkflow.run,
                 OperationWorkflowRequest(
                     semantic_attempt_id=request.identity.semantic_key,
+                    execution_generation=deep_binding.execution_generation,
                     operation_kind="bound_operation",
-                    payload=request.model_dump(mode="json"),
-                    task_queue="wp-cp-040-live",
+                    operation=request,
                     timeout_seconds=300,
                 ),
                 id="qualification/wp-cp-040/live",
