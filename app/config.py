@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     bell_labs_trace_pseudonym_key: SecretStr | None = None
 
     langgraph_runtime_enabled: bool = False
+    async_subagent_spawning_enabled: bool = False
     bell_labs_environment: Literal["development", "staging", "production"] = "development"
     agent_server_endpoint: str = "http://127.0.0.1:2024"
     agent_server_api_key: SecretStr | None = None

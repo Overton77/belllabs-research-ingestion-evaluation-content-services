@@ -1,0 +1,23 @@
+---
+description: WP-BP-010 StageGraph implementation scope and qualification
+globs: app/domain/control_plane/contracts.py,app/domain/control_plane/compiler.py,app/domain/orchestration/contracts.py,app/domain/orchestration/interpreter.py,app/application/orchestration.py,app/temporal/orchestration_activities.py,app/temporal/workflows/stagegraph.py,app/temporal/stagegraph_workflow.py,app/agent_server/stagegraph/**,tests/**/*stagegraph*,docs/migrations_instructions/evidence_v2/WP-BP-010/**
+alwaysApply: false
+---
+
+# WP-BP-010 StageGraph
+
+- Read the canonical StageGraph specification, `WP-BP-010-stagegraph-runtime.md`,
+  `IMPLEMENTATION_READINESS.md`, accepted dependency evidence, and
+  `PARALLEL_WORKTREE_PROTOCOL.md` before editing.
+- Own only StageGraph regions in shared control-plane/compiler/orchestration modules.
+- Keep run control, generic operation execution, Deep Agents materialization, async delegation,
+  root workflow, and registries read-only unless the integrator approves an explicit amendment.
+- Replace the batch `asyncio.gather()` frontier with deterministic incremental child
+  reconciliation. Interpreter proposals never become lifecycle authority.
+- Move accepted mechanics into `app/temporal/workflows/stagegraph.py`; delete the legacy flat
+  workflow, direct-activity family path, and Agent Server macro graph at acceptance.
+- Add deterministic join/property/fairness/invalidation/obligation tests, Temporal replay/recovery,
+  and a credential-gated live API-to-Temporal test using real LLM calls. The live graph must prove
+  downstream release before an unrelated slow sibling finishes.
+- Use a minimal exact Deep Agent binding; defer the complete advanced-capability vertical to
+  `WP-CP-050`.

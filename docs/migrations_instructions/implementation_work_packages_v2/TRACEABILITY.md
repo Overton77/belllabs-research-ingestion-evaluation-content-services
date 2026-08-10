@@ -1,7 +1,7 @@
 # Control-plane foundation traceability projection
 
 Status: generated-style projection from canonical specification metadata; requirements are authored only in their owning specifications.  
-Evidence status: WP-CP-010, WP-CP-020, and WP-CP-030 are accepted; later packages remain planned.
+Evidence status: WP-CP-010, WP-CP-020, WP-CP-030, WP-CP-040, and WP-CP-045 are accepted; later packages remain planned.
 
 | Requirement | Source anchors | ADR | Canonical spec | Contract | Work package | GitHub/local issue | Test/qualification | Evidence | Status |
 |---|---|---|---|---|---|---|---|---|---|
@@ -44,11 +44,11 @@ Evidence status: WP-CP-010, WP-CP-020, and WP-CP-030 are accepted; later package
 | REQ-CP-DA-005 | Foundation capability decision | ADR-0003 | SPEC-CP-DEEP-AGENT-RUNTIME | CON-CP-DEEP-AGENT-BINDING-V1 | WP-CP-040, WP-CP-050 | local Markdown | exact attachment vertical | `evidence_v2/WP-CP-040/README.md` | accepted |
 | REQ-CP-DA-006 | Catalog/runtime boundary | ADR-0003 | SPEC-CP-DEEP-AGENT-RUNTIME | CON-CP-DEEP-AGENT-BINDING-V1 | WP-CP-040 | local Markdown | runtime access guards | `evidence_v2/WP-CP-040/README.md` | accepted |
 | REQ-CP-DA-007 | Foundation sync-subagent decision | ADR-0003 | SPEC-CP-DEEP-AGENT-RUNTIME | CON-CP-DEEP-AGENT-PROFILE-V1 | WP-CP-040 | local Markdown | delegation ceiling tests | `evidence_v2/WP-CP-040/README.md` | accepted |
-| REQ-CP-DA-008 | Foundation async-child decision | ADR-0003 | SPEC-CP-DEEP-AGENT-RUNTIME | CON-CP-ASYNC-SUBAGENT-V1 | WP-CP-045, WP-CP-050 | local Markdown | spawn-before-submit tests | evidence_v2/WP-CP-045 | planned |
-| REQ-CP-DA-009 | Foundation dependency-class decision | ADR-0003 | SPEC-CP-DEEP-AGENT-RUNTIME | CON-CP-ASYNC-SUBAGENT-V1 | WP-CP-045 | local Markdown | four dependency classes | evidence_v2/WP-CP-045 | planned |
-| REQ-CP-DA-010 | Foundation async messaging decision | ADR-0003 | SPEC-CP-DEEP-AGENT-RUNTIME | CON-CP-ASYNC-SUBAGENT-V1 | WP-CP-045 | local Markdown | ordered message tests | evidence_v2/WP-CP-045 | planned |
-| REQ-CP-DA-011 | Foundation result-admission decision | ADR-0003 | SPEC-CP-DEEP-AGENT-RUNTIME | CON-CP-ASYNC-SUBAGENT-V1 | WP-CP-045, WP-CP-050 | local Markdown | result/late-result tests | evidence_v2/WP-CP-045 | planned |
-| REQ-CP-DA-012 | Foundation escalation decision | ADR-0003 | SPEC-CP-DEEP-AGENT-RUNTIME | CON-CP-ASYNC-SUBAGENT-V1 | WP-CP-045 | local Markdown | classifier fixtures | evidence_v2/WP-CP-045 | planned |
+| REQ-CP-DA-008 | Foundation async-child decision | ADR-0003 | SPEC-CP-DEEP-AGENT-RUNTIME | CON-CP-ASYNC-SUBAGENT-V1 | WP-CP-045, WP-CP-050 | local Markdown | spawn-before-submit tests | `evidence_v2/WP-CP-045/README.md` | accepted |
+| REQ-CP-DA-009 | Foundation dependency-class decision | ADR-0003 | SPEC-CP-DEEP-AGENT-RUNTIME | CON-CP-ASYNC-SUBAGENT-V1 | WP-CP-045 | local Markdown | four dependency classes | `evidence_v2/WP-CP-045/README.md` | accepted |
+| REQ-CP-DA-010 | Foundation async messaging decision | ADR-0003 | SPEC-CP-DEEP-AGENT-RUNTIME | CON-CP-ASYNC-SUBAGENT-V1 | WP-CP-045 | local Markdown | ordered message tests | `evidence_v2/WP-CP-045/README.md` | accepted |
+| REQ-CP-DA-011 | Foundation result-admission decision | ADR-0003 | SPEC-CP-DEEP-AGENT-RUNTIME | CON-CP-ASYNC-SUBAGENT-V1 | WP-CP-045, WP-CP-050 | local Markdown | result/late-result tests | `evidence_v2/WP-CP-045/README.md` | accepted |
+| REQ-CP-DA-012 | Foundation escalation decision | ADR-0003 | SPEC-CP-DEEP-AGENT-RUNTIME | CON-CP-ASYNC-SUBAGENT-V1 | WP-CP-045 | local Markdown | classifier fixtures | `evidence_v2/WP-CP-045/README.md` | accepted |
 | REQ-CP-DA-013 | Pre-research F4 workspace | ADR-0003 | SPEC-CP-DEEP-AGENT-RUNTIME | CON-CP-WORKSPACE-MANIFEST-V1 | WP-CP-040 | local Markdown | workspace ownership tests | `evidence_v2/WP-CP-040/README.md` | accepted |
 | REQ-CP-DA-014 | Pre-research F4 artifact | ADR-0003 | SPEC-CP-DEEP-AGENT-RUNTIME | CON-CP-ARTIFACT-PROMOTION-V1 | WP-CP-040 | local Markdown | promotion/idempotency tests | `evidence_v2/WP-CP-040/README.md` | accepted |
 | REQ-CP-DA-015 | Pre-research F4 snapshot | ADR-0003 | SPEC-CP-DEEP-AGENT-RUNTIME | CON-CP-SNAPSHOT-V1 | WP-CP-040 | local Markdown | clone/reauthorization tests | `evidence_v2/WP-CP-040/README.md` | accepted |
@@ -62,7 +62,7 @@ Evidence status: WP-CP-010, WP-CP-020, and WP-CP-030 are accepted; later package
 | REQ-BP-SG-001 | Pre-research F3 StageGraph | ADR-0003 | SPEC-BP-STAGEGRAPH | CON-BP-STAGEGRAPH-V1 | WP-BP-010 | local Markdown | structural validation | evidence_v2/WP-BP-010 | planned |
 | REQ-BP-SG-002 | Pre-research F3 joins | ADR-0003 | SPEC-BP-STAGEGRAPH | CON-BP-STAGEGRAPH-V1 | WP-BP-010 | local Markdown | dependency/join truth tables | evidence_v2/WP-BP-010 | planned |
 | REQ-BP-SG-003 | Pre-research F3 determinism | ADR-0003 | SPEC-BP-STAGEGRAPH | CON-BP-STAGE-DECISION-V1 | WP-BP-010 | local Markdown | randomized-order determinism | evidence_v2/WP-BP-010 | planned |
-| REQ-BP-SG-004 | Proposal §§2, 7.2 | ADR-0003 | SPEC-BP-STAGEGRAPH | CON-BP-STAGE-DECISION-V1 | WP-BP-010, WP-CP-050 | local Markdown | early-release timing proof | evidence_v2/WP-CP-050 | planned |
+| REQ-BP-SG-004 | Proposal §§2, 7.2 | ADR-0003 | SPEC-BP-STAGEGRAPH | CON-BP-STAGE-DECISION-V1 | WP-BP-010, WP-CP-050 | local Markdown | controlled early-release ordering proof; cohesive vertical | evidence_v2/WP-BP-010; evidence_v2/WP-CP-050 | planned |
 | REQ-BP-SG-005 | Pre-research F3 fairness | ADR-0003 | SPEC-BP-STAGEGRAPH | CON-BP-STAGE-DECISION-V1 | WP-BP-010 | local Markdown | saturation/starvation tests | evidence_v2/WP-BP-010 | planned |
 | REQ-BP-SG-006 | Proposal §7.2 retry identity | ADR-0003 | SPEC-BP-STAGEGRAPH | CON-BP-STAGE-DECISION-V1 | WP-BP-010 | local Markdown | retry/cycle lineage | evidence_v2/WP-BP-010 | planned |
 | REQ-BP-SG-007 | Pre-research F3 stage cycles | ADR-0003 | SPEC-BP-STAGEGRAPH | CON-BP-STAGE-DECISION-V1 | WP-BP-010 | local Markdown | bounded repair tests | evidence_v2/WP-BP-010 | planned |
@@ -72,13 +72,27 @@ Evidence status: WP-CP-010, WP-CP-020, and WP-CP-030 are accepted; later package
 | REQ-BP-GD-001 | Pre-research F3 objective envelope | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-BP-GOAL-DIRECTED-V1 | WP-BP-020 | local Markdown | envelope publication/control | evidence_v2/WP-BP-020 | planned |
 | REQ-BP-GD-002 | Proposal §7.4 revisions | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-BP-GOAL-DIRECTED-V1 | WP-BP-020 | local Markdown | revision-boundary tests | evidence_v2/WP-BP-020 | planned |
 | REQ-BP-GD-003 | Proposal §7.4 iterations | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-BP-GOAL-DIRECTED-V1 | WP-BP-020 | local Markdown | operation durability tests | evidence_v2/WP-BP-020 | planned |
-| REQ-BP-GD-004 | Proposal §7.4 | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-BP-GOAL-VERIFICATION-V1 | WP-BP-020, WP-CP-050 | local Markdown | independent verifier proof | evidence_v2/WP-CP-050 | planned |
-| REQ-BP-GD-005 | Proposal §7.4 handoff | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-BP-GOAL-HANDOFF-V1 | WP-BP-020, WP-CP-050 | local Markdown | empty-session resume | evidence_v2/WP-CP-050 | planned |
-| REQ-BP-GD-006 | Proposal §12 rollover | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-BP-GOAL-HANDOFF-V1 | WP-BP-020, WP-CP-050 | local Markdown | rollover/protected facts | evidence_v2/WP-CP-050 | planned |
+| REQ-BP-GD-004 | Proposal §7.4 | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-BP-GOAL-VERIFICATION-V1 | WP-BP-020, WP-CP-050 | local Markdown | independent verifier proof; cohesive vertical | evidence_v2/WP-BP-020; evidence_v2/WP-CP-050 | planned |
+| REQ-BP-GD-005 | Proposal §7.4 handoff | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-BP-GOAL-HANDOFF-V1 | WP-BP-020, WP-CP-050 | local Markdown | empty-session resume; cohesive vertical | evidence_v2/WP-BP-020; evidence_v2/WP-CP-050 | planned |
+| REQ-BP-GD-006 | Proposal §12 rollover | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-BP-GOAL-HANDOFF-V1 | WP-BP-020, WP-CP-050 | local Markdown | rollover/protected facts; cohesive vertical | evidence_v2/WP-BP-020; evidence_v2/WP-CP-050 | planned |
 | REQ-BP-GD-007 | Pre-research F3 convergence | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-BP-GOAL-DIRECTED-V1 | WP-BP-020, WP-CP-050 | local Markdown | precedence/property tests | evidence_v2/WP-BP-020 | planned |
 | REQ-BP-GD-008 | Foundation async-subgoal decision | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-CP-ASYNC-SUBAGENT-V1 | WP-BP-020 | local Markdown | delegation classifier tests | evidence_v2/WP-BP-020 | planned |
 | REQ-BP-GD-009 | Pre-research F3 fork boundary | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-BP-GOAL-DIRECTED-V1 | WP-BP-020 | local Markdown | protected-field/fork tests | evidence_v2/WP-BP-020 | planned |
 | REQ-BP-GD-010 | Pre-research F3 terminality | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-BP-GOAL-DIRECTED-V1 | WP-BP-020 | local Markdown | proposal/reducer tests | evidence_v2/WP-BP-020 | planned |
+
+## Blueprint runtime qualification projection
+
+`WP-BP-010` and `WP-BP-020` each require deterministic semantic suites plus a credential-gated,
+narrow runtime-logic acceptance vertical. Each vertical starts at the BellLabs API, passes through
+admission, `BellLabsRunWorkflow`, the real family workflow, and `OperationWorkflow`, and makes real
+LLM calls through the accepted Deep Agents adapter. These tests qualify family mechanics; they are
+not the complete production-shaped foundation vertical. `WP-BP-010` must capture branching,
+incremental-release, obligation, and terminalization evidence. `WP-BP-020` must capture separate
+executor/verifier operations, convergence or revision behavior, and terminalization evidence.
+
+These blueprint-package verticals prove family runtime logic. `WP-CP-050` still owns the later
+cohesive proof that combines MCP, Skills, sandboxes, snapshots, sync/async subagents, both
+families, and recovery.
 
 ## Validation rule
 

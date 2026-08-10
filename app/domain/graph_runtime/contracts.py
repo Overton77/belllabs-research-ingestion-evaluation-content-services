@@ -18,7 +18,6 @@ from app.domain.graph_runtime.identities import (
     DIGEST_PATTERN,
     AgentRunKey,
     AgentThreadKey,
-    AsyncTaskKey,
     BellLabsRunKey,
     DeploymentIdentity,
     ExecutionEpochKey,
@@ -221,18 +220,6 @@ class RespondToInterruptIntervention(InterventionBase):
     response_digest: str = Field(pattern=DIGEST_PATTERN)
 
 
-class UpdateAsyncTaskIntervention(InterventionBase):
-    kind: Literal["update_async_task"] = "update_async_task"
-    async_task: AsyncTaskKey
-    update_kind: Literal["accept_result", "reject_result", "request_status"]
-    result_manifest_ref: str | None = None
-
-
-class CancelAsyncTaskIntervention(InterventionBase):
-    kind: Literal["cancel_async_task"] = "cancel_async_task"
-    async_task: AsyncTaskKey
-
-
 class CancelRunIntervention(InterventionBase):
     kind: Literal["cancel_run"] = "cancel_run"
     cancellation_mode: Literal["graceful", "immediate"] = "graceful"
@@ -278,8 +265,6 @@ RuntimeIntervention = Annotated[
     | SatisfyWaitIntervention
     | ResumePauseIntervention
     | RespondToInterruptIntervention
-    | UpdateAsyncTaskIntervention
-    | CancelAsyncTaskIntervention
     | CancelRunIntervention
     | ForkFromCheckpointIntervention
     | PrivilegedOperatorReconcileIntervention,
@@ -324,30 +309,6 @@ class DurableInterruptResponse(Contract):
     response_digest: str = Field(pattern=DIGEST_PATTERN)
     actor: ActorRef
     decided_at: AwareDatetime
-
-
-class RuntimeAsyncTaskProjection(Contract):
-    task: AsyncTaskKey
-    binding_id: str = Field(min_length=1)
-    parent_epoch: ExecutionEpochKey
-    status: Literal[
-        "submitted",
-        "running",
-        "waiting",
-        "completed",
-        "failed",
-        "cancel_requested",
-        "cancelled",
-        "orphaned",
-        "reconciliation_required",
-    ]
-    request_digest: str = Field(pattern=DIGEST_PATTERN)
-    result_manifest_ref: str | None = None
-    lease_expires_at: AwareDatetime | None = None
-    heartbeat_at: AwareDatetime | None = None
-    version: int = Field(ge=1)
-    created_at: AwareDatetime
-    updated_at: AwareDatetime
 
 
 class BellLabsStreamEvent(Contract):
@@ -444,16 +405,6 @@ class SubagentContextSlice(Contract):
     protected_atoms_digest: str = Field(pattern=DIGEST_PATTERN)
     maximum_bytes: int = Field(ge=0)
     slice_digest: str = Field(pattern=DIGEST_PATTERN)
-
-
-class SubagentResultManifest(Contract):
-    result_id: str = Field(min_length=1)
-    async_task: AsyncTaskKey | None = None
-    output_refs: tuple[str, ...]
-    evidence_refs: tuple[str, ...] = ()
-    usage: dict[str, int] = Field(default_factory=dict)
-    context_slice_digest: str = Field(pattern=DIGEST_PATTERN)
-    result_digest: str = Field(pattern=DIGEST_PATTERN)
 
 
 class ContextReconstructionResult(Contract):

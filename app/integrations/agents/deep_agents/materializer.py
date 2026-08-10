@@ -88,14 +88,10 @@ class ExactComponentRegistry:
     model_factories: Mapping[str, ModelFactory]
     prompts: Mapping[str, str] = dataclass_field(default_factory=dict)
     tools: Mapping[str, BaseTool] = dataclass_field(default_factory=dict)
-    middleware: Mapping[str, AgentMiddleware[Any, Any, Any]] = dataclass_field(
-        default_factory=dict
-    )
+    middleware: Mapping[str, AgentMiddleware[Any, Any, Any]] = dataclass_field(default_factory=dict)
     skill_bundles: Mapping[str, ResolvedSkillBundle] = dataclass_field(default_factory=dict)
     sandbox_factories: Mapping[str, SandboxFactory] = dataclass_field(default_factory=dict)
-    checkpointers: Mapping[str, BaseCheckpointSaver[Any]] = dataclass_field(
-        default_factory=dict
-    )
+    checkpointers: Mapping[str, BaseCheckpointSaver[Any]] = dataclass_field(default_factory=dict)
     stores: Mapping[str, BaseStore] = dataclass_field(default_factory=dict)
 
 
@@ -301,8 +297,7 @@ class ExactDeepAgentMaterializer:
                 for ref in child.tool_refs
             ]
             child_skill_roots = {
-                str(PurePosixPath(skills_by_ref[ref].mount_root).parent)
-                for ref in child.skill_refs
+                str(PurePosixPath(skills_by_ref[ref].mount_root).parent) for ref in child.skill_refs
             }
             if not child_skill_roots <= set(skill_sources):
                 raise DeepAgentRuntimeDrift("subagent Skill projection is unavailable")
@@ -421,13 +416,10 @@ class ExactDeepAgentMaterializer:
             else:
                 headers = {}
                 if server.credential_refs:
-                    headers["Authorization"] = (
-                        "Bearer "
-                        + _secret_value(
-                            server.credential_refs[0].provider,
-                            server.credential_refs[0].key,
-                            secrets,
-                        )
+                    headers["Authorization"] = "Bearer " + _secret_value(
+                        server.credential_refs[0].provider,
+                        server.credential_refs[0].key,
+                        secrets,
                     )
                 connections[server.server_name] = {
                     "transport": server.transport,

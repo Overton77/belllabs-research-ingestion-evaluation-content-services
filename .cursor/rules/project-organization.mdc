@@ -7,10 +7,11 @@ alwaysApply: true
 
 ## Hard rules
 
-- Read in order: `00_MAIN_GOAL_AND_INDEX.md`; `01_GLOBAL_HANDOFF_AND_STAGE_GATE_RULES.md`;
-  `02A_OWNER_AMENDMENTS_FOR_STAGES_3_TO_6.md` when applicable; canonical organization; the
-  complete active package and dependencies; accepted architecture/contract docs; then the
-  as-built guide, code, and tests.
+- Read in order: canonical `SPEC-*`/`REQ-*`/`CON-*` in `../biotech-meta`; the v2
+  `docs/migrations_instructions/implementation_work_packages_v2/README.md`;
+  `IMPLEMENTATION_READINESS.md`; the complete active WP and dependencies; accepted dependency
+  evidence; then the as-built guide, code, and tests. The Stage 0–8 package system is frozen
+  historical provenance and cannot authorize implementation.
 - Follow `docs/interview_and_research_result_documentation/CANONICAL_APPLICATION_CODEBASE_ORGANIZATION.md` for projected target paths,
   ownership, status labels, staged moves, and document lifecycle. If a projected path differs,
   the active package remains implementation authority.
@@ -32,5 +33,8 @@ alwaysApply: true
   target paths only when the active package or an accepted spec-ticket explicitly authorizes them.
 - Do not duplicate domain contracts, interpreters, API authority, MCP control paths, or task
   queue definitions. Promote accepted experiment behavior before production imports it.
+- Parallel `WP-BP-010`/`WP-BP-020` work must follow
+  `docs/migrations_instructions/implementation_work_packages_v2/PARALLEL_WORKTREE_PROTOCOL.md`,
+  including common-base, family-region ownership, and integrator-only shared paths.
 - Treat `docs/interview_and_research_result_documentation/CODEBASE_DOMAIN_WORKFLOW_GUIDE.md` as as-built reference. Historical plans,
   experiments, scratch files, and superseded recommendations are non-normative.

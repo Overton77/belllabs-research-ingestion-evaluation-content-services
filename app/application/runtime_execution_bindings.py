@@ -9,7 +9,6 @@ from typing import Protocol
 from app.domain.graph_runtime.contracts import (
     GraphExecutionSubmission,
     InterventionReceipt,
-    RuntimeAsyncTaskProjection,
     RuntimeExecutionAttempt,
     RuntimeExecutionBinding,
     RuntimeExecutionProjection,
@@ -86,25 +85,9 @@ class RuntimeInterventionRepository(Protocol):
     ) -> tuple[RuntimeIntervention, InterventionReceipt] | None: ...
 
 
-class RuntimeAsyncTaskRepository(Protocol):
-    async def put(
-        self,
-        task: RuntimeAsyncTaskProjection,
-        *,
-        expected_version: int | None,
-    ) -> RuntimeAsyncTaskProjection: ...
-
-    async def get_task(
-        self,
-        request_scope: str,
-        async_task_id: str,
-    ) -> RuntimeAsyncTaskProjection | None: ...
-
-
 class InMemoryRuntimeCoordinationRepository(
     RuntimeExecutionBindingRepository,
     RuntimeInterventionRepository,
-    RuntimeAsyncTaskRepository,
 ):
     """Concurrency-safe behavioral adapter matching PostgreSQL uniqueness semantics."""
 
@@ -116,7 +99,6 @@ class InMemoryRuntimeCoordinationRepository(
         self._interventions: dict[
             tuple[str, str], tuple[RuntimeIntervention, InterventionReceipt]
         ] = {}
-        self._tasks: dict[tuple[str, str], RuntimeAsyncTaskProjection] = {}
 
     async def create_binding(
         self,
@@ -328,42 +310,6 @@ class InMemoryRuntimeCoordinationRepository(
         command_id: str,
     ) -> tuple[RuntimeIntervention, InterventionReceipt] | None:
         return deepcopy(self._interventions.get((request_scope, command_id)))
-
-    async def put(
-        self,
-        task: RuntimeAsyncTaskProjection,
-        *,
-        expected_version: int | None,
-    ) -> RuntimeAsyncTaskProjection:
-        key = (
-            task.parent_epoch.request_scope,
-            task.task.async_task_id,
-        )
-        async with self._lock:
-            prior = self._tasks.get(key)
-            if prior is None:
-                if expected_version is not None:
-                    raise RuntimeBindingConflict("async task does not exist at expected version")
-            else:
-                if expected_version != prior.version or task.version != prior.version + 1:
-                    raise RuntimeBindingConflict("async task version is stale")
-                if (
-                    prior.task != task.task
-                    or prior.binding_id != task.binding_id
-                    or prior.parent_epoch != task.parent_epoch
-                    or prior.request_digest != task.request_digest
-                    or prior.created_at != task.created_at
-                ):
-                    raise RuntimeBindingConflict("async task immutable identity changed")
-            self._tasks[key] = deepcopy(task)
-            return deepcopy(task)
-
-    async def get_task(
-        self,
-        request_scope: str,
-        async_task_id: str,
-    ) -> RuntimeAsyncTaskProjection | None:
-        return deepcopy(self._tasks.get((request_scope, async_task_id)))
 
 
 def _epoch_tuple(epoch: ExecutionEpochKey) -> tuple[str, str, int]:

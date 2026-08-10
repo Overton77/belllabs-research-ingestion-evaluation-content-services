@@ -1,7 +1,7 @@
 ---
 id: WP-CP-045
 title: Implement async-subagent parent-child lifecycle
-status: ready_when_unblocked
+status: accepted
 implements: [REQ-CP-RUN-009, REQ-CP-EXEC-005, REQ-CP-EXEC-006, REQ-CP-EXEC-008, REQ-CP-DA-008, REQ-CP-DA-009, REQ-CP-DA-010, REQ-CP-DA-011, REQ-CP-DA-012]
 governed_by: [ADR-0003, SPEC-CP-RUN-CONTROL, SPEC-CP-DURABLE-EXECUTION, SPEC-CP-DEEP-AGENT-RUNTIME]
 contracts: [CON-CP-ASYNC-SUBAGENT-V1, CON-CP-WORKFLOW-MESSAGE-V1, CON-CP-BUDGET-LEDGER-V1]
@@ -18,7 +18,10 @@ A parent Deep Agent can start, continue alongside, wait for, message, cancel, re
 
 ## Current implementation baseline
 
-Partial `AsyncSubagentDefinition`, `AsyncTaskKey`, runtime projection, intervention, result-manifest, and feature-maturity contracts exist. They assume a remote graph shape and do not yet constitute the accepted complete lifecycle.
+The accepted implementation replaces the partial remote-graph-shaped models with canonical
+operation-execution contracts, PostgreSQL authority, MongoDB detail records, the wrapped Deep
+Agents mechanism, and deterministic provider reconnection. See
+[`evidence_v2/WP-CP-045`](../evidence_v2/WP-CP-045/README.md).
 
 ## Requirements implemented
 
@@ -40,7 +43,9 @@ Deep Agent profile/materializer, operation workflow, application parent-child se
   Persist BellLabs identity and authority before provider submission, bind returned thread/run IDs,
   and converge provider polling into typed facts and result manifests.
 - Add the deterministic governance classifier and fixtures for subordinate, operation, and linked
-  run routing.
+  run routing. `app/domain/operation_execution/delegation.py` is the sole classifier owner;
+  blueprint runtimes consume it and may add family-specific fixtures but must not implement a
+  second classifier.
 - Delete the partial remote-graph-shaped async models and their active consumers after the new
   lifecycle acceptance suite passes.
 
@@ -53,13 +58,13 @@ path satisfy the canonical contract.
 
 ## Acceptance criteria
 
-- [ ] Spawn persists exact contract/link/reservation before submission.
-- [ ] Required, degradable, nonblocking, and advisory classes behave exactly as frozen.
-- [ ] Parent and child exchange ordered typed messages with durable receipts.
-- [ ] Retry/callback/poll ambiguity creates one effective child and settlement.
-- [ ] Cancellation, orphan, late result, and superseded generation are reconciled.
-- [ ] Child output changes no parent state before explicit admission.
-- [ ] Governance classifier selects subordinate, operation, or linked-run execution deterministically.
+- [x] Spawn persists exact contract/link/reservation before submission.
+- [x] `required_blocking`, `degradable_blocking`, `nonblocking`, and `advisory` behave exactly as frozen.
+- [x] Parent and child exchange ordered typed messages with durable receipts.
+- [x] Retry/callback/poll ambiguity creates one effective child and settlement.
+- [x] Cancellation, orphan, late result, and superseded generation are reconciled.
+- [x] Child output changes no parent state before explicit admission.
+- [x] Governance classifier selects subordinate, operation, or linked-run execution deterministically.
 
 ## Qualification and evidence
 

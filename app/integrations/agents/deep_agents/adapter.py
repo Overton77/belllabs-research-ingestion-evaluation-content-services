@@ -71,11 +71,14 @@ class DeepAgentRuntimeAdapter:
                 "configurable": {"thread_id": binding.binding_id},
                 "callbacks": [disclosure_observer],
             }
-            result = cast(dict[str, Any], await agent.ainvoke(
-                cast(Any, state),
-                context=materialized.context,
-                config=config,
-            ))
+            result = cast(
+                dict[str, Any],
+                await agent.ainvoke(
+                    cast(Any, state),
+                    context=materialized.context,
+                    config=config,
+                ),
+            )
             snapshot = await agent.aget_state(config)
             actual_state = cast(dict[str, Any], snapshot.values)
 
@@ -259,11 +262,7 @@ class _SkillDisclosureObserver(BaseCallbackHandler):
         **kwargs: Any,
     ) -> None:
         del serialized, kwargs
-        observed = "\n".join(
-            _message_text(message)
-            for batch in messages
-            for message in batch
-        )
+        observed = "\n".join(_message_text(message) for batch in messages for message in batch)
         for skill in self._skills:
             path = f"{str(skill.mount_root).rstrip('/')}/SKILL.md"
             if skill.skill_name in observed and path in observed:

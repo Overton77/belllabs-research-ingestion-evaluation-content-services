@@ -1,0 +1,24 @@
+---
+description: WP-BP-020 GoalDirected implementation scope and qualification
+globs: app/domain/control_plane/contracts.py,app/domain/control_plane/compiler.py,app/domain/orchestration/contracts.py,app/domain/orchestration/goal_directed.py,app/domain/operation_execution/delegation.py,app/application/orchestration.py,app/application/async_subagents.py,app/temporal/goal_directed_activities.py,app/temporal/workflows/goal_directed.py,app/temporal/goal_directed_workflow.py,app/agent_server/goal_directed/**,tests/**/*goal*,docs/migrations_instructions/evidence_v2/WP-BP-020/**
+alwaysApply: false
+---
+
+# WP-BP-020 GoalDirected
+
+- Before editing, verify accepted `WP-CP-045` evidence and the worktree's recorded
+  `BP_BASE_REVISION`; stop if either is missing or mismatched.
+- Read the canonical GoalDirected specification, `WP-BP-020-goal-directed-runtime.md`,
+  `IMPLEMENTATION_READINESS.md`, accepted dependency evidence, and
+  `PARALLEL_WORKTREE_PROTOCOL.md`.
+- Own only GoalDirected regions in shared control-plane/compiler/orchestration modules.
+- Consume `app/domain/operation_execution/delegation.py`; do not change classifier semantics or
+  create a second classifier.
+- Family state never owns `terminal`; emit proposals for the run-control reducer. Executor and
+  independent verifier are separately bound `OperationWorkflow` children.
+- Move accepted mechanics into `app/temporal/workflows/goal_directed.py`; delete the legacy flat
+  workflow, direct goal activities, and Agent Server macro graph at acceptance.
+- Add deterministic revision/convergence/handoff/verifier tests, Temporal replay/recovery, and a
+  credential-gated live API-to-Temporal test using real executor and verifier LLM calls.
+- Use a minimal exact Deep Agent binding; defer the complete advanced-capability vertical to
+  `WP-CP-050`.

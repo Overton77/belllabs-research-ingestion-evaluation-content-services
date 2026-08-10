@@ -154,7 +154,9 @@ class AsyncSubagentExecutionDocument(Document):
     class Settings:
         name = "async_subagent_executions"
         indexes = [
-            IndexModel([("request_scope", ASCENDING), ("child_execution_id", ASCENDING)], unique=True),
+            IndexModel(
+                [("request_scope", ASCENDING), ("child_execution_id", ASCENDING)], unique=True
+            ),
             IndexModel([("parent_run_id", ASCENDING), ("parent_operation_id", ASCENDING)]),
         ]
 
@@ -172,5 +174,7 @@ class ParentAsyncSubagentLinkDocument(Document):
         name = "parent_async_subagent_links"
         indexes = [
             IndexModel([("request_scope", ASCENDING), ("link_id", ASCENDING)], unique=True),
-            IndexModel([("request_scope", ASCENDING), ("child_execution_id", ASCENDING)], unique=True),
+            IndexModel(
+                [("request_scope", ASCENDING), ("child_execution_id", ASCENDING)], unique=True
+            ),
         ]

@@ -279,9 +279,10 @@ class CognitiveChannelPack(Contract):
         built_ins = {"messages", "files", "todos", "structured_response"}
         if built_ins & set(names):
             raise ValueError("Deep Agents built-in channels must be inherited, not redeclared")
-        if not (info.context or {}).get("allow_placeholder_digest") and sha256_digest(
-            self.model_dump(mode="python", exclude={"digest"})
-        ) != self.digest:
+        if (
+            not (info.context or {}).get("allow_placeholder_digest")
+            and sha256_digest(self.model_dump(mode="python", exclude={"digest"})) != self.digest
+        ):
             raise ValueError("cognitive channel pack digest mismatch")
         return self
 
@@ -328,9 +329,10 @@ class CognitiveRuntimeContextPack(Contract):
         names = [field.name for field in self.fields]
         if len(names) != len(set(names)):
             raise ValueError("cognitive runtime-context pack fields must be unique")
-        if not (info.context or {}).get("allow_placeholder_digest") and sha256_digest(
-            self.model_dump(mode="python", exclude={"digest"})
-        ) != self.digest:
+        if (
+            not (info.context or {}).get("allow_placeholder_digest")
+            and sha256_digest(self.model_dump(mode="python", exclude={"digest"})) != self.digest
+        ):
             raise ValueError("cognitive runtime-context pack digest mismatch")
         return self
 
@@ -383,9 +385,11 @@ class CognitiveStateSchema(Contract):
             raise ValueError("subagent state slice identities must be unique")
         if any(not item.channel_names <= set(names) for item in self.subagent_slices):
             raise ValueError("subagent state slice contains an unknown channel")
-        if not (info.context or {}).get("allow_placeholder_digest") and sha256_digest(
-            self.model_dump(mode="python", exclude={"schema_digest"})
-        ) != self.schema_digest:
+        if (
+            not (info.context or {}).get("allow_placeholder_digest")
+            and sha256_digest(self.model_dump(mode="python", exclude={"schema_digest"}))
+            != self.schema_digest
+        ):
             raise ValueError("cognitive state schema digest mismatch")
         return self
 
@@ -428,9 +432,11 @@ class CognitiveRuntimeContextSchema(Contract):
             raise ValueError("subagent context slice identities must be unique")
         if any(not item.field_names <= set(names) for item in self.subagent_slices):
             raise ValueError("subagent context slice contains an unknown field")
-        if not (info.context or {}).get("allow_placeholder_digest") and sha256_digest(
-            self.model_dump(mode="python", exclude={"schema_digest"})
-        ) != self.schema_digest:
+        if (
+            not (info.context or {}).get("allow_placeholder_digest")
+            and sha256_digest(self.model_dump(mode="python", exclude={"schema_digest"}))
+            != self.schema_digest
+        ):
             raise ValueError("cognitive runtime-context schema digest mismatch")
         return self
 
@@ -603,9 +609,11 @@ class AsyncSubagentContract(Contract):
 
     @model_validator(mode="after")
     def validate_digest(self, info: ValidationInfo) -> AsyncSubagentContract:
-        if not (info.context or {}).get("allow_placeholder_digest") and sha256_digest(
-            self.model_dump(mode="python", exclude={"contract_digest"})
-        ) != self.contract_digest:
+        if (
+            not (info.context or {}).get("allow_placeholder_digest")
+            and sha256_digest(self.model_dump(mode="python", exclude={"contract_digest"}))
+            != self.contract_digest
+        ):
             raise ValueError("async subagent contract digest mismatch")
         return self
 
@@ -639,9 +647,11 @@ class AsyncSubagentResultManifest(Contract):
 
     @model_validator(mode="after")
     def validate_digest(self, info: ValidationInfo) -> AsyncSubagentResultManifest:
-        if not (info.context or {}).get("allow_placeholder_digest") and sha256_digest(
-            self.model_dump(mode="python", exclude={"manifest_digest"})
-        ) != self.manifest_digest:
+        if (
+            not (info.context or {}).get("allow_placeholder_digest")
+            and sha256_digest(self.model_dump(mode="python", exclude={"manifest_digest"}))
+            != self.manifest_digest
+        ):
             raise ValueError("async subagent result manifest digest mismatch")
         return self
 
@@ -684,7 +694,10 @@ class AsyncSubagentExecution(Contract):
         bound = self.provider_thread_id is not None and self.provider_run_id is not None
         if (self.provider_thread_id is None) != (self.provider_run_id is None):
             raise ValueError("provider thread and run identities bind together")
-        if self.lifecycle in {AsyncSubagentLifecycle.PROPOSED, AsyncSubagentLifecycle.ADMITTED} and bound:
+        if (
+            self.lifecycle in {AsyncSubagentLifecycle.PROPOSED, AsyncSubagentLifecycle.ADMITTED}
+            and bound
+        ):
             raise ValueError("provider identity cannot precede BellLabs admission")
         if self.lifecycle == AsyncSubagentLifecycle.COMPLETED and self.result_manifest is None:
             raise ValueError("completed async child requires a typed result manifest")
@@ -705,7 +718,9 @@ class AsyncSubagentMessage(Contract):
     context_authority: Literal["instruction", "admitted_context", "untrusted_observation"]
     expires_at: AwareDatetime | None = None
     supersedes_message_id: str | None = Field(default=None, min_length=1)
-    receipt: Literal["accepted", "claimed", "provider_applied", "checkpoint_committed", "terminal_rejected"] = "accepted"
+    receipt: Literal[
+        "accepted", "claimed", "provider_applied", "checkpoint_committed", "terminal_rejected"
+    ] = "accepted"
     created_at: AwareDatetime
 
 
@@ -754,7 +769,6 @@ class DeepAgentProfile(Contract):
     sync_subagents: tuple[SyncSubagentProfile, ...] = ()
     async_subagents: tuple[AsyncSubagentContract, ...] = ()
     async_subagent_policy_refs: tuple[ExactDefinitionRef, ...] = ()
-    async_subagents: tuple[AsyncSubagentContract, ...] = ()
     delegation_ceiling: DelegationCeiling = Field(default_factory=DelegationCeiling)
     hitl_policy_ref: ExactDefinitionRef | None = None
     limits: dict[str, int] = Field(default_factory=dict)
@@ -775,9 +789,11 @@ class DeepAgentProfile(Contract):
         async_names = [item.name for item in self.async_subagents]
         if len(async_names) != len(set(async_names)):
             raise ValueError("asynchronous subagent names must be unique")
-        if not (info.context or {}).get("allow_placeholder_digest") and sha256_digest(
-            self.model_dump(mode="python", exclude={"profile_digest"})
-        ) != self.profile_digest:
+        if (
+            not (info.context or {}).get("allow_placeholder_digest")
+            and sha256_digest(self.model_dump(mode="python", exclude={"profile_digest"}))
+            != self.profile_digest
+        ):
             raise ValueError("Deep Agent profile digest mismatch")
         return self
 
@@ -796,9 +812,7 @@ class DeepAgentProfile(Contract):
 
 
 class DeepAgentExecutionPlacementProfile(Contract):
-    schema_version: Literal["belllabs.deep-agent-placement.v1"] = (
-        "belllabs.deep-agent-placement.v1"
-    )
+    schema_version: Literal["belllabs.deep-agent-placement.v1"] = "belllabs.deep-agent-placement.v1"
     logical_id: str = Field(pattern=r"^[a-z0-9][a-z0-9._:-]*$")
     revision: int = Field(ge=1)
     placement: Literal["local_in_worker", "remote_langsmith_deployment"]
@@ -824,9 +838,11 @@ class DeepAgentExecutionPlacementProfile(Contract):
             raise ValueError("local Deep Agent placement cannot declare a remote deployment")
         if self.placement == "remote_langsmith_deployment" and not self.deployment_id:
             raise ValueError("remote Deep Agent placement requires an exact deployment identity")
-        if not (info.context or {}).get("allow_placeholder_digest") and sha256_digest(
-            self.model_dump(mode="python", exclude={"placement_digest"})
-        ) != self.placement_digest:
+        if (
+            not (info.context or {}).get("allow_placeholder_digest")
+            and sha256_digest(self.model_dump(mode="python", exclude={"placement_digest"}))
+            != self.placement_digest
+        ):
             raise ValueError("Deep Agent placement digest mismatch")
         return self
 
@@ -854,9 +870,7 @@ class DeepAgentAttachmentRecord(Contract):
 
 
 class DeepAgentExecutionBinding(Contract):
-    schema_version: Literal["belllabs.deep-agent-binding.v1"] = (
-        "belllabs.deep-agent-binding.v1"
-    )
+    schema_version: Literal["belllabs.deep-agent-binding.v1"] = "belllabs.deep-agent-binding.v1"
     binding_id: str = Field(min_length=1)
     run_id: str = Field(min_length=1)
     operation_id: str = Field(min_length=1)
@@ -887,6 +901,7 @@ class DeepAgentExecutionBinding(Contract):
     skills: tuple[DeepAgentSkillComponent, ...] = ()
     sandbox: DeepAgentSandboxComponent
     sync_subagents: tuple[SyncSubagentProfile, ...] = ()
+    async_subagents: tuple[AsyncSubagentContract, ...] = ()
     cognitive_state_schema: CognitiveStateSchema
     cognitive_context_schema: CognitiveRuntimeContextSchema
     cognitive_context_values: dict[str, object]
@@ -911,8 +926,10 @@ class DeepAgentExecutionBinding(Contract):
             raise ValueError("Deep Agent context values do not exactly match the frozen schema")
         for name, field in context_fields.items():
             value = self.cognitive_context_values[name]
-            if field.reference_only and isinstance(value, str) and not (
-                value.startswith("ref:") or value.startswith("handle:")
+            if (
+                field.reference_only
+                and isinstance(value, str)
+                and not (value.startswith("ref:") or value.startswith("handle:"))
             ):
                 raise ValueError("reference-only cognitive context value contains material")
         contributed = {
@@ -931,9 +948,11 @@ class DeepAgentExecutionBinding(Contract):
         ]
         if len(attachment_keys) != len(set(attachment_keys)):
             raise ValueError("Deep Agent attachment collision")
-        if not (info.context or {}).get("allow_placeholder_digest") and sha256_digest(
-            self.model_dump(mode="python", exclude={"binding_digest"})
-        ) != self.binding_digest:
+        if (
+            not (info.context or {}).get("allow_placeholder_digest")
+            and sha256_digest(self.model_dump(mode="python", exclude={"binding_digest"}))
+            != self.binding_digest
+        ):
             raise ValueError("Deep Agent execution binding digest mismatch")
         return self
 
@@ -1201,6 +1220,7 @@ class OperationWorkflowRequest(Contract):
     timeout_seconds: int = Field(default=300, ge=1, le=86_400)
     message_cursor: int = Field(default=0, ge=0)
     effect_frontier: tuple[str, ...] = ()
+    active_async_child_ids: tuple[str, ...] = ()
 
     @property
     def workflow_id(self) -> str:
@@ -1215,6 +1235,7 @@ class OperationWorkflowResult(Contract):
     result: dict[str, object] = Field(default_factory=dict)
     message_cursor: int = Field(ge=0)
     effect_frontier: tuple[str, ...] = ()
+    active_async_child_ids: tuple[str, ...] = ()
 
 
 class ArtifactCheckEvidence(Contract):

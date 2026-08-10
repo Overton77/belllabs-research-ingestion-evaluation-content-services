@@ -1,4 +1,5 @@
 from app.integrations.agents.deep_agents.adapter import DeepAgentRuntimeAdapter
+from app.integrations.agents.deep_agents.async_subagents import DeepAgentsAsyncSubagentAdapter
 from app.integrations.agents.deep_agents.materializer import (
     ExactComponentRegistry,
     ExactDeepAgentMaterializer,
@@ -10,6 +11,7 @@ from app.integrations.agents.deep_agents.materializer import (
 
 __all__ = [
     "DeepAgentRuntimeAdapter",
+    "DeepAgentsAsyncSubagentAdapter",
     "ExactComponentRegistry",
     "ExactDeepAgentMaterializer",
     "LangSmithSandboxFactory",

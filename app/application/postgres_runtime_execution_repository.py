@@ -13,7 +13,6 @@ from app.application.runtime_execution_bindings import (
 from app.domain.graph_runtime.contracts import (
     GraphExecutionSubmission,
     InterventionReceipt,
-    RuntimeAsyncTaskProjection,
     RuntimeExecutionAttempt,
     RuntimeExecutionBinding,
     RuntimeExecutionProjection,
@@ -455,100 +454,6 @@ class PostgresRuntimeCoordinationRepository:
             receipt,
         )
 
-    async def put(
-        self,
-        task: RuntimeAsyncTaskProjection,
-        *,
-        expected_version: int | None,
-    ) -> RuntimeAsyncTaskProjection:
-        scope = task.parent_epoch.request_scope
-        async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, scope)
-            prior_payload = await connection.fetchval(
-                """
-                SELECT task_payload
-                FROM belllabs_control.runtime_async_tasks
-                WHERE request_scope = $1 AND async_task_id = $2
-                FOR UPDATE
-                """,
-                scope,
-                task.task.async_task_id,
-            )
-            if prior_payload is None:
-                if expected_version is not None:
-                    raise RuntimeBindingConflict("async task does not exist at expected version")
-                await connection.execute(
-                    """
-                    INSERT INTO belllabs_control.runtime_async_tasks (
-                        async_task_id, request_scope, binding_id,
-                        deployment_endpoint_id, child_thread_id, child_run_id,
-                        request_digest, status, result_manifest_ref, version,
-                        heartbeat_at, lease_expires_at, task_payload, created_at, updated_at
-                    )
-                    VALUES (
-                        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                        $11, $12, $13::jsonb, $14, $15
-                    )
-                    """,
-                    task.task.async_task_id,
-                    scope,
-                    task.binding_id,
-                    task.task.deployment_endpoint_id,
-                    task.task.child_thread.agent_server_thread_id,
-                    task.task.child_run.agent_server_run_id if task.task.child_run else None,
-                    task.request_digest,
-                    task.status,
-                    task.result_manifest_ref,
-                    task.version,
-                    task.heartbeat_at,
-                    task.lease_expires_at,
-                    _dump(task),
-                    task.created_at,
-                    task.updated_at,
-                )
-                return task
-            prior = RuntimeAsyncTaskProjection.model_validate(_json(prior_payload))
-            _validate_task_update(prior, task, expected_version)
-            await connection.execute(
-                """
-                UPDATE belllabs_control.runtime_async_tasks
-                SET child_run_id = $3, status = $4, result_manifest_ref = $5,
-                    version = $6, heartbeat_at = $7, lease_expires_at = $8,
-                    task_payload = $9::jsonb, updated_at = $10
-                WHERE request_scope = $1 AND async_task_id = $2 AND version = $11
-                """,
-                scope,
-                task.task.async_task_id,
-                task.task.child_run.agent_server_run_id if task.task.child_run else None,
-                task.status,
-                task.result_manifest_ref,
-                task.version,
-                task.heartbeat_at,
-                task.lease_expires_at,
-                _dump(task),
-                task.updated_at,
-                expected_version,
-            )
-        return task
-
-    async def get_task(
-        self,
-        request_scope: str,
-        async_task_id: str,
-    ) -> RuntimeAsyncTaskProjection | None:
-        async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, request_scope)
-            payload = await connection.fetchval(
-                """
-                SELECT task_payload
-                FROM belllabs_control.runtime_async_tasks
-                WHERE request_scope = $1 AND async_task_id = $2
-                """,
-                request_scope,
-                async_task_id,
-            )
-        return RuntimeAsyncTaskProjection.model_validate(_json(payload)) if payload else None
-
 
 def _validate_binding_update(
     prior: RuntimeExecutionBinding,
@@ -567,27 +472,6 @@ def _validate_binding_update(
     right = binding.model_dump(mode="json", exclude=immutable)
     if left != right:
         raise RuntimeBindingConflict("runtime binding immutable identity changed")
-
-
-def _validate_task_update(
-    prior: RuntimeAsyncTaskProjection,
-    task: RuntimeAsyncTaskProjection,
-    expected_version: int | None,
-) -> None:
-    if expected_version != prior.version or task.version != prior.version + 1:
-        raise RuntimeBindingConflict("async task version is stale")
-    mutable = {
-        "status",
-        "result_manifest_ref",
-        "version",
-        "heartbeat_at",
-        "lease_expires_at",
-        "updated_at",
-    }
-    if prior.model_dump(mode="json", exclude=mutable) != task.model_dump(
-        mode="json", exclude=mutable
-    ):
-        raise RuntimeBindingConflict("async task immutable identity changed")
 
 
 async def _set_scope(connection: asyncpg.Connection, request_scope: str) -> None:

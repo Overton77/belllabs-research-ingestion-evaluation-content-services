@@ -253,17 +253,6 @@ SynchronousSubagentDefinition = Annotated[
 ]
 
 
-class AsyncSubagentDefinition(Contract):
-    kind: Literal["async_remote_graph"] = "async_remote_graph"
-    profile: SubagentProfileKey
-    graph_id: str = Field(min_length=1)
-    deployment_endpoint_ref: str = Field(min_length=1)
-    runtime_policy_ref: ContentAddressedRef
-    dedicated_child_thread: Literal[True] = True
-    headers_secret_ref: SecretRef | None = None
-    lifecycle_policy_ref: str = Field(min_length=1)
-
-
 class DelegationModePolicy(Contract):
     mode: Literal["sync_subagent", "dynamic_interpreter", "async_subagent", "linked_run"]
     enabled: bool = False
@@ -285,7 +274,6 @@ class DelegationPolicyDefinition(RuntimeDefinition):
     ]
     modes: tuple[DelegationModePolicy, ...]
     synchronous_subagents: tuple[SynchronousSubagentDefinition, ...] = ()
-    asynchronous_subagents: tuple[AsyncSubagentDefinition, ...] = ()
 
     @model_validator(mode="after")
     def delegation_modes_are_complete_and_distinct(self) -> DelegationPolicyDefinition:
@@ -294,8 +282,6 @@ class DelegationPolicyDefinition(RuntimeDefinition):
         if set(names) != required or len(names) != len(required):
             raise ValueError("all four delegation modes require distinct policies")
         enabled = {item.mode for item in self.modes if item.enabled}
-        if self.asynchronous_subagents and "async_subagent" not in enabled:
-            raise ValueError("async subagent definitions require the async mode to be enabled")
         if self.synchronous_subagents and "sync_subagent" not in enabled:
             raise ValueError("sync subagent definitions require the sync mode to be enabled")
         return self

@@ -50,8 +50,10 @@ class AsyncDelegationDecision(BaseModel):
 def classify_async_delegation(boundary: AsyncDelegationBoundary) -> AsyncDelegationDecision:
     """Pure, precedence-ordered governance classifier; it never launches work."""
 
-    if boundary.recognized_workflow_type or boundary.independent_authority or (
-        boundary.independent_terminality and boundary.reusable_product_output
+    if (
+        boundary.recognized_workflow_type
+        or boundary.independent_authority
+        or (boundary.independent_terminality and boundary.reusable_product_output)
     ):
         return AsyncDelegationDecision(
             route="linked_run", reason_code="workflow_or_product_authority_boundary"

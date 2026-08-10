@@ -65,7 +65,9 @@ class MongoAsyncSubagentDetailRepository:
                 raise AsyncSubagentError("async execution identity collision") from None
             return prior
 
-    async def get_execution(self, request_scope: str, child_execution_id: str) -> AsyncSubagentExecution:
+    async def get_execution(
+        self, request_scope: str, child_execution_id: str
+    ) -> AsyncSubagentExecution:
         document = await AsyncSubagentExecutionDocument.find_one(
             AsyncSubagentExecutionDocument.request_scope == request_scope,
             AsyncSubagentExecutionDocument.child_execution_id == child_execution_id,
@@ -74,7 +76,18 @@ class MongoAsyncSubagentDetailRepository:
             raise AsyncSubagentError("async child execution not found")
         return AsyncSubagentExecution.model_validate(document.payload)
 
-    async def get_link(self, request_scope: str, child_execution_id: str) -> ParentAsyncSubagentLink:
+    async def get_contract(self, request_scope: str, contract_id: str) -> AsyncSubagentContract:
+        document = await AsyncSubagentContractDocument.find_one(
+            AsyncSubagentContractDocument.request_scope == request_scope,
+            AsyncSubagentContractDocument.contract_id == contract_id,
+        )
+        if document is None:
+            raise AsyncSubagentError("async subagent contract not found")
+        return AsyncSubagentContract.model_validate(document.payload)
+
+    async def get_link(
+        self, request_scope: str, child_execution_id: str
+    ) -> ParentAsyncSubagentLink:
         document = await ParentAsyncSubagentLinkDocument.find_one(
             ParentAsyncSubagentLinkDocument.request_scope == request_scope,
             ParentAsyncSubagentLinkDocument.child_execution_id == child_execution_id,

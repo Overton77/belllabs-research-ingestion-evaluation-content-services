@@ -14,16 +14,17 @@ WP-CP-001 (accepted)
 
 ## Current frontier
 
-`WP-CP-010` is accepted. Implement `WP-CP-020` next.
+`WP-CP-001` through `WP-CP-045` are accepted. Implement `WP-BP-010` and `WP-BP-020` in parallel
+from the same accepted `WP-CP-045` baseline, then integrate them under
+[`PARALLEL_WORKTREE_PROTOCOL.md`](PARALLEL_WORKTREE_PROTOCOL.md).
 
-After `WP-CP-040`, `WP-CP-045` and `WP-BP-010` may proceed in parallel. Start `WP-BP-020` as
-soon as `WP-CP-045` is accepted; it does not depend on `WP-BP-010`. Run `WP-CP-050` last, after
-`WP-CP-045`, `WP-BP-010`, and `WP-BP-020` are accepted.
+`WP-BP-020` does not depend on `WP-BP-010`; they share only frozen foundation seams and
+integrator-owned files. Run `WP-CP-050` last, after both blueprint packages are accepted.
 
 For one serial implementer, prefer the critical-path-first order:
 
 ```text
-WP-CP-010 -> WP-CP-020 -> WP-CP-030 -> WP-CP-040 ->
+WP-CP-001 -> WP-CP-010 -> WP-CP-020 -> WP-CP-030 -> WP-CP-040 ->
 WP-CP-045 -> WP-BP-020 -> WP-BP-010 -> WP-CP-050
 ```
 

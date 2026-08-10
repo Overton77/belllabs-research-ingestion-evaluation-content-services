@@ -7,7 +7,6 @@ from pydantic import BaseModel, ConfigDict
 from app.application.runtime_decisions import DurableDecisionService
 from app.domain.graph_runtime.contracts import (
     AppendInputIntervention,
-    CancelAsyncTaskIntervention,
     CancelRunIntervention,
     ForkFromCheckpointIntervention,
     PrivilegedOperatorReconcileIntervention,
@@ -16,7 +15,6 @@ from app.domain.graph_runtime.contracts import (
     RuntimeExecutionBinding,
     RuntimeIntervention,
     SatisfyWaitIntervention,
-    UpdateAsyncTaskIntervention,
 )
 
 
@@ -121,11 +119,6 @@ class BellLabsAgentServerActionResolver:
                     }
                 },
             )
-        if isinstance(
-            intervention,
-            UpdateAsyncTaskIntervention | CancelAsyncTaskIntervention,
-        ):
-            raise ValueError("async task interventions remain disabled until Stage 6")
         if isinstance(intervention, ForkFromCheckpointIntervention):
             raise ValueError("fork commands require the admitted RuntimeForkService path")
         if isinstance(intervention, PrivilegedOperatorReconcileIntervention):

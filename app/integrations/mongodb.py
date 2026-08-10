@@ -9,9 +9,9 @@ from pymongo.asynchronous.database import AsyncDatabase
 
 from app.config import Settings
 from app.models import (
+    ArtifactMetadataRevisionDocument,
     AsyncSubagentContractDocument,
     AsyncSubagentExecutionDocument,
-    ArtifactMetadataRevisionDocument,
     CatalogProjectionAlertDocument,
     CatalogProjectionEventDocument,
     DefinitionAliasDocument,

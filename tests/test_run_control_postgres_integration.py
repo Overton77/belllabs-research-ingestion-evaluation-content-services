@@ -45,6 +45,7 @@ async def test_postgres_atomic_rollback_and_concurrent_version_conflict(
                 "0012_graph_runtime_operation_journal.sql",
                 "0013_legacy_operation_journal_backfill.sql",
                 "0015_transactional_run_control_v1.sql",
+                "0016_async_subagent_parent_child_v1.sql",
             }
 
         async def fail_admission(boundary: str) -> None:

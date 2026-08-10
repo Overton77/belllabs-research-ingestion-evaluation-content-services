@@ -118,14 +118,6 @@ class SubagentProfileKey(Identity):
     profile_digest: str = Field(pattern=DIGEST_PATTERN)
 
 
-class AsyncTaskKey(Identity):
-    provider: Literal["deepagents"] = "deepagents"
-    deployment_endpoint_id: str = Field(pattern=IDENTIFIER_PATTERN)
-    async_task_id: str = Field(pattern=IDENTIFIER_PATTERN)
-    child_thread: AgentThreadKey
-    child_run: AgentRunKey | None = None
-
-
 class LinkedBellLabsRunKey(Identity):
     request_scope: str = Field(min_length=1, max_length=256)
     parent_belllabs_run_id: str = Field(pattern=IDENTIFIER_PATTERN)

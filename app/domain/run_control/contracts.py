@@ -140,10 +140,14 @@ class EffectSettlementOutcome(StrEnum):
 
 
 class AsyncChildDependencyClass(StrEnum):
-    REQUIRED = "required"
-    DEGRADABLE = "degradable"
-    OPTIONAL = "optional"
+    REQUIRED_BLOCKING = "required_blocking"
+    DEGRADABLE_BLOCKING = "degradable_blocking"
+    NONBLOCKING = "nonblocking"
     ADVISORY = "advisory"
+    # Source compatibility for the WP-CP-020 authority tests; persisted V1 values are canonical.
+    REQUIRED = "required_blocking"
+    DEGRADABLE = "degradable_blocking"
+    OPTIONAL = "nonblocking"
 
 
 class AsyncChildDecisionOutcome(StrEnum):

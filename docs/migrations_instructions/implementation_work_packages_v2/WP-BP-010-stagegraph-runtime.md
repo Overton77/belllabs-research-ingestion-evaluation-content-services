@@ -1,7 +1,7 @@
 ---
 id: WP-BP-010
 title: Implement canonical StageGraph runtime
-status: ready_when_unblocked
+status: ready
 implements: [REQ-BP-SG-001, REQ-BP-SG-002, REQ-BP-SG-003, REQ-BP-SG-004, REQ-BP-SG-005, REQ-BP-SG-006, REQ-BP-SG-007, REQ-BP-SG-008, REQ-BP-SG-009, REQ-BP-SG-010]
 governed_by: [ADR-0003, SPEC-BP-STAGEGRAPH]
 contracts: [CON-BP-STAGEGRAPH-V1, CON-BP-STAGE-DECISION-V1]
@@ -46,8 +46,11 @@ Blueprint contracts/compiler, interpreter/kernel, Temporal StageGraph workflow, 
 
 Implement the canonical typed-dependency blueprint and decision contracts. Port useful semantic
 fixtures to the new schemas, then remove the parallel dependency maps, ambiguous concurrency field,
-direct-activity family path, and Agent Server macro graph. Behavioral comparison is diagnostic
-only; exact legacy schema parity is not required.
+direct-activity family path, and Agent Server macro graph. Move executable mechanics from the
+legacy `app/temporal/stagegraph_workflow.py` module into the frozen
+`app/temporal/workflows/stagegraph.py` owner and delete the legacy module at acceptance; a
+re-export shim is not the accepted runtime. Behavioral comparison is diagnostic only; exact legacy
+schema parity is not required.
 
 ## Acceptance criteria
 
@@ -63,6 +66,22 @@ only; exact legacy schema parity is not required.
 
 Run `QUAL-BP-STAGEGRAPH-SEMANTICS-RECOVERY`, including captured replay, worker loss, waits,
 cancellation, late results, cycles, and Continue-As-New against canonical fixtures.
+
+The qualification also includes a credential-gated live acceptance test. It must submit through
+the BellLabs API, pass through transactional admission and `BellLabsRunWorkflow`, execute the real
+`StageGraphWorkflow`, and run `OperationWorkflow` children with real LLM calls through the
+accepted Deep Agents adapter. The graph must contain a branching frontier and a downstream
+`any(1)` or equivalent minimum join. Evidence must prove that downstream work starts after the
+satisfying result and before an unrelated slow sibling completes. Use a controlled synchronization
+gate around the slow sibling while preserving real LLM calls, and prove ordering from Temporal
+history events rather than provider latency or wall-clock timing alone. Then record accepted stage
+outputs, current obligation evidence, and the run-control reducer's terminal outcome.
+
+The live test complements deterministic unit/property, join-truth-table, API integration, Temporal
+time-skipping, replay, recovery, cancellation, and late-result tests; it cannot replace them. Use
+the smallest exact Deep Agent binding needed to prove StageGraph semantics. MCP servers, Skills,
+executable sandboxes, snapshots, and the complete advanced-capability combination remain outside
+this package's live-test requirement and are proved cohesively by `WP-CP-050`.
 
 ## Failure and rollback posture
 

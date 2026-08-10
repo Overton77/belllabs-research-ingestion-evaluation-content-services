@@ -8,7 +8,6 @@ from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.domain.control_plane.canonical import sha256_digest
 from app.domain.operation_execution.contracts import (
     AsyncSubagentContract,
     AsyncSubagentDependencyClass,
@@ -65,9 +64,16 @@ class AsyncSubagentDetailRepository(Protocol):
         link: ParentAsyncSubagentLink,
     ) -> AsyncSubagentExecution: ...
 
-    async def get_execution(self, request_scope: str, child_execution_id: str) -> AsyncSubagentExecution: ...
-    async def get_link(self, request_scope: str, child_execution_id: str) -> ParentAsyncSubagentLink: ...
-    async def save_execution(self, request_scope: str, execution: AsyncSubagentExecution) -> None: ...
+    async def get_execution(
+        self, request_scope: str, child_execution_id: str
+    ) -> AsyncSubagentExecution: ...
+    async def get_contract(self, request_scope: str, contract_id: str) -> AsyncSubagentContract: ...
+    async def get_link(
+        self, request_scope: str, child_execution_id: str
+    ) -> ParentAsyncSubagentLink: ...
+    async def save_execution(
+        self, request_scope: str, execution: AsyncSubagentExecution
+    ) -> None: ...
     async def save_link(self, request_scope: str, link: ParentAsyncSubagentLink) -> None: ...
 
 
@@ -81,7 +87,9 @@ class AsyncSubagentAuthorityPort(Protocol):
     ) -> None: ...
 
     async def append_message(self, request_scope: str, message: AsyncSubagentMessage) -> None: ...
-    async def request_cancellation(self, request_scope: str, child_execution_id: str, reason: str) -> None: ...
+    async def request_cancellation(
+        self, request_scope: str, child_execution_id: str, reason: str
+    ) -> None: ...
     async def decide_result(
         self,
         request_scope: str,
@@ -90,19 +98,33 @@ class AsyncSubagentAuthorityPort(Protocol):
         manifest_digest: str,
     ) -> None: ...
 
-    async def settle(self, request_scope: str, child_execution_id: str, settlement_ref: str) -> None: ...
+    async def settle(
+        self, request_scope: str, child_execution_id: str, settlement_ref: str
+    ) -> None: ...
 
 
 class AsyncSubagentProviderPort(Protocol):
     async def start(
-        self, contract: AsyncSubagentContract, objective: str
+        self,
+        contract: AsyncSubagentContract,
+        execution: AsyncSubagentExecution,
+        objective: str,
     ) -> ProviderAsyncObservation: ...
-    async def check(self, execution: AsyncSubagentExecution) -> ProviderAsyncObservation: ...
+    async def check(
+        self, contract: AsyncSubagentContract, execution: AsyncSubagentExecution
+    ) -> ProviderAsyncObservation: ...
     async def update(
-        self, execution: AsyncSubagentExecution, message: AsyncSubagentMessage
+        self,
+        contract: AsyncSubagentContract,
+        execution: AsyncSubagentExecution,
+        message: AsyncSubagentMessage,
     ) -> ProviderAsyncObservation: ...
-    async def cancel(self, execution: AsyncSubagentExecution) -> ProviderAsyncObservation: ...
-    async def list(self, executions: tuple[AsyncSubagentExecution, ...]) -> tuple[ProviderAsyncObservation, ...]: ...
+    async def cancel(
+        self, contract: AsyncSubagentContract, execution: AsyncSubagentExecution
+    ) -> ProviderAsyncObservation: ...
+    async def list(
+        self, executions: tuple[tuple[AsyncSubagentContract, AsyncSubagentExecution], ...]
+    ) -> tuple[ProviderAsyncObservation, ...]: ...
 
 
 class AsyncSubagentService:
@@ -113,15 +135,26 @@ class AsyncSubagentService:
         details: AsyncSubagentDetailRepository,
         authority: AsyncSubagentAuthorityPort,
         provider: AsyncSubagentProviderPort,
+        *,
+        allow_new_spawns: bool = False,
     ) -> None:
         self._details = details
         self._authority = authority
         self._provider = provider
+        self._allow_new_spawns = allow_new_spawns
 
     async def spawn(self, request: AsyncSubagentSpawnRequest) -> AsyncSubagentExecution:
+        if not self._allow_new_spawns:
+            raise AsyncSubagentError(
+                "new async subagent spawning is feature-gated; reconciliation remains available"
+            )
         if request.dependency_class not in request.contract.dependency_classes:
             raise AsyncSubagentError("dependency class exceeds the immutable contract ceiling")
-        child_id = str(uuid5(NAMESPACE_URL, f"async-child:{request.parent_binding_id}:{request.idempotency_key}"))
+        child_id = str(
+            uuid5(
+                NAMESPACE_URL, f"async-child:{request.parent_binding_id}:{request.idempotency_key}"
+            )
+        )
         link_id = str(uuid5(NAMESPACE_URL, f"async-link:{child_id}"))
         execution = AsyncSubagentExecution(
             child_execution_id=child_id,
@@ -152,28 +185,41 @@ class AsyncSubagentService:
             created_at=request.requested_at,
             updated_at=request.requested_at,
         )
-        prior = await self._details.create_before_submit(request.request_scope, request.contract, execution, link)
+        prior = await self._details.create_before_submit(
+            request.request_scope, request.contract, execution, link
+        )
         if prior.lifecycle != AsyncSubagentLifecycle.PROPOSED:
             return prior
         await self._authority.reserve_and_admit(request, child_id, link_id)
         admitted = execution.model_copy(
-            update={"lifecycle": AsyncSubagentLifecycle.ADMITTED, "updated_at": request.requested_at}
+            update={
+                "lifecycle": AsyncSubagentLifecycle.ADMITTED,
+                "updated_at": request.requested_at,
+            }
         )
         await self._details.save_execution(request.request_scope, admitted)
         try:
-            observation = await self._provider.start(request.contract, request.objective)
+            observation = await self._provider.start(request.contract, admitted, request.objective)
         except Exception:
             orphaned = admitted.model_copy(
-                update={"lifecycle": AsyncSubagentLifecycle.ORPHANED, "updated_at": request.requested_at}
+                update={
+                    "lifecycle": AsyncSubagentLifecycle.ORPHANED,
+                    "updated_at": request.requested_at,
+                }
             )
             await self._details.save_execution(request.request_scope, orphaned)
-            await self._authority.record_fact(request.request_scope, child_id, "lifecycle", "orphaned")
+            await self._authority.record_fact(
+                request.request_scope, child_id, "lifecycle", "orphaned"
+            )
             raise
         return await self._apply_observation(request.request_scope, admitted, observation)
 
-    async def reconcile(self, request_scope: str, child_execution_id: str) -> AsyncSubagentExecution:
+    async def reconcile(
+        self, request_scope: str, child_execution_id: str
+    ) -> AsyncSubagentExecution:
         execution = await self._details.get_execution(request_scope, child_execution_id)
-        observation = await self._provider.check(execution)
+        contract = await self._details.get_contract(request_scope, execution.contract_id)
+        observation = await self._provider.check(contract, execution)
         return await self._apply_observation(request_scope, execution, observation)
 
     async def send_message(
@@ -184,16 +230,21 @@ class AsyncSubagentService:
         payload_ref: str,
         correlation_id: str,
         created_at: datetime,
-        context_authority: Literal["instruction", "admitted_context", "untrusted_observation"] = "instruction",
+        context_authority: Literal[
+            "instruction", "admitted_context", "untrusted_observation"
+        ] = "instruction",
     ) -> AsyncSubagentMessage:
         execution = await self._details.get_execution(request_scope, child_execution_id)
+        contract = await self._details.get_contract(request_scope, execution.contract_id)
         link = await self._details.get_link(request_scope, child_execution_id)
         sequence = 1 + max(
             (item.target_sequence for item in link.messages if item.direction == "parent_to_child"),
             default=0,
         )
         message = AsyncSubagentMessage(
-            message_id=str(uuid5(NAMESPACE_URL, f"async-message:{child_execution_id}:parent:{sequence}")),
+            message_id=str(
+                uuid5(NAMESPACE_URL, f"async-message:{child_execution_id}:parent:{sequence}")
+            ),
             child_execution_id=child_execution_id,
             direction="parent_to_child",
             target_sequence=sequence,
@@ -203,28 +254,78 @@ class AsyncSubagentService:
             created_at=created_at,
         )
         await self._authority.append_message(request_scope, message)
-        link = link.model_copy(update={"messages": (*link.messages, message), "updated_at": created_at})
+        link = link.model_copy(
+            update={"messages": (*link.messages, message), "updated_at": created_at}
+        )
         await self._details.save_link(request_scope, link)
-        observation = await self._provider.update(execution, message)
+        observation = await self._provider.update(contract, execution, message)
         applied = message.model_copy(update={"receipt": "provider_applied"})
         link = link.model_copy(
-            update={"messages": (*link.messages[:-1], applied), "updated_at": observation.observed_at}
+            update={
+                "messages": (*link.messages[:-1], applied),
+                "updated_at": observation.observed_at,
+            }
         )
         await self._details.save_link(request_scope, link)
         await self._apply_observation(request_scope, execution, observation)
         return applied
 
+    async def receive_child_message(
+        self,
+        request_scope: str,
+        child_execution_id: str,
+        *,
+        payload_ref: str,
+        correlation_id: str,
+        created_at: datetime,
+    ) -> AsyncSubagentMessage:
+        """Durably accept an observed child message without treating thread content as delivery."""
+
+        link = await self._details.get_link(request_scope, child_execution_id)
+        sequence = 1 + max(
+            (item.target_sequence for item in link.messages if item.direction == "child_to_parent"),
+            default=0,
+        )
+        message = AsyncSubagentMessage(
+            message_id=str(
+                uuid5(NAMESPACE_URL, f"async-message:{child_execution_id}:child:{sequence}")
+            ),
+            child_execution_id=child_execution_id,
+            direction="child_to_parent",
+            target_sequence=sequence,
+            correlation_id=correlation_id,
+            payload_ref=payload_ref,
+            context_authority="untrusted_observation",
+            receipt="checkpoint_committed",
+            created_at=created_at,
+        )
+        await self._authority.append_message(request_scope, message)
+        await self._details.save_link(
+            request_scope,
+            link.model_copy(
+                update={"messages": (*link.messages, message), "updated_at": created_at}
+            ),
+        )
+        return message
+
     async def cancel(
         self, request_scope: str, child_execution_id: str, reason: str, requested_at: datetime
     ) -> AsyncSubagentExecution:
         execution = await self._details.get_execution(request_scope, child_execution_id)
+        contract = await self._details.get_contract(request_scope, execution.contract_id)
         link = await self._details.get_link(request_scope, child_execution_id)
         await self._authority.request_cancellation(request_scope, child_execution_id, reason)
         await self._details.save_link(
             request_scope,
-            link.model_copy(update={"cancellation_requested": True, "cancellation_reason": reason, "updated_at": requested_at}),
+            link.model_copy(
+                update={
+                    "cancellation_requested": True,
+                    "cancellation_reason": reason,
+                    "updated_at": requested_at,
+                }
+            ),
         )
-        observation = await self._provider.cancel(execution)
+        observation = await self._provider.cancel(contract, execution)
         return await self._apply_observation(request_scope, execution, observation)
 
     async def decide_result(
@@ -251,7 +352,9 @@ class AsyncSubagentService:
         updated = link.model_copy(
             update={
                 "result_decision": decision,
-                "admitted_manifest_digest": manifest.manifest_digest if decision in {"admit", "conditionally_admit"} else None,
+                "admitted_manifest_digest": manifest.manifest_digest
+                if decision in {"admit", "conditionally_admit"}
+                else None,
                 "updated_at": decided_at,
             }
         )
@@ -298,10 +401,19 @@ class AsyncSubagentService:
         }
         manifest = None
         if observation.status == "success":
-            if not observation.output_ref or not observation.usage_ref or not observation.checkpoint_ref:
+            if (
+                not observation.output_ref
+                or not observation.usage_ref
+                or not observation.checkpoint_ref
+            ):
                 raise AsyncSubagentError("provider success lacks canonical result references")
             manifest = AsyncSubagentResultManifest.create(
-                manifest_id=str(uuid5(NAMESPACE_URL, f"async-result:{execution.child_execution_id}:{execution.execution_generation}")),
+                manifest_id=str(
+                    uuid5(
+                        NAMESPACE_URL,
+                        f"async-result:{execution.child_execution_id}:{execution.execution_generation}",
+                    )
+                ),
                 child_execution_id=execution.child_execution_id,
                 execution_generation=execution.execution_generation,
                 output_refs=(observation.output_ref,),
@@ -322,7 +434,12 @@ class AsyncSubagentService:
         )
         await self._details.save_execution(request_scope, updated)
         fact_ref = manifest.manifest_digest if manifest is not None else observation.status
-        await self._authority.record_fact(request_scope, execution.child_execution_id, "result" if manifest else "lifecycle", fact_ref)
+        await self._authority.record_fact(
+            request_scope,
+            execution.child_execution_id,
+            "result" if manifest else "lifecycle",
+            fact_ref,
+        )
         return updated
 
 
@@ -333,7 +450,13 @@ class InMemoryAsyncSubagentDetailRepository:
         self.executions: dict[tuple[str, str], AsyncSubagentExecution] = {}
         self.links: dict[tuple[str, str], ParentAsyncSubagentLink] = {}
 
-    async def create_before_submit(self, request_scope: str, contract: AsyncSubagentContract, execution: AsyncSubagentExecution, link: ParentAsyncSubagentLink) -> AsyncSubagentExecution:
+    async def create_before_submit(
+        self,
+        request_scope: str,
+        contract: AsyncSubagentContract,
+        execution: AsyncSubagentExecution,
+        link: ParentAsyncSubagentLink,
+    ) -> AsyncSubagentExecution:
         key = (request_scope, execution.child_execution_id)
         async with self._lock:
             prior = self.executions.get(key)
@@ -346,13 +469,23 @@ class InMemoryAsyncSubagentDetailRepository:
             self.links[key] = deepcopy(link)
             return deepcopy(execution)
 
-    async def get_execution(self, request_scope: str, child_execution_id: str) -> AsyncSubagentExecution:
+    async def get_execution(
+        self, request_scope: str, child_execution_id: str
+    ) -> AsyncSubagentExecution:
         try:
             return deepcopy(self.executions[(request_scope, child_execution_id)])
         except KeyError as error:
             raise AsyncSubagentError("async child execution not found") from error
 
-    async def get_link(self, request_scope: str, child_execution_id: str) -> ParentAsyncSubagentLink:
+    async def get_contract(self, request_scope: str, contract_id: str) -> AsyncSubagentContract:
+        try:
+            return deepcopy(self.contracts[(request_scope, contract_id)])
+        except KeyError as error:
+            raise AsyncSubagentError("async subagent contract not found") from error
+
+    async def get_link(
+        self, request_scope: str, child_execution_id: str
+    ) -> ParentAsyncSubagentLink:
         try:
             return deepcopy(self.links[(request_scope, child_execution_id)])
         except KeyError as error:
@@ -376,29 +509,59 @@ class InMemoryAsyncSubagentAuthority:
         self.decisions: dict[tuple[str, str], tuple[str, str]] = {}
         self.settlements: dict[tuple[str, str], str] = {}
 
-    async def reserve_and_admit(self, request: AsyncSubagentSpawnRequest, child_execution_id: str, link_id: str) -> None:
-        self.reservations.setdefault((request.request_scope, child_execution_id), {"reservation_id": request.reservation_id, "link_id": link_id, "dependency_class": request.dependency_class.value})
+    async def reserve_and_admit(
+        self, request: AsyncSubagentSpawnRequest, child_execution_id: str, link_id: str
+    ) -> None:
+        self.reservations.setdefault(
+            (request.request_scope, child_execution_id),
+            {
+                "reservation_id": request.reservation_id,
+                "link_id": link_id,
+                "dependency_class": request.dependency_class.value,
+            },
+        )
 
-    async def record_fact(self, request_scope: str, child_execution_id: str, fact_kind: str, fact_ref: str) -> None:
+    async def record_fact(
+        self, request_scope: str, child_execution_id: str, fact_kind: str, fact_ref: str
+    ) -> None:
         item = (request_scope, child_execution_id, fact_kind, fact_ref)
         if item not in self.facts:
             self.facts.append(item)
 
     async def append_message(self, request_scope: str, message: AsyncSubagentMessage) -> None:
-        expected = 1 + max((item.target_sequence for scope, item in self.messages if scope == request_scope and item.child_execution_id == message.child_execution_id and item.direction == message.direction), default=0)
+        expected = 1 + max(
+            (
+                item.target_sequence
+                for scope, item in self.messages
+                if scope == request_scope
+                and item.child_execution_id == message.child_execution_id
+                and item.direction == message.direction
+            ),
+            default=0,
+        )
         if message.target_sequence != expected:
             raise AsyncSubagentError("message target sequence is not monotonic")
         self.messages.append((request_scope, deepcopy(message)))
 
-    async def request_cancellation(self, request_scope: str, child_execution_id: str, reason: str) -> None:
+    async def request_cancellation(
+        self, request_scope: str, child_execution_id: str, reason: str
+    ) -> None:
         self.cancellations.setdefault((request_scope, child_execution_id), reason)
 
-    async def decide_result(self, request_scope: str, child_execution_id: str, decision: Literal["admit", "conditionally_admit", "reject", "defer"], manifest_digest: str) -> None:
+    async def decide_result(
+        self,
+        request_scope: str,
+        child_execution_id: str,
+        decision: Literal["admit", "conditionally_admit", "reject", "defer"],
+        manifest_digest: str,
+    ) -> None:
         key = (request_scope, child_execution_id)
         prior = self.decisions.get(key)
         if prior is not None and prior != (decision, manifest_digest):
             raise AsyncSubagentError("result has a conflicting authority decision")
         self.decisions[key] = (decision, manifest_digest)
 
-    async def settle(self, request_scope: str, child_execution_id: str, settlement_ref: str) -> None:
+    async def settle(
+        self, request_scope: str, child_execution_id: str, settlement_ref: str
+    ) -> None:
         self.settlements.setdefault((request_scope, child_execution_id), settlement_ref)

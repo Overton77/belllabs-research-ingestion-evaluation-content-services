@@ -1,0 +1,24 @@
+---
+description: Parallel StageGraph and GoalDirected worktree ownership and integration
+alwaysApply: true
+---
+
+# Parallel blueprint worktrees
+
+When `WP-BP-010` and `WP-BP-020` are active concurrently:
+
+- Follow `docs/migrations_instructions/implementation_work_packages_v2/PARALLEL_WORKTREE_PROTOCOL.md`.
+- Both branches must start from the same accepted `WP-CP-045` revision and record it as
+  `BP_BASE_REVISION`.
+- StageGraph owns only StageGraph regions and paths; GoalDirected owns only GoalDirected regions
+  and paths. Never resolve a shared-file conflict by taking one entire side.
+- Family-neutral orchestration contracts, run control, root/operation workflows, Deep Agents
+  materialization, async delegation semantics, and registries are integrator-owned.
+- Preserve unrelated dirty changes. Do not perform whole-file formatting, bulk relocation, sibling
+  WP implementation, or opportunistic cleanup in shared files.
+- Merge both branches through `integration/bp-runtimes`; run deterministic and credential-gated
+  real-LLM API-to-Temporal qualifications there before target-branch merge.
+- Runtime proof must traverse the BellLabs API, admission, root workflow, real family workflow,
+  `OperationWorkflow`, and accepted Deep Agents adapter. Provider invocation alone is not proof.
+- Keep complete Skills/MCP/sandbox/snapshot capability combination out of the BP scope; it belongs
+  to `WP-CP-050`.

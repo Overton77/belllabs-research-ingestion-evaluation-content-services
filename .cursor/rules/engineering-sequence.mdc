@@ -39,7 +39,10 @@ BellLabs adaptations on top of those skills: specs land under `../biotech-meta/d
 - **Specs ≠ tickets.** Specs via `to-spec`; publishing tickets is a separate `to-tickets` step.
 - **Respect the pre-research DAG** (`F* → C* → P*/R*`) in `../biotech-meta/docs/specs/pre-research/README.md`. Do not jump ahead of prerequisites.
 - **Optional handoff (any stage):** use `handoff` when invoked, otherwise follow the user's manual handoff flow; do not invent a handoff format unprompted.
-- **Branch/PR lifecycle:** follow `.scratch/ISSUE_BRANCH_PR_LIFECYCLE.md` — one branch/PR per issue unless deliberately batched.
+- **Branch/PR lifecycle:** use one branch/worktree per active WP unless deliberately batched.
+  Concurrent `WP-BP-010`/`WP-BP-020` work follows
+  `docs/migrations_instructions/implementation_work_packages_v2/PARALLEL_WORKTREE_PROTOCOL.md`
+  and merges through its temporary integration branch.
 
 ## BAD / GOOD
 

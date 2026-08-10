@@ -13,6 +13,9 @@
   [replacement work-package index](docs/migrations_instructions/implementation_work_packages_v2/README.md);
   the complete active `WP-*` and its dependencies; then as-built guidance, code, tests, and
   evidence. Requirements belong to their canonical `SPEC-*`; a work package cannot amend them.
+- Concurrent `WP-BP-010` and `WP-BP-020` work must follow the scoped
+  [v2 agent instructions](docs/migrations_instructions/implementation_work_packages_v2/AGENTS.md)
+  and [parallel worktree protocol](docs/migrations_instructions/implementation_work_packages_v2/PARALLEL_WORKTREE_PROTOCOL.md).
 - Temporal is the sole production macro-workflow runtime. The BellLabs API is the sole governed
   public facade. Agent Server is bounded to operation, qualification, development, and shared
   support assets; it is not an application root or competing scheduler.
