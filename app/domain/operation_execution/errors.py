@@ -22,6 +22,18 @@ class UnsupportedRuntimePolicy(ValueError):
     """The selected agent runtime cannot faithfully enforce a bound policy."""
 
 
+class DeepAgentMaterializationError(ValueError):
+    """An exact Deep Agent binding could not be materialized before model invocation."""
+
+
+class DeepAgentRuntimeDrift(DeepAgentMaterializationError):
+    """Installed runtime or resolved component differs from the immutable binding."""
+
+
+class DeepAgentUnsupportedPlacement(DeepAgentMaterializationError):
+    """The exact placement is not qualified by this adapter and cannot silently fall back."""
+
+
 class SandboxSnapshotError(ValueError):
     """Snapshot creation or clone restore violated a governed invariant."""
 

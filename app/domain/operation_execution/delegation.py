@@ -27,6 +27,49 @@ class LinkedRunRequired(ValueError):
         super().__init__(admission.reason_code)
 
 
+class AsyncDelegationBoundary(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    recognized_workflow_type: bool = False
+    independent_authority: bool = False
+    independent_terminality: bool = False
+    reusable_product_output: bool = False
+    substantial_separate_budget: bool = False
+    durable_cross_operation_wait: bool = False
+    independent_settlement: bool = False
+    independently_messageable_or_cancellable: bool = False
+
+
+class AsyncDelegationDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    route: Literal["subordinate", "operation", "linked_run"]
+    reason_code: str
+
+
+def classify_async_delegation(boundary: AsyncDelegationBoundary) -> AsyncDelegationDecision:
+    """Pure, precedence-ordered governance classifier; it never launches work."""
+
+    if boundary.recognized_workflow_type or boundary.independent_authority or (
+        boundary.independent_terminality and boundary.reusable_product_output
+    ):
+        return AsyncDelegationDecision(
+            route="linked_run", reason_code="workflow_or_product_authority_boundary"
+        )
+    if (
+        boundary.independent_terminality
+        or boundary.reusable_product_output
+        or boundary.substantial_separate_budget
+        or boundary.durable_cross_operation_wait
+        or boundary.independent_settlement
+        or boundary.independently_messageable_or_cancellable
+    ):
+        return AsyncDelegationDecision(
+            route="operation", reason_code="independent_durable_operation_boundary"
+        )
+    return AsyncDelegationDecision(route="subordinate", reason_code="parent_operation_local")
+
+
 def admit_delegation(
     binding: OperationExecutionBinding,
     delegation: DelegationBinding,

@@ -124,3 +124,53 @@ class OperationMigrationQuarantineDocument(Document):
                 unique=True,
             ),
         ]
+
+
+class AsyncSubagentContractDocument(Document):
+    request_scope: str
+    contract_id: str
+    contract_digest: str
+    payload: dict[str, Any]
+    created_at: datetime
+
+    class Settings:
+        name = "async_subagent_contracts"
+        indexes = [
+            IndexModel([("request_scope", ASCENDING), ("contract_id", ASCENDING)], unique=True),
+            IndexModel([("request_scope", ASCENDING), ("contract_digest", ASCENDING)]),
+        ]
+
+
+class AsyncSubagentExecutionDocument(Document):
+    request_scope: str
+    child_execution_id: str
+    contract_id: str
+    parent_run_id: str
+    parent_operation_id: str
+    execution_generation: int
+    payload: dict[str, Any]
+    updated_at: datetime
+
+    class Settings:
+        name = "async_subagent_executions"
+        indexes = [
+            IndexModel([("request_scope", ASCENDING), ("child_execution_id", ASCENDING)], unique=True),
+            IndexModel([("parent_run_id", ASCENDING), ("parent_operation_id", ASCENDING)]),
+        ]
+
+
+class ParentAsyncSubagentLinkDocument(Document):
+    request_scope: str
+    link_id: str
+    child_execution_id: str
+    parent_run_id: str
+    parent_operation_id: str
+    payload: dict[str, Any]
+    updated_at: datetime
+
+    class Settings:
+        name = "parent_async_subagent_links"
+        indexes = [
+            IndexModel([("request_scope", ASCENDING), ("link_id", ASCENDING)], unique=True),
+            IndexModel([("request_scope", ASCENDING), ("child_execution_id", ASCENDING)], unique=True),
+        ]

@@ -9,6 +9,8 @@ from pymongo.asynchronous.database import AsyncDatabase
 
 from app.config import Settings
 from app.models import (
+    AsyncSubagentContractDocument,
+    AsyncSubagentExecutionDocument,
     ArtifactMetadataRevisionDocument,
     CatalogProjectionAlertDocument,
     CatalogProjectionEventDocument,
@@ -27,6 +29,7 @@ from app.models import (
     OperationExecutionClaimDocument,
     OperationMigrationQuarantineDocument,
     OperationSettlementDocument,
+    ParentAsyncSubagentLinkDocument,
     PublishedDefinitionDocument,
     SandboxSnapshotClaimDocument,
     SandboxSnapshotCloneDocument,
@@ -38,6 +41,8 @@ from app.models import (
 )
 
 BEANIE_MODELS = [
+    AsyncSubagentContractDocument,
+    AsyncSubagentExecutionDocument,
     ArtifactMetadataRevisionDocument,
     CatalogProjectionAlertDocument,
     CatalogProjectionEventDocument,
@@ -57,6 +62,7 @@ BEANIE_MODELS = [
     OperationExecutionClaimDocument,
     OperationMigrationQuarantineDocument,
     OperationSettlementDocument,
+    ParentAsyncSubagentLinkDocument,
     SandboxSnapshotClaimDocument,
     SandboxSnapshotDocument,
     SandboxSnapshotCloneDocument,

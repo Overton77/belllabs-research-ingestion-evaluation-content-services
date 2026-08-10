@@ -41,8 +41,8 @@ from app.domain.run_control.errors import RunControlError
 from app.domain.schema_grounding.errors import SchemaGroundingError
 from app.integrations.langsmith_tracing import configure_langsmith_tracing
 from app.integrations.mongodb import create_mongodb
-from app.integrations.openai_runtime_factory import DurableOpenAIAgentsRuntimeFactory
 from app.integrations.postgres import create_postgres_pool
+from app.integrations.runtime_realtime import PostgresRedisApprovalGateway
 from app.integrations.supabase import create_supabase
 from app.mcp import create_coordinator_http_deployment, mount_coordinator_http
 from app.middleware.body_limit import BodySizeLimitMiddleware
@@ -101,7 +101,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await initialize_run_control_resources(app)
     relay_task: asyncio.Task[None] | None = None
     redis: Redis | None = None
-    runtime_factory: DurableOpenAIAgentsRuntimeFactory | None = None
     pool = getattr(app.state, "run_control_postgres_pool", None)
     if pool is not None:
         redis = Redis.from_url(
@@ -116,15 +115,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             if settings.runtime_realtime_required:
                 raise
         if redis is not None:
-            runtime_factory = DurableOpenAIAgentsRuntimeFactory(
-                pool=pool,
-                redis=redis,
+            approval_gateway = PostgresRedisApprovalGateway(
+                pool,
+                redis,
                 checkpoint_signing_key=settings.checkpoint_signing_key,
-                approval_timeout_seconds=settings.runtime_approval_timeout_seconds,
             )
             app.state.runtime_redis = redis
-            app.state.openai_runtime_factory = runtime_factory
-            app.state.runtime_approval_gateway = runtime_factory.approvals
+            app.state.runtime_approval_gateway = approval_gateway
             app.state.runtime_socket_authorizer = SupabaseRuntimeSocketAuthorizer(
                 sio,
                 await create_supabase(settings),
@@ -149,8 +146,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             relay_task.cancel()
             with suppress(asyncio.CancelledError):
                 await relay_task
-        if runtime_factory is not None:
-            await runtime_factory.aclose()
         if redis is not None:
             await redis.aclose()
         await close_run_control_resources(app)

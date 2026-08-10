@@ -3,12 +3,21 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import ExactDefinitionRef, SecretRef
 
 DIGEST_PATTERN = r"^sha256:[0-9a-f]{64}$"
+PLACEHOLDER_DIGEST = "sha256:" + "0" * 64
 
 
 class Contract(BaseModel):
@@ -231,6 +240,717 @@ class UnsupportedPolicy(Contract):
         return self
 
 
+class CognitiveChannelContributor(StrEnum):
+    BASE = "base"
+    MIDDLEWARE = "middleware"
+    WORKFLOW_TYPE = "workflow_type"
+    OPERATION_ROLE = "operation_role"
+
+
+class CognitiveReducer(StrEnum):
+    REPLACE = "replace"
+    MERGE_BY_KEY = "merge_by_key"
+    APPEND_UNIQUE_BY_ID = "append_unique_by_id"
+
+
+class CognitiveChannelDefinition(Contract):
+    name: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    value_kind: Literal["object", "map", "append_list", "string_list"]
+    value_schema_ref: str = Field(min_length=1)
+    reducer: CognitiveReducer
+    sensitivity: Literal["public", "internal", "restricted"] = "internal"
+
+
+class CognitiveChannelPack(Contract):
+    schema_version: Literal["belllabs.cognitive-channel-pack.v1"] = (
+        "belllabs.cognitive-channel-pack.v1"
+    )
+    logical_id: str = Field(pattern=r"^[a-z0-9][a-z0-9._:-]*$")
+    revision: int = Field(ge=1)
+    contributor: CognitiveChannelContributor
+    channels: tuple[CognitiveChannelDefinition, ...] = Field(min_length=1)
+    digest: str = Field(pattern=DIGEST_PATTERN)
+
+    @model_validator(mode="after")
+    def validate_pack(self, info: ValidationInfo) -> CognitiveChannelPack:
+        names = [channel.name for channel in self.channels]
+        if len(names) != len(set(names)):
+            raise ValueError("cognitive channel pack names must be unique")
+        built_ins = {"messages", "files", "todos", "structured_response"}
+        if built_ins & set(names):
+            raise ValueError("Deep Agents built-in channels must be inherited, not redeclared")
+        if not (info.context or {}).get("allow_placeholder_digest") and sha256_digest(
+            self.model_dump(mode="python", exclude={"digest"})
+        ) != self.digest:
+            raise ValueError("cognitive channel pack digest mismatch")
+        return self
+
+    @classmethod
+    def create(cls, **values: object) -> CognitiveChannelPack:
+        payload = dict(values)
+        payload.pop("digest", None)
+        payload.setdefault("schema_version", "belllabs.cognitive-channel-pack.v1")
+        draft = cls.model_validate(
+            {**payload, "digest": PLACEHOLDER_DIGEST},
+            context={"allow_placeholder_digest": True},
+        )
+        complete = draft.model_dump(mode="python", exclude={"digest"})
+        return cls(**complete, digest=sha256_digest(complete))
+
+
+class CognitiveChannelPackRef(Contract):
+    logical_id: str = Field(pattern=r"^[a-z0-9][a-z0-9._:-]*$")
+    revision: int = Field(ge=1)
+    digest: str = Field(pattern=DIGEST_PATTERN)
+    contributor: CognitiveChannelContributor
+
+
+class CognitiveRuntimeField(Contract):
+    name: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    value_kind: Literal["string", "integer", "boolean", "string_list", "string_map"]
+    required: bool = True
+    sensitivity: Literal["public", "internal", "restricted"] = "internal"
+    reference_only: bool = False
+
+
+class CognitiveRuntimeContextPack(Contract):
+    schema_version: Literal["belllabs.cognitive-context-pack.v1"] = (
+        "belllabs.cognitive-context-pack.v1"
+    )
+    logical_id: str = Field(pattern=r"^[a-z0-9][a-z0-9._:-]*$")
+    revision: int = Field(ge=1)
+    contributor: CognitiveChannelContributor
+    fields: tuple[CognitiveRuntimeField, ...] = Field(min_length=1)
+    digest: str = Field(pattern=DIGEST_PATTERN)
+
+    @model_validator(mode="after")
+    def validate_pack(self, info: ValidationInfo) -> CognitiveRuntimeContextPack:
+        names = [field.name for field in self.fields]
+        if len(names) != len(set(names)):
+            raise ValueError("cognitive runtime-context pack fields must be unique")
+        if not (info.context or {}).get("allow_placeholder_digest") and sha256_digest(
+            self.model_dump(mode="python", exclude={"digest"})
+        ) != self.digest:
+            raise ValueError("cognitive runtime-context pack digest mismatch")
+        return self
+
+    @classmethod
+    def create(cls, **values: object) -> CognitiveRuntimeContextPack:
+        payload = dict(values)
+        payload.pop("digest", None)
+        payload.setdefault("schema_version", "belllabs.cognitive-context-pack.v1")
+        draft = cls.model_validate(
+            {**payload, "digest": PLACEHOLDER_DIGEST},
+            context={"allow_placeholder_digest": True},
+        )
+        complete = draft.model_dump(mode="python", exclude={"digest"})
+        return cls(**complete, digest=sha256_digest(complete))
+
+
+class SubagentStateSlice(Contract):
+    slice_id: str = Field(min_length=1)
+    channel_names: frozenset[str]
+    include_parent_messages: Literal[False] = False
+
+
+class SubagentContextSlice(Contract):
+    slice_id: str = Field(min_length=1)
+    field_names: frozenset[str]
+    include_secret_fields: Literal[False] = False
+
+
+class CognitiveStateSchema(Contract):
+    schema_version: Literal["belllabs.cognitive-state-schema.v1"] = (
+        "belllabs.cognitive-state-schema.v1"
+    )
+    schema_id: str = Field(min_length=1)
+    pack_refs: tuple[CognitiveChannelPackRef, ...] = Field(min_length=1)
+    channels: tuple[CognitiveChannelDefinition, ...] = Field(min_length=3)
+    reducer_registry_digest: str = Field(pattern=DIGEST_PATTERN)
+    deepagents_version: Literal["0.7.5"] = "0.7.5"
+    subagent_slices: tuple[SubagentStateSlice, ...] = ()
+    schema_digest: str = Field(pattern=DIGEST_PATTERN)
+
+    @model_validator(mode="after")
+    def validate_schema(self, info: ValidationInfo) -> CognitiveStateSchema:
+        names = [channel.name for channel in self.channels]
+        if len(names) != len(set(names)):
+            raise ValueError("effective cognitive state channel collision")
+        minimum = {"artifact_index", "context_manifest", "child_result_index"}
+        if not minimum <= set(names):
+            raise ValueError("effective cognitive state schema omits a BellLabs base channel")
+        if len({item.slice_id for item in self.subagent_slices}) != len(self.subagent_slices):
+            raise ValueError("subagent state slice identities must be unique")
+        if any(not item.channel_names <= set(names) for item in self.subagent_slices):
+            raise ValueError("subagent state slice contains an unknown channel")
+        if not (info.context or {}).get("allow_placeholder_digest") and sha256_digest(
+            self.model_dump(mode="python", exclude={"schema_digest"})
+        ) != self.schema_digest:
+            raise ValueError("cognitive state schema digest mismatch")
+        return self
+
+    @classmethod
+    def create(cls, **values: object) -> CognitiveStateSchema:
+        payload = dict(values)
+        payload.pop("schema_digest", None)
+        payload.setdefault("schema_version", "belllabs.cognitive-state-schema.v1")
+        payload.setdefault("deepagents_version", "0.7.5")
+        payload.setdefault("subagent_slices", ())
+        draft = cls.model_validate(
+            {**payload, "schema_digest": PLACEHOLDER_DIGEST},
+            context={"allow_placeholder_digest": True},
+        )
+        complete = draft.model_dump(mode="python", exclude={"schema_digest"})
+        return cls(**complete, schema_digest=sha256_digest(complete))
+
+
+class CognitiveRuntimeContextSchema(Contract):
+    schema_version: Literal["belllabs.cognitive-context-schema.v1"] = (
+        "belllabs.cognitive-context-schema.v1"
+    )
+    schema_id: str = Field(min_length=1)
+    pack_refs: tuple[CognitiveChannelPackRef, ...] = Field(min_length=1)
+    fields: tuple[CognitiveRuntimeField, ...] = Field(min_length=1)
+    subagent_slices: tuple[SubagentContextSlice, ...] = ()
+    schema_digest: str = Field(pattern=DIGEST_PATTERN)
+
+    @model_validator(mode="after")
+    def validate_schema(self, info: ValidationInfo) -> CognitiveRuntimeContextSchema:
+        names = [field.name for field in self.fields]
+        if len(names) != len(set(names)):
+            raise ValueError("effective cognitive runtime-context field collision")
+        forbidden = {"api_key", "password", "secret", "token", "credential"}
+        for field in self.fields:
+            normalized = field.name.lower()
+            if any(fragment in normalized for fragment in forbidden) and not field.reference_only:
+                raise ValueError("sensitive cognitive context fields must contain references only")
+        if len({item.slice_id for item in self.subagent_slices}) != len(self.subagent_slices):
+            raise ValueError("subagent context slice identities must be unique")
+        if any(not item.field_names <= set(names) for item in self.subagent_slices):
+            raise ValueError("subagent context slice contains an unknown field")
+        if not (info.context or {}).get("allow_placeholder_digest") and sha256_digest(
+            self.model_dump(mode="python", exclude={"schema_digest"})
+        ) != self.schema_digest:
+            raise ValueError("cognitive runtime-context schema digest mismatch")
+        return self
+
+    @classmethod
+    def create(cls, **values: object) -> CognitiveRuntimeContextSchema:
+        payload = dict(values)
+        payload.pop("schema_digest", None)
+        payload.setdefault("schema_version", "belllabs.cognitive-context-schema.v1")
+        payload.setdefault("subagent_slices", ())
+        draft = cls.model_validate(
+            {**payload, "schema_digest": PLACEHOLDER_DIGEST},
+            context={"allow_placeholder_digest": True},
+        )
+        complete = draft.model_dump(mode="python", exclude={"schema_digest"})
+        return cls(**complete, schema_digest=sha256_digest(complete))
+
+
+class DeepAgentModelComponent(Contract):
+    ref: ExactDefinitionRef
+    provider: Literal["openai"]
+    model_name: str = Field(min_length=1)
+    settings: dict[str, object] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def exact_model_ref(self) -> DeepAgentModelComponent:
+        if self.ref.kind.value != "model":
+            raise ValueError("Deep Agent model component requires an exact model ref")
+        return self
+
+
+class DeepAgentMiddlewareComponent(Contract):
+    ref: ExactDefinitionRef
+    order: int = Field(ge=0)
+    contributed_channels: tuple[CognitiveChannelDefinition, ...] = ()
+
+    @model_validator(mode="after")
+    def exact_middleware_ref(self) -> DeepAgentMiddlewareComponent:
+        if self.ref.kind.value != "middleware":
+            raise ValueError("Deep Agent middleware component requires an exact middleware ref")
+        return self
+
+
+class DeepAgentToolComponent(Contract):
+    ref: ExactDefinitionRef
+    tool_name: str = Field(min_length=1)
+    schema_digest: str = Field(pattern=DIGEST_PATTERN)
+    attachment_target: str = Field(min_length=1)
+
+
+class DeepAgentSkillComponent(Contract):
+    ref: ExactDefinitionRef
+    skill_name: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    bundle_digest: str = Field(pattern=DIGEST_PATTERN)
+    skill_md_digest: str = Field(pattern=DIGEST_PATTERN)
+    mount_root: str = Field(pattern=r"^/.*[^/]$")
+    attachment_target: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def exact_skill_ref(self) -> DeepAgentSkillComponent:
+        if self.ref.kind.value != "skill":
+            raise ValueError("Deep Agent skill component requires an exact Skill ref")
+        return self
+
+
+class DeepAgentMCPToolComponent(Contract):
+    tool_name: str = Field(min_length=1)
+    schema_digest: str = Field(pattern=DIGEST_PATTERN)
+
+
+class DeepAgentMCPServerComponent(Contract):
+    ref: ExactDefinitionRef
+    server_name: str = Field(pattern=r"^[a-z][a-z0-9_-]*$")
+    transport: Literal["stdio", "sse", "streamable_http"]
+    endpoint: str | None = None
+    command: str | None = None
+    arguments: tuple[str, ...] = ()
+    credential_refs: tuple[SecretRef, ...] = ()
+    tools: tuple[DeepAgentMCPToolComponent, ...] = Field(min_length=1)
+    schema_digest: str = Field(pattern=DIGEST_PATTERN)
+    attachment_target: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_transport(self) -> DeepAgentMCPServerComponent:
+        if self.ref.kind.value != "mcp_server":
+            raise ValueError("Deep Agent MCP component requires an exact MCP server ref")
+        if self.transport == "stdio":
+            if not self.command or self.endpoint is not None:
+                raise ValueError("stdio MCP binding requires only command/arguments")
+        elif not self.endpoint or self.command is not None or self.arguments:
+            raise ValueError("remote MCP binding requires only an endpoint")
+        names = [tool.tool_name for tool in self.tools]
+        if len(names) != len(set(names)):
+            raise ValueError("MCP tool names must be unique per exact server binding")
+        return self
+
+
+class DeepAgentSandboxComponent(Contract):
+    ref: ExactDefinitionRef
+    backend: Literal["langsmith", "daytona", "state"]
+    runtime_digest: str = Field(pattern=DIGEST_PATTERN)
+    snapshot_ref: str | None = None
+    credential_refs: tuple[SecretRef, ...] = ()
+    idle_ttl_seconds: int = Field(default=300, ge=60, le=86_400)
+
+    @model_validator(mode="after")
+    def exact_sandbox_ref(self) -> DeepAgentSandboxComponent:
+        if self.ref.kind.value != "sandbox_profile":
+            raise ValueError("Deep Agent sandbox component requires an exact sandbox profile ref")
+        return self
+
+
+class SyncSubagentProfile(Contract):
+    name: str = Field(pattern=r"^[a-z][a-z0-9_-]*$")
+    description: str = Field(min_length=1)
+    system_prompt_ref: ExactDefinitionRef
+    model: DeepAgentModelComponent
+    tool_refs: tuple[ExactDefinitionRef, ...] = ()
+    skill_refs: tuple[ExactDefinitionRef, ...] = ()
+    state_slice_id: str = Field(min_length=1)
+    context_slice_id: str = Field(min_length=1)
+    workspace_id: str = Field(min_length=1)
+    writable_paths: tuple[str, ...] = Field(min_length=1)
+    budget_limits: dict[str, int] = Field(default_factory=dict)
+
+
+class AsyncSubagentDependencyClass(StrEnum):
+    REQUIRED_BLOCKING = "required_blocking"
+    DEGRADABLE_BLOCKING = "degradable_blocking"
+    NONBLOCKING = "nonblocking"
+    ADVISORY = "advisory"
+
+
+class AsyncSubagentLifecycle(StrEnum):
+    PROPOSED = "proposed"
+    ADMITTED = "admitted"
+    SUBMITTED = "submitted"
+    RUNNING = "running"
+    WAITING = "waiting"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    ORPHANED = "orphaned"
+
+
+class AsyncSubagentContract(Contract):
+    """Immutable BellLabs ceiling for one permitted background subordinate."""
+
+    schema_version: Literal["belllabs.async-subagent-contract.v1"] = (
+        "belllabs.async-subagent-contract.v1"
+    )
+    contract_id: str = Field(min_length=1)
+    name: str = Field(pattern=r"^[a-z][a-z0-9_-]*$")
+    description: str = Field(min_length=1)
+    graph_id: str = Field(min_length=1)
+    agent_protocol_url: str = Field(min_length=1)
+    objective_schema_ref: str = Field(min_length=1)
+    result_schema_ref: str = Field(min_length=1)
+    context_slice_id: str = Field(min_length=1)
+    state_slice_id: str = Field(min_length=1)
+    capability_ceiling: CapabilityGrant
+    authority_refs: tuple[str, ...] = Field(min_length=1)
+    budget_limits: dict[str, int] = Field(min_length=1)
+    dependency_classes: frozenset[AsyncSubagentDependencyClass] = Field(min_length=1)
+    timeout_seconds: int = Field(ge=1, le=604_800)
+    cancellation_propagation: Literal["required", "best_effort", "none"]
+    late_result_policy: Literal["quarantine", "record_only", "eligible_if_parent_open"]
+    fallback_policy: Literal["fail_parent", "degrade", "continue_without_result"]
+    result_admission_policy_ref: str = Field(min_length=1)
+    contract_digest: str = Field(pattern=DIGEST_PATTERN)
+
+    @model_validator(mode="after")
+    def validate_digest(self, info: ValidationInfo) -> AsyncSubagentContract:
+        if not (info.context or {}).get("allow_placeholder_digest") and sha256_digest(
+            self.model_dump(mode="python", exclude={"contract_digest"})
+        ) != self.contract_digest:
+            raise ValueError("async subagent contract digest mismatch")
+        return self
+
+    @classmethod
+    def create(cls, **values: object) -> AsyncSubagentContract:
+        payload = dict(values)
+        payload.pop("contract_digest", None)
+        payload.setdefault("schema_version", "belllabs.async-subagent-contract.v1")
+        draft = cls.model_validate(
+            {**payload, "contract_digest": PLACEHOLDER_DIGEST},
+            context={"allow_placeholder_digest": True},
+        )
+        complete = draft.model_dump(mode="python", exclude={"contract_digest"})
+        return cls(**complete, contract_digest=sha256_digest(complete))
+
+
+class AsyncSubagentResultManifest(Contract):
+    schema_version: Literal["belllabs.async-subagent-result.v1"] = (
+        "belllabs.async-subagent-result.v1"
+    )
+    manifest_id: str = Field(min_length=1)
+    child_execution_id: str = Field(min_length=1)
+    execution_generation: int = Field(ge=1)
+    output_refs: tuple[str, ...] = ()
+    evidence_refs: tuple[str, ...] = ()
+    usage_ref: str = Field(min_length=1)
+    checkpoint_ref: str = Field(min_length=1)
+    effect_refs: tuple[str, ...] = ()
+    completed_at: AwareDatetime
+    manifest_digest: str = Field(pattern=DIGEST_PATTERN)
+
+    @model_validator(mode="after")
+    def validate_digest(self, info: ValidationInfo) -> AsyncSubagentResultManifest:
+        if not (info.context or {}).get("allow_placeholder_digest") and sha256_digest(
+            self.model_dump(mode="python", exclude={"manifest_digest"})
+        ) != self.manifest_digest:
+            raise ValueError("async subagent result manifest digest mismatch")
+        return self
+
+    @classmethod
+    def create(cls, **values: object) -> AsyncSubagentResultManifest:
+        payload = dict(values)
+        payload.pop("manifest_digest", None)
+        payload.setdefault("schema_version", "belllabs.async-subagent-result.v1")
+        draft = cls.model_validate(
+            {**payload, "manifest_digest": PLACEHOLDER_DIGEST},
+            context={"allow_placeholder_digest": True},
+        )
+        complete = draft.model_dump(mode="python", exclude={"manifest_digest"})
+        return cls(**complete, manifest_digest=sha256_digest(complete))
+
+
+class AsyncSubagentExecution(Contract):
+    schema_version: Literal["belllabs.async-subagent-execution.v1"] = (
+        "belllabs.async-subagent-execution.v1"
+    )
+    child_execution_id: str = Field(min_length=1)
+    contract_id: str = Field(min_length=1)
+    contract_digest: str = Field(pattern=DIGEST_PATTERN)
+    parent_run_id: str = Field(min_length=1)
+    parent_operation_id: str = Field(min_length=1)
+    parent_binding_id: str = Field(min_length=1)
+    execution_generation: int = Field(ge=1)
+    objective_ref: str = Field(min_length=1)
+    context_slice_ref: str = Field(min_length=1)
+    reservation_id: str = Field(min_length=1)
+    lifecycle: AsyncSubagentLifecycle
+    provider_thread_id: str | None = Field(default=None, min_length=1)
+    provider_run_id: str | None = Field(default=None, min_length=1)
+    result_manifest: AsyncSubagentResultManifest | None = None
+    created_at: AwareDatetime
+    updated_at: AwareDatetime
+
+    @model_validator(mode="after")
+    def provider_binding_follows_submission(self) -> AsyncSubagentExecution:
+        bound = self.provider_thread_id is not None and self.provider_run_id is not None
+        if (self.provider_thread_id is None) != (self.provider_run_id is None):
+            raise ValueError("provider thread and run identities bind together")
+        if self.lifecycle in {AsyncSubagentLifecycle.PROPOSED, AsyncSubagentLifecycle.ADMITTED} and bound:
+            raise ValueError("provider identity cannot precede BellLabs admission")
+        if self.lifecycle == AsyncSubagentLifecycle.COMPLETED and self.result_manifest is None:
+            raise ValueError("completed async child requires a typed result manifest")
+        return self
+
+
+class AsyncSubagentMessage(Contract):
+    schema_version: Literal["belllabs.async-subagent-message.v1"] = (
+        "belllabs.async-subagent-message.v1"
+    )
+    message_id: str = Field(min_length=1)
+    child_execution_id: str = Field(min_length=1)
+    direction: Literal["parent_to_child", "child_to_parent"]
+    target_sequence: int = Field(ge=1)
+    correlation_id: str = Field(min_length=1)
+    causation_id: str | None = Field(default=None, min_length=1)
+    payload_ref: str = Field(min_length=1)
+    context_authority: Literal["instruction", "admitted_context", "untrusted_observation"]
+    expires_at: AwareDatetime | None = None
+    supersedes_message_id: str | None = Field(default=None, min_length=1)
+    receipt: Literal["accepted", "claimed", "provider_applied", "checkpoint_committed", "terminal_rejected"] = "accepted"
+    created_at: AwareDatetime
+
+
+class ParentAsyncSubagentLink(Contract):
+    schema_version: Literal["belllabs.parent-async-subagent-link.v1"] = (
+        "belllabs.parent-async-subagent-link.v1"
+    )
+    link_id: str = Field(min_length=1)
+    child_execution_id: str = Field(min_length=1)
+    parent_run_id: str = Field(min_length=1)
+    parent_operation_id: str = Field(min_length=1)
+    dependency_class: AsyncSubagentDependencyClass
+    timeout_at: AwareDatetime
+    cancellation_propagation: Literal["required", "best_effort", "none"]
+    late_result_policy: Literal["quarantine", "record_only", "eligible_if_parent_open"]
+    fallback_policy: Literal["fail_parent", "degrade", "continue_without_result"]
+    result_admission_policy_ref: str = Field(min_length=1)
+    messages: tuple[AsyncSubagentMessage, ...] = ()
+    cancellation_requested: bool = False
+    cancellation_reason: str | None = None
+    result_decision: Literal["admit", "conditionally_admit", "reject", "defer"] | None = None
+    admitted_manifest_digest: str | None = Field(default=None, pattern=DIGEST_PATTERN)
+    settled: bool = False
+    created_at: AwareDatetime
+    updated_at: AwareDatetime
+
+
+class DeepAgentProfile(Contract):
+    schema_version: Literal["belllabs.deep-agent-profile.v1"] = "belllabs.deep-agent-profile.v1"
+    logical_id: str = Field(pattern=r"^[a-z0-9][a-z0-9._:-]*$")
+    revision: int = Field(ge=1)
+    framework_family: Literal["deepagents"] = "deepagents"
+    model: DeepAgentModelComponent
+    structured_output_ref: ExactDefinitionRef | None = None
+    prompt_refs: tuple[ExactDefinitionRef, ...] = Field(min_length=1)
+    context_assembly_ref: ExactDefinitionRef
+    middleware: tuple[DeepAgentMiddlewareComponent, ...] = ()
+    backend_ref: ExactDefinitionRef
+    store_ref: ExactDefinitionRef
+    checkpointer_ref: ExactDefinitionRef
+    tools: tuple[DeepAgentToolComponent, ...] = ()
+    mcp_servers: tuple[DeepAgentMCPServerComponent, ...] = ()
+    skills: tuple[DeepAgentSkillComponent, ...] = ()
+    memory_refs: tuple[ExactDefinitionRef, ...] = ()
+    sandbox: DeepAgentSandboxComponent
+    sync_subagents: tuple[SyncSubagentProfile, ...] = ()
+    async_subagents: tuple[AsyncSubagentContract, ...] = ()
+    async_subagent_policy_refs: tuple[ExactDefinitionRef, ...] = ()
+    async_subagents: tuple[AsyncSubagentContract, ...] = ()
+    delegation_ceiling: DelegationCeiling = Field(default_factory=DelegationCeiling)
+    hitl_policy_ref: ExactDefinitionRef | None = None
+    limits: dict[str, int] = Field(default_factory=dict)
+    tracing_policy_ref: ExactDefinitionRef
+    cognitive_state_pack_refs: tuple[CognitiveChannelPackRef, ...] = Field(min_length=1)
+    cognitive_context_pack_refs: tuple[CognitiveChannelPackRef, ...] = Field(min_length=1)
+    compatible_placement_ids: frozenset[str] = Field(min_length=1)
+    profile_digest: str = Field(pattern=DIGEST_PATTERN)
+
+    @model_validator(mode="after")
+    def validate_profile(self, info: ValidationInfo) -> DeepAgentProfile:
+        orders = [item.order for item in self.middleware]
+        if orders != sorted(orders) or len(orders) != len(set(orders)):
+            raise ValueError("Deep Agent middleware order must be exact and collision-free")
+        names = [item.name for item in self.sync_subagents]
+        if len(names) != len(set(names)):
+            raise ValueError("synchronous subagent names must be unique")
+        async_names = [item.name for item in self.async_subagents]
+        if len(async_names) != len(set(async_names)):
+            raise ValueError("asynchronous subagent names must be unique")
+        if not (info.context or {}).get("allow_placeholder_digest") and sha256_digest(
+            self.model_dump(mode="python", exclude={"profile_digest"})
+        ) != self.profile_digest:
+            raise ValueError("Deep Agent profile digest mismatch")
+        return self
+
+    @classmethod
+    def create(cls, **values: object) -> DeepAgentProfile:
+        payload = dict(values)
+        payload.pop("profile_digest", None)
+        payload.setdefault("schema_version", "belllabs.deep-agent-profile.v1")
+        payload.setdefault("framework_family", "deepagents")
+        draft = cls.model_validate(
+            {**payload, "profile_digest": PLACEHOLDER_DIGEST},
+            context={"allow_placeholder_digest": True},
+        )
+        complete = draft.model_dump(mode="python", exclude={"profile_digest"})
+        return cls(**complete, profile_digest=sha256_digest(complete))
+
+
+class DeepAgentExecutionPlacementProfile(Contract):
+    schema_version: Literal["belllabs.deep-agent-placement.v1"] = (
+        "belllabs.deep-agent-placement.v1"
+    )
+    logical_id: str = Field(pattern=r"^[a-z0-9][a-z0-9._:-]*$")
+    revision: int = Field(ge=1)
+    placement: Literal["local_in_worker", "remote_langsmith_deployment"]
+    deepagents_version: Literal["0.7.5"] = "0.7.5"
+    python_runtime: str = Field(min_length=1)
+    package_versions: dict[str, str] = Field(min_length=1)
+    deployment_id: str | None = None
+    task_queue: str = Field(min_length=1)
+    checkpoint_behavior: Literal["local_checkpointer", "remote_managed"]
+    cancellation_behavior: Literal["cooperative", "remote_reconcile"]
+    streaming_behavior: Literal["state_updates", "messages"]
+    message_injection_behavior: Literal["invoke_only", "remote_thread"]
+    reconnect_behavior: Literal["checkpoint_resume", "remote_run_reconnect"]
+    sandbox_backends: frozenset[Literal["langsmith", "daytona", "state"]]
+    trace_behavior: Literal["langsmith"] = "langsmith"
+    qualification_refs: tuple[str, ...] = Field(min_length=1)
+    silent_fallback: Literal[False] = False
+    placement_digest: str = Field(pattern=DIGEST_PATTERN)
+
+    @model_validator(mode="after")
+    def validate_placement(self, info: ValidationInfo) -> DeepAgentExecutionPlacementProfile:
+        if self.placement == "local_in_worker" and self.deployment_id is not None:
+            raise ValueError("local Deep Agent placement cannot declare a remote deployment")
+        if self.placement == "remote_langsmith_deployment" and not self.deployment_id:
+            raise ValueError("remote Deep Agent placement requires an exact deployment identity")
+        if not (info.context or {}).get("allow_placeholder_digest") and sha256_digest(
+            self.model_dump(mode="python", exclude={"placement_digest"})
+        ) != self.placement_digest:
+            raise ValueError("Deep Agent placement digest mismatch")
+        return self
+
+    @classmethod
+    def create(cls, **values: object) -> DeepAgentExecutionPlacementProfile:
+        payload = dict(values)
+        payload.pop("placement_digest", None)
+        payload.setdefault("schema_version", "belllabs.deep-agent-placement.v1")
+        payload.setdefault("deepagents_version", "0.7.5")
+        payload.setdefault("trace_behavior", "langsmith")
+        payload.setdefault("silent_fallback", False)
+        draft = cls.model_validate(
+            {**payload, "placement_digest": PLACEHOLDER_DIGEST},
+            context={"allow_placeholder_digest": True},
+        )
+        complete = draft.model_dump(mode="python", exclude={"placement_digest"})
+        return cls(**complete, placement_digest=sha256_digest(complete))
+
+
+class DeepAgentAttachmentRecord(Contract):
+    component_kind: Literal["model", "middleware", "tool", "mcp", "skill", "sandbox"]
+    component_digest: str = Field(pattern=DIGEST_PATTERN)
+    attachment_target: str = Field(min_length=1)
+    status: Literal["intended", "resolved"] = "intended"
+
+
+class DeepAgentExecutionBinding(Contract):
+    schema_version: Literal["belllabs.deep-agent-binding.v1"] = (
+        "belllabs.deep-agent-binding.v1"
+    )
+    binding_id: str = Field(min_length=1)
+    run_id: str = Field(min_length=1)
+    operation_id: str = Field(min_length=1)
+    operation_attempt: int = Field(ge=1)
+    execution_generation: int = Field(ge=1)
+    erc_digest: str = Field(pattern=DIGEST_PATTERN)
+    control_revision: int = Field(ge=1)
+    profile_id: str = Field(min_length=1)
+    profile_revision: int = Field(ge=1)
+    profile_digest: str = Field(pattern=DIGEST_PATTERN)
+    placement_id: str = Field(min_length=1)
+    placement_revision: int = Field(ge=1)
+    placement_digest: str = Field(pattern=DIGEST_PATTERN)
+    placement: Literal["local_in_worker", "remote_langsmith_deployment"]
+    task_queue: str = Field(min_length=1)
+    checkpoint_behavior: Literal["local_checkpointer", "remote_managed"]
+    cancellation_behavior: Literal["cooperative", "remote_reconcile"]
+    streaming_behavior: Literal["state_updates", "messages"]
+    message_injection_behavior: Literal["invoke_only", "remote_thread"]
+    reconnect_behavior: Literal["checkpoint_resume", "remote_run_reconnect"]
+    model: DeepAgentModelComponent
+    backend_ref: ExactDefinitionRef
+    store_ref: ExactDefinitionRef
+    checkpointer_ref: ExactDefinitionRef
+    middleware: tuple[DeepAgentMiddlewareComponent, ...] = ()
+    tools: tuple[DeepAgentToolComponent, ...] = ()
+    mcp_servers: tuple[DeepAgentMCPServerComponent, ...] = ()
+    skills: tuple[DeepAgentSkillComponent, ...] = ()
+    sandbox: DeepAgentSandboxComponent
+    sync_subagents: tuple[SyncSubagentProfile, ...] = ()
+    cognitive_state_schema: CognitiveStateSchema
+    cognitive_context_schema: CognitiveRuntimeContextSchema
+    cognitive_context_values: dict[str, object]
+    initial_artifact_index: dict[str, object] = Field(default_factory=dict)
+    initial_context_manifest: dict[str, object]
+    initial_child_result_index: tuple[dict[str, object], ...] = ()
+    workspace: WorkspaceContract
+    capability_grant: CapabilityGrant
+    reservation_id: str = Field(min_length=1)
+    authority_refs: tuple[str, ...] = Field(min_length=1)
+    redaction_policy_ref: str = Field(min_length=1)
+    package_versions: dict[str, str] = Field(min_length=1)
+    intended_attachments: tuple[DeepAgentAttachmentRecord, ...] = Field(min_length=1)
+    applied_degradations: tuple[str, ...] = ()
+    silent_fallback: Literal[False] = False
+    binding_digest: str = Field(pattern=DIGEST_PATTERN)
+
+    @model_validator(mode="after")
+    def validate_binding(self, info: ValidationInfo) -> DeepAgentExecutionBinding:
+        context_fields = {field.name: field for field in self.cognitive_context_schema.fields}
+        if set(self.cognitive_context_values) != set(context_fields):
+            raise ValueError("Deep Agent context values do not exactly match the frozen schema")
+        for name, field in context_fields.items():
+            value = self.cognitive_context_values[name]
+            if field.reference_only and isinstance(value, str) and not (
+                value.startswith("ref:") or value.startswith("handle:")
+            ):
+                raise ValueError("reference-only cognitive context value contains material")
+        contributed = {
+            channel.name: channel
+            for component in self.middleware
+            for channel in component.contributed_channels
+        }
+        effective = {channel.name: channel for channel in self.cognitive_state_schema.channels}
+        if any(effective.get(name) != channel for name, channel in contributed.items()):
+            raise ValueError("middleware cognitive channels drift from the frozen state schema")
+        if self.skills and not {"skills_metadata", "skills_load_errors"} <= set(effective):
+            raise ValueError("Skills middleware channels are absent from the frozen state schema")
+        attachment_keys = [
+            (item.component_kind, item.component_digest, item.attachment_target)
+            for item in self.intended_attachments
+        ]
+        if len(attachment_keys) != len(set(attachment_keys)):
+            raise ValueError("Deep Agent attachment collision")
+        if not (info.context or {}).get("allow_placeholder_digest") and sha256_digest(
+            self.model_dump(mode="python", exclude={"binding_digest"})
+        ) != self.binding_digest:
+            raise ValueError("Deep Agent execution binding digest mismatch")
+        return self
+
+    @classmethod
+    def create(cls, **values: object) -> DeepAgentExecutionBinding:
+        payload = dict(values)
+        payload.pop("binding_digest", None)
+        payload.setdefault("schema_version", "belllabs.deep-agent-binding.v1")
+        payload.setdefault("silent_fallback", False)
+        draft = cls.model_validate(
+            {**payload, "binding_digest": PLACEHOLDER_DIGEST},
+            context={"allow_placeholder_digest": True},
+        )
+        complete = draft.model_dump(mode="python", exclude={"binding_digest"})
+        return cls(**complete, binding_digest=sha256_digest(complete))
+
+
 class OperationExecutionRequest(Contract):
     identity: OperationAttemptIdentity
     request_scope: str = Field(min_length=1)
@@ -253,6 +973,8 @@ class OperationExecutionRequest(Contract):
     workspace: WorkspaceContract
     secret_refs: tuple[SecretRef, ...] = ()
     unsupported_policies: tuple[UnsupportedPolicy, ...] = ()
+    execution_runtime: Literal["native", "deep_agent"] = "native"
+    deep_agent_binding: DeepAgentExecutionBinding | None = None
     budget_reservation_id: str = Field(min_length=1)
     budget_limits: dict[str, int]
     tracing_policy_ref: str = Field(min_length=1)
@@ -264,6 +986,25 @@ class OperationExecutionRequest(Contract):
 
     @model_validator(mode="after")
     def capabilities_cover_exact_bindings(self) -> OperationExecutionRequest:
+        if (self.execution_runtime == "deep_agent") != (self.deep_agent_binding is not None):
+            raise ValueError(
+                "deep_agent execution requires exactly one canonical Deep Agent binding"
+            )
+        if self.deep_agent_binding is not None:
+            deep_binding = self.deep_agent_binding
+            if (
+                deep_binding.run_id != self.identity.run_id
+                or deep_binding.operation_id != self.identity.operation_id
+                or deep_binding.operation_attempt != self.identity.operation_attempt
+                or deep_binding.erc_digest != self.effective_configuration_digest
+                or deep_binding.control_revision != self.run_control_revision
+                or deep_binding.workspace != self.workspace
+                or deep_binding.capability_grant != self.capability_grant
+                or deep_binding.reservation_id != self.budget_reservation_id
+            ):
+                raise ValueError(
+                    "Deep Agent binding does not match the operation authority envelope"
+                )
         if not {tool.tool_id for tool in self.tools} <= self.capability_grant.tool_ids:
             raise ValueError("tool binding exceeds the operation capability grant")
         if (
@@ -344,6 +1085,8 @@ class OperationExecutionBinding(Contract):
     sensitive_data_policy_ref: str
     snapshot_policy_ref: str
     applied_degradations: tuple[str, ...] = ()
+    execution_runtime: Literal["native", "deep_agent"] = "native"
+    deep_agent_binding: DeepAgentExecutionBinding | None = None
     side_effect_key: str
     bound_at: AwareDatetime
 

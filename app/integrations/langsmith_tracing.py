@@ -1,38 +1,26 @@
-"""LangSmith tracing bootstrap for BellLabs runtimes.
-
-The app still executes via the OpenAI Agents SDK. LangSmith captures those runs through:
-
-1. process-env configuration (`LANGSMITH_*`)
-2. `OpenAIAgentsTracingProcessor` (agent/tool/handoff spans)
-3. wrapped OpenAI clients + `@traceable` entry spans for BellLabs metadata
-
-Secrets and full prompt bodies are never sent as root-span I/O.
-"""
+"""LangSmith tracing bootstrap for provider-neutral BellLabs runtimes."""
 
 from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from typing import Any, cast
+from typing import Any
 
-from agents.tracing import TracingProcessor
 from langsmith import traceable
-from langsmith.integrations.openai_agents_sdk import OpenAIAgentsTracingProcessor
 from langsmith.wrappers import wrap_openai
 from openai import AsyncOpenAI
 
 from app.config import Settings
 
 _CONFIGURED = False
-_PROCESSOR_INSTALLED = False
 
 
 def configure_langsmith_tracing(settings: Settings) -> bool:
-    """Export LangSmith env vars and install OpenAI Agents + client tracing.
+    """Export LangSmith environment configuration.
 
     Returns True when tracing is enabled and an API key is present.
     """
-    global _CONFIGURED, _PROCESSOR_INSTALLED
+    global _CONFIGURED
     api_key = (
         settings.langsmith_api_key.get_secret_value().strip()
         if settings.langsmith_api_key is not None
@@ -53,41 +41,6 @@ def configure_langsmith_tracing(settings: Settings) -> bool:
     if workspace_id:
         os.environ["LANGSMITH_WORKSPACE_ID"] = workspace_id
 
-    openai_key = settings.openai_api_key.get_secret_value().strip()
-    if openai_key:
-        os.environ.setdefault("OPENAI_API_KEY", openai_key)
-        try:
-            from agents import set_default_openai_client
-        except ImportError:
-            pass
-        else:
-            # use_for_tracing=False: LangSmith owns observability; do not also export
-            # OpenAI Agents platform traces with this client key.
-            set_default_openai_client(
-                create_traced_async_openai(openai_key),
-                use_for_tracing=False,
-            )
-
-    if enabled and not _PROCESSOR_INSTALLED:
-        try:
-            from agents import set_trace_processors
-        except ImportError:
-            pass
-        else:
-            set_trace_processors(
-                [
-                    cast(
-                        TracingProcessor,
-                        OpenAIAgentsTracingProcessor(
-                            project_name=project or None,
-                            tags=["belllabs", "openai-agents"],
-                            metadata={"runtime": "openai_agents"},
-                        ),
-                    )
-                ]
-            )
-            _PROCESSOR_INSTALLED = True
-
     _CONFIGURED = True
     return enabled
 
@@ -104,15 +57,19 @@ def runtime_execute_metadata(
 ) -> dict[str, object]:
     binding = getattr(invocation, "binding", None)
     model_policy = getattr(binding, "model_policy", None)
+    deep_binding = getattr(binding, "deep_agent_binding", None)
+    model_component = getattr(deep_binding, "model", None)
     metadata: dict[str, object] = {
-        "runtime": "openai_agents",
+        "runtime": "deepagents",
         "run_id": getattr(binding, "run_id", None),
         "binding_id": getattr(binding, "binding_id", None),
         "operation_id": getattr(binding, "operation_id", None),
         "request_scope": getattr(binding, "request_scope", None),
         "configuration_digest": getattr(binding, "effective_configuration_digest", None),
-        "model": getattr(model_policy, "model", None),
-        "provider": getattr(model_policy, "provider", None),
+        "model": getattr(model_component, "model_name", None)
+        or getattr(model_policy, "model", None),
+        "provider": getattr(model_component, "provider", None)
+        or getattr(model_policy, "provider", None),
         "workspace_id": getattr(getattr(invocation, "workspace", None), "workspace_id", None),
     }
     if extra:
@@ -124,12 +81,15 @@ def process_runtime_execute_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
     """Redact secrets and prompt bodies from LangSmith root-span inputs."""
     invocation = inputs.get("invocation")
     binding = getattr(invocation, "binding", None)
+    deep_binding = getattr(binding, "deep_agent_binding", None)
+    model_component = getattr(deep_binding, "model", None)
     return {
         "run_id": getattr(binding, "run_id", None),
         "binding_id": getattr(binding, "binding_id", None),
         "operation_id": getattr(binding, "operation_id", None),
         "request_scope": getattr(binding, "request_scope", None),
-        "model": getattr(getattr(binding, "model_policy", None), "model", None),
+        "model": getattr(model_component, "model_name", None)
+        or getattr(getattr(binding, "model_policy", None), "model", None),
         "secret_names": list(getattr(invocation, "resolved_secret_names", ()) or ()),
         "prompt_segment_count": len(getattr(invocation, "prompt_segments", ()) or ()),
         "resolved_secrets": "[redacted]",
@@ -176,10 +136,10 @@ def process_embedding_outputs(outputs: Any) -> dict[str, Any]:
     }
 
 
-trace_openai_agents_execute = traceable(
-    name="belllabs.openai_agents.execute",
+trace_deep_agent_execute = traceable(
+    name="belllabs.deep_agent.execute",
     run_type="chain",
-    tags=["belllabs", "openai-agents", "operation-execution"],
+    tags=["belllabs", "deepagents", "operation-execution"],
     process_inputs=process_runtime_execute_inputs,
     process_outputs=process_runtime_execute_outputs,
 )

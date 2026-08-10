@@ -17,11 +17,14 @@ from app.models.external_capability import (
 )
 from app.models.infrastructure import InfrastructureMarker
 from app.models.operation_execution import (
+    AsyncSubagentContractDocument,
+    AsyncSubagentExecutionDocument,
     OperationExecutionBindingAuthorityV2Document,
     OperationExecutionBindingDocument,
     OperationExecutionClaimDocument,
     OperationMigrationQuarantineDocument,
     OperationSettlementDocument,
+    ParentAsyncSubagentLinkDocument,
 )
 from app.models.sandbox_snapshot import (
     SandboxSnapshotClaimDocument,
@@ -36,6 +39,8 @@ from app.models.workspace_materialization import (
 )
 
 __all__ = [
+    "AsyncSubagentContractDocument",
+    "AsyncSubagentExecutionDocument",
     "ArtifactMetadataRevisionDocument",
     "CatalogProjectionAlertDocument",
     "CatalogProjectionEventDocument",
@@ -54,6 +59,7 @@ __all__ = [
     "OperationExecutionClaimDocument",
     "OperationMigrationQuarantineDocument",
     "OperationSettlementDocument",
+    "ParentAsyncSubagentLinkDocument",
     "PublishedDefinitionDocument",
     "SandboxSnapshotClaimDocument",
     "SandboxSnapshotCloneDocument",

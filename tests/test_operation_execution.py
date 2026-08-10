@@ -32,6 +32,7 @@ from app.domain.operation_execution.contracts import (
     OperationAttemptIdentity,
     OperationExecutionRequest,
     OperationSettlement,
+    OperationWorkflowRequest,
     PromptSegment,
     PromptTrustClass,
     RuntimeUsage,
@@ -62,8 +63,8 @@ from app.temporal.operation_activities import (
     OperationExecutionActivities,
     parse_operation_result,
 )
-from app.temporal.operation_workflow import OperationExecutionWorkflow
 from app.temporal.workflow_sandbox import coordinator_workflow_runner
+from app.temporal.workflows.operation import OperationWorkflow
 
 NOW = datetime(2026, 7, 19, 20, 0, tzinfo=UTC)
 DIGEST = "sha256:" + "a" * 64
@@ -716,18 +717,23 @@ async def test_real_temporal_activity_uses_public_operation_result_seam() -> Non
         async with Worker(
             environment.client,
             task_queue="operation-execution-conformance",
-            workflows=[OperationExecutionWorkflow],
+            workflows=[OperationWorkflow],
             workflow_runner=coordinator_workflow_runner(),
             activities=[activities.execute],
         ):
-            payload = await environment.client.execute_workflow(
-                OperationExecutionWorkflow.run,
-                operation_request().model_dump(mode="json"),
+            workflow_result = await environment.client.execute_workflow(
+                OperationWorkflow.run,
+                OperationWorkflowRequest(
+                    semantic_attempt_id=operation_request().identity.semantic_key,
+                    operation_kind="bound_operation",
+                    payload=operation_request().model_dump(mode="json"),
+                    task_queue="operation-execution-conformance",
+                ),
                 id="operation-execution-conformance",
                 task_queue="operation-execution-conformance",
             )
 
-    result = parse_operation_result(payload)
+    result = parse_operation_result(workflow_result.result or {})
     assert result.status == "completed"
     assert result.output_text == "conformance-ok"
     assert len(runtime.invocations) == 1

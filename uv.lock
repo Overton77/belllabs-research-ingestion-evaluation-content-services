@@ -458,7 +458,6 @@ dependencies = [
     { name = "asyncpg" },
     { name = "beanie" },
     { name = "deepagents" },
-    { name = "docker" },
     { name = "fastapi" },
     { name = "fastmcp" },
     { name = "graphql-core" },
@@ -476,11 +475,10 @@ dependencies = [
     { name = "langgraph-cli", extra = ["inmem"] },
     { name = "langgraph-runtime-inmem" },
     { name = "langgraph-sdk" },
-    { name = "langsmith", extra = ["openai-agents", "pytest"] },
+    { name = "langsmith", extra = ["pytest"] },
     { name = "mcp" },
     { name = "neo4j" },
     { name = "openai" },
-    { name = "openai-agents" },
     { name = "opentelemetry-api" },
     { name = "opentelemetry-sdk" },
     { name = "psycopg", extra = ["binary", "pool"] },
@@ -489,7 +487,7 @@ dependencies = [
     { name = "python-socketio" },
     { name = "redis" },
     { name = "supabase" },
-    { name = "temporalio", extra = ["openai-agents", "opentelemetry"] },
+    { name = "temporalio", extra = ["opentelemetry"] },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -511,7 +509,6 @@ requires-dist = [
     { name = "asyncpg", specifier = ">=0.30,<1" },
     { name = "beanie", specifier = ">=2,<3" },
     { name = "deepagents", specifier = "==0.7.5" },
-    { name = "docker", specifier = ">=7,<8" },
     { name = "fastapi", specifier = ">=0.116,<1" },
     { name = "fastmcp", specifier = "==3.4.4" },
     { name = "graphql-core", specifier = ">=3.2,<4" },
@@ -529,11 +526,10 @@ requires-dist = [
     { name = "langgraph-cli", extras = ["inmem"], specifier = "==0.4.31" },
     { name = "langgraph-runtime-inmem", specifier = "==0.32.0" },
     { name = "langgraph-sdk", specifier = "==0.4.2" },
-    { name = "langsmith", extras = ["openai-agents", "pytest", "sandbox"], specifier = "==0.10.15" },
+    { name = "langsmith", extras = ["pytest", "sandbox"], specifier = "==0.10.15" },
     { name = "mcp", specifier = "==1.29.0" },
     { name = "neo4j", specifier = ">=5.28,<7" },
-    { name = "openai", specifier = ">=2.36,<2.45" },
-    { name = "openai-agents", specifier = ">=0.17.8,<0.18" },
+    { name = "openai", specifier = ">=2.36,<3" },
     { name = "opentelemetry-api", specifier = ">=1.37,<2" },
     { name = "opentelemetry-sdk", specifier = ">=1.37,<2" },
     { name = "psycopg", extras = ["binary", "pool"], specifier = "==3.3.4" },
@@ -542,7 +538,7 @@ requires-dist = [
     { name = "python-socketio", specifier = ">=5.13,<6" },
     { name = "redis", specifier = ">=6,<7" },
     { name = "supabase", specifier = ">=2.18,<3" },
-    { name = "temporalio", extras = ["openai-agents", "opentelemetry"], specifier = ">=1.30,<2" },
+    { name = "temporalio", extras = ["opentelemetry"], specifier = ">=1.30,<2" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.35,<1" },
 ]
 
@@ -1037,20 +1033,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/8c/8b/57666417c0f90f08bcafa776861060426765fdb422eb10212086fb811d26/dnspython-2.8.0.tar.gz", hash = "sha256:181d3c6996452cb1189c4046c61599b84a5a86e099562ffde77d26984ff26d0f", size = 368251, upload-time = "2025-09-07T18:58:00.022Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ba/5a/18ad964b0086c6e62e2e7500f7edc89e3faa45033c71c1893d34eed2b2de/dnspython-2.8.0-py3-none-any.whl", hash = "sha256:01d9bbc4a2d76bf0db7c1f729812ded6d912bd318d3b1cf81d30c0f845dbf3af", size = 331094, upload-time = "2025-09-07T18:57:58.071Z" },
-]
-
-[[package]]
-name = "docker"
-version = "7.2.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pywin32", marker = "sys_platform == 'win32'" },
-    { name = "requests" },
-    { name = "urllib3" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/88/7f/731ff914b0255d3d065f45fd4e626d4b8c95dbcbaada049f337a6ac16410/docker-7.2.0.tar.gz", hash = "sha256:cebb93773d334f778e023a7ee352a8d6e13ab1bd3b863a4d4a59dec897df43ac", size = 118731, upload-time = "2026-07-09T14:53:46.39Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/75/23/529140fe1aab80fc6992f93a706deec709140a6397439139a054e1515c45/docker-7.2.0-py3-none-any.whl", hash = "sha256:a3f45fdeb9165e2d25d9a1d02ddf3bc70fb572cf5ebbf9b58558c22caf29b71f", size = 148775, upload-time = "2026-07-09T14:53:45.224Z" },
 ]
 
 [[package]]
@@ -2510,9 +2492,6 @@ wheels = [
 ]
 
 [package.optional-dependencies]
-openai-agents = [
-    { name = "openai-agents" },
-]
 otel = [
     { name = "opentelemetry-api" },
     { name = "opentelemetry-exporter-otlp-proto-http" },
@@ -3031,24 +3010,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/49/f5/7c7cb955305cb41f7f3c5fd7e0e38bf6bbf2658468863d4b7b868a5cb8df/openai-2.44.0.tar.gz", hash = "sha256:68a5a5ffad82b8ff7d451c437529fb64f7c3b8123aaf0c021966a882d9e3947d", size = 988753, upload-time = "2026-06-24T20:56:02.293Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ae/f4/561ed79fd94876160018a5e75254cfcb9b0e62d4dded9dcb20072e86d623/openai-2.44.0-py3-none-any.whl", hash = "sha256:0a2a3ab2e29aeda368700f662ff9ba0f9df17ba4c54577a64e08b8115a3cc0ad", size = 1366216, upload-time = "2026-06-24T20:55:58.882Z" },
-]
-
-[[package]]
-name = "openai-agents"
-version = "0.17.8"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "griffelib" },
-    { name = "mcp" },
-    { name = "openai" },
-    { name = "pydantic" },
-    { name = "requests" },
-    { name = "typing-extensions" },
-    { name = "websockets" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/03/4a/ed4237dfad0feb5903532f18264a9f9bc5f578e478a6302645abad9fa98a/openai_agents-0.17.8.tar.gz", hash = "sha256:0ce1aa77cbfdc388c18a87d83eba27928f2a055a4368030bf362eeefb1584a3b", size = 5507219, upload-time = "2026-07-06T23:37:12.606Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/3f/b7/c86caec47d7e1ddff375de2dde0148164bf7d0b1e5e188301cbaba426d56/openai_agents-0.17.8-py3-none-any.whl", hash = "sha256:5e08c58588d0b1a401eb9565e22bf4fe23169f27e2de9fb3ac2e337140e532eb", size = 859601, upload-time = "2026-07-06T23:37:10.456Z" },
 ]
 
 [[package]]
@@ -4639,10 +4600,6 @@ wheels = [
 ]
 
 [package.optional-dependencies]
-openai-agents = [
-    { name = "mcp" },
-    { name = "openai-agents" },
-]
 opentelemetry = [
     { name = "opentelemetry-api" },
     { name = "opentelemetry-sdk" },

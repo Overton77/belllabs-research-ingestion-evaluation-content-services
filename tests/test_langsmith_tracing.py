@@ -28,7 +28,6 @@ def test_configure_langsmith_tracing_exports_env(monkeypatch) -> None:
     monkeypatch.delenv("LANGSMITH_PROJECT", raising=False)
     import app.integrations.langsmith_tracing as tracing
 
-    monkeypatch.setattr(tracing, "_PROCESSOR_INSTALLED", False)
     settings = get_settings().model_copy(
         update={
             "langsmith_api_key": SecretStr("lsv2_pt_test_key"),
@@ -44,7 +43,7 @@ def test_configure_langsmith_tracing_exports_env(monkeypatch) -> None:
     assert os.environ["LANGSMITH_TRACING"] == "true"
     assert os.environ["LANGSMITH_API_KEY"] == "lsv2_pt_test_key"
     assert os.environ["LANGSMITH_PROJECT"] == "BellLabsBiotech-Test"
-    assert tracing._PROCESSOR_INSTALLED is True
+    assert not hasattr(tracing, "_PROCESSOR_INSTALLED")
 
 
 def test_create_traced_async_openai_returns_client() -> None:

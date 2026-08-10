@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-import io
-import tarfile
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.application.operation_execution import _binding_for
 from app.application.sandbox_snapshots import (
     InMemorySandboxSnapshotRepository,
     InMemorySnapshotPayloadStore,
@@ -29,8 +26,6 @@ from app.domain.operation_execution.errors import (
     SnapshotMigrationRequired,
     SnapshotPayloadMismatch,
 )
-from app.integrations.openai_sandbox_snapshots import OpenAIAgentsSnapshotBridge
-from tests.test_operation_execution import operation_request
 
 NOW = datetime(2026, 7, 21, 18, 0, tzinfo=UTC)
 RUNTIME = sha256_digest("runtime")
@@ -116,7 +111,7 @@ def create_request() -> SandboxSnapshotCreateRequest:
         request_scope="tenant:one",
         source_namespace_id="run-workspace:run-1",
         source_workspace_id="workspace-source",
-        provider="openai-agents-docker",
+        provider="langsmith-sandbox",
         reason=SnapshotCreationReason.FAILURE,
         producer_binding_id="binding-source",
         snapshot_policy_ref="snapshot:on-failure@1",
@@ -265,83 +260,3 @@ async def test_restore_uses_trusted_time_and_rejects_cross_scope() -> None:
     with pytest.raises(SnapshotCompatibilityError, match="scope"):
         await snapshots.clone_restore(cross_scope)
     assert sandbox.clones == []
-
-
-async def test_openai_sdk_archive_bridge_exposes_provider_capture() -> None:
-    class Client:
-        pass
-
-    bridge = OpenAIAgentsSnapshotBridge(  # type: ignore[arg-type]
-        Client(),
-        captured_policy_refs=frozenset({"snapshot:on-failure@1"}),
-    )
-    operation = operation_request()
-    binding = _binding_for(
-        operation,
-        sha256_digest(operation.model_dump(mode="json", exclude={"requested_at"})),
-    )
-    workspace = MaterializedWorkspace(
-        workspace_id="workspace-source",
-        namespace_id="run-workspace:run-1",
-        provider="openai-agents-docker",
-        runtime_digest=RUNTIME,
-        image_digest=IMAGE,
-        mount_manifest_digest=MOUNTS,
-    )
-    archive = bridge.begin_capture(binding, workspace)
-    assert archive is not None
-    sdk_archive = io.BytesIO()
-    with tarfile.open(fileobj=sdk_archive, mode="w") as tar:
-        content = b"restorable report"
-        entry = tarfile.TarInfo("workspace/output/report.md")
-        entry.size = len(content)
-        tar.addfile(entry, io.BytesIO(content))
-    await archive.persist(io.BytesIO(sdk_archive.getvalue()))
-    bridge.complete_capture(binding, workspace, archive)
-
-    capture = await bridge.capture(create_request())
-
-    with tarfile.open(fileobj=io.BytesIO(capture.payload), mode="r:") as restored:
-        assert restored.getnames() == ["workspace/output/report.md"]
-    assert capture.provider_snapshot_id == archive.id
-    assert capture.filesystem_digest.startswith("sha256:")
-
-
-async def test_openai_sdk_archive_bridge_rejects_secret_content_at_innocuous_path() -> None:
-    class Client:
-        pass
-
-    bridge = OpenAIAgentsSnapshotBridge(  # type: ignore[arg-type]
-        Client(),
-        captured_policy_refs=frozenset({"snapshot:on-failure@1"}),
-    )
-    operation = operation_request()
-    binding = _binding_for(
-        operation,
-        sha256_digest(operation.model_dump(mode="json", exclude={"requested_at"})),
-    )
-    workspace = MaterializedWorkspace(
-        workspace_id="workspace-source",
-        namespace_id="run-workspace:run-1",
-        provider="openai-agents-docker",
-        runtime_digest=RUNTIME,
-        image_digest=IMAGE,
-        mount_manifest_digest=MOUNTS,
-    )
-    archive = bridge.begin_capture(binding, workspace)
-    assert archive is not None
-    sdk_archive = io.BytesIO()
-    with tarfile.open(fileobj=sdk_archive, mode="w") as tar:
-        content = b"stale-token"
-        entry = tarfile.TarInfo("workspace/output/report.txt")
-        entry.size = len(content)
-        tar.addfile(entry, io.BytesIO(content))
-    await archive.persist(io.BytesIO(sdk_archive.getvalue()))
-
-    with pytest.raises(SnapshotCompatibilityError, match="resolved secret value"):
-        bridge.complete_capture(
-            binding,
-            workspace,
-            archive,
-            sensitive_values=(b"stale-token",),
-        )

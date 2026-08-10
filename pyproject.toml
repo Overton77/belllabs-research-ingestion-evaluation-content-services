@@ -12,7 +12,6 @@ dependencies = [
   "asyncpg>=0.30,<1",
   "beanie>=2,<3",
   "deepagents==0.7.5",
-  "docker>=7,<8",
   "fastapi>=0.116,<1",
   "fastmcp==3.4.4",
   "graphql-core>=3.2,<4",
@@ -30,12 +29,10 @@ dependencies = [
   "langgraph-cli[inmem]==0.4.31",
   "langgraph-runtime-inmem==0.32.0",
   "langgraph-sdk==0.4.2",
-  "langsmith[openai-agents,pytest,sandbox]==0.10.15",
+  "langsmith[pytest,sandbox]==0.10.15",
   "mcp==1.29.0",
   "neo4j>=5.28,<7",
-  # openai 2.46 added a required usage field before openai-agents 0.17.8 adapted.
-  "openai>=2.36,<2.45",
-  "openai-agents>=0.17.8,<0.18",
+  "openai>=2.36,<3",
   "opentelemetry-api>=1.37,<2",
   "opentelemetry-sdk>=1.37,<2",
   "psycopg[binary,pool]==3.3.4",
@@ -44,7 +41,7 @@ dependencies = [
   "python-socketio>=5.13,<6",
   "redis>=6,<7",
   "supabase>=2.18,<3",
-  "temporalio[openai-agents,opentelemetry]>=1.30,<2",
+  "temporalio[opentelemetry]>=1.30,<2",
   "uvicorn[standard]>=0.35,<1",
 ]
 

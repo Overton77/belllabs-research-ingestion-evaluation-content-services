@@ -1,17 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
-from datetime import timedelta
-
-import docker
-from agents.sandbox.sandboxes import DockerSandboxClient
-from temporalio.contrib.openai_agents import (
-    ModelActivityParameters,
-    OpenAIAgentsPlugin,
-    SandboxClientProvider,
-)
-from temporalio.worker import Worker
 
 from app.application.control_plane import ControlPlaneService
 from app.application.control_plane_repository import BeanieDefinitionRepository
@@ -69,8 +58,6 @@ from app.temporal.schema_grounding_activities import (
     SchemaGroundingActivities,
     create_schema_grounding_activity_worker,
 )
-from app.temporal.workflow_sandbox import coordinator_workflow_runner
-from app.temporal.workflows.sandbox_probe import SandboxAgentProbeWorkflow
 
 
 async def main(
@@ -82,16 +69,8 @@ async def main(
             "COORDINATOR_LAUNCH_ENABLED requires concrete StageGraph and "
             "GoalDirected activity adapters; refusing to advertise unusable workers"
         )
-    # PRE-EMPTIVE SETUP: Pydantic reads .env without mutating process env, while
-    # the Agents SDK and LangSmith read credentials from the process environment.
     configure_langsmith_tracing(settings)
-    os.environ.setdefault("OPENAI_API_KEY", settings.openai_api_key.get_secret_value())
-    docker_client = DockerSandboxClient(docker.from_env())
-    plugin = OpenAIAgentsPlugin(
-        model_params=ModelActivityParameters(start_to_close_timeout=timedelta(seconds=60)),
-        sandbox_clients=[SandboxClientProvider("docker", docker_client)],
-    )
-    client = await create_temporal_client(settings, plugins=[plugin])
+    client = await create_temporal_client(settings)
     coordinator_workers = None
     if settings.coordinator_launch_enabled:
         assert coordinator_activities is not None
@@ -100,12 +79,6 @@ async def main(
             task_queues=coordinator_task_queues(settings.temporal_task_queue),
             activities=coordinator_activities,
         )
-    probe_worker = Worker(
-        client,
-        task_queue=settings.temporal_task_queue,
-        workflows=[SandboxAgentProbeWorkflow],
-        workflow_runner=coordinator_workflow_runner(),
-    )
     mongo_client, _database = await create_mongodb(settings)
     postgres_pool = await create_application_postgres_pool(settings)
     try:
@@ -171,7 +144,6 @@ async def main(
             activities=schema_activities,
         )
         workers = [
-            probe_worker,
             linked_worker,
             schema_worker,
         ]

@@ -1,7 +1,7 @@
 ---
 id: WP-CP-040
 title: Implement Deep Agent profile, placement, binding, and capability materialization
-status: ready_when_unblocked
+status: accepted
 implements: [REQ-CP-DA-001, REQ-CP-DA-002, REQ-CP-DA-003, REQ-CP-DA-004, REQ-CP-DA-005, REQ-CP-DA-006, REQ-CP-DA-007, REQ-CP-DA-013, REQ-CP-DA-014, REQ-CP-DA-015, REQ-CP-CS-001, REQ-CP-CS-002, REQ-CP-CS-003, REQ-CP-CS-004, REQ-CP-CS-005, REQ-CP-CS-006, REQ-CP-CS-007]
 governed_by: [ADR-0003, ADR-0004, SPEC-CP-DEEP-AGENT-RUNTIME, SPEC-CP-COGNITIVE-SCHEMAS]
 contracts: [CON-CP-DEEP-AGENT-PROFILE-V1, CON-CP-DEEP-AGENT-PLACEMENT-V1, CON-CP-DEEP-AGENT-BINDING-V1, CON-CP-COGNITIVE-STATE-SCHEMA-V1, CON-CP-COGNITIVE-CONTEXT-SCHEMA-V1, CON-CP-COGNITIVE-CHANNEL-PACK-V1, CON-CP-WORKSPACE-MANIFEST-V1, CON-CP-ARTIFACT-PROMOTION-V1, CON-CP-SNAPSHOT-V1]
@@ -51,14 +51,14 @@ active application path. Record exact Deep Agents/LangGraph/runtime dependencies
 
 ## Acceptance criteria
 
-- [ ] `DeepAgentProfile` and placement contracts validate and digest deterministically.
-- [ ] Compiler emits a complete flattened binding including cognitive state/context schema digests.
-- [ ] Adapter resolves those digests to `create_deep_agent(state_schema=..., context_schema=...)` and seeds `artifact_index`, `context_manifest`, and `child_result_index`.
-- [ ] Local placement invokes Deep Agents 0.7.5 through the provider-neutral executor.
-- [ ] One exact MCP server/tool surface, Skill bundle, and sandbox attach correctly.
-- [ ] Runtime drift, component collision, unsupported policy, or silent fallback fails closed.
-- [ ] Sync subagent receives only delegated capability/workspace ceilings.
-- [ ] Artifact promotion and snapshot clone/reauthorization pass.
+- [x] `DeepAgentProfile` and placement contracts validate and digest deterministically.
+- [x] Compiler emits a complete flattened binding including cognitive state/context schema digests.
+- [x] Adapter resolves those digests to `create_deep_agent(state_schema=..., context_schema=...)` and seeds `artifact_index`, `context_manifest`, and `child_result_index`.
+- [x] Local placement invokes Deep Agents 0.7.5 through the provider-neutral executor.
+- [x] One exact MCP server/tool surface, Skill bundle, and sandbox attach correctly.
+- [x] Runtime drift, component collision, unsupported policy, or silent fallback fails closed.
+- [x] Sync subagent receives only delegated capability/workspace ceilings.
+- [x] Artifact promotion and snapshot clone/reauthorization pass.
 
 ## Qualification and evidence
 
