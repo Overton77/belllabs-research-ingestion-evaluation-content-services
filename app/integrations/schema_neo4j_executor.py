@@ -41,8 +41,7 @@ class Neo4jBoundedReadExecutorFactory:
             or admission.workspace_binding is None
             or capability is None
             or not capability.admitted
-            or decision.deployment_manifest_id
-            != admission.deployment_manifest.manifest_id
+            or decision.deployment_manifest_id != admission.deployment_manifest.manifest_id
             or decision.workspace_binding_id != admission.workspace_binding.binding_id
             or decision.graph_capability_grant_id != capability.grant_id
             or decision.schema_definition_digest != admission.schema_definition_digest

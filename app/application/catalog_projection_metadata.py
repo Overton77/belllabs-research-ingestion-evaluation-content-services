@@ -82,9 +82,7 @@ def build_workflow_compatibility(
 ) -> dict[ExactDefinitionRef, frozenset[ExactDefinitionRef]]:
     """Build discovery compatibility from immutable workflow/profile dependency closure."""
     by_ref = {item.ref: item.definition for item in published}
-    result: dict[ExactDefinitionRef, set[ExactDefinitionRef]] = {
-        ref: set() for ref in by_ref
-    }
+    result: dict[ExactDefinitionRef, set[ExactDefinitionRef]] = {ref: set() for ref in by_ref}
     for workflow in published:
         definition = workflow.definition
         if not isinstance(definition, WorkflowTypeDefinition):

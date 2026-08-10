@@ -162,9 +162,7 @@ class RuntimeExecutionAttempt(Contract):
 
     @field_validator("provider_metadata")
     @classmethod
-    def provider_metadata_has_no_sensitive_values(
-        cls, value: dict[str, Any]
-    ) -> dict[str, Any]:
+    def provider_metadata_has_no_sensitive_values(cls, value: dict[str, Any]) -> dict[str, Any]:
         _reject_sensitive_payload(value)
         return value
 
@@ -313,9 +311,7 @@ class DurableInterruptEnvelope(Contract):
 
     @field_validator("redacted_request_summary")
     @classmethod
-    def interrupt_summary_has_no_sensitive_values(
-        cls, value: dict[str, Any]
-    ) -> dict[str, Any]:
+    def interrupt_summary_has_no_sensitive_values(cls, value: dict[str, Any]) -> dict[str, Any]:
         _reject_redacted_runtime_payload(value)
         return value
 
@@ -369,9 +365,7 @@ class BellLabsStreamEvent(Contract):
 
     @field_validator("redacted_payload")
     @classmethod
-    def stream_payload_has_no_sensitive_values(
-        cls, value: dict[str, Any]
-    ) -> dict[str, Any]:
+    def stream_payload_has_no_sensitive_values(cls, value: dict[str, Any]) -> dict[str, Any]:
         _reject_redacted_runtime_payload(value)
         return value
 
@@ -560,9 +554,7 @@ def _reject_redacted_runtime_payload(value: object) -> None:
             for key, nested in item.items():
                 normalized = str(key).lower().replace("-", "_")
                 if normalized not in safe_keys:
-                    raise ValueError(
-                        "redacted runtime payload contains a non-allowlisted field"
-                    )
+                    raise ValueError("redacted runtime payload contains a non-allowlisted field")
                 inspect(nested)
         elif isinstance(item, list | tuple):
             for nested in item:

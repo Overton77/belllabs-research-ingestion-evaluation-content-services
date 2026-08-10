@@ -37,13 +37,8 @@ class PostgresRunSemanticInputBindingRepository:
                 binding.run_id,
             )
             if prior is not None:
-                persisted = RunSemanticInputBinding.model_validate(
-                    _json(prior["binding_payload"])
-                )
-                if (
-                    prior["binding_digest"] != binding.binding_digest
-                    or persisted != binding
-                ):
+                persisted = RunSemanticInputBinding.model_validate(_json(prior["binding_payload"]))
+                if prior["binding_digest"] != binding.binding_digest or persisted != binding:
                     raise SemanticInputBindingConflict(
                         "Workflow Run already has a different semantic input binding"
                     )

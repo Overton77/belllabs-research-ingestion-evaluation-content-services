@@ -27,7 +27,8 @@ from app.domain.orchestration.contracts import (
     WorkflowEvaluationRequest,
     WorkflowEvaluationResult,
 )
-from app.temporal.stagegraph_workflow import StageGraphWorkflow
+from app.temporal.registration.activities import coordinator_activities
+from app.temporal.registration.workflows import coordinator_workflows
 from app.temporal.workflow_sandbox import coordinator_workflow_runner
 
 
@@ -113,12 +114,7 @@ def create_stagegraph_worker(
     return Worker(
         client,
         task_queue=task_queue,
-        workflows=[StageGraphWorkflow],
+        workflows=coordinator_workflows("StageGraph"),
         workflow_runner=coordinator_workflow_runner(),
-        activities=[
-            activities.execute_operation,
-            activities.evaluate_workflow,
-            activities.apply_lifecycle_command,
-            activities.materialize_workflow_result,
-        ],
+        activities=coordinator_activities("StageGraph", activities),
     )

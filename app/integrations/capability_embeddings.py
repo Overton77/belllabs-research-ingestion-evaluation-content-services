@@ -72,9 +72,8 @@ class OpenAICapabilityEmbeddingAdapter:
             except Exception as error:
                 raise CapabilityEmbeddingDependencyError() from error
             ordered = sorted(response.data, key=lambda item: item.index)
-            if (
-                len(ordered) != len(batch)
-                or [item.index for item in ordered] != list(range(len(batch)))
+            if len(ordered) != len(batch) or [item.index for item in ordered] != list(
+                range(len(batch))
             ):
                 raise CapabilityEmbeddingDependencyError(
                     "capability embedding response has invalid indexes"

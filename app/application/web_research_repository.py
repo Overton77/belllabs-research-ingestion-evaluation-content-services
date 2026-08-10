@@ -114,15 +114,9 @@ class BeanieWebResearchRecordRepository:
                     WebResearchRecordDocument.request_scope == record.request_scope,
                     WebResearchRecordDocument.record_id == record.record_id,
                 )
-                prior = (
-                    _from_document(prior_document)
-                    if prior_document is not None
-                    else None
-                )
+                prior = _from_document(prior_document) if prior_document is not None else None
             if prior is None or prior != record:
-                raise WebResearchRecordConflict(
-                    "web-research record uniqueness conflict"
-                ) from None
+                raise WebResearchRecordConflict("web-research record uniqueness conflict") from None
             return prior
 
     async def get(
@@ -141,9 +135,7 @@ class BeanieWebResearchRecordRepository:
             raise WebResearchRecordNotFound(f"web-research record not found: {record_ref}")
         record = _from_document(document)
         if web_research_record_ref(record) != record_ref:
-            raise WebResearchRecordNotFound(
-                f"web-research record digest mismatch: {record_ref}"
-            )
+            raise WebResearchRecordNotFound(f"web-research record digest mismatch: {record_ref}")
         return record
 
     async def get_by_intent(
@@ -174,9 +166,7 @@ def _record_id_from_ref(record_ref: str) -> str:
         or not record_ref.startswith("belllabs://web-research/")
         or len(parts[-1]) != 64
     ):
-        raise WebResearchRecordNotFound(
-            f"invalid web-research record reference: {record_ref}"
-        )
+        raise WebResearchRecordNotFound(f"invalid web-research record reference: {record_ref}")
     return parts[-2]
 
 

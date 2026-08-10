@@ -415,9 +415,11 @@ class ReportGraphReconciliationWorkflow:
                 )
                 if relationship in projection.allowed_relationship_types
             )
-            for sequence, product_name in enumerate(
-                ("TruAge", "TruHealth", "TruAge + TruHealth"), start=3
-            ) if product_relationships else ():
+            for sequence, product_name in (
+                enumerate(("TruAge", "TruHealth", "TruAge + TruHealth"), start=3)
+                if product_relationships
+                else ()
+            ):
                 required_seed_intents.append(
                     QueryExecutionIntent(
                         intent_id=f"{config.run_id}-product-neighborhood-{sequence}",
@@ -459,9 +461,7 @@ class ReportGraphReconciliationWorkflow:
                     "allowed_traversals": projection.allowed_traversals,
                     "identity_fields_by_label": projection.identity_fields_by_label,
                     "online_fulltext_capabilities": tuple(
-                        item
-                        for item in projection.fulltext_capabilities
-                        if item.get("live_online")
+                        item for item in projection.fulltext_capabilities if item.get("live_online")
                     ),
                     "required_first_intent": required_first_intent.model_dump(mode="json"),
                     "required_seed_intents": tuple(
@@ -474,6 +474,7 @@ class ReportGraphReconciliationWorkflow:
             query_results: list[QueryExecutionResult] = []
             query_intents: list[QueryExecutionIntent] = []
             if executor is not None:
+
                 async def execute_intent(intent: QueryExecutionIntent) -> QueryExecutionResult:
                     query_intents.append(intent)
                     sequence = len(query_intents)
@@ -511,14 +512,11 @@ class ReportGraphReconciliationWorkflow:
                     for intent in required_intents:
                         await execute_intent(intent)
                     unsuccessful = [
-                        result.intent_id
-                        for result in query_results
-                        if result.status != "succeeded"
+                        result.intent_id for result in query_results if result.status != "succeeded"
                     ]
                     if unsuccessful:
                         raise RuntimeError(
-                            "required host-compiled intents did not all succeed: "
-                            f"{unsuccessful}"
+                            f"required host-compiled intents did not all succeed: {unsuccessful}"
                         )
                     evidence = _observational_evidence(query_intents, query_results)
                     planned_usage: dict[str, int] = {}
@@ -529,9 +527,7 @@ class ReportGraphReconciliationWorkflow:
                         max_turns=config.max_query_intents * 2 + 4,
                     )
                     planned_usage = dict(planned.usage)
-                    required_intent_ids = {
-                        intent.intent_id for intent in required_intents
-                    }
+                    required_intent_ids = {intent.intent_id for intent in required_intents}
 
                     def missing_required_successes() -> set[str]:
                         successful = {
@@ -609,9 +605,7 @@ class ReportGraphReconciliationWorkflow:
                 "review_decision": selection_outcome.review.decision,
                 "revision_count": selection_outcome.revision_count,
                 "invalid_name_count": len(selection_outcome.validation.errors),
-                "unjustified_addition_count": len(
-                    selection_outcome.review.unjustified_selections
-                ),
+                "unjustified_addition_count": len(selection_outcome.review.unjustified_selections),
             }
             query_metrics = evaluate_query_results(query_results)
             query_metrics.update(
@@ -786,9 +780,7 @@ def _observational_evidence(
 ) -> GraphReconciliationEvidence:
     """Build exact evidence from persisted results without semantic invention."""
     entities: dict[tuple[str, str | None, str | None], dict[str, Any]] = {}
-    relationships: dict[
-        tuple[str, str, str, str], ExistingRelationshipEvidence
-    ] = {}
+    relationships: dict[tuple[str, str, str, str], ExistingRelationshipEvidence] = {}
     failures: list[str] = []
 
     for intent, result in zip(intents, results, strict=True):
@@ -848,9 +840,9 @@ def _observational_evidence(
                         target_id=target_id,
                         result_id=result.result_id,
                     )
-                    relationships[
-                        (source_id, relationship_type, target_id, result.result_id)
-                    ] = relationship
+                    relationships[(source_id, relationship_type, target_id, result.result_id)] = (
+                        relationship
+                    )
 
     matched_entities = tuple(
         MatchedExistingEntity(

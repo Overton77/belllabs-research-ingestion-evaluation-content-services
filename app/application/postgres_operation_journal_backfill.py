@@ -77,16 +77,11 @@ class PostgresOperationJournalBackfillRepository(OperationJournalBackfillTarget)
             )
             if progress_row is None:
                 raise RuntimeError("backfill progress row was not created")
-            if (
-                progress_row["source_snapshot_digest"]
-                != batch.source_snapshot.snapshot_digest
-            ):
+            if progress_row["source_snapshot_digest"] != batch.source_snapshot.snapshot_digest:
                 raise IdempotencyConflict("backfill run reused with another source snapshot")
             if batch.completed:
                 if progress_row["source_cursor"] != batch.previous_cursor:
-                    raise IdempotencyConflict(
-                        "backfill completion cursor is stale"
-                    )
+                    raise IdempotencyConflict("backfill completion cursor is stale")
                 await connection.execute(
                     """
                     UPDATE belllabs_control.operation_journal_backfill_batches
@@ -126,9 +121,7 @@ class PostgresOperationJournalBackfillRepository(OperationJournalBackfillTarget)
                     prior_batch["batch_digest"] != batch.batch_digest
                     or progress_row["source_cursor"] != batch.cursor
                 ):
-                    raise IdempotencyConflict(
-                        "backfill batch cursor has conflicting content"
-                    )
+                    raise IdempotencyConflict("backfill batch cursor has conflicting content")
                 return
             if progress_row["source_cursor"] != batch.previous_cursor:
                 raise IdempotencyConflict("backfill batch cursor is stale")
@@ -144,8 +137,7 @@ class PostgresOperationJournalBackfillRepository(OperationJournalBackfillTarget)
                 )
             now = datetime.now(UTC)
             source_claim_count = len(batch.claims) + sum(
-                item.source_collection == "operation_execution_claims"
-                for item in batch.quarantines
+                item.source_collection == "operation_execution_claims" for item in batch.quarantines
             )
             source_settlement_count = len(batch.settlements) + sum(
                 item.source_collection == "operation_execution_settlements"
@@ -265,8 +257,7 @@ class PostgresOperationJournalBackfillRepository(OperationJournalBackfillTarget)
                 MIGRATION_STREAM,
             )
         persisted_target_digests = [
-            str(item["target_canonical_digest"])
-            for item in (*claim_rows, *settlement_rows)
+            str(item["target_canonical_digest"]) for item in (*claim_rows, *settlement_rows)
         ]
         source_items = [
             (
@@ -283,9 +274,7 @@ class PostgresOperationJournalBackfillRepository(OperationJournalBackfillTarget)
             )
             for item in quarantine_rows
         ]
-        source_digest = _aggregate_digests(
-            [digest for _, _, digest in sorted(source_items)]
-        )
+        source_digest = _aggregate_digests([digest for _, _, digest in sorted(source_items)])
         target_digest = _aggregate_digests(persisted_target_digests)
         if (
             source_digest != row["source_aggregate_digest"]
@@ -323,12 +312,8 @@ class PostgresOperationJournalBackfillRepository(OperationJournalBackfillTarget)
             json.dumps(
                 {
                     "request_scope": batch.source_snapshot.request_scope,
-                    "claim_high_watermark": (
-                        batch.source_snapshot.claim_high_watermark
-                    ),
-                    "settlement_high_watermark": (
-                        batch.source_snapshot.settlement_high_watermark
-                    ),
+                    "claim_high_watermark": (batch.source_snapshot.claim_high_watermark),
+                    "settlement_high_watermark": (batch.source_snapshot.settlement_high_watermark),
                     "record_count": batch.source_snapshot.record_count,
                     "aggregate_digest": batch.source_snapshot.aggregate_digest,
                     "captured_at": batch.source_snapshot.captured_at.isoformat(),
@@ -447,9 +432,7 @@ async def _admit_settlement(
             prior["settlement_id"] != settlement.settlement_id
             or prior["source_canonical_digest"] != lineage.source_canonical_digest
         ):
-            raise IdempotencyConflict(
-                "legacy settlement source identity has conflicting content"
-            )
+            raise IdempotencyConflict("legacy settlement source identity has conflicting content")
         return
     await connection.execute(
         """
@@ -645,16 +628,12 @@ def _progress_from_row(row: asyncpg.Record) -> BackfillProgress:
         admitted_claim_count=int(row["target_claim_count"]),
         admitted_settlement_count=int(row["target_settlement_count"]),
         quarantine_count=quarantines,
-        source_aggregate_digest=row["source_aggregate_digest"]
-        or sha256_digest([]),
-        target_aggregate_digest=row["target_aggregate_digest"]
-        or sha256_digest([]),
+        source_aggregate_digest=row["source_aggregate_digest"] or sha256_digest([]),
+        target_aggregate_digest=row["target_aggregate_digest"] or sha256_digest([]),
         source_snapshot=SourceSnapshot(
             request_scope=str(snapshot_payload["request_scope"]),
             claim_high_watermark=snapshot_payload["claim_high_watermark"],
-            settlement_high_watermark=snapshot_payload[
-                "settlement_high_watermark"
-            ],
+            settlement_high_watermark=snapshot_payload["settlement_high_watermark"],
             record_count=int(snapshot_payload["record_count"]),
             aggregate_digest=str(snapshot_payload["aggregate_digest"]),
             captured_at=datetime.fromisoformat(snapshot_payload["captured_at"]),

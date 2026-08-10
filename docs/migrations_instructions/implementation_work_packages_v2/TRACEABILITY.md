@@ -1,7 +1,7 @@
 # Control-plane foundation traceability projection
 
 Status: generated-style projection from canonical specification metadata; requirements are authored only in their owning specifications.  
-Evidence status: WP-CP-010 and WP-CP-020 are accepted; later packages remain planned.
+Evidence status: WP-CP-010, WP-CP-020, and WP-CP-030 are accepted; later packages remain planned.
 
 | Requirement | Source anchors | ADR | Canonical spec | Contract | Work package | GitHub/local issue | Test/qualification | Evidence | Status |
 |---|---|---|---|---|---|---|---|---|---|
@@ -25,18 +25,18 @@ Evidence status: WP-CP-010 and WP-CP-020 are accepted; later packages remain pla
 | REQ-CP-RUN-008 | Pre-research F2 outbox | ADR-0003 | SPEC-CP-RUN-CONTROL | CON-CP-DOMAIN-EVENT-V1 | WP-CP-020 | local Markdown | redelivery/gap tests | `evidence_v2/WP-CP-020/README.md` | accepted |
 | REQ-CP-RUN-009 | Foundation interview decisions 9-10 | ADR-0003 | SPEC-CP-RUN-CONTROL | CON-CP-ASYNC-SUBAGENT-V1 | WP-CP-020, WP-CP-045 | local Markdown | parent-authority acceptance test; QUAL-CP-ASYNC-SUBAGENT-LIFECYCLE remains WP-CP-045 | `evidence_v2/WP-CP-020/README.md` | accepted |
 | REQ-CP-RUN-010 | Pre-research F2 finalization | ADR-0003 | SPEC-CP-RUN-CONTROL | CON-CP-LIFECYCLE-V1 | WP-CP-020 | local Markdown | bounded finalization tests | `evidence_v2/WP-CP-020/README.md` | accepted |
-| REQ-CP-EXEC-001 | Proposal §7.1 | ADR-0003 | SPEC-CP-DURABLE-EXECUTION | CON-CP-TEMPORAL-IDENTITY-V1 | WP-CP-030, WP-CP-050 | local Markdown | root idempotency/replay | evidence_v2/WP-CP-030 | planned |
-| REQ-CP-EXEC-002 | Proposal §§7.1-7.4 | ADR-0003 | SPEC-CP-DURABLE-EXECUTION | CON-CP-TEMPORAL-IDENTITY-V1 | WP-CP-030 | local Markdown | cross-family root tests | evidence_v2/WP-CP-030 | planned |
-| REQ-CP-EXEC-003 | Proposal §7.3 | ADR-0003 | SPEC-CP-DURABLE-EXECUTION | CON-CP-TEMPORAL-IDENTITY-V1 | WP-CP-030, WP-CP-050 | local Markdown | operation recovery tests | evidence_v2/WP-CP-050 | planned |
-| REQ-CP-EXEC-004 | Proposal §§6-8 | ADR-0003 | SPEC-CP-DURABLE-EXECUTION | CON-CP-TEMPORAL-IDENTITY-V1 | WP-CP-030 | local Markdown | captured-history replay | evidence_v2/WP-CP-030 | planned |
-| REQ-CP-EXEC-005 | Proposal §§8-10 | ADR-0003 | SPEC-CP-DURABLE-EXECUTION | CON-CP-TEMPORAL-IDENTITY-V1 | WP-CP-030, WP-CP-045 | local Markdown | retry/generation tests | evidence_v2/WP-CP-045 | planned |
-| REQ-CP-EXEC-006 | Proposal §9 | ADR-0003 | SPEC-CP-DURABLE-EXECUTION | CON-CP-WORKFLOW-MESSAGE-V1 | WP-CP-030, WP-CP-045, WP-CP-050 | local Markdown | ordered receipt tests | evidence_v2/WP-CP-045 | planned |
-| REQ-CP-EXEC-007 | Proposal §9 | ADR-0003 | SPEC-CP-DURABLE-EXECUTION | CON-CP-WORKFLOW-MESSAGE-V1 | WP-CP-030 | local Markdown | Signal/Update/Query tests | evidence_v2/WP-CP-030 | planned |
-| REQ-CP-EXEC-008 | Proposal §§9-10 | ADR-0003 | SPEC-CP-DURABLE-EXECUTION | CON-CP-WORKFLOW-MESSAGE-V1 | WP-CP-030, WP-CP-045, WP-CP-050 | local Markdown | cancellation saga tests | evidence_v2/WP-CP-045 | planned |
-| REQ-CP-EXEC-009 | Proposal §7; pre-research F3 | ADR-0003 | SPEC-CP-DURABLE-EXECUTION | CON-CP-LINKED-RUN-V1 | WP-CP-030 | local Markdown | QUAL-CP-LINKED-RUN-SEMANTICS | evidence_v2/WP-CP-030 | planned |
-| REQ-CP-EXEC-010 | Pre-research F3 | ADR-0003 | SPEC-CP-DURABLE-EXECUTION | CON-CP-LINKED-RUN-V1 | WP-CP-030 | local Markdown | result/late-result tests | evidence_v2/WP-CP-030 | planned |
-| REQ-CP-EXEC-011 | Proposal §12 | ADR-0003 | SPEC-CP-DURABLE-EXECUTION | CON-CP-CONTINUATION-V1 | WP-CP-030, WP-CP-050 | local Markdown | forced Continue-As-New | evidence_v2/WP-CP-050 | planned |
-| REQ-CP-EXEC-012 | Proposal §11 | ADR-0003 | SPEC-CP-DURABLE-EXECUTION | CON-CP-CONTINUATION-V1 | WP-CP-030 | local Markdown | semantic fork tests | evidence_v2/WP-CP-030 | planned |
+| REQ-CP-EXEC-001 | Proposal §7.1 | ADR-0003 | SPEC-CP-DURABLE-EXECUTION | CON-CP-TEMPORAL-IDENTITY-V1 | WP-CP-030, WP-CP-050 | local Markdown | root idempotency/replay | `evidence_v2/WP-CP-030/README.md` | accepted |
+| REQ-CP-EXEC-002 | Proposal §§7.1-7.4 | ADR-0003 | SPEC-CP-DURABLE-EXECUTION | CON-CP-TEMPORAL-IDENTITY-V1 | WP-CP-030 | local Markdown | cross-family root tests | `evidence_v2/WP-CP-030/README.md` | accepted |
+| REQ-CP-EXEC-003 | Proposal §7.3 | ADR-0003 | SPEC-CP-DURABLE-EXECUTION | CON-CP-TEMPORAL-IDENTITY-V1 | WP-CP-030, WP-CP-050 | local Markdown | operation recovery tests | `evidence_v2/WP-CP-030/README.md` | accepted |
+| REQ-CP-EXEC-004 | Proposal §§6-8 | ADR-0003 | SPEC-CP-DURABLE-EXECUTION | CON-CP-TEMPORAL-IDENTITY-V1 | WP-CP-030 | local Markdown | captured-history replay | `evidence_v2/WP-CP-030/README.md` | accepted |
+| REQ-CP-EXEC-005 | Proposal §§8-10 | ADR-0003 | SPEC-CP-DURABLE-EXECUTION | CON-CP-TEMPORAL-IDENTITY-V1 | WP-CP-030, WP-CP-045 | local Markdown | retry/generation tests | `evidence_v2/WP-CP-030/README.md` | accepted |
+| REQ-CP-EXEC-006 | Proposal §9 | ADR-0003 | SPEC-CP-DURABLE-EXECUTION | CON-CP-WORKFLOW-MESSAGE-V1 | WP-CP-030, WP-CP-045, WP-CP-050 | local Markdown | ordered receipt tests | `evidence_v2/WP-CP-030/README.md` | accepted |
+| REQ-CP-EXEC-007 | Proposal §9 | ADR-0003 | SPEC-CP-DURABLE-EXECUTION | CON-CP-WORKFLOW-MESSAGE-V1 | WP-CP-030 | local Markdown | Signal/Update/Query tests | `evidence_v2/WP-CP-030/README.md` | accepted |
+| REQ-CP-EXEC-008 | Proposal §§9-10 | ADR-0003 | SPEC-CP-DURABLE-EXECUTION | CON-CP-WORKFLOW-MESSAGE-V1 | WP-CP-030, WP-CP-045, WP-CP-050 | local Markdown | cancellation saga tests | `evidence_v2/WP-CP-030/README.md` | accepted |
+| REQ-CP-EXEC-009 | Proposal §7; pre-research F3 | ADR-0003 | SPEC-CP-DURABLE-EXECUTION | CON-CP-LINKED-RUN-V1 | WP-CP-030 | local Markdown | QUAL-CP-LINKED-RUN-SEMANTICS | `evidence_v2/WP-CP-030/README.md` | accepted |
+| REQ-CP-EXEC-010 | Pre-research F3 | ADR-0003 | SPEC-CP-DURABLE-EXECUTION | CON-CP-LINKED-RUN-V1 | WP-CP-030 | local Markdown | result/late-result tests | `evidence_v2/WP-CP-030/README.md` | accepted |
+| REQ-CP-EXEC-011 | Proposal §12 | ADR-0003 | SPEC-CP-DURABLE-EXECUTION | CON-CP-CONTINUATION-V1 | WP-CP-030, WP-CP-050 | local Markdown | forced Continue-As-New | `evidence_v2/WP-CP-030/README.md` | accepted |
+| REQ-CP-EXEC-012 | Proposal §11 | ADR-0003 | SPEC-CP-DURABLE-EXECUTION | CON-CP-CONTINUATION-V1 | WP-CP-030 | local Markdown | semantic fork tests | `evidence_v2/WP-CP-030/README.md` | accepted |
 | REQ-CP-DA-001 | Proposal §8; provider-neutral seam | ADR-0003 | SPEC-CP-DEEP-AGENT-RUNTIME | CON-CP-DEEP-AGENT-BINDING-V1 | WP-CP-040 | local Markdown | executor conformance | evidence_v2/WP-CP-040 | planned |
 | REQ-CP-DA-002 | Foundation profile decision | ADR-0003 | SPEC-CP-DEEP-AGENT-RUNTIME | CON-CP-DEEP-AGENT-PROFILE-V1 | WP-CP-040 | local Markdown | strict profile schema | evidence_v2/WP-CP-040 | planned |
 | REQ-CP-DA-003 | Foundation flattening decision | ADR-0003 | SPEC-CP-DEEP-AGENT-RUNTIME | CON-CP-DEEP-AGENT-BINDING-V1 | WP-CP-040, WP-CP-050 | local Markdown | binding drift tests | evidence_v2/WP-CP-040 | planned |

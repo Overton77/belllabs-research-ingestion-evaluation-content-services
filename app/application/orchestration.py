@@ -337,9 +337,7 @@ class WorkflowLaunchDispatcher:
             != prepared.effective_configuration_digest
             or semantic_binding.blueprint_digest != prepared.blueprint_digest
         ):
-            raise ValueError(
-                "semantic input binding does not match the admitted workflow launch"
-            )
+            raise ValueError("semantic input binding does not match the admitted workflow launch")
         binding_ref = await binding_service.freeze(semantic_binding)
         return replace(prepared, semantic_input_binding_ref=binding_ref)
 

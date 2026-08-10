@@ -260,9 +260,7 @@ class RuntimeInterventionService:
             if current_checkpoint != intervention.expected_checkpoint:
                 raise ValueError("intervention expected LangGraph checkpoint is stale")
         if isinstance(intervention, PrivilegedOperatorReconcileIntervention):
-            repair_authorization = await self._authority.authorize_privileged_repair(
-                intervention
-            )
+            repair_authorization = await self._authority.authorize_privileged_repair(intervention)
             if (
                 not isinstance(repair_authorization, PrivilegedRepairAuthorization)
                 or not repair_authorization.approved

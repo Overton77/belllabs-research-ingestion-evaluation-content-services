@@ -88,9 +88,7 @@ class AsyncioSkillDiscoverySubprocessRunner:
         except TimeoutError as error:
             process.kill()
             await process.wait()
-            raise SkillDiscoveryDependencyError(
-                "pinned npx skills discovery timed out"
-            ) from error
+            raise SkillDiscoveryDependencyError("pinned npx skills discovery timed out") from error
         except Exception:
             if process.returncode is None:
                 process.kill()
@@ -125,9 +123,7 @@ class NpxSkillsDiscoveryAdapter:
         self._timeout_seconds = timeout_seconds
         self._max_output_bytes = max_output_bytes
         self._working_directory_root = (
-            working_directory_root.resolve()
-            if working_directory_root is not None
-            else None
+            working_directory_root.resolve() if working_directory_root is not None else None
         )
         if self._working_directory_root is not None:
             self._working_directory_root.mkdir(parents=True, exist_ok=True)
@@ -272,17 +268,13 @@ def _parse_candidates(
         matched_owner = match.group("owner")
         if owner is not None and matched_owner.casefold() != owner.casefold():
             continue
-        identity = (
-            f"{matched_owner}/{match.group('repository')}/{match.group('skill')}"
-        )
+        identity = f"{matched_owner}/{match.group('repository')}/{match.group('skill')}"
         if identity.casefold() in seen:
             continue
         seen.add(identity.casefold())
         locator = match.group(0)
         identity_digest = _digest(
-            (
-                f"{ExternalDiscoverySource.NPX_SKILLS.value}\0{identity}"
-            ).encode()
+            (f"{ExternalDiscoverySource.NPX_SKILLS.value}\0{identity}").encode()
         )
         candidates.append(
             ExternalDiscoveryCandidate(

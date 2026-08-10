@@ -77,11 +77,7 @@ class InMemoryRunSemanticInputBindingRepository:
         run_id: str,
     ) -> RunSemanticInputBinding | None:
         binding = self._bindings.get(binding_id)
-        if (
-            binding is None
-            or binding.request_scope != request_scope
-            or binding.run_id != run_id
-        ):
+        if binding is None or binding.request_scope != request_scope or binding.run_id != run_id:
             return None
         return binding
 

@@ -38,9 +38,7 @@ class SchemaGraphAdmissionService:
             uuid5(
                 NAMESPACE_URL,
                 "schema-graph-admission:"
-                + sha256_digest(
-                    request.model_dump(mode="json", exclude={"requested_at"})
-                ),
+                + sha256_digest(request.model_dump(mode="json", exclude={"requested_at"})),
             )
         )
         decision = GraphAdmissionDecision(
@@ -90,8 +88,7 @@ class SchemaGraphAdmissionService:
             return "deployment_manifest_revoked", "deployment manifest is revoked or inactive"
         if (
             not manifest.issuer_authority_ref.startswith("issue-12:")
-            or
-            manifest.environment != request.environment
+            or manifest.environment != request.environment
             or manifest.database != request.database
             or manifest.deployment_id != request.deployment_id
             or manifest.schema_definition_ref != request.schema_definition_ref
@@ -107,8 +104,7 @@ class SchemaGraphAdmissionService:
             return "workspace_binding_missing", "Issue 13 Schema Workspace Binding is required"
         if (
             not binding.issuer_authority_ref.startswith("issue-13:")
-            or
-            binding.request_scope != request.request_scope
+            or binding.request_scope != request.request_scope
             or binding.run_id != request.run_id
             or binding.catalog_build_id != request.catalog_build_id
             or binding.catalog_digest != request.catalog_digest
@@ -128,8 +124,7 @@ class SchemaGraphAdmissionService:
             return "graph_capability_denied", "independent graph read capability was not admitted"
         if (
             not capability.decided_by_authority_ref.startswith("graph-authority:")
-            or
-            capability.request_scope != request.request_scope
+            or capability.request_scope != request.request_scope
             or capability.run_id != request.run_id
             or capability.environment != request.environment
             or capability.database != request.database

@@ -75,26 +75,24 @@ class BeanieProjectionEventRepository(ProjectionEventRepository):
         owner: str,
         completed_at: datetime,
     ) -> bool:
-        result = (
-            await CatalogProjectionEventDocument.get_pymongo_collection().update_one(
-                {
-                    "event_id": event.event_id,
-                    "state": ProjectionEventState.PROCESSING.value,
-                    "attempt_count": event.attempt_count,
-                    "lease_owner": owner,
-                    "lease_expires_at": {"$gt": completed_at},
-                },
-                {
-                    "$set": {
-                        "state": ProjectionEventState.COMPLETED.value,
-                        "completed_at": completed_at,
-                        "lease_owner": None,
-                        "lease_expires_at": None,
-                        "last_error_code": None,
-                        "poison_reason": None,
-                    }
-                },
-            )
+        result = await CatalogProjectionEventDocument.get_pymongo_collection().update_one(
+            {
+                "event_id": event.event_id,
+                "state": ProjectionEventState.PROCESSING.value,
+                "attempt_count": event.attempt_count,
+                "lease_owner": owner,
+                "lease_expires_at": {"$gt": completed_at},
+            },
+            {
+                "$set": {
+                    "state": ProjectionEventState.COMPLETED.value,
+                    "completed_at": completed_at,
+                    "lease_owner": None,
+                    "lease_expires_at": None,
+                    "last_error_code": None,
+                    "poison_reason": None,
+                }
+            },
         )
         return result.modified_count == 1
 
@@ -135,13 +133,9 @@ class BeanieProjectionEventRepository(ProjectionEventRepository):
                             ),
                             "lease_owner": None,
                             "lease_expires_at": None,
-                            "next_attempt_at": (
-                                failed_at if poison else failed_at + delay
-                            ),
+                            "next_attempt_at": (failed_at if poison else failed_at + delay),
                             "last_error_code": failure.error_code,
-                            "poison_reason": (
-                                failure.error_code if poison else None
-                            ),
+                            "poison_reason": (failure.error_code if poison else None),
                         }
                     },
                     return_document=ReturnDocument.AFTER,
@@ -154,18 +148,16 @@ class BeanieProjectionEventRepository(ProjectionEventRepository):
                         failure.error_code,
                         failed_at,
                     )
-                    await (
-                        CatalogProjectionAlertDocument.get_pymongo_collection().update_one(
-                            {"alert_id": alert.alert_id},
-                            {
-                                "$setOnInsert": {
-                                    **alert.model_dump(mode="python"),
-                                    "acknowledged_at": None,
-                                }
-                            },
-                            upsert=True,
-                            session=session,
-                        )
+                    await CatalogProjectionAlertDocument.get_pymongo_collection().update_one(
+                        {"alert_id": alert.alert_id},
+                        {
+                            "$setOnInsert": {
+                                **alert.model_dump(mode="python"),
+                                "acknowledged_at": None,
+                            }
+                        },
+                        upsert=True,
+                        session=session,
                     )
         if updated is None:
             return None
@@ -175,9 +167,5 @@ class BeanieProjectionEventRepository(ProjectionEventRepository):
 
 def _event(document: dict[str, Any]) -> CatalogProjectionEvent:
     return CatalogProjectionEvent.model_validate(
-        {
-            key: value
-            for key, value in document.items()
-            if key not in {"_id", "revision_id"}
-        }
+        {key: value for key, value in document.items() if key not in {"_id", "revision_id"}}
     )

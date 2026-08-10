@@ -196,9 +196,7 @@ class QuarantineInspectionObservations(InspectionContract):
     ) -> frozenset[str]:
         normalized = frozenset(item.strip() for item in value)
         if any(
-            not item
-            or len(item) > 128
-            or not item.replace("_", "").replace("-", "").isalnum()
+            not item or len(item) > 128 or not item.replace("_", "").replace("-", "").isalnum()
             for item in normalized
         ):
             raise ValueError("secret requirements must be bounded reference names")
@@ -212,11 +210,7 @@ class QuarantineInspectionObservations(InspectionContract):
     ) -> frozenset[str]:
         normalized = frozenset(item.strip().casefold() for item in value)
         if any(
-            not item
-            or len(item) > 253
-            or "://" in item
-            or "/" in item
-            or "@" in item
+            not item or len(item) > 253 or "://" in item or "/" in item or "@" in item
             for item in normalized
         ):
             raise ValueError("network requirements must contain hostnames only")
@@ -389,8 +383,7 @@ class BeanieExternalCandidateInspectionRepository:
             return workspace
         except DuplicateKeyError:
             existing = await ExternalCandidateInspectionWorkspaceDocument.find_one(
-                ExternalCandidateInspectionWorkspaceDocument.workspace_id
-                == workspace.workspace_id
+                ExternalCandidateInspectionWorkspaceDocument.workspace_id == workspace.workspace_id
             )
             if existing is None:
                 raise InspectionPersistenceError(
@@ -423,13 +416,10 @@ class BeanieExternalCandidateInspectionRepository:
             return report
         except DuplicateKeyError:
             existing = await ExternalCandidateInspectionReportDocument.find_one(
-                ExternalCandidateInspectionReportDocument.inspection_id
-                == report.inspection_id
+                ExternalCandidateInspectionReportDocument.inspection_id == report.inspection_id
             )
             if existing is None:
-                raise InspectionPersistenceError(
-                    "inspection report uniqueness conflict"
-                ) from None
+                raise InspectionPersistenceError("inspection report uniqueness conflict") from None
             prior = _report_from_document(existing)
             if prior != report:
                 raise InspectionPersistenceError(
@@ -445,9 +435,7 @@ class BeanieExternalCandidateInspectionRepository:
             ExternalCandidateInspectionReportDocument.inspection_id == inspection_id
         )
         if document is None:
-            raise ExternalCandidateNotFound(
-                f"inspection report not found: {inspection_id}"
-            )
+            raise ExternalCandidateNotFound(f"inspection report not found: {inspection_id}")
         return _report_from_document(document)
 
     async def get_workspace(
@@ -458,9 +446,7 @@ class BeanieExternalCandidateInspectionRepository:
             ExternalCandidateInspectionWorkspaceDocument.workspace_id == workspace_id
         )
         if document is None:
-            raise ExternalCandidateNotFound(
-                f"inspection workspace not found: {workspace_id}"
-            )
+            raise ExternalCandidateNotFound(f"inspection workspace not found: {workspace_id}")
         return _workspace_from_document(document)
 
 
@@ -573,8 +559,7 @@ def _workspace(
     )
     probe_mode = (
         InspectionProbeMode.STATIC_AND_MCP_TOOLS_LIST
-        if allow_mcp_tools_list_probe
-        and candidate.candidate.source.value == "mcp_registry"
+        if allow_mcp_tools_list_probe and candidate.candidate.source.value == "mcp_registry"
         else InspectionProbeMode.STATIC_ONLY
     )
     values = {
@@ -673,9 +658,7 @@ def _report(
         candidate_record_id=candidate.candidate_record_id,
         inspection_id=inspection_id,
         readiness=(
-            PromotionReadiness.READY_FOR_HUMAN_REVIEW
-            if ready
-            else PromotionReadiness.NOT_READY
+            PromotionReadiness.READY_FOR_HUMAN_REVIEW if ready else PromotionReadiness.NOT_READY
         ),
         evidence_refs=(
             candidate.candidate.raw_response_ref or candidate.evidence_id,
@@ -736,9 +719,7 @@ def _promotion_blocking_findings(
         for finding in observations.findings
         if finding.severity == InspectionFindingSeverity.ERROR
     )
-    return tuple(
-        dict.fromkeys((*gate_blockers, *error_blockers))
-    )[:MAX_PROMOTION_BLOCKING_FINDINGS]
+    return tuple(dict.fromkeys((*gate_blockers, *error_blockers)))[:MAX_PROMOTION_BLOCKING_FINDINGS]
 
 
 def _report_content_digest(report: ExternalCandidateInspectionReport) -> str:

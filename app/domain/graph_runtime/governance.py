@@ -165,9 +165,7 @@ def validate_field_governance(
     models: Iterable[type[BaseModel]] = GOVERNED_MODELS,
 ) -> None:
     expected = {
-        f"{model.__name__}.{field_name}"
-        for model in models
-        for field_name in model.model_fields
+        f"{model.__name__}.{field_name}" for model in models for field_name in model.model_fields
     }
     missing = expected - appendix.keys()
     unknown = appendix.keys() - expected
@@ -182,10 +180,7 @@ def field_governance_schema() -> dict[str, object]:
     validate_field_governance(appendix)
     return {
         "schema_version": "belllabs.field-governance.v1",
-        "fields": {
-            key: value.model_dump(mode="json")
-            for key, value in sorted(appendix.items())
-        },
+        "fields": {key: value.model_dump(mode="json") for key, value in sorted(appendix.items())},
     }
 
 
@@ -230,11 +225,7 @@ def _policy_for(model: type[BaseModel], field_name: str) -> FieldGovernance:
         retention="policy_ref:runtime-contract-default",
         sensitivity="sensitive_ref" if secret_ref else "redacted" if payload else "internal",
         trace_policy=(
-            "exclude"
-            if secret_ref
-            else "digest_only"
-            if payload or digest
-            else "include"
+            "exclude" if secret_ref else "digest_only" if payload or digest else "include"
         ),
         compatibility_behavior=compatibility,
     )

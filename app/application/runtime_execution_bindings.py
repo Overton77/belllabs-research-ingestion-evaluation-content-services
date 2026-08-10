@@ -193,8 +193,7 @@ class InMemoryRuntimeCoordinationRepository(
                 (
                     item
                     for item in attempts
-                    if item.attempt_key.runtime_attempt
-                    == attempt.attempt_key.runtime_attempt
+                    if item.attempt_key.runtime_attempt == attempt.attempt_key.runtime_attempt
                 ),
                 None,
             )
@@ -240,9 +239,7 @@ class InMemoryRuntimeCoordinationRepository(
             if any(getattr(prior, field) != getattr(binding, field) for field in immutable):
                 raise RuntimeBindingConflict("runtime binding immutable identity changed")
             self._bindings[key] = deepcopy(binding)
-            for submission_key, (digest, submitted_binding) in tuple(
-                self._submissions.items()
-            ):
+            for submission_key, (digest, submitted_binding) in tuple(self._submissions.items()):
                 if submitted_binding.binding_id == binding.binding_id:
                     self._submissions[submission_key] = (digest, deepcopy(binding))
             return deepcopy(binding)
@@ -305,9 +302,7 @@ class InMemoryRuntimeCoordinationRepository(
             f"idempotency:{intervention.idempotency_key}",
         )
         async with self._lock:
-            prior = self._interventions.get(command_key) or self._interventions.get(
-                idempotency_key
-            )
+            prior = self._interventions.get(command_key) or self._interventions.get(idempotency_key)
             if prior is not None:
                 if prior[0] != intervention:
                     raise RuntimeBindingConflict(

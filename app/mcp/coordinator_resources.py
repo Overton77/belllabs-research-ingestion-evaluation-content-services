@@ -5,12 +5,8 @@ from typing import Any, Protocol
 from fastmcp import Context, FastMCP
 
 RESOURCE_TEMPLATE_NAMES = {
-    "belllabs://workflow-types/{logical_id}/{revision}/contract": (
-        "workflow_type_contract"
-    ),
-    "belllabs://workflow-types/{logical_id}/{revision}/input-schema": (
-        "workflow_input_schema"
-    ),
+    "belllabs://workflow-types/{logical_id}/{revision}/contract": ("workflow_type_contract"),
+    "belllabs://workflow-types/{logical_id}/{revision}/input-schema": ("workflow_input_schema"),
     "belllabs://workflow-types/{logical_id}/{revision}/output-contracts": (
         "workflow_output_contracts"
     ),

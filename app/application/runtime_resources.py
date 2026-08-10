@@ -38,9 +38,7 @@ class InMemoryResourceLeaseJournal:
     def __init__(self, capacity: ResourceCapacity) -> None:
         self._capacity = capacity
         self._lock = asyncio.Lock()
-        self._records: dict[
-            tuple[str, str], ResourceLeaseRecord | ResourceLeaseRecordV2
-        ] = {}
+        self._records: dict[tuple[str, str], ResourceLeaseRecord | ResourceLeaseRecordV2] = {}
         self._semantic: dict[tuple[str, str], str] = {}
 
     async def acquire(
@@ -223,9 +221,7 @@ class InMemoryResourceLeaseJournal:
             counts.update(record.request.resources)
         return counts
 
-    def _require(
-        self, key: tuple[str, str]
-    ) -> ResourceLeaseRecord | ResourceLeaseRecordV2:
+    def _require(self, key: tuple[str, str]) -> ResourceLeaseRecord | ResourceLeaseRecordV2:
         try:
             return self._records[key]
         except KeyError as error:

@@ -256,22 +256,16 @@ class PreparedLaunchTicket(Contract):
                 raise ValueError("semantic binding plan metadata is incomplete")
         elif (
             self.semantic_binding_plan.plan_ref != self.semantic_binding_plan_ref
-            or self.semantic_binding_plan.plan_digest
-            != self.semantic_binding_plan_digest
+            or self.semantic_binding_plan.plan_digest != self.semantic_binding_plan_digest
             or self.semantic_binding_plan.blueprint_family != self.blueprint_family
         ):
-            raise ValueError(
-                "frozen semantic binding plan differs from launch ticket metadata"
-            )
+            raise ValueError("frozen semantic binding plan differs from launch ticket metadata")
         if self.runtime_run_plan is not None:
             if self.runtime_run_plan.effective_run_configuration_digest != (
                 self.effective_configuration_digest
             ):
                 raise ValueError("runtime RunPlan has a different ERC digest")
-            if (
-                self.runtime_run_plan.semantic_binding_ref
-                != self.semantic_binding_plan_ref
-            ):
+            if self.runtime_run_plan.semantic_binding_ref != self.semantic_binding_plan_ref:
                 raise ValueError("runtime RunPlan has a different semantic binding plan")
             if self.runtime_run_plan.workflow_implementation_ref not in self.resolved_asset_refs:
                 raise ValueError("runtime RunPlan implementation is not a resolved asset")

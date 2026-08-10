@@ -77,9 +77,7 @@ async def main() -> int:
             for item in readiness
         }
         if not all(item.available for item in readiness):
-            raise RuntimeError(
-                "both coordinator Temporal workflow families require active pollers"
-            )
+            raise RuntimeError("both coordinator Temporal workflow families require active pollers")
         return {"enabled": True, "families": families}
 
     async def s3() -> str:

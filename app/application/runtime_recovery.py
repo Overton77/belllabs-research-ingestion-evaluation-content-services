@@ -412,9 +412,7 @@ class RuntimeForkService:
         admission_was_persisted = admission is not None
         if admission is None:
             if not await self._repository.claim_admission(request):
-                admission_observation = (
-                    await self._authority.reconcile_fork_admission(request)
-                )
+                admission_observation = await self._authority.reconcile_fork_admission(request)
                 if admission_observation.status == "ambiguous":
                     raise RuntimeError("fork admission remains ambiguous")
                 if admission_observation.status == "admitted":

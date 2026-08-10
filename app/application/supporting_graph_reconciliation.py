@@ -77,9 +77,7 @@ class SupportingGraphReconciliationWorkflow:
         except SchemaGroundingRecordNotFound:
             prior_envelope = None
         if prior_envelope is not None:
-            prior = SupportingGraphReconciliationRecord.model_validate(
-                prior_envelope.payload
-            )
+            prior = SupportingGraphReconciliationRecord.model_validate(prior_envelope.payload)
             if prior.request_digest != request_digest:
                 raise CatalogPublicationConflict(
                     "reconciliation identity was reused with different governed inputs"
@@ -195,9 +193,7 @@ class SupportingGraphReconciliationWorkflow:
         else:
             admitted_evidence = _default_evidence(request, actual_references, results)
         status: Literal["completed", "failed"] = (
-            "completed"
-            if all(result.status == "succeeded" for result in results)
-            else "failed"
+            "completed" if all(result.status == "succeeded" for result in results) else "failed"
         )
         record = self._record(
             request,
@@ -246,9 +242,7 @@ class SupportingGraphReconciliationWorkflow:
             )
         )
 
-    async def _persist_reconciliation(
-        self, record: SupportingGraphReconciliationRecord
-    ) -> None:
+    async def _persist_reconciliation(self, record: SupportingGraphReconciliationRecord) -> None:
         await self._records.append(
             schema_grounding_record(
                 record_type="reconciliation",
@@ -350,9 +344,7 @@ def _validate_intent(
         return "intent query kind exceeds the graph capability grant"
     if not set(intent.labels).issubset(grant.allowed_node_labels):
         return "intent labels exceed the graph capability grant"
-    if not set(intent.relationship_types).issubset(
-        grant.allowed_relationship_types
-    ):
+    if not set(intent.relationship_types).issubset(grant.allowed_relationship_types):
         return "intent relationship types exceed the graph capability grant"
     if intent.limit > min(projection.maximum_limit, grant.maximum_limit):
         return "intent limit exceeds the admitted projection or capability bound"
@@ -450,10 +442,6 @@ def _reconciliation_request_digest(
     return sha256_digest(
         {
             "request": request.model_dump(mode="json"),
-            "evidence": (
-                evidence.model_dump(mode="json")
-                if evidence is not None
-                else None
-            ),
+            "evidence": (evidence.model_dump(mode="json") if evidence is not None else None),
         }
     )

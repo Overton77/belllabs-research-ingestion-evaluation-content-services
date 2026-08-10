@@ -164,9 +164,7 @@ async def _mount_coordinator(
 ) -> BaseRoute:
     application_pool = getattr(app.state, "run_control_postgres_pool", None)
     if application_pool is None:
-        raise RuntimeError(
-            "COORDINATOR_MCP_ENABLED requires application PostgreSQL"
-        )
+        raise RuntimeError("COORDINATOR_MCP_ENABLED requires application PostgreSQL")
     mongo_client, _database = await create_mongodb(active_settings)
     app.state.control_plane_mongodb_client = mongo_client
     capability_pool = await create_postgres_pool(active_settings)
@@ -201,9 +199,7 @@ async def _mount_coordinator(
         application_postgres_pool=application_pool,
         dependencies=dependencies,
         limits=CoordinatorLimits(
-            request_timeout_seconds=(
-                active_settings.coordinator_request_timeout_seconds
-            ),
+            request_timeout_seconds=(active_settings.coordinator_request_timeout_seconds),
             max_request_bytes=active_settings.coordinator_max_request_bytes,
             max_response_bytes=active_settings.coordinator_max_response_bytes,
             max_concurrency=active_settings.coordinator_max_concurrency,
@@ -226,9 +222,7 @@ async def _mount_coordinator(
         auth=auth,
         mount_path=active_settings.coordinator_mcp_mount_path,
     )
-    await stack.enter_async_context(
-        deployment.app.router.lifespan_context(deployment.app)
-    )
+    await stack.enter_async_context(deployment.app.router.lifespan_context(deployment.app))
     mount_coordinator_http(app, deployment, lifespan_is_combined=True)
     route = app.router.routes[-1]
     app.state.coordinator_facade = facade

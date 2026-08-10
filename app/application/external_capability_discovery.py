@@ -148,9 +148,7 @@ class ExternalCapabilityDiscoveryService:
 
     def _require_enabled(self) -> None:
         if not self._enabled:
-            raise ExternalCapabilityDiscoveryDisabled(
-                "external capability discovery is disabled"
-            )
+            raise ExternalCapabilityDiscoveryDisabled("external capability discovery is disabled")
 
     def _bounded_limit(self, requested: int) -> int:
         if requested < 1:

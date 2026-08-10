@@ -32,9 +32,7 @@ class VerifiedAccessTokenPrincipalResolver:
         token = self._token_reader()
         if token is None:
             raise _unauthenticated("an authenticated MCP access token is required")
-        if token.expires_at is not None and token.expires_at <= int(
-            datetime.now(UTC).timestamp()
-        ):
+        if token.expires_at is not None and token.expires_at <= int(datetime.now(UTC).timestamp()):
             raise _unauthenticated("the MCP access token has expired")
         claims = token.claims
         actor_id = _nonblank(token.subject) or _claim_text(claims, "sub")
@@ -48,15 +46,11 @@ class VerifiedAccessTokenPrincipalResolver:
         if tenant_scope is None and len(permitted_scopes) == 1:
             tenant_scope = next(iter(permitted_scopes))
         if tenant_scope is None:
-            raise _unauthenticated(
-                "the verified MCP identity must select exactly one tenant scope"
-            )
+            raise _unauthenticated("the verified MCP identity must select exactly one tenant scope")
         if request_scope is None:
             request_scope = tenant_scope
         if permitted_scopes and request_scope not in permitted_scopes:
-            raise _unauthenticated(
-                "the verified MCP request scope is not permitted"
-            )
+            raise _unauthenticated("the verified MCP request scope is not permitted")
         if actor_id is None:
             raise _unauthenticated("the verified MCP identity has no actor subject")
         roles = _claim_set(claims, self._roles_claim)
@@ -89,16 +83,12 @@ def _claim_set(claims: Mapping[str, Any], name: str) -> frozenset[str]:
     elif isinstance(value, list | tuple | set | frozenset):
         raw = value
     else:
-        raise _unauthenticated(
-            f"the verified MCP {name} claim has an invalid shape"
-        )
+        raise _unauthenticated(f"the verified MCP {name} claim has an invalid shape")
     normalized = frozenset(
         item for value in raw if isinstance(value, str) if (item := _normalized(value))
     )
     if len(normalized) != len(tuple(raw)):
-        raise _unauthenticated(
-            f"the verified MCP {name} claim contains invalid values"
-        )
+        raise _unauthenticated(f"the verified MCP {name} claim contains invalid values")
     return normalized
 
 

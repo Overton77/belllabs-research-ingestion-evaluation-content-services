@@ -135,8 +135,7 @@ def web_capability_definitions() -> tuple[Definition, ...]:
         logical_id="mcp.tavily",
         title="Tavily MCP Server",
         description=(
-            "Reviewed Tavily remote recipe for current search, extraction, mapping, "
-            "and crawling."
+            "Reviewed Tavily remote recipe for current search, extraction, mapping, and crawling."
         ),
         transport="streamable_http",
         endpoint="https://mcp.tavily.com/mcp/",
@@ -357,9 +356,7 @@ def web_capability_definitions() -> tuple[Definition, ...]:
                 "obligation:cited-synthesis:v1",
             }
         ),
-        output_contracts=frozenset(
-            {"schema:web-research-browser-verification-result:v1"}
-        ),
+        output_contracts=frozenset({"schema:web-research-browser-verification-result:v1"}),
         allowed_blueprints=frozenset({blueprint_ref}),
         allowed_control_profiles=frozenset({_ref(control)}),
         allowed_runtime_profiles=frozenset({_ref(runtime)}),
@@ -461,9 +458,7 @@ def _mcp_server(
         transport=transport,
         endpoint=endpoint,
         launch_template=launch_template,
-        credential_refs=(
-            SecretRef(provider="environment", key=credential_name),
-        ),
+        credential_refs=(SecretRef(provider="environment", key=credential_name),),
         allowed_tools=frozenset(allowed_tools),
         approval_policy={
             tool_name: ("always" if tool_name.endswith("_interact") else "never")
@@ -688,9 +683,7 @@ def _web_research_blueprint() -> StageGraphBlueprint:
                 stage_id="search_firecrawl",
                 depends_on=frozenset({"admit_public_goal"}),
                 reservation={"tool.calls.total": 5, "operation.attempts": 1},
-                obligation_refs=frozenset(
-                    {"obligation:firecrawl-search-evidence:v1"}
-                ),
+                obligation_refs=frozenset({"obligation:firecrawl-search-evidence:v1"}),
                 output_slots=frozenset({"firecrawl_evidence"}),
             ),
             StageNode(
@@ -732,9 +725,7 @@ def _web_research_blueprint() -> StageGraphBlueprint:
             }
         ),
         max_parallel_stages=2,
-        workflow_evaluation_contract_ref=(
-            "evaluation:web-research-browser-verification:v1"
-        ),
+        workflow_evaluation_contract_ref=("evaluation:web-research-browser-verification:v1"),
     )
 
 

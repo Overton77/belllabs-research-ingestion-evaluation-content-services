@@ -57,9 +57,7 @@ class PostgresWorkflowResultRepository:
                 result.request_scope,
             )
             if run is None or str(run["phase"]) != "terminal":
-                raise ValueError(
-                    "typed Workflow Result requires its terminal Workflow Run"
-                )
+                raise ValueError("typed Workflow Result requires its terminal Workflow Run")
             inserted = await connection.fetchrow(
                 """
                 INSERT INTO belllabs_control.coordinator_workflow_results (

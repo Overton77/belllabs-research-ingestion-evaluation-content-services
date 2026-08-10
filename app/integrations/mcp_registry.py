@@ -186,9 +186,7 @@ class MCPRegistryAdapter:
                 response = await self._runner.get(request)
             except Exception as error:
                 if attempt >= self._max_retries:
-                    raise MCPRegistryDependencyError(
-                        "MCP Registry request failed"
-                    ) from error
+                    raise MCPRegistryDependencyError("MCP Registry request failed") from error
             else:
                 if response.status_code == 200:
                     return response, attempt + 1
@@ -231,9 +229,7 @@ def _server_items(payload: Mapping[str, Any]) -> tuple[Mapping[str, Any], ...]:
 def _next_cursor(payload: Mapping[str, Any]) -> str | None:
     metadata = payload.get("metadata")
     candidate = (
-        metadata.get("next_cursor")
-        if isinstance(metadata, dict)
-        else payload.get("next_cursor")
+        metadata.get("next_cursor") if isinstance(metadata, dict) else payload.get("next_cursor")
     )
     value = str(candidate).strip() if candidate is not None else ""
     return value or None
@@ -296,8 +292,7 @@ def _server_locator(
             return url
     suffix = f"/versions/{quote(version, safe='')}" if version else ""
     return (
-        "https://registry.modelcontextprotocol.io/"
-        f"v0.1/servers/{quote(identity, safe='')}{suffix}"
+        f"https://registry.modelcontextprotocol.io/v0.1/servers/{quote(identity, safe='')}{suffix}"
     )
 
 

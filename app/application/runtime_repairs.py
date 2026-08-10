@@ -98,9 +98,7 @@ class PrivilegedRuntimeRepairService:
                 actor_id=intervention.actor.actor_id,
                 reason=intervention.reason,
                 expected_belllabs_version=intervention.expected_belllabs_version,
-                expected_checkpoint_id=(
-                    intervention.expected_checkpoint.langgraph_checkpoint_id
-                ),
+                expected_checkpoint_id=(intervention.expected_checkpoint.langgraph_checkpoint_id),
                 before_digest=observation.before_digest,
                 after_digest=observation.after_digest,
                 evidence_refs=intervention.evidence_refs,

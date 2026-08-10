@@ -61,9 +61,7 @@ class StageCapabilityRequirementRef(VersionedContractRef):
 
 class OperationAssemblyRef(VersionedContractRef):
     kind: Literal["operation_assembly"] = "operation_assembly"
-    schema_version: Literal["belllabs.operation-assembly.v3"] = (
-        "belllabs.operation-assembly.v3"
-    )
+    schema_version: Literal["belllabs.operation-assembly.v3"] = "belllabs.operation-assembly.v3"
 
 
 class ExecutionResourceEnvelopeRef(VersionedContractRef):
@@ -111,9 +109,7 @@ class MiddlewareBinding(Contract):
 
 
 class MiddlewareStackDefinition(RuntimeDefinition):
-    kind: Literal[RuntimeDefinitionKind.MIDDLEWARE_STACK] = (
-        RuntimeDefinitionKind.MIDDLEWARE_STACK
-    )
+    kind: Literal[RuntimeDefinitionKind.MIDDLEWARE_STACK] = RuntimeDefinitionKind.MIDDLEWARE_STACK
     ordered_middleware: tuple[MiddlewareBinding, ...]
 
     @model_validator(mode="after")
@@ -212,9 +208,7 @@ class ContextManifestEntry(Contract):
 
 
 class ContextAssemblySpec(RuntimeDefinition):
-    kind: Literal[RuntimeDefinitionKind.CONTEXT_ASSEMBLY] = (
-        RuntimeDefinitionKind.CONTEXT_ASSEMBLY
-    )
+    kind: Literal[RuntimeDefinitionKind.CONTEXT_ASSEMBLY] = RuntimeDefinitionKind.CONTEXT_ASSEMBLY
     policy_ref: ContentAddressedRef
     ordered_entries: tuple[ContextManifestEntry, ...]
     protected_atoms_digest: str = Field(pattern=DIGEST_PATTERN)
@@ -282,9 +276,7 @@ class DelegationModePolicy(Contract):
 
 
 class DelegationPolicyDefinition(RuntimeDefinition):
-    kind: Literal[RuntimeDefinitionKind.DELEGATION_POLICY] = (
-        RuntimeDefinitionKind.DELEGATION_POLICY
-    )
+    kind: Literal[RuntimeDefinitionKind.DELEGATION_POLICY] = RuntimeDefinitionKind.DELEGATION_POLICY
     continuity_mode: Literal[
         "isolated_context",
         "bounded_context_slice",
@@ -505,9 +497,7 @@ class StageImplementationBinding(Contract):
 
 
 class GraphAssemblySpec(Contract):
-    schema_version: Literal["belllabs.graph-assembly-spec.v1"] = (
-        "belllabs.graph-assembly-spec.v1"
-    )
+    schema_version: Literal["belllabs.graph-assembly-spec.v1"] = "belllabs.graph-assembly-spec.v1"
     graph_assembly_ref: ContentAddressedRef
     state_schema_digest: str = Field(pattern=DIGEST_PATTERN)
     reducer_registry_digest: str = Field(pattern=DIGEST_PATTERN)
@@ -570,9 +560,7 @@ class StageCapabilityRequirement(Contract):
     input_contract_ref: str = Field(min_length=1)
     output_contract_ref: str = Field(min_length=1)
     context_purpose: str = Field(min_length=1)
-    effect_class: Literal[
-        "pure", "read_only", "idempotent_effect", "consequential_effect"
-    ]
+    effect_class: Literal["pure", "read_only", "idempotent_effect", "consequential_effect"]
     delegation_modes_allowed: frozenset[Literal["sync", "async", "linked_run"]] = frozenset()
     resource_class_ref: str = Field(min_length=1)
     verification_contract_ref: str = Field(min_length=1)
@@ -622,9 +610,7 @@ class UnavailableStageSurface(Contract):
         "feature_disabled",
         "readiness_unavailable",
     ]
-    maturity: Literal[
-        "stable", "beta", "preview", "entitlement_dependent", "policy_disabled"
-    ]
+    maturity: Literal["stable", "beta", "preview", "entitlement_dependent", "policy_disabled"]
     fallback: str = Field(min_length=1)
     detail: str = Field(min_length=1)
 
@@ -718,9 +704,7 @@ class ExecutionLineageEnvelope(Contract):
 class GraphAssemblySpecV2(Contract):
     """Versioned replacement; GraphAssemblySpec v1 remains readable unchanged."""
 
-    schema_version: Literal["belllabs.graph-assembly-spec.v2"] = (
-        "belllabs.graph-assembly-spec.v2"
-    )
+    schema_version: Literal["belllabs.graph-assembly-spec.v2"] = "belllabs.graph-assembly-spec.v2"
     graph_assembly_ref: ContentAddressedRef
     state_schema_digest: str = Field(pattern=DIGEST_PATTERN)
     reducer_registry_digest: str = Field(pattern=DIGEST_PATTERN)
@@ -799,9 +783,7 @@ class ExecutionResourceEnvelopeV2(Contract):
 class OperationAssemblySpecV3(Contract):
     """Exact operation assembly with an explicit adapter and Temporal execution profile."""
 
-    schema_version: Literal["belllabs.operation-assembly.v3"] = (
-        "belllabs.operation-assembly.v3"
-    )
+    schema_version: Literal["belllabs.operation-assembly.v3"] = "belllabs.operation-assembly.v3"
     operation_assembly_id: str = Field(min_length=1)
     operation_contract_ref: str = Field(min_length=1)
     implementation_kind: Literal[
@@ -918,9 +900,7 @@ class ExecutionLineageEnvelopeV2(Contract):
 class GraphAssemblySpecV3(Contract):
     """Temporal-aligned graph assembly without mutating the published v2 schema."""
 
-    schema_version: Literal["belllabs.graph-assembly-spec.v3"] = (
-        "belllabs.graph-assembly-spec.v3"
-    )
+    schema_version: Literal["belllabs.graph-assembly-spec.v3"] = "belllabs.graph-assembly-spec.v3"
     graph_assembly_ref: ContentAddressedRef
     state_schema_digest: str = Field(pattern=DIGEST_PATTERN)
     reducer_registry_digest: str = Field(pattern=DIGEST_PATTERN)

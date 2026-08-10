@@ -579,9 +579,7 @@ def schema_grounding_agent_definitions() -> tuple[Definition, ...]:
         DefinitionKind.AGENT_PROFILE,
     }
     return tuple(
-        definition
-        for definition in schema_grounding_definitions()
-        if definition.kind in kinds
+        definition for definition in schema_grounding_definitions() if definition.kind in kinds
     )
 
 

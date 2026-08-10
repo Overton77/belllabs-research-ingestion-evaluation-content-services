@@ -290,9 +290,7 @@ class FirecrawlMCPSearchAdapter(FirecrawlSearchPort):
             },
             timeout_seconds=self._timeout_seconds,
             max_response_bytes=self._max_response_bytes,
-            expected_tools_snapshot_digest=(
-                _FIRECRAWL_REVIEWED_TOOLS_CANONICAL_DIGEST
-            ),
+            expected_tools_snapshot_digest=(_FIRECRAWL_REVIEWED_TOOLS_CANONICAL_DIGEST),
         )
         return _normalized_search_response(
             payload,
@@ -349,9 +347,7 @@ class TavilyMCPSearchAdapter(TavilySearchPort):
             },
             timeout_seconds=self._timeout_seconds,
             max_response_bytes=self._max_response_bytes,
-            expected_tools_snapshot_digest=(
-                _TAVILY_REVIEWED_TOOLS_CANONICAL_DIGEST
-            ),
+            expected_tools_snapshot_digest=(_TAVILY_REVIEWED_TOOLS_CANONICAL_DIGEST),
         )
         return _normalized_search_response(
             payload,
@@ -932,10 +928,7 @@ def _parse_pinned_tavily_search_text(text: str) -> dict[str, object]:
         if (
             not title
             or not content
-            or any(
-                marker in content
-                for marker in ("\nRaw Content:", "\nFavicon:", "\nImages:")
-            )
+            or any(marker in content for marker in ("\nRaw Content:", "\nFavicon:", "\nImages:"))
             or parsed_url.scheme not in {"http", "https"}
             or not parsed_url.hostname
         ):
@@ -1066,9 +1059,7 @@ def _session_id(idempotency_key: str, *, invocation: str = "") -> str:
     normalized = _SESSION_SAFE.sub("-", idempotency_key).strip("-")
     if not normalized:
         return "belllabs-web-research"
-    identity_digest = sha256(
-        f"{idempotency_key}\0{invocation}".encode()
-    ).hexdigest()[:12]
+    identity_digest = sha256(f"{idempotency_key}\0{invocation}".encode()).hexdigest()[:12]
     return f"belllabs-{identity_digest}"
 
 

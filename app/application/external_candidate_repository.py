@@ -62,8 +62,7 @@ class InMemoryExternalCandidateRepository:
     async def record(self, batch: ExternalDiscoveryBatch) -> ExternalDiscoveryBatch:
         recorded_at = self._clock()
         evidence_records = tuple(
-            _persisted_evidence(evidence, recorded_at=recorded_at)
-            for evidence in batch.evidence
+            _persisted_evidence(evidence, recorded_at=recorded_at) for evidence in batch.evidence
         )
         evidence_by_digest = _evidence_by_digest(evidence_records)
         candidate_records = tuple(
@@ -166,8 +165,7 @@ class BeanieExternalCandidateRepository:
     async def record(self, batch: ExternalDiscoveryBatch) -> ExternalDiscoveryBatch:
         recorded_at = self._clock()
         evidence_records = tuple(
-            _persisted_evidence(evidence, recorded_at=recorded_at)
-            for evidence in batch.evidence
+            _persisted_evidence(evidence, recorded_at=recorded_at) for evidence in batch.evidence
         )
         evidence_by_digest = _evidence_by_digest(evidence_records)
         candidate_records = tuple(
@@ -232,8 +230,7 @@ class BeanieExternalCandidateRepository:
             await document.insert()
         except DuplicateKeyError:
             existing = await ExternalDiscoveryCandidateDocument.find_one(
-                ExternalDiscoveryCandidateDocument.candidate_record_id
-                == record.candidate_record_id
+                ExternalDiscoveryCandidateDocument.candidate_record_id == record.candidate_record_id
             )
             if existing is None or _candidate_from_document(existing) != record:
                 raise ExternalCandidatePersistenceError(
@@ -260,9 +257,7 @@ class BeanieExternalCandidateRepository:
             ExternalDiscoveryCandidateDocument.candidate_record_id == candidate_record_id
         )
         if document is None:
-            raise ExternalCandidateNotFound(
-                f"candidate record not found: {candidate_record_id}"
-            )
+            raise ExternalCandidateNotFound(f"candidate record not found: {candidate_record_id}")
         return _candidate_from_document(document)
 
     async def get_evidence(self, evidence_id: str) -> PersistedDiscoveryEvidence:
@@ -270,9 +265,7 @@ class BeanieExternalCandidateRepository:
             ExternalDiscoveryEvidenceDocument.evidence_id == evidence_id
         )
         if document is None:
-            raise ExternalCandidateNotFound(
-                f"discovery evidence not found: {evidence_id}"
-            )
+            raise ExternalCandidateNotFound(f"discovery evidence not found: {evidence_id}")
         return _evidence_from_document(document)
 
     async def list_candidate_records(
@@ -310,8 +303,7 @@ def _persisted_candidate(
     recorded_at: datetime,
 ) -> PersistedExternalCandidate:
     raw_response_ref = (
-        f"mongodb://external-discovery-evidence/{evidence.evidence_id}"
-        "#sanitized-metadata"
+        f"mongodb://external-discovery-evidence/{evidence.evidence_id}#sanitized-metadata"
     )
     enriched = candidate.model_copy(update={"raw_response_ref": raw_response_ref})
     content_digest = sha256_digest(enriched)
@@ -366,9 +358,7 @@ def _append_immutable[T](
     if prior is None:
         records[identity] = value
     elif prior != value:
-        raise ExternalCandidatePersistenceError(
-            f"immutable {subject} identity conflict"
-        )
+        raise ExternalCandidatePersistenceError(f"immutable {subject} identity conflict")
 
 
 def _evidence_from_document(
@@ -381,9 +371,7 @@ def _evidence_from_document(
         recorded_at=document.recorded_at,
     )
     if sha256_digest(record.evidence) != record.record_digest:
-        raise ExternalCandidatePersistenceError(
-            "external discovery evidence digest mismatch"
-        )
+        raise ExternalCandidatePersistenceError("external discovery evidence digest mismatch")
     return record
 
 
@@ -398,9 +386,7 @@ def _candidate_from_document(
         recorded_at=document.recorded_at,
     )
     if sha256_digest(record.candidate) != record.content_digest:
-        raise ExternalCandidatePersistenceError(
-            "external discovery candidate digest mismatch"
-        )
+        raise ExternalCandidatePersistenceError("external discovery candidate digest mismatch")
     if record.candidate_record_id != f"candidate-record:{record.content_digest}":
         raise ExternalCandidatePersistenceError(
             "external discovery candidate record identity mismatch"

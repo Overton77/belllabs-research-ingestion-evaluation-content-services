@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import timedelta
+from typing import Any, cast
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
@@ -18,10 +19,12 @@ with workflow.unsafe.imports_passed_through():
         StageGraphResultDetails,
         TerminalWorkflowCompletion,
     )
+    from app.domain.operation_execution.contracts import OperationWorkflowRequest
     from app.domain.orchestration.contracts import (
         ExecutionIdentity,
         LifecycleCommandOutcome,
         LifecycleCommandRequest,
+        StageExecutionIdentity,
         StageGraphExecutionState,
         StageGraphRunInput,
         StageGraphRunResult,
@@ -34,6 +37,7 @@ with workflow.unsafe.imports_passed_through():
         StageGraphExecutionError,
         StageGraphInterpreter,
     )
+    from app.temporal.workflows.operation import OperationWorkflow
 
 
 @workflow.defn(name="belllabs.stagegraph")
@@ -197,7 +201,7 @@ class StageGraphWorkflow:
 
                 if reservation_failed:
                     requests = tuple(replace(request, reservation={}) for request in requests)
-                    raw_results: list[StageOperationResult | BaseException] = [
+                    raw_results: list[Any] = [
                         StageOperationResult(
                             identity=request.identity,
                             disposition="failed",
@@ -208,18 +212,36 @@ class StageGraphWorkflow:
                         for request in requests
                     ]
                 else:
-                    raw_results = list[StageOperationResult | BaseException](
+                    if run_input.durable_operation_children:
+                        operation_calls = [
+                            workflow.execute_child_workflow(
+                                OperationWorkflow.run,
+                                OperationWorkflowRequest(
+                                    semantic_attempt_id=request.identity.semantic_key,
+                                    operation_kind="stage_operation",
+                                    payload=asdict(request),
+                                    task_queue=workflow.info().task_queue,
+                                    timeout_seconds=run_input.task_timeout_seconds,
+                                ),
+                                id=f"operation/{request.identity.semantic_key}",
+                                task_queue=workflow.info().task_queue,
+                            )
+                            for request in requests
+                        ]
+                    else:
+                        operation_calls = [
+                            workflow.execute_activity(
+                                "stagegraph.execute_operation",
+                                request,
+                                result_type=StageOperationResult,
+                                start_to_close_timeout=timeout,
+                                retry_policy=retry_policy,
+                            )
+                            for request in requests
+                        ]
+                    raw_results = list[Any](
                         await asyncio.gather(
-                            *[
-                                workflow.execute_activity(
-                                    "stagegraph.execute_operation",
-                                    request,
-                                    result_type=StageOperationResult,
-                                    start_to_close_timeout=timeout,
-                                    retry_policy=retry_policy,
-                                )
-                                for request in requests
-                            ],
+                            *operation_calls,
                             return_exceptions=True,
                         )
                     )
@@ -237,7 +259,24 @@ class StageGraphWorkflow:
                                 evaluation_contract_ref=(request.cycle_evaluation_contract_ref),
                             )
                         )
-                    elif raw_result.pending_external_usage:
+                        continue
+                    elif run_input.durable_operation_children:
+                        operation_payload = cast(dict[str, Any], raw_result.result)
+                        raw_result = StageOperationResult(
+                            **cast(
+                                Any,
+                                {
+                                    **operation_payload,
+                                    "identity": StageExecutionIdentity(
+                                        **operation_payload["identity"]
+                                    ),
+                                },
+                            )
+                        )
+                    if (
+                        not isinstance(raw_result, BaseException)
+                        and raw_result.pending_external_usage
+                    ):
                         conservative_usage = {
                             dimension: raw_result.actual_usage.get(dimension, 0)
                             + raw_result.pending_external_usage.get(dimension, 0)
@@ -307,9 +346,7 @@ class StageGraphWorkflow:
                             current_output_refs=interpreter.current_outputs(state),
                             execution_lineage=tuple(state.lineage),
                             request_scope=run_input.request_scope,
-                            semantic_input_binding_ref=(
-                                run_input.semantic_input_binding_ref
-                            ),
+                            semantic_input_binding_ref=(run_input.semantic_input_binding_ref),
                             effective_configuration_digest=(
                                 run_input.effective_configuration_digest
                             ),

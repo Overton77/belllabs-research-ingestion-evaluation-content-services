@@ -47,9 +47,7 @@ class InMemorySchemaGroundingRecordRepository:
             tuple[str, SchemaGroundingRecordType, str], SchemaGroundingRecordEnvelope
         ] = {}
 
-    async def append(
-        self, record: SchemaGroundingRecordEnvelope
-    ) -> SchemaGroundingRecordEnvelope:
+    async def append(self, record: SchemaGroundingRecordEnvelope) -> SchemaGroundingRecordEnvelope:
         _verify_record(record)
         key = (record.request_scope, record.record_type, record.record_id)
         async with self._lock:
@@ -99,9 +97,7 @@ class InMemorySchemaGroundingRecordRepository:
 
 
 class BeanieSchemaGroundingRecordRepository:
-    async def append(
-        self, record: SchemaGroundingRecordEnvelope
-    ) -> SchemaGroundingRecordEnvelope:
+    async def append(self, record: SchemaGroundingRecordEnvelope) -> SchemaGroundingRecordEnvelope:
         _verify_record(record)
         document = SchemaGroundingRecordDocument(**record.model_dump(mode="python"))
         try:
@@ -139,9 +135,7 @@ class BeanieSchemaGroundingRecordRepository:
             SchemaGroundingRecordDocument.record_id == record_id,
         )
         if document is None:
-            raise SchemaGroundingRecordNotFound(
-                f"{record_type} record not found: {record_id}"
-            )
+            raise SchemaGroundingRecordNotFound(f"{record_type} record not found: {record_id}")
         record = SchemaGroundingRecordEnvelope.model_validate(
             document.model_dump(mode="python", exclude={"id"})
         )

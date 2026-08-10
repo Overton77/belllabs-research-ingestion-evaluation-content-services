@@ -74,9 +74,7 @@ class CoordinatorStreamableHttpClient:
         return CoordinatorHttpToolResult(data=result.structuredContent)
 
     async def read_resource(self, uri: str):
-        result = ReadResourceResult.model_validate(
-            await self._rpc("resources/read", {"uri": uri})
-        )
+        result = ReadResourceResult.model_validate(await self._rpc("resources/read", {"uri": uri}))
         return result.contents
 
     async def _rpc(self, method: str, params: dict[str, object]) -> object:

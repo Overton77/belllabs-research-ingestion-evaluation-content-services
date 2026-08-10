@@ -206,8 +206,7 @@ class InMemoryLaunchTicketRepository:
             prior = self._by_id[prior_id]
             if (
                 prior.proposal_digest != ticket.proposal_digest
-                or prior.semantic_binding_plan_digest
-                != ticket.semantic_binding_plan_digest
+                or prior.semantic_binding_plan_digest != ticket.semantic_binding_plan_digest
                 or _runtime_plan_digest(prior) != _runtime_plan_digest(ticket)
             ):
                 raise LaunchIdempotencyConflict(
@@ -351,10 +350,8 @@ class CoordinatorLaunchPreparationService:
             raise LaunchTicketUnavailable(
                 "semantic binding plan differs from the compiled blueprint family"
             )
-        if (
-            self._runtime_plan_requirement
-            == RuntimePlanRequirement.REQUIRE_RUN_PLAN_V3
-            and (self._runtime_plans is None or semantic_plan is None)
+        if self._runtime_plan_requirement == RuntimePlanRequirement.REQUIRE_RUN_PLAN_V3 and (
+            self._runtime_plans is None or semantic_plan is None
         ):
             raise LaunchTicketUnavailable(
                 "production launch preparation requires a frozen RunPlanV3"
@@ -524,19 +521,14 @@ class CoordinatorWorkflowLaunchService:
             )
             raise LaunchTicketUnavailable("launch ticket expired")
         if ticket.semantic_binding_plan is None:
-            raise LaunchTicketUnavailable(
-                "launch ticket has no frozen exact semantic binding plan"
-            )
+            raise LaunchTicketUnavailable("launch ticket has no frozen exact semantic binding plan")
         if ticket.runtime_unavailable_surfaces:
             raise LaunchTicketUnavailable("launch ticket has unavailable required runtime surfaces")
         if (
-            self._runtime_plan_requirement
-            == RuntimePlanRequirement.REQUIRE_RUN_PLAN_V3
+            self._runtime_plan_requirement == RuntimePlanRequirement.REQUIRE_RUN_PLAN_V3
             and ticket.runtime_run_plan is None
         ):
-            raise LaunchTicketUnavailable(
-                "production launch ticket has no frozen RunPlanV3"
-            )
+            raise LaunchTicketUnavailable("production launch ticket has no frozen RunPlanV3")
         if not ticket.launchable:
             raise LaunchTicketUnavailable("launch ticket did not pass admission preview")
         if self._semantic_bindings is None or self._binding_service is None:

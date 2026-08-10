@@ -96,13 +96,9 @@ class PostgresCoordinatorAuditSink:
                 correlation_id=str(row["correlation_id"]),
                 request_digest=str(row["request_digest"]),
                 response_digest=(
-                    str(row["response_digest"])
-                    if row["response_digest"] is not None
-                    else None
+                    str(row["response_digest"]) if row["response_digest"] is not None else None
                 ),
-                error_code=(
-                    str(row["error_code"]) if row["error_code"] is not None else None
-                ),
+                error_code=(str(row["error_code"]) if row["error_code"] is not None else None),
             )
             for row in rows
         )

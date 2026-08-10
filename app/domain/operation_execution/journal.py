@@ -146,9 +146,7 @@ class OperationJournalSettlement(Contract):
             **values,
             settlement_digest="sha256:" + "0" * 64,
         )
-        digest = sha256_digest(
-            draft.model_dump(mode="json", exclude={"settlement_digest"})
-        )
+        digest = sha256_digest(draft.model_dump(mode="json", exclude={"settlement_digest"}))
         return cls(**values, settlement_digest=digest)
 
 

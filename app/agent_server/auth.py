@@ -46,18 +46,12 @@ def _verifier() -> JWTVerifier:
     issuer = _configured_issuer()
     audience = os.environ.get("BELL_LABS_AGENT_AUTH_AUDIENCE", "authenticated")
     if not issuer:
-        raise RuntimeError(
-            "BELL_LABS_AGENT_AUTH_ISSUER or SUPABASE_URL is required"
-        )
+        raise RuntimeError("BELL_LABS_AGENT_AUTH_ISSUER or SUPABASE_URL is required")
     public_key = os.environ.get("BELL_LABS_AGENT_AUTH_PUBLIC_KEY")
     configured_jwks_uri = os.environ.get("BELL_LABS_AGENT_AUTH_JWKS_URI", "").strip()
     return JWTVerifier(
         public_key=public_key,
-        jwks_uri=(
-            None
-            if public_key
-            else configured_jwks_uri or f"{issuer}/.well-known/jwks.json"
-        ),
+        jwks_uri=(None if public_key else configured_jwks_uri or f"{issuer}/.well-known/jwks.json"),
         issuer=issuer,
         audience=audience,
         algorithm=os.environ.get("BELL_LABS_AGENT_AUTH_ALGORITHM", "RS256"),
@@ -175,10 +169,7 @@ async def authorize_store(ctx: Auth.types.AuthContext, value: dict[str, Any]) ->
         or namespace[0] not in principal.request_scopes
         or namespace[1] != os.environ.get("BELL_LABS_ENVIRONMENT", "development")
         or namespace[2] not in {"runtime_projection", "procedural_memory"}
-        or (
-            "value" in value
-            and not _allowed_store_value(namespace[2], value["value"])
-        )
+        or ("value" in value and not _allowed_store_value(namespace[2], value["value"]))
     ):
         raise Auth.exceptions.HTTPException(status_code=403, detail="Store namespace denied")
     return True
@@ -199,9 +190,7 @@ def _authorize_scoped_resource(
     metadata = value.setdefault("metadata", {})
     if not isinstance(metadata, dict):
         raise Auth.exceptions.HTTPException(status_code=403, detail="invalid resource metadata")
-    requested_scope = str(
-        metadata.get("request_scope") or value.get("request_scope") or ""
-    )
+    requested_scope = str(metadata.get("request_scope") or value.get("request_scope") or "")
     if not requested_scope:
         if len(principal.request_scopes) != 1:
             raise Auth.exceptions.HTTPException(
@@ -218,14 +207,17 @@ def _authorize_scoped_resource(
 def _require_role(principal: AgentPrincipal, ctx: Auth.types.AuthContext) -> None:
     action = str(getattr(ctx, "action", "")).lower()
     write_action = any(
-        marker in action
-        for marker in ("create", "update", "delete", "put", "run", "cancel")
+        marker in action for marker in ("create", "update", "delete", "put", "run", "cancel")
     )
-    allowed = {"operator", "scheduler"} if write_action else {
-        "operator",
-        "scheduler",
-        "auditor",
-    }
+    allowed = (
+        {"operator", "scheduler"}
+        if write_action
+        else {
+            "operator",
+            "scheduler",
+            "auditor",
+        }
+    )
     if not principal.roles & allowed:
         raise Auth.exceptions.HTTPException(
             status_code=403,

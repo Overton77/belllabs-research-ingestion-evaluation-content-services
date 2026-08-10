@@ -114,9 +114,7 @@ class OperationJournalMutation:
             or self.transition.resulting_version != self.expected_run_version + 1
             or self.transition.causation_id != self.claim.effect_claim_id
         ):
-            raise ValueError(
-                "lifecycle transition does not match the claimed operation boundary"
-            )
+            raise ValueError("lifecycle transition does not match the claimed operation boundary")
         if self.command_result is not None and (
             self.command_result.run_id != self.belllabs_run_id
             or self.command_result.resulting_run_version != self.expected_run_version + 1
@@ -347,10 +345,7 @@ class InMemoryAtomicOperationJournalRepository:
             prior_settlement = self._settlements.get(claim_id)
             if prior_settlement is None:
                 self._settlements[claim_id] = deepcopy(mutation.settlement)
-            elif (
-                prior_settlement.settlement_digest
-                != mutation.settlement.settlement_digest
-            ):
+            elif prior_settlement.settlement_digest != mutation.settlement.settlement_digest:
                 raise IdempotencyConflict("operation settlement replay conflicts")
             claim_status = (
                 EffectClaimStatus.RECONCILIATION_REQUIRED
@@ -376,9 +371,7 @@ class InMemoryAtomicOperationJournalRepository:
             if current != mutation.expected_run_version:
                 raise RunVersionConflict("operation journal run version is stale")
             self._run_versions[run_key] = resulting_version
-            self._budgets[mutation.belllabs_run_id] = deepcopy(
-                mutation.resulting_budget
-            )
+            self._budgets[mutation.belllabs_run_id] = deepcopy(mutation.resulting_budget)
             self._transitions.setdefault(mutation.belllabs_run_id, []).append(
                 deepcopy(mutation.transition)
             )

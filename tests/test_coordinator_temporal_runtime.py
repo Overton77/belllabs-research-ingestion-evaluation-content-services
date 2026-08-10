@@ -47,6 +47,8 @@ from app.temporal.goal_directed_workflow import GoalDirectedWorkflow
 from app.temporal.orchestration_activities import StageGraphActivities
 from app.temporal.stagegraph_workflow import StageGraphWorkflow
 from app.temporal.workflow_sandbox import coordinator_workflow_runner
+from app.temporal.workflows.belllabs_run import BellLabsRunWorkflow
+from app.temporal.workflows.operation import OperationWorkflow
 
 DIGEST = "sha256:" + "a" * 64
 PROTECTED_SCOPE = sha256_digest("coordinator-runtime-protected-scope")
@@ -133,9 +135,7 @@ class AcceptingLifecycle:
             accepted_obligation_evidence_digest=DIGEST,
             required_obligations_accepted=True,
             terminal_outcome=(
-                RunOutcome.COMPLETED
-                if request.action["kind"] == "terminalize"
-                else None
+                RunOutcome.COMPLETED if request.action["kind"] == "terminalize" else None
             ),
         )
 
@@ -360,11 +360,11 @@ async def test_family_submitter_and_worker_set_run_and_replay_both_families() ->
             ).fetch_history()
 
         await Replayer(
-            workflows=[StageGraphWorkflow],
+            workflows=[BellLabsRunWorkflow, StageGraphWorkflow, OperationWorkflow],
             workflow_runner=coordinator_workflow_runner(),
         ).replay_workflow(stage_history)
         await Replayer(
-            workflows=[GoalDirectedWorkflow],
+            workflows=[BellLabsRunWorkflow, GoalDirectedWorkflow, OperationWorkflow],
             workflow_runner=coordinator_workflow_runner(),
         ).replay_workflow(goal_history)
 
@@ -427,8 +427,8 @@ async def test_worker_readiness_requires_actual_pollers_for_each_exact_queue() -
     assert [item.family for item in readiness] == ["StageGraph", "GoalDirected"]
     assert all(item.available for item in readiness)
     assert client.workflow_service.queues == [
-        "coordinator-stagegraph",
-        "coordinator-goal-directed",
+        "coordinator-coordinator-family-stagegraph",
+        "coordinator-coordinator-family-goal-directed",
     ]
 
 

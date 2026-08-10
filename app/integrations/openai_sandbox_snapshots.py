@@ -37,9 +37,7 @@ class _ArchiveSnapshot(SnapshotBase):
     writable: bool = Field(default=False, exclude=True, repr=False)
     max_input_bytes: int = Field(default=268_435_456, exclude=True, repr=False)
 
-    async def persist(
-        self, data: io.IOBase, *, dependencies: Dependencies | None = None
-    ) -> None:
+    async def persist(self, data: io.IOBase, *, dependencies: Dependencies | None = None) -> None:
         del dependencies
         if not self.writable:
             return
@@ -47,9 +45,7 @@ class _ArchiveSnapshot(SnapshotBase):
         if not isinstance(content, bytes):
             raise TypeError("sandbox snapshot archive must be binary")
         if len(content) > self.max_input_bytes:
-            raise SnapshotCompatibilityError(
-                "sandbox snapshot archive exceeds input size limit"
-            )
+            raise SnapshotCompatibilityError("sandbox snapshot archive exceeds input size limit")
         object.__setattr__(self, "payload", content)
 
     async def restore(self, *, dependencies: Dependencies | None = None) -> io.IOBase:
@@ -148,9 +144,7 @@ class OpenAIAgentsSnapshotBridge:
 
     async def capture(self, request: SandboxSnapshotCreateRequest) -> SandboxSnapshotCapture:
         try:
-            capture = self._captures.pop(
-                (request.source_namespace_id, request.source_workspace_id)
-            )
+            capture = self._captures.pop((request.source_namespace_id, request.source_workspace_id))
         except KeyError as error:
             raise SnapshotCompatibilityError(
                 "no completed OpenAI sandbox archive exists for the source workspace"
@@ -299,8 +293,7 @@ def _sanitize_archive(
                 )
             seen_paths.add(path)
             if allowed_roots is not None and not any(
-                path == root or path.startswith(root.rstrip("/") + "/")
-                for root in allowed_roots
+                path == root or path.startswith(root.rstrip("/") + "/") for root in allowed_roots
             ):
                 continue
             _reject_sensitive_path(path)
@@ -358,9 +351,7 @@ def _sanitize_archive(
                 }
             )
     if not filesystem_entries:
-        raise SnapshotCompatibilityError(
-            "snapshot contains no governed writable workspace entries"
-        )
+        raise SnapshotCompatibilityError("snapshot contains no governed writable workspace entries")
     return (
         output.getvalue(),
         sha256_digest(filesystem_entries),
@@ -394,8 +385,7 @@ def _reject_sensitive_path(path: str) -> None:
         "id_ed25519",
     }
     if any(
-        part in prohibited_parts or part == ".env" or part.startswith(".env.")
-        for part in parts
+        part in prohibited_parts or part == ".env" or part.startswith(".env.") for part in parts
     ):
         raise SnapshotCompatibilityError(
             "snapshot archive contains a prohibited credential-bearing path"
@@ -432,6 +422,4 @@ def _reject_sensitive_content(content: bytes, sensitive_values: tuple[bytes, ...
         r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b",
     )
     if any(re.search(pattern, text) for pattern in secret_patterns):
-        raise SnapshotCompatibilityError(
-            "snapshot archive contains credential-shaped content"
-        )
+        raise SnapshotCompatibilityError("snapshot archive contains credential-shaped content")

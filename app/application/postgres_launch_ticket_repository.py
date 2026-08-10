@@ -43,13 +43,10 @@ class PostgresLaunchTicketRepository:
                 ticket.idempotency_key,
             )
             if prior is not None:
-                persisted = PreparedLaunchTicket.model_validate(
-                    _json(prior["ticket_payload"])
-                )
+                persisted = PreparedLaunchTicket.model_validate(_json(prior["ticket_payload"]))
                 if (
                     prior["proposal_digest"] != ticket.proposal_digest
-                    or persisted.semantic_binding_plan_digest
-                    != ticket.semantic_binding_plan_digest
+                    or persisted.semantic_binding_plan_digest != ticket.semantic_binding_plan_digest
                 ):
                     raise LaunchIdempotencyConflict(
                         "launch idempotency identity was reused with a changed proposal "
@@ -261,8 +258,7 @@ def _dump(value: Any) -> str:
         value = value.model_dump(mode="json")
     elif isinstance(value, tuple):
         value = [
-            item.model_dump(mode="json") if hasattr(item, "model_dump") else item
-            for item in value
+            item.model_dump(mode="json") if hasattr(item, "model_dump") else item for item in value
         ]
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
 

@@ -43,11 +43,7 @@ class MongoSandboxSnapshotRepository:
         document = await SandboxSnapshotDocument.find_one(
             SandboxSnapshotDocument.snapshot_id == snapshot_id
         )
-        return (
-            SandboxSnapshot.model_validate(document.payload)
-            if document is not None
-            else None
-        )
+        return SandboxSnapshot.model_validate(document.payload) if document is not None else None
 
     async def create_snapshot(self, snapshot: SandboxSnapshot) -> SandboxSnapshot:
         document = SandboxSnapshotDocument(
@@ -80,9 +76,7 @@ class MongoSandboxSnapshotRepository:
             SandboxSnapshotCloneDocument.clone_id == clone_id
         )
         return (
-            SnapshotCloneRecord.model_validate(document.payload)
-            if document is not None
-            else None
+            SnapshotCloneRecord.model_validate(document.payload) if document is not None else None
         )
 
     async def create_clone(self, clone: SnapshotCloneRecord) -> SnapshotCloneRecord:

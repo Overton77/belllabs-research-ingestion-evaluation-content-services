@@ -136,10 +136,7 @@ class InMemoryProjectionEventRepository:
                         ProjectionEventState.PROCESSING,
                     }
                     and event.next_attempt_at <= now
-                    and (
-                        event.lease_expires_at is None
-                        or event.lease_expires_at <= now
-                    )
+                    and (event.lease_expires_at is None or event.lease_expires_at <= now)
                 ),
                 key=lambda event: (event.next_attempt_at, event.created_at, event.event_id),
             )[:limit]
@@ -216,15 +213,11 @@ class InMemoryProjectionEventRepository:
             updated = current.model_copy(
                 update={
                     "state": (
-                        ProjectionEventState.POISON
-                        if poison
-                        else ProjectionEventState.RETRY
+                        ProjectionEventState.POISON if poison else ProjectionEventState.RETRY
                     ),
                     "lease_owner": None,
                     "lease_expires_at": None,
-                    "next_attempt_at": (
-                        failed_at if poison else failed_at + delay
-                    ),
+                    "next_attempt_at": (failed_at if poison else failed_at + delay),
                     "last_error_code": failure.error_code,
                     "poison_reason": failure.error_code if poison else None,
                 }
@@ -241,9 +234,7 @@ class InMemoryProjectionEventRepository:
 
     async def alerts(self) -> tuple[ProjectionOperationalAlert, ...]:
         async with self._lock:
-            return tuple(
-                sorted(self._alerts.values(), key=lambda alert: alert.alert_id)
-            )
+            return tuple(sorted(self._alerts.values(), key=lambda alert: alert.alert_id))
 
 
 class ProjectionProcessingSummary(ProjectionEventContract):
@@ -328,10 +319,7 @@ class CatalogProjectionEventProcessor:
             projector = self._projector_factory(generation)
             try:
                 await projector.project_many(
-                    tuple(
-                        CatalogProjectionInput(ref=event.exact_ref)
-                        for event in events
-                    ),
+                    tuple(CatalogProjectionInput(ref=event.exact_ref) for event in events),
                     tenant_scope=tenant_scope,
                 )
             except Exception as error:
@@ -349,12 +337,8 @@ class CatalogProjectionEventProcessor:
                                 owner,
                                 classify_projection_failure(isolated_error),
                             )
-                            retried += int(
-                                outcome == ProjectionEventState.RETRY
-                            )
-                            poisoned += int(
-                                outcome == ProjectionEventState.POISON
-                            )
+                            retried += int(outcome == ProjectionEventState.RETRY)
+                            poisoned += int(outcome == ProjectionEventState.POISON)
                             lease_lost += int(outcome is None)
                             continue
                         did_complete = await self._events.complete(

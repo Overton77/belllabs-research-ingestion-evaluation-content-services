@@ -47,20 +47,15 @@ ORDER BY e.issued_at DESC
 LIMIT 2
 """.strip()
 
-_READ_TOKEN_NODE_LABELS = (
-    "CALL db.labels() YIELD label RETURN collect(DISTINCT label) AS values"
-)
+_READ_TOKEN_NODE_LABELS = "CALL db.labels() YIELD label RETURN collect(DISTINCT label) AS values"
 _READ_TOKEN_RELATIONSHIP_TYPES = (
     "CALL db.relationshipTypes() YIELD relationshipType "
     "RETURN collect(DISTINCT relationshipType) AS values"
 )
 _READ_ACTIVE_NODE_LABELS = (
-    "MATCH (n) UNWIND labels(n) AS label "
-    "RETURN collect(DISTINCT label) AS values"
+    "MATCH (n) UNWIND labels(n) AS label RETURN collect(DISTINCT label) AS values"
 )
-_READ_ACTIVE_RELATIONSHIP_TYPES = (
-    "MATCH ()-[r]->() RETURN collect(DISTINCT type(r)) AS values"
-)
+_READ_ACTIVE_RELATIONSHIP_TYPES = "MATCH ()-[r]->() RETURN collect(DISTINCT type(r)) AS values"
 _READ_INDEXES = """
 SHOW INDEXES
 YIELD name, state, type, entityType, labelsOrTypes, properties,
@@ -275,9 +270,7 @@ async def _read_index_descriptors(
                     labels_or_types=_sorted_strings(row.get("labelsOrTypes")),
                     properties=_ordered_strings(row.get("properties")),
                     state=str(row["state"]),
-                    owning_constraint=_optional_string(
-                        row.get("owningConstraint")
-                    ),
+                    owning_constraint=_optional_string(row.get("owningConstraint")),
                 )
                 for row in rows
             ),

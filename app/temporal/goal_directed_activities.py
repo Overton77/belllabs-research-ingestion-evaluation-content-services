@@ -30,7 +30,8 @@ from app.domain.orchestration.contracts import (
     LifecycleCommandOutcome,
     LifecycleCommandRequest,
 )
-from app.temporal.goal_directed_workflow import GoalDirectedWorkflow
+from app.temporal.registration.activities import coordinator_activities
+from app.temporal.registration.workflows import coordinator_workflows
 from app.temporal.workflow_sandbox import coordinator_workflow_runner
 
 
@@ -130,13 +131,7 @@ def create_goal_directed_worker(
     return Worker(
         client,
         task_queue=task_queue,
-        workflows=[GoalDirectedWorkflow],
+        workflows=coordinator_workflows("GoalDirected"),
         workflow_runner=coordinator_workflow_runner(),
-        activities=[
-            activities.execute_iteration,
-            activities.prepare_handoff,
-            activities.verify_iteration,
-            activities.apply_lifecycle_command,
-            activities.materialize_workflow_result,
-        ],
+        activities=coordinator_activities("GoalDirected", activities),
     )

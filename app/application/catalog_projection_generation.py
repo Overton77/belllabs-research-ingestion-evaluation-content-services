@@ -113,9 +113,7 @@ class InMemoryProjectionGenerationRepository:
                 spec.projection_generation,
                 embedding_model_id=spec.embedding_model_id,
                 embedding_dimensions=spec.embedding_dimensions,
-                search_document_format_version=(
-                    spec.search_document_format_version
-                ),
+                search_document_format_version=(spec.search_document_format_version),
             )
             self._records[key] = proposed
             return proposed
@@ -164,31 +162,23 @@ class InMemoryProjectionGenerationRepository:
             or any(
                 document.embedding_model_id != spec.embedding_model_id
                 or document.embedding_dimensions != spec.embedding_dimensions
-                or document.search_document_format_version
-                != spec.search_document_format_version
+                or document.search_document_format_version != spec.search_document_format_version
                 for document in rows
             )
         ):
             raise RuntimeError("projection generation verification failed")
-        for kind, active_generation in (
-            self._search.active_generations_for_tenant(
-                spec.tenant_scope
-            ).items()
-        ):
+        for kind, active_generation in self._search.active_generations_for_tenant(
+            spec.tenant_scope
+        ).items():
             if kind in spec.selected_kinds:
                 continue
-            active = self._records.get(
-                (spec.tenant_scope, active_generation)
-            )
+            active = self._records.get((spec.tenant_scope, active_generation))
             if active is not None and (
                 active.embedding_model_id != spec.embedding_model_id
                 or active.embedding_dimensions != spec.embedding_dimensions
-                or active.search_document_format_version
-                != spec.search_document_format_version
+                or active.search_document_format_version != spec.search_document_format_version
             ):
-                raise RuntimeError(
-                    "projection generation is incompatible with another active kind"
-                )
+                raise RuntimeError("projection generation is incompatible with another active kind")
         record = current.model_copy(
             update={
                 "state": "active",
@@ -204,20 +194,14 @@ class InMemoryProjectionGenerationRepository:
             spec.projection_generation,
             spec.selected_kinds,
         )
-        active_ids = set(
-            self._search.active_generations_for_tenant(
-                spec.tenant_scope
-            ).values()
-        )
+        active_ids = set(self._search.active_generations_for_tenant(spec.tenant_scope).values())
         for prior_key, prior in tuple(self._records.items()):
             if (
                 prior_key[0] == spec.tenant_scope
                 and prior_key[1] not in active_ids
                 and prior.state == "active"
             ):
-                self._records[prior_key] = prior.model_copy(
-                    update={"state": "superseded"}
-                )
+                self._records[prior_key] = prior.model_copy(update={"state": "superseded"})
         return ProjectionGenerationActivation(
             tenant_scope=spec.tenant_scope,
             projection_generation=spec.projection_generation,

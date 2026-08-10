@@ -437,13 +437,9 @@ async def run_live_schema_grounding_coordinator(
             workspace_read_only=True,
             requested_graph_access="read",
             query_kinds=frozenset(intent.query_kind for intent in intents),
-            allowed_node_labels=frozenset(
-                label for intent in intents for label in intent.labels
-            ),
+            allowed_node_labels=frozenset(label for intent in intents for label in intent.labels),
             allowed_relationship_types=frozenset(
-                relationship
-                for intent in intents
-                for relationship in intent.relationship_types
+                relationship for intent in intents for relationship in intent.relationship_types
             ),
             maximum_limit=max(intent.limit for intent in intents),
             maximum_traversal_depth=max(intent.max_depth for intent in intents),
@@ -587,8 +583,7 @@ async def run_live_schema_grounding_coordinator(
             admission_evidence=(
                 f"schema-definition:{schema_ref.digest}",
                 f"schema-catalog-build:{build_record.build_id}",
-                "schema-deployment-manifest:"
-                f"{authority_bundle.deployment_manifest.manifest_id}",
+                f"schema-deployment-manifest:{authority_bundle.deployment_manifest.manifest_id}",
                 f"schema-workspace-binding:{authority_bundle.workspace_binding.binding_id}",
                 f"graph-capability:{authority_bundle.graph_capability.grant_id}",
                 "sensitive-data-policy:policy:sensitive-data:v1",
@@ -896,9 +891,7 @@ def _operation_templates(
     if not isinstance(max_turns, int):
         raise ValueError("schema Agent Profile max_turns must be an integer")
     writable = tuple(
-        slot.path
-        for slot in workspace.definition.slots
-        if slot.access == "exclusive_write"
+        slot.path for slot in workspace.definition.slots if slot.access == "exclusive_write"
     )
     prompt = "Execute only the exact admitted schema operation contract."
     operations = {
@@ -1131,11 +1124,7 @@ async def _stage_result_record(
     request_scope: str,
     operation_repository: SemanticOperationBindingRepository,
 ) -> WorkflowResultRecord:
-    evidence = tuple(
-        ref
-        for stage_refs in result.output_refs.values()
-        for ref in stage_refs
-    )
+    evidence = tuple(ref for stage_refs in result.output_refs.values() for ref in stage_refs)
     final_refs = result.output_refs.get("accept_selection", ())
     if len(final_refs) != 1:
         raise RuntimeError("Scenario A did not produce one accepted selection")

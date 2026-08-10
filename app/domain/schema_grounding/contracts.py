@@ -262,15 +262,11 @@ class LiveNeo4jSchemaSnapshot(Contract):
     def descriptors_are_canonical(self) -> LiveNeo4jSchemaSnapshot:
         if self.indexes != tuple(sorted(self.indexes, key=lambda item: item.name)):
             raise ValueError("snapshot indexes must be sorted by exact name")
-        if self.constraints != tuple(
-            sorted(self.constraints, key=lambda item: item.name)
-        ):
+        if self.constraints != tuple(sorted(self.constraints, key=lambda item: item.name)):
             raise ValueError("snapshot constraints must be sorted by exact name")
         if not self.active_node_labels.issubset(self.token_catalog_node_labels):
             raise ValueError("active node labels must exist in the token catalog")
-        if not self.active_relationship_types.issubset(
-            self.token_catalog_relationship_types
-        ):
+        if not self.active_relationship_types.issubset(self.token_catalog_relationship_types):
             raise ValueError("active relationship types must exist in the token catalog")
         return self
 

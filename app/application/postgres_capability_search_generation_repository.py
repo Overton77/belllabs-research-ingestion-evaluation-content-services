@@ -147,9 +147,7 @@ class PostgresProjectionGenerationRepository(ProjectionGenerationRepository):
             tenant_scope=spec.tenant_scope,
             projection_generation=spec.projection_generation,
             activated_count=int(row["activated_count"]),
-            activated_source_set_digest=str(
-                row["activated_source_set_digest"]
-            ),
+            activated_source_set_digest=str(row["activated_source_set_digest"]),
             activated_at=record["activated_at"],
         )
 
@@ -180,14 +178,10 @@ def _record(row: Mapping[str, Any]) -> ProjectionGenerationRecord:
         embedding_model_id=str(row["embedding_model_id"]),
         embedding_dimensions=int(row["embedding_dimensions"]),
         search_document_format_version=int(row["search_document_format_version"]),
-        selected_kinds=frozenset(
-            DefinitionKind(str(kind)) for kind in row["selected_kinds"]
-        ),
+        selected_kinds=frozenset(DefinitionKind(str(kind)) for kind in row["selected_kinds"]),
         expected_count=int(row["expected_count"]),
         expected_source_set_digest=str(row["expected_source_set_digest"]),
-        actual_count=(
-            int(row["actual_count"]) if row["actual_count"] is not None else None
-        ),
+        actual_count=(int(row["actual_count"]) if row["actual_count"] is not None else None),
         actual_source_set_digest=(
             str(row["actual_source_set_digest"])
             if row["actual_source_set_digest"] is not None

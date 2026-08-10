@@ -162,18 +162,14 @@ def build_scenario_d_execution_correction(
     if not isinstance(blueprint_record.definition, StageGraphBlueprint):
         raise ReviewedCapabilityPromotionError("Scenario D blueprint head has wrong kind")
     if not isinstance(control_record.definition, ControlProfileDefinition):
-        raise ReviewedCapabilityPromotionError(
-            "Scenario D control-profile head has wrong kind"
-        )
+        raise ReviewedCapabilityPromotionError("Scenario D control-profile head has wrong kind")
     if not isinstance(workflow_record.definition, WorkflowTypeDefinition):
         raise ReviewedCapabilityPromotionError("Scenario D workflow head has wrong kind")
     if not isinstance(
         implementation_record.definition,
         WorkflowImplementationBindingDefinition,
     ):
-        raise ReviewedCapabilityPromotionError(
-            "Scenario D implementation head has wrong kind"
-        )
+        raise ReviewedCapabilityPromotionError("Scenario D implementation head has wrong kind")
 
     records = (
         blueprint_record,
@@ -182,8 +178,7 @@ def build_scenario_d_execution_correction(
         implementation_record,
     )
     if any(
-        record.ref.revision not in {1, 2} or record.retired_at is not None
-        for record in records
+        record.ref.revision not in {1, 2} or record.retired_at is not None for record in records
     ):
         raise ReviewedCapabilityPromotionError(
             "Scenario D correction requires active revision-one heads or exact revision two"
@@ -195,9 +190,7 @@ def build_scenario_d_execution_correction(
         else blueprint_record.definition.model_copy(
             update={
                 "stages": tuple(
-                    stage.model_copy(
-                        update={"reservation": {"operation.attempts": 1}}
-                    )
+                    stage.model_copy(update={"reservation": {"operation.attempts": 1}})
                     if stage.stage_id == "admit_public_goal"
                     else stage
                     for stage in blueprint_record.definition.stages
@@ -209,9 +202,7 @@ def build_scenario_d_execution_correction(
     corrected_control = (
         control_record.definition
         if control_record.ref.revision == 2
-        else control_record.definition.model_copy(
-            update={"blueprint_ref": blueprint_ref}
-        )
+        else control_record.definition.model_copy(update={"blueprint_ref": blueprint_ref})
     )
     control_ref = _correction_ref(corrected_control)
     corrected_workflow = (
@@ -977,10 +968,9 @@ def _validate_scenario_d_correction(
         raise ReviewedCapabilityPromotionError(
             "Scenario D corrected control profile does not bind the exact blueprint"
         )
-    if (
-        workflow.allowed_blueprints != frozenset({blueprint_ref})
-        or workflow.allowed_control_profiles != frozenset({control_ref})
-    ):
+    if workflow.allowed_blueprints != frozenset(
+        {blueprint_ref}
+    ) or workflow.allowed_control_profiles != frozenset({control_ref}):
         raise ReviewedCapabilityPromotionError(
             "Scenario D corrected workflow does not bind exact executable authorities"
         )

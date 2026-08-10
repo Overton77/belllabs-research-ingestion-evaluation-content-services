@@ -1192,9 +1192,7 @@ class PostgresRuntimeIncidentRepository:
                     recorded_at=prior["recorded_at"],
                 )
                 if persisted != record:
-                    raise IdempotencyConflict(
-                        "repair audit identity has conflicting facts"
-                    )
+                    raise IdempotencyConflict("repair audit identity has conflicting facts")
                 return persisted
             await connection.execute(
                 """

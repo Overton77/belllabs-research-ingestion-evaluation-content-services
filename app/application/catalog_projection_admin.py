@@ -55,8 +55,7 @@ class ProjectionVerificationSummary(ProjectionAdminContract):
     def valid(self) -> bool:
         return (
             self.expected_count == self.observed_count == self.verified_count
-            and self.expected_source_set_digest
-            == self.observed_source_set_digest
+            and self.expected_source_set_digest == self.observed_source_set_digest
             and not self.missing_refs
             and not self.stale_refs
             and not self.unexpected_refs
@@ -83,9 +82,7 @@ async def rebuild_capability_search_projection(
     tenant_scope: str,
     projection_generation: str,
     selected_kinds: frozenset[DefinitionKind] | None = None,
-    workflow_compatibility: dict[
-        ExactDefinitionRef, frozenset[ExactDefinitionRef]
-    ] | None = None,
+    workflow_compatibility: dict[ExactDefinitionRef, frozenset[ExactDefinitionRef]] | None = None,
     batch_size: int = 64,
     clock: Callable[[], datetime] | None = None,
 ) -> ProjectionRebuildSummary:
@@ -137,9 +134,7 @@ async def rebuild_capability_search_projection(
             tenant_scope=tenant_scope,
             projection_generation=projection_generation,
             activated_count=generation_record.actual_count,
-            activated_source_set_digest=(
-                generation_record.actual_source_set_digest
-            ),
+            activated_source_set_digest=(generation_record.actual_source_set_digest),
             activated_at=generation_record.activated_at,
         )
         completed_event_count = await _complete_events(
@@ -255,12 +250,8 @@ async def verify_capability_search_projection(
         projection_generation,
         kinds=kinds,
     )
-    expected_by_identity = {
-        (ref.kind, ref.logical_id, ref.revision): ref for ref in exact_refs
-    }
-    observed_by_identity = {
-        (row.asset_kind, row.logical_id, row.revision): row for row in rows
-    }
+    expected_by_identity = {(ref.kind, ref.logical_id, ref.revision): ref for ref in exact_refs}
+    observed_by_identity = {(row.asset_kind, row.logical_id, row.revision): row for row in rows}
     missing: list[ExactDefinitionRef] = []
     stale: list[ExactDefinitionRef] = []
     incompatible: list[ExactDefinitionRef] = []
@@ -282,8 +273,7 @@ async def verify_capability_search_projection(
             row.projection_generation != projection_generation
             or row.embedding_model_id != embedding_model_id
             or row.embedding_dimensions != embedding_dimensions
-            or row.search_document_format_version
-            != search_document_format_version
+            or row.search_document_format_version != search_document_format_version
         ):
             incompatible.append(row.exact_ref)
             continue
@@ -295,9 +285,7 @@ async def verify_capability_search_projection(
         if identity not in expected_by_identity
     ]
     expected_digest = projection_source_set_digest(exact_refs)
-    observed_digest = projection_source_set_digest(
-        tuple(row.exact_ref for row in rows)
-    )
+    observed_digest = projection_source_set_digest(tuple(row.exact_ref for row in rows))
     return ProjectionVerificationSummary(
         tenant_scope=tenant_scope,
         projection_generation=projection_generation,

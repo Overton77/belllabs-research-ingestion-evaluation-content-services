@@ -118,9 +118,7 @@ class PostgresCatalogSearchRepository:
                 document.search_document_format_version,
             )
             if generation is None:
-                raise RuntimeError(
-                    "capability projection generation is missing or not writable"
-                )
+                raise RuntimeError("capability projection generation is missing or not writable")
             row = await connection.fetchrow(
                 """
                 INSERT INTO capability_search.documents (
@@ -284,9 +282,7 @@ class PostgresCatalogSearchRepository:
     ) -> tuple[RankedCapabilityDocument, ...]:
         query, args = _filtered_query(
             request,
-            score_sql=(
-                "ts_rank_cd(fts, websearch_to_tsquery('english', $1), 32)"
-            ),
+            score_sql=("ts_rank_cd(fts, websearch_to_tsquery('english', $1), 32)"),
             match_sql="fts @@ websearch_to_tsquery('english', $1)",
             order_sql="branch_score DESC, logical_id, revision",
             tail_args=(request.query, limit),
@@ -310,9 +306,7 @@ class PostgresCatalogSearchRepository:
     ) -> tuple[RankedCapabilityDocument, ...]:
         query, args = _filtered_query(
             request,
-            score_sql=(
-                "1 - (embedding <=> $1::extensions.vector)"
-            ),
+            score_sql=("1 - (embedding <=> $1::extensions.vector)"),
             match_sql="TRUE",
             order_sql="embedding <=> $1::extensions.vector, logical_id, revision",
             tail_args=(_vector_literal(query_embedding), limit),
@@ -402,9 +396,7 @@ def _document(row: Mapping[str, Any]) -> CapabilitySearchDocument:
         raw_refs = json.loads(raw_refs)
     embedding = row["embedding"]
     if isinstance(embedding, str):
-        embedding = tuple(
-            float(item) for item in embedding.strip("[]").split(",") if item
-        )
+        embedding = tuple(float(item) for item in embedding.strip("[]").split(",") if item)
     return CapabilitySearchDocument(
         search_document_id=row["search_document_id"],
         tenant_scope=str(row["tenant_scope"]),
@@ -425,12 +417,8 @@ def _document(row: Mapping[str, Any]) -> CapabilitySearchDocument:
         tags=frozenset(row.get("tags") or ()),
         domains=frozenset(row.get("domains") or ()),
         operation_classes=frozenset(row.get("operation_classes") or ()),
-        workflow_type_refs=frozenset(
-            ExactDefinitionRef.model_validate(item) for item in raw_refs
-        ),
-        capability_requirements=frozenset(
-            row.get("capability_requirements") or ()
-        ),
+        workflow_type_refs=frozenset(ExactDefinitionRef.model_validate(item) for item in raw_refs),
+        capability_requirements=frozenset(row.get("capability_requirements") or ()),
         compatible_runtimes=frozenset(row.get("compatible_runtimes") or ()),
         compatibility_summary=str(row["compatibility_summary"]),
         schema_digest_verified=bool(row["schema_digest_verified"]),

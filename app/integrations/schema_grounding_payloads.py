@@ -56,9 +56,7 @@ def schema_grounding_input_uri(
 ) -> str:
     object_format = SCHEMA_GROUNDING_INPUT_FORMATS[kind]
     key = digest.removeprefix("sha256:")
-    return (
-        f"s3://{bucket}/schema-grounding/live-inputs/{key}{object_format.suffix}"
-    )
+    return f"s3://{bucket}/schema-grounding/live-inputs/{key}{object_format.suffix}"
 
 
 __all__ = [

@@ -91,9 +91,7 @@ class PostgresAtomicOperationJournalRepository:
                 mutation.belllabs_run_id,
             )
             if run_row is None:
-                raise RunControlNotFound(
-                    f"workflow run not found: {mutation.belllabs_run_id}"
-                )
+                raise RunControlNotFound(f"workflow run not found: {mutation.belllabs_run_id}")
             if run_row["version"] != mutation.expected_run_version:
                 raise RunVersionConflict(
                     f"expected version {mutation.expected_run_version}, "
@@ -116,13 +114,11 @@ class PostgresAtomicOperationJournalRepository:
                 if (
                     prior_row["request_scope"] != claim.request_scope
                     or prior_row["belllabs_run_id"] != claim.belllabs_run_id
-                    or prior_row["operation_contract_digest"]
-                    != claim.operation_contract_digest
+                    or prior_row["operation_contract_digest"] != claim.operation_contract_digest
                     or prior_row["idempotency_key"] != claim.idempotency_key
                     or prior_row["request_digest"] != claim.request_digest
                     or prior_row["semantic_binding_id"] != claim.semantic_binding_id
-                    or prior_row["semantic_binding_digest"]
-                    != claim.semantic_binding_digest
+                    or prior_row["semantic_binding_digest"] != claim.semantic_binding_digest
                     or prior_row["semantic_attempt_key"] != claim.semantic_attempt_key
                     or prior_row["claim_mode"] != claim.claim_mode
                 ):
@@ -492,12 +488,11 @@ class PostgresAtomicOperationJournalRepository:
             mutation.command_result.command_id,
         )
         if prior_result is not None:
-            if (
-                prior_result["command_fingerprint"]
-                != mutation.command_result.command_fingerprint
-                or _json(prior_result["result"])
-                != mutation.command_result.model_dump(mode="json")
-            ):
+            if prior_result[
+                "command_fingerprint"
+            ] != mutation.command_result.command_fingerprint or _json(
+                prior_result["result"]
+            ) != mutation.command_result.model_dump(mode="json"):
                 raise IdempotencyConflict("operation lifecycle command result collision")
         else:
             await connection.execute(
@@ -620,9 +615,7 @@ class PostgresAtomicOperationJournalRepository:
             child.parent_account_id,
         )
         if parent_payload is None:
-            raise RunControlNotFound(
-                f"parent budget account not found: {child.parent_account_id}"
-            )
+            raise RunControlNotFound(f"parent budget account not found: {child.parent_account_id}")
         parent = BudgetState.model_validate(_json(parent_payload))
         updated, entries = roll_up_child_budget(
             parent,

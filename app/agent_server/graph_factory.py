@@ -11,15 +11,9 @@ def graph_from_exact_definitions(
 ) -> object:
     """Select immutable topology only after exact assembly/RunPlan agreement."""
 
-    if (
-        run_plan.graph_assembly.graph_assembly_ref.digest
-        != assembly.graph.graph_assembly_digest
-    ):
+    if run_plan.graph_assembly.graph_assembly_ref.digest != assembly.graph.graph_assembly_digest:
         raise ValueError("RunPlan and GraphAssemblyDefinition digests do not match")
-    if (
-        run_plan.graph_assembly.state_schema_digest
-        != assembly.state_schema_ref.digest
-    ):
+    if run_plan.graph_assembly.state_schema_digest != assembly.state_schema_ref.digest:
         raise ValueError("RunPlan and graph state schema digests do not match")
     if assembly.graph.graph_family == "StageGraph":
         return stagegraph_graph

@@ -269,9 +269,7 @@ class PermissionCatalogAuthorization:
         allowed = (
             universe
             if not kind_scopes or "all" in kind_scopes
-            else frozenset(
-                kind for kind in universe if kind.value in kind_scopes
-            )
+            else frozenset(kind for kind in universe if kind.value in kind_scopes)
         )
         return allowed & requested if requested else allowed
 
@@ -389,9 +387,7 @@ class ProductionCoordinatorFacade:
         self._prompt_bindings = dict(prompt_bindings)
         self._flags = flags
         self._audit = audit
-        self._catalog_authorization = (
-            catalog_authorization or PermissionCatalogAuthorization()
-        )
+        self._catalog_authorization = catalog_authorization or PermissionCatalogAuthorization()
         self._discovery = discovery
         self._inspections = inspections
         self._inspection_reports = inspection_reports
@@ -440,8 +436,7 @@ class ProductionCoordinatorFacade:
                         item.split(":", 1)[0] in self._effective_surface.tools
                         or (
                             item == "discover_only_if_internal_capability_is_missing"
-                            and "discover_mcp_servers"
-                            in self._effective_surface.tools
+                            and "discover_mcp_servers" in self._effective_surface.tools
                         )
                     )
                 ),
@@ -470,9 +465,7 @@ class ProductionCoordinatorFacade:
                 raise self._forbidden(
                     "authenticated principal cannot read the requested catalog kinds"
                 )
-            response = await self._search.search(
-                parsed.model_copy(update={"kinds": allowed_kinds})
-            )
+            response = await self._search.search(parsed.model_copy(update={"kinds": allowed_kinds}))
             visible = []
             for hit in response.hits:
                 assert hit.exact_ref is not None
@@ -513,9 +506,7 @@ class ProductionCoordinatorFacade:
                 self._require_permission(principal, "capability.inspect")
                 if self._inspection_reports is None:
                     raise self._dependency("candidate inspection records are unavailable")
-                report = await self._inspection_reports.get_report(
-                    str(exact_ref["inspection_id"])
-                )
+                report = await self._inspection_reports.get_report(str(exact_ref["inspection_id"]))
                 if report.tenant_scope != principal.tenant_scope:
                     raise self._not_found("candidate inspection was not found")
                 return report
@@ -681,9 +672,7 @@ class ProductionCoordinatorFacade:
         async def operation() -> WorkflowLaunchHandle:
             self._require_permission(principal, "workflow.launch")
             if idempotency_issuer != principal.actor_id:
-                raise self._forbidden(
-                    "launch idempotency issuer differs from authenticated actor"
-                )
+                raise self._forbidden("launch idempotency issuer differs from authenticated actor")
             if not idempotency_key.strip() or len(idempotency_key) > 256:
                 raise self._invalid("launch idempotency key is invalid")
             launcher, contexts = self._required_launcher()
@@ -786,15 +775,10 @@ class ProductionCoordinatorFacade:
                     "non_goals": sorted(definition.non_goals),
                     "invariants": sorted(definition.invariants),
                     "obligations": sorted(definition.obligations),
-                    "authority_ceiling": definition.authority_ceiling.model_dump(
-                        mode="json"
-                    ),
-                    "workspace_contract": definition.workspace_contract.model_dump(
-                        mode="json"
-                    ),
+                    "authority_ceiling": definition.authority_ceiling.model_dump(mode="json"),
+                    "workspace_contract": definition.workspace_contract.model_dump(mode="json"),
                     "linked_run_slots": [
-                        item.model_dump(mode="json")
-                        for item in definition.linked_run_slots
+                        item.model_dump(mode="json") for item in definition.linked_run_slots
                     ],
                 }
             if view == "input-schema":
@@ -892,9 +876,7 @@ class ProductionCoordinatorFacade:
                 "prompt is missing required variables: " + ", ".join(sorted(missing))
             )
         if unknown := supplied - expected:
-            raise self._invalid(
-                "prompt received unknown variables: " + ", ".join(sorted(unknown))
-            )
+            raise self._invalid("prompt received unknown variables: " + ", ".join(sorted(unknown)))
         if any(not _SAFE_TEMPLATE_VARIABLE.fullmatch(name) for name in supplied):
             raise self._invalid("prompt variable name is invalid")
         body = definition.body
@@ -1003,13 +985,9 @@ class ProductionCoordinatorFacade:
 
     def _derive_effective_surface(self) -> EffectiveCoordinatorSurface:
         if self._flags.capability_search_enabled and self._search is None:
-            raise ValueError(
-                "capability search is enabled without a composed search provider"
-            )
+            raise ValueError("capability search is enabled without a composed search provider")
         if self._flags.external_discovery_enabled and self._discovery is None:
-            raise ValueError(
-                "external discovery is enabled without a composed discovery provider"
-            )
+            raise ValueError("external discovery is enabled without a composed discovery provider")
         if self._flags.coordinator_launch_enabled:
             required_launch = {
                 "preparation": self._preparation,
@@ -1018,13 +996,10 @@ class ProductionCoordinatorFacade:
                 "launch_contexts": self._launch_contexts,
                 "run_resources": self._run_resources,
             }
-            missing = tuple(
-                name for name, provider in required_launch.items() if provider is None
-            )
+            missing = tuple(name for name, provider in required_launch.items() if provider is None)
             if missing:
                 raise ValueError(
-                    "coordinator launch is enabled without providers: "
-                    + ", ".join(missing)
+                    "coordinator launch is enabled without providers: " + ", ".join(missing)
                 )
 
         tools = ["coordinator_bootstrap", "get_capability", "validate_workflow_design"]
@@ -1103,15 +1078,11 @@ class ProductionCoordinatorFacade:
             raise error
         try:
             await self._rate_limiter.acquire(principal.actor_id, self._clock())
-            async with self._semaphore, asyncio.timeout(
-                self._limits.request_timeout_seconds
-            ):
+            async with self._semaphore, asyncio.timeout(self._limits.request_timeout_seconds):
                 response = await operation()
             response_bytes = _encoded(response)
             if len(response_bytes) > self._limits.max_response_bytes:
-                raise self._dependency(
-                    "coordinator response exceeds the configured size limit"
-                )
+                raise self._dependency("coordinator response exceeds the configured size limit")
         except CoordinatorDomainError as error:
             await self._audit_failure(
                 operation_name,
@@ -1152,8 +1123,7 @@ class ProductionCoordinatorFacade:
             )
             if translated.code == CoordinatorErrorCode.INTERNAL_ERROR:
                 LOGGER.error(
-                    "coordinator operation failed correlation_id=%s operation=%s "
-                    "error_type=%s",
+                    "coordinator operation failed correlation_id=%s operation=%s error_type=%s",
                     correlation_id,
                     operation_name,
                     type(error).__name__,
@@ -1222,9 +1192,7 @@ class ProductionCoordinatorFacade:
             }
         if isinstance(definition, MCPServerDefinition):
             return base | {
-                "schema_snapshot_ref": definition.schema_snapshot_ref.model_dump(
-                    mode="json"
-                ),
+                "schema_snapshot_ref": definition.schema_snapshot_ref.model_dump(mode="json"),
                 "schema_digest": definition.schema_digest,
                 "allowed_tools": sorted(definition.allowed_tools),
             }
@@ -1244,9 +1212,7 @@ class ProductionCoordinatorFacade:
                     else None
                 ),
                 "inline_body_digest": (
-                    sha256_digest(definition.body)
-                    if definition.body is not None
-                    else None
+                    sha256_digest(definition.body) if definition.body is not None else None
                 ),
             }
         raise ProductionCoordinatorFacade._not_found(
@@ -1258,13 +1224,9 @@ class ProductionCoordinatorFacade:
         try:
             revision = int(value)
         except ValueError as error:
-            raise ProductionCoordinatorFacade._invalid(
-                "resource revision is invalid"
-            ) from error
+            raise ProductionCoordinatorFacade._invalid("resource revision is invalid") from error
         if revision < 1:
-            raise ProductionCoordinatorFacade._invalid(
-                "resource revision is invalid"
-            )
+            raise ProductionCoordinatorFacade._invalid("resource revision is invalid")
         return revision
 
     @staticmethod
@@ -1312,10 +1274,7 @@ def _safe_render(
             )
         return body
     rendered = body
-    values = {
-        variable.name: arguments.get(variable.name, "")
-        for variable in definition.variables
-    }
+    values = {variable.name: arguments.get(variable.name, "") for variable in definition.variables}
     if definition.template_engine == "format":
         chunks: list[str] = []
         try:
@@ -1400,13 +1359,9 @@ def _translate_dependency_error(error: Exception) -> CoordinatorDomainError:
             code = CoordinatorErrorCode.CONFLICT
         return CoordinatorDomainError(code, "launch ticket is unavailable")
     if isinstance(error, ExternalCapabilityDiscoveryDisabled):
-        return ProductionCoordinatorFacade._dependency(
-            "external capability discovery is disabled"
-        )
+        return ProductionCoordinatorFacade._dependency("external capability discovery is disabled")
     if isinstance(error, (TypeError, ValueError)):
-        return ProductionCoordinatorFacade._invalid(
-            "coordinator request is invalid"
-        )
+        return ProductionCoordinatorFacade._invalid("coordinator request is invalid")
     return CoordinatorDomainError(
         CoordinatorErrorCode.INTERNAL_ERROR,
         "coordinator operation failed",

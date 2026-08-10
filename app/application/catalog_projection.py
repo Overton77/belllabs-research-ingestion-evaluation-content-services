@@ -153,9 +153,7 @@ class CatalogProjector:
         if embedding_inputs:
             embedded_items = await self._embed_many(tuple(embedding_inputs))
             if len(embedded_items) != len(embedding_inputs):
-                raise CatalogProjectionError(
-                    "embedding batch response has an invalid item count"
-                )
+                raise CatalogProjectionError("embedding batch response has an invalid item count")
             for prepared_index, embedded in zip(
                 embedding_indexes,
                 embedded_items,
@@ -186,9 +184,7 @@ class CatalogProjector:
                 raise CatalogProjectionError("projection embedding is unavailable")
             document = self._document(item, tenant_scope)
             changed = await self._search.upsert(document)
-            results.append(
-                CatalogProjectionResult(document=document, changed=changed)
-            )
+            results.append(CatalogProjectionResult(document=document, changed=changed))
         return tuple(results)
 
     async def _prepare(
@@ -213,19 +209,12 @@ class CatalogProjector:
             published.definition,
             exact_ref=ref,
         )
-        operation_classes = (
-            request.operation_classes | classification.operation_classes
-        )
-        workflow_type_refs = (
-            request.workflow_type_refs | classification.workflow_type_refs
-        )
+        operation_classes = request.operation_classes | classification.operation_classes
+        workflow_type_refs = request.workflow_type_refs | classification.workflow_type_refs
         capability_requirements = (
-            request.capability_requirements
-            | classification.capability_requirements
+            request.capability_requirements | classification.capability_requirements
         )
-        compatible_runtimes = (
-            request.compatible_runtimes | classification.compatible_runtimes
-        )
+        compatible_runtimes = request.compatible_runtimes | classification.compatible_runtimes
         if rendered.search_document_format_version != SEARCH_DOCUMENT_FORMAT_VERSION:
             raise CatalogProjectionError("search document format version changed")
         text_digest = _text_digest(rendered.search_text)
@@ -255,8 +244,7 @@ class CatalogProjector:
             and reusable.search_text_digest == text_digest
             and reusable.embedding_model_id == self._embedding_model_id
             and reusable.embedding_dimensions == self._embedding_dimensions
-            and reusable.search_document_format_version
-            == SEARCH_DOCUMENT_FORMAT_VERSION
+            and reusable.search_document_format_version == SEARCH_DOCUMENT_FORMAT_VERSION
         )
         projection_unchanged = (
             embedding_reusable
@@ -318,9 +306,7 @@ class CatalogProjector:
             embedding=item.embedding or (),
             embedding_model_id=self._embedding_model_id,
             embedding_dimensions=self._embedding_dimensions,
-            search_document_format_version=(
-                item.rendered.search_document_format_version
-            ),
+            search_document_format_version=(item.rendered.search_document_format_version),
             parent_ref=parent_ref,
             tags=item.source.tags,
             domains=item.source.domains,
@@ -329,12 +315,9 @@ class CatalogProjector:
             capability_requirements=item.capability_requirements,
             compatible_runtimes=item.compatible_runtimes,
             compatibility_summary=(
-                item.source.compatibility_summary
-                or "Compatible with the indexed catalog contract."
+                item.source.compatibility_summary or "Compatible with the indexed catalog contract."
             ),
-            mongodb_document_id=(
-                f"{ref.kind.value}:{ref.logical_id}:{ref.revision}:{ref.digest}"
-            ),
+            mongodb_document_id=(f"{ref.kind.value}:{ref.logical_id}:{ref.revision}:{ref.digest}"),
             source_published_at=item.published.published_at,
             indexed_at=self._clock(),
             projection_generation=self._projection_generation,

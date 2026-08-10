@@ -66,9 +66,7 @@ class CapabilitySearchRequest(Contract):
     operation_class: str | None = Field(default=None, min_length=1, max_length=256)
     required_capabilities: frozenset[str] = Field(default_factory=frozenset)
     runtime: str | None = Field(default=None, min_length=1, max_length=256)
-    status_filter: frozenset[CatalogAssetStatus] = frozenset(
-        {CatalogAssetStatus.PUBLISHED}
-    )
+    status_filter: frozenset[CatalogAssetStatus] = frozenset({CatalogAssetStatus.PUBLISHED})
     include_external_candidates: bool = False
     limit: int = Field(default=10, ge=1, le=100)
 
@@ -131,12 +129,9 @@ class CapabilitySearchHit(Contract):
                 raise ValueError("internal search hits require projection evidence")
         elif self.authorization_state != AuthorizationState.CANDIDATE_ONLY:
             raise ValueError("external candidate hits are candidate_only")
-        if (
-            self.parent_ref is not None
-            and (
-                self.kind != DefinitionKind.MCP_TOOL
-                or self.parent_ref.kind != DefinitionKind.MCP_SERVER
-            )
+        if self.parent_ref is not None and (
+            self.kind != DefinitionKind.MCP_TOOL
+            or self.parent_ref.kind != DefinitionKind.MCP_SERVER
         ):
             raise ValueError("only MCP Tool hits may carry an MCP Server parent")
         return self

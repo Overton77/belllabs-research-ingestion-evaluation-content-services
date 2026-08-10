@@ -389,9 +389,7 @@ def create_coordinator_server(
         async def invoke(principal: CoordinatorPrincipal) -> object:
             request_scope = principal.request_scope or principal.tenant_scope
             if proposal.get("tenant_scope") != principal.tenant_scope:
-                raise ValueError(
-                    "proposal tenant_scope must match the authenticated tenant"
-                )
+                raise ValueError("proposal tenant_scope must match the authenticated tenant")
             if proposal.get("request_scope") != request_scope:
                 raise ValueError(
                     "proposal request_scope must match the authenticated request scope"

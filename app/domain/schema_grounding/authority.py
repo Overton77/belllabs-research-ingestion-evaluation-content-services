@@ -339,33 +339,22 @@ def live_schema_compatibility_diff(
                             _physical_property_name(
                                 physical,
                                 node_type=index.node_type,
-                                logical_property=str(
-                                    index.arguments["embeddingProperty"]
-                                ),
+                                logical_property=str(index.arguments["embeddingProperty"]),
                             ),
                         ),
                         state="ONLINE",
                     )
                     for index in physical.vector_indexes
-                    if index.arguments.get("indexName")
-                    and index.arguments.get("embeddingProperty")
+                    if index.arguments.get("indexName") and index.arguments.get("embeddingProperty")
                 ),
             ),
             key=lambda item: item.name,
         )
     )
-    unexpected_nodes = (
-        snapshot.token_catalog_node_labels - expected_nodes - operational_labels
-    )
-    unexpected_active_nodes = (
-        snapshot.active_node_labels - expected_nodes - operational_labels
-    )
-    unexpected_relationships = (
-        snapshot.token_catalog_relationship_types - expected_relationships
-    )
-    unexpected_active_relationships = (
-        snapshot.active_relationship_types - expected_relationships
-    )
+    unexpected_nodes = snapshot.token_catalog_node_labels - expected_nodes - operational_labels
+    unexpected_active_nodes = snapshot.active_node_labels - expected_nodes - operational_labels
+    unexpected_relationships = snapshot.token_catalog_relationship_types - expected_relationships
+    unexpected_active_relationships = snapshot.active_relationship_types - expected_relationships
     missing_canonical_indexes = tuple(
         index for index in expected_indexes if index not in snapshot.indexes
     )
@@ -425,9 +414,7 @@ def live_schema_compatibility_diff(
         noncanonical_constraints=noncanonical_constraints,
         expected_index_names=expected_index_names,
         observed_index_names=snapshot.index_names,
-        missing_index_names=frozenset(
-            index.name for index in missing_canonical_indexes
-        ),
+        missing_index_names=frozenset(index.name for index in missing_canonical_indexes),
         unexpected_index_names=snapshot.index_names - expected_index_names,
         compatible=(
             database_matches

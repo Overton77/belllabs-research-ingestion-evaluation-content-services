@@ -71,12 +71,7 @@ class S3PayloadStore:
     ) -> None:
         if not media_type.strip():
             raise ValueError("S3 payload media type must be non-empty")
-        if (
-            not suffix.startswith(".")
-            or len(suffix) == 1
-            or "/" in suffix
-            or "\\" in suffix
-        ):
+        if not suffix.startswith(".") or len(suffix) == 1 or "/" in suffix or "\\" in suffix:
             raise ValueError("S3 payload suffix must be a simple dot-prefixed extension")
         self._settings = settings
         self._bucket = bucket

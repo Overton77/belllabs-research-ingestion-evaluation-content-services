@@ -81,10 +81,7 @@ class CapabilitySearchDocument(SearchRepositoryContract):
         if len(self.embedding) != self.embedding_dimensions:
             raise ValueError("search document embedding dimensions do not match")
         if self.asset_kind == DefinitionKind.MCP_TOOL:
-            if (
-                self.parent_ref is None
-                or self.parent_ref.kind != DefinitionKind.MCP_SERVER
-            ):
+            if self.parent_ref is None or self.parent_ref.kind != DefinitionKind.MCP_SERVER:
                 raise ValueError("MCP Tool search rows require an exact MCP Server parent")
         elif self.parent_ref is not None:
             raise ValueError("only MCP Tool search rows may carry a parent")
@@ -169,9 +166,7 @@ class InMemoryCatalogSearchRepository:
         *,
         projection_generation: str | None = None,
     ) -> CapabilitySearchDocument | None:
-        generation = projection_generation or self._active_generations.get(
-            (tenant_scope, kind)
-        )
+        generation = projection_generation or self._active_generations.get((tenant_scope, kind))
         if generation is None:
             candidates = [
                 document
@@ -180,9 +175,7 @@ class InMemoryCatalogSearchRepository:
             ]
             value = candidates[-1] if candidates else None
         else:
-            value = self._documents.get(
-                (tenant_scope, kind, logical_id, revision, generation)
-            )
+            value = self._documents.get((tenant_scope, kind, logical_id, revision, generation))
         return value.model_copy(deep=True) if value is not None else None
 
     async def upsert(self, document: CapabilitySearchDocument) -> bool:
@@ -194,9 +187,7 @@ class InMemoryCatalogSearchRepository:
             document.embedding_dimensions,
             document.search_document_format_version,
         ):
-            raise RuntimeError(
-                "capability projection row violates its generation contract"
-            )
+            raise RuntimeError("capability projection row violates its generation contract")
         key = (
             document.tenant_scope,
             document.asset_kind,
@@ -316,9 +307,7 @@ class InMemoryCatalogSearchRepository:
             if len(document.embedding) != len(query_embedding):
                 continue
             score = _cosine_similarity(query_embedding, document.embedding)
-            scored.append(
-                RankedCapabilityDocument(document=document, branch_score=score)
-            )
+            scored.append(RankedCapabilityDocument(document=document, branch_score=score))
         return tuple(
             sorted(
                 scored,
@@ -345,10 +334,7 @@ class InMemoryCatalogSearchRepository:
                 not request.required_capabilities
                 or request.required_capabilities <= document.capability_requirements
             )
-            and (
-                request.runtime is None
-                or request.runtime in document.compatible_runtimes
-            )
+            and (request.runtime is None or request.runtime in document.compatible_runtimes)
             and (
                 request.operation_class is None
                 or request.operation_class in document.operation_classes
@@ -360,9 +346,7 @@ class InMemoryCatalogSearchRepository:
         )
 
     def _is_active(self, document: CapabilitySearchDocument) -> bool:
-        generation = self._active_generations.get(
-            (document.tenant_scope, document.asset_kind)
-        )
+        generation = self._active_generations.get((document.tenant_scope, document.asset_kind))
         return generation is None or generation == document.projection_generation
 
 
@@ -399,6 +383,4 @@ def _cosine_similarity(left: tuple[float, ...], right: tuple[float, ...]) -> flo
     right_norm = math.sqrt(sum(value * value for value in right))
     if left_norm == 0 or right_norm == 0:
         return 0.0
-    return sum(a * b for a, b in zip(left, right, strict=True)) / (
-        left_norm * right_norm
-    )
+    return sum(a * b for a, b in zip(left, right, strict=True)) / (left_norm * right_norm)

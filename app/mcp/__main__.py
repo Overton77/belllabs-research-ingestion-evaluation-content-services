@@ -62,8 +62,7 @@ async def _build_facade(
         update={
             "coordinator_launch_enabled": False,
             "external_capability_discovery_enabled": (
-                settings.external_capability_discovery_enabled
-                and not skip_external_discovery
+                settings.external_capability_discovery_enabled and not skip_external_discovery
             ),
         }
     )

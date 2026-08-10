@@ -79,9 +79,7 @@ async def _verify_read_contracts(
                 relation,
             )
             if row is None or not row["relation_exists"] or not row["can_select"]:
-                raise RuntimeError(
-                    f"runtime read contract is unavailable for {relation}"
-                )
+                raise RuntimeError(f"runtime read contract is unavailable for {relation}")
             verified.append(relation)
     return tuple(verified)
 
@@ -243,9 +241,7 @@ async def preflight_live_schema_grounding(args: Any) -> dict[str, Any]:
                 "uri": overlay_uri,
                 "digest": overlay_digest,
                 "size_bytes": len(overlay_bytes),
-                "media_type": (
-                    SCHEMA_GROUNDING_INPUT_FORMATS["semantic_overlay"].media_type
-                ),
+                "media_type": (SCHEMA_GROUNDING_INPUT_FORMATS["semantic_overlay"].media_type),
             },
             "report": {
                 "uri": report_uri,
@@ -260,18 +256,14 @@ async def preflight_live_schema_grounding(args: Any) -> dict[str, Any]:
             versioning = await client.get_bucket_versioning(Bucket=settings.s3_bucket)
             encryption = await client.get_bucket_encryption(Bucket=settings.s3_bucket)
             for name, expected in expected_objects.items():
-                key = str(expected["uri"]).removeprefix(
-                    f"s3://{settings.s3_bucket}/"
-                )
+                key = str(expected["uri"]).removeprefix(f"s3://{settings.s3_bucket}/")
                 try:
                     object_heads[name] = await client.head_object(
                         Bucket=settings.s3_bucket,
                         Key=key,
                     )
                 except ClientError as error:
-                    status = error.response.get("ResponseMetadata", {}).get(
-                        "HTTPStatusCode"
-                    )
+                    status = error.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
                     if status != 404:
                         raise
                     object_heads[name] = None
@@ -300,9 +292,7 @@ async def preflight_live_schema_grounding(args: Any) -> dict[str, Any]:
             name: _object_status(expected, object_heads[name])
             for name, expected in expected_objects.items()
         }
-        objects_ready = all(
-            bool(status["integrity_verified"]) for status in object_status.values()
-        )
+        objects_ready = all(bool(status["integrity_verified"]) for status in object_status.values())
         evidence_present = evidence is not None
         launch_ready = objects_ready and bool(args.deployment_id) and evidence_present
         return {
@@ -361,23 +351,17 @@ async def preflight_live_schema_grounding(args: Any) -> dict[str, Any]:
                     "database": snapshot.database,
                     "server_agent": snapshot.server_agent,
                     "live_schema_snapshot_digest": snapshot.snapshot_digest,
-                    "token_catalog_node_label_count": len(
-                        snapshot.token_catalog_node_labels
-                    ),
+                    "token_catalog_node_label_count": len(snapshot.token_catalog_node_labels),
                     "token_catalog_relationship_type_count": len(
                         snapshot.token_catalog_relationship_types
                     ),
                     "active_node_label_count": len(snapshot.active_node_labels),
-                    "active_relationship_type_count": len(
-                        snapshot.active_relationship_types
-                    ),
+                    "active_relationship_type_count": len(snapshot.active_relationship_types),
                     "index_count": len(snapshot.indexes),
                     "constraint_count": len(snapshot.constraints),
                     "requested_deployment_id": args.deployment_id,
                     "deployment_evidence_present": evidence_present,
-                    "deployment_evidence_ref": (
-                        None if evidence is None else evidence.evidence_id
-                    ),
+                    "deployment_evidence_ref": (None if evidence is None else evidence.evidence_id),
                 },
                 "s3": {
                     "bucket": settings.s3_bucket,

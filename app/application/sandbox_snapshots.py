@@ -178,10 +178,7 @@ class BindingSnapshotAuthority:
         manifest = await self._manifests.get_current(
             request.target_namespace_id, request.target_workspace_id
         )
-        if (
-            manifest is None
-            or manifest.manifest_digest != request.target_mount_manifest_digest
-        ):
+        if manifest is None or manifest.manifest_digest != request.target_mount_manifest_digest:
             raise SnapshotAuthorityError("restore target manifest is not current and exact")
         if (
             binding.request_scope != request.request_scope
@@ -222,9 +219,7 @@ class SandboxSnapshotService:
         self._clock = clock or (lambda: datetime.now(UTC))
 
     async def create(self, request: SandboxSnapshotCreateRequest) -> SandboxSnapshot:
-        creation_identity = sha256_digest(
-            request.model_dump(mode="json", exclude={"created_at"})
-        )
+        creation_identity = sha256_digest(request.model_dump(mode="json", exclude={"created_at"}))
         prior = await self._snapshots.get_snapshot(request.snapshot_id)
         if prior is not None:
             if prior.creation_identity != creation_identity:

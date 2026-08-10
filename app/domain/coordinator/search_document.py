@@ -88,23 +88,17 @@ def search_document_source(
         compatibility_parts.add(f"blueprint: {_exact_ref(definition.blueprint_ref)}")
     elif isinstance(definition, RuntimeProfileDefinition):
         intended_uses.add("Provide an executable runtime binding")
-        authority_summary = "required capabilities: " + _items(
-            definition.required_capabilities
-        )
+        authority_summary = "required capabilities: " + _items(definition.required_capabilities)
         compatibility_parts.add(f"runtime binding: {definition.binding}")
     elif isinstance(definition, WorkspaceTemplateDefinition):
         intended_uses.add("Materialize governed workflow workspace slots")
         input_summary = _items(slot.purpose for slot in definition.slots)
         output_summary = _items(slot.name for slot in definition.slots)
-        authority_summary = "required capabilities: " + _items(
-            definition.required_capabilities
-        )
+        authority_summary = "required capabilities: " + _items(definition.required_capabilities)
     elif isinstance(definition, EvaluationProfileDefinition):
         intended_uses.add("Evaluate workflow outputs against frozen gates")
         input_summary = _items(definition.gate_contract_refs)
-        authority_summary = "required capabilities: " + _items(
-            definition.required_capabilities
-        )
+        authority_summary = "required capabilities: " + _items(definition.required_capabilities)
     elif isinstance(definition, WorkflowConfigurationDefinition):
         intended_uses.add("Configure one exact Workflow Type")
         compatibility_parts.add(
@@ -125,9 +119,7 @@ def search_document_source(
         compatibility_parts.add(f"template engine: {definition.template_engine}")
     elif isinstance(definition, SkillDefinition):
         intended_uses.add(definition.body_summary)
-        authority_summary = "required capabilities: " + _items(
-            definition.required_capabilities
-        )
+        authority_summary = "required capabilities: " + _items(definition.required_capabilities)
         compatibility_parts.update(_skill_compatibility(definition))
     elif isinstance(definition, MCPServerDefinition):
         intended_uses.add("Provide governed MCP tools")
@@ -228,12 +220,6 @@ def _skill_compatibility(definition: SkillDefinition) -> set[str]:
     return {
         f"runtimes: {_items(compatibility.runtimes) or 'none'}",
         f"executables: {_items(compatibility.executables) or 'none'}",
-        (
-            "network capabilities: "
-            f"{_items(compatibility.network_capabilities) or 'none'}"
-        ),
-        (
-            "workspace capabilities: "
-            f"{_items(compatibility.workspace_capabilities) or 'none'}"
-        ),
+        (f"network capabilities: {_items(compatibility.network_capabilities) or 'none'}"),
+        (f"workspace capabilities: {_items(compatibility.workspace_capabilities) or 'none'}"),
     }

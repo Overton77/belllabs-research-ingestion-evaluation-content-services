@@ -98,9 +98,7 @@ class SchemaCatalogBuildService:
             await self._persist_rejection(request, error)
             raise
 
-    async def get(
-        self, request_scope: str, build_id: str
-    ) -> SchemaCatalogBuildRecord:
+    async def get(self, request_scope: str, build_id: str) -> SchemaCatalogBuildRecord:
         envelope = await self._records.get(request_scope, "catalog_build", build_id)
         return SchemaCatalogBuildRecord.model_validate(envelope.payload)
 
@@ -290,9 +288,9 @@ class SchemaCatalogBuildService:
 
 def _bundle_payload(root: Path, manifest: dict[str, Any]) -> dict[str, object]:
     files = {
-        f"schema/{path.relative_to(root).as_posix()}": base64.b64encode(
-            path.read_bytes()
-        ).decode("ascii")
+        f"schema/{path.relative_to(root).as_posix()}": base64.b64encode(path.read_bytes()).decode(
+            "ascii"
+        )
         for path in sorted(item for item in root.rglob("*") if item.is_file())
     }
     return {
@@ -343,6 +341,4 @@ def _verify_declared_inputs(
 
 
 def _request_fingerprint(request: SchemaCatalogBuildRequest) -> str:
-    return sha256_digest(
-        request.model_dump(mode="json", exclude={"requested_at"})
-    )
+    return sha256_digest(request.model_dump(mode="json", exclude={"requested_at"}))

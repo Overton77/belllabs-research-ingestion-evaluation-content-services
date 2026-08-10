@@ -139,9 +139,7 @@ class DurableDecisionService:
         self._authority = authority or DenyByDefaultDecisionAuthority()
 
     async def create_request(self, request: DecisionRequest) -> DurableDecisionRecord:
-        expected = sha256_digest(
-            request.model_dump(mode="json", exclude={"request_digest"})
-        )
+        expected = sha256_digest(request.model_dump(mode="json", exclude={"request_digest"}))
         if expected != request.request_digest:
             raise ValueError("decision request digest mismatch")
         return await self._repository.create(request)

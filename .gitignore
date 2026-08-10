@@ -65,6 +65,7 @@ dist/
 .idea/
 
 # Jupyter/IPython notebooks
+notebooks/
 .ipynb_checkpoints
 *.ipynb
 

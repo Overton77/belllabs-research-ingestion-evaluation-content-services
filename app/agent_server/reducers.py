@@ -68,9 +68,7 @@ def merge_monotonic_integer(left: int | None, right: int | None) -> int | None:
     return max(value for value in (left, right) if value is not None)
 
 
-def merge_keyed_canonical_digest[
-    T: Mapping[str, Any] | BaseModel
-](
+def merge_keyed_canonical_digest[T: Mapping[str, Any] | BaseModel](
     left: Mapping[str, T] | Sequence[T] | None,
     right: Mapping[str, T] | Sequence[T] | None,
 ) -> dict[str, T]:

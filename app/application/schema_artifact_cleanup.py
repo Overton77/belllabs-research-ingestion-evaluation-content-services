@@ -230,9 +230,7 @@ def plan_zero_count_schema_artifact_cleanup(
         )
     }
     if active_usage:
-        raise SchemaDeploymentMismatch(
-            "schema cleanup target label gained nodes or relationships"
-        )
+        raise SchemaDeploymentMismatch("schema cleanup target label gained nodes or relationships")
     if snapshot.active_node_labels & TARGET_LABELS:
         raise SchemaDeploymentMismatch(
             "schema cleanup target label is present in the active-label snapshot"
@@ -243,14 +241,12 @@ def plan_zero_count_schema_artifact_cleanup(
     candidate_indexes = tuple(
         item
         for item in snapshot.indexes
-        if item.name in expected_indexes
-        or bool(set(item.labels_or_types) & TARGET_LABELS)
+        if item.name in expected_indexes or bool(set(item.labels_or_types) & TARGET_LABELS)
     )
     candidate_constraints = tuple(
         item
         for item in snapshot.constraints
-        if item.name in expected_constraints
-        or bool(set(item.labels_or_types) & TARGET_LABELS)
+        if item.name in expected_constraints or bool(set(item.labels_or_types) & TARGET_LABELS)
     )
     _verify_exact_descriptors(
         "index",
@@ -264,18 +260,13 @@ def plan_zero_count_schema_artifact_cleanup(
     )
 
     present_indexes = tuple(sorted(candidate_indexes, key=lambda item: item.name))
-    present_constraints = tuple(
-        sorted(candidate_constraints, key=lambda item: item.name)
-    )
+    present_constraints = tuple(sorted(candidate_constraints, key=lambda item: item.name))
     present_index_names = {item.name for item in present_indexes}
     present_constraint_names = {item.name for item in present_constraints}
     missing_indexes = tuple(sorted(set(expected_indexes) - present_index_names))
-    missing_constraints = tuple(
-        sorted(set(expected_constraints) - present_constraint_names)
-    )
+    missing_constraints = tuple(sorted(set(expected_constraints) - present_constraint_names))
     constraint_commands = tuple(
-        f"DROP CONSTRAINT `{name}` IF EXISTS"
-        for name in sorted(expected_constraints)
+        f"DROP CONSTRAINT `{name}` IF EXISTS" for name in sorted(expected_constraints)
     )
     independent_index_commands = tuple(
         f"DROP INDEX `{item.name}` IF EXISTS"
@@ -338,8 +329,7 @@ def _verify_exact_descriptors(
         expected = expected_by_name.get(name)
         if expected is None or candidate != expected:
             raise SchemaDeploymentMismatch(
-                f"schema cleanup {kind} descriptor changed or escaped the exact allowlist: "
-                f"{name}"
+                f"schema cleanup {kind} descriptor changed or escaped the exact allowlist: {name}"
             )
 
 

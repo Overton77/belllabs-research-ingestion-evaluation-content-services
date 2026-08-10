@@ -21,9 +21,7 @@ def configure_bootstrap_reconciler(reconciler: RuntimeBootstrapReconciler) -> No
 
 
 def reset_bootstrap_reconciler() -> None:
-    configure_bootstrap_reconciler(
-        RuntimeBootstrapReconciler(UnconfiguredBootstrapAuthority())
-    )
+    configure_bootstrap_reconciler(RuntimeBootstrapReconciler(UnconfiguredBootstrapAuthority()))
 
 
 def get_bootstrap_reconciler() -> RuntimeBootstrapReconciler:

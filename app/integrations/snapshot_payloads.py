@@ -60,9 +60,7 @@ class S3SnapshotPayloadStore:
         if not address.object_ref.startswith(prefix):
             raise SnapshotPayloadMismatch("snapshot belongs to a different object store")
         key = address.object_ref.removeprefix(prefix)
-        expected_key = (
-            f"{self._prefix}/{address.content_digest.removeprefix('sha256:')}"
-        )
+        expected_key = f"{self._prefix}/{address.content_digest.removeprefix('sha256:')}"
         if key != expected_key:
             raise SnapshotPayloadMismatch("snapshot object reference is not content-addressed")
         if address.size_bytes > MAX_SNAPSHOT_PAYLOAD_BYTES:

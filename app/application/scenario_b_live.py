@@ -111,9 +111,7 @@ async def run_scenario_b_live(
         )
         discovered = (*skill_batch.candidates, *mcp_batch.candidates)
         if not discovered:
-            raise RuntimeError(
-                "Scenario B external discovery returned no inspectable candidates"
-            )
+            raise RuntimeError("Scenario B external discovery returned no inspectable candidates")
         persisted = tuple(
             [await candidates.get_candidate(candidate.candidate_id) for candidate in discovered]
         )
@@ -251,8 +249,7 @@ async def _internal_gap(
     selectable = tuple(
         hit
         for hit in response.hits
-        if hit.authorization_state == AuthorizationState.SELECTABLE
-        and hit.exact_ref is not None
+        if hit.authorization_state == AuthorizationState.SELECTABLE and hit.exact_ref is not None
     )
     if selectable:
         raise RuntimeError(
@@ -263,9 +260,7 @@ async def _internal_gap(
         "required_capability": MISSING_CAPABILITY,
         "selectable_hit_count": 0,
         "returned_hit_count": len(response.hits),
-        "authorization_states": sorted(
-            {hit.authorization_state.value for hit in response.hits}
-        ),
+        "authorization_states": sorted({hit.authorization_state.value for hit in response.hits}),
         "token_use": [item.model_dump(mode="json") for item in response.token_use],
     }
 
@@ -273,9 +268,7 @@ async def _internal_gap(
 def _direct_attachment_refusal(
     persisted: PersistedExternalCandidate,
 ) -> dict[str, object]:
-    decision = evaluate_selection(
-        SelectionFacts(candidate_id=persisted.candidate.candidate_id)
-    )
+    decision = evaluate_selection(SelectionFacts(candidate_id=persisted.candidate.candidate_id))
     try:
         require_selectable(decision)
     except CoordinatorDomainError as error:
@@ -283,15 +276,11 @@ def _direct_attachment_refusal(
     else:
         raise AssertionError("external candidate unexpectedly became selectable")
     try:
-        ExactDefinitionRef.model_validate(
-            persisted.candidate.model_dump(mode="json")
-        )
+        ExactDefinitionRef.model_validate(persisted.candidate.model_dump(mode="json"))
     except ValidationError as error:
         type_refusal = {
             "accepted_as_exact_definition_ref": False,
-            "validation_error_types": sorted(
-                {str(item["type"]) for item in error.errors()}
-            ),
+            "validation_error_types": sorted({str(item["type"]) for item in error.errors()}),
         }
     else:
         raise AssertionError(
@@ -314,12 +303,7 @@ async def _batch_evidence(
     records = tuple(
         [await repository.get_candidate(candidate.candidate_id) for candidate in batch.candidates]
     )
-    evidence_ids = sorted(
-        {
-            f"discovery-evidence:{sha256_digest(item)}"
-            for item in batch.evidence
-        }
-    )
+    evidence_ids = sorted({f"discovery-evidence:{sha256_digest(item)}" for item in batch.evidence})
     evidence = tuple([await repository.get_evidence(identity) for identity in evidence_ids])
     return {
         "source": batch.source.value,
@@ -359,12 +343,12 @@ def _candidate_ref(record: PersistedExternalCandidate) -> dict[str, object]:
 
 def _live_settings() -> tuple[Settings, Path, Path]:
     python_executable = Path(sys.executable).resolve(strict=True)
-    node = (
-        Path(sys.base_prefix).resolve().parent / "node" / "bin" / "node.exe"
-    ).resolve(strict=True)
-    npx = (
-        PROJECT_ROOT.parent / ".tools" / "node_modules" / ".bin" / "npx.CMD"
-    ).resolve(strict=True)
+    node = (Path(sys.base_prefix).resolve().parent / "node" / "bin" / "node.exe").resolve(
+        strict=True
+    )
+    npx = (PROJECT_ROOT.parent / ".tools" / "node_modules" / ".bin" / "npx.CMD").resolve(
+        strict=True
+    )
     node_bin = str(node.parent)
     current_path = os.environ.get("PATH", "")
     if node_bin.casefold() not in {

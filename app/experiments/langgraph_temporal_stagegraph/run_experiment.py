@@ -164,9 +164,9 @@ async def run(args: argparse.Namespace) -> None:
                         "event_log": (),
                     },
                     config=config,
-                )  
-            # User comments: Check for the args.resume. If it is present, retrieve the graph state 
-            #  Record an event and wake the dispatcher wi    
+                )
+            # User comments: Check for the args.resume. If it is present, retrieve the graph state
+            #  Record an event and wake the dispatcher wi
             snapshot = await graph.aget_state(config)
             if any(task.interrupts for task in snapshot.tasks):
                 await repository.record_graph_event(

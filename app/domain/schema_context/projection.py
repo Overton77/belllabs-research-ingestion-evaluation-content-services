@@ -47,9 +47,7 @@ def build_operation_projection(
             diagnostics.append(f"vector index not admitted or unavailable: {name}")
 
     semantic_labels = set(accepted.selection.selected_node_types)
-    labels = tuple(
-        sorted(semantic_labels & set(expanded.selected_node_definitions))
-    )
+    labels = tuple(sorted(semantic_labels & set(expanded.selected_node_definitions)))
     relationships = tuple(sorted(expanded.selected_relationship_definitions))
     properties = {
         label: tuple(field["name"] for field in node["fields"])

@@ -81,10 +81,7 @@ def mask_trace_payload(value: Any, *, max_string_chars: int = 512) -> Any:
                 )
         return masked
     if isinstance(value, list | tuple):
-        return [
-            mask_trace_payload(item, max_string_chars=max_string_chars)
-            for item in value
-        ]
+        return [mask_trace_payload(item, max_string_chars=max_string_chars) for item in value]
     if isinstance(value, str):
         lowered = value.lower()
         if any(marker in lowered for marker in SIGNED_URL_MARKERS):

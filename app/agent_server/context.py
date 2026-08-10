@@ -55,9 +55,7 @@ def principal_from_auth_user(user: Any) -> AgentPrincipal:
             if item.startswith("request_scope:")
         ),
         roles=frozenset(
-            item.removeprefix("role:")
-            for item in permissions
-            if item.startswith("role:")
+            item.removeprefix("role:") for item in permissions if item.startswith("role:")
         ),
     )
 
@@ -81,8 +79,4 @@ def _strings(value: object) -> tuple[str, ...]:
         candidates = value
     else:
         return ()
-    return tuple(
-        item
-        for item in (str(candidate).strip() for candidate in candidates)
-        if item
-    )
+    return tuple(item for item in (str(candidate).strip() for candidate in candidates) if item)

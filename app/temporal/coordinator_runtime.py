@@ -53,6 +53,7 @@ from app.temporal.orchestration_activities import (
     StageGraphActivities,
     create_stagegraph_worker,
 )
+from app.temporal.registration.task_queues import BellLabsTaskQueues
 
 
 @dataclass(frozen=True)
@@ -76,10 +77,7 @@ class CoordinatorWorkerActivities:
 
     @property
     def completion_configured(self) -> bool:
-        return (
-            self.stagegraph.completion_configured
-            and self.goal_directed.completion_configured
-        )
+        return self.stagegraph.completion_configured and self.goal_directed.completion_configured
 
 
 @dataclass(frozen=True)
@@ -211,9 +209,10 @@ class TemporalFamilyReadiness:
 def coordinator_task_queues(base_task_queue: str) -> CoordinatorTaskQueues:
     if not base_task_queue:
         raise ValueError("base Temporal task queue must be non-empty")
+    logical = BellLabsTaskQueues.from_base(base_task_queue)
     return CoordinatorTaskQueues(
-        stagegraph=f"{base_task_queue}-stagegraph",
-        goal_directed=f"{base_task_queue}-goal-directed",
+        stagegraph=f"{logical.coordinator_family}-stagegraph",
+        goal_directed=f"{logical.coordinator_family}-goal-directed",
     )
 
 
@@ -226,9 +225,7 @@ def create_coordinator_workers(
     """Register both accepted coordinator workflow families with real activities."""
 
     if not activities.completion_configured:
-        raise ValueError(
-            "coordinator workers require durable typed-result completion providers"
-        )
+        raise ValueError("coordinator workers require durable typed-result completion providers")
     return CoordinatorWorkerSet(
         stagegraph=create_stagegraph_worker(
             client,

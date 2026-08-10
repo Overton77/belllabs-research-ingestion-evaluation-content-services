@@ -174,9 +174,7 @@ def _authorize_scoped_resource(
     metadata = value.setdefault("metadata", {})
     if not isinstance(metadata, dict):
         raise Auth.exceptions.HTTPException(status_code=403, detail="invalid resource metadata")
-    requested_scope = str(
-        metadata.get("request_scope") or value.get("request_scope") or ""
-    )
+    requested_scope = str(metadata.get("request_scope") or value.get("request_scope") or "")
     if not requested_scope:
         requested_scope = next(iter(principal.request_scopes))
     if requested_scope not in principal.request_scopes:
@@ -191,11 +189,15 @@ def _require_role(principal: AgentPrincipal, ctx: Auth.types.AuthContext) -> Non
         marker in action
         for marker in ("create", "update", "delete", "put", "run", "cancel", "copy")
     )
-    allowed = {"operator", "scheduler"} if write_action else {
-        "operator",
-        "scheduler",
-        "auditor",
-    }
+    allowed = (
+        {"operator", "scheduler"}
+        if write_action
+        else {
+            "operator",
+            "scheduler",
+            "auditor",
+        }
+    )
     if not principal.roles & allowed:
         raise Auth.exceptions.HTTPException(
             status_code=403,

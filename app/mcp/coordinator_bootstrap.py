@@ -43,11 +43,7 @@ def create_coordinator_http_deployment(
         )
     origins = settings.cors_origins
     allowed_hosts = sorted(
-        {
-            parsed.hostname
-            for origin in origins
-            if (parsed := urlsplit(origin)).hostname is not None
-        }
+        {parsed.hostname for origin in origins if (parsed := urlsplit(origin)).hostname is not None}
         | {"127.0.0.1", "localhost"}
     )
     server = create_coordinator_server(

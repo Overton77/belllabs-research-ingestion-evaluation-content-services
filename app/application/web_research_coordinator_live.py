@@ -387,9 +387,7 @@ class InMemoryMCPCapabilitySearchAdapter:
             "limit": request.limit,
         }
         if request.workflow_type_ref is not None:
-            payload["workflow_type_ref"] = request.workflow_type_ref.model_dump(
-                mode="json"
-            )
+            payload["workflow_type_ref"] = request.workflow_type_ref.model_dump(mode="json")
         if request.operation_class is not None:
             payload["operation_class"] = request.operation_class
         if request.runtime is not None:
@@ -487,9 +485,7 @@ async def run_live_coordinator(
             readiness=LiveRuntimeReadiness(stagegraph_task_queue=task_queue),
             coordinator_skill=DefinitionSelector(exact=coordinator_skill_record.ref),
             prompt_bindings=(
-                {"propose_workflow": prompt_record.ref}
-                if prompt_record is not None
-                else {}
+                {"propose_workflow": prompt_record.ref} if prompt_record is not None else {}
             ),
             flags=CoordinatorFeatureFlags(
                 capability_search_enabled=True,
@@ -522,8 +518,7 @@ async def run_live_coordinator(
             hits=(workflow_hit, *selected_hits),
         )
         selected_identities = {
-            (ref.kind, ref.logical_id)
-            for ref in (_required_hit_ref(hit) for hit in selected_hits)
+            (ref.kind, ref.logical_id) for ref in (_required_hit_ref(hit) for hit in selected_hits)
         }
         if selected_identities != REQUIRED_SELECTED_IDENTITIES:
             raise RuntimeError(
@@ -585,19 +580,13 @@ async def run_live_coordinator(
                 "internal_search_requests": [
                     request.model_dump(mode="json") for request in requests
                 ],
-                "selected_capability_hits": [
-                    hit.model_dump(mode="json") for hit in selected_hits
-                ],
+                "selected_capability_hits": [hit.model_dump(mode="json") for hit in selected_hits],
                 "selection_basis": {
                     "strategy": "top-current-profile-derived-exact-dependencies",
-                    "agent_profile_ref": selection.profile_record.ref.model_dump(
-                        mode="json"
-                    ),
+                    "agent_profile_ref": selection.profile_record.ref.model_dump(mode="json"),
                     "required_identity_assertion_phase": "post-retrieval-only",
                     "external_candidates_authorize_selection": False,
-                    "query_identity_hints_absent": _selection_queries_are_name_free(
-                        requests
-                    ),
+                    "query_identity_hints_absent": _selection_queries_are_name_free(requests),
                     "current_head_and_digest_verified": True,
                 },
                 "projection_generation": projection_generation_proof,
@@ -609,9 +598,7 @@ async def run_live_coordinator(
                 ),
                 "measured_metrics": {
                     "operator_correction_count": operator_correction_count,
-                    "planning_elapsed_ms": planning.transport[
-                        "planning_elapsed_ms"
-                    ],
+                    "planning_elapsed_ms": planning.transport["planning_elapsed_ms"],
                     "search_estimated_tokens_total": planning.transport[
                         "search_estimated_tokens_total"
                     ],
@@ -619,9 +606,7 @@ async def run_live_coordinator(
                 },
                 "coordinator_audit": {
                     "event_count": len(audit_events),
-                    "events": [
-                        event.model_dump(mode="json") for event in audit_events
-                    ],
+                    "events": [event.model_dump(mode="json") for event in audit_events],
                 },
             }
 
@@ -755,9 +740,7 @@ async def run_live_coordinator(
             readiness=LiveRuntimeReadiness(stagegraph_task_queue=task_queue),
             coordinator_skill=DefinitionSelector(exact=coordinator_skill_record.ref),
             prompt_bindings=(
-                {"propose_workflow": prompt_record.ref}
-                if prompt_record is not None
-                else {}
+                {"propose_workflow": prompt_record.ref} if prompt_record is not None else {}
             ),
             flags=CoordinatorFeatureFlags(
                 capability_search_enabled=True,
@@ -861,9 +844,7 @@ async def run_live_coordinator(
             launch_handle.run_id,
         )
         if persisted is None:
-            raise RuntimeError(
-                "Temporal completion did not materialize a durable typed result"
-            )
+            raise RuntimeError("Temporal completion did not materialize a durable typed result")
         result_read_started = perf_counter()
         retrieved = await _result_through_mounted_mcp(
             live_facade,
@@ -908,17 +889,14 @@ async def run_live_coordinator(
         observed_audit_operations = {event.operation for event in audit_events}
         if missing_audits := required_audit_operations - observed_audit_operations:
             raise RuntimeError(
-                "durable coordinator audit is incomplete: "
-                + ", ".join(sorted(missing_audits))
+                "durable coordinator audit is incomplete: " + ", ".join(sorted(missing_audits))
             )
         provider_stage_ids = ("search_firecrawl", "search_tavily")
         provider_success_count = sum(
-            bool(run_result.output_refs.get(stage_id))
-            for stage_id in provider_stage_ids
+            bool(run_result.output_refs.get(stage_id)) for stage_id in provider_stage_ids
         )
         browser_evidence_success_count = int(
-            bool(run_result.output_refs.get("browser_verify"))
-            and bool(screenshots.refs)
+            bool(run_result.output_refs.get("browser_verify")) and bool(screenshots.refs)
         )
         if provider_success_count != len(provider_stage_ids):
             raise RuntimeError("terminal run lacks successful evidence from both providers")
@@ -943,18 +921,14 @@ async def run_live_coordinator(
             "selected_capability_refs": [
                 _required_hit_ref(hit).model_dump(mode="json") for hit in selected_hits
             ],
-            "selected_capability_hits": [
-                hit.model_dump(mode="json") for hit in selected_hits
-            ],
+            "selected_capability_hits": [hit.model_dump(mode="json") for hit in selected_hits],
             "selection_basis": {
                 "strategy": "top-current-profile-derived-exact-dependencies",
                 "workflow_type_ref": workflow_ref.model_dump(mode="json"),
                 "agent_profile_ref": selection.profile_record.ref.model_dump(mode="json"),
                 "required_identity_assertion_phase": "post-retrieval-only",
                 "external_candidates_authorize_selection": False,
-                "query_identity_hints_absent": _selection_queries_are_name_free(
-                    requests
-                ),
+                "query_identity_hints_absent": _selection_queries_are_name_free(requests),
                 "current_head_and_digest_verified": True,
             },
             "projection_generation": projection_generation_proof,
@@ -997,10 +971,7 @@ async def run_live_coordinator(
             "coordinator_audit": {
                 "event_count": len(audit_events),
                 "event_refs": [
-                    (
-                        "postgres://belllabs_control/coordinator_audit_events/"
-                        f"{event.event_id}"
-                    )
+                    (f"postgres://belllabs_control/coordinator_audit_events/{event.event_id}")
                     for event in audit_events
                 ],
                 "events": [event.model_dump(mode="json") for event in audit_events],
@@ -1016,12 +987,12 @@ async def run_live_coordinator(
 def _live_settings() -> Settings:
     """Bind reviewed workspace Node/npx artifacts without relying on host PATH."""
 
-    node = (
-        Path(sys.base_prefix).resolve().parent / "node" / "bin" / "node.exe"
-    ).resolve(strict=True)
-    npx = (
-        PROJECT_ROOT.parent / ".tools" / "node_modules" / ".bin" / "npx.CMD"
-    ).resolve(strict=True)
+    node = (Path(sys.base_prefix).resolve().parent / "node" / "bin" / "node.exe").resolve(
+        strict=True
+    )
+    npx = (PROJECT_ROOT.parent / ".tools" / "node_modules" / ".bin" / "npx.CMD").resolve(
+        strict=True
+    )
     node_path = str(node.parent)
     current_path = os.environ.get("PATH", "")
     if node_path.casefold() not in {
@@ -1178,12 +1149,9 @@ async def _run_mounted_mcp_planning(
             if (
                 candidate_design_validation.launchable
                 or not candidate_design_validation.requires_publication
-                or candidate_id
-                not in candidate_design_validation.candidate_ids_requiring_promotion
+                or candidate_id not in candidate_design_validation.candidate_ids_requiring_promotion
             ):
-                raise RuntimeError(
-                    "external candidate design validation granted launch authority"
-                )
+                raise RuntimeError("external candidate design validation granted launch authority")
     planning_calls = [
         "coordinator_bootstrap",
         "get_capability:coordinator-skill-metadata",
@@ -1223,8 +1191,7 @@ async def _run_mounted_mcp_planning(
             "search_call_timings_ms": search_adapter.timings_ms,
             "search_token_use": search_adapter.token_use,
             "search_estimated_tokens_total": sum(
-                cast(int, item["estimated_tokens"])
-                for item in search_adapter.token_use
+                cast(int, item["estimated_tokens"]) for item in search_adapter.token_use
             ),
             "mutation_calls": [
                 "prepare_workflow_launch",
@@ -1255,27 +1222,16 @@ async def _progressive_coordinator_skill_proof(
     )
     manifest = await _mcp_read_json_resource(
         client,
-        (
-            "belllabs://catalog/skill/"
-            f"{selected_ref.logical_id}/{selected_ref.revision}/manifest"
-        ),
+        (f"belllabs://catalog/skill/{selected_ref.logical_id}/{selected_ref.revision}/manifest"),
     )
     skill_entry = next(
-        (
-            entry
-            for entry in record.definition.file_manifest
-            if entry.path == "SKILL.md"
-        ),
+        (entry for entry in record.definition.file_manifest if entry.path == "SKILL.md"),
         None,
     )
     if skill_entry is None:
         raise RuntimeError("selected coordinator skill manifest has no SKILL.md")
     skill_path = (
-        PROJECT_ROOT
-        / ".agents"
-        / "skills"
-        / record.definition.skill_name
-        / "SKILL.md"
+        PROJECT_ROOT / ".agents" / "skills" / record.definition.skill_name / "SKILL.md"
     ).resolve(strict=True)
     skill_bytes = await asyncio.to_thread(skill_path.read_bytes)
     actual_digest = f"sha256:{sha256(skill_bytes).hexdigest()}"
@@ -1321,14 +1277,9 @@ async def _external_discovery_proof(
     for candidate in (*mcp_batch.candidates, *skills_batch.candidates):
         record = await candidates.get_candidate(candidate.candidate_id)
         if record.candidate != candidate:
-            raise RuntimeError(
-                "external candidate readback does not match this discovery batch"
-            )
+            raise RuntimeError("external candidate readback does not match this discovery batch")
         evidence = await candidates.get_evidence(record.evidence_id)
-        if (
-            evidence.evidence.raw_response_digest
-            != candidate.raw_response_digest
-        ):
+        if evidence.evidence.raw_response_digest != candidate.raw_response_digest:
             raise RuntimeError("external discovery evidence digest does not match candidate")
         persisted.append(
             {
@@ -1344,9 +1295,7 @@ async def _external_discovery_proof(
                 "query": candidate.query,
                 "retrieved_at": evidence.evidence.retrieved_at.isoformat(),
                 "raw_response_digest": candidate.raw_response_digest,
-                "raw_response_size_bytes": (
-                    evidence.evidence.raw_response_size_bytes
-                ),
+                "raw_response_size_bytes": (evidence.evidence.raw_response_size_bytes),
                 "trust_tier": candidate.trust_tier,
                 "inspection_status": candidate.inspection_status,
                 "promoted_ref": candidate.promoted_ref,
@@ -1588,9 +1537,7 @@ async def _projection_generation_proof(
     hits: tuple[CapabilitySearchHit, ...],
 ) -> dict[str, object]:
     generations = {
-        hit.projection_generation
-        for hit in hits
-        if hit.projection_generation is not None
+        hit.projection_generation for hit in hits if hit.projection_generation is not None
     }
     if len(generations) != 1:
         raise RuntimeError("selected search evidence spans multiple projection generations")
@@ -1602,16 +1549,12 @@ async def _projection_generation_proof(
         or record.actual_count != record.expected_count
         or record.actual_source_set_digest != record.expected_source_set_digest
     ):
-        raise RuntimeError(
-            "selected search generation lacks active source-set verification"
-        )
+        raise RuntimeError("selected search generation lacks active source-set verification")
     active_by_kind: dict[str, str] = {}
     for kind in sorted({hit.kind for hit in hits}, key=lambda item: item.value):
         active = await repository.active_for_kind(tenant_scope, kind)
         if active != projection_generation:
-            raise RuntimeError(
-                "selected search evidence is not from the active kind generation"
-            )
+            raise RuntimeError("selected search evidence is not from the active kind generation")
         active_by_kind[kind.value] = active
     return {
         "projection_generation": projection_generation,
@@ -1623,15 +1566,9 @@ async def _projection_generation_proof(
         "embedding_model_id": record.embedding_model_id,
         "embedding_dimensions": record.embedding_dimensions,
         "search_document_format_version": record.search_document_format_version,
-        "verified_at": (
-            record.verified_at.isoformat()
-            if record.verified_at is not None
-            else None
-        ),
+        "verified_at": (record.verified_at.isoformat() if record.verified_at is not None else None),
         "activated_at": (
-            record.activated_at.isoformat()
-            if record.activated_at is not None
-            else None
+            record.activated_at.isoformat() if record.activated_at is not None else None
         ),
         "active_generation_by_selected_kind": active_by_kind,
     }
@@ -1764,8 +1701,7 @@ def _profile_derived_selection(
             and hit.authorization_state == AuthorizationState.SELECTABLE
             and current.get((ref.kind, ref.logical_id)) is not None
             and current[(ref.kind, ref.logical_id)].ref == ref
-            and sha256_digest(current[(ref.kind, ref.logical_id)].definition)
-            == ref.digest
+            and sha256_digest(current[(ref.kind, ref.logical_id)].definition) == ref.digest
         )
     }
     selectable_by_ref[profile_ref] = profile_hit
@@ -1775,10 +1711,7 @@ def _profile_derived_selection(
             "internal bounded search did not retrieve every exact dependency derived "
             "from the selected Agent Profile: "
             + ", ".join(
-                sorted(
-                    f"{ref.kind.value}:{ref.logical_id}@{ref.revision}"
-                    for ref in missing
-                )
+                sorted(f"{ref.kind.value}:{ref.logical_id}@{ref.revision}" for ref in missing)
             )
         )
     return tuple(
@@ -1983,10 +1916,7 @@ def _operation_templates(
             for tool_ref in profile.tool_refs
             for tool_record in (_record_for_exact_ref(records, tool_ref),)
             for tool in (tool_record.definition,)
-            if (
-                isinstance(tool, MCPToolDefinition)
-                and tool.server_ref == server_ref
-            )
+            if (isinstance(tool, MCPToolDefinition) and tool.server_ref == server_ref)
         )
         if not allowed_tools:
             raise RuntimeError(
@@ -1998,8 +1928,7 @@ def _operation_templates(
                 revision=record.ref.revision,
                 transport=definition.transport,
                 endpoint_ref=(
-                    definition.endpoint
-                    or f"catalog://mcp-server/{server_ref.logical_id}/stdio"
+                    definition.endpoint or f"catalog://mcp-server/{server_ref.logical_id}/stdio"
                 ),
                 allowed_tools=allowed_tools,
                 schema_digest=definition.schema_digest,
@@ -2075,9 +2004,7 @@ def _operation_templates(
             agent_profile_ref=profile_record.ref,
             capability_grant=CapabilityGrant(
                 capabilities=profile.maximum_capability_request.capabilities,
-                mcp_server_ids=frozenset(
-                    ref.logical_id for ref in profile.mcp_server_refs
-                ),
+                mcp_server_ids=frozenset(ref.logical_id for ref in profile.mcp_server_refs),
                 network_hosts=frozenset(hosts),
             ),
             workspace=WorkspaceContract(

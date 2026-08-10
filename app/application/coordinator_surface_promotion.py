@@ -129,11 +129,7 @@ def plan_coordinator_surface_promotion(
         key = (definition.kind.value, definition.logical_id)
         revisions = by_identity.get(key, [])
         head = max(revisions, key=lambda item: item.ref.revision) if revisions else None
-        if (
-            head is not None
-            and head.retired_at is None
-            and head.definition == definition
-        ):
+        if head is not None and head.retired_at is None and head.definition == definition:
             reused.append(head.ref)
             continue
         publish.append(definition)

@@ -30,6 +30,7 @@ configure_agent_server_tracing()
 async def lifespan(runtime_app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     if not settings.has_application_postgres:
+
         async def unavailable() -> bool:
             return False
 

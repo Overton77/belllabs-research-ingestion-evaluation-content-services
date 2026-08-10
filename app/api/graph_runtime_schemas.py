@@ -158,13 +158,9 @@ def graph_runtime_contract_schemas() -> dict[str, object]:
         "operation_journal_settlement": OperationJournalSettlement,
         "operation_claim_result": OperationClaimResult,
     }
-    schemas: dict[str, object] = {
-        name: model.model_json_schema() for name, model in models.items()
-    }
+    schemas: dict[str, object] = {name: model.model_json_schema() for name, model in models.items()}
     schemas["runtime_intervention"] = TypeAdapter(RuntimeIntervention).json_schema()
-    schemas["operation_execution_outcome"] = TypeAdapter(
-        OperationExecutionOutcome
-    ).json_schema()
+    schemas["operation_execution_outcome"] = TypeAdapter(OperationExecutionOutcome).json_schema()
     schemas["operation_execution_outcome_v2"] = TypeAdapter(
         OperationExecutionOutcomeV2
     ).json_schema()

@@ -261,8 +261,7 @@ def reduce_lifecycle(
                 "async_child_decision_exists", "async child decision already exists"
             )
         if any(
-            item.fact_id == action.fact_id
-            and item.outcome != AsyncChildDecisionOutcome.DEFERRED
+            item.fact_id == action.fact_id and item.outcome != AsyncChildDecisionOutcome.DEFERRED
             for item in child.decisions
         ):
             raise ReductionRejected(
@@ -276,9 +275,7 @@ def reduce_lifecycle(
             reason=action.reason,
             decided_at=command.occurred_at,
         )
-        async_children[index] = child.model_copy(
-            update={"decisions": (*child.decisions, decision)}
-        )
+        async_children[index] = child.model_copy(update={"decisions": (*child.decisions, decision)})
     elif isinstance(action, ProposeContinuationAction):
         _validate_continuation_dimensions(next_budget, action.proposal)
         if any(item.proposal_id == action.proposal.proposal_id for item in pending_proposals):
@@ -757,9 +754,7 @@ def _observe_effect(
             "observations": (*claim.observations, observation),
         }
     )
-    updated = state.model_copy(
-        update={"claims": {**state.claims, action.effect_id: updated_claim}}
-    )
+    updated = state.model_copy(update={"claims": {**state.claims, action.effect_id: updated_claim}})
     return updated, EffectLedgerEntry(
         entry_id=_stable_id(
             "effect-entry", state.run_id, action.effect_id, "observation", action.observation_id
@@ -809,9 +804,7 @@ def _settle_effect(
         update={"disposition": EffectDisposition(action.outcome.value), "settlement": settlement}
     )
     updated_claim = ConsequentialEffectClaim.model_validate(updated_claim.model_dump(mode="python"))
-    updated = state.model_copy(
-        update={"claims": {**state.claims, action.effect_id: updated_claim}}
-    )
+    updated = state.model_copy(update={"claims": {**state.claims, action.effect_id: updated_claim}})
     return updated, EffectLedgerEntry(
         entry_id=_stable_id(
             "effect-entry", state.run_id, action.effect_id, "settlement", action.settlement_id
@@ -901,9 +894,7 @@ def _terminal_outcome(
             "non-cancellation terminalization requires every pause to be resumed",
         )
     if proposal.expected_run_version != projection.version:
-        raise ReductionRejected(
-            "stale_control_revision", "proposal run-control revision is stale"
-        )
+        raise ReductionRejected("stale_control_revision", "proposal run-control revision is stale")
     if proposal.workflow_type_digest != projection.workflow_type_ref.digest:
         raise ReductionRejected(
             "stale_workflow_type_revision", "proposal Workflow Type revision is stale"

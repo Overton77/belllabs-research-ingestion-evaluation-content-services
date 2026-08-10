@@ -577,17 +577,13 @@ class OpenAIAgentsSandboxRuntime:
             else None
         )
         if binding.workspace.restore_snapshot_id is not None and restored_session is None:
-            raise ValueError(
-                "bound snapshot restore has no admitted cloned sandbox session"
-            )
+            raise ValueError("bound snapshot restore has no admitted cloned sandbox session")
         archive = (
             self._snapshot_bridge.begin_capture(binding, invocation.workspace)
             if self._snapshot_bridge is not None and restored_session is None
             else None
         )
-        retention_key = (
-            binding.workspace.workspace_id if self._retain_sandbox_sessions else None
-        )
+        retention_key = binding.workspace.workspace_id if self._retain_sandbox_sessions else None
         retained_lock = (
             self._retained_sandbox_locks.setdefault(retention_key, asyncio.Lock())
             if retention_key is not None
@@ -596,9 +592,7 @@ class OpenAIAgentsSandboxRuntime:
         if retained_lock is not None:
             await retained_lock.acquire()
         retained_session = (
-            self._retained_sandboxes.get(retention_key)
-            if retention_key is not None
-            else None
+            self._retained_sandboxes.get(retention_key) if retention_key is not None else None
         )
         session = restored_session or retained_session
         if session is None:

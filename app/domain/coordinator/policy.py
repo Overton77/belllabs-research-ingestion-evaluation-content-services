@@ -50,16 +50,12 @@ def evaluate_selection(facts: SelectionFacts) -> SelectionDecision:
     if facts.lifecycle_status == CatalogAssetStatus.REVOKED:
         return SelectionDecision(
             authorization_state=AuthorizationState.UNAVAILABLE,
-            reasons=(
-                _reason(PolicyReasonCode.ASSET_REVOKED, "The asset has been revoked."),
-            ),
+            reasons=(_reason(PolicyReasonCode.ASSET_REVOKED, "The asset has been revoked."),),
         )
     if facts.lifecycle_status == CatalogAssetStatus.RETIRED:
         return SelectionDecision(
             authorization_state=AuthorizationState.UNAVAILABLE,
-            reasons=(
-                _reason(PolicyReasonCode.ASSET_RETIRED, "The asset has been retired."),
-            ),
+            reasons=(_reason(PolicyReasonCode.ASSET_RETIRED, "The asset has been retired."),),
         )
     if not facts.source_digest_verified:
         return SelectionDecision(

@@ -41,12 +41,8 @@ class CoordinatorRunResourceService:
             run_id=run_id,
         )
         if binding is None:
-            raise SemanticInputBindingNotFound(
-                "Workflow Run semantic input binding was not found"
-            )
+            raise SemanticInputBindingNotFound("Workflow Run semantic input binding was not found")
         return {
             "semantic_input_binding": binding.model_dump(mode="json"),
-            "operation_execution_binding_refs": list(
-                binding.operation_execution_binding_refs
-            ),
+            "operation_execution_binding_refs": list(binding.operation_execution_binding_refs),
         }

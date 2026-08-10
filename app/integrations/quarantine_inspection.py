@@ -191,8 +191,7 @@ class StaticQuarantineInspectionRunner:
             len(payload.files) > bounds.max_files
             or total_bytes > bounds.max_download_bytes
             or largest > bounds.max_file_bytes
-            or payload.network_requirement_hosts
-            - execution.workspace.network_host_allowlist
+            or payload.network_requirement_hosts - execution.workspace.network_host_allowlist
         ):
             raise QuarantineInspectionDependencyError(
                 "candidate payload exceeds the immutable inspection envelope"
@@ -243,9 +242,7 @@ class StaticQuarantineInspectionRunner:
                 f"trusted static inspection exited with code {result.exit_code}"
             )
         try:
-            scanned = StaticScanOutput.model_validate_json(
-                result.stdout.decode("utf-8")
-            )
+            scanned = StaticScanOutput.model_validate_json(result.stdout.decode("utf-8"))
         except (UnicodeDecodeError, ValueError) as error:
             raise QuarantineInspectionDependencyError(
                 "trusted static inspection returned an invalid bounded report"
@@ -373,9 +370,7 @@ class InMemoryStaticCandidatePayloadProvider:
         try:
             return self._payloads[execution.candidate.candidate.candidate_id]
         except KeyError as error:
-            raise QuarantineInspectionDependencyError(
-                "candidate payload is unavailable"
-            ) from error
+            raise QuarantineInspectionDependencyError("candidate payload is unavailable") from error
 
 
 __all__ = [

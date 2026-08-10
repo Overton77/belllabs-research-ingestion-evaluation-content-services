@@ -13,7 +13,7 @@ with workflow.unsafe.imports_passed_through():
 
 @workflow.defn
 class SandboxAgentProbeWorkflow:
-    """PRE-EMPTIVE SETUP: one minimal durable Agents SDK + Docker sandbox workflow."""
+    """Pre-production runtime qualification probe; never a macro scheduler."""
 
     @workflow.run
     async def run(self, prompt: str) -> str:
@@ -42,7 +42,6 @@ class SandboxAgentProbeWorkflow:
                 ),
             )
         except MaxTurnsExceeded:
-            # Do not let Temporal retry a deliberately bounded model run forever.
             raise ApplicationError(
                 "Sandbox agent exceeded its three-turn bootstrap budget",
                 non_retryable=True,

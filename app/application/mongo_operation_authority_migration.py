@@ -165,10 +165,8 @@ class MongoOperationBindingAuthorityMigrationRepository:
             await document.insert()
         except DuplicateKeyError:
             prior = await OperationExecutionBindingAuthorityV2Document.find_one(
-                OperationExecutionBindingAuthorityV2Document.binding_id
-                == binding.binding_id,
-                OperationExecutionBindingAuthorityV2Document.request_scope
-                == binding.request_scope,
+                OperationExecutionBindingAuthorityV2Document.binding_id == binding.binding_id,
+                OperationExecutionBindingAuthorityV2Document.request_scope == binding.request_scope,
             )
             if (
                 prior is None
@@ -237,9 +235,7 @@ class MongoOperationBindingAuthorityMigrationRepository:
                         await _quarantine(
                             source_id=source_id,
                             reason_code="target_digest_or_lineage_conflict",
-                            observed_digest=(
-                                prior.canonical_digest if prior is not None else None
-                            ),
+                            observed_digest=(prior.canonical_digest if prior is not None else None),
                             expected_digest=record.canonical_digest,
                         )
                         quarantined += 1
@@ -272,8 +268,7 @@ class MongoOperationBindingAuthorityMigrationRepository:
         target_source_records = [
             record
             for record in target_records
-            if record.source_document_id
-            in {source.source_document_id for source in source_records}
+            if record.source_document_id in {source.source_document_id for source in source_records}
         ]
         target_digest = _records_digest(target_source_records)
         batch_verified = (
@@ -292,9 +287,7 @@ class MongoOperationBindingAuthorityMigrationRepository:
         complete = remaining == 0
         if complete:
             all_source_documents = (
-                await OperationExecutionBindingDocument.find_all()
-                .sort("+binding_id")
-                .to_list()
+                await OperationExecutionBindingDocument.find_all().sort("+binding_id").to_list()
             )
             source_records = []
             invalid_source_ids: set[str] = set()
@@ -307,15 +300,12 @@ class MongoOperationBindingAuthorityMigrationRepository:
             target_source_records = [
                 record
                 for record in target_records
-                if record.source_collection
-                == OperationExecutionBindingDocument.Settings.name
+                if record.source_collection == OperationExecutionBindingDocument.Settings.name
                 and record.source_document_id in source_ids
             ]
             source_digest = _records_digest(source_records)
             target_digest = _records_digest(target_source_records)
-            quarantine_documents = (
-                await OperationMigrationQuarantineDocument.find_all().to_list()
-            )
+            quarantine_documents = await OperationMigrationQuarantineDocument.find_all().to_list()
             quarantined_source_ids = {
                 document.source_document_id for document in quarantine_documents
             }
@@ -455,9 +445,7 @@ class VersionedMongoOperationBindingRepository:
         self,
         requested_schema_version: Literal["1", "2"] | None,
     ) -> Literal["v2", "legacy"]:
-        requested = requested_schema_version or (
-            "2" if self._write_authority == "v2" else "1"
-        )
+        requested = requested_schema_version or ("2" if self._write_authority == "v2" else "1")
         return select_authority_version(
             requested_schema_version=requested,
             v2_available=True,
@@ -516,9 +504,7 @@ def _legacy_record(
     }
     for field_name, observed in mirrored.items():
         if observed is not None and observed != binding_values[field_name]:
-            raise ValueError(
-                f"legacy binding mirror field conflicts with payload: {field_name}"
-            )
+            raise ValueError(f"legacy binding mirror field conflicts with payload: {field_name}")
     return BindingAuthorityRecord(
         schema_version="1",
         binding=binding,

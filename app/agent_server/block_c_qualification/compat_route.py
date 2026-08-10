@@ -67,10 +67,7 @@ def decide_resume_route(
     if (
         source_graph_id == GRAPH_ID_N
         and source_compat_version == COMPAT_VERSION_N
-        and (
-            target_graph_id == GRAPH_ID_N1
-            or target_compat_version == COMPAT_VERSION_N1
-        )
+        and (target_graph_id == GRAPH_ID_N1 or target_compat_version == COMPAT_VERSION_N1)
     ):
         return CompatibilityRouteDecision(
             allowed=False,

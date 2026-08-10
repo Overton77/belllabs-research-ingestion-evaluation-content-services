@@ -16,8 +16,13 @@ with workflow.unsafe.imports_passed_through():
         RunCompositionLink,
         RunDependencyClass,
     )
-    from app.domain.orchestration.contracts import StageGraphRunInput, StageGraphRunResult
+    from app.domain.orchestration.contracts import (
+        BellLabsRunInput,
+        StageGraphRunInput,
+        StageGraphRunResult,
+    )
     from app.temporal.stagegraph_workflow import StageGraphWorkflow
+    from app.temporal.workflows.belllabs_run import BellLabsRunWorkflow
 
 
 @workflow.defn(name="belllabs.linked-run")
@@ -80,6 +85,9 @@ class LinkedRunWorkflow:
                 "continuation_state": (
                     continuation.model_dump(mode="json") if continuation is not None else None
                 ),
+                "legacy_direct_family_fixture": bool(
+                    payload.get("legacy_direct_family_fixture", False)
+                ),
             },
             id=observer_id,
             task_queue=workflow.info().task_queue,
@@ -134,14 +142,38 @@ class LinkedRunObserverWorkflow:
         )
         child_input = StageGraphRunInput(**payload["child_input"])
         timeout = timedelta(seconds=int(payload.get("execution_timeout_seconds", 3600)))
-        handle = await workflow.start_child_workflow(
-            StageGraphWorkflow.run,
-            child_input,
-            id=f"linked-child:{link.child_run_id}",
-            task_queue=str(payload["child_task_queue"]),
-            execution_timeout=timeout,
-            parent_close_policy=workflow.ParentClosePolicy.REQUEST_CANCEL,
-        )
+        handle: Any
+        if payload.get("legacy_direct_family_fixture", False):
+            handle = await workflow.start_child_workflow(
+                StageGraphWorkflow.run,
+                child_input,
+                id=f"linked-child:{link.child_run_id}",
+                task_queue=str(payload["child_task_queue"]),
+                execution_timeout=timeout,
+                parent_close_policy=workflow.ParentClosePolicy.REQUEST_CANCEL,
+            )
+        else:
+            root_input = BellLabsRunInput(
+                schema_version="belllabs.temporal-root.v1",
+                run_id=link.child_run_id,
+                request_scope=link.request_scope,
+                effective_configuration_digest=child_input.effective_configuration_digest,
+                workflow_type_digest=child_input.blueprint_digest,
+                family="StageGraph",
+                family_input={
+                    **payload["child_input"],
+                    "durable_operation_children": True,
+                },
+                family_task_queue=str(payload["child_task_queue"]),
+            )
+            handle = await workflow.start_child_workflow(
+                BellLabsRunWorkflow.run,
+                root_input,
+                id=root_input.workflow_id,
+                task_queue=str(payload["child_task_queue"]),
+                execution_timeout=timeout,
+                parent_close_policy=workflow.ParentClosePolicy.REQUEST_CANCEL,
+            )
         self._child_handle = handle
         if self._cancel_requested:
             handle.cancel()

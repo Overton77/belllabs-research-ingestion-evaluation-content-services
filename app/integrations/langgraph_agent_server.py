@@ -304,9 +304,7 @@ class LangGraphAgentServerInterventionClient:
             limit=100,
         )
         if isinstance(intervention, CancelRunIntervention):
-            active = [
-                run for run in runs if run.get("status") in {"pending", "running"}
-            ]
+            active = [run for run in runs if run.get("status") in {"pending", "running"}]
             if active:
                 return await self.apply(intervention, binding_id=binding_id)
             return self._receipt(
@@ -318,8 +316,7 @@ class LangGraphAgentServerInterventionClient:
         matches = [
             run
             for run in runs
-            if (run.get("metadata") or {}).get("belllabs_command_id")
-            == intervention.command_id
+            if (run.get("metadata") or {}).get("belllabs_command_id") == intervention.command_id
             and (run.get("metadata") or {}).get("belllabs_command_digest")
             == intervention.request_digest
             and (run.get("metadata") or {}).get("belllabs_binding_id") == binding_id
@@ -412,9 +409,7 @@ class LangGraphAgentServerRepairClient:
     ) -> PrivilegedRepairObservation | None:
         self._require_route(intervention, binding)
         assert binding.agent_thread is not None
-        latest = await self._client.threads.get_state(
-            binding.agent_thread.agent_server_thread_id
-        )
+        latest = await self._client.threads.get_state(binding.agent_thread.agent_server_thread_id)
         repair = (latest.get("values") or {}).get("runtime_reconciliation")
         if not isinstance(repair, Mapping) or repair.get("command_id") != intervention.command_id:
             return None

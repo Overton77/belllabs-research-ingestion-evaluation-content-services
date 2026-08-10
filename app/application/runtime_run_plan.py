@@ -117,8 +117,7 @@ def compile_structural_graph_assembly(
         if (
             capability_manifest_ref.kind.value != "capability_manifest"
             or capability_manifest_ref.logical_id != capability_manifest.logical_id
-            or capability_manifest_ref.schema_version
-            != capability_manifest.schema_version
+            or capability_manifest_ref.schema_version != capability_manifest.schema_version
             or capability_manifest_ref.digest != capability_manifest.digest
         ):
             raise ValueError("capability manifest reference is not exact")
@@ -219,10 +218,7 @@ def _effective_capability_ids(
         raise ValueError(f"capability readiness contains unknown IDs: {sorted(unknown)}")
     for capability_id, readiness_fact in readiness_by_id.items():
         record = records[capability_id]
-        if (
-            readiness_fact.maturity != record.maturity
-            or readiness_fact.enabled != record.enabled
-        ):
+        if readiness_fact.maturity != record.maturity or readiness_fact.enabled != record.enabled:
             raise ValueError("capability readiness differs from the pinned maturity manifest")
     allowed: set[str] = set()
     for capability_id, record in records.items():
@@ -302,8 +298,7 @@ def _validate_delegation(
     if assembly.synchronous_subagent_refs and "sync" not in allowed:
         raise ValueError("operation assembly enables synchronous delegation without authority")
     if (
-        assembly.async_subagent_target_refs
-        or assembly.implementation_kind == "async_child"
+        assembly.async_subagent_target_refs or assembly.implementation_kind == "async_child"
     ) and "async" not in allowed:
         raise ValueError("operation assembly enables async delegation without authority")
     if assembly.implementation_kind == "linked_run" and "linked_run" not in allowed:
@@ -371,8 +366,7 @@ def compile_structural_graph_assembly_v3(
         for item in requirements
     )
     bindings = tuple(
-        StageExecutionBindingV2.model_validate(item.model_dump(mode="python"))
-        for item in bindings
+        StageExecutionBindingV2.model_validate(item.model_dump(mode="python")) for item in bindings
     )
     assemblies = {
         key: OperationAssemblySpecV3.model_validate(value.model_dump(mode="python"))
@@ -445,10 +439,7 @@ def compile_structural_graph_assembly_v3(
             raise ValueError("stage binding operation contract is incompatible with requirement")
         if binding.resource_envelope_ref != assembly.resource_envelope_ref:
             raise ValueError("stage binding and operation assembly resource envelopes differ")
-        if (
-            binding.temporal_execution_profile_ref
-            != assembly.temporal_execution_profile_ref
-        ):
+        if binding.temporal_execution_profile_ref != assembly.temporal_execution_profile_ref:
             raise ValueError(
                 "stage binding and operation assembly Temporal execution profiles differ"
             )

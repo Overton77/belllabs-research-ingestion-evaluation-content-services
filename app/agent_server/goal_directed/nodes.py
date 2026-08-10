@@ -23,11 +23,7 @@ async def admit_goal_binding(
 async def bounded_agent_placeholder(
     state: GoalDirectedState,
 ) -> dict[str, tuple[str, ...]]:
-    return {
-        "event_refs": (
-            f"bounded-agent-placeholder:{state['graph_assembly_digest']}",
-        )
-    }
+    return {"event_refs": (f"bounded-agent-placeholder:{state['graph_assembly_digest']}",)}
 
 
 async def independent_verifier_placeholder(

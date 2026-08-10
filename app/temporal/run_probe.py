@@ -7,7 +7,7 @@ from temporalio.contrib.openai_agents import OpenAIAgentsPlugin
 
 from app.config import get_settings
 from app.integrations.temporal import create_temporal_client
-from app.temporal.workflows import SandboxAgentProbeWorkflow
+from app.temporal.workflows.sandbox_probe import SandboxAgentProbeWorkflow
 
 
 async def main() -> None:

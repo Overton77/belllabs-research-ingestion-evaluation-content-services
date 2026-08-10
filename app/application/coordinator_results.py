@@ -125,13 +125,10 @@ class TerminalWorkflowCompletionService:
                 run_id=completion.run_id,
             )
             if binding is None:
-                raise ValueError(
-                    "typed Workflow Result requires its semantic input binding"
-                )
+                raise ValueError("typed Workflow Result requires its semantic input binding")
             if (
                 operation_binding_refs
-                and operation_binding_refs
-                != binding.operation_execution_binding_refs
+                and operation_binding_refs != binding.operation_execution_binding_refs
             ):
                 raise ValueError(
                     "typed Workflow Result operation bindings conflict with launch authority"
@@ -162,7 +159,5 @@ class TerminalWorkflowCompletionService:
             reconciled.phase.value != "terminal"
             or reconciled.terminal_outcome != completion.terminal_outcome
         ):
-            raise RuntimeError(
-                "Workflow Run terminality changed during result materialization"
-            )
+            raise RuntimeError("Workflow Run terminality changed during result materialization")
         return persisted

@@ -51,9 +51,7 @@ class Settings(BaseSettings):
     agent_server_endpoint: str = "http://127.0.0.1:2024"
     agent_server_api_key: SecretStr | None = None
     agent_server_stagegraph_id: Literal["belllabs_stagegraph"] = "belllabs_stagegraph"
-    agent_server_goal_directed_id: Literal["belllabs_goal_directed"] = (
-        "belllabs_goal_directed"
-    )
+    agent_server_goal_directed_id: Literal["belllabs_goal_directed"] = "belllabs_goal_directed"
     agent_server_deployment_endpoint_id: str | None = None
     agent_server_deployment_revision: str | None = None
     bell_labs_agent_auth_issuer: str | None = None
@@ -86,9 +84,7 @@ class Settings(BaseSettings):
     capability_search_enabled: bool = False
     external_capability_discovery_enabled: bool = False
     coordinator_launch_enabled: bool = False
-    capability_embedding_model: Literal["text-embedding-3-small"] = (
-        "text-embedding-3-small"
-    )
+    capability_embedding_model: Literal["text-embedding-3-small"] = "text-embedding-3-small"
     capability_embedding_dimensions: Literal[1536] = 1536
     capability_projection_lease_seconds: int = Field(
         default=120,
@@ -150,12 +146,7 @@ class Settings(BaseSettings):
     web_research_tavily_mcp_command: Path | None = None
     web_research_tavily_mcp_arguments: tuple[str, ...] = ()
     web_research_tavily_mcp_module: Path = (
-        PROJECT_ROOT.parent
-        / ".tools"
-        / "node_modules"
-        / "tavily-mcp"
-        / "build"
-        / "index.js"
+        PROJECT_ROOT.parent / ".tools" / "node_modules" / "tavily-mcp" / "build" / "index.js"
     )
     web_research_agent_browser_node: Path | None = None
     web_research_agent_browser_entrypoint: Path = (
@@ -197,12 +188,8 @@ class Settings(BaseSettings):
     neo4j_uri: str = Field(validation_alias=AliasChoices("NEO4J_URI", "NEO$J_URI"))
     neo4j_aura_username: str
     neo4j_aura_password: SecretStr
-    schema_deployment_issuer_authority_ref: str = (
-        "issue-12:graph-schema-deployment-service"
-    )
-    schema_workspace_issuer_authority_ref: str = (
-        "issue-13:schema-workspace-materialization-service"
-    )
+    schema_deployment_issuer_authority_ref: str = "issue-12:graph-schema-deployment-service"
+    schema_workspace_issuer_authority_ref: str = "issue-13:schema-workspace-materialization-service"
     graph_capability_authority_ref: str = "graph-authority:read-capability-service"
     schema_workspace_materializer_version: str = "issue-13-materializer-v1"
 
@@ -249,9 +236,7 @@ class Settings(BaseSettings):
     @property
     def application_backfill_postgres_dsn(self) -> str:
         if self.application_backfill_database_direct is None:
-            raise ValueError(
-                "APPLICATION_BACKFILL_DATABASE_DIRECT is required for backfill"
-            )
+            raise ValueError("APPLICATION_BACKFILL_DATABASE_DIRECT is required for backfill")
         return self.application_backfill_database_direct.get_secret_value()
 
     @property
@@ -262,9 +247,7 @@ class Settings(BaseSettings):
 
     @property
     def coordinator_jwt_issuer(self) -> str:
-        return self.coordinator_mcp_jwt_issuer or (
-            f"{self.supabase_url.rstrip('/')}/auth/v1"
-        )
+        return self.coordinator_mcp_jwt_issuer or (f"{self.supabase_url.rstrip('/')}/auth/v1")
 
     @property
     def checkpoint_signing_key(self) -> bytes:

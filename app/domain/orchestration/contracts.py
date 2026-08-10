@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any, Literal
 
@@ -22,6 +22,152 @@ StageStatus = Literal[
 class ExecutionIdentity:
     run_id: str
     execution_epoch: int = 1
+
+
+WorkflowFamily = Literal["StageGraph", "GoalDirected"]
+
+
+@dataclass(frozen=True)
+class WorkflowMessage:
+    """Reference-only command delivered durably to a workflow execution."""
+
+    message_id: str
+    sequence: int
+    kind: Literal["control", "fact", "result", "cancel"]
+    payload_ref: str
+    execution_generation: int = 1
+
+    def __post_init__(self) -> None:
+        if not self.message_id or not self.payload_ref:
+            raise ValueError("workflow messages require stable identities and payload refs")
+        if self.sequence < 1 or self.execution_generation < 1:
+            raise ValueError("workflow message sequence and generation must be positive")
+
+
+@dataclass(frozen=True)
+class WorkflowMessageReceipt:
+    message_id: str
+    sequence: int
+    status: Literal["accepted", "duplicate", "stale_generation", "gap"]
+    technical_segment: int
+
+
+@dataclass(frozen=True)
+class RunContinuityState:
+    """Compact semantic state carried across technical history segments."""
+
+    execution_epoch: int = 1
+    technical_segment: int = 1
+    execution_generation: int = 1
+    family_workflow_id: str = ""
+    active_operation_ids: tuple[str, ...] = ()
+    pending_message_ids: tuple[str, ...] = ()
+    message_receipts: tuple[WorkflowMessageReceipt, ...] = ()
+    last_message_sequence: int = 0
+    reservation_balances: dict[str, int] = field(default_factory=dict)
+    linked_run_ids: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if min(self.execution_epoch, self.technical_segment, self.execution_generation) < 1:
+            raise ValueError("continuity identities must be positive")
+        message_ids = tuple(receipt.message_id for receipt in self.message_receipts)
+        if len(message_ids) != len(set(message_ids)):
+            raise ValueError("continuity receipts require unique message identities")
+        accepted_sequences = tuple(
+            receipt.sequence
+            for receipt in self.message_receipts
+            if receipt.status == "accepted"
+        )
+        if accepted_sequences != tuple(sorted(set(accepted_sequences))):
+            raise ValueError("accepted continuity receipts must be unique and ordered")
+        if accepted_sequences and accepted_sequences[-1] > self.last_message_sequence:
+            raise ValueError("receipt frontier exceeds the message sequence frontier")
+
+    def next_technical_segment(self) -> RunContinuityState:
+        return replace(self, technical_segment=self.technical_segment + 1)
+
+
+@dataclass(frozen=True)
+class BellLabsRunInput:
+    schema_version: Literal["belllabs.temporal-root.v1"]
+    run_id: str
+    request_scope: str
+    effective_configuration_digest: str
+    workflow_type_digest: str
+    family: WorkflowFamily
+    family_input: dict[str, Any]
+    family_task_queue: str
+    continuity: RunContinuityState = field(default_factory=RunContinuityState)
+    continue_as_new_event_threshold: int = 10_000
+    force_continue_as_new: bool = False
+
+    def __post_init__(self) -> None:
+        if not all(
+            (
+                self.run_id,
+                self.request_scope,
+                self.effective_configuration_digest,
+                self.workflow_type_digest,
+                self.family_task_queue,
+            )
+        ):
+            raise ValueError("root input requires exact identities, digests, and task queue")
+        if self.continuity.execution_epoch < 1:
+            raise ValueError("execution epoch must be positive")
+        if self.continue_as_new_event_threshold < 1:
+            raise ValueError("Continue-As-New threshold must be positive")
+
+    @property
+    def workflow_id(self) -> str:
+        return f"belllabs-run/{self.run_id}"
+
+    @property
+    def family_workflow_id(self) -> str:
+        return f"family/{self.run_id}/{self.continuity.execution_epoch}"
+
+
+@dataclass(frozen=True)
+class BellLabsRunResult:
+    run_id: str
+    execution_epoch: int
+    technical_segment: int
+    family: WorkflowFamily
+    family_result: dict[str, Any]
+    message_receipts: tuple[WorkflowMessageReceipt, ...] = ()
+
+
+@dataclass(frozen=True)
+class SemanticForkRequest:
+    source_run_id: str
+    new_run_id: str
+    request_scope: str
+    snapshot_ref: str
+    effective_configuration_digest: str
+
+
+@dataclass(frozen=True)
+class SemanticForkResult:
+    new_run_id: str
+    execution_epoch: Literal[1]
+    technical_segment: Literal[1]
+    snapshot_ref: str
+    active_operation_ids: tuple[()] = ()
+    pending_message_ids: tuple[()] = ()
+
+
+def create_semantic_fork(request: SemanticForkRequest) -> SemanticForkResult:
+    """Create isolated fork identity; live execution state is deliberately not copied."""
+
+    if request.source_run_id == request.new_run_id:
+        raise ValueError("semantic fork requires a new BellLabs run identity")
+    if not request.snapshot_ref or not request.effective_configuration_digest:
+        raise ValueError("semantic fork requires an admitted semantic snapshot and ERC")
+    return SemanticForkResult(
+        new_run_id=request.new_run_id,
+        execution_epoch=1,
+        technical_segment=1,
+        snapshot_ref=request.snapshot_ref,
+    )
 
 
 @dataclass(frozen=True)
@@ -179,6 +325,7 @@ class StageGraphRunInput:
     semantic_input_binding_ref: str = ""
     tenant_scope: str = ""
     materialize_typed_result: bool = False
+    durable_operation_children: bool = False
 
 
 @dataclass(frozen=True)
@@ -405,6 +552,7 @@ class GoalDirectedRunInput:
     semantic_input_binding_ref: str = ""
     tenant_scope: str = ""
     materialize_typed_result: bool = False
+    durable_operation_children: bool = False
 
 
 @dataclass(frozen=True)

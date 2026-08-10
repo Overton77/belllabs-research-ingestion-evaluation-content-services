@@ -83,30 +83,36 @@ class MongoLegacyOperationJournalSource(LegacyOperationJournalSource):
         scope_query = _scope_query(request_scope)
         after_collection, after_document_id = _split_cursor(after_cursor)
         claims = []
-        if (
-            snapshot.claim_high_watermark is not None
-            and after_collection in {None, CLAIMS_COLLECTION}
-        ):
-            claims = await OperationExecutionClaimDocument.find(
-                _cursor_query(
-                    scope_query,
-                    after_document_id if after_collection == CLAIMS_COLLECTION else None,
-                    snapshot.claim_high_watermark,
+        if snapshot.claim_high_watermark is not None and after_collection in {
+            None,
+            CLAIMS_COLLECTION,
+        }:
+            claims = (
+                await OperationExecutionClaimDocument.find(
+                    _cursor_query(
+                        scope_query,
+                        after_document_id if after_collection == CLAIMS_COLLECTION else None,
+                        snapshot.claim_high_watermark,
+                    )
                 )
-            ).sort("_id").limit(limit).to_list()
+                .sort("_id")
+                .limit(limit)
+                .to_list()
+            )
         settlements = []
         if snapshot.settlement_high_watermark is not None:
-            settlements = await OperationSettlementDocument.find(
-                _cursor_query(
-                    scope_query,
-                    (
-                        after_document_id
-                        if after_collection == SETTLEMENTS_COLLECTION
-                        else None
-                    ),
-                    snapshot.settlement_high_watermark,
+            settlements = (
+                await OperationSettlementDocument.find(
+                    _cursor_query(
+                        scope_query,
+                        (after_document_id if after_collection == SETTLEMENTS_COLLECTION else None),
+                        snapshot.settlement_high_watermark,
+                    )
                 )
-            ).sort("_id").limit(limit).to_list()
+                .sort("_id")
+                .limit(limit)
+                .to_list()
+            )
         records = [
             LegacyMongoRecord(
                 collection=CLAIMS_COLLECTION,
@@ -135,9 +141,7 @@ class MongoLegacyOperationJournalSource(LegacyOperationJournalSource):
         ]
         records.sort(key=lambda item: item.cursor)
         return tuple(
-            item
-            for item in records
-            if after_cursor is None or item.cursor > after_cursor
+            item for item in records if after_cursor is None or item.cursor > after_cursor
         )[:limit]
 
     async def get_binding(
@@ -159,9 +163,7 @@ class MongoLegacyOperationJournalSource(LegacyOperationJournalSource):
             return None
         if binding.binding_id != document.binding_id:
             return None
-        if document.request_scope is not None and (
-            binding.request_scope != document.request_scope
-        ):
+        if document.request_scope is not None and (binding.request_scope != document.request_scope):
             return None
         return binding
 
@@ -273,9 +275,7 @@ async def _find_scoped(
     request_scope: str,
     binding_id: str,
 ) -> Any | None:
-    document = await model.find_one(
-        {"binding_id": binding_id, "request_scope": request_scope}
-    )
+    document = await model.find_one({"binding_id": binding_id, "request_scope": request_scope})
     if document is not None:
         return document
     return await model.find_one(

@@ -70,7 +70,7 @@ from app.temporal.schema_grounding_activities import (
     create_schema_grounding_activity_worker,
 )
 from app.temporal.workflow_sandbox import coordinator_workflow_runner
-from app.temporal.workflows import SandboxAgentProbeWorkflow
+from app.temporal.workflows.sandbox_probe import SandboxAgentProbeWorkflow
 
 
 async def main(

@@ -104,8 +104,7 @@ async def guarded_deployment_runs_wait(
         runs_wait = runs_wait_by_role[decision.resume_assembly_role]
     except KeyError as error:
         raise RuntimeError(
-            f"no runs.wait callback registered for assembly "
-            f"{decision.resume_assembly_role!r}"
+            f"no runs.wait callback registered for assembly {decision.resume_assembly_role!r}"
         ) from error
     try:
         assistant_id = assistant_id_by_graph[decision.resume_graph_id]

@@ -64,10 +64,7 @@ class MongoOperationBindingRepository:
             if document is not None
             else None
         )
-        if (
-            binding is not None
-            and binding.request_scope != request_scope
-        ):
+        if binding is not None and binding.request_scope != request_scope:
             return None
         return binding
 
@@ -103,6 +100,7 @@ class MongoOperationBindingRepository:
                     "semantic operation binding has a conflicting fingerprint"
                 ) from None
             return prior
+
     async def get_settlement(
         self,
         binding_id: str,

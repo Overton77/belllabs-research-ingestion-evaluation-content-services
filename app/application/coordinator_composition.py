@@ -230,9 +230,7 @@ def build_production_coordinator_facade(
             external_discovery_enabled=settings.external_capability_discovery_enabled,
             coordinator_launch_enabled=settings.coordinator_launch_enabled,
         ),
-        audit=dependencies.audit or PostgresCoordinatorAuditSink(
-            application_postgres_pool
-        ),
+        audit=dependencies.audit or PostgresCoordinatorAuditSink(application_postgres_pool),
         catalog_authorization=dependencies.catalog_authorization,
         discovery=discovery,
         inspections=dependencies.inspections,

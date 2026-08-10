@@ -11,11 +11,7 @@ from app.domain.graph_runtime.identities import DIGEST_PATTERN
 async def admit_runtime_binding(state: StageGraphState, runtime: Any) -> dict[str, tuple[str, ...]]:
     _validate_common_state(state)
     require_runtime_scope(runtime, state["request_scope"])
-    return {
-        "event_refs": (
-            f"runtime-binding-admitted:{state['graph_assembly_digest']}",
-        )
-    }
+    return {"event_refs": (f"runtime-binding-admitted:{state['graph_assembly_digest']}",)}
 
 
 async def interpret_next_stage(

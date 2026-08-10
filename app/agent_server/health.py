@@ -45,15 +45,10 @@ async def readiness_report(
     capabilities = {
         "graph_registry": (
             "ready"
-            if set(GRAPH_REGISTRY)
-            == {"belllabs_stagegraph", "belllabs_goal_directed"}
+            if set(GRAPH_REGISTRY) == {"belllabs_stagegraph", "belllabs_goal_directed"}
             else "degraded"
         ),
-        "authentication": (
-            "ready"
-            if authentication_is_configured()
-            else "not_configured"
-        ),
+        "authentication": ("ready" if authentication_is_configured() else "not_configured"),
         "tracing": (
             "ready"
             if tracing_enabled and trace_io_hidden and tracing_configured

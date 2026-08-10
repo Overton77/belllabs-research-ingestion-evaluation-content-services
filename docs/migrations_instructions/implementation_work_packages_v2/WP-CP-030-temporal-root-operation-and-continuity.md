@@ -1,7 +1,7 @@
 ---
 id: WP-CP-030
 title: Implement Temporal root, operation, continuity, messaging, cancellation, and linked runs
-status: ready
+status: accepted
 implements: [REQ-CP-EXEC-001, REQ-CP-EXEC-002, REQ-CP-EXEC-003, REQ-CP-EXEC-004, REQ-CP-EXEC-005, REQ-CP-EXEC-006, REQ-CP-EXEC-007, REQ-CP-EXEC-008, REQ-CP-EXEC-009, REQ-CP-EXEC-010, REQ-CP-EXEC-011, REQ-CP-EXEC-012]
 governed_by: [ADR-0003, SPEC-CP-DURABLE-EXECUTION]
 contracts: [CON-CP-TEMPORAL-IDENTITY-V1, CON-CP-WORKFLOW-MESSAGE-V1, CON-CP-LINKED-RUN-V1, CON-CP-CONTINUATION-V1]

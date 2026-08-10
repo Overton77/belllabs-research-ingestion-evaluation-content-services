@@ -259,14 +259,9 @@ class OperationJournalBackfillService:
                 request_scope=request_scope,
                 run_id=run_id,
             )
-        captured_snapshot = await self._source.capture_snapshot(
-            request_scope=request_scope
-        )
+        captured_snapshot = await self._source.capture_snapshot(request_scope=request_scope)
         if progress is not None:
-            if (
-                progress.source_snapshot.snapshot_digest
-                != captured_snapshot.snapshot_digest
-            ):
+            if progress.source_snapshot.snapshot_digest != captured_snapshot.snapshot_digest:
                 raise RuntimeError("legacy source changed since the backfill snapshot")
             source_snapshot = progress.source_snapshot
         else:
@@ -279,9 +274,7 @@ class OperationJournalBackfillService:
             progress.target_aggregate_digest if progress is not None else sha256_digest([])
         )
         source_count = progress.source_count if progress is not None else 0
-        admitted_claim_count = (
-            progress.admitted_claim_count if progress is not None else 0
-        )
+        admitted_claim_count = progress.admitted_claim_count if progress is not None else 0
         admitted_settlement_count = (
             progress.admitted_settlement_count if progress is not None else 0
         )
@@ -360,9 +353,7 @@ class OperationJournalBackfillService:
             completed=True,
             dry_run=dry_run,
         )
-        verified_source = await self._source.capture_snapshot(
-            request_scope=request_scope
-        )
+        verified_source = await self._source.capture_snapshot(request_scope=request_scope)
         if verified_source.snapshot_digest != source_snapshot.snapshot_digest:
             raise RuntimeError("legacy source changed during backfill verification")
         if dry_run:

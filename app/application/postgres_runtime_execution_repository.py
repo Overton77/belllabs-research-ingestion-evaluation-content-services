@@ -60,13 +60,8 @@ class PostgresRuntimeCoordinationRepository:
                 binding.epoch.execution_epoch,
             )
             if prior is not None:
-                persisted = RuntimeExecutionBinding.model_validate(
-                    _json(prior["binding_payload"])
-                )
-                if (
-                    prior["submission_digest"] != submission.request_digest
-                    or persisted != binding
-                ):
+                persisted = RuntimeExecutionBinding.model_validate(_json(prior["binding_payload"]))
+                if prior["submission_digest"] != submission.request_digest or persisted != binding:
                     raise RuntimeBindingConflict(
                         "runtime submission or epoch has conflicting immutable intent"
                     )
@@ -179,9 +174,7 @@ class PostgresRuntimeCoordinationRepository:
                     _json(prior["provider_detail"])["contract"]
                 )
                 if persisted != attempt:
-                    raise RuntimeBindingConflict(
-                        "runtime attempt identity has conflicting facts"
-                    )
+                    raise RuntimeBindingConflict("runtime attempt identity has conflicting facts")
                 return persisted
             await connection.execute(
                 """
@@ -392,8 +385,7 @@ class PostgresRuntimeCoordinationRepository:
                 if (
                     prior["command_id"] != intervention.command_id
                     or prior["request_digest"] != intervention.request_digest
-                    or _json(prior["command_payload"])
-                    != intervention.model_dump(mode="json")
+                    or _json(prior["command_payload"]) != intervention.model_dump(mode="json")
                 ):
                     raise RuntimeBindingConflict(
                         "intervention idempotency identity has conflicting intent"

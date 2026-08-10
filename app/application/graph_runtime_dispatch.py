@@ -281,8 +281,7 @@ class GraphRuntimeDispatchService:
         ):
             raise ValueError("submission RunPlan digest differs from the frozen plan")
         if (
-            submission.graph_assembly_digest
-            != run_plan.graph_assembly.graph_assembly_ref.digest
+            submission.graph_assembly_digest != run_plan.graph_assembly.graph_assembly_ref.digest
             or submission.state_schema_digest != run_plan.graph_assembly.state_schema_digest
         ):
             raise ValueError("runtime submission cannot widen or reinterpret graph assembly")

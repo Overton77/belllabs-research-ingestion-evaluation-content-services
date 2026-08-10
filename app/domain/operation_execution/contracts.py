@@ -444,6 +444,36 @@ class OperationExecutionResult(Contract):
     failure_message: str | None = None
 
 
+class OperationWorkflowRequest(Contract):
+    """Typed durable wrapper for exactly one semantic operation attempt."""
+
+    schema_version: Literal["belllabs.operation-workflow.v1"] = "belllabs.operation-workflow.v1"
+    semantic_attempt_id: str = Field(min_length=1)
+    execution_generation: int = Field(default=1, ge=1)
+    operation_kind: Literal[
+        "stage_operation", "goal_iteration", "goal_verification", "bound_operation"
+    ]
+    payload: dict[str, object]
+    task_queue: str = Field(min_length=1)
+    timeout_seconds: int = Field(default=300, ge=1, le=86_400)
+    message_cursor: int = Field(default=0, ge=0)
+    effect_frontier: tuple[str, ...] = ()
+
+    @property
+    def workflow_id(self) -> str:
+        return f"operation/{self.semantic_attempt_id}"
+
+
+class OperationWorkflowResult(Contract):
+    schema_version: Literal["belllabs.operation-result.v1"] = "belllabs.operation-result.v1"
+    semantic_attempt_id: str
+    execution_generation: int = Field(ge=1)
+    disposition: Literal["completed", "cancelled", "failed", "in_doubt"]
+    result: dict[str, object] = Field(default_factory=dict)
+    message_cursor: int = Field(ge=0)
+    effect_frontier: tuple[str, ...] = ()
+
+
 class ArtifactCheckEvidence(Contract):
     check_id: str = Field(min_length=1)
     required: bool = True
