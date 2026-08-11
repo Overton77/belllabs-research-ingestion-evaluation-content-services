@@ -12,11 +12,7 @@ from app.application.orchestration import (
     RunControlLifecycleGateway,
     StageGraphDecisionService,
     StageGraphOperationMaterializer,
-    StageOperationExecutor,
-    WorkflowEvaluator,
 )
-from app.application.orchestration_binding_repository import SemanticInputBindingNotFound
-from app.application.orchestration_routing import SemanticRoutingError
 from app.domain.coordinator.launch import (
     LaunchAuthorizationError,
     TerminalWorkflowCompletion,
@@ -28,14 +24,12 @@ from app.domain.orchestration.contracts import (
     StageGraphAdmissionActivityResult,
     StageGraphCompletionActivityRequest,
     StageGraphCompletionActivityResult,
+    StageGraphCycleActivityRequest,
+    StageGraphCycleActivityResult,
     StageGraphInitializeRequest,
     StageGraphInitializeResult,
     StageGraphResultActivityRequest,
     StageGraphResultActivityResult,
-    StageOperationRequest,
-    StageOperationResult,
-    WorkflowEvaluationRequest,
-    WorkflowEvaluationResult,
 )
 from app.temporal.registration.activities import coordinator_activities
 from app.temporal.registration.workflows import coordinator_workflows
@@ -47,15 +41,12 @@ class StageGraphActivities:
 
     def __init__(
         self,
-        operation_executor: StageOperationExecutor,
-        workflow_evaluator: WorkflowEvaluator,
+        *,
+        decision_service: StageGraphDecisionService,
+        operation_materializer: StageGraphOperationMaterializer,
         lifecycle_gateway: RunControlLifecycleGateway,
         completion: TerminalWorkflowCompletionPort | None = None,
-        decision_service: StageGraphDecisionService | None = None,
-        operation_materializer: StageGraphOperationMaterializer | None = None,
     ) -> None:
-        self._operation_executor = operation_executor
-        self._workflow_evaluator = workflow_evaluator
         self._lifecycle_gateway = lifecycle_gateway
         self._completion = completion
         self._decision_service = decision_service
@@ -66,12 +57,6 @@ class StageGraphActivities:
         return self._completion is not None
 
     def _canonical_decisions(self) -> StageGraphDecisionService:
-        if self._decision_service is None:
-            raise ApplicationError(
-                "canonical StageGraph decision service is unavailable",
-                type="stagegraph_decision_service_unavailable",
-                non_retryable=True,
-            )
         return self._decision_service
 
     @activity.defn(name="stagegraph.initialize")
@@ -85,12 +70,6 @@ class StageGraphActivities:
         self, request: StageGraphAdmissionActivityRequest
     ) -> StageGraphAdmissionActivityResult:
         if request.operation is None:
-            if self._operation_materializer is None:
-                raise ApplicationError(
-                    "canonical StageGraph operation materializer is unavailable",
-                    type="stagegraph_operation_materializer_unavailable",
-                    non_retryable=True,
-                )
             request = replace(
                 request,
                 operation=await self._operation_materializer.materialize(request),
@@ -103,36 +82,17 @@ class StageGraphActivities:
     ) -> StageGraphResultActivityResult:
         return await self._canonical_decisions().decide_result(request)
 
+    @activity.defn(name="stagegraph.apply_cycle")
+    async def apply_cycle(
+        self, request: StageGraphCycleActivityRequest
+    ) -> StageGraphCycleActivityResult:
+        return await self._canonical_decisions().apply_cycle(request)
+
     @activity.defn(name="stagegraph.complete")
     async def complete_stagegraph(
         self, request: StageGraphCompletionActivityRequest
     ) -> StageGraphCompletionActivityResult:
         return await self._canonical_decisions().complete(request)
-
-    @activity.defn(name="stagegraph.execute_operation")
-    async def execute_operation(self, request: StageOperationRequest) -> StageOperationResult:
-        try:
-            result = await self._operation_executor.execute(request)
-        except (SemanticRoutingError, SemanticInputBindingNotFound) as error:
-            raise ApplicationError(
-                str(error),
-                type="semantic_input_binding_rejected",
-                non_retryable=True,
-            ) from error
-        return result
-
-    @activity.defn(name="stagegraph.evaluate_workflow")
-    async def evaluate_workflow(
-        self, request: WorkflowEvaluationRequest
-    ) -> WorkflowEvaluationResult:
-        try:
-            return await self._workflow_evaluator.evaluate(request)
-        except (SemanticRoutingError, SemanticInputBindingNotFound) as error:
-            raise ApplicationError(
-                str(error),
-                type="semantic_input_binding_rejected",
-                non_retryable=True,
-            ) from error
 
     @activity.defn(name="stagegraph.apply_lifecycle_command")
     async def apply_lifecycle_command(

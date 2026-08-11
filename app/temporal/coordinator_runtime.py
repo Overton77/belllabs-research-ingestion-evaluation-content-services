@@ -15,14 +15,17 @@ from app.application.goal_directed import (
     GoalDirectedDocumentRepository,
     GoalOperationTemplateProvider,
 )
-from app.application.orchestration import RunControlLifecycleGateway
+from app.application.orchestration import (
+    RunControlLifecycleGateway,
+    StageGraphDecisionService,
+    StageGraphOperationPreparationService,
+    StageGraphOperationTemplateProvider,
+)
 from app.application.orchestration_binding_repository import (
     RunSemanticInputBindingRepository,
     RunSemanticInputBindingService,
 )
 from app.application.orchestration_routing import (
-    BoundStageOperationExecutor,
-    BoundWorkflowEvaluator,
     OperationExecutionBindingReader,
     SemanticHandlerRegistry,
 )
@@ -30,6 +33,7 @@ from app.application.postgres_orchestration_binding_repository import (
     PostgresRunSemanticInputBindingRepository,
 )
 from app.application.run_control import RunControlService
+from app.application.run_control_repository import RunControlRepository
 from app.application.schema_catalog_build import SchemaCatalogBuildService
 from app.application.schema_context_selection import ReviewAgentPort, SelectionAgentPort
 from app.application.schema_context_stage_handlers import (
@@ -94,6 +98,16 @@ class GoalDirectedCoordinatorDependencies:
 
 
 @dataclass(frozen=True)
+class StageGraphCoordinatorDependencies:
+    """Exact authority and operation-template ports for canonical StageGraph activities."""
+
+    run_control: RunControlService
+    repository: RunControlRepository
+    operation_bindings: SemanticOperationBindingRepository
+    templates: StageGraphOperationTemplateProvider
+
+
+@dataclass(frozen=True)
 class SchemaGroundingCoordinatorRuntimeDependencies:
     """Concrete semantic services registered by the dual-family coordinator worker."""
 
@@ -106,6 +120,7 @@ class SchemaGroundingCoordinatorRuntimeDependencies:
     reviewer: ReviewAgentPort
     reconciliations: SupportingGraphReconciliationWorkflow
     goal_directed: GoalDirectedCoordinatorDependencies
+    stagegraph: StageGraphCoordinatorDependencies
     operation_bindings: OperationExecutionBindingReader | None = None
 
 
@@ -124,6 +139,7 @@ def create_routed_coordinator_activities(
     handlers: SemanticHandlerRegistry,
     lifecycle: RunControlLifecycleGateway,
     goal_directed: GoalDirectedCoordinatorDependencies,
+    stagegraph: StageGraphCoordinatorDependencies,
     web_research: WebResearchHandlerDependencies | None = None,
     operation_bindings: OperationExecutionBindingReader | None = None,
     completion: TerminalWorkflowCompletionPort | None = None,
@@ -134,14 +150,16 @@ def create_routed_coordinator_activities(
         register_web_research_stagegraph_handlers(handlers, web_research)
     return CoordinatorWorkerActivities(
         stagegraph=StageGraphActivities(
-            operation_executor=BoundStageOperationExecutor(
-                bindings, handlers, operation_bindings
-            ),
-            workflow_evaluator=BoundWorkflowEvaluator(
-                bindings, handlers, operation_bindings
-            ),
             lifecycle_gateway=lifecycle,
             completion=completion,
+            decision_service=StageGraphDecisionService(
+                stagegraph.run_control,
+                stagegraph.repository,
+            ),
+            operation_materializer=StageGraphOperationPreparationService(
+                templates=stagegraph.templates,
+                operation_bindings=stagegraph.operation_bindings,
+            ),
         ),
         goal_directed=compose_goal_directed_activities(
             run_control=goal_directed.run_control,
@@ -193,6 +211,7 @@ def create_schema_grounding_coordinator_runtime(
             handlers=handlers,
             lifecycle=dependencies.lifecycle,
             goal_directed=dependencies.goal_directed,
+            stagegraph=dependencies.stagegraph,
             operation_bindings=dependencies.operation_bindings,
         ),
         bindings=bindings,

@@ -29,7 +29,6 @@ from app.domain.control_plane.contracts import (
     SkillFileManifestEntry,
     SourceProvenance,
     StageGraphBlueprint,
-    StageNode,
     WorkflowConfigurationDefinition,
     WorkflowCyclePolicy,
     WorkflowImplementationBindingDefinition,
@@ -39,6 +38,10 @@ from app.domain.control_plane.contracts import (
     WorkspaceTemplateDefinition,
 )
 from app.domain.control_plane.extensions import ExtensionPayload, ExtensionRegistry
+from app.domain.control_plane.stagegraph_builder import (
+    StageGraphStageSpec,
+    build_stagegraph_v2,
+)
 
 SCHEMA_GROUNDING_EXTENSION_NAMESPACE = "belllabs.schema-grounding"
 SCHEMA_GROUNDING_EXTENSION_VERSION = "1"
@@ -588,54 +591,45 @@ def schema_grounding_agent_definitions() -> tuple[Definition, ...]:
 
 
 def _selection_blueprint() -> StageGraphBlueprint:
-    return StageGraphBlueprint(
+    return build_stagegraph_v2(
         logical_id="schema-context-selection-v1",
         title="Schema Context Selection StageGraph",
         description="Materialize, select, validate, independently review, and accept.",
         stages=(
-            StageNode(
+            StageGraphStageSpec(
                 stage_id="materialize_selection_context",
                 reservation={"operation.attempts": 1},
-                output_slots=frozenset({"selection_workspace_binding"}),
+                output_slots=("selection_workspace_binding",),
             ),
-            StageNode(
+            StageGraphStageSpec(
                 stage_id="semantic_selector",
-                depends_on=frozenset({"materialize_selection_context"}),
+                depends_on=("materialize_selection_context",),
                 reservation={"operation.attempts": 1},
-                obligation_refs=frozenset({"obligation:semantic-selection:v1"}),
-                output_slots=frozenset({"selection_draft"}),
+                obligation_refs=("obligation:semantic-selection:v1",),
+                output_slots=("selection_draft",),
             ),
-            StageNode(
+            StageGraphStageSpec(
                 stage_id="structural_validation",
-                depends_on=frozenset({"semantic_selector"}),
+                depends_on=("semantic_selector",),
                 reservation={"operation.attempts": 1},
-                obligation_refs=frozenset({"obligation:structural-validation:v1"}),
-                output_slots=frozenset({"selection_validation"}),
+                obligation_refs=("obligation:structural-validation:v1",),
+                output_slots=("selection_validation",),
             ),
-            StageNode(
+            StageGraphStageSpec(
                 stage_id="independent_reviewer",
-                depends_on=frozenset({"structural_validation"}),
+                depends_on=("structural_validation",),
                 reservation={"operation.attempts": 1},
-                obligation_refs=frozenset({"obligation:independent-review:v1"}),
-                output_slots=frozenset({"selection_review"}),
+                obligation_refs=("obligation:independent-review:v1",),
+                output_slots=("selection_review",),
             ),
-            StageNode(
+            StageGraphStageSpec(
                 stage_id="accept_selection",
-                depends_on=frozenset({"independent_reviewer"}),
+                depends_on=("independent_reviewer",),
                 reservation={"operation.attempts": 1},
-                output_slots=frozenset({"accepted_selection"}),
+                output_slots=("accepted_selection",),
             ),
         ),
-        declared_output_slots=frozenset(
-            {
-                "selection_workspace_binding",
-                "selection_draft",
-                "selection_validation",
-                "selection_review",
-                "accepted_selection",
-            }
-        ),
-        max_parallel_stages=1,
+        max_concurrency=1,
         workflow_evaluation_contract_ref="evaluation:schema-selection:v1",
         workflow_cycle_policy=WorkflowCyclePolicy(
             max_cycles=2,
@@ -674,22 +668,21 @@ def _reconciliation_blueprint() -> StageGraphBlueprint:
         "graph_authority_gate": frozenset({"obligation:graph-gate-admitted:v1"}),
         "execute_bounded_intents": frozenset({"obligation:bounded-query-evidence:v1"}),
     }
-    return StageGraphBlueprint(
+    return build_stagegraph_v2(
         logical_id="supporting-graph-reconciliation-v1",
         title="Supporting Graph Reconciliation StageGraph",
         description="Derive, gate, execute bounded reads, verify evidence, and promote.",
         stages=tuple(
-            StageNode(
+            StageGraphStageSpec(
                 stage_id=stage_id,
-                depends_on=(frozenset({stage_ids[index - 1]}) if index else frozenset()),
+                depends_on=((stage_ids[index - 1],) if index else ()),
                 reservation={"operation.attempts": 1},
-                obligation_refs=obligations.get(stage_id, frozenset()),
-                output_slots=frozenset({output_slots[stage_id]}),
+                obligation_refs=tuple(obligations.get(stage_id, frozenset())),
+                output_slots=(output_slots[stage_id],),
             )
             for index, stage_id in enumerate(stage_ids)
         ),
-        declared_output_slots=frozenset(output_slots.values()),
-        max_parallel_stages=1,
+        max_concurrency=1,
         workflow_evaluation_contract_ref="evaluation:supporting-graph-reconciliation:v1",
     )
 

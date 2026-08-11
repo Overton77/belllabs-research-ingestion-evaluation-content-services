@@ -10,7 +10,10 @@ from app.api.graph_runtime_schemas import graph_runtime_contract_schemas
 from app.application.mongo_operation_authority_migration import select_authority_version
 from app.application.runtime_run_plan import compile_structural_graph_assembly
 from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.contracts import StageGraphBlueprint, StageNode
+from app.domain.control_plane.stagegraph_builder import (
+    StageGraphStageSpec,
+    build_stagegraph_v2,
+)
 from app.domain.graph_runtime.contracts import (
     ProviderNeutralAttemptMetadata,
     RuntimeCapabilityReadiness,
@@ -309,11 +312,11 @@ def test_v2_structural_compiler_requires_exact_coverage_and_reports_disabled_sur
         resource_envelope_ref=manifest_ref,
         compatibility_key="stagegraph-v2",
     )
-    blueprint = StageGraphBlueprint(
+    blueprint = build_stagegraph_v2(
         logical_id="blueprint.collect",
         title="Collect",
         description="One exact stage",
-        stages=(StageNode(stage_id="collect"),),
+        stages=(StageGraphStageSpec(stage_id="collect"),),
     )
     compiled, unavailable = compile_structural_graph_assembly(
         blueprint=blueprint,
@@ -417,11 +420,11 @@ def test_structural_compiler_intersects_exact_manifest_authority_and_readiness()
         resource_envelope_ref=manifest_ref,
         compatibility_key="stagegraph-v2",
     )
-    blueprint = StageGraphBlueprint(
+    blueprint = build_stagegraph_v2(
         logical_id="blueprint.collect",
         title="Collect",
         description="One exact stage",
-        stages=(StageNode(stage_id="collect"),),
+        stages=(StageGraphStageSpec(stage_id="collect"),),
     )
     readiness = RuntimeCapabilityReadiness(
         capability_id="literature_search",

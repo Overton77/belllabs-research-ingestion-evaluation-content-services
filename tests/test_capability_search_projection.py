@@ -15,10 +15,12 @@ from app.domain.control_plane.contracts import (
     MCPToolDefinition,
     PromptDefinition,
     SourceProvenance,
-    StageGraphBlueprint,
-    StageNode,
     WorkflowTypeDefinition,
     WorkflowWorkspaceContract,
+)
+from app.domain.control_plane.stagegraph_builder import (
+    StageGraphStageSpec,
+    build_stagegraph_v2,
 )
 from app.domain.coordinator.contracts import (
     AuthorizationState,
@@ -442,11 +444,11 @@ def _workflow_type(blueprint_ref: ExactDefinitionRef) -> WorkflowTypeDefinition:
 
 
 def test_workflow_design_draft_enforces_blueprint_family_shape() -> None:
-    graph = StageGraphBlueprint(
+    graph = build_stagegraph_v2(
         logical_id="draft.web-research-stagegraph",
         title="Draft web research graph",
         description="Search then verify",
-        stages=(StageNode(stage_id="search"),),
+        stages=(StageGraphStageSpec(stage_id="search"),),
     )
     graph_ref = ref(DefinitionKind.BLUEPRINT, graph.logical_id)
     common = {

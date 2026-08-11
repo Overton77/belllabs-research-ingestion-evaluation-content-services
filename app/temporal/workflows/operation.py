@@ -88,10 +88,16 @@ class OperationWorkflow:
             start_to_close_timeout=timedelta(seconds=request.timeout_seconds),
             retry_policy=RetryPolicy(maximum_attempts=3),
         )
+        status = result.get("status", "completed")
+        disposition = (
+            status
+            if status in {"completed", "cancelled", "failed", "in_doubt"}
+            else "failed"
+        )
         return OperationWorkflowResult(
             semantic_attempt_id=request.semantic_attempt_id,
             execution_generation=request.execution_generation,
-            disposition="completed",
+            disposition=disposition,
             result=result,
             message_cursor=request.message_cursor,
             effect_frontier=request.effect_frontier,

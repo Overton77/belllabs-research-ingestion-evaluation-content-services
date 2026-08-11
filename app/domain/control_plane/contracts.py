@@ -330,6 +330,13 @@ class StageOperationSlot(Contract):
 
     _identifier = field_validator("operation_slot_id")(_stagegraph_identifier)
 
+    @field_validator("fallback_sequence")
+    @classmethod
+    def validate_fallback_sequence(
+        cls, value: tuple[str, ...]
+    ) -> tuple[str, ...]:
+        return tuple(_stagegraph_identifier(item) for item in value)
+
     @field_validator("allowed_variants")
     @classmethod
     def normalize_allowed_variants(
@@ -361,6 +368,14 @@ class StageCyclePolicy(Contract):
     reservation: dict[str, int] = Field(default_factory=dict)
     stopping_rule_precedence: tuple[StageGraphIdentifier, ...] = ()
 
+    @field_validator("stopping_rule_precedence")
+    @classmethod
+    def validate_stopping_precedence(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        normalized = tuple(_stagegraph_identifier(item) for item in value)
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("stage stopping-rule precedence identities must be unique")
+        return normalized
+
     @field_validator("reservation")
     @classmethod
     def validate_reservation(cls, value: dict[str, int]) -> dict[str, int]:
@@ -377,6 +392,14 @@ class WorkflowCyclePolicy(Contract):
     objective_contract_ref: str = Field(min_length=1)
     reservation: dict[str, int] = Field(default_factory=dict)
     stopping_rule_precedence: tuple[StageGraphIdentifier, ...] = ()
+
+    @field_validator("stopping_rule_precedence")
+    @classmethod
+    def validate_stopping_precedence(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        normalized = tuple(_stagegraph_identifier(item) for item in value)
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("workflow stopping-rule precedence identities must be unique")
+        return normalized
 
     @field_validator("reservation")
     @classmethod
@@ -584,6 +607,19 @@ class LinkedRunSlot(Contract):
         lambda value: None if value is None else _stagegraph_identifier(value)
     )
 
+    @field_validator("dependency_ids")
+    @classmethod
+    def normalize_dependency_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        normalized = tuple(
+            sorted(
+                (_stagegraph_identifier(item) for item in value),
+                key=lambda item: item.encode("utf-8"),
+            )
+        )
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("linked-run dependency identities must be unique")
+        return normalized
+
 
 class StageGraphPolicyDefinition(Contract):
     policy_kind: StageGraphIdentifier
@@ -646,6 +682,12 @@ class CompletionObligationRef(Contract):
         lambda value: None if value is None else _stagegraph_identifier(value)
     )
 
+    @model_validator(mode="after")
+    def owner_matches_scope(self) -> CompletionObligationRef:
+        if (self.obligation_scope == "stage") != (self.owner_stage_id is not None):
+            raise ValueError("stage completion obligations require an owner; workflow forbids one")
+        return self
+
 
 class StageGraphBlueprint(DefinitionBase):
     kind: Literal[DefinitionKind.BLUEPRINT] = DefinitionKind.BLUEPRINT
@@ -672,7 +714,7 @@ class StageGraphBlueprint(DefinitionBase):
     @model_validator(mode="before")
     @classmethod
     def default_fairness_group(cls, value: Any) -> Any:
-        if isinstance(value, dict) and not value.get("fairness_groups"):
+        if isinstance(value, dict) and "fairness_groups" not in value:
             return {
                 **value,
                 "fairness_groups": ({"group_id": "default", "weight": 1},),
@@ -780,8 +822,6 @@ class StageGraphBlueprint(DefinitionBase):
             raise ValueError("stage identities must be unique")
         known_stages = set(stage_ids)
         groups = self.fairness_groups
-        if not groups and all(stage.fairness_group_id == "default" for stage in self.stages):
-            groups = (FairnessGroup(group_id="default", weight=1),)
         if not groups:
             raise ValueError("StageGraph fairness groups cannot be empty")
         group_ids = [group.group_id for group in groups]
@@ -791,6 +831,11 @@ class StageGraphBlueprint(DefinitionBase):
             raise ValueError("every stage fairness group must have an authored weight")
 
         stage_by_id = {stage.stage_id: stage for stage in self.stages}
+        mapping_keys = [(item.stage_id, item.mapping_id) for item in self.stage_mappings]
+        if len(mapping_keys) != len(set(mapping_keys)):
+            raise ValueError("stage mapping complete keys must be unique")
+        if any(item.stage_id not in known_stages for item in self.stage_mappings):
+            raise ValueError("stage mapping references an unknown stage")
         dependency_ids = [item.dependency_id for item in self.dependencies]
         if len(dependency_ids) != len(set(dependency_ids)):
             raise ValueError("dependency identities must be unique")
@@ -857,6 +902,62 @@ class StageGraphBlueprint(DefinitionBase):
 
         for stage_id in stage_ids:
             visit(stage_id)
+
+        workflow_obligations = {
+            item.obligation_slot_id for item in self.workflow_obligation_slots
+        }
+        matrix_keys: set[tuple[str, str | None, str, str]] = set()
+        declared_obligations: set[tuple[str, str | None, str]] = set()
+        for row in self.obligation_matrix:
+            matrix_key = (
+                row.obligation_scope,
+                row.owner_stage_id,
+                row.obligation_slot_id,
+                row.evidence_slot_id,
+            )
+            if matrix_key in matrix_keys:
+                raise ValueError("obligation matrix contains a duplicate complete key")
+            matrix_keys.add(matrix_key)
+            obligation_key = (
+                row.obligation_scope,
+                row.owner_stage_id,
+                row.obligation_slot_id,
+            )
+            declared_obligations.add(obligation_key)
+            if row.obligation_scope == "workflow":
+                if row.obligation_slot_id not in workflow_obligations:
+                    raise ValueError("obligation matrix references an unknown workflow obligation")
+            else:
+                if row.owner_stage_id not in stage_by_id:
+                    raise ValueError("obligation matrix references an unknown owner stage")
+                if row.obligation_slot_id not in {
+                    item.obligation_slot_id
+                    for item in stage_by_id[row.owner_stage_id].obligation_slots
+                }:
+                    raise ValueError("obligation matrix references an unknown stage obligation")
+        completion_keys = [
+            (item.obligation_scope, item.owner_stage_id, item.obligation_slot_id)
+            for item in self.completion_obligations
+        ]
+        if len(completion_keys) != len(set(completion_keys)):
+            raise ValueError("completion obligations contain a duplicate complete key")
+        if not set(completion_keys) <= declared_obligations:
+            raise ValueError("completion obligation references an unknown obligation matrix row")
+
+        linked_keys: set[tuple[int, str | None, str]] = set()
+        for slot in self.linked_run_slots:
+            linked_key = (
+                0 if slot.owner_stage_id is None else 1,
+                slot.owner_stage_id,
+                slot.linked_run_slot_id,
+            )
+            if linked_key in linked_keys:
+                raise ValueError("linked-run slots contain a duplicate complete key")
+            linked_keys.add(linked_key)
+            if slot.owner_stage_id is not None and slot.owner_stage_id not in known_stages:
+                raise ValueError("linked-run slot references an unknown owner stage")
+            if not set(slot.dependency_ids) <= set(dependency_ids):
+                raise ValueError("linked-run slot references an unknown dependency")
         if (
             self.workflow_cycle_policy is not None
             and self.workflow_evaluation_contract_ref is not None
@@ -866,7 +967,7 @@ class StageGraphBlueprint(DefinitionBase):
             raise ValueError(
                 "workflow cycle policy must use the frozen workflow evaluation contract"
             )
-        normalized = {
+        _normalized_collections = {
             "stages": tuple(sorted(self.stages, key=lambda item: item.stage_id.encode("utf-8"))),
             "stage_mappings": tuple(
                 sorted(
@@ -995,8 +1096,48 @@ class StageGraphBlueprint(DefinitionBase):
                 )
             ),
         }
-        for field_name, collection in normalized.items():
-            keys = [item.model_dump_json() for item in collection]
+        # Field validators above materialize these normalized tuples. Keep the full
+        # registry construction here as an executable guard that every published
+        # collection remains classified when the schema evolves.
+        if set(_normalized_collections) != {
+            "stages",
+            "stage_mappings",
+            "joins",
+            "dependencies",
+            "workflow_obligation_slots",
+            "obligation_matrix",
+            "fairness_groups",
+            "linked_run_slots",
+            "policy_definitions",
+            "waits",
+            "cycle_limits",
+            "invalidation_reuse_declarations",
+            "capacity_ceilings",
+            "completion_obligations",
+        }:
+            raise ValueError("StageGraph contains an unclassified publication collection")
+        complete_keys: dict[str, list[object]] = {
+            "policy_definitions": [
+                (item.policy_kind, item.scope_kind, item.scope_id, item.policy_id)
+                for item in self.policy_definitions
+            ],
+            "waits": [
+                (item.scope_kind, item.scope_id, item.wait_id) for item in self.waits
+            ],
+            "cycle_limits": [
+                (item.scope_kind, item.scope_id, item.condition_kind, item.condition_id)
+                for item in self.cycle_limits
+            ],
+            "invalidation_reuse_declarations": [
+                (item.scope_kind, item.scope_id, item.declaration_kind, item.declaration_id)
+                for item in self.invalidation_reuse_declarations
+            ],
+            "capacity_ceilings": [
+                (item.scope_kind, item.scope_id, item.dimension_kind, item.dimension_id)
+                for item in self.capacity_ceilings
+            ],
+        }
+        for field_name, keys in complete_keys.items():
             if len(keys) != len(set(keys)):
                 raise ValueError(f"{field_name} contains a duplicate complete key")
         return self

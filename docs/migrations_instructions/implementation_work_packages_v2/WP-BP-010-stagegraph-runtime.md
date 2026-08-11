@@ -1,7 +1,7 @@
 ---
 id: WP-BP-010
 title: Implement canonical StageGraph runtime
-status: ready
+status: accepted
 implements: [REQ-BP-SG-001, REQ-BP-SG-002, REQ-BP-SG-003, REQ-BP-SG-004, REQ-BP-SG-005, REQ-BP-SG-006, REQ-BP-SG-007, REQ-BP-SG-008, REQ-BP-SG-009, REQ-BP-SG-010]
 governed_by: [ADR-0003, SPEC-BP-STAGEGRAPH]
 contracts: [CON-BP-STAGEGRAPH-V2, CON-BP-STAGE-DECISION-V1]
@@ -56,21 +56,21 @@ schema parity is not required.
 
 ## Acceptance criteria
 
-- [ ] Structural and join validation is complete.
-- [ ] Pre-publication normalization classifies every collection, applies the complete V2 key
+- [x] Structural and join validation is complete.
+- [x] Pre-publication normalization classifies every collection, applies the complete V2 key
   registry, preserves semantic arrays, rejects duplicate complete keys/non-NFC identifiers, and
   produces digest-stable canonical bytes.
-- [ ] Readiness is pure and deterministic.
-- [ ] Downstream `any(1)` starts before a slow sibling completes.
-- [ ] Initial/resumed weighted-group-ring and per-group candidate cursors advance only with
+- [x] Readiness is pure and deterministic.
+- [x] Downstream `any(1)` starts before a slow sibling completes.
+- [x] Initial/resumed weighted-group-ring and per-group candidate cursors advance only with
   authoritative admission and prevent oversubscription/starvation.
-- [ ] Every dependency disposition and `all`/`any`/`minimum(k)` satisfied/pending/impossible case
+- [x] Every dependency disposition and `all`/`any`/`minimum(k)` satisfied/pending/impossible case
   follows the complete V2 truth table.
-- [ ] Slow-sibling action/arrival routing, absolute late-result veto precedence, authored rule
+- [x] Slow-sibling action/arrival routing, absolute late-result veto precedence, authored rule
   precedence, and exact admit/reject/quarantine effects are deterministic.
-- [ ] Technical retry, stage cycle, and workflow cycle identities are distinct.
-- [ ] Minimal invalidation reuses unaffected immutable outputs.
-- [ ] Completion requires current accepted obligation evidence and closure of every producer
+- [x] Technical retry, stage cycle, and workflow cycle identities are distinct.
+- [x] Minimal invalidation reuses unaffected immutable outputs.
+- [x] Completion requires current accepted obligation evidence and closure of every producer
   liability, including child quiescence, reservations/usage, effects, cancellation, and exactly one
   result disposition.
 

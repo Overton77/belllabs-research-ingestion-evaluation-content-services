@@ -46,18 +46,16 @@ flowchart LR
 | [WP-CP-030](WP-CP-030-temporal-root-operation-and-continuity.md) | Implement root/family/operation hierarchy, messages, cancellation, linked runs, and continuation | WP-CP-020 | accepted |
 | [WP-CP-040](WP-CP-040-deep-agent-profile-binding-and-materialization.md) | Materialize exact Deep Agents 0.7.5 profiles and placements through the operation seam | WP-CP-030 | accepted |
 | [WP-CP-045](WP-CP-045-async-subagent-parent-child-lifecycle.md) | Implement governed durable async-subagent parent/child behavior | WP-CP-040 | accepted |
-| [WP-BP-010](WP-BP-010-stagegraph-runtime.md) | Implement canonical StageGraph interpreter/workflow semantics | WP-CP-030, WP-CP-040 | ready |
+| [WP-BP-010](WP-BP-010-stagegraph-runtime.md) | Implement canonical StageGraph interpreter/workflow semantics | WP-CP-030, WP-CP-040 | accepted |
 | [WP-BP-020](WP-BP-020-goal-directed-runtime.md) | Implement canonical GoalDirected revisions, handoffs, verification, and convergence | WP-CP-030, WP-CP-040, WP-CP-045 | ready |
 | [WP-CP-050](WP-CP-050-foundation-capability-materialization-vertical.md) | Prove the cohesive foundation with exact MCP, Skill, sandbox, sync/async subagents, both families, and recovery | WP-CP-045, WP-BP-010, WP-BP-020 | ready when unblocked |
 
 ## Immediate implementation frontier
 
-`WP-CP-001` through `WP-CP-045` are accepted. `WP-BP-010` and `WP-BP-020` are the active
-parallel implementation frontier and must begin from the same accepted `WP-CP-045` revision under
-the [parallel worktree protocol](PARALLEL_WORKTREE_PROTOCOL.md). `WP-CP-050` remains blocked until
-both blueprint runtimes are accepted. BellLabs is pre-production, so new canonical schemas may
-replace local prototype persistence directly. No package may silently mutate a published
-canonical `CON-*` meaning.
+`WP-CP-001` through `WP-CP-045` and `WP-BP-010` are accepted. `WP-BP-020` remains on the blueprint
+implementation frontier. `WP-CP-050` remains blocked until both blueprint runtimes are accepted.
+BellLabs is pre-production, so new canonical schemas may replace local prototype persistence
+directly. No package may silently mutate a published canonical `CON-*` meaning.
 
 ## Replacement posture
 

@@ -135,9 +135,10 @@ def compile_structural_graph_assembly(
         readiness_by_id = {}
 
     expected = {
-        (stage.stage_id, variant)
+        (stage.stage_id, variant.operation_variant_id)
         for stage in blueprint.stages
-        for variant in (stage.variant_names or frozenset({"default"}))
+        for slot in stage.operation_slots
+        for variant in slot.allowed_variants
     }
     requirement_by_key = {(item.stage_id, item.variant_name): item for item in requirements}
     binding_by_key = {(item.stage_id, item.variant_name): item for item in bindings}
@@ -400,9 +401,10 @@ def compile_structural_graph_assembly_v3(
         disabled_capability_ids=disabled_capability_ids,
     )
     expected = {
-        (stage.stage_id, variant)
+        (stage.stage_id, variant.operation_variant_id)
         for stage in blueprint.stages
-        for variant in (stage.variant_names or frozenset({"default"}))
+        for slot in stage.operation_slots
+        for variant in slot.allowed_variants
     }
     requirement_by_key = {(item.stage_id, item.variant_name): item for item in requirements}
     binding_by_key = {(item.stage_id, item.variant_name): item for item in bindings}

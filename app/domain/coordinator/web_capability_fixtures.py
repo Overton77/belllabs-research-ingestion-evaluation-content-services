@@ -29,12 +29,15 @@ from app.domain.control_plane.contracts import (
     SkillFileManifestEntry,
     SourceProvenance,
     StageGraphBlueprint,
-    StageNode,
     WorkflowImplementationBindingDefinition,
     WorkflowTypeDefinition,
     WorkflowWorkspaceContract,
     WorkspaceSlot,
     WorkspaceTemplateDefinition,
+)
+from app.domain.control_plane.stagegraph_builder import (
+    StageGraphStageSpec,
+    build_stagegraph_v2,
 )
 
 FIRECRAWL_TOOL_NAMES = (
@@ -667,7 +670,7 @@ def _agent_browser_skill() -> SkillDefinition:
 
 
 def _web_research_blueprint() -> StageGraphBlueprint:
-    return StageGraphBlueprint(
+    return build_stagegraph_v2(
         logical_id="web-research-browser-verification-v1",
         title="Web Research and Browser Verification StageGraph",
         description=(
@@ -675,56 +678,46 @@ def _web_research_blueprint() -> StageGraphBlueprint:
             "verifies claims in a browser, and promotes a typed result."
         ),
         stages=(
-            StageNode(
+            StageGraphStageSpec(
                 stage_id="admit_public_goal",
-                output_slots=frozenset({"admission_decision"}),
+                output_slots=("admission_decision",),
             ),
-            StageNode(
+            StageGraphStageSpec(
                 stage_id="search_firecrawl",
-                depends_on=frozenset({"admit_public_goal"}),
+                depends_on=("admit_public_goal",),
                 reservation={"tool.calls.total": 5, "operation.attempts": 1},
-                obligation_refs=frozenset({"obligation:firecrawl-search-evidence:v1"}),
-                output_slots=frozenset({"firecrawl_evidence"}),
+                obligation_refs=("obligation:firecrawl-search-evidence:v1",),
+                output_slots=("firecrawl_evidence",),
             ),
-            StageNode(
+            StageGraphStageSpec(
                 stage_id="search_tavily",
-                depends_on=frozenset({"admit_public_goal"}),
+                depends_on=("admit_public_goal",),
                 reservation={"tool.calls.total": 5, "operation.attempts": 1},
-                obligation_refs=frozenset({"obligation:tavily-search-evidence:v1"}),
-                output_slots=frozenset({"tavily_evidence"}),
+                obligation_refs=("obligation:tavily-search-evidence:v1",),
+                output_slots=("tavily_evidence",),
             ),
-            StageNode(
+            StageGraphStageSpec(
                 stage_id="synthesize_citations",
-                depends_on=frozenset({"search_firecrawl", "search_tavily"}),
+                depends_on=("search_firecrawl", "search_tavily"),
                 reservation={"operation.attempts": 1},
-                obligation_refs=frozenset({"obligation:cited-synthesis:v1"}),
-                output_slots=frozenset({"cited_synthesis"}),
+                obligation_refs=("obligation:cited-synthesis:v1",),
+                output_slots=("cited_synthesis",),
             ),
-            StageNode(
+            StageGraphStageSpec(
                 stage_id="browser_verify",
-                depends_on=frozenset({"synthesize_citations"}),
+                depends_on=("synthesize_citations",),
                 reservation={"tool.calls.total": 10, "operation.attempts": 1},
-                obligation_refs=frozenset({"obligation:browser-verification:v1"}),
-                output_slots=frozenset({"browser_verification_evidence"}),
+                obligation_refs=("obligation:browser-verification:v1",),
+                output_slots=("browser_verification_evidence",),
             ),
-            StageNode(
+            StageGraphStageSpec(
                 stage_id="promote_verified_result",
-                depends_on=frozenset({"browser_verify"}),
+                depends_on=("browser_verify",),
                 reservation={"operation.attempts": 1},
-                output_slots=frozenset({"verified_research_result"}),
+                output_slots=("verified_research_result",),
             ),
         ),
-        declared_output_slots=frozenset(
-            {
-                "admission_decision",
-                "firecrawl_evidence",
-                "tavily_evidence",
-                "cited_synthesis",
-                "browser_verification_evidence",
-                "verified_research_result",
-            }
-        ),
-        max_parallel_stages=2,
+        max_concurrency=2,
         workflow_evaluation_contract_ref=("evaluation:web-research-browser-verification:v1"),
     )
 

@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
+from app.application.goal_directed import InMemoryGoalOperationTemplateRepository
 from app.application.orchestration_binding_repository import (
     InMemoryRunSemanticInputBindingRepository,
 )
@@ -41,16 +43,15 @@ from app.domain.coordinator.web_research_runtime import (
 )
 from app.domain.orchestration.bindings import StageHandlerBinding
 from app.domain.orchestration.contracts import (
+    StageCandidateIdentity,
     StageExecutionIdentity,
     StageOperationRequest,
     WorkflowEvaluationRequest,
 )
-from typing import Any, cast
-
-from app.application.goal_directed import InMemoryGoalOperationTemplateRepository
 from app.domain.run_control.contracts import ActorContext
 from app.temporal.coordinator_runtime import (
     GoalDirectedCoordinatorDependencies,
+    StageGraphCoordinatorDependencies,
     create_routed_coordinator_activities,
 )
 
@@ -326,11 +327,16 @@ def request(
     return StageOperationRequest(
         identity=StageExecutionIdentity(
             run_id=RUN_ID,
-            stage_id=stage_id,
-            workflow_cycle=1,
-            stage_cycle=1,
-            operation_attempt=operation_attempt,
             execution_epoch=1,
+            candidate=StageCandidateIdentity(
+                stage_id=stage_id,
+                mapped_instance_presence=0,
+                mapped_instance_id="NO_MAPPED_INSTANCE",
+                workflow_cycle_ordinal=1,
+                stage_cycle_ordinal=1,
+                operation_slot_id="execute",
+            ),
+            semantic_attempt=operation_attempt,
         ),
         idempotency_key=f"{RUN_ID}:{stage_id}:cycle-1",
         objective="execute the exact governed web-research stage",
@@ -529,6 +535,12 @@ def test_routed_activity_composition_registers_web_research_handlers() -> None:
                 actor_id="web-research-test",
                 permissions=frozenset({"workflow_run.goal_directed"}),
             ),
+        ),
+        stagegraph=StageGraphCoordinatorDependencies(
+            run_control=cast(Any, object()),
+            repository=cast(Any, object()),
+            operation_bindings=cast(Any, object()),
+            templates=cast(Any, object()),
         ),
         web_research=dependencies,
     )

@@ -1,7 +1,7 @@
 # Control-plane foundation traceability projection
 
 Status: generated-style projection from canonical specification metadata; requirements are authored only in their owning specifications.  
-Evidence status: WP-CP-010, WP-CP-020, WP-CP-030, WP-CP-040, and WP-CP-045 are accepted; later packages remain planned.
+Evidence status: WP-CP-010, WP-CP-020, WP-CP-030, WP-CP-040, WP-CP-045, and WP-BP-010 are accepted; later packages remain planned.
 Canonical metadata revision: `c48867a240d09a98db9cdfb4937f55176f30adf1`.
 
 | Requirement | Source anchors | ADR | Canonical spec | Contract | Work package | GitHub/local issue | Test/qualification | Evidence | Status |
@@ -60,16 +60,16 @@ Canonical metadata revision: `c48867a240d09a98db9cdfb4937f55176f30adf1`.
 | REQ-CP-CS-005 | Frozen middleware channels | ADR-0004 | SPEC-CP-COGNITIVE-SCHEMAS | CON-CP-COGNITIVE-CHANNEL-PACK-V1 | WP-CP-040 | local Markdown | Skills middleware ownership test | `evidence_v2/WP-CP-040/README.md` | accepted |
 | REQ-CP-CS-006 | Subagent projections | ADR-0004 | SPEC-CP-COGNITIVE-SCHEMAS | CON-CP-COGNITIVE-STATE-SCHEMA-V1 | WP-CP-040 | local Markdown | exact slice ceiling test | `evidence_v2/WP-CP-040/README.md` | accepted |
 | REQ-CP-CS-007 | Checkpoint digest gate | ADR-0004 | SPEC-CP-COGNITIVE-SCHEMAS | CON-CP-COGNITIVE-CONTEXT-SCHEMA-V1 | WP-CP-040 | local Markdown | binding/checkpoint schema digests | `evidence_v2/WP-CP-040/README.md` | accepted |
-| REQ-BP-SG-001 | Pre-research F3 StageGraph | ADR-0003 | SPEC-BP-STAGEGRAPH | CON-BP-STAGEGRAPH-V2 | WP-BP-010 | local Markdown | structural validation; normalization; complete ordering-key registry; digest stability | evidence_v2/WP-BP-010 | planned |
-| REQ-BP-SG-002 | Pre-research F3 joins | ADR-0003 | SPEC-BP-STAGEGRAPH | CON-BP-STAGEGRAPH-V2 | WP-BP-010 | local Markdown | complete dependency-disposition and join truth tables | evidence_v2/WP-BP-010 | planned |
-| REQ-BP-SG-003 | Pre-research F3 determinism | ADR-0003 | SPEC-BP-STAGEGRAPH | CON-BP-STAGE-DECISION-V1 | WP-BP-010 | local Markdown | randomized-order determinism | evidence_v2/WP-BP-010 | planned |
-| REQ-BP-SG-004 | Proposal §§2, 7.2 | ADR-0003 | SPEC-BP-STAGEGRAPH | CON-BP-STAGEGRAPH-V2; CON-BP-STAGE-DECISION-V1 | WP-BP-010, WP-CP-050 | local Markdown | controlled early-release ordering and slow-sibling liability proof; cohesive vertical | evidence_v2/WP-BP-010; evidence_v2/WP-CP-050 | planned |
-| REQ-BP-SG-005 | Pre-research F3 fairness | ADR-0003 | SPEC-BP-STAGEGRAPH | CON-BP-STAGEGRAPH-V2; CON-BP-STAGE-DECISION-V1 | WP-BP-010 | local Markdown | initial/resumed weighted-ring cursors; admission-only movement; saturation/starvation | evidence_v2/WP-BP-010 | planned |
-| REQ-BP-SG-006 | Proposal §7.2 retry identity | ADR-0003 | SPEC-BP-STAGEGRAPH | CON-BP-STAGE-DECISION-V1 | WP-BP-010 | local Markdown | retry/cycle lineage | evidence_v2/WP-BP-010 | planned |
-| REQ-BP-SG-007 | Pre-research F3 stage cycles | ADR-0003 | SPEC-BP-STAGEGRAPH | CON-BP-STAGEGRAPH-V2; CON-BP-STAGE-DECISION-V1 | WP-BP-010 | local Markdown | bounded repair and semantic-precedence tests | evidence_v2/WP-BP-010 | planned |
-| REQ-BP-SG-008 | Pre-research F3 invalidation | ADR-0003 | SPEC-BP-STAGEGRAPH | CON-BP-STAGEGRAPH-V2; CON-BP-STAGE-DECISION-V1 | WP-BP-010 | local Markdown | minimal reuse and invalid-generation lineage tests | evidence_v2/WP-BP-010 | planned |
-| REQ-BP-SG-009 | Pre-research F3 waits/cancellation | ADR-0003 | SPEC-BP-STAGEGRAPH | CON-BP-STAGEGRAPH-V2; CON-BP-STAGE-DECISION-V1 | WP-BP-010 | local Markdown | wait/cancel; slow-sibling routing; veto/rule precedence; late-result effects | evidence_v2/WP-BP-010 | planned |
-| REQ-BP-SG-010 | Pre-research F3 obligations | ADR-0003 | SPEC-BP-STAGEGRAPH | CON-BP-STAGEGRAPH-V2; CON-BP-STAGE-DECISION-V1 | WP-BP-010, WP-CP-050 | local Markdown | obligation completion and producer-liability closure | evidence_v2/WP-BP-010 | planned |
+| REQ-BP-SG-001 | Pre-research F3 StageGraph | ADR-0003 | SPEC-BP-STAGEGRAPH | CON-BP-STAGEGRAPH-V2 | WP-BP-010 | local Markdown | structural validation; normalization; complete ordering-key registry; digest stability | evidence_v2/WP-BP-010/README.md | accepted |
+| REQ-BP-SG-002 | Pre-research F3 joins | ADR-0003 | SPEC-BP-STAGEGRAPH | CON-BP-STAGEGRAPH-V2 | WP-BP-010 | local Markdown | complete dependency-disposition and join truth tables | evidence_v2/WP-BP-010/README.md | accepted |
+| REQ-BP-SG-003 | Pre-research F3 determinism | ADR-0003 | SPEC-BP-STAGEGRAPH | CON-BP-STAGE-DECISION-V1 | WP-BP-010 | local Markdown | randomized-order determinism | evidence_v2/WP-BP-010/README.md | accepted |
+| REQ-BP-SG-004 | Proposal §§2, 7.2 | ADR-0003 | SPEC-BP-STAGEGRAPH | CON-BP-STAGEGRAPH-V2; CON-BP-STAGE-DECISION-V1 | WP-BP-010, WP-CP-050 | local Markdown | controlled early-release ordering and slow-sibling liability proof; cohesive vertical | evidence_v2/WP-BP-010/README.md; evidence_v2/WP-CP-050 | accepted |
+| REQ-BP-SG-005 | Pre-research F3 fairness | ADR-0003 | SPEC-BP-STAGEGRAPH | CON-BP-STAGEGRAPH-V2; CON-BP-STAGE-DECISION-V1 | WP-BP-010 | local Markdown | initial/resumed weighted-ring cursors; admission-only movement; saturation/starvation | evidence_v2/WP-BP-010/README.md | accepted |
+| REQ-BP-SG-006 | Proposal §7.2 retry identity | ADR-0003 | SPEC-BP-STAGEGRAPH | CON-BP-STAGE-DECISION-V1 | WP-BP-010 | local Markdown | retry/cycle lineage | evidence_v2/WP-BP-010/README.md | accepted |
+| REQ-BP-SG-007 | Pre-research F3 stage cycles | ADR-0003 | SPEC-BP-STAGEGRAPH | CON-BP-STAGEGRAPH-V2; CON-BP-STAGE-DECISION-V1 | WP-BP-010 | local Markdown | bounded repair and semantic-precedence tests | evidence_v2/WP-BP-010/README.md | accepted |
+| REQ-BP-SG-008 | Pre-research F3 invalidation | ADR-0003 | SPEC-BP-STAGEGRAPH | CON-BP-STAGEGRAPH-V2; CON-BP-STAGE-DECISION-V1 | WP-BP-010 | local Markdown | minimal reuse and invalid-generation lineage tests | evidence_v2/WP-BP-010/README.md | accepted |
+| REQ-BP-SG-009 | Pre-research F3 waits/cancellation | ADR-0003 | SPEC-BP-STAGEGRAPH | CON-BP-STAGEGRAPH-V2; CON-BP-STAGE-DECISION-V1 | WP-BP-010 | local Markdown | wait/cancel; slow-sibling routing; veto/rule precedence; late-result effects | evidence_v2/WP-BP-010/README.md | accepted |
+| REQ-BP-SG-010 | Pre-research F3 obligations | ADR-0003 | SPEC-BP-STAGEGRAPH | CON-BP-STAGEGRAPH-V2; CON-BP-STAGE-DECISION-V1 | WP-BP-010, WP-CP-050 | local Markdown | obligation completion and producer-liability closure | evidence_v2/WP-BP-010/README.md | accepted |
 | REQ-BP-GD-001 | Pre-research F3 objective envelope | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-BP-GOAL-DIRECTED-V1 | WP-BP-020 | local Markdown | envelope publication/control | evidence_v2/WP-BP-020 | planned |
 | REQ-BP-GD-002 | Proposal §7.4 revisions | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-BP-GOAL-DIRECTED-V1 | WP-BP-020 | local Markdown | revision-boundary tests | evidence_v2/WP-BP-020 | planned |
 | REQ-BP-GD-003 | Proposal §7.4 iterations | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-BP-GOAL-DIRECTED-V1 | WP-BP-020 | local Markdown | operation durability tests | evidence_v2/WP-BP-020 | planned |

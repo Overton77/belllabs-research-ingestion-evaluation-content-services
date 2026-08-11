@@ -7,6 +7,7 @@ from typing import Any, cast
 
 import pytest
 
+from app.application.goal_directed import InMemoryGoalOperationTemplateRepository
 from app.application.orchestration_binding_repository import (
     InMemoryRunSemanticInputBindingRepository,
 )
@@ -27,10 +28,12 @@ from app.application.schema_grounding_repository import (
     InMemorySchemaGroundingRecordRepository,
 )
 from app.domain.orchestration.contracts import (
+    StageCandidateIdentity,
     StageExecutionIdentity,
     StageOperationRequest,
     WorkflowEvaluationRequest,
 )
+from app.domain.run_control.contracts import ActorContext
 from app.domain.schema_context.contracts import (
     PropertyIntentHint,
     SchemaContextSelection,
@@ -42,11 +45,10 @@ from app.domain.schema_grounding.contracts import (
     SchemaCatalogBuildRequest,
 )
 from app.integrations.control_plane_payloads import ContentAddress, InMemoryPayloadStore
-from app.application.goal_directed import InMemoryGoalOperationTemplateRepository
-from app.domain.run_control.contracts import ActorContext
 from app.temporal.coordinator_runtime import (
     GoalDirectedCoordinatorDependencies,
     SchemaGroundingCoordinatorRuntimeDependencies,
+    StageGraphCoordinatorDependencies,
     create_schema_grounding_coordinator_runtime,
 )
 from tests.schema_context_helpers import SDL
@@ -173,11 +175,16 @@ def _stage_request(
     return StageOperationRequest(
         identity=StageExecutionIdentity(
             run_id="selection-run-1",
-            stage_id=stage_id,
-            workflow_cycle=0,
-            stage_cycle=0,
-            operation_attempt=1,
             execution_epoch=1,
+            candidate=StageCandidateIdentity(
+                stage_id=stage_id,
+                mapped_instance_presence=0,
+                mapped_instance_id="NO_MAPPED_INSTANCE",
+                workflow_cycle_ordinal=0,
+                stage_cycle_ordinal=0,
+                operation_slot_id="execute",
+            ),
+            semantic_attempt=1,
         ),
         idempotency_key=f"operation:{stage_id}:1",
         objective=f"Execute {stage_id}",
@@ -480,6 +487,12 @@ def test_production_runtime_shares_postgres_binding_authority_with_workers() -> 
                     actor_id="schema-context-test",
                     permissions=frozenset({"workflow_run.goal_directed"}),
                 ),
+            ),
+            stagegraph=StageGraphCoordinatorDependencies(
+                run_control=cast(Any, object()),
+                repository=cast(Any, object()),
+                operation_bindings=cast(Any, object()),
+                templates=cast(Any, object()),
             ),
         ),
     )

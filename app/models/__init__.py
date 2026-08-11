@@ -1,11 +1,4 @@
 from app.models.artifact_promotion import ArtifactMetadataRevisionDocument
-from app.models.goal_directed import (
-    GoalHandoffDocument,
-    GoalIterationDocument,
-    GoalOperationTemplateDocument,
-    GoalRevisionDocument,
-    GoalVerificationDocument,
-)
 from app.models.control_plane import (
     CatalogProjectionAlertDocument,
     CatalogProjectionEventDocument,
@@ -21,6 +14,13 @@ from app.models.external_capability import (
     ExternalCandidateInspectionWorkspaceDocument,
     ExternalDiscoveryCandidateDocument,
     ExternalDiscoveryEvidenceDocument,
+)
+from app.models.goal_directed import (
+    GoalHandoffDocument,
+    GoalIterationDocument,
+    GoalOperationTemplateDocument,
+    GoalRevisionDocument,
+    GoalVerificationDocument,
 )
 from app.models.infrastructure import InfrastructureMarker
 from app.models.operation_execution import (

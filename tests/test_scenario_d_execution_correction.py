@@ -77,7 +77,9 @@ async def test_corrective_bundle_advances_exact_transitive_chain_and_preserves_r
         for stage in original_blueprint.definition.stages
         if stage.stage_id == "admit_public_goal"
     )
-    assert not original_admission.reservation
+    assert original_admission.operation_slots[0].reservation == {
+        "operation.attempts": 1
+    }
 
     bundle = build_scenario_d_execution_correction(catalog_records=records)
     blueprint, control, workflow, implementation = bundle.definitions

@@ -21,7 +21,6 @@ with workflow.unsafe.imports_passed_through():
         StageGraphRunInput,
         StageGraphRunResult,
     )
-    from app.temporal.workflows.stagegraph import StageGraphWorkflow
     from app.temporal.workflows.belllabs_run import BellLabsRunWorkflow
 
 
@@ -85,9 +84,6 @@ class LinkedRunWorkflow:
                 "continuation_state": (
                     continuation.model_dump(mode="json") if continuation is not None else None
                 ),
-                "legacy_direct_family_fixture": bool(
-                    payload.get("legacy_direct_family_fixture", False)
-                ),
             },
             id=observer_id,
             task_queue=workflow.info().task_queue,
@@ -142,43 +138,32 @@ class LinkedRunObserverWorkflow:
         )
         child_input = StageGraphRunInput(**payload["child_input"])
         timeout = timedelta(seconds=int(payload.get("execution_timeout_seconds", 3600)))
-        handle: Any
-        if payload.get("legacy_direct_family_fixture", False):
-            handle = await workflow.start_child_workflow(
-                StageGraphWorkflow.run,
-                child_input,
-                id=f"linked-child:{link.child_run_id}",
-                task_queue=str(payload["child_task_queue"]),
-                execution_timeout=timeout,
-                parent_close_policy=workflow.ParentClosePolicy.REQUEST_CANCEL,
-            )
-        else:
-            root_input = BellLabsRunInput(
-                schema_version="belllabs.temporal-root.v1",
-                run_id=link.child_run_id,
-                request_scope=link.request_scope,
-                effective_configuration_digest=child_input.effective_configuration_digest,
-                workflow_type_digest=child_input.blueprint_digest,
-                family="StageGraph",
-                family_input={
-                    **payload["child_input"],
-                    "durable_operation_children": True,
-                },
-                family_task_queue=str(payload["child_task_queue"]),
-            )
-            handle = await workflow.start_child_workflow(
-                BellLabsRunWorkflow.run,
-                root_input,
-                id=root_input.workflow_id,
-                task_queue=str(payload["child_task_queue"]),
-                execution_timeout=timeout,
-                parent_close_policy=workflow.ParentClosePolicy.REQUEST_CANCEL,
-            )
+        root_input = BellLabsRunInput(
+            schema_version="belllabs.temporal-root.v1",
+            run_id=link.child_run_id,
+            request_scope=link.request_scope,
+            effective_configuration_digest=child_input.effective_configuration_digest,
+            workflow_type_digest=child_input.blueprint_digest,
+            family="StageGraph",
+            family_input={
+                **payload["child_input"],
+                "durable_operation_children": True,
+            },
+            family_task_queue=str(payload["child_task_queue"]),
+        )
+        handle: Any = await workflow.start_child_workflow(
+            BellLabsRunWorkflow.run,
+            root_input,
+            id=root_input.workflow_id,
+            task_queue=str(payload["child_task_queue"]),
+            execution_timeout=timeout,
+            parent_close_policy=workflow.ParentClosePolicy.REQUEST_CANCEL,
+        )
         self._child_handle = handle
         if self._cancel_requested:
             handle.cancel()
         try:
-            result: StageGraphRunResult = await handle
+            result: StageGraphRunResult | dict[str, Any] = await handle
         except (asyncio.CancelledError, CancelledError) as error:
             resolution = await self._resolve_observation(
                 {
@@ -224,9 +209,14 @@ class LinkedRunObserverWorkflow:
                 current_epoch=current_epoch,
                 continuation=continuation,
             )
+        output_refs = (
+            result.output_refs
+            if isinstance(result, StageGraphRunResult)
+            else result["output_refs"]
+        )
         exact_output_refs = tuple(
             output_ref
-            for stage_outputs in result.output_refs.values()
+            for stage_outputs in output_refs.values()
             for output_ref in stage_outputs
         )
         resolution = await self._resolve_observation(

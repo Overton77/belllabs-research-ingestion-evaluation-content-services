@@ -49,7 +49,10 @@ from app.application.mongo_operation_execution_repository import (
 from app.application.orchestration import (
     F1OrchestrationBindingVerifier,
     RunControlLifecycleGateway,
+    StageGraphDecisionService,
     StageGraphLaunchService,
+    StageGraphOperationPreparationService,
+    StaticStageGraphOperationTemplateProvider,
     WorkflowLaunchDispatcher,
     orchestration_lifecycle_actor,
 )
@@ -177,8 +180,8 @@ from app.integrations.web_research_runtime import (
     attest_reviewed_web_research_runtime,
     build_live_web_research_handler_dependencies,
 )
-from app.temporal.workflows.stagegraph import StageGraphWorkflow
 from app.temporal.web_research_smoke import create_web_research_stagegraph_worker
+from app.temporal.workflows.stagegraph import StageGraphWorkflow
 
 SEARCH_PLAN: tuple[tuple[str, frozenset[DefinitionKind]], ...] = (
     (
@@ -677,8 +680,9 @@ async def run_live_coordinator(
         policies = AdmissionPolicyRegistry()
         register_web_research_admission_policies(policies)
         verifier = F1RunConfigurationVerifier(control_plane)
+        run_repository = PostgresRunControlRepository(application_pool)
         run_control = RunControlService(
-            PostgresRunControlRepository(application_pool),
+            run_repository,
             verifier,
             policies,
         )
@@ -779,7 +783,7 @@ async def run_live_coordinator(
             ),
             mirror_root=artifact_root,
         )
-        handler_dependencies = build_live_web_research_handler_dependencies(
+        _ = build_live_web_research_handler_dependencies(
             settings=settings,
             firecrawl_tool_ref=_selected_ref(
                 selected_hits,
@@ -801,10 +805,20 @@ async def run_live_coordinator(
         worker = create_web_research_stagegraph_worker(
             temporal,
             task_queue=task_queue,
-            bindings=semantic_repository,
             lifecycle=lifecycle,
-            dependencies=handler_dependencies,
-            operation_bindings=operation_repository,
+            decision_service=StageGraphDecisionService(
+                run_control,
+                run_repository,
+            ),
+            operation_materializer=StageGraphOperationPreparationService(
+                templates=StaticStageGraphOperationTemplateProvider(
+                    {
+                        f"{stage_id}/execute/default": template
+                        for stage_id, template in operation_templates.operations.items()
+                    }
+                ),
+                operation_bindings=operation_repository,
+            ),
             completion=TerminalWorkflowCompletionService(
                 runs=run_control,
                 results=results,

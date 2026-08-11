@@ -52,7 +52,6 @@ class Settings(BaseSettings):
     bell_labs_environment: Literal["development", "staging", "production"] = "development"
     agent_server_endpoint: str = "http://127.0.0.1:2024"
     agent_server_api_key: SecretStr | None = None
-    agent_server_stagegraph_id: Literal["belllabs_stagegraph"] = "belllabs_stagegraph"
     agent_server_goal_directed_id: Literal["belllabs_goal_directed"] = "belllabs_goal_directed"
     agent_server_deployment_endpoint_id: str | None = None
     agent_server_deployment_revision: str | None = None

@@ -7,6 +7,7 @@ from typing import Literal, Protocol
 from pydantic import TypeAdapter
 
 from app.application.control_plane import ControlPlaneService
+from app.application.operation_execution import bind_operation_execution_request
 from app.application.orchestration_binding_repository import (
     RunSemanticInputBindingService,
 )
@@ -16,13 +17,19 @@ from app.application.run_control import (
     RunControlService,
 )
 from app.application.run_control_repository import RunControlRepository
+from app.application.semantic_operation_bindings import SemanticOperationBindingRepository
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import (
     DefinitionKind,
     GoalDirectedBlueprint,
     StageGraphBlueprint,
 )
-from app.domain.operation_execution.contracts import OperationWorkflowRequest
+from app.domain.operation_execution.contracts import (
+    OperationAttemptIdentity,
+    OperationExecutionRequest,
+    OperationWorkflowRequest,
+    PromptSegment,
+)
 from app.domain.orchestration.bindings import RunSemanticInputBinding
 from app.domain.orchestration.contracts import (
     GoalDirectedRunInput,
@@ -34,20 +41,25 @@ from app.domain.orchestration.contracts import (
     StageGraphAdmissionActivityResult,
     StageGraphCompletionActivityRequest,
     StageGraphCompletionActivityResult,
+    StageGraphCycleActivityRequest,
+    StageGraphCycleActivityResult,
     StageGraphDecisionMutation,
     StageGraphInitializeRequest,
     StageGraphInitializeResult,
     StageGraphResultActivityRequest,
     StageGraphResultActivityResult,
     StageGraphRunInput,
+    StageInvalidationProposal,
     StageOperationRequest,
     StageOperationResult,
     WorkflowEvaluationRequest,
     WorkflowEvaluationResult,
+    WorkflowInvalidationProposal,
 )
 from app.domain.orchestration.interpreter import StageGraphInterpreter
 from app.domain.run_control.contracts import (
     AcceptedObligationEvidence,
+    AcceptedOperationSettlementEvidence,
     AcceptedOutputEvidence,
     ActorContext,
     ApplyAuthorityBatchAction,
@@ -55,6 +67,7 @@ from app.domain.run_control.contracts import (
     LifecycleAction,
     LifecycleCommand,
     RecordObligationEvidenceAction,
+    RecordOperationSettlementEvidenceAction,
     RecordOutputEvidenceAction,
     RecordUsageAction,
     ReserveBudgetAction,
@@ -224,6 +237,17 @@ class StageGraphDecisionService:
             StageGraphBlueprint.model_validate(request.blueprint),
             effective_max_concurrency=request.effective_max_concurrency,
         )
+        available_concurrency = max(
+            request.effective_max_concurrency
+            - interpreter.running_concurrency(request.projection),
+            0,
+        )
+        authoritative_frontier = interpreter.frontier(
+            request.projection,
+            available_concurrency=available_concurrency,
+        )
+        if not authoritative_frontier or authoritative_frontier[0] != proposal:
+            raise ValueError("StageGraph admission proposal is stale or not authoritative")
         if (
             operation.semantic_attempt_id != proposal.identity.semantic_key
             or operation.operation.identity.run_id != request.run_id
@@ -289,9 +313,12 @@ class StageGraphDecisionService:
         proposal = interpreter.result_decision(
             request.observation.identity,
             request.late_facts,
+            operation_disposition=request.observation.operation_disposition,
         )
         run = await self._run_control.get_run(request.request_scope, request.run_id)
+        current_projection = replace(request.projection, run_version=run.version)
         effects = await self._run_control.get_effects(request.request_scope, request.run_id)
+        budget = await self._run_control.get_budget(request.request_scope, request.run_id)
         observation = replace(
             request.observation,
             reservations_and_usage_settled=True,
@@ -303,31 +330,30 @@ class StageGraphDecisionService:
                 or request.observation.cancellation_reconciled
             ),
         )
-        liability = request.projection.producer_liabilities[
+        liability = current_projection.producer_liabilities[
             observation.identity.semantic_key
         ]
+        if liability.reservation_id in budget.reservations:
+            raise ValueError("operation usage reservation is not authoritatively settled")
         reservation_id = next(
             (
                 instance.admitted_operation_request_ref
-                for instance in request.projection.stages.values()
+                for instance in current_projection.stages.values()
                 if instance.candidate == request.observation.identity.candidate
             ),
             None,
         )
         if reservation_id is None:
             raise ValueError("StageGraph result has no admitted operation reference")
-        actual_usage = request.observation.operation_result.get("usage", {})
-        if not isinstance(actual_usage, dict):
-            raise ValueError("operation result usage must be a typed dimension map")
         next_projection = interpreter.apply_result_decision(
-            request.projection,
+            current_projection,
             observation,
             proposal,
-            next_run_version=request.projection.run_version + 1,
-            next_family_version=request.projection.family_version + 1,
+            next_run_version=current_projection.run_version + 1,
+            next_family_version=current_projection.family_version + 1,
         )
         mutation = self._mutation(
-            request.projection,
+            current_projection,
             next_projection,
             decision_kind="result_decided",
             mutation_id=f"result-{sha256_digest(observation.identity.semantic_key)[7:]}",
@@ -337,6 +363,7 @@ class StageGraphDecisionService:
             decision_payload={
                 "proposal": asdict(proposal),
                 "prior_liability": asdict(liability),
+                "observation_digest": sha256_digest(observation.operation_result),
             },
         )
         output_evidence = observation.operation_result.get("output_refs", ())
@@ -346,21 +373,10 @@ class StageGraphDecisionService:
         if not isinstance(obligation_evidence, list | tuple):
             raise ValueError("operation result obligation refs must be a sequence")
         batch_actions: list[
-            RecordUsageAction | RecordObligationEvidenceAction | RecordOutputEvidenceAction
-        ] = [
-            RecordUsageAction(
-                usage_id=f"usage:{request.observation.identity.semantic_key}",
-                reservation_id=liability.reservation_id,
-                actual_amounts={
-                    str(dimension): int(amount) for dimension, amount in actual_usage.items()
-                },
-                release_amounts={
-                    dimension: max(amount - int(actual_usage.get(dimension, 0)), 0)
-                    for dimension, amount in liability.reserved_amounts.items()
-                },
-                pending_external_amounts={},
-            )
-        ]
+            RecordObligationEvidenceAction
+            | RecordOutputEvidenceAction
+            | RecordOperationSettlementEvidenceAction
+        ] = []
         if proposal.decision.value == "admit":
             admitted_outputs = next(
                 (
@@ -396,13 +412,26 @@ class StageGraphDecisionService:
                     key=lambda item: item.encode("utf-8"),
                 )
             )
+        batch_actions.append(
+            RecordOperationSettlementEvidenceAction(
+                evidence=AcceptedOperationSettlementEvidence(
+                    settlement_id=(
+                        f"stagegraph-result:{request.observation.identity.semantic_key}"
+                    ),
+                    settlement_payload_digest=sha256_digest(
+                        observation.operation_result
+                    ),
+                    accepted_by_authority_ref=ORCHESTRATION_AUTHORITY_REF,
+                )
+            )
+        )
         receipt = await self._run_control.execute_family_admission(
             LifecycleCommand(
                 command_id=f"stagegraph:{mutation.mutation_id}",
                 idempotency_issuer=request.idempotency_issuer,
                 request_scope=request.request_scope,
                 run_id=request.run_id,
-                expected_run_version=request.projection.run_version,
+                expected_run_version=current_projection.run_version,
                 actor=orchestration_lifecycle_actor(),
                 action=ApplyAuthorityBatchAction(actions=tuple(batch_actions)),
                 reason="Settle StageGraph producer usage and decide its result",
@@ -414,24 +443,145 @@ class StageGraphDecisionService:
         )
         accepted = receipt.command_result.status == CommandStatus.ACCEPTED
         if accepted:
+            if receipt.family_receipt is None:
+                raise RuntimeError("accepted StageGraph result is missing its family receipt")
             next_projection = replace(
                 next_projection,
                 run_version=receipt.command_result.resulting_run_version,
                 family_version=receipt.family_receipt.family_version,
-                accepted_obligation_evidence=frozenset(
-                    {
-                        *next_projection.accepted_obligation_evidence,
-                        *(
-                            str(item)
-                            for item in obligation_evidence
-                            if proposal.decision.value == "admit"
-                        ),
-                    }
-                ),
             )
         return StageGraphResultActivityResult(
             accepted=accepted,
-            projection=next_projection if accepted else request.projection,
+            projection=next_projection if accepted else current_projection,
+            proposal=proposal,
+            reason_code=receipt.command_result.reason_code,
+        )
+
+    async def apply_cycle(
+        self, request: StageGraphCycleActivityRequest
+    ) -> StageGraphCycleActivityResult:
+        await self._verify_family_head(
+            request.request_scope,
+            request.run_id,
+            request.projection,
+        )
+        run = await self._run_control.get_run(request.request_scope, request.run_id)
+        current_projection = replace(request.projection, run_version=run.version)
+        blueprint = StageGraphBlueprint.model_validate(request.blueprint)
+        stage = (
+            next((item for item in blueprint.stages if item.stage_id == request.stage_id), None)
+            if request.cycle_scope == "stage"
+            else None
+        )
+        policy = (
+            stage.stage_cycle_policy
+            if stage is not None
+            else blueprint.workflow_cycle_policy
+        )
+        if policy is None:
+            raise ValueError(f"StageGraph {request.cycle_scope} cycle is not authored")
+        if (
+            request.evaluation_contract_ref != policy.evaluation_contract_ref
+            or request.objective_contract_ref != policy.objective_contract_ref
+            or not request.evaluation_ref
+        ):
+            raise ValueError(f"{request.cycle_scope} cycle evidence is outside frozen contracts")
+        interpreter = StageGraphInterpreter(
+            blueprint,
+            effective_max_concurrency=request.effective_max_concurrency,
+        )
+        proposal: StageInvalidationProposal | WorkflowInvalidationProposal
+        if request.cycle_scope == "stage":
+            if request.stage_id is None:
+                raise ValueError("stage cycle requires a stage identity")
+            stage_proposal = interpreter.stage_invalidation(
+                current_projection,
+                stage_id=request.stage_id,
+                next_objective=request.next_objective,
+            )
+            next_projection = interpreter.apply_stage_invalidation(
+                current_projection,
+                stage_proposal,
+                next_run_version=current_projection.run_version + 1,
+                next_family_version=current_projection.family_version + 1,
+            )
+            proposal = stage_proposal
+            cycle_ordinal = stage_proposal.next_stage_cycle_ordinal
+        else:
+            workflow_proposal = interpreter.workflow_invalidation(
+                current_projection,
+                invalidation_frontier=request.invalidation_frontier,
+                next_objective=request.next_objective,
+            )
+            next_projection = interpreter.apply_workflow_invalidation(
+                current_projection,
+                workflow_proposal,
+                next_run_version=current_projection.run_version + 1,
+                next_family_version=current_projection.family_version + 1,
+            )
+            proposal = workflow_proposal
+            cycle_ordinal = workflow_proposal.next_workflow_cycle_ordinal
+        exact_ref = next(
+            (
+                item.admitted_operation_request_ref
+                for item in current_projection.stages.values()
+                if item.admitted_operation_request_ref is not None
+            ),
+            None,
+        )
+        if exact_ref is None:
+            raise ValueError("workflow cycle requires an admitted producer operation")
+        mutation = self._mutation(
+            current_projection,
+            next_projection,
+            decision_kind="cycle_decided",
+            mutation_id=(
+                f"cycle-{request.run_id}-{request.cycle_scope}-{request.stage_id or 'graph'}-"
+                f"{cycle_ordinal}"
+            ),
+            exact_operation_request_ref=exact_ref,
+            request_scope=request.request_scope,
+            decided_at=request.occurred_at,
+            decision_payload={
+                "proposal": asdict(proposal),
+                "evaluation_ref": request.evaluation_ref,
+            },
+        )
+        receipt = await self._run_control.execute_family_admission(
+            LifecycleCommand(
+                command_id=f"stagegraph:{mutation.mutation_id}",
+                idempotency_issuer=request.idempotency_issuer,
+                request_scope=request.request_scope,
+                run_id=request.run_id,
+                expected_run_version=current_projection.run_version,
+                actor=orchestration_lifecycle_actor(),
+                action=RecordUsageAction(
+                    usage_id=(
+                        f"stagegraph-cycle:{request.run_id}:"
+                        f"{request.cycle_scope}:{request.stage_id or 'graph'}:{cycle_ordinal}"
+                    ),
+                    authority_ref=ORCHESTRATION_AUTHORITY_REF,
+                    actual_amounts=policy.reservation,
+                ),
+                reason="Accept typed StageGraph workflow cycle and invalidation frontier",
+                evidence_refs=(request.evaluation_ref,),
+                occurred_at=request.occurred_at,
+                correlation_id=request.correlation_id,
+            ),
+            mutation,
+        )
+        accepted = receipt.command_result.status == CommandStatus.ACCEPTED
+        if accepted:
+            if receipt.family_receipt is None:
+                raise RuntimeError("accepted StageGraph cycle is missing its family receipt")
+            next_projection = replace(
+                next_projection,
+                run_version=receipt.command_result.resulting_run_version,
+                family_version=receipt.family_receipt.family_version,
+            )
+        return StageGraphCycleActivityResult(
+            accepted=accepted,
+            projection=next_projection if accepted else current_projection,
             proposal=proposal,
             reason_code=receipt.command_result.reason_code,
         )
@@ -447,17 +597,18 @@ class StageGraphDecisionService:
             request.projection,
         )
         run = await self._run_control.get_run(request.request_scope, request.run_id)
+        current_projection = replace(request.projection, run_version=run.version)
         budget = await self._run_control.get_budget(request.request_scope, request.run_id)
         effects = await self._run_control.get_effects(request.request_scope, request.run_id)
         next_projection = replace(
-            request.projection,
-            family_version=request.projection.family_version + 1,
-            run_version=request.projection.run_version + 1,
+            current_projection,
+            family_version=current_projection.family_version + 1,
+            run_version=current_projection.run_version + 1,
         )
         exact_ref = next(
             (
                 item.admitted_operation_request_ref
-                for item in request.projection.stages.values()
+                for item in current_projection.stages.values()
                 if item.admitted_operation_request_ref is not None
             ),
             None,
@@ -465,7 +616,7 @@ class StageGraphDecisionService:
         if exact_ref is None:
             raise ValueError("StageGraph terminalization requires an exact producer operation")
         mutation = self._mutation(
-            request.projection,
+            current_projection,
             next_projection,
             decision_kind="completion_proposed",
             mutation_id=f"complete-{sha256_digest(request.projection.digest)[7:]}",
@@ -492,7 +643,7 @@ class StageGraphDecisionService:
             required_obligations_accepted=request.proposal.required_obligations_accepted,
             execution_failure_refs=tuple(
                 item.candidate.semantic_prefix
-                for item in request.projection.stages.values()
+                for item in current_projection.stages.values()
                 if item.status == "failed"
             ),
             valid_output_refs=request.proposal.valid_output_refs,
@@ -598,6 +749,162 @@ class StageGraphOperationMaterializer(Protocol):
     ) -> OperationWorkflowRequest: ...
 
 
+class StageGraphOperationTemplateProvider(Protocol):
+    """Resolve an immutable operation template from the admitted semantic binding."""
+
+    async def get_template(
+        self,
+        *,
+        semantic_input_binding_ref: str,
+        operation_request_key: str,
+        request_scope: str,
+        run_id: str,
+    ) -> OperationExecutionRequest: ...
+
+
+class StaticStageGraphOperationTemplateProvider:
+    """Process-local adapter for an immutable, already-admitted template set."""
+
+    def __init__(self, templates: dict[str, OperationExecutionRequest]) -> None:
+        if not templates:
+            raise ValueError("StageGraph operation templates cannot be empty")
+        if any(not key for key in templates):
+            raise ValueError("StageGraph operation template keys cannot be empty")
+        self._templates = dict(templates)
+
+    async def get_template(
+        self,
+        *,
+        semantic_input_binding_ref: str,
+        operation_request_key: str,
+        request_scope: str,
+        run_id: str,
+    ) -> OperationExecutionRequest:
+        del request_scope, run_id
+        if not semantic_input_binding_ref:
+            raise ValueError("StageGraph template lookup requires an immutable semantic binding")
+        template = self._templates.get(operation_request_key)
+        if template is None:
+            raise ValueError(
+                f"StageGraph operation template is unavailable: {operation_request_key}"
+            )
+        return template
+
+
+class StageGraphOperationPreparationService:
+    """Materialize and persist the exact OperationWorkflow child before admission."""
+
+    def __init__(
+        self,
+        *,
+        templates: StageGraphOperationTemplateProvider,
+        operation_bindings: SemanticOperationBindingRepository,
+    ) -> None:
+        self._templates = templates
+        self._operation_bindings = operation_bindings
+
+    async def materialize(
+        self,
+        request: StageGraphAdmissionActivityRequest,
+    ) -> OperationWorkflowRequest:
+        proposal = request.proposal
+        template = await self._templates.get_template(
+            semantic_input_binding_ref=request.semantic_input_binding_ref,
+            operation_request_key=proposal.operation_request_key,
+            request_scope=request.request_scope,
+            run_id=request.run_id,
+        )
+        workspace = template.workspace.model_copy(
+            update={
+                "namespace_id": template.workspace.namespace_id.replace(
+                    "{run_id}", request.run_id
+                ),
+                "workspace_id": template.workspace.workspace_id.replace(
+                    "{run_id}", request.run_id
+                ),
+            }
+        )
+        identity = OperationAttemptIdentity(
+            run_id=request.run_id,
+            operation_id=proposal.identity.operation_id,
+            operation_attempt=proposal.identity.semantic_attempt,
+        )
+        control_revision = request.projection.run_version + 1
+        deep_binding = template.deep_agent_binding
+        if deep_binding is not None:
+            deep_binding = deep_binding.__class__.create(
+                **{
+                    **deep_binding.model_dump(
+                        mode="python", exclude={"binding_digest"}
+                    ),
+                    "binding_id": f"deep-agent:{identity.semantic_key}",
+                    "run_id": request.run_id,
+                    "operation_id": identity.operation_id,
+                    "operation_attempt": identity.operation_attempt,
+                    "execution_generation": proposal.identity.execution_generation,
+                    "erc_digest": request.effective_configuration_digest,
+                    "control_revision": control_revision,
+                    "workspace": workspace,
+                    "capability_grant": template.capability_grant,
+                    "reservation_id": proposal.reservation_id,
+                }
+            )
+        operation = OperationExecutionRequest.model_validate(
+            {
+                **template.model_dump(mode="python"),
+                "identity": OperationAttemptIdentity(
+                    run_id=identity.run_id,
+                    operation_id=identity.operation_id,
+                    operation_attempt=identity.operation_attempt,
+                ),
+                "request_scope": request.request_scope,
+                "effective_configuration_digest": request.effective_configuration_digest,
+                "run_control_revision": control_revision,
+                "workspace": workspace,
+                "deep_agent_binding": deep_binding,
+                "budget_reservation_id": proposal.reservation_id,
+                "budget_limits": proposal.reservation,
+                "prompt_segments": (
+                    template.prompt_segments
+                    if proposal.objective_override is None
+                    else (
+                        *template.prompt_segments,
+                        PromptSegment(
+                            source_ref=f"stage-cycle-objective:{proposal.identity.semantic_key}",
+                            source_revision=1,
+                            # The cycle objective is a reducer-admitted run input,
+                            # not a newly published privileged prompt definition.
+                            trust_class="admitted_input",
+                            content=proposal.objective_override,
+                            rendered_digest=sha256_digest(proposal.objective_override),
+                        ),
+                    )
+                ),
+                "prior_binding_id": None,
+                "requested_at": request.occurred_at,
+                "idempotency_key": (
+                    f"stagegraph:{proposal.identity.semantic_key}:"
+                    f"generation:{proposal.identity.execution_generation}"
+                ),
+            }
+        )
+        if operation.identity.semantic_key != proposal.identity.semantic_key:
+            raise ValueError("StageGraph and OperationWorkflow semantic identities diverged")
+        binding = bind_operation_execution_request(operation)
+        persisted = await self._operation_bindings.create_binding(
+            binding,
+            request_scope=request.request_scope,
+        )
+        if persisted != binding:
+            raise ValueError("persisted StageGraph operation binding differs from exact intent")
+        return OperationWorkflowRequest(
+            semantic_attempt_id=operation.identity.semantic_key,
+            execution_generation=proposal.identity.execution_generation,
+            operation_kind="bound_operation",
+            operation=operation,
+        )
+
+
 def validate_stagegraph_authority_batch(
     mutation: AtomicFamilyMutation,
     batch: ApplyAuthorityBatchAction,
@@ -606,8 +913,10 @@ def validate_stagegraph_authority_batch(
 
     if not isinstance(mutation, StageGraphDecisionMutation):
         return "unexpected StageGraph mutation type"
-    usage_actions = tuple(
-        action for action in batch.actions if isinstance(action, RecordUsageAction)
+    settlement_actions = tuple(
+        action
+        for action in batch.actions
+        if isinstance(action, RecordOperationSettlementEvidenceAction)
     )
     output_actions = tuple(
         action for action in batch.actions if isinstance(action, RecordOutputEvidenceAction)
@@ -617,21 +926,23 @@ def validate_stagegraph_authority_batch(
         for action in batch.actions
         if isinstance(action, RecordObligationEvidenceAction)
     )
-    if len(usage_actions) != 1:
-        return "StageGraph authority batches require exactly one usage settlement"
-    usage_id = usage_actions[0].usage_id
-    if not usage_id.startswith("usage:") or usage_id == "usage:":
-        return "StageGraph usage settlement identity is malformed"
+    if len(settlement_actions) != 1:
+        return "StageGraph result batches require exactly one settlement observation"
     if mutation.decision_kind != "result_decided":
         if output_actions or obligation_actions:
             return "only StageGraph result decisions may batch evidence acceptance"
         return None
-    semantic_key = usage_id.removeprefix("usage:")
     payload = mutation.decision_payload.get("prior_liability")
     if not isinstance(payload, dict):
         return "StageGraph result batch lacks prior producer liability binding"
-    if payload.get("semantic_attempt_id") != semantic_key:
-        return "StageGraph usage settlement does not bind the decided producer liability"
+    semantic_key = payload.get("semantic_attempt_id")
+    evidence = settlement_actions[0].evidence
+    if evidence.settlement_id != f"stagegraph-result:{semantic_key}":
+        return "StageGraph settlement observation does not bind the producer liability"
+    if evidence.settlement_payload_digest != mutation.decision_payload.get(
+        "observation_digest"
+    ):
+        return "StageGraph settlement observation digest does not bind the result"
     return None
 
 
@@ -644,16 +955,23 @@ def register_stagegraph_family_mutations(registry: FamilyAdmissionRegistry) -> N
         mutation_kind="decision_committed",
         required_permission="workflow_run.reserve_budget",
         allowed_action_kinds=frozenset(
-            {"reserve_budget", "record_usage", "terminalize", "apply_authority_batch"}
+            {
+                "reserve_budget",
+                "record_usage",
+                "terminalize",
+                "apply_authority_batch",
+            }
         ),
         allowed_batch_action_kinds=frozenset(
             {
-                "record_usage",
                 "record_obligation_evidence",
                 "record_output_evidence",
+                "record_operation_settlement_evidence",
             }
         ),
-        required_batch_action_kinds=frozenset({"record_usage"}),
+        required_batch_action_kinds=frozenset(
+            {"record_operation_settlement_evidence"}
+        ),
         batch_binding_validator=validate_stagegraph_authority_batch,
     )
 

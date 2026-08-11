@@ -8,11 +8,11 @@ import asyncpg
 
 from app.application.control_plane import ControlPlaneService
 from app.application.control_plane_repository import BeanieDefinitionRepository
+from app.application.goal_directed import configure_goal_directed_family_admissions
 from app.application.linked_runs import LinkedRunService
+from app.application.orchestration import register_stagegraph_family_mutations
 from app.application.postgres_linked_run_repository import PostgresLinkedRunRepository
 from app.application.postgres_run_control_repository import PostgresRunControlRepository
-from app.application.goal_directed import configure_goal_directed_family_admissions
-from app.application.orchestration import register_stagegraph_family_mutations
 from app.application.run_control import (
     AdmissionPolicyRegistry,
     F1RunConfigurationVerifier,

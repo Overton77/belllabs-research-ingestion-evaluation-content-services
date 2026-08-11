@@ -36,7 +36,6 @@ from app.domain.control_plane.contracts import (
     RuntimeProfileDefinition,
     SaveDraftRequest,
     SecretRef,
-    StageGraphBlueprint,
     StageNode,
     WorkflowConfigurationDefinition,
     WorkflowTypeDefinition,
@@ -52,6 +51,10 @@ from app.domain.control_plane.errors import (
 )
 from app.domain.control_plane.extensions import ExtensionRegistry
 from app.domain.control_plane.fixtures import GENERIC_GOAL_DIRECTED
+from app.domain.control_plane.stagegraph_builder import (
+    StageGraphStageSpec,
+    build_stagegraph_v2,
+)
 from app.integrations.control_plane_payloads import (
     ContentAddressedPayloadStore,
     InMemoryPayloadStore,
@@ -95,18 +98,16 @@ async def configured_service(
     )
     blueprint = await publish(
         service,
-        StageGraphBlueprint(
+        build_stagegraph_v2(
             logical_id="generic.graph",
             title="Generic graph",
             description="Contract-only test graph",
             stages=(
-                StageNode(
+                StageGraphStageSpec(
                     stage_id="first",
-                    output_slots=frozenset({"result"}),
-                    variant_names=frozenset({"careful"}),
+                    output_slots=("result",),
                 ),
             ),
-            declared_output_slots=frozenset({"result"}),
         ),
     )
     control = await publish(
@@ -116,7 +117,7 @@ async def configured_service(
             title="Generic control",
             description="No workflow-specific defaults",
             blueprint_ref=blueprint.ref,
-            selected_variants=frozenset({"careful"}),
+            selected_variants=frozenset({"default"}),
             authority_ceiling=authority("sandbox", "evaluate", budget=80, concurrency=3),
             overlayable_fields=frozenset(
                 {"capabilities", "budgets", "max_concurrency", "variants"}
@@ -246,22 +247,29 @@ def test_contracts_forbid_unknown_fields_and_invalid_stage_graphs() -> None:
         StageNode(stage_id="stage", unknown=True)  # type: ignore[call-arg]
 
     with pytest.raises(ValidationError, match="dependency cycle"):
-        StageGraphBlueprint(
+        build_stagegraph_v2(
             logical_id="cycle",
             title="Cycle",
             description="Invalid",
             stages=(
-                StageNode(stage_id="a", depends_on=frozenset({"b"})),
-                StageNode(stage_id="b", depends_on=frozenset({"a"})),
+                StageGraphStageSpec(
+                    stage_id="a", depends_on=("b",), output_slots=("result",)
+                ),
+                StageGraphStageSpec(
+                    stage_id="b", depends_on=("a",), output_slots=("result",)
+                ),
             ),
         )
 
-    with pytest.raises(ValidationError, match="undeclared output"):
-        StageGraphBlueprint(
+    with pytest.raises(ValueError, match="must declare an output slot"):
+        build_stagegraph_v2(
             logical_id="output",
             title="Output",
             description="Invalid",
-            stages=(StageNode(stage_id="a", output_slots=frozenset({"missing"})),),
+            stages=(
+                StageGraphStageSpec(stage_id="a"),
+                StageGraphStageSpec(stage_id="b", depends_on=("a",)),
+            ),
         )
 
 
@@ -365,7 +373,7 @@ async def test_publish_compile_retrieve_is_deterministic_and_intersects_ceilings
             requested_capabilities=frozenset({"sandbox", "evaluate"}),
             budget_ceilings={"units": 50},
             max_concurrency=1,
-            selected_variants=frozenset({"careful"}),
+            selected_variants=frozenset({"default"}),
         ),
     )
     first = await service.compile(request)

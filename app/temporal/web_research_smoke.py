@@ -6,21 +6,16 @@ from temporalio.client import Client
 from temporalio.worker import Worker
 
 from app.application.coordinator_results import TerminalWorkflowCompletionPort
-from app.application.orchestration import RunControlLifecycleGateway
+from app.application.orchestration import (
+    RunControlLifecycleGateway,
+    StageGraphDecisionService,
+    StageGraphOperationMaterializer,
+)
 from app.application.orchestration_binding_repository import (
     RunSemanticInputBindingRepository,
 )
-from app.application.orchestration_routing import (
-    BoundStageOperationExecutor,
-    BoundWorkflowEvaluator,
-    OperationExecutionBindingReader,
-    SemanticHandlerRegistry,
-)
 from app.application.web_research_repository import web_research_record_ref
-from app.application.web_research_semantic_handlers import (
-    WebResearchHandlerDependencies,
-    register_web_research_stagegraph_handlers,
-)
+from app.application.web_research_semantic_handlers import WebResearchHandlerDependencies
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import StageGraphBlueprint
 from app.domain.coordinator.launch import BlueprintFamily
@@ -47,22 +42,19 @@ def create_web_research_stagegraph_worker(
     client: Client,
     *,
     task_queue: str,
-    bindings: RunSemanticInputBindingRepository,
     lifecycle: RunControlLifecycleGateway,
-    dependencies: WebResearchHandlerDependencies,
-    operation_bindings: OperationExecutionBindingReader,
+    decision_service: StageGraphDecisionService,
+    operation_materializer: StageGraphOperationMaterializer,
     completion: TerminalWorkflowCompletionPort | None = None,
 ) -> Worker:
-    """Compose a real Scenario D worker; every unknown semantic route fails closed."""
+    """Compose Scenario D on the sole canonical StageGraph activity surface."""
 
-    handlers = SemanticHandlerRegistry()
-    register_web_research_stagegraph_handlers(handlers, dependencies)
     return create_stagegraph_worker(
         client,
         task_queue=task_queue,
         activities=StageGraphActivities(
-            operation_executor=BoundStageOperationExecutor(bindings, handlers, operation_bindings),
-            workflow_evaluator=BoundWorkflowEvaluator(bindings, handlers, operation_bindings),
+            decision_service=decision_service,
+            operation_materializer=operation_materializer,
             lifecycle_gateway=lifecycle,
             completion=completion,
         ),
@@ -79,7 +71,8 @@ async def run_web_research_stagegraph_smoke(
     bindings: RunSemanticInputBindingRepository,
     lifecycle: RunControlLifecycleGateway,
     dependencies: WebResearchHandlerDependencies,
-    operation_bindings: OperationExecutionBindingReader,
+    decision_service: StageGraphDecisionService,
+    operation_materializer: StageGraphOperationMaterializer,
 ) -> WebResearchTemporalSmokeResult:
     """Persist exact binding, run one local Temporal worker, and return durable refs."""
 
@@ -90,10 +83,9 @@ async def run_web_research_stagegraph_smoke(
     worker = create_web_research_stagegraph_worker(
         client,
         task_queue=task_queue,
-        bindings=bindings,
         lifecycle=lifecycle,
-        dependencies=dependencies,
-        operation_bindings=operation_bindings,
+        decision_service=decision_service,
+        operation_materializer=operation_materializer,
     )
     submitter = TemporalWorkflowSubmitter(
         client,

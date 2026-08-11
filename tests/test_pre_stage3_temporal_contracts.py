@@ -17,8 +17,10 @@ from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import (
     DefinitionKind,
     ExactDefinitionRef,
-    StageGraphBlueprint,
-    StageNode,
+)
+from app.domain.control_plane.stagegraph_builder import (
+    StageGraphStageSpec,
+    build_stagegraph_v2,
 )
 from app.domain.graph_runtime.contracts import RuntimeCapabilityReadiness
 from app.domain.graph_runtime.definitions import (
@@ -221,11 +223,11 @@ def test_v3_compiler_freezes_temporal_profile_and_fails_closed_on_drift() -> Non
         )
     )
     compiled, unavailable = compile_structural_graph_assembly_v3(
-        blueprint=StageGraphBlueprint(
+        blueprint=build_stagegraph_v2(
             logical_id="blueprint.collect.temporal",
             title="Collect",
             description="One exact Temporal operation stage.",
-            stages=(StageNode(stage_id="collect"),),
+            stages=(StageGraphStageSpec(stage_id="collect"),),
         ),
         effective_configuration=effective_configuration,
         graph_assembly_ref=ref(RuntimeDefinitionKind.GRAPH_ASSEMBLY, "stagegraph.v3"),
@@ -256,11 +258,11 @@ def test_v3_compiler_freezes_temporal_profile_and_fails_closed_on_drift() -> Non
     )
     with pytest.raises(ValueError, match="Temporal execution profiles differ"):
         compile_structural_graph_assembly_v3(
-            blueprint=StageGraphBlueprint(
+            blueprint=build_stagegraph_v2(
                 logical_id="blueprint.collect.temporal",
                 title="Collect",
                 description="One exact Temporal operation stage.",
-                stages=(StageNode(stage_id="collect"),),
+                stages=(StageGraphStageSpec(stage_id="collect"),),
             ),
             effective_configuration=effective_configuration,
             graph_assembly_ref=ref(RuntimeDefinitionKind.GRAPH_ASSEMBLY, "stagegraph.v3"),
@@ -278,11 +280,11 @@ def test_v3_compiler_freezes_temporal_profile_and_fails_closed_on_drift() -> Non
 
     with pytest.raises(ValueError, match="wrong definition kind"):
         compile_structural_graph_assembly_v3(
-            blueprint=StageGraphBlueprint(
+            blueprint=build_stagegraph_v2(
                 logical_id="blueprint.collect.temporal",
                 title="Collect",
                 description="One exact Temporal operation stage.",
-                stages=(StageNode(stage_id="collect"),),
+                stages=(StageGraphStageSpec(stage_id="collect"),),
             ),
             effective_configuration=effective_configuration,
             graph_assembly_ref=ref(RuntimeDefinitionKind.STATE_SCHEMA, "not-a-graph"),
@@ -307,11 +309,11 @@ def test_v3_compiler_freezes_temporal_profile_and_fails_closed_on_drift() -> Non
     )
     with pytest.raises(ValueError, match="stage requirement reference"):
         compile_structural_graph_assembly_v3(
-            blueprint=StageGraphBlueprint(
+            blueprint=build_stagegraph_v2(
                 logical_id="blueprint.collect.temporal",
                 title="Collect",
                 description="One exact Temporal operation stage.",
-                stages=(StageNode(stage_id="collect"),),
+                stages=(StageGraphStageSpec(stage_id="collect"),),
             ),
             effective_configuration=effective_configuration,
             graph_assembly_ref=ref(RuntimeDefinitionKind.GRAPH_ASSEMBLY, "stagegraph.v3"),
@@ -330,11 +332,11 @@ def test_v3_compiler_freezes_temporal_profile_and_fails_closed_on_drift() -> Non
     stale_assembly = assembly.model_copy(update={"adapter_variant": "changed_without_digest"})
     with pytest.raises(ValidationError, match="operation assembly digest mismatch"):
         compile_structural_graph_assembly_v3(
-            blueprint=StageGraphBlueprint(
+            blueprint=build_stagegraph_v2(
                 logical_id="blueprint.collect.temporal",
                 title="Collect",
                 description="One exact Temporal operation stage.",
-                stages=(StageNode(stage_id="collect"),),
+                stages=(StageGraphStageSpec(stage_id="collect"),),
             ),
             effective_configuration=effective_configuration,
             graph_assembly_ref=ref(RuntimeDefinitionKind.GRAPH_ASSEMBLY, "stagegraph.v3"),

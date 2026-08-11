@@ -47,3 +47,30 @@ uv run pytest -q tests/test_stagegraph_v2.py tests/test_atomic_family_admission.
 ```
 
 FINAL_DISPOSITION: READY_FOR_REVIEW
+
+## 2026-08-11 post-merge implementation audit
+
+The earlier handoff was not authoritative for acceptance. Its listed gaps were real, and the
+post-merge code also lacked accepted stage-cycle execution and exact generation-aware cycle-result
+routing. The audit completed the canonical V2 implementation, removed the legacy production
+registrations/tests, added real operation materialization, incremental Temporal qualification,
+bounded stage/workflow cycles, minimal invalidation/reuse, waits, cancellation reconciliation,
+Continue-As-New, and obligation/liability completion coverage.
+
+Current evidence is
+`docs/migrations_instructions/evidence_v2/WP-BP-010/README.md`. The implementation is complete,
+but this handoff still must not be promoted to `accepted` until the credential-gated live vertical
+and a non-Windows worker-replacement qualification run are recorded.
+
+FINAL_DISPOSITION_2026_08_11: IMPLEMENTATION_COMPLETE_QUALIFICATION_PENDING
+
+## 2026-08-11 qualification closure
+
+The credential-gated API-to-real-LLM vertical passed and captured Temporal-history proof of
+incremental downstream release. The native Linux/WSL Temporal qualification also passed the
+stop-original-worker/start-independent-replacement recovery scenario. A final canonical audit
+added deterministic no-progress cycle stopping, removed the linked-run direct-family bypass, and
+made root result deserialization explicit. Evidence and every `REQ-BP-SG-*` traceability row are
+published as accepted in `docs/migrations_instructions/evidence_v2/WP-BP-010/README.md`.
+
+FINAL_DISPOSITION_2026_08_11_QUALIFIED: ACCEPTED

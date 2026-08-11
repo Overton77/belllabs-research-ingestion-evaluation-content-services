@@ -149,9 +149,9 @@ async def test_fastmcp_first_all_application_worker_factories_validate() -> None
     )
     activities = CoordinatorWorkerActivities(
         stagegraph=StageGraphActivities(
-            CompletingStageExecutor(),
-            AcceptingWorkflowEvaluator(),
-            AcceptingLifecycle(),
+            decision_service=cast(Any, object()),
+            operation_materializer=cast(Any, object()),
+            lifecycle_gateway=AcceptingLifecycle(),
             completion=UnusedCompletion(),
         ),
         goal_directed=_goal_directed_activities(),
@@ -191,14 +191,6 @@ async def test_fastmcp_first_all_application_worker_factories_validate() -> None
         for worker in workers:
             async with worker:
                 pass
-
-
-@pytest.mark.asyncio
-async def test_root_and_family_workers_replay_both_legacy_family_fixtures() -> None:
-    pytest.skip(
-        "end-to-end dual-family replay moved to V2 package suites "
-        "(tests/test_stagegraph_v2.py, tests/test_wp_bp_020_temporal.py) after atomic switch"
-    )
 
 
 @pytest.mark.asyncio

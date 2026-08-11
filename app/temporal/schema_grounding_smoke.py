@@ -4,13 +4,15 @@ from dataclasses import dataclass
 
 from temporalio.client import Client
 
-from app.application.orchestration import RunControlLifecycleGateway
+from app.application.orchestration import (
+    RunControlLifecycleGateway,
+    StageGraphDecisionService,
+    StageGraphOperationMaterializer,
+)
 from app.application.orchestration_binding_repository import (
     RunSemanticInputBindingRepository,
 )
 from app.application.orchestration_routing import (
-    BoundStageOperationExecutor,
-    BoundWorkflowEvaluator,
     SemanticHandlerRegistry,
 )
 from app.application.schema_catalog_build import SchemaCatalogBuildService
@@ -78,6 +80,8 @@ async def run_schema_context_stagegraph_smoke(
     catalog_payloads: ContentAddressedPayloadStore,
     selector: SelectionAgentPort,
     reviewer: ReviewAgentPort,
+    decision_service: StageGraphDecisionService,
+    operation_materializer: StageGraphOperationMaterializer,
 ) -> SchemaContextTemporalSmokeResult:
     """Run the exact Scenario A graph through real routed Temporal activities."""
 
@@ -99,8 +103,8 @@ async def run_schema_context_stagegraph_smoke(
     if persisted.binding_digest != semantic_binding.binding_digest:
         raise ValueError("Scenario A binding persistence changed immutable authority")
     activities = StageGraphActivities(
-        operation_executor=BoundStageOperationExecutor(bindings, handlers),
-        workflow_evaluator=BoundWorkflowEvaluator(bindings, handlers),
+        decision_service=decision_service,
+        operation_materializer=operation_materializer,
         lifecycle_gateway=lifecycle,
     )
     worker = create_stagegraph_worker(
@@ -184,7 +188,7 @@ async def run_supporting_graph_goal_smoke(
     refs = tuple(
         ref for execution in result.execution_results for ref in execution.output_refs
     )
-    if result.stop_reason != "verified_completion" or not refs:
+    if result.convergence_proposal.action != "complete" or not refs:
         raise RuntimeError("Scenario C did not independently verify reconciliation")
     return SupportingGraphTemporalSmokeResult(
         workflow_id=submission.workflow_id,

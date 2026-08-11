@@ -35,6 +35,8 @@ from app.domain.control_plane.contracts import (
     RunInputManifestRef,
 )
 from app.domain.orchestration.contracts import (
+    BellLabsRunInput,
+    StageGraphCompletionProposal,
     StageGraphRunInput,
     StageGraphRunResult,
 )
@@ -68,10 +70,11 @@ PARENT_AUTHORITY = "workflow_run.parent:parent-run:sponsor"
 DECISION_AUTHORITY = "authority:composition"
 
 
-@workflow.defn(name="belllabs.stagegraph", sandboxed=False)
+@workflow.defn(name="belllabs.run.v1", sandboxed=False)
 class FixtureChildWorkflow:
     @workflow.run
-    async def run(self, run_input: StageGraphRunInput) -> StageGraphRunResult:
+    async def run(self, root_input: BellLabsRunInput) -> StageGraphRunResult:
+        run_input = StageGraphRunInput(**root_input.family_input)
         if run_input.blueprint.get("logical_id") == "child.fail":
             raise ApplicationError("fixture child failed", non_retryable=True)
         if run_input.blueprint.get("logical_id") == "child.cancel":
@@ -80,12 +83,16 @@ class FixtureChildWorkflow:
             run_id=run_input.run_id,
             workflow_cycles=0,
             execution_epoch=run_input.execution_epoch,
-            stage_cycles={"child": 0},
-            operation_attempts={"child": 1},
+            family_version=1,
             output_refs={"child": ("artifact:child:exact-v1",)},
             reused_output_refs={},
             schedule_trace=("child",),
-            lineage=(),
+            completion_proposal=StageGraphCompletionProposal(
+                required_obligations_accepted=True,
+                pending_dependency_ids=(),
+                open_producer_liability_ids=(),
+                valid_output_refs=("artifact:child:exact-v1",),
+            ),
         )
 
 
@@ -571,6 +578,7 @@ async def test_temporal_mapping_executes_admitted_child_as_distinct_workflow(
         run_id=link.child_run_id,
         request_scope=link.request_scope,
         effective_configuration_digest=link.child_effective_configuration_digest,
+        workflow_type_digest=DIGEST,
         blueprint_digest=DIGEST,
         blueprint={
             "logical_id": (
@@ -635,12 +643,12 @@ async def test_temporal_mapping_executes_admitted_child_as_distinct_workflow(
                         "effective_configuration_digest": (
                             child_input.effective_configuration_digest
                         ),
+                        "workflow_type_digest": child_input.workflow_type_digest,
                         "blueprint_digest": child_input.blueprint_digest,
                         "blueprint": child_input.blueprint,
                     },
                     "continuation_state": continuation.model_dump(mode="json"),
                     "force_continue_as_new": True,
-                    "legacy_direct_family_fixture": True,
                 },
                 id="linked-run-parent-fixture",
                 task_queue="linked-run-composition",
@@ -711,6 +719,7 @@ async def test_degradable_child_failure_requires_governed_resolution() -> None:
                         "effective_configuration_digest": (
                             link.child_effective_configuration_digest
                         ),
+                        "workflow_type_digest": DIGEST,
                         "blueprint_digest": DIGEST,
                         "blueprint": {
                             "logical_id": "child.fail",
@@ -720,7 +729,6 @@ async def test_degradable_child_failure_requires_governed_resolution() -> None:
                             "stages": [{"stage_id": "child"}],
                         },
                     },
-                    "legacy_direct_family_fixture": True,
                 },
                 id="linked-run-degradation-parent",
                 task_queue="linked-run-degradation",

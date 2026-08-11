@@ -300,7 +300,11 @@ class GoalDirectedOperationResultService:
             ):
                 handoff = _recover_handoff_compaction(
                     handoff,
-                    action=request.compaction_failure_action,
+                    action=(
+                        "retry"
+                        if request.compaction_failure_action == "retry"
+                        else "fresh_from_handoff"
+                    ),
                 )
             result = replace(
                 parsed,

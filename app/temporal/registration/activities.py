@@ -29,10 +29,11 @@ def coordinator_activities(family: str, activities: Any) -> Sequence[ActivityCal
 
     if family == "StageGraph":
         return (
-            activities.execute_operation,
-            activities.evaluate_workflow,
-            activities.apply_lifecycle_command,
-            activities.materialize_workflow_result,
+            activities.initialize,
+            activities.admit_operation,
+            activities.decide_result,
+            activities.apply_cycle,
+            activities.complete_stagegraph,
         )
     if family == "GoalDirected":
         return (

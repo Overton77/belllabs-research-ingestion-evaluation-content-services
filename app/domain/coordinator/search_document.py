@@ -81,7 +81,16 @@ def search_document_source(
         intended_uses.add(f"Execute a {definition.family} workflow blueprint")
         input_summary = "stages: " + _items(stage.stage_id for stage in definition.stages)
         output_summary = _items(definition.declared_output_slots)
-        authority_summary = f"maximum parallel stages: {definition.max_parallel_stages}"
+        workflow_concurrency = next(
+            (
+                item.amount
+                for item in definition.capacity_ceilings
+                if item.scope_kind == "workflow"
+                and item.dimension_kind == "concurrency"
+            ),
+            1,
+        )
+        authority_summary = f"maximum operation concurrency: {workflow_concurrency}"
     elif isinstance(definition, ControlProfileDefinition):
         intended_uses.add("Apply bounded workflow control policy")
         authority_summary = _authority(definition.authority_ceiling)

@@ -41,12 +41,15 @@ from app.domain.control_plane.contracts import (
     RunInputManifestRef,
     RuntimeProfileDefinition,
     StageGraphBlueprint,
-    StageNode,
     WorkflowImplementationBindingDefinition,
     WorkflowTypeDefinition,
     WorkflowWorkspaceContract,
     WorkspaceSlot,
     WorkspaceTemplateDefinition,
+)
+from app.domain.control_plane.stagegraph_builder import (
+    StageGraphStageSpec,
+    build_stagegraph_v2,
 )
 from app.domain.graph_runtime.contracts import RuntimeCapabilityReadiness
 from app.domain.graph_runtime.definitions import (
@@ -196,25 +199,23 @@ def reference_blueprint(family_id: str) -> StageGraphBlueprint:
         )
     else:
         raise ValueError(f"unsupported reference family: {family_id}")
-    stages: list[StageNode] = []
-    for index, stage_id in enumerate(stage_ids):
-        stages.append(
-            StageNode(
-                stage_id=stage_id,
-                depends_on=frozenset({stage_ids[index - 1]}) if index else frozenset(),
-                obligation_refs=frozenset({f"obligation:{family_id}:{stage_id}@1"}),
-                output_slots=frozenset({"typed_result"})
-                if stage_id == "publish_result"
-                else frozenset(),
-            )
+    stages = tuple(
+        StageGraphStageSpec(
+            stage_id=stage_id,
+            depends_on=((stage_ids[index - 1],) if index else ()),
+            obligation_refs=(f"obligation:{family_id}:{stage_id}@1",),
+            output_slots=("typed_result",) if stage_id == "publish_result" else (
+                f"{stage_id}:result",
+            ),
         )
-    return StageGraphBlueprint(
+        for index, stage_id in enumerate(stage_ids)
+    )
+    return build_stagegraph_v2(
         logical_id=f"{family_id}.blueprint.{REFERENCE_BLUEPRINT_VERSION}",
         title=title,
         description=description,
-        stages=tuple(stages),
-        declared_output_slots=frozenset({"typed_result"}),
-        max_parallel_stages=1,
+        stages=stages,
+        max_concurrency=1,
     )
 
 
@@ -283,7 +284,7 @@ async def prepare_reference_implementation(
         now,
     )
     obligations = frozenset(
-        obligation for stage in blueprint.stages for obligation in stage.obligation_refs
+        slot.obligation_ref for stage in blueprint.stages for slot in stage.obligation_slots
     )
     output_contract = f"contract:{family_id}:typed-result@1"
     workflow_record = await _publish(
@@ -333,7 +334,7 @@ async def prepare_reference_implementation(
         evaluation_profile_ref=evaluation_record.ref,
         obligation_realizations=tuple(
             ObligationRealization(
-                obligation_ref=next(iter(stage.obligation_refs)),
+                obligation_ref=stage.obligation_slots[0].obligation_ref,
                 realization_kind="stage",
                 realization_ref=stage.stage_id,
             )

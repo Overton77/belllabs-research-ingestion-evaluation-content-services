@@ -957,7 +957,9 @@ def _validate_scenario_d_correction(
         (stage for stage in blueprint.stages if stage.stage_id == "admit_public_goal"),
         None,
     )
-    if admission is None or not admission.reservation:
+    if admission is None or not any(
+        slot.reservation for slot in admission.operation_slots
+    ):
         raise ReviewedCapabilityPromotionError(
             "Scenario D correction must reserve the admission operation before dispatch"
         )

@@ -29,6 +29,7 @@ from app.domain.orchestration.contracts import (
     StageGraphAcceptedProjection,
     StageGraphCompletionProposal,
     StageInstanceProjection,
+    StageInvalidationProposal,
     StageOperationAdmissionProposal,
     StageResultObservation,
     StageStatus,
@@ -262,6 +263,7 @@ class StageGraphInterpreter:
                     frozen_input_refs=input_refs,
                     selected_ring_index=ring_index,
                     next_fairness=fairness,
+                    objective_override=instance.objective_override,
                 )
             )
             remaining -= slots.concurrency_slots
@@ -271,6 +273,21 @@ class StageGraphInterpreter:
             if not candidates_by_group[group_id]:
                 del candidates_by_group[group_id]
         return tuple(proposals)
+
+    def running_concurrency(self, projection: StageGraphAcceptedProjection) -> int:
+        """Return authoritative concurrency slots represented by admitted running stages."""
+        total = 0
+        for instance in projection.stages.values():
+            if instance.status != "running":
+                continue
+            stage = self.stages[instance.candidate.stage_id]
+            slot = next(
+                item
+                for item in stage.operation_slots
+                if item.operation_slot_id == instance.candidate.operation_slot_id
+            )
+            total += slot.concurrency_slots
+        return total
 
     def apply_admission(
         self,
@@ -363,13 +380,15 @@ class StageGraphInterpreter:
                 disposition=proposal.dependency_dispositions[edge.dependency_id],
                 evidence_refs=output_refs if proposal.decision == ResultDecision.ADMIT else (),
             )
-        accepted_results = projection.accepted_results + (
-            AcceptedResultFact(
-                identity=observation.identity,
-                operation_result=observation.operation_result,
-                accepted_at_order=observation.accepted_order,
-            ),
-        )
+        accepted_results = projection.accepted_results
+        if proposal.decision == ResultDecision.ADMIT:
+            accepted_results += (
+                AcceptedResultFact(
+                    identity=observation.identity,
+                    operation_result=observation.operation_result,
+                    accepted_at_order=observation.accepted_order,
+                ),
+            )
         accepted_results = tuple(
             sorted(
                 accepted_results,
@@ -384,6 +403,13 @@ class StageGraphInterpreter:
                 ),
             )
         )
+        raw_obligation_refs = observation.operation_result.get("obligation_refs", ())
+        obligation_refs = (
+            frozenset(str(item) for item in raw_obligation_refs)
+            if proposal.decision == ResultDecision.ADMIT
+            and isinstance(raw_obligation_refs, list | tuple)
+            else frozenset()
+        )
         return replace(
             projection,
             family_version=next_family_version,
@@ -392,6 +418,9 @@ class StageGraphInterpreter:
             dependencies=dependencies,
             producer_liabilities=liabilities,
             accepted_results=accepted_results,
+            accepted_obligation_evidence=(
+                frozenset(projection.accepted_obligation_evidence) | obligation_refs
+            ),
         )
 
     def workflow_invalidation(
@@ -426,6 +455,187 @@ class StageGraphInterpreter:
             ),
             reused_output_refs=reused,
             next_objective=next_objective,
+        )
+
+    def stage_invalidation(
+        self,
+        projection: StageGraphAcceptedProjection,
+        *,
+        stage_id: str,
+        next_objective: str,
+    ) -> StageInvalidationProposal:
+        stage = self.stages.get(stage_id)
+        if stage is None or stage.stage_cycle_policy is None:
+            raise StageGraphExecutionError("stage cycle is not authored")
+        current = max(
+            (
+                item.candidate.stage_cycle_ordinal
+                for item in projection.stages.values()
+                if item.candidate.stage_id == stage_id
+                and item.candidate.workflow_cycle_ordinal
+                == projection.workflow_cycle_ordinal
+            ),
+            default=0,
+        )
+        if current >= stage.stage_cycle_policy.max_cycles:
+            raise StageGraphExecutionError("stage cycle limit exceeded")
+        if not next_objective:
+            raise StageGraphExecutionError("a stage cycle requires a new typed objective")
+        current_objectives = {
+            item.objective_override
+            for item in projection.stages.values()
+            if item.candidate.stage_id == stage_id
+            and item.candidate.workflow_cycle_ordinal
+            == projection.workflow_cycle_ordinal
+            and item.candidate.stage_cycle_ordinal == current
+            and item.objective_override is not None
+        }
+        if next_objective in current_objectives:
+            raise StageGraphExecutionError(
+                "stage cycle made no objective progress under the frozen stopping rule"
+            )
+        invalidated = {stage_id, *self.descendants[stage_id]}
+        reused = {
+            item.candidate.semantic_prefix: item.output_refs
+            for item in projection.stages.values()
+            if item.candidate.stage_id not in invalidated and item.output_refs
+        }
+        prior = tuple(
+            ref
+            for item in projection.stages.values()
+            if item.candidate.stage_id == stage_id
+            for ref in item.output_refs
+        )
+        unmet = tuple(
+            slot.obligation_ref
+            for slot in stage.obligation_slots
+            if slot.obligation_ref not in projection.accepted_obligation_evidence
+        )
+        return StageInvalidationProposal(
+            stage_id=stage_id,
+            prior_stage_cycle_ordinal=current,
+            next_stage_cycle_ordinal=current + 1,
+            invalidated_stage_ids=tuple(
+                sorted(invalidated, key=lambda item: item.encode("utf-8"))
+            ),
+            reused_output_refs=reused,
+            unmet_obligation_refs=unmet,
+            accepted_evidence_refs=tuple(sorted(projection.accepted_obligation_evidence)),
+            allowed_input_refs=self._input_refs(stage_id, projection),
+            prior_result_refs=prior,
+            next_objective=next_objective,
+        )
+
+    def apply_stage_invalidation(
+        self,
+        projection: StageGraphAcceptedProjection,
+        proposal: StageInvalidationProposal,
+        *,
+        next_run_version: int,
+        next_family_version: int,
+    ) -> StageGraphAcceptedProjection:
+        invalidated = frozenset(proposal.invalidated_stage_ids)
+        stages = dict(projection.stages)
+        for key, instance in tuple(stages.items()):
+            if instance.candidate.stage_id in invalidated:
+                stages[key] = replace(instance, status="invalidated")
+        for stage_id in sorted(invalidated, key=lambda item: item.encode("utf-8")):
+            stage = self.stages[stage_id]
+            for slot in stage.operation_slots:
+                candidate = StageCandidateIdentity(
+                    stage_id=stage_id,
+                    mapped_instance_presence=0,
+                    mapped_instance_id="NO_MAPPED_INSTANCE",
+                    workflow_cycle_ordinal=projection.workflow_cycle_ordinal,
+                    stage_cycle_ordinal=proposal.next_stage_cycle_ordinal,
+                    operation_slot_id=slot.operation_slot_id,
+                )
+                stages[candidate.semantic_prefix] = StageInstanceProjection(
+                    candidate=candidate,
+                    status="ready" if not self.stage_joins[stage_id] else "blocked",
+                    objective_override=(
+                        proposal.next_objective if stage_id == proposal.stage_id else None
+                    ),
+                )
+        dependencies = dict(projection.dependencies)
+        for edge in self.blueprint.dependencies:
+            if edge.producer_stage_id not in invalidated:
+                continue
+            prior = dependencies[edge.dependency_id]
+            dependencies[edge.dependency_id] = DependencyProjection(
+                dependency_id=edge.dependency_id,
+                generation=prior.generation + 1,
+                disposition=DependencyDisposition.UNRESOLVED,
+                supersedes_generation=prior.generation,
+            )
+        return replace(
+            projection,
+            family_version=next_family_version,
+            run_version=next_run_version,
+            stages=stages,
+            dependencies=dependencies,
+            invalidated_stage_ids=invalidated,
+        )
+
+    def apply_workflow_invalidation(
+        self,
+        projection: StageGraphAcceptedProjection,
+        proposal: WorkflowInvalidationProposal,
+        *,
+        next_run_version: int,
+        next_family_version: int,
+    ) -> StageGraphAcceptedProjection:
+        """Apply one accepted workflow-cycle decision without overwriting prior lineage."""
+        if proposal.next_workflow_cycle_ordinal != projection.workflow_cycle_ordinal + 1:
+            raise StageGraphExecutionError("workflow invalidation cycle is not the next ordinal")
+        invalidated = frozenset(proposal.invalidated_stage_ids)
+        if not invalidated or not invalidated <= self.stages.keys():
+            raise StageGraphExecutionError("workflow invalidation names an unknown stage")
+        stages = dict(projection.stages)
+        for key, instance in tuple(stages.items()):
+            if instance.candidate.stage_id not in invalidated:
+                continue
+            stages[key] = replace(instance, status="invalidated")
+        for stage_id in sorted(invalidated, key=lambda item: item.encode("utf-8")):
+            stage = self.stages[stage_id]
+            status: StageStatus = "ready" if not self.stage_joins[stage_id] else "blocked"
+            for slot in stage.operation_slots:
+                candidate = StageCandidateIdentity(
+                    stage_id=stage_id,
+                    mapped_instance_presence=0,
+                    mapped_instance_id="NO_MAPPED_INSTANCE",
+                    workflow_cycle_ordinal=proposal.next_workflow_cycle_ordinal,
+                    stage_cycle_ordinal=0,
+                    operation_slot_id=slot.operation_slot_id,
+                )
+                stages[candidate.semantic_prefix] = StageInstanceProjection(
+                    candidate=candidate,
+                    status=status,
+                    objective_override=(
+                        proposal.next_objective
+                        if stage_id in proposal.invalidation_frontier
+                        else None
+                    ),
+                )
+        dependencies = dict(projection.dependencies)
+        for edge in self.blueprint.dependencies:
+            if edge.producer_stage_id not in invalidated:
+                continue
+            prior = dependencies[edge.dependency_id]
+            dependencies[edge.dependency_id] = DependencyProjection(
+                dependency_id=edge.dependency_id,
+                generation=prior.generation + 1,
+                disposition=DependencyDisposition.UNRESOLVED,
+                supersedes_generation=prior.generation,
+            )
+        return replace(
+            projection,
+            family_version=next_family_version,
+            run_version=next_run_version,
+            workflow_cycle_ordinal=proposal.next_workflow_cycle_ordinal,
+            stages=stages,
+            dependencies=dependencies,
+            invalidated_stage_ids=invalidated,
         )
 
     def late_result_decision(
@@ -467,7 +677,7 @@ class StageGraphInterpreter:
                     matched_veto=reason,
                     quarantine_reason=reason if decision == ResultDecision.QUARANTINE else None,
                 )
-        if slow_sibling_route == "quarantine":
+        if facts.consumer_already_admitted and slow_sibling_route == "quarantine":
             return ResultDispositionProposal(
                 identity=identity,
                 decision=ResultDecision.QUARANTINE,
@@ -510,6 +720,8 @@ class StageGraphInterpreter:
         self,
         identity: StageExecutionIdentity,
         facts: LateResultFacts,
+        *,
+        operation_disposition: str = "completed",
     ) -> ResultDispositionProposal:
         edges = self._producer_edges(identity.candidate.stage_id)
         if not edges:
@@ -527,19 +739,35 @@ class StageGraphInterpreter:
             )
             for edge in edges
         ]
-        first = decisions[0]
-        if any(item.decision != first.decision for item in decisions[1:]):
-            raise StageGraphExecutionError(
-                "one producer result cannot receive conflicting admission decisions"
+        precedence = {
+            ResultDecision.ADMIT: 0,
+            ResultDecision.REJECT: 1,
+            ResultDecision.QUARANTINE: 2,
+        }
+        first = max(decisions, key=lambda item: precedence[item.decision])
+        has_absolute_veto = any(item.matched_veto is not None for item in decisions)
+        if operation_disposition != "completed" and not has_absolute_veto:
+            first = ResultDispositionProposal(
+                identity=identity,
+                decision=ResultDecision.REJECT,
+                dependency_dispositions={},
+                matched_veto=f"operation_{operation_disposition}",
             )
+        final_dispositions = {
+            edge.dependency_id: (
+                decision.dependency_dispositions[edge.dependency_id]
+                if first.decision == ResultDecision.ADMIT
+                else self._negative_disposition(
+                    edge,
+                    cancelled=operation_disposition == "cancelled",
+                )
+            )
+            for edge, decision in zip(edges, decisions, strict=True)
+        }
         return ResultDispositionProposal(
             identity=identity,
             decision=first.decision,
-            dependency_dispositions={
-                dependency_id: disposition
-                for item in decisions
-                for dependency_id, disposition in item.dependency_dispositions.items()
-            },
+            dependency_dispositions=final_dispositions,
             matched_veto=first.matched_veto,
             matched_rule_id=first.matched_rule_id,
             quarantine_reason=first.quarantine_reason,
@@ -588,7 +816,8 @@ class StageGraphInterpreter:
         )
         return StageGraphCompletionProposal(
             required_obligations_accepted=(
-                required_obligations <= projection.accepted_obligation_evidence
+                required_obligations
+                <= frozenset(projection.accepted_obligation_evidence)
             ),
             pending_dependency_ids=pending_dependencies,
             open_producer_liability_ids=open_liabilities,
@@ -678,9 +907,17 @@ class StageGraphInterpreter:
         ].slow_sibling_policy.arrival_route
 
     @staticmethod
-    def _negative_disposition(edge: StageDependency) -> DependencyDisposition:
+    def _negative_disposition(
+        edge: StageDependency,
+        *,
+        cancelled: bool = False,
+    ) -> DependencyDisposition:
+        if edge.dependency_class == DependencyClass.ADVISORY:
+            return DependencyDisposition.UNRESOLVED
         if edge.dependency_class == DependencyClass.OPTIONAL:
             return DependencyDisposition.OMITTED
+        if cancelled:
+            return DependencyDisposition.CANCELLED
         return DependencyDisposition.FAILED
 
     @staticmethod

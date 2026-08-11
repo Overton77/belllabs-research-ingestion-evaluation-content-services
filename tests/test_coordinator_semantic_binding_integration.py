@@ -40,6 +40,7 @@ from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import DefinitionKind, ExactDefinitionRef
 from app.domain.operation_execution.contracts import OperationAttemptIdentity
 from app.domain.orchestration.contracts import (
+    StageCandidateIdentity,
     StageExecutionIdentity,
     StageOperationRequest,
     StageOperationResult,
@@ -345,11 +346,16 @@ async def test_full_coordinator_chain_freezes_real_oebs_before_dispatch(
         request = StageOperationRequest(
             identity=StageExecutionIdentity(
                 run_id=run_id,
-                stage_id="semantic_selector",
-                workflow_cycle=0,
-                stage_cycle=0,
-                operation_attempt=1,
                 execution_epoch=1,
+                candidate=StageCandidateIdentity(
+                    stage_id="semantic_selector",
+                    mapped_instance_presence=0,
+                    mapped_instance_id="NO_MAPPED_INSTANCE",
+                    workflow_cycle_ordinal=0,
+                    stage_cycle_ordinal=0,
+                    operation_slot_id="execute",
+                ),
+                semantic_attempt=1,
             ),
             idempotency_key="operation:semantic-selector:1",
             objective="Consume the frozen selector authority.",

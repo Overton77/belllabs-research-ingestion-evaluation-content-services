@@ -410,7 +410,7 @@ class GoalDirectedInterpreter:
                         "action": compaction_action,
                     }
                 ),
-                action=compaction_action,
+                action="pause" if compaction_action == "pause" else "escalate",
                 reason="compaction_failure",
                 goal_revision_id=state.active_revision.revision_id,
                 source_iteration=execution.identity.iteration,

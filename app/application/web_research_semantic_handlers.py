@@ -665,7 +665,9 @@ def resolve_web_research_run_authority(
         ),
         None,
     )
-    if admission is None or not admission.reservation:
+    if admission is None or not any(
+        slot.reservation for slot in admission.operation_slots
+    ):
         raise SemanticRoutingError(
             "Scenario D current blueprint is not dispatchable; publish the execution correction"
         )

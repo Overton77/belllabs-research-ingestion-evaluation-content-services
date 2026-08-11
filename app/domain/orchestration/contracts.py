@@ -269,9 +269,31 @@ class StageExecutionIdentity:
     @property
     def semantic_key(self) -> str:
         return (
-            f"{self.run_id}:execution-epoch:{self.execution_epoch}:"
-            f"{self.candidate.semantic_prefix}:semantic-attempt:{self.semantic_attempt}"
+            f"{self.run_id}:operation:execution-epoch:{self.execution_epoch}:"
+            f"{self.candidate.semantic_prefix}:attempt:{self.semantic_attempt}"
         )
+
+    @property
+    def operation_id(self) -> str:
+        return (
+            f"execution-epoch:{self.execution_epoch}:{self.candidate.semantic_prefix}"
+        )
+
+    @property
+    def stage_id(self) -> str:
+        return self.candidate.stage_id
+
+    @property
+    def workflow_cycle(self) -> int:
+        return self.candidate.workflow_cycle_ordinal
+
+    @property
+    def stage_cycle(self) -> int:
+        return self.candidate.stage_cycle_ordinal
+
+    @property
+    def operation_attempt(self) -> int:
+        return self.semantic_attempt
 
 
 @dataclass(frozen=True)
@@ -322,12 +344,13 @@ class StageInstanceProjection:
     obligation_evidence_refs: tuple[str, ...] = ()
     wait_condition_id: str | None = None
     pause_decision_id: str | None = None
+    objective_override: str | None = None
 
 
 @dataclass(frozen=True)
 class AcceptedResultFact:
     identity: StageExecutionIdentity
-    operation_result: dict[str, object]
+    operation_result: dict[str, Any]
     accepted_at_order: int
 
 
@@ -363,17 +386,21 @@ class StageOperationAdmissionProposal:
     frozen_input_refs: tuple[str, ...]
     selected_ring_index: int
     next_fairness: FairnessCursorState
+    objective_override: str | None = None
 
 
 @dataclass(frozen=True)
 class StageResultObservation:
     identity: StageExecutionIdentity
-    operation_result: dict[str, object]
+    operation_result: dict[str, Any]
     child_closed_or_quiesced: bool
     reservations_and_usage_settled: bool
     effects_settled: bool
     cancellation_reconciled: bool
     accepted_order: int
+    operation_disposition: Literal["completed", "cancelled", "failed", "in_doubt"] = (
+        "completed"
+    )
 
 
 @dataclass(frozen=True)
@@ -404,6 +431,20 @@ class WorkflowInvalidationProposal:
     invalidation_frontier: tuple[str, ...]
     invalidated_stage_ids: tuple[str, ...]
     reused_output_refs: dict[str, tuple[str, ...]]
+    next_objective: str
+
+
+@dataclass(frozen=True)
+class StageInvalidationProposal:
+    stage_id: str
+    prior_stage_cycle_ordinal: int
+    next_stage_cycle_ordinal: int
+    invalidated_stage_ids: tuple[str, ...]
+    reused_output_refs: dict[str, tuple[str, ...]]
+    unmet_obligation_refs: tuple[str, ...]
+    accepted_evidence_refs: tuple[str, ...]
+    allowed_input_refs: tuple[str, ...]
+    prior_result_refs: tuple[str, ...]
     next_objective: str
 
 
@@ -446,14 +487,42 @@ class StageGraphDecisionMutation(AtomicFamilyMutation):
 
 @dataclass(frozen=True)
 class StageOperationRequest:
-    proposal: StageOperationAdmissionProposal
-    operation: OperationWorkflowRequest
+    """Bound input for a native StageGraph semantic operation handler."""
+
+    identity: StageExecutionIdentity
+    idempotency_key: str
+    objective: str
+    input_refs: tuple[str, ...]
+    reservation_id: str
+    reservation: dict[str, int]
+    workspace_namespace: str
+    request_scope: str = ""
+    semantic_input_binding_ref: str = ""
+    effective_configuration_digest: str = ""
+    blueprint_digest: str = ""
+    cycle_evaluation_contract_ref: str = ""
+    cycle_objective_contract_ref: str = ""
 
 
 @dataclass(frozen=True)
 class StageOperationResult:
-    observation: StageResultObservation
-    proposal: ResultDispositionProposal | None = None
+    """Typed native handler observation; family authority still decides admission."""
+
+    identity: StageExecutionIdentity
+    disposition: Literal["completed", "skipped", "failed", "waiting", "paused"]
+    output_refs: tuple[str, ...] = ()
+    evaluation: Literal["accept", "cycle", "degrade", "escalate"] = "accept"
+    evaluation_ref: str = ""
+    next_objective: str = ""
+    evaluation_contract_ref: str = ""
+    objective_contract_ref: str = ""
+    wait_condition_id: str = ""
+    pause_decision_id: str = ""
+    handoff_ref: str = ""
+    temporal_activity_attempt: int = 1
+    actual_usage: dict[str, int] = field(default_factory=dict)
+    pending_external_usage: dict[str, int] = field(default_factory=dict)
+    output_contract_ref: str = ""
 
 
 @dataclass(frozen=True)
@@ -481,11 +550,13 @@ class StageGraphAdmissionActivityRequest:
     projection: StageGraphAcceptedProjection
     proposal: StageOperationAdmissionProposal
     operation: OperationWorkflowRequest | None
-    blueprint: dict[str, object]
+    blueprint: dict[str, Any]
     effective_max_concurrency: int
     occurred_at: datetime
     idempotency_issuer: str
     correlation_id: str
+    semantic_input_binding_ref: str = ""
+    effective_configuration_digest: str = ""
 
 
 @dataclass(frozen=True)
@@ -503,7 +574,7 @@ class StageGraphResultActivityRequest:
     projection: StageGraphAcceptedProjection
     observation: StageResultObservation
     late_facts: LateResultFacts
-    blueprint: dict[str, object]
+    blueprint: dict[str, Any]
     effective_max_concurrency: int
     occurred_at: datetime
     idempotency_issuer: str
@@ -515,6 +586,33 @@ class StageGraphResultActivityResult:
     accepted: bool
     projection: StageGraphAcceptedProjection
     proposal: ResultDispositionProposal
+    reason_code: str
+
+
+@dataclass(frozen=True)
+class StageGraphCycleActivityRequest:
+    run_id: str
+    request_scope: str
+    projection: StageGraphAcceptedProjection
+    invalidation_frontier: tuple[str, ...]
+    next_objective: str
+    evaluation_ref: str
+    evaluation_contract_ref: str
+    objective_contract_ref: str
+    blueprint: dict[str, Any]
+    effective_max_concurrency: int
+    occurred_at: datetime
+    idempotency_issuer: str
+    correlation_id: str
+    cycle_scope: Literal["stage", "workflow"] = "workflow"
+    stage_id: str | None = None
+
+
+@dataclass(frozen=True)
+class StageGraphCycleActivityResult:
+    accepted: bool
+    projection: StageGraphAcceptedProjection
+    proposal: WorkflowInvalidationProposal | StageInvalidationProposal
     reason_code: str
 
 
@@ -541,12 +639,16 @@ class StageGraphCompletionActivityResult:
 @dataclass(frozen=True)
 class WorkflowEvaluationRequest:
     run_id: str
-    workflow_cycle_ordinal: int
+    workflow_cycle: int
     objective: str
     current_output_refs: dict[str, tuple[str, ...]]
     request_scope: str
     effective_configuration_digest: str
     blueprint_digest: str
+    execution_lineage: tuple[StageOperationResult, ...] = ()
+    semantic_input_binding_ref: str = ""
+    evaluation_contract_ref: str = ""
+    objective_contract_ref: str = ""
 
 
 @dataclass(frozen=True)
@@ -557,6 +659,7 @@ class WorkflowEvaluationResult:
     next_objective: str = ""
     evaluation_contract_ref: str = ""
     objective_contract_ref: str = ""
+    output_contract_ref: str = ""
 
 
 @dataclass(frozen=True)
