@@ -8,7 +8,11 @@ from app.application.orchestration import RunControlLifecycleGateway
 from app.application.orchestration_binding_repository import (
     RunSemanticInputBindingRepository,
 )
-from app.application.orchestration_routing import SemanticHandlerRegistry
+from app.application.orchestration_routing import (
+    BoundStageOperationExecutor,
+    BoundWorkflowEvaluator,
+    SemanticHandlerRegistry,
+)
 from app.application.schema_catalog_build import SchemaCatalogBuildService
 from app.application.schema_context_selection import ReviewAgentPort, SelectionAgentPort
 from app.application.schema_context_stage_handlers import (
@@ -16,13 +20,6 @@ from app.application.schema_context_stage_handlers import (
     register_schema_context_stage_handlers,
 )
 from app.application.schema_grounding_repository import SchemaGroundingRecordRepository
-from app.application.schema_grounding_semantic_handlers import (
-    register_supporting_graph_goal_handlers,
-)
-from app.application.supporting_graph_reconciliation import (
-    SupportingGraphReconciliationWorkflow,
-)
-from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import (
     GoalDirectedBlueprint,
     StageGraphBlueprint,
@@ -37,11 +34,17 @@ from app.domain.orchestration.contracts import (
 )
 from app.integrations.control_plane_payloads import ContentAddressedPayloadStore
 from app.integrations.temporal_workflow_submission import TemporalWorkflowSubmitter
-from app.temporal.coordinator_runtime import create_routed_coordinator_activities
-from app.temporal.goal_directed_activities import create_goal_directed_worker
-from app.temporal.goal_directed_workflow import GoalDirectedWorkflow
-from app.temporal.orchestration_activities import create_stagegraph_worker
-from app.temporal.stagegraph_workflow import StageGraphWorkflow
+from app.temporal.activities.goal_directed import (
+    compose_goal_directed_activities,
+    create_goal_directed_worker,
+)
+from app.temporal.coordinator_runtime import GoalDirectedCoordinatorDependencies
+from app.temporal.orchestration_activities import (
+    StageGraphActivities,
+    create_stagegraph_worker,
+)
+from app.temporal.workflows.goal_directed import GoalDirectedWorkflow
+from app.temporal.workflows.stagegraph import StageGraphWorkflow
 
 
 @dataclass(frozen=True)
@@ -95,15 +98,15 @@ async def run_schema_context_stagegraph_smoke(
     persisted = await bindings.create(semantic_binding)
     if persisted.binding_digest != semantic_binding.binding_digest:
         raise ValueError("Scenario A binding persistence changed immutable authority")
-    activities = create_routed_coordinator_activities(
-        bindings=bindings,
-        handlers=handlers,
-        lifecycle=lifecycle,
+    activities = StageGraphActivities(
+        operation_executor=BoundStageOperationExecutor(bindings, handlers),
+        workflow_evaluator=BoundWorkflowEvaluator(bindings, handlers),
+        lifecycle_gateway=lifecycle,
     )
     worker = create_stagegraph_worker(
         client,
         task_queue=task_queue,
-        activities=activities.stagegraph,
+        activities=activities,
     )
     submitter = _submitter(client, task_queue, stagegraph=True)
     async with worker:
@@ -139,35 +142,33 @@ async def run_supporting_graph_goal_smoke(
     semantic_binding: RunSemanticInputBinding,
     bindings: RunSemanticInputBindingRepository,
     lifecycle: RunControlLifecycleGateway,
-    records: SchemaGroundingRecordRepository,
-    reconciliation: SupportingGraphReconciliationWorkflow,
+    goal_directed: GoalDirectedCoordinatorDependencies,
 ) -> SupportingGraphTemporalSmokeResult:
-    """Run exact Scenario C semantics through the generic GoalDirected workflow."""
+    """Run exact Scenario C semantics through the canonical GoalDirected OperationWorkflow path."""
 
+    del bindings  # binding authority is admitted before smoke; templates live on goal_directed
     blueprint = GoalDirectedBlueprint.model_validate(run_input.blueprint)
     _verify_shared_authority(run_input, semantic_binding)
     if blueprint.logical_id != "supporting-graph-reconciliation-goal-directed-v1":
         raise ValueError(
             "Scenario C smoke requires supporting-graph-reconciliation-goal-directed-v1"
         )
-    handlers = SemanticHandlerRegistry()
-    register_supporting_graph_goal_handlers(
-        handlers,
-        workflow=reconciliation,
-        records=records,
-    )
-    persisted = await bindings.create(semantic_binding)
-    if persisted.binding_digest != semantic_binding.binding_digest:
-        raise ValueError("Scenario C binding persistence changed immutable authority")
-    activities = create_routed_coordinator_activities(
-        bindings=bindings,
-        handlers=handlers,
+    if not run_input.semantic_input_binding_ref:
+        raise ValueError("Scenario C smoke requires an admitted semantic_input_binding_ref")
+    if run_input.semantic_input_binding_ref != semantic_binding.binding_id:
+        raise ValueError("Scenario C run input is not bound to the admitted semantic binding")
+    activities = compose_goal_directed_activities(
+        run_control=goal_directed.run_control,
+        operation_bindings=goal_directed.operation_bindings,
+        templates=goal_directed.templates,
+        documents=goal_directed.documents,
         lifecycle=lifecycle,
+        actor=goal_directed.actor,
     )
     worker = create_goal_directed_worker(
         client,
         task_queue=task_queue,
-        activities=activities.goal_directed,
+        activities=activities,
     )
     submitter = _submitter(client, task_queue, stagegraph=False)
     async with worker:
@@ -181,9 +182,7 @@ async def run_supporting_graph_goal_smoke(
             submission.workflow_id,
         ).result()
     refs = tuple(
-        ref
-        for execution in result.execution_results
-        for ref in execution.output_refs
+        ref for execution in result.execution_results for ref in execution.output_refs
     )
     if result.stop_reason != "verified_completion" or not refs:
         raise RuntimeError("Scenario C did not independently verify reconciliation")
@@ -199,21 +198,13 @@ def _verify_shared_authority(
     run_input: StageGraphRunInput | GoalDirectedRunInput,
     binding: RunSemanticInputBinding,
 ) -> None:
-    blueprint = (
-        StageGraphBlueprint.model_validate(run_input.blueprint)
-        if isinstance(run_input, StageGraphRunInput)
-        else GoalDirectedBlueprint.model_validate(run_input.blueprint)
-    )
     if (
-        sha256_digest(blueprint) != run_input.blueprint_digest
-        or binding.binding_id != run_input.semantic_input_binding_ref
-        or binding.request_scope != run_input.request_scope
-        or binding.run_id != run_input.run_id
-        or binding.effective_configuration_digest
-        != run_input.effective_configuration_digest
-        or binding.blueprint_digest != run_input.blueprint_digest
+        run_input.run_id != binding.run_id
+        or run_input.request_scope != binding.request_scope
+        or run_input.effective_configuration_digest != binding.effective_configuration_digest
+        or run_input.blueprint_digest != binding.blueprint_digest
     ):
-        raise ValueError("Temporal smoke input and semantic binding authority differ")
+        raise ValueError("semantic binding does not match the frozen Temporal run authority")
 
 
 def _submitter(
@@ -222,14 +213,14 @@ def _submitter(
     *,
     stagegraph: bool,
 ) -> TemporalWorkflowSubmitter:
+    family_queue = task_queue
     return TemporalWorkflowSubmitter(
         client,
-        stagegraph_task_queue=(
-            task_queue if stagegraph else f"{task_queue}-unused-stagegraph"
-        ),
+        stagegraph_task_queue=family_queue if stagegraph else f"{task_queue}-unused-stagegraph",
         goal_directed_task_queue=(
-            f"{task_queue}-unused-goal" if stagegraph else task_queue
+            family_queue if not stagegraph else f"{task_queue}-unused-goal-directed"
         ),
+        root_task_queue=task_queue,
     )
 
 

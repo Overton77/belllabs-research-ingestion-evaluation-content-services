@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+import pytest
+
+pytest.skip(
+    "legacy StageGraphExecutionState/flat StageGraphWorkflow deleted by WP-BP-010 V2 contracts; canonical coverage is tests/test_stagegraph_v2.py",
+    allow_module_level=True,
+)
+
 from collections import Counter
 
 import pytest

@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 from temporalio import activity
+from temporalio.client import Client
 from temporalio.exceptions import ApplicationError
+from temporalio.worker import Worker
 
 from app.application.coordinator_results import TerminalWorkflowCompletionPort
 from app.application.goal_directed import (
+    GoalDirectedDocumentRepository,
     GoalDirectedOperationPreparationService,
     GoalDirectedOperationResultService,
+    GoalOperationTemplateProvider,
 )
 from app.application.orchestration import RunControlLifecycleGateway
+from app.application.run_control import RunControlService
+from app.application.semantic_operation_bindings import SemanticOperationBindingRepository
 from app.domain.coordinator.launch import LaunchAuthorizationError, TerminalWorkflowCompletion
 from app.domain.orchestration.contracts import (
     LifecycleCommandOutcome,
@@ -20,6 +26,10 @@ from app.domain.orchestration.goal_directed_runtime import (
     GoalOperationReconciliationRequest,
     GoalOperationReconciliationResult,
 )
+from app.domain.run_control.contracts import ActorContext
+from app.temporal.registration.activities import coordinator_activities
+from app.temporal.registration.workflows import coordinator_workflows
+from app.temporal.workflow_sandbox import coordinator_workflow_runner
 
 
 class GoalDirectedActivities:
@@ -98,4 +108,49 @@ class GoalDirectedActivities:
             ) from error
 
 
-__all__ = ["GoalDirectedActivities"]
+def compose_goal_directed_activities(
+    *,
+    run_control: RunControlService,
+    operation_bindings: SemanticOperationBindingRepository,
+    templates: GoalOperationTemplateProvider,
+    documents: GoalDirectedDocumentRepository,
+    lifecycle: RunControlLifecycleGateway,
+    actor: ActorContext,
+    completion: TerminalWorkflowCompletionPort | None = None,
+) -> GoalDirectedActivities:
+    """Wire production GoalDirected activities on the OperationWorkflow path."""
+
+    return GoalDirectedActivities(
+        operations=GoalDirectedOperationPreparationService(
+            templates=templates,
+            operation_bindings=operation_bindings,
+            run_control=run_control,
+            documents=documents,
+            actor=actor,
+        ),
+        results=GoalDirectedOperationResultService(documents),
+        lifecycle=lifecycle,
+        completion=completion,
+    )
+
+
+def create_goal_directed_worker(
+    client: Client,
+    *,
+    task_queue: str,
+    activities: GoalDirectedActivities,
+) -> Worker:
+    return Worker(
+        client,
+        task_queue=task_queue,
+        workflows=coordinator_workflows("GoalDirected"),
+        workflow_runner=coordinator_workflow_runner(),
+        activities=coordinator_activities("GoalDirected", activities),
+    )
+
+
+__all__ = [
+    "GoalDirectedActivities",
+    "compose_goal_directed_activities",
+    "create_goal_directed_worker",
+]

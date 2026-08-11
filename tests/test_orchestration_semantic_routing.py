@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+import pytest
+
+pytest.skip(
+    "legacy BoundGoal*/direct GoalDirected semantic routing deleted by WP-BP-020 atomic switch; canonical coverage is tests/test_wp_bp_020_*.py",
+    allow_module_level=True,
+)
+
 from datetime import UTC, datetime
 
 import pytest

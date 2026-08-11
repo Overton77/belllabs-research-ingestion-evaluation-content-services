@@ -21,7 +21,7 @@ with workflow.unsafe.imports_passed_through():
         StageGraphRunInput,
         StageGraphRunResult,
     )
-    from app.temporal.stagegraph_workflow import StageGraphWorkflow
+    from app.temporal.workflows.stagegraph import StageGraphWorkflow
     from app.temporal.workflows.belllabs_run import BellLabsRunWorkflow
 
 

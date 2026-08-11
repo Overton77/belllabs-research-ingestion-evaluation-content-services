@@ -177,7 +177,7 @@ from app.integrations.web_research_runtime import (
     attest_reviewed_web_research_runtime,
     build_live_web_research_handler_dependencies,
 )
-from app.temporal.stagegraph_workflow import StageGraphWorkflow
+from app.temporal.workflows.stagegraph import StageGraphWorkflow
 from app.temporal.web_research_smoke import create_web_research_stagegraph_worker
 
 SEARCH_PLAN: tuple[tuple[str, frozenset[DefinitionKind]], ...] = (

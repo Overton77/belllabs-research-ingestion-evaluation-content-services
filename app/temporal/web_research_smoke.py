@@ -31,7 +31,7 @@ from app.temporal.orchestration_activities import (
     StageGraphActivities,
     create_stagegraph_worker,
 )
-from app.temporal.stagegraph_workflow import StageGraphWorkflow
+from app.temporal.workflows.stagegraph import StageGraphWorkflow
 
 
 @dataclass(frozen=True)

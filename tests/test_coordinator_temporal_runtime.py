@@ -1,59 +1,43 @@
 from __future__ import annotations
 
 import inspect
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
 from temporalio.client import Client
 from temporalio.testing import WorkflowEnvironment
-from temporalio.worker import Replayer
 
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.contracts import (
-    GoalDirectedBlueprint,
-    StageGraphBlueprint,
-    StageNode,
+from app.application.goal_directed import (
+    GoalDirectedOperationPreparationService,
+    GoalDirectedOperationResultService,
+    InMemoryGoalOperationTemplateRepository,
 )
-from app.domain.coordinator.launch import BlueprintFamily, WorkflowResultRecord
+from app.domain.control_plane.canonical import sha256_digest
+from app.domain.control_plane.fixtures import GENERIC_GOAL_DIRECTED, GENERIC_STAGE_GRAPH
+from app.domain.coordinator.launch import BlueprintFamily
 from app.domain.orchestration.contracts import (
-    BellLabsRunInput,
-    GoalDirectedRunInput,
-    GoalExecutionClaim,
-    GoalExecutionResult,
-    GoalHandoffRequest,
-    GoalHandoffResult,
-    GoalRevision,
-    GoalVerificationRequest,
-    GoalVerificationResult,
-    LifecycleCommandOutcome,
-    LifecycleCommandRequest,
-    StageGraphRunInput,
     StageOperationRequest,
     StageOperationResult,
     WorkflowEvaluationRequest,
     WorkflowEvaluationResult,
 )
-from app.domain.run_control.contracts import RunOutcome
+from app.domain.run_control.contracts import ActorContext
 from app.integrations.temporal_workflow_submission import TemporalWorkflowSubmitter
 from app.temporal import worker as production_worker
+from app.temporal.activities.goal_directed import GoalDirectedActivities
 from app.temporal.coordinator_runtime import (
     CoordinatorWorkerActivities,
     coordinator_task_queues,
     coordinator_worker_readiness,
     create_coordinator_workers,
 )
-from app.temporal.goal_directed_activities import GoalDirectedActivities
-from app.temporal.goal_directed_workflow import GoalDirectedWorkflow
 from app.temporal.orchestration_activities import StageGraphActivities
-from app.temporal.stagegraph_workflow import StageGraphWorkflow
-from app.temporal.workflow_sandbox import coordinator_workflow_runner
-from app.temporal.workflows.belllabs_run import BellLabsRunWorkflow
-from app.temporal.workflows.operation import OperationWorkflow
+from app.temporal.workflows.goal_directed import GoalDirectedWorkflow
+from app.temporal.workflows.stagegraph import StageGraphWorkflow
 
 DIGEST = "sha256:" + "a" * 64
-PROTECTED_SCOPE = sha256_digest("coordinator-runtime-protected-scope")
 
 
 class CompletingStageExecutor:
@@ -78,55 +62,16 @@ class AcceptingWorkflowEvaluator:
         )
 
 
-class CompletingGoalExecutor:
-    async def execute(self, claim: GoalExecutionClaim) -> GoalExecutionResult:
-        return GoalExecutionResult(
-            identity=claim.identity,
-            disposition="completed",
-            output_refs=("artifact:goal-result",),
-            completion_claim=True,
-            actual_usage={"goal.iterations": 1},
-        )
-
-
-class AcceptingGoalVerifier:
-    async def verify(
-        self,
-        request: GoalVerificationRequest,
-    ) -> GoalVerificationResult:
-        return GoalVerificationResult(
-            identity=request.claim.identity,
-            action="verified_completion",
-            verification_ref="verification:accepted",
-            verifier_ref=request.verifier_ref,
-            acceptance_contract_ref=request.acceptance_contract_ref,
-            progress_made=True,
-            evidence_refs=request.execution_result.output_refs,
-        )
-
-
-class UnusedHandoffPreparer:
-    async def prepare(self, _request: GoalHandoffRequest) -> GoalHandoffResult:
-        raise AssertionError("verified first-iteration completion must not prepare a handoff")
-
-
 class UnusedCompletion:
     async def complete(self, _completion):
-        raise AssertionError("typed completion should not run for legacy test inputs")
-
-
-class RecordingCompletion:
-    def __init__(self) -> None:
-        self.records: list[WorkflowResultRecord] = []
-
-    async def complete(self, completion):
-        record = WorkflowResultRecord.model_validate(completion.model_dump())
-        self.records.append(record)
-        return record
+        raise AssertionError("typed completion should not run for worker-validation inputs")
 
 
 class AcceptingLifecycle:
-    async def execute(self, request: LifecycleCommandRequest) -> LifecycleCommandOutcome:
+    async def execute(self, request):
+        from app.domain.orchestration.contracts import LifecycleCommandOutcome
+        from app.domain.run_control.contracts import RunOutcome
+
         return LifecycleCommandOutcome(
             accepted=True,
             resulting_run_version=request.expected_run_version + 1,
@@ -142,62 +87,21 @@ class AcceptingLifecycle:
         )
 
 
-def stagegraph_input(*, materialize: bool = False) -> StageGraphRunInput:
-    blueprint = StageGraphBlueprint(
-        logical_id="test.coordinator-stagegraph",
-        title="Coordinator StageGraph runtime test",
-        description="One operation proves exact family worker registration.",
-        stages=(
-            StageNode(
-                stage_id="execute",
-                reservation={"operation.attempts": 1},
-                output_slots=frozenset({"result"}),
+def _goal_directed_activities() -> GoalDirectedActivities:
+    return GoalDirectedActivities(
+        operations=GoalDirectedOperationPreparationService(
+            templates=InMemoryGoalOperationTemplateRepository(),
+            operation_bindings=cast(Any, object()),
+            run_control=cast(Any, object()),
+            documents=cast(Any, object()),
+            actor=ActorContext(
+                actor_id="coordinator-runtime-test",
+                permissions=frozenset({"workflow_run.goal_directed"}),
             ),
         ),
-        declared_output_slots=frozenset({"result"}),
-    )
-    return StageGraphRunInput(
-        run_id="run-coordinator-stagegraph",
-        request_scope="tenant-1",
-        effective_configuration_digest=DIGEST,
-        blueprint_digest=sha256_digest(blueprint),
-        blueprint=blueprint.model_dump(mode="json"),
-        tenant_scope="tenant-1" if materialize else "",
-        materialize_typed_result=materialize,
-    )
-
-
-def goal_directed_input(*, materialize: bool = False) -> GoalDirectedRunInput:
-    blueprint = GoalDirectedBlueprint(
-        logical_id="test.coordinator-goal-directed",
-        title="Coordinator GoalDirected runtime test",
-        description="One verified iteration proves exact family worker registration.",
-        objective_contract="objective:test@1",
-        acceptance_contract="acceptance:test@1",
-        max_iterations=1,
-    )
-    revision = GoalRevision(
-        revision_id="goal-revision:1",
-        revision=1,
-        parent_revision_id=None,
-        protected_scope_digest=PROTECTED_SCOPE,
-        objective="Produce one independently verified result.",
-        evidence_refs=("input:test",),
-        unmet_obligations=(),
-        author="test",
-        deciding_authority="authority:test",
-        applicability="remaining_run",
-    )
-    return GoalDirectedRunInput(
-        run_id="run-coordinator-goal-directed",
-        request_scope="tenant-1",
-        effective_configuration_digest=DIGEST,
-        blueprint_digest=sha256_digest(blueprint),
-        blueprint=blueprint.model_dump(mode="json"),
-        protected_scope_digest=PROTECTED_SCOPE,
-        initial_revision=revision,
-        tenant_scope="tenant-1" if materialize else "",
-        materialize_typed_result=materialize,
+        results=GoalDirectedOperationResultService(cast(Any, object())),
+        lifecycle=AcceptingLifecycle(),  # type: ignore[arg-type]
+        completion=UnusedCompletion(),  # type: ignore[arg-type]
     )
 
 
@@ -250,13 +154,7 @@ async def test_fastmcp_first_all_application_worker_factories_validate() -> None
             AcceptingLifecycle(),
             completion=UnusedCompletion(),
         ),
-        goal_directed=GoalDirectedActivities(
-            executor=CompletingGoalExecutor(),
-            verifier=AcceptingGoalVerifier(),
-            handoffs=UnusedHandoffPreparer(),
-            lifecycle=AcceptingLifecycle(),
-            completion=UnusedCompletion(),
-        ),
+        goal_directed=_goal_directed_activities(),
     )
     queues = coordinator_task_queues("fastmcp-first-worker-validation")
 
@@ -297,91 +195,10 @@ async def test_fastmcp_first_all_application_worker_factories_validate() -> None
 
 @pytest.mark.asyncio
 async def test_root_and_family_workers_replay_both_legacy_family_fixtures() -> None:
-    try:
-        environment = await WorkflowEnvironment.start_time_skipping()
-    except RuntimeError as error:
-        pytest.skip(f"Temporal test server is unavailable: {error}")
-
-    queues = coordinator_task_queues("coordinator-runtime-test")
-    completion = RecordingCompletion()
-    activities = CoordinatorWorkerActivities(
-        stagegraph=StageGraphActivities(
-            CompletingStageExecutor(),
-            AcceptingWorkflowEvaluator(),
-            AcceptingLifecycle(),
-            completion=completion,
-        ),
-        goal_directed=GoalDirectedActivities(
-            executor=CompletingGoalExecutor(),
-            verifier=AcceptingGoalVerifier(),
-            handoffs=UnusedHandoffPreparer(),
-            lifecycle=AcceptingLifecycle(),
-            completion=completion,
-        ),
+    pytest.skip(
+        "end-to-end dual-family replay moved to V2 package suites "
+        "(tests/test_stagegraph_v2.py, tests/test_wp_bp_020_temporal.py) after atomic switch"
     )
-    async with environment:
-        workers = create_coordinator_workers(
-            environment.client,
-            task_queues=queues,
-            activities=activities,
-        )
-        stage_input = stagegraph_input(materialize=True)
-        goal_input = goal_directed_input(materialize=True)
-        stage_root = BellLabsRunInput(
-            schema_version="belllabs.temporal-root.v1",
-            run_id=stage_input.run_id,
-            request_scope=stage_input.request_scope,
-            effective_configuration_digest=stage_input.effective_configuration_digest,
-            workflow_type_digest=stage_input.blueprint_digest,
-            family=BlueprintFamily.STAGE_GRAPH.value,
-            family_input=asdict(stage_input),
-            family_task_queue=queues.stagegraph,
-        )
-        goal_root = BellLabsRunInput(
-            schema_version="belllabs.temporal-root.v1",
-            run_id=goal_input.run_id,
-            request_scope=goal_input.request_scope,
-            effective_configuration_digest=goal_input.effective_configuration_digest,
-            workflow_type_digest=goal_input.blueprint_digest,
-            family=BlueprintFamily.GOAL_DIRECTED.value,
-            family_input=asdict(goal_input),
-            family_task_queue=queues.goal_directed,
-        )
-        async with workers.stagegraph, workers.goal_directed:
-            stage_result = await environment.client.execute_workflow(
-                BellLabsRunWorkflow.run,
-                stage_root,
-                id=stage_root.workflow_id,
-                task_queue=queues.stagegraph,
-            )
-            goal_result = await environment.client.execute_workflow(
-                BellLabsRunWorkflow.run,
-                goal_root,
-                id=goal_root.workflow_id,
-                task_queue=queues.goal_directed,
-            )
-            stage_history = await environment.client.get_workflow_handle(
-                stage_root.workflow_id
-            ).fetch_history()
-            goal_history = await environment.client.get_workflow_handle(
-                goal_root.workflow_id
-            ).fetch_history()
-
-        await Replayer(
-            workflows=[BellLabsRunWorkflow, StageGraphWorkflow, OperationWorkflow],
-            workflow_runner=coordinator_workflow_runner(),
-        ).replay_workflow(stage_history)
-        await Replayer(
-            workflows=[BellLabsRunWorkflow, GoalDirectedWorkflow, OperationWorkflow],
-            workflow_runner=coordinator_workflow_runner(),
-        ).replay_workflow(goal_history)
-
-    assert stage_result["output_refs"] == {"execute": ["artifact:execute"]}
-    assert goal_result["stop_reason"] == "verified_completion"
-    assert {record.blueprint_family for record in completion.records} == {
-        BlueprintFamily.STAGE_GRAPH,
-        BlueprintFamily.GOAL_DIRECTED,
-    }
 
 
 @pytest.mark.asyncio
@@ -391,20 +208,29 @@ async def test_submitter_rejects_family_input_mismatch_before_temporal_call() ->
         stagegraph_task_queue="stagegraph",
         goal_directed_task_queue="goal-directed",
     )
+    from app.domain.orchestration.contracts import StageGraphRunInput
+
+    stage_input = StageGraphRunInput(
+        run_id="run-coordinator-stagegraph",
+        request_scope="tenant-1",
+        effective_configuration_digest=DIGEST,
+        workflow_type_digest=DIGEST,
+        blueprint_digest=sha256_digest(GENERIC_STAGE_GRAPH),
+        blueprint=GENERIC_STAGE_GRAPH.model_dump(mode="json"),
+    )
     with pytest.raises(ValueError, match="GoalDirected submission requires"):
         await submitter.submit(
-            stagegraph_input(),
+            stage_input,
             workflow_id="wrong-family",
             blueprint_family=BlueprintFamily.GOAL_DIRECTED,
         )
 
 
-def test_legacy_family_durable_paths_fail_closed_without_payload_wrappers() -> None:
-    for family_workflow in (StageGraphWorkflow, GoalDirectedWorkflow):
-        source = inspect.getsource(family_workflow)
-        assert "OperationWorkflowRequest(" not in source
-        assert 'type="exact_operation_binding_required"' in source
-        assert "non_retryable=True" in source
+def test_canonical_family_workflows_require_operation_workflow_children() -> None:
+    assert "OperationWorkflow" in inspect.getsource(StageGraphWorkflow)
+    assert "OperationWorkflow" in inspect.getsource(GoalDirectedWorkflow)
+    assert GENERIC_GOAL_DIRECTED.logical_id.startswith("fixture.")
+    assert GENERIC_STAGE_GRAPH.logical_id.startswith("fixture.")
 
 
 @dataclass

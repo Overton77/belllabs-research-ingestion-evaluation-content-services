@@ -42,7 +42,10 @@ from app.domain.schema_grounding.contracts import (
     SchemaCatalogBuildRequest,
 )
 from app.integrations.control_plane_payloads import ContentAddress, InMemoryPayloadStore
+from app.application.goal_directed import InMemoryGoalOperationTemplateRepository
+from app.domain.run_control.contracts import ActorContext
 from app.temporal.coordinator_runtime import (
+    GoalDirectedCoordinatorDependencies,
     SchemaGroundingCoordinatorRuntimeDependencies,
     create_schema_grounding_coordinator_runtime,
 )
@@ -468,6 +471,16 @@ def test_production_runtime_shares_postgres_binding_authority_with_workers() -> 
             selector=UnusedAgents(),
             reviewer=UnusedAgents(),
             reconciliations=cast(Any, object()),
+            goal_directed=GoalDirectedCoordinatorDependencies(
+                run_control=cast(Any, object()),
+                operation_bindings=cast(Any, object()),
+                templates=InMemoryGoalOperationTemplateRepository(),
+                documents=cast(Any, object()),
+                actor=ActorContext(
+                    actor_id="schema-context-test",
+                    permissions=frozenset({"workflow_run.goal_directed"}),
+                ),
+            ),
         ),
     )
 

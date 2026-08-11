@@ -11,15 +11,16 @@ from temporalio.client import Client
 from temporalio.worker import Worker
 
 from app.application.coordinator_results import TerminalWorkflowCompletionPort
+from app.application.goal_directed import (
+    GoalDirectedDocumentRepository,
+    GoalOperationTemplateProvider,
+)
 from app.application.orchestration import RunControlLifecycleGateway
 from app.application.orchestration_binding_repository import (
     RunSemanticInputBindingRepository,
     RunSemanticInputBindingService,
 )
 from app.application.orchestration_routing import (
-    BoundGoalHandoffPreparer,
-    BoundGoalIndependentVerifier,
-    BoundGoalIterationExecutor,
     BoundStageOperationExecutor,
     BoundWorkflowEvaluator,
     OperationExecutionBindingReader,
@@ -28,15 +29,14 @@ from app.application.orchestration_routing import (
 from app.application.postgres_orchestration_binding_repository import (
     PostgresRunSemanticInputBindingRepository,
 )
+from app.application.run_control import RunControlService
 from app.application.schema_catalog_build import SchemaCatalogBuildService
 from app.application.schema_context_selection import ReviewAgentPort, SelectionAgentPort
 from app.application.schema_context_stage_handlers import (
     register_schema_context_stage_handlers,
 )
 from app.application.schema_grounding_repository import SchemaGroundingRecordRepository
-from app.application.schema_grounding_semantic_handlers import (
-    register_supporting_graph_goal_handlers,
-)
+from app.application.semantic_operation_bindings import SemanticOperationBindingRepository
 from app.application.supporting_graph_reconciliation import (
     SupportingGraphReconciliationWorkflow,
 )
@@ -44,9 +44,11 @@ from app.application.web_research_semantic_handlers import (
     WebResearchHandlerDependencies,
     register_web_research_stagegraph_handlers,
 )
+from app.domain.run_control.contracts import ActorContext
 from app.integrations.control_plane_payloads import ContentAddressedPayloadStore
-from app.temporal.goal_directed_activities import (
+from app.temporal.activities.goal_directed import (
     GoalDirectedActivities,
+    compose_goal_directed_activities,
     create_goal_directed_worker,
 )
 from app.temporal.orchestration_activities import (
@@ -81,6 +83,17 @@ class CoordinatorWorkerActivities:
 
 
 @dataclass(frozen=True)
+class GoalDirectedCoordinatorDependencies:
+    """Exact ports required to compose the canonical GoalDirected activity surface."""
+
+    run_control: RunControlService
+    operation_bindings: SemanticOperationBindingRepository
+    templates: GoalOperationTemplateProvider
+    documents: GoalDirectedDocumentRepository
+    actor: ActorContext
+
+
+@dataclass(frozen=True)
 class SchemaGroundingCoordinatorRuntimeDependencies:
     """Concrete semantic services registered by the dual-family coordinator worker."""
 
@@ -92,6 +105,7 @@ class SchemaGroundingCoordinatorRuntimeDependencies:
     selector: SelectionAgentPort
     reviewer: ReviewAgentPort
     reconciliations: SupportingGraphReconciliationWorkflow
+    goal_directed: GoalDirectedCoordinatorDependencies
     operation_bindings: OperationExecutionBindingReader | None = None
 
 
@@ -109,6 +123,7 @@ def create_routed_coordinator_activities(
     bindings: RunSemanticInputBindingRepository,
     handlers: SemanticHandlerRegistry,
     lifecycle: RunControlLifecycleGateway,
+    goal_directed: GoalDirectedCoordinatorDependencies,
     web_research: WebResearchHandlerDependencies | None = None,
     operation_bindings: OperationExecutionBindingReader | None = None,
     completion: TerminalWorkflowCompletionPort | None = None,
@@ -119,16 +134,22 @@ def create_routed_coordinator_activities(
         register_web_research_stagegraph_handlers(handlers, web_research)
     return CoordinatorWorkerActivities(
         stagegraph=StageGraphActivities(
-            operation_executor=BoundStageOperationExecutor(bindings, handlers, operation_bindings),
-            workflow_evaluator=BoundWorkflowEvaluator(bindings, handlers, operation_bindings),
+            operation_executor=BoundStageOperationExecutor(
+                bindings, handlers, operation_bindings
+            ),
+            workflow_evaluator=BoundWorkflowEvaluator(
+                bindings, handlers, operation_bindings
+            ),
             lifecycle_gateway=lifecycle,
             completion=completion,
         ),
-        goal_directed=GoalDirectedActivities(
-            executor=BoundGoalIterationExecutor(bindings, handlers, operation_bindings),
-            verifier=BoundGoalIndependentVerifier(bindings, handlers, operation_bindings),
-            handoffs=BoundGoalHandoffPreparer(bindings, handlers, operation_bindings),
+        goal_directed=compose_goal_directed_activities(
+            run_control=goal_directed.run_control,
+            operation_bindings=goal_directed.operation_bindings,
+            templates=goal_directed.templates,
+            documents=goal_directed.documents,
             lifecycle=lifecycle,
+            actor=goal_directed.actor,
             completion=completion,
         ),
     )
@@ -166,16 +187,12 @@ def create_schema_grounding_coordinator_runtime(
         selector=dependencies.selector,
         reviewer=dependencies.reviewer,
     )
-    register_supporting_graph_goal_handlers(
-        handlers,
-        workflow=dependencies.reconciliations,
-        records=dependencies.records,
-    )
     return SchemaGroundingCoordinatorRuntime(
         activities=create_routed_coordinator_activities(
             bindings=bindings,
             handlers=handlers,
             lifecycle=dependencies.lifecycle,
+            goal_directed=dependencies.goal_directed,
             operation_bindings=dependencies.operation_bindings,
         ),
         bindings=bindings,

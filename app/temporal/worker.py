@@ -11,6 +11,8 @@ from app.application.control_plane_repository import BeanieDefinitionRepository
 from app.application.linked_runs import LinkedRunService
 from app.application.postgres_linked_run_repository import PostgresLinkedRunRepository
 from app.application.postgres_run_control_repository import PostgresRunControlRepository
+from app.application.goal_directed import configure_goal_directed_family_admissions
+from app.application.orchestration import register_stagegraph_family_mutations
 from app.application.run_control import (
     AdmissionPolicyRegistry,
     F1RunConfigurationVerifier,
@@ -102,11 +104,17 @@ def compose_worker_run_control_service(
 ) -> RunControlService:
     """Build worker run control with an optional exact family-policy registry."""
 
+    if family_admission_registry is None:
+        registry = FamilyAdmissionRegistry()
+        configure_goal_directed_family_admissions(registry)
+        register_stagegraph_family_mutations(registry)
+    else:
+        registry = family_admission_registry
     return RunControlService(
         repository,
         configuration_verifier,
         policies,
-        family_admission_registry,
+        registry,
     )
 
 

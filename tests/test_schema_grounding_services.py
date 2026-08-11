@@ -10,11 +10,6 @@ import pytest
 from app.application.orchestration_binding_repository import (
     InMemoryRunSemanticInputBindingRepository,
 )
-from app.application.orchestration_routing import (
-    BoundGoalIndependentVerifier,
-    BoundGoalIterationExecutor,
-    SemanticHandlerRegistry,
-)
 from app.application.schema_catalog import CATALOG_GENERATOR_VERSION
 from app.application.schema_catalog_build import SchemaCatalogBuildService
 from app.application.schema_context_derivation import SchemaContextDerivationService
@@ -23,17 +18,10 @@ from app.application.schema_grounding_repository import (
 )
 from app.application.schema_grounding_semantic_handlers import (
     build_supporting_graph_run_binding,
-    register_supporting_graph_goal_handlers,
 )
 from app.application.schema_workspace_binding import SchemaGraphAdmissionService
 from app.application.supporting_graph_reconciliation import (
     SupportingGraphReconciliationWorkflow,
-)
-from app.domain.orchestration.contracts import (
-    GoalAgentRunIdentity,
-    GoalExecutionClaim,
-    GoalIterationIdentity,
-    GoalVerificationRequest,
 )
 from app.domain.schema_context.canonicalization import sha256_digest
 from app.domain.schema_context.contracts import (
@@ -499,83 +487,7 @@ async def test_supporting_reconciliation_persists_exact_intent_result_evidence()
 
 @pytest.mark.asyncio
 async def test_goal_semantic_handlers_execute_and_independently_rehydrate_reconciliation() -> None:
-    request, records, factory = await _reconciliation_fixture()
-    workflow = SupportingGraphReconciliationWorkflow(
-        admission=SchemaGraphAdmissionService(records),
-        executor_factory=factory,
-        records=records,
+    pytest.skip(
+        "direct BoundGoal*/register_supporting_graph_goal_handlers path deleted by "
+        "WP-BP-020 atomic switch; Scenario C now uses OperationWorkflow templates"
     )
-    run_binding = build_supporting_graph_run_binding(
-        request=request,
-        effective_configuration_digest="sha256:" + "d" * 64,
-        blueprint_digest="sha256:" + "c" * 64,
-        acceptance_contract_ref="evaluation:supporting-graph-reconciliation:v1",
-        created_at=NOW,
-    )
-    assert run_binding.goal_operation_handlers[0].operation_class == "goal_iteration"
-    assert run_binding.goal_verifier is not None
-    assert run_binding.goal_handoff is not None
-    binding_repository = InMemoryRunSemanticInputBindingRepository()
-    await binding_repository.create(run_binding)
-    handlers = SemanticHandlerRegistry()
-    register_supporting_graph_goal_handlers(
-        handlers,
-        workflow=workflow,
-        records=records,
-    )
-    identity = GoalAgentRunIdentity(
-        iteration=GoalIterationIdentity(
-            run_id=request.run_id,
-            goal_iteration=1,
-            goal_revision_id="goal-revision:1",
-            execution_epoch=1,
-        ),
-        agent_run=1,
-        session_generation=1,
-    )
-    claim = GoalExecutionClaim(
-        identity=identity,
-        idempotency_key="goal-operation:reconciliation:1",
-        operation_class="goal_iteration",
-        objective=request.question,
-        protected_scope_digest="sha256:" + "f" * 64,
-        reservation_id="reservation:goal:1",
-        reservation={"goal.iterations": 1, "graph.reads": 1},
-        session_mode="reuse",
-        session_id="goal-session:1",
-        workspace_mode="shared",
-        workspace_namespace="run/run-reconciliation/goal/workspace/1",
-        snapshot_mode="on_failure",
-        request_scope=request.request_scope,
-        semantic_input_binding_ref=run_binding.binding_id,
-        effective_configuration_digest=run_binding.effective_configuration_digest,
-        blueprint_digest=run_binding.blueprint_digest,
-    )
-
-    execution = await BoundGoalIterationExecutor(
-        binding_repository,
-        handlers,
-    ).execute(
-        claim
-    )
-
-    verification = await BoundGoalIndependentVerifier(
-        binding_repository,
-        handlers,
-    ).verify(
-        GoalVerificationRequest(
-            claim=claim,
-            execution_result=execution,
-            verifier_ref="verifier:supporting-graph-reconciliation:v1",
-            acceptance_contract_ref=(
-                "evaluation:supporting-graph-reconciliation:v1"
-            ),
-        )
-    )
-
-    assert execution.disposition == "completed"
-    assert execution.completion_claim
-    assert execution.actual_usage == {"graph.reads": 1}
-    assert verification.action == "verified_completion"
-    assert verification.evidence_refs == execution.output_refs
-    assert factory.executor.calls == 1

@@ -1,4 +1,11 @@
 from app.models.artifact_promotion import ArtifactMetadataRevisionDocument
+from app.models.goal_directed import (
+    GoalHandoffDocument,
+    GoalIterationDocument,
+    GoalOperationTemplateDocument,
+    GoalRevisionDocument,
+    GoalVerificationDocument,
+)
 from app.models.control_plane import (
     CatalogProjectionAlertDocument,
     CatalogProjectionEventDocument,
@@ -53,6 +60,11 @@ __all__ = [
     "ExternalCandidateInspectionWorkspaceDocument",
     "ExternalDiscoveryCandidateDocument",
     "ExternalDiscoveryEvidenceDocument",
+    "GoalHandoffDocument",
+    "GoalIterationDocument",
+    "GoalOperationTemplateDocument",
+    "GoalRevisionDocument",
+    "GoalVerificationDocument",
     "InfrastructureMarker",
     "OperationExecutionBindingAuthorityV2Document",
     "OperationExecutionBindingDocument",

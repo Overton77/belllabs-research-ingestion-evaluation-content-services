@@ -45,7 +45,14 @@ from app.domain.orchestration.contracts import (
     StageOperationRequest,
     WorkflowEvaluationRequest,
 )
-from app.temporal.coordinator_runtime import create_routed_coordinator_activities
+from typing import Any, cast
+
+from app.application.goal_directed import InMemoryGoalOperationTemplateRepository
+from app.domain.run_control.contracts import ActorContext
+from app.temporal.coordinator_runtime import (
+    GoalDirectedCoordinatorDependencies,
+    create_routed_coordinator_activities,
+)
 
 CONFIGURATION_DIGEST = "sha256:" + "1" * 64
 BLUEPRINT_DIGEST = "sha256:" + "2" * 64
@@ -513,6 +520,16 @@ def test_routed_activity_composition_registers_web_research_handlers() -> None:
         bindings=InMemoryRunSemanticInputBindingRepository(),
         handlers=registry,
         lifecycle=FakeLifecycle(),  # type: ignore[arg-type]
+        goal_directed=GoalDirectedCoordinatorDependencies(
+            run_control=cast(Any, object()),
+            operation_bindings=cast(Any, object()),
+            templates=InMemoryGoalOperationTemplateRepository(),
+            documents=cast(Any, object()),
+            actor=ActorContext(
+                actor_id="web-research-test",
+                permissions=frozenset({"workflow_run.goal_directed"}),
+            ),
+        ),
         web_research=dependencies,
     )
 
