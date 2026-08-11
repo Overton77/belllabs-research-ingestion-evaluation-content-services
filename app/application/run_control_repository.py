@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Protocol, TypeVar
 
 from app.domain.control_plane.canonical import sha256_digest
+from app.domain.operation_execution.journal import OperationJournalSettlement
 from app.domain.run_control.budget import roll_up_child_budget
 from app.domain.run_control.contracts import (
     AdmissionDecision,
@@ -27,6 +28,7 @@ from app.domain.run_control.contracts import (
     OutboxCursor,
     OutboxRecord,
     RunProjection,
+    UsageRecord,
 )
 from app.domain.run_control.errors import (
     IdempotencyConflict,
@@ -42,6 +44,55 @@ from app.domain.run_control.family_admission import (
 
 M = TypeVar("M", bound=AtomicFamilyMutation)
 FailureHook = Callable[[str], Awaitable[None] | None]
+
+
+def authority_state_digest(state: BudgetState | EffectLedgerState) -> str:
+    """Canonical CAS digest that preserves set/map semantics before JSON encoding."""
+
+    return sha256_digest(state.model_dump(mode="python"))
+
+
+def upgrade_legacy_operation_pending_usage(
+    budget: BudgetState,
+    effects: EffectLedgerState,
+    settlement: OperationJournalSettlement,
+) -> BudgetState:
+    """Reconstruct one unambiguous legacy pending usage from journal/effect authority."""
+
+    if (
+        settlement.status != "reconciliation_required"
+        or not settlement.pending_external_usage
+        or settlement.effect_claim_id not in effects.claims
+        or settlement.settlement_id in budget.usage_ids
+        or budget.usage_records
+        or budget.outstanding_usage_ids
+    ):
+        raise ValueError("legacy pending usage evidence is absent or ambiguous")
+    claim = effects.claims[settlement.effect_claim_id]
+    if claim.run_id != budget.run_id or claim.settlement is not None:
+        raise ValueError("legacy effect claim does not match the pending budget")
+    pending = {
+        dimension: amount
+        for dimension, amount in budget.pending_settlement.items()
+        if amount > 0
+    }
+    if pending != settlement.pending_external_usage:
+        raise ValueError("legacy pending usage totals do not match journal evidence")
+    usage = UsageRecord(
+        usage_id=settlement.settlement_id,
+        reservation_id=claim.reservation_id,
+        authority_ref=claim.operation_ref,
+        actual_amounts=settlement.usage,
+        release_amounts=settlement.released_usage,
+        pending_external_amounts=settlement.pending_external_usage,
+    )
+    return budget.model_copy(
+        update={
+            "usage_ids": budget.usage_ids | {usage.usage_id},
+            "usage_records": {usage.usage_id: usage},
+            "outstanding_usage_ids": frozenset({usage.usage_id}),
+        }
+    )
 
 
 @dataclass(frozen=True)
@@ -380,11 +431,11 @@ class InMemoryRunControlRepository:
         current = self._runs.get(mutation.result.run_id)
         if current is None or current.request_scope != mutation.request_scope:
             raise RunControlNotFound(f"workflow run not found: {mutation.result.run_id}")
-        current_budget_digest = sha256_digest(
-            self._budgets[mutation.result.run_id].model_dump(mode="json")
+        current_budget_digest = authority_state_digest(
+            self._budgets[mutation.result.run_id]
         )
-        current_effects_digest = sha256_digest(
-            self._effects[mutation.result.run_id].model_dump(mode="json")
+        current_effects_digest = authority_state_digest(
+            self._effects[mutation.result.run_id]
         )
         if (
             mutation.expected_budget_digest != current_budget_digest
