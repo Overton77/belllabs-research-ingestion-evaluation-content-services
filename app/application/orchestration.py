@@ -47,11 +47,14 @@ from app.domain.orchestration.contracts import (
 )
 from app.domain.orchestration.interpreter import StageGraphInterpreter
 from app.domain.run_control.contracts import (
+    AcceptedObligationEvidence,
     AcceptedOutputEvidence,
     ActorContext,
+    ApplyAuthorityBatchAction,
     CommandStatus,
     LifecycleAction,
     LifecycleCommand,
+    RecordObligationEvidenceAction,
     RecordOutputEvidenceAction,
     RecordUsageAction,
     ReserveBudgetAction,
@@ -59,6 +62,7 @@ from app.domain.run_control.contracts import (
     TerminalizationProposal,
     TerminalizeAction,
 )
+from app.domain.run_control.family_admission import AtomicFamilyMutation
 
 LIFECYCLE_ACTION_ADAPTER: TypeAdapter[LifecycleAction] = TypeAdapter(LifecycleAction)
 ORCHESTRATION_AUTHORITY_REF = "orchestration-authority"
@@ -338,6 +342,60 @@ class StageGraphDecisionService:
         output_evidence = observation.operation_result.get("output_refs", ())
         if not isinstance(output_evidence, list | tuple):
             raise ValueError("operation result output refs must be a sequence")
+        obligation_evidence = observation.operation_result.get("obligation_refs", ())
+        if not isinstance(obligation_evidence, list | tuple):
+            raise ValueError("operation result obligation refs must be a sequence")
+        batch_actions: list[
+            RecordUsageAction | RecordObligationEvidenceAction | RecordOutputEvidenceAction
+        ] = [
+            RecordUsageAction(
+                usage_id=f"usage:{request.observation.identity.semantic_key}",
+                reservation_id=liability.reservation_id,
+                actual_amounts={
+                    str(dimension): int(amount) for dimension, amount in actual_usage.items()
+                },
+                release_amounts={
+                    dimension: max(amount - int(actual_usage.get(dimension, 0)), 0)
+                    for dimension, amount in liability.reserved_amounts.items()
+                },
+                pending_external_amounts={},
+            )
+        ]
+        if proposal.decision.value == "admit":
+            admitted_outputs = next(
+                (
+                    item.output_refs
+                    for item in next_projection.stages.values()
+                    if item.candidate == request.observation.identity.candidate
+                ),
+                (),
+            )
+            batch_actions.extend(
+                RecordObligationEvidenceAction(
+                    evidence=AcceptedObligationEvidence(
+                        obligation_ref=str(obligation_ref),
+                        evidence_digest=sha256_digest(str(obligation_ref)),
+                        accepted_by_authority_ref=ORCHESTRATION_AUTHORITY_REF,
+                    )
+                )
+                for obligation_ref in sorted(
+                    {str(item) for item in obligation_evidence},
+                    key=lambda item: item.encode("utf-8"),
+                )
+            )
+            batch_actions.extend(
+                RecordOutputEvidenceAction(
+                    evidence=AcceptedOutputEvidence(
+                        output_ref=output_ref,
+                        evidence_digest=sha256_digest(output_ref),
+                        accepted_by_authority_ref=ORCHESTRATION_AUTHORITY_REF,
+                    )
+                )
+                for output_ref in sorted(
+                    admitted_outputs,
+                    key=lambda item: item.encode("utf-8"),
+                )
+            )
         receipt = await self._run_control.execute_family_admission(
             LifecycleCommand(
                 command_id=f"stagegraph:{mutation.mutation_id}",
@@ -346,25 +404,7 @@ class StageGraphDecisionService:
                 run_id=request.run_id,
                 expected_run_version=request.projection.run_version,
                 actor=orchestration_lifecycle_actor(),
-                action=RecordUsageAction(
-                    usage_id=f"usage:{request.observation.identity.semantic_key}",
-                    reservation_id=(
-                        liability.reservation_id
-                    ),
-                    actual_amounts={
-                        str(dimension): int(amount)
-                        for dimension, amount in actual_usage.items()
-                    },
-                    release_amounts={
-                        dimension: max(
-                            amount
-                            - int(actual_usage.get(dimension, 0)),
-                            0,
-                        )
-                        for dimension, amount in liability.reserved_amounts.items()
-                    },
-                    pending_external_amounts={},
-                ),
+                action=ApplyAuthorityBatchAction(actions=tuple(batch_actions)),
                 reason="Settle StageGraph producer usage and decide its result",
                 evidence_refs=tuple(str(item) for item in output_evidence),
                 occurred_at=request.occurred_at,
@@ -373,47 +413,22 @@ class StageGraphDecisionService:
             mutation,
         )
         accepted = receipt.command_result.status == CommandStatus.ACCEPTED
-        if accepted and proposal.decision.value == "admit":
-            for output_ref in next(
-                (
-                    item.output_refs
-                    for item in next_projection.stages.values()
-                    if item.candidate == request.observation.identity.candidate
+        if accepted:
+            next_projection = replace(
+                next_projection,
+                run_version=receipt.command_result.resulting_run_version,
+                family_version=receipt.family_receipt.family_version,
+                accepted_obligation_evidence=frozenset(
+                    {
+                        *next_projection.accepted_obligation_evidence,
+                        *(
+                            str(item)
+                            for item in obligation_evidence
+                            if proposal.decision.value == "admit"
+                        ),
+                    }
                 ),
-                (),
-            ):
-                output_result = await self._run_control.execute(
-                    LifecycleCommand(
-                        command_id=(
-                            "stagegraph:output:"
-                            f"{sha256_digest(output_ref).removeprefix('sha256:')}"
-                        ),
-                        idempotency_issuer=request.idempotency_issuer,
-                        request_scope=request.request_scope,
-                        run_id=request.run_id,
-                        expected_run_version=next_projection.run_version,
-                        actor=orchestration_lifecycle_actor(),
-                        action=RecordOutputEvidenceAction(
-                            evidence=AcceptedOutputEvidence(
-                                output_ref=output_ref,
-                                evidence_digest=sha256_digest(output_ref),
-                                accepted_by_authority_ref=ORCHESTRATION_AUTHORITY_REF,
-                            )
-                        ),
-                        reason="Accept StageGraph output evidence after result admission",
-                        evidence_refs=(output_ref,),
-                        occurred_at=request.occurred_at,
-                        correlation_id=request.correlation_id,
-                    )
-                )
-                if output_result.status != CommandStatus.ACCEPTED:
-                    raise ValueError(
-                        "accepted StageGraph result output could not enter run-control authority"
-                    )
-                next_projection = replace(
-                    next_projection,
-                    run_version=output_result.resulting_run_version,
-                )
+            )
         return StageGraphResultActivityResult(
             accepted=accepted,
             projection=next_projection if accepted else request.projection,
@@ -583,6 +598,43 @@ class StageGraphOperationMaterializer(Protocol):
     ) -> OperationWorkflowRequest: ...
 
 
+def validate_stagegraph_authority_batch(
+    mutation: AtomicFamilyMutation,
+    batch: ApplyAuthorityBatchAction,
+) -> str | None:
+    """Narrow StageGraph batch references to the exact producer decision under admission."""
+
+    if not isinstance(mutation, StageGraphDecisionMutation):
+        return "unexpected StageGraph mutation type"
+    usage_actions = tuple(
+        action for action in batch.actions if isinstance(action, RecordUsageAction)
+    )
+    output_actions = tuple(
+        action for action in batch.actions if isinstance(action, RecordOutputEvidenceAction)
+    )
+    obligation_actions = tuple(
+        action
+        for action in batch.actions
+        if isinstance(action, RecordObligationEvidenceAction)
+    )
+    if len(usage_actions) != 1:
+        return "StageGraph authority batches require exactly one usage settlement"
+    usage_id = usage_actions[0].usage_id
+    if not usage_id.startswith("usage:") or usage_id == "usage:":
+        return "StageGraph usage settlement identity is malformed"
+    if mutation.decision_kind != "result_decided":
+        if output_actions or obligation_actions:
+            return "only StageGraph result decisions may batch evidence acceptance"
+        return None
+    semantic_key = usage_id.removeprefix("usage:")
+    payload = mutation.decision_payload.get("prior_liability")
+    if not isinstance(payload, dict):
+        return "StageGraph result batch lacks prior producer liability binding"
+    if payload.get("semantic_attempt_id") != semantic_key:
+        return "StageGraph usage settlement does not bind the decided producer liability"
+    return None
+
+
 def register_stagegraph_family_mutations(registry: FamilyAdmissionRegistry) -> None:
     """Publish the exact StageGraph policy for integrator-owned composition."""
 
@@ -592,8 +644,17 @@ def register_stagegraph_family_mutations(registry: FamilyAdmissionRegistry) -> N
         mutation_kind="decision_committed",
         required_permission="workflow_run.reserve_budget",
         allowed_action_kinds=frozenset(
-            {"reserve_budget", "record_usage", "terminalize"}
+            {"reserve_budget", "record_usage", "terminalize", "apply_authority_batch"}
         ),
+        allowed_batch_action_kinds=frozenset(
+            {
+                "record_usage",
+                "record_obligation_evidence",
+                "record_output_evidence",
+            }
+        ),
+        required_batch_action_kinds=frozenset({"record_usage"}),
+        batch_binding_validator=validate_stagegraph_authority_batch,
     )
 
 
