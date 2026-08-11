@@ -424,7 +424,12 @@ def _declared_variants(
     blueprint: StageGraphBlueprint | GoalDirectedBlueprint,
 ) -> frozenset[str]:
     if isinstance(blueprint, StageGraphBlueprint):
-        return frozenset(variant for stage in blueprint.stages for variant in stage.variant_names)
+        return frozenset(
+            variant.operation_variant_id
+            for stage in blueprint.stages
+            for slot in stage.operation_slots
+            for variant in slot.allowed_variants
+        )
     return blueprint.variant_names
 
 
@@ -505,7 +510,9 @@ def _validate_implementation_binding(
                 raise CompilationRejected(
                     "StageGraph obligation realization must name an existing stage"
                 )
-            if realization.obligation_ref not in stage.obligation_refs:
+            if realization.obligation_ref not in {
+                slot.obligation_ref for slot in stage.obligation_slots
+            }:
                 raise CompilationRejected(
                     "StageGraph stage does not declare its realized obligation"
                 )

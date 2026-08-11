@@ -1,20 +1,50 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
+from dataclasses import replace
 
-from app.domain.control_plane.contracts import StageGraphBlueprint, StageNode
+from app.domain.control_plane.canonical import sha256_digest
+from app.domain.control_plane.contracts import (
+    DependencyClass,
+    JoinKind,
+    StageDependency,
+    StageGraphBlueprint,
+    StageJoin,
+    StageOperationSlot,
+)
 from app.domain.orchestration.contracts import (
+    AcceptedResultFact,
+    CandidateOrderingKey,
+    DependencyDisposition,
+    DependencyProjection,
     ExecutionIdentity,
+    FairnessCursorState,
+    JoinDisposition,
+    LateResultFacts,
+    ProducerLiability,
+    ResultDecision,
+    ResultDispositionProposal,
+    StageCandidateIdentity,
     StageExecutionIdentity,
-    StageExecutionState,
-    StageGraphExecutionState,
-    StageOperationRequest,
-    StageOperationResult,
-    WorkflowEvaluationResult,
+    StageGraphAcceptedProjection,
+    StageGraphCompletionProposal,
+    StageInstanceProjection,
+    StageOperationAdmissionProposal,
+    StageResultObservation,
+    StageStatus,
+    WorkflowInvalidationProposal,
 )
 
-TERMINAL_STATUSES = frozenset({"completed", "degraded", "skipped", "failed"})
-ACCEPTED_STATUSES = frozenset({"completed", "degraded"})
+TERMINAL_DEPENDENCY_DISPOSITIONS = frozenset(
+    {
+        DependencyDisposition.FULFILLED,
+        DependencyDisposition.DEGRADED,
+        DependencyDisposition.OMITTED,
+        DependencyDisposition.FAILED,
+        DependencyDisposition.CANCELLED,
+        DependencyDisposition.INVALID,
+    }
+)
 
 
 class StageGraphExecutionError(ValueError):
@@ -22,15 +52,16 @@ class StageGraphExecutionError(ValueError):
 
 
 class StageGraphInterpreter:
-    """Pure deterministic scheduler for one frozen, application-authored StageGraph."""
+    """Pure proposal interpreter for one immutable normalized StageGraph V2."""
 
     def __init__(self, blueprint: StageGraphBlueprint, *, effective_max_concurrency: int) -> None:
         if effective_max_concurrency < 1:
             raise StageGraphExecutionError("effective concurrency must be positive")
         oversized = [
-            stage.stage_id
+            (stage.stage_id, slot.operation_slot_id)
             for stage in blueprint.stages
-            if stage.concurrency_slots > effective_max_concurrency
+            for slot in stage.operation_slots
+            if slot.concurrency_slots > effective_max_concurrency
         ]
         if oversized:
             raise StageGraphExecutionError(
@@ -38,343 +69,635 @@ class StageGraphInterpreter:
             )
         self.blueprint = blueprint
         self.stages = {stage.stage_id: stage for stage in blueprint.stages}
-        self.max_concurrency = min(
-            blueprint.max_parallel_stages,
-            effective_max_concurrency,
-        )
+        self.max_concurrency = effective_max_concurrency
+        self.dependencies = {item.dependency_id: item for item in blueprint.dependencies}
+        self.joins = {
+            (item.consumer_stage_id, item.join_id): item for item in blueprint.joins
+        }
+        self.stage_joins: dict[str, tuple[StageJoin, ...]] = {
+            stage_id: tuple(
+                item for item in blueprint.joins if item.consumer_stage_id == stage_id
+            )
+            for stage_id in self.stages
+        }
         self.descendants = self._descendants()
+        self.group_ring = self._weighted_group_ring()
 
-    def initial_state(
+    def initial_projection(
         self,
         identity: ExecutionIdentity,
         *,
         run_version: int,
-        request_scope: str = "",
-        semantic_input_binding_ref: str = "",
-        effective_configuration_digest: str = "",
-        blueprint_digest: str = "",
-    ) -> StageGraphExecutionState:
-        return StageGraphExecutionState(
-            identity=identity,
-            run_version=run_version,
-            stages={stage_id: StageExecutionState() for stage_id in self.stages},
-            request_scope=request_scope,
-            semantic_input_binding_ref=semantic_input_binding_ref,
-            effective_configuration_digest=effective_configuration_digest,
-            blueprint_digest=blueprint_digest,
-        )
-
-    def runnable(self, state: StageGraphExecutionState) -> tuple[str, ...]:
-        candidates = [
-            stage
-            for stage in self.blueprint.stages
-            if state.stages[stage.stage_id].status == "pending"
-            and self._join_satisfied(stage, state)
-        ]
-        ordered = sorted(
-            candidates,
-            key=lambda stage: (
-                stage.fairness_priority,
-                state.fairness_cursor.get(stage.fairness_group, 0),
-                stage.fairness_group,
-                stage.stage_id,
-            ),
-        )
-        selected: list[str] = []
-        slots = self.max_concurrency
-        for stage in ordered:
-            if stage.concurrency_slots <= slots:
-                selected.append(stage.stage_id)
-                slots -= stage.concurrency_slots
-        return tuple(selected)
-
-    def operation_request(
-        self,
-        state: StageGraphExecutionState,
-        stage_id: str,
-    ) -> StageOperationRequest:
-        stage = self.stages[stage_id]
-        stage_state = state.stages[stage_id]
-        if stage_state.status != "pending" or not self._join_satisfied(stage, state):
-            raise StageGraphExecutionError(f"stage is not runnable: {stage_id}")
-        if not stage.reservation:
-            raise StageGraphExecutionError(
-                f"stage dispatch requires a prior non-empty reservation: {stage_id}"
-            )
-        stage_state.status = "running"
-        stage_state.operation_attempt += 1
-        state.fairness_cursor[stage.fairness_group] = (
-            state.fairness_cursor.get(stage.fairness_group, 0) + 1
-        )
-        identity = StageExecutionIdentity(
-            run_id=state.identity.run_id,
-            stage_id=stage_id,
-            workflow_cycle=state.workflow_cycle,
-            stage_cycle=stage_state.stage_cycle,
-            operation_attempt=stage_state.operation_attempt,
-            execution_epoch=state.identity.execution_epoch,
-        )
-        state.schedule_trace.append(identity.semantic_key)
-        input_refs = sorted(
-            output_ref
-            for dependency in stage.depends_on
-            if state.stages[dependency].status in ACCEPTED_STATUSES
-            for output_ref in state.stages[dependency].output_refs
-        )
-        if stage_state.stage_cycle:
-            input_refs.extend(stage_state.output_refs)
-        reservation = dict(stage.reservation)
-        reservation["operation.attempts"] = 1
-        reservation["concurrency.slots"] = stage.concurrency_slots
-        if stage_state.stage_cycle and stage.stage_cycle_policy is not None:
-            for dimension, amount in stage.stage_cycle_policy.reservation.items():
-                reservation[dimension] = reservation.get(dimension, 0) + amount
-        reservation_id = f"reservation:{identity.semantic_key}"
-        return StageOperationRequest(
-            identity=identity,
-            idempotency_key=f"operation:{identity.semantic_key}",
-            objective=stage_state.objective,
-            input_refs=tuple(input_refs),
-            reservation_id=reservation_id,
-            reservation=reservation,
-            workspace_namespace=(
-                f"run/{identity.run_id}/execution-epoch/{identity.execution_epoch}/"
-                f"workflow-cycle/{identity.workflow_cycle}/"
-                f"stage/{stage_id}/stage-cycle/{identity.stage_cycle}"
-            ),
-            request_scope=state.request_scope,
-            semantic_input_binding_ref=state.semantic_input_binding_ref,
-            effective_configuration_digest=state.effective_configuration_digest,
-            blueprint_digest=state.blueprint_digest,
-            cycle_evaluation_contract_ref=(
-                stage.stage_cycle_policy.evaluation_contract_ref
-                if stage.stage_cycle_policy is not None
-                else ""
-            ),
-            cycle_objective_contract_ref=(
-                stage.stage_cycle_policy.objective_contract_ref
-                if stage.stage_cycle_policy is not None
-                else ""
-            ),
-        )
-
-    def apply_stage_result(
-        self,
-        state: StageGraphExecutionState,
-        result: StageOperationResult,
-    ) -> None:
-        if result.identity.stage_id not in self.stages:
-            raise StageGraphExecutionError(
-                f"result references an unknown stage: {result.identity.stage_id}"
-            )
-        stage = self.stages[result.identity.stage_id]
-        current = state.stages[stage.stage_id]
-        expected = (
-            state.identity.run_id,
-            state.workflow_cycle,
-            current.stage_cycle,
-            current.operation_attempt,
-            state.identity.execution_epoch,
-        )
-        observed = (
-            result.identity.run_id,
-            result.identity.workflow_cycle,
-            result.identity.stage_cycle,
-            result.identity.operation_attempt,
-            result.identity.execution_epoch,
-        )
-        if current.status != "running" or observed != expected:
-            raise StageGraphExecutionError(
-                "stage result does not match the active semantic identity"
-            )
-        state.lineage.append(result)
-        current.output_refs = result.output_refs
-        if result.disposition == "waiting":
-            if not result.wait_condition_id:
-                raise StageGraphExecutionError("waiting result requires a wait condition identity")
-            current.status = "waiting"
-            current.wait_condition_id = result.wait_condition_id
-            return
-        if result.disposition == "paused":
-            if not result.pause_decision_id:
-                raise StageGraphExecutionError("paused result requires a pause decision identity")
-            current.status = "paused"
-            current.pause_decision_id = result.pause_decision_id
-            return
-        if (
-            stage.stage_cycle_policy is not None
-            and result.evaluation_contract_ref != stage.stage_cycle_policy.evaluation_contract_ref
-        ):
-            raise StageGraphExecutionError(
-                f"stage evaluation is not bound to its frozen contract: {stage.stage_id}"
-            )
-        if result.evaluation == "cycle":
-            policy = stage.stage_cycle_policy
-            if policy is None or current.stage_cycle >= policy.max_cycles:
-                raise StageGraphExecutionError(f"stage cycle limit exceeded: {stage.stage_id}")
-            if result.objective_contract_ref != policy.objective_contract_ref:
-                raise StageGraphExecutionError(
-                    f"stage cycle decision is not bound to frozen contracts: {stage.stage_id}"
-                )
-            if not result.next_objective:
-                raise StageGraphExecutionError("a stage cycle requires a new typed objective")
-            current.stage_cycle += 1
-            current.objective = result.next_objective
-            current.status = "pending"
-            return
-        if result.evaluation == "degrade":
-            if stage.completion_class == "required":
-                raise StageGraphExecutionError("a required stage cannot be degraded")
-            current.status = "degraded"
-            return
-        if result.evaluation == "escalate":
-            current.status = "failed"
-            return
-        current.status = result.disposition
-
-    def clear_wait(self, state: StageGraphExecutionState, condition_id: str) -> None:
-        stage_state = next(
-            (
-                item
-                for item in state.stages.values()
-                if item.status == "waiting" and item.wait_condition_id == condition_id
-            ),
-            None,
-        )
-        if stage_state is None:
-            raise StageGraphExecutionError(f"unknown active wait: {condition_id}")
-        stage_state.status = "pending"
-        stage_state.wait_condition_id = ""
-
-    def resume_pause(self, state: StageGraphExecutionState, decision_id: str) -> None:
-        stage_state = next(
-            (
-                item
-                for item in state.stages.values()
-                if item.status == "paused" and item.pause_decision_id == decision_id
-            ),
-            None,
-        )
-        if stage_state is None:
-            raise StageGraphExecutionError(f"unknown active pause: {decision_id}")
-        stage_state.status = "pending"
-        stage_state.pause_decision_id = ""
-
-    def resolve_blocked(self, state: StageGraphExecutionState) -> bool:
-        changed = False
+    ) -> StageGraphAcceptedProjection:
+        stages: dict[str, StageInstanceProjection] = {}
         for stage in self.blueprint.stages:
-            current = state.stages[stage.stage_id]
-            if current.status != "pending" or not stage.depends_on:
-                continue
-            dependency_states = [state.stages[item].status for item in stage.depends_on]
-            if not all(item in TERMINAL_STATUSES for item in dependency_states):
-                continue
-            if self._join_satisfied(stage, state):
-                continue
-            if stage.skip_policy == "when_dependencies_unsatisfied":
-                current.status = "skipped"
-            else:
-                current.status = "failed"
-            changed = True
-        return changed
-
-    def graph_complete(self, state: StageGraphExecutionState) -> bool:
-        return all(item.status in TERMINAL_STATUSES for item in state.stages.values())
-
-    def graph_failed(self, state: StageGraphExecutionState) -> bool:
-        return any(
-            state.stages[stage.stage_id].status == "failed" and stage.completion_class == "required"
-            for stage in self.blueprint.stages
+            initial_status: StageStatus = (
+                "ready" if not self.stage_joins[stage.stage_id] else "blocked"
+            )
+            for operation_slot in stage.operation_slots:
+                candidate = StageCandidateIdentity(
+                    stage_id=stage.stage_id,
+                    mapped_instance_presence=0,
+                    mapped_instance_id="NO_MAPPED_INSTANCE",
+                    workflow_cycle_ordinal=0,
+                    stage_cycle_ordinal=0,
+                    operation_slot_id=operation_slot.operation_slot_id,
+                )
+                stages[candidate.semantic_prefix] = StageInstanceProjection(
+                    candidate=candidate,
+                    status=initial_status,
+                )
+        return StageGraphAcceptedProjection(
+            identity=identity,
+            family_version=0,
+            run_version=run_version,
+            stages=stages,
+            dependencies={
+                item.dependency_id: DependencyProjection(dependency_id=item.dependency_id)
+                for item in self.blueprint.dependencies
+            },
+            fairness=FairnessCursorState(
+                group_ring_cursor=0,
+                candidate_cursors={
+                    group.group_id: None for group in self.blueprint.fairness_groups
+                },
+            ),
         )
 
-    def apply_workflow_evaluation(
+    @staticmethod
+    def dependency_satisfies(
+        dependency_class: DependencyClass,
+        disposition: DependencyDisposition,
+    ) -> bool | None:
+        if dependency_class == DependencyClass.ADVISORY:
+            return None
+        if disposition == DependencyDisposition.UNRESOLVED:
+            return False
+        if dependency_class == DependencyClass.REQUIRED:
+            return disposition == DependencyDisposition.FULFILLED
+        if dependency_class == DependencyClass.DEGRADABLE:
+            return disposition in {
+                DependencyDisposition.FULFILLED,
+                DependencyDisposition.DEGRADED,
+            }
+        return disposition in TERMINAL_DEPENDENCY_DISPOSITIONS
+
+    def join_disposition(
         self,
-        state: StageGraphExecutionState,
-        decision: WorkflowEvaluationResult,
-    ) -> dict[str, tuple[str, ...]]:
-        if decision.action != "cycle":
-            return {}
-        self.validate_workflow_evaluation(state, decision)
-        frontier = set(decision.invalidation_frontier)
+        join: StageJoin,
+        projection: StageGraphAcceptedProjection,
+    ) -> JoinDisposition:
+        edges = [self.dependencies[item] for item in join.dependency_ids]
+        non_advisory = [
+            edge for edge in edges if edge.dependency_class != DependencyClass.ADVISORY
+        ]
+        satisfied = 0
+        unresolved = 0
+        for edge in non_advisory:
+            disposition = projection.dependencies[edge.dependency_id].disposition
+            if disposition == DependencyDisposition.UNRESOLVED:
+                unresolved += 1
+            elif self.dependency_satisfies(edge.dependency_class, disposition):
+                satisfied += 1
+        count = len(non_advisory)
+        if join.kind == JoinKind.ALL:
+            if satisfied == count:
+                return JoinDisposition.SATISFIED
+            if satisfied + unresolved < count:
+                return JoinDisposition.IMPOSSIBLE
+            return JoinDisposition.PENDING
+        if join.kind == JoinKind.ANY:
+            if satisfied >= 1:
+                return JoinDisposition.SATISFIED
+            if unresolved == 0:
+                return JoinDisposition.IMPOSSIBLE
+            return JoinDisposition.PENDING
+        minimum = join.minimum
+        if minimum is None:
+            raise StageGraphExecutionError("minimum join is missing its frozen threshold")
+        if satisfied >= minimum:
+            return JoinDisposition.SATISFIED
+        if satisfied + unresolved < minimum:
+            return JoinDisposition.IMPOSSIBLE
+        return JoinDisposition.PENDING
+
+    def frontier(
+        self,
+        projection: StageGraphAcceptedProjection,
+        *,
+        available_concurrency: int,
+        blocked_candidate_keys: frozenset[str] = frozenset(),
+    ) -> tuple[StageOperationAdmissionProposal, ...]:
+        if available_concurrency < 0:
+            raise StageGraphExecutionError("available concurrency cannot be negative")
+        candidates_by_group: dict[
+            str, list[tuple[CandidateOrderingKey, StageInstanceProjection]]
+        ] = defaultdict(list)
+        for instance in projection.stages.values():
+            if instance.status not in {"blocked", "ready"}:
+                continue
+            joins = self.stage_joins[instance.candidate.stage_id]
+            dispositions = [self.join_disposition(item, projection) for item in joins]
+            if any(item == JoinDisposition.IMPOSSIBLE for item in dispositions):
+                continue
+            if any(item != JoinDisposition.SATISFIED for item in dispositions):
+                continue
+            stage = self.stages[instance.candidate.stage_id]
+            slot = next(
+                item
+                for item in stage.operation_slots
+                if item.operation_slot_id == instance.candidate.operation_slot_id
+            )
+            key = CandidateOrderingKey(priority=slot.priority, identity=instance.candidate)
+            candidates_by_group[stage.fairness_group_id].append((key, instance))
+        for candidates in candidates_by_group.values():
+            candidates.sort(key=lambda item: item[0].as_tuple())
+
+        proposals: list[StageOperationAdmissionProposal] = []
+        fairness = projection.fairness
+        remaining = min(available_concurrency, self.max_concurrency)
+        while remaining and candidates_by_group:
+            selected = self._select_next_candidate(
+                candidates_by_group,
+                fairness,
+                blocked_candidate_keys,
+                remaining,
+            )
+            if selected is None:
+                break
+            ring_index, group_id, key, instance, slots = selected
+            identity = StageExecutionIdentity(
+                run_id=projection.identity.run_id,
+                execution_epoch=projection.identity.execution_epoch,
+                candidate=instance.candidate,
+                semantic_attempt=instance.semantic_attempt + 1,
+            )
+            reservation = dict(slots.reservation)
+            reservation["operation.attempts"] = 1
+            reservation["concurrency.slots"] = slots.concurrency_slots
+            next_candidate_cursors = dict(fairness.candidate_cursors)
+            next_candidate_cursors[group_id] = key
+            fairness = FairnessCursorState(
+                group_ring_cursor=(ring_index + 1) % len(self.group_ring),
+                candidate_cursors=next_candidate_cursors,
+            )
+            input_refs = self._input_refs(instance.candidate.stage_id, projection)
+            request_key = (
+                f"{instance.candidate.stage_id}/"
+                f"{instance.candidate.operation_slot_id}/"
+                f"{slots.allowed_variants[0].operation_variant_id}"
+            )
+            exact_ref = (
+                "operation-request:"
+                f"{sha256_digest(identity.semantic_key).removeprefix('sha256:')}"
+            )
+            proposals.append(
+                StageOperationAdmissionProposal(
+                    ordering_key=key,
+                    identity=identity,
+                    operation_request_key=request_key,
+                    exact_operation_request_ref=exact_ref,
+                    reservation_id=f"reservation:{identity.semantic_key}",
+                    reservation=reservation,
+                    frozen_input_refs=input_refs,
+                    selected_ring_index=ring_index,
+                    next_fairness=fairness,
+                )
+            )
+            remaining -= slots.concurrency_slots
+            candidates_by_group[group_id] = [
+                item for item in candidates_by_group[group_id] if item[0] != key
+            ]
+            if not candidates_by_group[group_id]:
+                del candidates_by_group[group_id]
+        return tuple(proposals)
+
+    def apply_admission(
+        self,
+        projection: StageGraphAcceptedProjection,
+        proposal: StageOperationAdmissionProposal,
+        *,
+        next_run_version: int,
+        next_family_version: int,
+    ) -> StageGraphAcceptedProjection:
+        key = proposal.identity.candidate.semantic_prefix
+        current = projection.stages.get(key)
+        if current is None or current.status not in {"blocked", "ready"}:
+            raise StageGraphExecutionError("operation admission does not match a ready candidate")
+        stages = dict(projection.stages)
+        stages[key] = replace(
+            current,
+            status="running",
+            semantic_attempt=proposal.identity.semantic_attempt,
+            admitted_operation_request_ref=proposal.exact_operation_request_ref,
+            frozen_input_refs=proposal.frozen_input_refs,
+        )
+        liabilities = dict(projection.producer_liabilities)
+        liabilities[proposal.identity.semantic_key] = ProducerLiability(
+            semantic_attempt_id=proposal.identity.semantic_key,
+            reservation_id=proposal.reservation_id,
+            reserved_amounts=proposal.reservation,
+        )
+        return replace(
+            projection,
+            family_version=next_family_version,
+            run_version=next_run_version,
+            stages=stages,
+            fairness=proposal.next_fairness,
+            producer_liabilities=liabilities,
+        )
+
+    def apply_result_decision(
+        self,
+        projection: StageGraphAcceptedProjection,
+        observation: StageResultObservation,
+        proposal: ResultDispositionProposal,
+        *,
+        next_run_version: int,
+        next_family_version: int,
+    ) -> StageGraphAcceptedProjection:
+        if observation.identity != proposal.identity:
+            raise StageGraphExecutionError("result observation and decision identities differ")
+        key = observation.identity.candidate.semantic_prefix
+        current = projection.stages.get(key)
+        if (
+            current is None
+            or current.status != "running"
+            or current.semantic_attempt != observation.identity.semantic_attempt
+        ):
+            raise StageGraphExecutionError("result does not match the active semantic attempt")
+        liabilities = dict(projection.producer_liabilities)
+        liability = liabilities.get(observation.identity.semantic_key)
+        if liability is None or liability.result_decision is not None:
+            raise StageGraphExecutionError("producer result already has a decision or no liability")
+        liabilities[observation.identity.semantic_key] = ProducerLiability(
+            semantic_attempt_id=liability.semantic_attempt_id,
+            reservation_id=liability.reservation_id,
+            reserved_amounts=liability.reserved_amounts,
+            child_closed_or_quiesced=observation.child_closed_or_quiesced,
+            reservations_and_usage_settled=observation.reservations_and_usage_settled,
+            effects_settled=observation.effects_settled,
+            cancellation_reconciled=observation.cancellation_reconciled,
+            result_decision=proposal.decision,
+        )
+        result = observation.operation_result
+        raw_output_refs = result.get("output_refs", ())
+        output_refs = (
+            tuple(str(item) for item in raw_output_refs)
+            if isinstance(raw_output_refs, list | tuple)
+            else ()
+        )
+        stages = dict(projection.stages)
+        stages[key] = replace(
+            current,
+            status=self._stage_status_for_result(proposal),
+            output_refs=output_refs if proposal.decision == ResultDecision.ADMIT else (),
+        )
+        dependencies = dict(projection.dependencies)
+        for edge in self._producer_edges(current.candidate.stage_id):
+            existing = dependencies[edge.dependency_id]
+            if existing.disposition != DependencyDisposition.UNRESOLVED:
+                continue
+            dependencies[edge.dependency_id] = replace(
+                existing,
+                disposition=proposal.dependency_dispositions[edge.dependency_id],
+                evidence_refs=output_refs if proposal.decision == ResultDecision.ADMIT else (),
+            )
+        accepted_results = projection.accepted_results + (
+            AcceptedResultFact(
+                identity=observation.identity,
+                operation_result=observation.operation_result,
+                accepted_at_order=observation.accepted_order,
+            ),
+        )
+        accepted_results = tuple(
+            sorted(
+                accepted_results,
+                key=lambda item: (
+                    item.identity.candidate.stage_id.encode("utf-8"),
+                    item.identity.candidate.mapped_instance_presence,
+                    item.identity.candidate.mapped_instance_id.encode("utf-8"),
+                    item.identity.candidate.workflow_cycle_ordinal,
+                    item.identity.candidate.stage_cycle_ordinal,
+                    item.identity.candidate.operation_slot_id.encode("utf-8"),
+                    item.identity.semantic_attempt,
+                ),
+            )
+        )
+        return replace(
+            projection,
+            family_version=next_family_version,
+            run_version=next_run_version,
+            stages=stages,
+            dependencies=dependencies,
+            producer_liabilities=liabilities,
+            accepted_results=accepted_results,
+        )
+
+    def workflow_invalidation(
+        self,
+        projection: StageGraphAcceptedProjection,
+        *,
+        invalidation_frontier: tuple[str, ...],
+        next_objective: str,
+    ) -> WorkflowInvalidationProposal:
+        policy = self.blueprint.workflow_cycle_policy
+        if policy is None or projection.workflow_cycle_ordinal >= policy.max_cycles:
+            raise StageGraphExecutionError("workflow cycle limit exceeded")
+        frontier = set(invalidation_frontier)
+        if not frontier or not frontier <= self.stages.keys():
+            raise StageGraphExecutionError("workflow cycle has an invalid invalidation frontier")
+        if not next_objective:
+            raise StageGraphExecutionError("a workflow cycle requires a new typed objective")
         invalidated = frontier | {
             descendant for stage_id in frontier for descendant in self.descendants[stage_id]
         }
-        reused = {
-            stage_id: stage_state.output_refs
-            for stage_id, stage_state in state.stages.items()
-            if stage_id not in invalidated and stage_state.output_refs
-        }
-        state.workflow_cycle += 1
-        state.workflow_objective = decision.next_objective
-        for stage_id in invalidated:
-            stage_state = state.stages[stage_id]
-            stage_state.status = "pending"
-            stage_state.stage_cycle = 0
-            stage_state.objective = decision.next_objective
-            stage_state.output_refs = ()
-            stage_state.wait_condition_id = ""
-            stage_state.pause_decision_id = ""
-        return reused
+        reused: dict[str, tuple[str, ...]] = {}
+        for instance in projection.stages.values():
+            if instance.candidate.stage_id not in invalidated and instance.output_refs:
+                reused[instance.candidate.semantic_prefix] = instance.output_refs
+        return WorkflowInvalidationProposal(
+            next_workflow_cycle_ordinal=projection.workflow_cycle_ordinal + 1,
+            invalidation_frontier=tuple(
+                sorted(frontier, key=lambda item: item.encode("utf-8"))
+            ),
+            invalidated_stage_ids=tuple(
+                sorted(invalidated, key=lambda item: item.encode("utf-8"))
+            ),
+            reused_output_refs=reused,
+            next_objective=next_objective,
+        )
 
-    def validate_workflow_evaluation(
+    def late_result_decision(
         self,
-        state: StageGraphExecutionState,
-        decision: WorkflowEvaluationResult,
-    ) -> None:
-        policy = self.blueprint.workflow_cycle_policy
-        if policy is None or state.workflow_cycle >= policy.max_cycles:
-            raise StageGraphExecutionError("workflow cycle limit exceeded")
-        if (
-            decision.evaluation_contract_ref != policy.evaluation_contract_ref
-            or decision.objective_contract_ref != policy.objective_contract_ref
-        ):
-            raise StageGraphExecutionError(
-                "workflow cycle decision is not bound to frozen contracts"
+        identity: StageExecutionIdentity,
+        edge: StageDependency,
+        facts: LateResultFacts,
+        *,
+        slow_sibling_route: str,
+    ) -> ResultDispositionProposal:
+        vetoes = (
+            (
+                facts.run_terminal or facts.terminalization_started,
+                "run_terminal_or_terminalization_started",
+                ResultDecision.QUARANTINE,
+            ),
+            (
+                facts.generation_superseded
+                or facts.producer_invalidated
+                or facts.evidence_invalid,
+                "generation_or_evidence_invalid",
+                ResultDecision.QUARANTINE,
+            ),
+            (facts.run_cancelling, "run_cancelling", ResultDecision.QUARANTINE),
+            (
+                facts.dependency_terminally_disposed,
+                "dependency_terminally_disposed",
+                ResultDecision.REJECT,
+            ),
+        )
+        for matched, reason, decision in vetoes:
+            if matched:
+                return ResultDispositionProposal(
+                    identity=identity,
+                    decision=decision,
+                    dependency_dispositions={
+                        edge.dependency_id: self._negative_disposition(edge)
+                    },
+                    matched_veto=reason,
+                    quarantine_reason=reason if decision == ResultDecision.QUARANTINE else None,
+                )
+        if slow_sibling_route == "quarantine":
+            return ResultDispositionProposal(
+                identity=identity,
+                decision=ResultDecision.QUARANTINE,
+                dependency_dispositions={
+                    edge.dependency_id: self._negative_disposition(edge)
+                },
+                quarantine_reason="slow_sibling_route",
             )
-        frontier = set(decision.invalidation_frontier)
-        if not frontier or not frontier <= self.stages.keys():
-            raise StageGraphExecutionError("workflow cycle has an invalid invalidation frontier")
-        if not decision.next_objective:
-            raise StageGraphExecutionError("a workflow cycle requires a new typed objective")
+        if facts.consumer_already_admitted:
+            rule = next(
+                item
+                for item in self.blueprint.late_result_policy.rules
+                if item.trigger == "consumer_already_admitted"
+            )
+            decision = ResultDecision(rule.decision)
+            return ResultDispositionProposal(
+                identity=identity,
+                decision=decision,
+                dependency_dispositions={
+                    edge.dependency_id: (
+                        DependencyDisposition.FULFILLED
+                        if decision == ResultDecision.ADMIT
+                        else self._negative_disposition(edge)
+                    )
+                },
+                matched_rule_id=rule.rule_id,
+                quarantine_reason=(
+                    rule.rule_id if decision == ResultDecision.QUARANTINE else None
+                ),
+            )
+        return ResultDispositionProposal(
+            identity=identity,
+            decision=ResultDecision.ADMIT,
+            dependency_dispositions={
+                edge.dependency_id: DependencyDisposition.FULFILLED
+            },
+        )
 
-    def current_outputs(self, state: StageGraphExecutionState) -> dict[str, tuple[str, ...]]:
-        return {
-            stage_id: item.output_refs
-            for stage_id, item in state.stages.items()
-            if item.output_refs and item.status in ACCEPTED_STATUSES
-        }
-
-    def _join_satisfied(
+    def result_decision(
         self,
-        stage: StageNode,
-        state: StageGraphExecutionState,
-    ) -> bool:
-        if not stage.depends_on:
-            return True
-        acceptable = 0
-        for dependency_id in stage.depends_on:
-            dependency_status = state.stages[dependency_id].status
-            dependency_class = stage.dependency_classes.get(dependency_id, "required")
-            if dependency_status in ACCEPTED_STATUSES:
-                acceptable += 1
-            elif dependency_class in {"optional", "advisory"} and dependency_status in {
-                "skipped",
-                "failed",
-            }:
-                acceptable += 1
-            elif dependency_class == "degradable" and dependency_status == "skipped":
-                acceptable += 1
-        if stage.join_policy == "any":
-            return acceptable >= 1
-        if stage.join_policy == "minimum":
-            return acceptable >= (stage.minimum_dependencies or 1)
-        return acceptable == len(stage.depends_on)
+        identity: StageExecutionIdentity,
+        facts: LateResultFacts,
+    ) -> ResultDispositionProposal:
+        edges = self._producer_edges(identity.candidate.stage_id)
+        if not edges:
+            return ResultDispositionProposal(
+                identity=identity,
+                decision=ResultDecision.ADMIT,
+                dependency_dispositions={},
+            )
+        decisions = [
+            self.late_result_decision(
+                identity,
+                edge,
+                facts,
+                slow_sibling_route=self._slow_sibling_route(edge),
+            )
+            for edge in edges
+        ]
+        first = decisions[0]
+        if any(item.decision != first.decision for item in decisions[1:]):
+            raise StageGraphExecutionError(
+                "one producer result cannot receive conflicting admission decisions"
+            )
+        return ResultDispositionProposal(
+            identity=identity,
+            decision=first.decision,
+            dependency_dispositions={
+                dependency_id: disposition
+                for item in decisions
+                for dependency_id, disposition in item.dependency_dispositions.items()
+            },
+            matched_veto=first.matched_veto,
+            matched_rule_id=first.matched_rule_id,
+            quarantine_reason=first.quarantine_reason,
+        )
+
+    def completion(
+        self,
+        projection: StageGraphAcceptedProjection,
+    ) -> StageGraphCompletionProposal:
+        required_obligations = {
+            item.evidence_slot_id
+            for item in self.blueprint.obligation_matrix
+            if item.required
+        }
+        pending_dependencies = tuple(
+            sorted(
+                (
+                    dependency_id
+                    for dependency_id, item in projection.dependencies.items()
+                    if item.disposition == DependencyDisposition.UNRESOLVED
+                    and self.dependencies[dependency_id].dependency_class
+                    != DependencyClass.ADVISORY
+                ),
+                key=lambda item: item.encode("utf-8"),
+            )
+        )
+        open_liabilities = tuple(
+            sorted(
+                (
+                    liability_id
+                    for liability_id, item in projection.producer_liabilities.items()
+                    if not item.closed
+                ),
+                key=lambda item: item.encode("utf-8"),
+            )
+        )
+        outputs = tuple(
+            sorted(
+                {
+                    output_ref
+                    for instance in projection.stages.values()
+                    for output_ref in instance.output_refs
+                },
+                key=lambda item: item.encode("utf-8"),
+            )
+        )
+        return StageGraphCompletionProposal(
+            required_obligations_accepted=(
+                required_obligations <= projection.accepted_obligation_evidence
+            ),
+            pending_dependency_ids=pending_dependencies,
+            open_producer_liability_ids=open_liabilities,
+            valid_output_refs=outputs,
+        )
+
+    def _select_next_candidate(
+        self,
+        candidates_by_group: dict[
+            str, list[tuple[CandidateOrderingKey, StageInstanceProjection]]
+        ],
+        fairness: FairnessCursorState,
+        blocked_candidate_keys: frozenset[str],
+        remaining_concurrency: int,
+    ) -> tuple[
+        int,
+        str,
+        CandidateOrderingKey,
+        StageInstanceProjection,
+        StageOperationSlot,
+    ] | None:
+        for offset in range(len(self.group_ring)):
+            ring_index = (fairness.group_ring_cursor + offset) % len(self.group_ring)
+            group_id = self.group_ring[ring_index]
+            candidates = candidates_by_group.get(group_id, ())
+            if not candidates:
+                continue
+            cursor = fairness.candidate_cursors.get(group_id)
+            cursor_tuple = cursor.as_tuple() if cursor is not None else None
+            after = [
+                item
+                for item in candidates
+                if cursor_tuple is None or item[0].as_tuple() > cursor_tuple
+            ]
+            ordered = [*after, *(item for item in candidates if item not in after)]
+            for key, instance in ordered:
+                stage = self.stages[instance.candidate.stage_id]
+                slot = next(
+                    item
+                    for item in stage.operation_slots
+                    if item.operation_slot_id == instance.candidate.operation_slot_id
+                )
+                if (
+                    instance.candidate.semantic_prefix in blocked_candidate_keys
+                    or slot.concurrency_slots > remaining_concurrency
+                ):
+                    continue
+                return ring_index, group_id, key, instance, slot
+        return None
+
+    def _weighted_group_ring(self) -> tuple[str, ...]:
+        groups = sorted(
+            self.blueprint.fairness_groups,
+            key=lambda item: item.group_id.encode("utf-8"),
+        )
+        ring = tuple(
+            group.group_id
+            for round_number in range(1, max(item.weight for item in groups) + 1)
+            for group in groups
+            if group.weight >= round_number
+        )
+        if not ring:
+            raise StageGraphExecutionError("weighted fairness ring cannot be empty")
+        return ring
+
+    def _input_refs(
+        self,
+        stage_id: str,
+        projection: StageGraphAcceptedProjection,
+    ) -> tuple[str, ...]:
+        refs = {
+            evidence_ref
+            for edge in self.blueprint.dependencies
+            if edge.consumer_stage_id == stage_id
+            for evidence_ref in projection.dependencies[edge.dependency_id].evidence_refs
+        }
+        return tuple(sorted(refs, key=lambda item: item.encode("utf-8")))
+
+    def _producer_edges(self, stage_id: str) -> tuple[StageDependency, ...]:
+        return tuple(
+            item for item in self.blueprint.dependencies if item.producer_stage_id == stage_id
+        )
+
+    def _slow_sibling_route(self, edge: StageDependency) -> str:
+        return self.joins[
+            (edge.consumer_stage_id, edge.join_id)
+        ].slow_sibling_policy.arrival_route
+
+    @staticmethod
+    def _negative_disposition(edge: StageDependency) -> DependencyDisposition:
+        if edge.dependency_class == DependencyClass.OPTIONAL:
+            return DependencyDisposition.OMITTED
+        return DependencyDisposition.FAILED
+
+    @staticmethod
+    def _stage_status_for_result(proposal: ResultDispositionProposal) -> StageStatus:
+        if proposal.decision == ResultDecision.ADMIT:
+            return (
+                "degraded"
+                if DependencyDisposition.DEGRADED
+                in proposal.dependency_dispositions.values()
+                else "completed"
+            )
+        return "failed"
 
     def _descendants(self) -> dict[str, frozenset[str]]:
         direct: dict[str, set[str]] = defaultdict(set)
-        for stage in self.blueprint.stages:
-            for dependency in stage.depends_on:
-                direct[dependency].add(stage.stage_id)
+        for dependency in self.blueprint.dependencies:
+            direct[dependency.producer_stage_id].add(dependency.consumer_stage_id)
         result: dict[str, frozenset[str]] = {}
         for root in self.stages:
             descendants: set[str] = set()

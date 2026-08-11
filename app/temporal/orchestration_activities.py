@@ -10,6 +10,8 @@ from temporalio.worker import Worker
 from app.application.coordinator_results import TerminalWorkflowCompletionPort
 from app.application.orchestration import (
     RunControlLifecycleGateway,
+    StageGraphDecisionService,
+    StageGraphOperationMaterializer,
     StageOperationExecutor,
     WorkflowEvaluator,
 )
@@ -22,6 +24,14 @@ from app.domain.coordinator.launch import (
 from app.domain.orchestration.contracts import (
     LifecycleCommandOutcome,
     LifecycleCommandRequest,
+    StageGraphAdmissionActivityRequest,
+    StageGraphAdmissionActivityResult,
+    StageGraphCompletionActivityRequest,
+    StageGraphCompletionActivityResult,
+    StageGraphInitializeRequest,
+    StageGraphInitializeResult,
+    StageGraphResultActivityRequest,
+    StageGraphResultActivityResult,
     StageOperationRequest,
     StageOperationResult,
     WorkflowEvaluationRequest,
@@ -41,15 +51,63 @@ class StageGraphActivities:
         workflow_evaluator: WorkflowEvaluator,
         lifecycle_gateway: RunControlLifecycleGateway,
         completion: TerminalWorkflowCompletionPort | None = None,
+        decision_service: StageGraphDecisionService | None = None,
+        operation_materializer: StageGraphOperationMaterializer | None = None,
     ) -> None:
         self._operation_executor = operation_executor
         self._workflow_evaluator = workflow_evaluator
         self._lifecycle_gateway = lifecycle_gateway
         self._completion = completion
+        self._decision_service = decision_service
+        self._operation_materializer = operation_materializer
 
     @property
     def completion_configured(self) -> bool:
         return self._completion is not None
+
+    def _canonical_decisions(self) -> StageGraphDecisionService:
+        if self._decision_service is None:
+            raise ApplicationError(
+                "canonical StageGraph decision service is unavailable",
+                type="stagegraph_decision_service_unavailable",
+                non_retryable=True,
+            )
+        return self._decision_service
+
+    @activity.defn(name="stagegraph.initialize")
+    async def initialize(
+        self, request: StageGraphInitializeRequest
+    ) -> StageGraphInitializeResult:
+        return await self._canonical_decisions().initialize(request)
+
+    @activity.defn(name="stagegraph.admit_operation")
+    async def admit_operation(
+        self, request: StageGraphAdmissionActivityRequest
+    ) -> StageGraphAdmissionActivityResult:
+        if request.operation is None:
+            if self._operation_materializer is None:
+                raise ApplicationError(
+                    "canonical StageGraph operation materializer is unavailable",
+                    type="stagegraph_operation_materializer_unavailable",
+                    non_retryable=True,
+                )
+            request = replace(
+                request,
+                operation=await self._operation_materializer.materialize(request),
+            )
+        return await self._canonical_decisions().admit_operation(request)
+
+    @activity.defn(name="stagegraph.decide_result")
+    async def decide_result(
+        self, request: StageGraphResultActivityRequest
+    ) -> StageGraphResultActivityResult:
+        return await self._canonical_decisions().decide_result(request)
+
+    @activity.defn(name="stagegraph.complete")
+    async def complete_stagegraph(
+        self, request: StageGraphCompletionActivityRequest
+    ) -> StageGraphCompletionActivityResult:
+        return await self._canonical_decisions().complete(request)
 
     @activity.defn(name="stagegraph.execute_operation")
     async def execute_operation(self, request: StageOperationRequest) -> StageOperationResult:
@@ -61,7 +119,7 @@ class StageGraphActivities:
                 type="semantic_input_binding_rejected",
                 non_retryable=True,
             ) from error
-        return replace(result, temporal_activity_attempt=activity.info().attempt)
+        return result
 
     @activity.defn(name="stagegraph.evaluate_workflow")
     async def evaluate_workflow(

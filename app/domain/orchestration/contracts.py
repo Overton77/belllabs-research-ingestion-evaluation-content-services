@@ -1,20 +1,31 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
+from enum import StrEnum
 from typing import Any, Literal
 
+from pydantic import Field, model_validator
+
+from app.domain.control_plane.canonical import sha256_digest
+from app.domain.operation_execution.contracts import OperationWorkflowRequest
 from app.domain.run_control.contracts import RunOutcome
+from app.domain.run_control.family_admission import AtomicFamilyMutation
 
 StageStatus = Literal[
-    "pending",
+    "structurally_unavailable",
+    "blocked",
+    "ready",
+    "reserved",
     "running",
     "waiting",
     "paused",
     "completed",
     "degraded",
-    "skipped",
     "failed",
+    "cancelled",
+    "skipped",
+    "invalidated",
 ]
 
 
@@ -170,73 +181,372 @@ def create_semantic_fork(request: SemanticForkRequest) -> SemanticForkResult:
     )
 
 
+class DependencyDisposition(StrEnum):
+    UNRESOLVED = "unresolved"
+    FULFILLED = "fulfilled"
+    DEGRADED = "degraded"
+    OMITTED = "omitted"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    INVALID = "invalid"
+
+
+class JoinDisposition(StrEnum):
+    SATISFIED = "satisfied"
+    PENDING = "pending"
+    IMPOSSIBLE = "impossible"
+
+
+class ResultDecision(StrEnum):
+    ADMIT = "admit"
+    REJECT = "reject"
+    QUARANTINE = "quarantine"
+
+
+@dataclass(frozen=True, order=True)
+class StageCandidateIdentity:
+    stage_id: str
+    mapped_instance_presence: int
+    mapped_instance_id: str
+    workflow_cycle_ordinal: int
+    stage_cycle_ordinal: int
+    operation_slot_id: str
+
+    def __post_init__(self) -> None:
+        if self.mapped_instance_presence not in {0, 1}:
+            raise ValueError("mapped-instance presence must be zero or one")
+        if (self.mapped_instance_presence == 0) != (
+            self.mapped_instance_id == "NO_MAPPED_INSTANCE"
+        ):
+            raise ValueError("absent mappings require the typed NO_MAPPED_INSTANCE sentinel")
+        if min(self.workflow_cycle_ordinal, self.stage_cycle_ordinal) < 0:
+            raise ValueError("semantic cycle ordinals cannot be negative")
+
+    @property
+    def semantic_prefix(self) -> str:
+        mapped = (
+            "none"
+            if self.mapped_instance_presence == 0
+            else self.mapped_instance_id
+        )
+        return (
+            f"stage:{self.stage_id}:mapped:{mapped}:"
+            f"workflow-cycle:{self.workflow_cycle_ordinal}:"
+            f"stage-cycle:{self.stage_cycle_ordinal}:slot:{self.operation_slot_id}"
+        )
+
+
+@dataclass(frozen=True)
+class CandidateOrderingKey:
+    priority: int
+    identity: StageCandidateIdentity
+
+    def as_tuple(self) -> tuple[object, ...]:
+        identity = self.identity
+        return (
+            self.priority,
+            identity.stage_id.encode("utf-8"),
+            identity.mapped_instance_presence,
+            (
+                b""
+                if identity.mapped_instance_presence == 0
+                else identity.mapped_instance_id.encode("utf-8")
+            ),
+            identity.workflow_cycle_ordinal,
+            identity.stage_cycle_ordinal,
+            identity.operation_slot_id.encode("utf-8"),
+        )
+
+
 @dataclass(frozen=True)
 class StageExecutionIdentity:
     run_id: str
-    stage_id: str
-    workflow_cycle: int
-    stage_cycle: int
-    operation_attempt: int
     execution_epoch: int
+    candidate: StageCandidateIdentity
+    semantic_attempt: int
+    execution_generation: int = 1
 
     @property
     def semantic_key(self) -> str:
         return (
             f"{self.run_id}:execution-epoch:{self.execution_epoch}:"
-            f"workflow-cycle:{self.workflow_cycle}:stage:{self.stage_id}:"
-            f"stage-cycle:{self.stage_cycle}:operation-attempt:{self.operation_attempt}"
+            f"{self.candidate.semantic_prefix}:semantic-attempt:{self.semantic_attempt}"
         )
 
 
 @dataclass(frozen=True)
-class StageOperationRequest:
+class DependencyProjection:
+    dependency_id: str
+    generation: int = 1
+    disposition: DependencyDisposition = DependencyDisposition.UNRESOLVED
+    evidence_refs: tuple[str, ...] = ()
+    supersedes_generation: int | None = None
+
+
+@dataclass(frozen=True)
+class FairnessCursorState:
+    group_ring_cursor: int = 0
+    candidate_cursors: dict[str, CandidateOrderingKey | None] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ProducerLiability:
+    semantic_attempt_id: str
+    reservation_id: str
+    reserved_amounts: dict[str, int] = field(default_factory=dict)
+    child_closed_or_quiesced: bool = False
+    reservations_and_usage_settled: bool = False
+    effects_settled: bool = False
+    cancellation_reconciled: bool = False
+    result_decision: ResultDecision | None = None
+
+    @property
+    def closed(self) -> bool:
+        return (
+            self.child_closed_or_quiesced
+            and self.reservations_and_usage_settled
+            and self.effects_settled
+            and self.cancellation_reconciled
+            and self.result_decision is not None
+        )
+
+
+@dataclass(frozen=True)
+class StageInstanceProjection:
+    candidate: StageCandidateIdentity
+    status: StageStatus = "blocked"
+    semantic_attempt: int = 0
+    admitted_operation_request_ref: str | None = None
+    frozen_input_refs: tuple[str, ...] = ()
+    output_refs: tuple[str, ...] = ()
+    obligation_evidence_refs: tuple[str, ...] = ()
+    wait_condition_id: str | None = None
+    pause_decision_id: str | None = None
+
+
+@dataclass(frozen=True)
+class AcceptedResultFact:
     identity: StageExecutionIdentity
-    idempotency_key: str
-    objective: str
-    input_refs: tuple[str, ...]
+    operation_result: dict[str, object]
+    accepted_at_order: int
+
+
+@dataclass(frozen=True)
+class StageGraphAcceptedProjection:
+    identity: ExecutionIdentity
+    family_version: int
+    run_version: int
+    workflow_cycle_ordinal: int = 0
+    stages: dict[str, StageInstanceProjection] = field(default_factory=dict)
+    dependencies: dict[str, DependencyProjection] = field(default_factory=dict)
+    fairness: FairnessCursorState = field(default_factory=FairnessCursorState)
+    producer_liabilities: dict[str, ProducerLiability] = field(default_factory=dict)
+    accepted_results: tuple[AcceptedResultFact, ...] = ()
+    accepted_obligation_evidence: frozenset[str] = frozenset()
+    invalidated_stage_ids: frozenset[str] = frozenset()
+
+    @property
+    def digest(self) -> str:
+        payload = asdict(self)
+        payload.pop("run_version")
+        return sha256_digest(payload)
+
+
+@dataclass(frozen=True)
+class StageOperationAdmissionProposal:
+    ordering_key: CandidateOrderingKey
+    identity: StageExecutionIdentity
+    operation_request_key: str
+    exact_operation_request_ref: str
     reservation_id: str
     reservation: dict[str, int]
-    workspace_namespace: str
-    request_scope: str = ""
-    semantic_input_binding_ref: str = ""
-    effective_configuration_digest: str = ""
-    blueprint_digest: str = ""
-    cycle_evaluation_contract_ref: str = ""
-    cycle_objective_contract_ref: str = ""
+    frozen_input_refs: tuple[str, ...]
+    selected_ring_index: int
+    next_fairness: FairnessCursorState
+
+
+@dataclass(frozen=True)
+class StageResultObservation:
+    identity: StageExecutionIdentity
+    operation_result: dict[str, object]
+    child_closed_or_quiesced: bool
+    reservations_and_usage_settled: bool
+    effects_settled: bool
+    cancellation_reconciled: bool
+    accepted_order: int
+
+
+@dataclass(frozen=True)
+class LateResultFacts:
+    consumer_already_admitted: bool = False
+    dependency_terminally_disposed: bool = False
+    producer_invalidated: bool = False
+    generation_superseded: bool = False
+    evidence_invalid: bool = False
+    run_cancelling: bool = False
+    terminalization_started: bool = False
+    run_terminal: bool = False
+
+
+@dataclass(frozen=True)
+class ResultDispositionProposal:
+    identity: StageExecutionIdentity
+    decision: ResultDecision
+    dependency_dispositions: dict[str, DependencyDisposition]
+    matched_veto: str | None = None
+    matched_rule_id: str | None = None
+    quarantine_reason: str | None = None
+
+
+@dataclass(frozen=True)
+class WorkflowInvalidationProposal:
+    next_workflow_cycle_ordinal: int
+    invalidation_frontier: tuple[str, ...]
+    invalidated_stage_ids: tuple[str, ...]
+    reused_output_refs: dict[str, tuple[str, ...]]
+    next_objective: str
+
+
+@dataclass(frozen=True)
+class StageGraphCompletionProposal:
+    required_obligations_accepted: bool
+    pending_dependency_ids: tuple[str, ...]
+    open_producer_liability_ids: tuple[str, ...]
+    valid_output_refs: tuple[str, ...]
+
+    @property
+    def can_terminalize(self) -> bool:
+        return (
+            self.required_obligations_accepted
+            and not self.pending_dependency_ids
+            and not self.open_producer_liability_ids
+        )
+
+
+class StageGraphDecisionMutation(AtomicFamilyMutation):
+    family_kind: Literal["stagegraph"] = "stagegraph"
+    mutation_kind: Literal["decision_committed"] = "decision_committed"
+    decision_kind: Literal[
+        "operation_admitted",
+        "result_decided",
+        "wait_decided",
+        "cycle_decided",
+        "completion_proposed",
+    ]
+    prior_projection_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    next_projection_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    decision_payload: dict[str, object]
+
+    @model_validator(mode="after")
+    def decision_changes_projection(self) -> StageGraphDecisionMutation:
+        if self.prior_projection_digest == self.next_projection_digest:
+            raise ValueError("StageGraph decisions must advance the accepted projection")
+        return self
+
+
+@dataclass(frozen=True)
+class StageOperationRequest:
+    proposal: StageOperationAdmissionProposal
+    operation: OperationWorkflowRequest
 
 
 @dataclass(frozen=True)
 class StageOperationResult:
-    identity: StageExecutionIdentity
-    disposition: Literal["completed", "skipped", "failed", "waiting", "paused"]
-    output_refs: tuple[str, ...] = ()
-    evaluation: Literal["accept", "cycle", "degrade", "escalate"] = "accept"
-    evaluation_ref: str = ""
-    next_objective: str = ""
-    evaluation_contract_ref: str = ""
-    objective_contract_ref: str = ""
-    wait_condition_id: str = ""
-    pause_decision_id: str = ""
-    handoff_ref: str = ""
-    temporal_activity_attempt: int = 1
-    actual_usage: dict[str, int] = field(default_factory=dict)
-    pending_external_usage: dict[str, int] = field(default_factory=dict)
-    output_contract_ref: str = ""
+    observation: StageResultObservation
+    proposal: ResultDispositionProposal | None = None
+
+
+@dataclass(frozen=True)
+class StageGraphInitializeRequest:
+    run_id: str
+    request_scope: str
+    expected_run_version: int
+    initial_projection: StageGraphAcceptedProjection
+    occurred_at: datetime
+    idempotency_issuer: str
+    correlation_id: str
+
+
+@dataclass(frozen=True)
+class StageGraphInitializeResult:
+    accepted: bool
+    projection: StageGraphAcceptedProjection
+    reason_code: str
+
+
+@dataclass(frozen=True)
+class StageGraphAdmissionActivityRequest:
+    run_id: str
+    request_scope: str
+    projection: StageGraphAcceptedProjection
+    proposal: StageOperationAdmissionProposal
+    operation: OperationWorkflowRequest | None
+    blueprint: dict[str, object]
+    effective_max_concurrency: int
+    occurred_at: datetime
+    idempotency_issuer: str
+    correlation_id: str
+
+
+@dataclass(frozen=True)
+class StageGraphAdmissionActivityResult:
+    accepted: bool
+    projection: StageGraphAcceptedProjection
+    operation: OperationWorkflowRequest | None
+    reason_code: str
+
+
+@dataclass(frozen=True)
+class StageGraphResultActivityRequest:
+    run_id: str
+    request_scope: str
+    projection: StageGraphAcceptedProjection
+    observation: StageResultObservation
+    late_facts: LateResultFacts
+    blueprint: dict[str, object]
+    effective_max_concurrency: int
+    occurred_at: datetime
+    idempotency_issuer: str
+    correlation_id: str
+
+
+@dataclass(frozen=True)
+class StageGraphResultActivityResult:
+    accepted: bool
+    projection: StageGraphAcceptedProjection
+    proposal: ResultDispositionProposal
+    reason_code: str
+
+
+@dataclass(frozen=True)
+class StageGraphCompletionActivityRequest:
+    run_id: str
+    request_scope: str
+    projection: StageGraphAcceptedProjection
+    proposal: StageGraphCompletionProposal
+    workflow_type_digest: str
+    occurred_at: datetime
+    idempotency_issuer: str
+    correlation_id: str
+
+
+@dataclass(frozen=True)
+class StageGraphCompletionActivityResult:
+    accepted: bool
+    terminal_outcome: RunOutcome | None
+    resulting_run_version: int
+    reason_code: str
 
 
 @dataclass(frozen=True)
 class WorkflowEvaluationRequest:
     run_id: str
-    workflow_cycle: int
+    workflow_cycle_ordinal: int
     objective: str
     current_output_refs: dict[str, tuple[str, ...]]
-    execution_lineage: tuple[StageOperationResult, ...]
-    request_scope: str = ""
-    semantic_input_binding_ref: str = ""
-    effective_configuration_digest: str = ""
-    blueprint_digest: str = ""
-    evaluation_contract_ref: str = ""
-    objective_contract_ref: str = ""
+    request_scope: str
+    effective_configuration_digest: str
+    blueprint_digest: str
 
 
 @dataclass(frozen=True)
@@ -247,7 +557,6 @@ class WorkflowEvaluationResult:
     next_objective: str = ""
     evaluation_contract_ref: str = ""
     objective_contract_ref: str = ""
-    output_contract_ref: str = ""
 
 
 @dataclass(frozen=True)
@@ -280,38 +589,12 @@ class LifecycleCommandOutcome:
     terminal_outcome: RunOutcome | None = None
 
 
-@dataclass
-class StageExecutionState:
-    status: StageStatus = "pending"
-    stage_cycle: int = 0
-    operation_attempt: int = 0
-    objective: str = "execute declared stage objective"
-    output_refs: tuple[str, ...] = ()
-    wait_condition_id: str = ""
-    pause_decision_id: str = ""
-
-
-@dataclass
-class StageGraphExecutionState:
-    identity: ExecutionIdentity
-    workflow_cycle: int = 0
-    run_version: int = 1
-    stages: dict[str, StageExecutionState] = field(default_factory=dict)
-    lineage: list[StageOperationResult] = field(default_factory=list)
-    schedule_trace: list[str] = field(default_factory=list)
-    fairness_cursor: dict[str, int] = field(default_factory=dict)
-    workflow_objective: str = "satisfy the frozen StageGraph"
-    request_scope: str = ""
-    semantic_input_binding_ref: str = ""
-    effective_configuration_digest: str = ""
-    blueprint_digest: str = ""
-
-
 @dataclass(frozen=True)
 class StageGraphRunInput:
     run_id: str
     request_scope: str
     effective_configuration_digest: str
+    workflow_type_digest: str
     blueprint_digest: str
     blueprint: dict[str, Any]
     initial_run_version: int = 1
@@ -325,7 +608,11 @@ class StageGraphRunInput:
     semantic_input_binding_ref: str = ""
     tenant_scope: str = ""
     materialize_typed_result: bool = False
-    durable_operation_children: bool = False
+    durable_operation_children: Literal[True] = True
+    operation_requests: dict[str, OperationWorkflowRequest] = field(default_factory=dict)
+    initial_projection: StageGraphAcceptedProjection | None = None
+    continue_as_new_event_threshold: int = 10_000
+    force_continue_as_new: bool = False
 
 
 @dataclass(frozen=True)
@@ -333,12 +620,11 @@ class StageGraphRunResult:
     run_id: str
     workflow_cycles: int
     execution_epoch: int
-    stage_cycles: dict[str, int]
-    operation_attempts: dict[str, int]
+    family_version: int
     output_refs: dict[str, tuple[str, ...]]
     reused_output_refs: dict[str, tuple[str, ...]]
     schedule_trace: tuple[str, ...]
-    lineage: tuple[StageOperationResult, ...]
+    completion_proposal: StageGraphCompletionProposal
 
 
 GoalVerifierAction = Literal[

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
 from pydantic import (
@@ -10,6 +11,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
@@ -250,13 +252,114 @@ class WorkflowWorkspaceContract(Contract):
         return self
 
 
-class StageCyclePolicy(Contract):
-    """Application-authored bounds for semantic rework of one stage."""
+StageGraphIdentifier = Annotated[str, Field(min_length=1, max_length=256)]
 
+
+def _stagegraph_identifier(value: str) -> str:
+    if value != unicodedata.normalize("NFC", value):
+        raise ValueError("StageGraph identifiers must already be Unicode NFC")
+    if value in {"NO_OWNER_STAGE", "NO_MAPPED_INSTANCE", "BEFORE_FIRST"}:
+        raise ValueError("StageGraph identifiers cannot use typed runtime sentinels")
+    if any(ord(character) < 32 or character == "\x7f" for character in value):
+        raise ValueError("StageGraph identifiers cannot contain control characters")
+    return value
+
+
+class DependencyClass(StrEnum):
+    REQUIRED = "required"
+    DEGRADABLE = "degradable"
+    OPTIONAL = "optional"
+    ADVISORY = "advisory"
+
+
+class JoinKind(StrEnum):
+    ALL = "all"
+    ANY = "any"
+    MINIMUM = "minimum"
+
+
+class FairnessGroup(Contract):
+    group_id: StageGraphIdentifier
+    weight: int = Field(ge=1, le=65_535)
+
+    _identifier = field_validator("group_id")(_stagegraph_identifier)
+
+
+class StageInputSlot(Contract):
+    input_slot_id: StageGraphIdentifier
+    required: bool = True
+
+    _identifier = field_validator("input_slot_id")(_stagegraph_identifier)
+
+
+class StageOutputSlot(Contract):
+    output_slot_id: StageGraphIdentifier
+    output_contract_ref: str = Field(min_length=1)
+
+    _identifier = field_validator("output_slot_id")(_stagegraph_identifier)
+
+
+class StageObligationSlot(Contract):
+    obligation_slot_id: StageGraphIdentifier
+    obligation_ref: str = Field(min_length=1)
+
+    _identifier = field_validator("obligation_slot_id")(_stagegraph_identifier)
+
+
+class WorkflowObligationSlot(Contract):
+    obligation_slot_id: StageGraphIdentifier
+    obligation_ref: str = Field(min_length=1)
+
+    _identifier = field_validator("obligation_slot_id")(_stagegraph_identifier)
+
+
+class AllowedOperationVariant(Contract):
+    operation_variant_id: StageGraphIdentifier
+    operation_contract_ref: str = Field(min_length=1)
+
+    _identifier = field_validator("operation_variant_id")(_stagegraph_identifier)
+
+
+class StageOperationSlot(Contract):
+    operation_slot_id: StageGraphIdentifier
+    priority: int = Field(default=0, ge=0)
+    concurrency_slots: int = Field(default=1, ge=1)
+    reservation: dict[str, int] = Field(default_factory=dict)
+    allowed_variants: tuple[AllowedOperationVariant, ...] = Field(min_length=1)
+    fallback_sequence: tuple[StageGraphIdentifier, ...] = ()
+
+    _identifier = field_validator("operation_slot_id")(_stagegraph_identifier)
+
+    @field_validator("allowed_variants")
+    @classmethod
+    def normalize_allowed_variants(
+        cls, value: tuple[AllowedOperationVariant, ...]
+    ) -> tuple[AllowedOperationVariant, ...]:
+        return tuple(
+            sorted(value, key=lambda item: item.operation_variant_id.encode("utf-8"))
+        )
+
+    @model_validator(mode="after")
+    def validate_operation_slot(self) -> StageOperationSlot:
+        if any(not dimension or amount < 0 for dimension, amount in self.reservation.items()):
+            raise ValueError("operation reservations require names and non-negative amounts")
+        identities = [item.operation_variant_id for item in self.allowed_variants]
+        if len(identities) != len(set(identities)):
+            raise ValueError("operation variant identities must be unique")
+        known = set(identities)
+        if len(self.fallback_sequence) != len(set(self.fallback_sequence)):
+            raise ValueError("operation fallback sequence identities must be unique")
+        if not set(self.fallback_sequence) <= known:
+            raise ValueError("operation fallback sequence references an unknown variant")
+        return self
+
+
+class StageCyclePolicy(Contract):
     max_cycles: int = Field(ge=1)
     evaluation_contract_ref: str = Field(min_length=1)
     objective_contract_ref: str = Field(min_length=1)
     reservation: dict[str, int] = Field(default_factory=dict)
+    stopping_rule_precedence: tuple[StageGraphIdentifier, ...] = ()
 
     @field_validator("reservation")
     @classmethod
@@ -269,12 +372,11 @@ class StageCyclePolicy(Contract):
 
 
 class WorkflowCyclePolicy(Contract):
-    """Bounds whole-workflow evaluation without adding dependency back-edges."""
-
     max_cycles: int = Field(ge=1)
     evaluation_contract_ref: str = Field(min_length=1)
     objective_contract_ref: str = Field(min_length=1)
     reservation: dict[str, int] = Field(default_factory=dict)
+    stopping_rule_precedence: tuple[StageGraphIdentifier, ...] = ()
 
     @field_validator("reservation")
     @classmethod
@@ -289,80 +391,471 @@ class WorkflowCyclePolicy(Contract):
 
 
 class StageNode(Contract):
-    stage_id: str = Field(pattern=r"^[a-z][a-z0-9_-]*$")
-    depends_on: frozenset[str] = Field(default_factory=frozenset)
-    dependency_classes: dict[str, Literal["required", "degradable", "optional", "advisory"]] = (
-        Field(default_factory=dict)
-    )
-    join_policy: Literal["all", "any", "minimum"] = "all"
-    minimum_dependencies: int | None = Field(default=None, ge=1)
-    completion_class: Literal["required", "degradable", "optional", "advisory"] = "required"
-    skip_policy: Literal["never", "when_dependencies_unsatisfied"] = "never"
-    fairness_group: str = Field(default="default", pattern=r"^[a-z][a-z0-9_-]*$")
-    fairness_priority: int = Field(default=0, ge=0)
-    concurrency_slots: int = Field(default=1, ge=1)
-    reservation: dict[str, int] = Field(default_factory=dict)
+    stage_id: StageGraphIdentifier
+    fairness_group_id: StageGraphIdentifier = "default"
+    input_slots: tuple[StageInputSlot, ...] = ()
+    output_slots: tuple[StageOutputSlot, ...] = ()
+    obligation_slots: tuple[StageObligationSlot, ...] = ()
+    operation_slots: tuple[StageOperationSlot, ...] = Field(min_length=1)
     stage_cycle_policy: StageCyclePolicy | None = None
-    obligation_refs: frozenset[str] = Field(default_factory=frozenset)
-    output_slots: frozenset[str] = Field(default_factory=frozenset)
-    variant_names: frozenset[str] = Field(default_factory=frozenset)
+
+    _identifiers = field_validator("stage_id", "fairness_group_id")(_stagegraph_identifier)
+
+    @field_validator("input_slots")
+    @classmethod
+    def normalize_inputs(
+        cls, value: tuple[StageInputSlot, ...]
+    ) -> tuple[StageInputSlot, ...]:
+        return tuple(sorted(value, key=lambda item: item.input_slot_id.encode("utf-8")))
+
+    @field_validator("output_slots")
+    @classmethod
+    def normalize_outputs(
+        cls, value: tuple[StageOutputSlot, ...]
+    ) -> tuple[StageOutputSlot, ...]:
+        return tuple(sorted(value, key=lambda item: item.output_slot_id.encode("utf-8")))
+
+    @field_validator("obligation_slots")
+    @classmethod
+    def normalize_obligations(
+        cls, value: tuple[StageObligationSlot, ...]
+    ) -> tuple[StageObligationSlot, ...]:
+        return tuple(
+            sorted(value, key=lambda item: item.obligation_slot_id.encode("utf-8"))
+        )
+
+    @field_validator("operation_slots")
+    @classmethod
+    def normalize_operations(
+        cls, value: tuple[StageOperationSlot, ...]
+    ) -> tuple[StageOperationSlot, ...]:
+        return tuple(
+            sorted(value, key=lambda item: item.operation_slot_id.encode("utf-8"))
+        )
 
     @model_validator(mode="after")
-    def validate_execution_policy(self) -> StageNode:
-        if not set(self.dependency_classes) <= self.depends_on:
-            raise ValueError("dependency classes may reference only declared dependencies")
-        if self.join_policy == "minimum":
-            if self.minimum_dependencies is None:
-                raise ValueError("minimum joins require minimum_dependencies")
-            if self.minimum_dependencies > len(self.depends_on):
-                raise ValueError("minimum_dependencies exceeds declared dependencies")
-        elif self.minimum_dependencies is not None:
-            raise ValueError("minimum_dependencies is valid only for minimum joins")
-        if any(not dimension or amount < 0 for dimension, amount in self.reservation.items()):
-            raise ValueError("stage reservations require names and non-negative amounts")
+    def normalize_stage_collections(self) -> StageNode:
+        collections: tuple[tuple[object, ...], ...] = (
+            self.input_slots,
+            self.output_slots,
+            self.obligation_slots,
+            self.operation_slots,
+        )
+        for collection in collections:
+            identities = []
+            for item in collection:
+                if not isinstance(item, BaseModel):
+                    raise ValueError("StageGraph stage collection item must be a model")
+                identity_field = next(
+                    name for name in type(item).model_fields if name.endswith("_id")
+                )
+                identities.append(getattr(item, identity_field))
+            if len(identities) != len(set(identities)):
+                raise ValueError("StageGraph stage collection contains a duplicate identity")
         return self
+
+
+class StageMapping(Contract):
+    stage_id: StageGraphIdentifier
+    mapping_id: StageGraphIdentifier
+
+    _identifiers = field_validator("stage_id", "mapping_id")(_stagegraph_identifier)
+
+
+class StageDependency(Contract):
+    dependency_id: StageGraphIdentifier
+    consumer_stage_id: StageGraphIdentifier
+    join_id: StageGraphIdentifier
+    producer_stage_id: StageGraphIdentifier
+    producer_output_slot_id: StageGraphIdentifier
+    consumer_input_slot_id: StageGraphIdentifier
+    dependency_class: DependencyClass
+
+    _identifiers = field_validator(
+        "dependency_id",
+        "consumer_stage_id",
+        "join_id",
+        "producer_stage_id",
+        "producer_output_slot_id",
+        "consumer_input_slot_id",
+    )(_stagegraph_identifier)
+
+
+class SlowSiblingPolicy(Contract):
+    triggers: tuple[
+        Literal[
+            "join_released",
+            "deadline_reached",
+            "accepted_budget_pressure",
+            "cancellation_requested",
+        ],
+        ...,
+    ] = Field(min_length=1)
+    execution_action: Literal["continue", "request_cancel"]
+    arrival_route: Literal["evaluate_late_result", "quarantine"]
+
+    @field_validator("triggers")
+    @classmethod
+    def unique_triggers(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(value) != len(set(value)):
+            raise ValueError("slow-sibling trigger precedence cannot contain duplicates")
+        return value
+
+
+class StageJoin(Contract):
+    consumer_stage_id: StageGraphIdentifier
+    join_id: StageGraphIdentifier
+    kind: JoinKind
+    minimum: int | None = Field(default=None, ge=1)
+    dependency_ids: tuple[StageGraphIdentifier, ...] = ()
+    slow_sibling_policy: SlowSiblingPolicy
+
+    _identifiers = field_validator("consumer_stage_id", "join_id")(_stagegraph_identifier)
+
+    @field_validator("dependency_ids")
+    @classmethod
+    def normalize_dependency_ids(
+        cls, value: tuple[str, ...]
+    ) -> tuple[str, ...]:
+        return tuple(sorted(value, key=lambda item: item.encode("utf-8")))
+
+    @model_validator(mode="after")
+    def validate_cardinality(self) -> StageJoin:
+        count = len(self.dependency_ids)
+        if len(set(self.dependency_ids)) != count:
+            raise ValueError("join dependency identities must be unique")
+        if self.kind == JoinKind.ANY and count == 0:
+            raise ValueError("any joins require at least one non-advisory dependency")
+        if self.kind == JoinKind.MINIMUM:
+            if self.minimum is None or count == 0 or self.minimum > count:
+                raise ValueError("minimum joins require 1 <= minimum <= dependency count")
+        elif self.minimum is not None:
+            raise ValueError("minimum is valid only for minimum joins")
+        return self
+
+
+class LateResultRule(Contract):
+    rule_id: StageGraphIdentifier
+    trigger: Literal["consumer_already_admitted"]
+    decision: Literal["admit", "reject", "quarantine"]
+
+    _identifier = field_validator("rule_id")(_stagegraph_identifier)
+
+
+class LateResultPolicy(Contract):
+    rules: tuple[LateResultRule, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def complete_and_ordered(self) -> LateResultPolicy:
+        identities = [item.rule_id for item in self.rules]
+        if len(identities) != len(set(identities)):
+            raise ValueError("late-result rule identities must be unique")
+        if not any(item.trigger == "consumer_already_admitted" for item in self.rules):
+            raise ValueError("late-result policy must cover consumer_already_admitted")
+        return self
+
+
+class ObligationMatrixRow(Contract):
+    obligation_scope: Literal["stage", "workflow"]
+    owner_stage_id: StageGraphIdentifier | None = None
+    obligation_slot_id: StageGraphIdentifier
+    evidence_slot_id: StageGraphIdentifier
+    required: bool = True
+
+    _identifiers = field_validator(
+        "owner_stage_id", "obligation_slot_id", "evidence_slot_id"
+    )(
+        lambda value: None if value is None else _stagegraph_identifier(value)
+    )
+
+    @model_validator(mode="after")
+    def owner_matches_scope(self) -> ObligationMatrixRow:
+        if (self.obligation_scope == "stage") != (self.owner_stage_id is not None):
+            raise ValueError("stage obligations require an owner; workflow obligations forbid one")
+        return self
+
+
+class LinkedRunSlot(Contract):
+    linked_run_slot_id: StageGraphIdentifier
+    owner_stage_id: StageGraphIdentifier | None = None
+    dependency_ids: tuple[StageGraphIdentifier, ...] = ()
+
+    _identifiers = field_validator("linked_run_slot_id", "owner_stage_id")(
+        lambda value: None if value is None else _stagegraph_identifier(value)
+    )
+
+
+class StageGraphPolicyDefinition(Contract):
+    policy_kind: StageGraphIdentifier
+    scope_kind: Literal["workflow", "stage", "join", "operation"]
+    scope_id: StageGraphIdentifier
+    policy_id: StageGraphIdentifier
+
+    _identifiers = field_validator("policy_kind", "scope_id", "policy_id")(
+        _stagegraph_identifier
+    )
+
+
+class StageGraphWait(Contract):
+    scope_kind: Literal["workflow", "stage", "operation"]
+    scope_id: StageGraphIdentifier
+    wait_id: StageGraphIdentifier
+
+    _identifiers = field_validator("scope_id", "wait_id")(_stagegraph_identifier)
+
+
+class StageGraphLimit(Contract):
+    scope_kind: Literal["workflow", "stage", "operation"]
+    scope_id: StageGraphIdentifier
+    condition_kind: StageGraphIdentifier
+    condition_id: StageGraphIdentifier
+    limit: int = Field(ge=0)
+
+    _identifiers = field_validator(
+        "scope_id", "condition_kind", "condition_id"
+    )(_stagegraph_identifier)
+
+
+class InvalidationReuseDeclaration(Contract):
+    scope_kind: Literal["workflow", "stage"]
+    scope_id: StageGraphIdentifier
+    declaration_kind: Literal["invalidate_descendants", "reuse_immutable"]
+    declaration_id: StageGraphIdentifier
+
+    _identifiers = field_validator("scope_id", "declaration_id")(_stagegraph_identifier)
+
+
+class CapacityCeiling(Contract):
+    scope_kind: Literal["workflow", "stage", "operation"]
+    scope_id: StageGraphIdentifier
+    dimension_kind: StageGraphIdentifier
+    dimension_id: StageGraphIdentifier
+    amount: int = Field(ge=0)
+
+    _identifiers = field_validator(
+        "scope_id", "dimension_kind", "dimension_id"
+    )(_stagegraph_identifier)
+
+
+class CompletionObligationRef(Contract):
+    obligation_scope: Literal["stage", "workflow"]
+    owner_stage_id: StageGraphIdentifier | None = None
+    obligation_slot_id: StageGraphIdentifier
+
+    _identifiers = field_validator("owner_stage_id", "obligation_slot_id")(
+        lambda value: None if value is None else _stagegraph_identifier(value)
+    )
 
 
 class StageGraphBlueprint(DefinitionBase):
     kind: Literal[DefinitionKind.BLUEPRINT] = DefinitionKind.BLUEPRINT
     family: Literal["StageGraph"] = "StageGraph"
+    contract_version: Literal["CON-BP-STAGEGRAPH-V2"] = "CON-BP-STAGEGRAPH-V2"
     stages: tuple[StageNode, ...] = Field(min_length=1)
-    declared_output_slots: frozenset[str] = Field(default_factory=frozenset)
-    max_parallel_stages: int = Field(default=1, ge=1)
+    stage_mappings: tuple[StageMapping, ...] = ()
+    joins: tuple[StageJoin, ...] = ()
+    dependencies: tuple[StageDependency, ...] = ()
+    workflow_obligation_slots: tuple[WorkflowObligationSlot, ...] = ()
+    obligation_matrix: tuple[ObligationMatrixRow, ...] = ()
+    fairness_groups: tuple[FairnessGroup, ...] = ()
+    linked_run_slots: tuple[LinkedRunSlot, ...] = ()
+    policy_definitions: tuple[StageGraphPolicyDefinition, ...] = ()
+    waits: tuple[StageGraphWait, ...] = ()
+    cycle_limits: tuple[StageGraphLimit, ...] = ()
+    invalidation_reuse_declarations: tuple[InvalidationReuseDeclaration, ...] = ()
+    capacity_ceilings: tuple[CapacityCeiling, ...] = ()
+    completion_obligations: tuple[CompletionObligationRef, ...] = ()
+    late_result_policy: LateResultPolicy
     workflow_evaluation_contract_ref: str | None = Field(default=None, min_length=1)
     workflow_cycle_policy: WorkflowCyclePolicy | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def default_fairness_group(cls, value: Any) -> Any:
+        if isinstance(value, dict) and not value.get("fairness_groups"):
+            return {
+                **value,
+                "fairness_groups": ({"group_id": "default", "weight": 1},),
+            }
+        return value
+
+    @field_validator(
+        "stages",
+        "stage_mappings",
+        "joins",
+        "dependencies",
+        "workflow_obligation_slots",
+        "obligation_matrix",
+        "fairness_groups",
+        "linked_run_slots",
+        "policy_definitions",
+        "waits",
+        "cycle_limits",
+        "invalidation_reuse_declarations",
+        "capacity_ceilings",
+        "completion_obligations",
+    )
+    @classmethod
+    def normalize_registry_collection(
+        cls, value: tuple[Any, ...], info: ValidationInfo
+    ) -> tuple[Any, ...]:
+        def utf8(item: str | None) -> tuple[int, bytes]:
+            return (0, b"") if item is None else (1, item.encode("utf-8"))
+
+        key_functions = {
+            "stages": lambda item: (item.stage_id.encode("utf-8"),),
+            "stage_mappings": lambda item: (
+                item.stage_id.encode("utf-8"),
+                item.mapping_id.encode("utf-8"),
+            ),
+            "joins": lambda item: (
+                item.consumer_stage_id.encode("utf-8"),
+                item.join_id.encode("utf-8"),
+            ),
+            "dependencies": lambda item: (
+                item.consumer_stage_id.encode("utf-8"),
+                item.join_id.encode("utf-8"),
+                item.producer_stage_id.encode("utf-8"),
+                item.producer_output_slot_id.encode("utf-8"),
+                item.dependency_id.encode("utf-8"),
+            ),
+            "workflow_obligation_slots": lambda item: (
+                item.obligation_slot_id.encode("utf-8"),
+            ),
+            "obligation_matrix": lambda item: (
+                item.obligation_scope.encode("utf-8"),
+                *utf8(item.owner_stage_id),
+                item.obligation_slot_id.encode("utf-8"),
+                item.evidence_slot_id.encode("utf-8"),
+            ),
+            "fairness_groups": lambda item: (item.group_id.encode("utf-8"),),
+            "linked_run_slots": lambda item: (
+                *utf8(item.owner_stage_id),
+                item.linked_run_slot_id.encode("utf-8"),
+            ),
+            "policy_definitions": lambda item: (
+                item.policy_kind.encode("utf-8"),
+                item.scope_kind.encode("utf-8"),
+                item.scope_id.encode("utf-8"),
+                item.policy_id.encode("utf-8"),
+            ),
+            "waits": lambda item: (
+                item.scope_kind.encode("utf-8"),
+                item.scope_id.encode("utf-8"),
+                item.wait_id.encode("utf-8"),
+            ),
+            "cycle_limits": lambda item: (
+                item.scope_kind.encode("utf-8"),
+                item.scope_id.encode("utf-8"),
+                item.condition_kind.encode("utf-8"),
+                item.condition_id.encode("utf-8"),
+            ),
+            "invalidation_reuse_declarations": lambda item: (
+                item.scope_kind.encode("utf-8"),
+                item.scope_id.encode("utf-8"),
+                item.declaration_kind.encode("utf-8"),
+                item.declaration_id.encode("utf-8"),
+            ),
+            "capacity_ceilings": lambda item: (
+                item.scope_kind.encode("utf-8"),
+                item.scope_id.encode("utf-8"),
+                item.dimension_kind.encode("utf-8"),
+                item.dimension_id.encode("utf-8"),
+            ),
+            "completion_obligations": lambda item: (
+                item.obligation_scope.encode("utf-8"),
+                *utf8(item.owner_stage_id),
+                item.obligation_slot_id.encode("utf-8"),
+            ),
+        }
+        field_name = info.field_name
+        if field_name is None:
+            raise ValueError("StageGraph registry normalization requires a field name")
+        return tuple(sorted(value, key=key_functions[field_name]))
+
     @model_validator(mode="after")
-    def validate_graph(self) -> StageGraphBlueprint:
-        ids = [stage.stage_id for stage in self.stages]
-        if len(ids) != len(set(ids)):
+    def validate_and_normalize_graph(self) -> StageGraphBlueprint:
+        stage_ids = [stage.stage_id for stage in self.stages]
+        if len(stage_ids) != len(set(stage_ids)):
             raise ValueError("stage identities must be unique")
-        known = set(ids)
-        for stage in self.stages:
-            if stage.stage_id in stage.depends_on or not stage.depends_on <= known:
-                raise ValueError(f"stage {stage.stage_id} has an invalid dependency")
-            if stage.concurrency_slots > self.max_parallel_stages:
-                raise ValueError(
-                    f"stage {stage.stage_id} concurrency slots exceed the graph ceiling"
-                )
-            if not stage.output_slots <= self.declared_output_slots:
-                raise ValueError(f"stage {stage.stage_id} uses an undeclared output slot")
+        known_stages = set(stage_ids)
+        groups = self.fairness_groups
+        if not groups and all(stage.fairness_group_id == "default" for stage in self.stages):
+            groups = (FairnessGroup(group_id="default", weight=1),)
+        if not groups:
+            raise ValueError("StageGraph fairness groups cannot be empty")
+        group_ids = [group.group_id for group in groups]
+        if len(group_ids) != len(set(group_ids)):
+            raise ValueError("fairness group identities must be unique")
+        if not {stage.fairness_group_id for stage in self.stages} <= set(group_ids):
+            raise ValueError("every stage fairness group must have an authored weight")
+
+        stage_by_id = {stage.stage_id: stage for stage in self.stages}
+        dependency_ids = [item.dependency_id for item in self.dependencies]
+        if len(dependency_ids) != len(set(dependency_ids)):
+            raise ValueError("dependency identities must be unique")
+        join_keys = [(item.consumer_stage_id, item.join_id) for item in self.joins]
+        if len(join_keys) != len(set(join_keys)):
+            raise ValueError("join identities must be unique in their consumer stage")
+        joins = {(item.consumer_stage_id, item.join_id): item for item in self.joins}
+        edges_by_join: dict[tuple[str, str], set[str]] = {}
+        structural_dependencies: dict[str, set[str]] = {
+            stage_id: set() for stage_id in stage_ids
+        }
+        for edge in self.dependencies:
+            if (
+                edge.consumer_stage_id not in known_stages
+                or edge.producer_stage_id not in known_stages
+                or edge.consumer_stage_id == edge.producer_stage_id
+            ):
+                raise ValueError("dependency references an invalid producer or consumer")
+            join_key = (edge.consumer_stage_id, edge.join_id)
+            if join_key not in joins:
+                raise ValueError("dependency references an unknown join")
+            producer_outputs = {
+                item.output_slot_id for item in stage_by_id[edge.producer_stage_id].output_slots
+            }
+            consumer_inputs = {
+                item.input_slot_id for item in stage_by_id[edge.consumer_stage_id].input_slots
+            }
+            if edge.producer_output_slot_id not in producer_outputs:
+                raise ValueError("dependency references an unknown producer output slot")
+            if edge.consumer_input_slot_id not in consumer_inputs:
+                raise ValueError("dependency references an unknown consumer input slot")
+            edges_by_join.setdefault(join_key, set()).add(edge.dependency_id)
+            structural_dependencies[edge.consumer_stage_id].add(edge.producer_stage_id)
+        for key, join in joins.items():
+            actual = edges_by_join.get(key, set())
+            if actual != set(join.dependency_ids):
+                raise ValueError("join dependency registry does not match declared edges")
+            non_advisory = sum(
+                1
+                for edge in self.dependencies
+                if (edge.consumer_stage_id, edge.join_id) == key
+                and edge.dependency_class != DependencyClass.ADVISORY
+            )
+            if join.kind == JoinKind.ANY and non_advisory == 0:
+                raise ValueError("any joins require a non-advisory dependency")
+            if join.kind == JoinKind.MINIMUM and (
+                join.minimum is None or join.minimum > non_advisory
+            ):
+                raise ValueError("minimum joins exceed non-advisory dependency count")
+
         visiting: set[str] = set()
         visited: set[str] = set()
-        dependencies = {stage.stage_id: stage.depends_on for stage in self.stages}
 
         def visit(stage_id: str) -> None:
             if stage_id in visiting:
-                raise ValueError("StageGraph dependency cycle")
+                raise ValueError("StageGraph structural dependency cycle")
             if stage_id in visited:
                 return
             visiting.add(stage_id)
-            for dependency in dependencies[stage_id]:
+            for dependency in structural_dependencies[stage_id]:
                 visit(dependency)
             visiting.remove(stage_id)
             visited.add(stage_id)
 
-        for stage_id in ids:
+        for stage_id in stage_ids:
             visit(stage_id)
         if (
             self.workflow_cycle_policy is not None
@@ -373,7 +866,146 @@ class StageGraphBlueprint(DefinitionBase):
             raise ValueError(
                 "workflow cycle policy must use the frozen workflow evaluation contract"
             )
+        normalized = {
+            "stages": tuple(sorted(self.stages, key=lambda item: item.stage_id.encode("utf-8"))),
+            "stage_mappings": tuple(
+                sorted(
+                    self.stage_mappings,
+                    key=lambda item: (
+                        item.stage_id.encode("utf-8"),
+                        item.mapping_id.encode("utf-8"),
+                    ),
+                )
+            ),
+            "joins": tuple(
+                sorted(
+                    self.joins,
+                    key=lambda item: (
+                        item.consumer_stage_id.encode("utf-8"),
+                        item.join_id.encode("utf-8"),
+                    ),
+                )
+            ),
+            "dependencies": tuple(
+                sorted(
+                    self.dependencies,
+                    key=lambda item: (
+                        item.consumer_stage_id.encode("utf-8"),
+                        item.join_id.encode("utf-8"),
+                        item.producer_stage_id.encode("utf-8"),
+                        item.producer_output_slot_id.encode("utf-8"),
+                        item.dependency_id.encode("utf-8"),
+                    ),
+                )
+            ),
+            "workflow_obligation_slots": tuple(
+                sorted(
+                    self.workflow_obligation_slots,
+                    key=lambda item: item.obligation_slot_id.encode("utf-8"),
+                )
+            ),
+            "obligation_matrix": tuple(
+                sorted(
+                    self.obligation_matrix,
+                    key=lambda item: (
+                        item.obligation_scope.encode("utf-8"),
+                        0 if item.owner_stage_id is None else 1,
+                        b"" if item.owner_stage_id is None else item.owner_stage_id.encode("utf-8"),
+                        item.obligation_slot_id.encode("utf-8"),
+                        item.evidence_slot_id.encode("utf-8"),
+                    ),
+                )
+            ),
+            "fairness_groups": tuple(
+                sorted(groups, key=lambda item: item.group_id.encode("utf-8"))
+            ),
+            "linked_run_slots": tuple(
+                sorted(
+                    self.linked_run_slots,
+                    key=lambda item: (
+                        0 if item.owner_stage_id is None else 1,
+                        b"" if item.owner_stage_id is None else item.owner_stage_id.encode("utf-8"),
+                        item.linked_run_slot_id.encode("utf-8"),
+                    ),
+                )
+            ),
+            "policy_definitions": tuple(
+                sorted(
+                    self.policy_definitions,
+                    key=lambda item: (
+                        item.policy_kind.encode("utf-8"),
+                        item.scope_kind.encode("utf-8"),
+                        item.scope_id.encode("utf-8"),
+                        item.policy_id.encode("utf-8"),
+                    ),
+                )
+            ),
+            "waits": tuple(
+                sorted(
+                    self.waits,
+                    key=lambda item: (
+                        item.scope_kind.encode("utf-8"),
+                        item.scope_id.encode("utf-8"),
+                        item.wait_id.encode("utf-8"),
+                    ),
+                )
+            ),
+            "cycle_limits": tuple(
+                sorted(
+                    self.cycle_limits,
+                    key=lambda item: (
+                        item.scope_kind.encode("utf-8"),
+                        item.scope_id.encode("utf-8"),
+                        item.condition_kind.encode("utf-8"),
+                        item.condition_id.encode("utf-8"),
+                    ),
+                )
+            ),
+            "invalidation_reuse_declarations": tuple(
+                sorted(
+                    self.invalidation_reuse_declarations,
+                    key=lambda item: (
+                        item.scope_kind.encode("utf-8"),
+                        item.scope_id.encode("utf-8"),
+                        item.declaration_kind.encode("utf-8"),
+                        item.declaration_id.encode("utf-8"),
+                    ),
+                )
+            ),
+            "capacity_ceilings": tuple(
+                sorted(
+                    self.capacity_ceilings,
+                    key=lambda item: (
+                        item.scope_kind.encode("utf-8"),
+                        item.scope_id.encode("utf-8"),
+                        item.dimension_kind.encode("utf-8"),
+                        item.dimension_id.encode("utf-8"),
+                    ),
+                )
+            ),
+            "completion_obligations": tuple(
+                sorted(
+                    self.completion_obligations,
+                    key=lambda item: (
+                        item.obligation_scope.encode("utf-8"),
+                        0 if item.owner_stage_id is None else 1,
+                        b"" if item.owner_stage_id is None else item.owner_stage_id.encode("utf-8"),
+                        item.obligation_slot_id.encode("utf-8"),
+                    ),
+                )
+            ),
+        }
+        for field_name, collection in normalized.items():
+            keys = [item.model_dump_json() for item in collection]
+            if len(keys) != len(set(keys)):
+                raise ValueError(f"{field_name} contains a duplicate complete key")
         return self
+
+    @property
+    def declared_output_slots(self) -> frozenset[str]:
+        return frozenset(
+            slot.output_slot_id for stage in self.stages for slot in stage.output_slots
+        )
 
 
 class GoalSessionRolloverPolicy(Contract):
