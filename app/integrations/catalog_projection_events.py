@@ -5,7 +5,7 @@ from typing import Any
 
 from pymongo import ASCENDING, ReturnDocument
 
-from app.application.catalog_projection_events import (
+from app.application.capability.catalog_projection_events import (
     CatalogProjectionEvent,
     ProjectionEventFailure,
     ProjectionEventRepository,

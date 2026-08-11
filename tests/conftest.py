@@ -6,8 +6,8 @@ import sys
 
 import pytest
 
-from app.application.control_plane import ControlPlaneService
-from app.application.control_plane_repository import InMemoryDefinitionRepository
+from app.application.control_plane.service import ControlPlaneService
+from app.application.control_plane.control_plane_repository import InMemoryDefinitionRepository
 from app.domain.control_plane.extensions import ExtensionRegistry
 from app.integrations.control_plane_payloads import InMemoryPayloadStore
 

@@ -5,10 +5,10 @@ from temporalio import activity
 from temporalio.client import Client
 from temporalio.worker import Worker
 
-from app.application.schema_catalog import SchemaCatalog
-from app.application.schema_catalog_build import SchemaCatalogBuildService
-from app.application.schema_context_derivation import SchemaContextDerivationService
-from app.application.supporting_graph_reconciliation import (
+from app.application.schema.schema_catalog import SchemaCatalog
+from app.application.schema.schema_catalog_build import SchemaCatalogBuildService
+from app.application.schema.schema_context_derivation import SchemaContextDerivationService
+from app.application.schema.supporting_graph_reconciliation import (
     SupportingGraphReconciliationWorkflow,
 )
 from app.domain.schema_context.contracts import (

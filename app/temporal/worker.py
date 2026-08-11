@@ -6,34 +6,34 @@ from typing import Protocol
 
 import asyncpg
 
-from app.application.control_plane import ControlPlaneService
-from app.application.control_plane_repository import BeanieDefinitionRepository
-from app.application.goal_directed import configure_goal_directed_family_admissions
-from app.application.linked_runs import LinkedRunService
-from app.application.orchestration import register_stagegraph_family_mutations
-from app.application.postgres_linked_run_repository import PostgresLinkedRunRepository
-from app.application.postgres_run_control_repository import PostgresRunControlRepository
-from app.application.run_control import (
+from app.application.control_plane.service import ControlPlaneService
+from app.application.control_plane.control_plane_repository import BeanieDefinitionRepository
+from app.application.orchestration.goal_directed import configure_goal_directed_family_admissions
+from app.application.orchestration.linked_runs import LinkedRunService
+from app.application.orchestration.service import register_stagegraph_family_mutations
+from app.application.orchestration.postgres_linked_run_repository import PostgresLinkedRunRepository
+from app.application.run_control.postgres_run_control_repository import PostgresRunControlRepository
+from app.application.run_control.service import (
     AdmissionPolicyRegistry,
     F1RunConfigurationVerifier,
     FamilyAdmissionRegistry,
     RunConfigurationVerifier,
     RunControlService,
 )
-from app.application.run_control_repository import RunControlRepository
-from app.application.schema_catalog_build import SchemaCatalogBuildService
-from app.application.schema_context_derivation import SchemaContextDerivationService
-from app.application.schema_grounding_admission import (
+from app.application.run_control.run_control_repository import RunControlRepository
+from app.application.schema.schema_catalog_build import SchemaCatalogBuildService
+from app.application.schema.schema_context_derivation import SchemaContextDerivationService
+from app.application.run_control.schema_grounding_admission import (
     register_schema_grounding_admission_policies,
 )
-from app.application.schema_grounding_repository import (
+from app.application.schema.schema_grounding_repository import (
     BeanieSchemaGroundingRecordRepository,
 )
-from app.application.schema_workspace_binding import SchemaGraphAdmissionService
-from app.application.supporting_graph_reconciliation import (
+from app.application.schema.schema_workspace_binding import SchemaGraphAdmissionService
+from app.application.schema.supporting_graph_reconciliation import (
     SupportingGraphReconciliationWorkflow,
 )
-from app.application.web_research_admission import (
+from app.application.run_control.web_research_admission import (
     register_web_research_admission_policies,
 )
 from app.config import Settings, get_settings

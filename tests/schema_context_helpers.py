@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from app.application.schema_catalog import SchemaCatalog, parse_schema_catalog
+from app.application.schema.schema_catalog import SchemaCatalog, parse_schema_catalog
 from app.domain.schema_context.contracts import (
     AcceptedSchemaContextSelection,
     PropertyIntentHint,

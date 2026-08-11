@@ -7,9 +7,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from app.application.control_plane import ControlPlaneService
-from app.application.control_plane_repository import BeanieDefinitionRepository
-from app.application.reviewed_capability_promotion import (
+from app.application.control_plane.service import ControlPlaneService
+from app.application.control_plane.control_plane_repository import BeanieDefinitionRepository
+from app.application.capability.reviewed_capability_promotion import (
     build_reviewed_capability_bundle,
     build_scenario_d_execution_correction,
     preflight_reviewed_capabilities,

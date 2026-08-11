@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from app.application.catalog_projection_admin import ProjectionEventCompletionPort
+from app.application.capability.catalog_projection_admin import ProjectionEventCompletionPort
 from app.domain.control_plane.contracts import DefinitionKind, ExactDefinitionRef
 from app.models import CatalogProjectionEventDocument, PublishedDefinitionDocument
 

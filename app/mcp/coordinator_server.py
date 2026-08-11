@@ -11,7 +11,7 @@ from fastmcp import Context, FastMCP
 from fastmcp.server.auth import AuthProvider
 from fastmcp.server.dependencies import get_http_headers
 
-from app.application.coordinator_facade import (
+from app.application.coordinator.coordinator_facade import (
     COORDINATOR_CORRELATION_ID,
     CoordinatorPrincipalLike,
     EffectiveCoordinatorSurface,

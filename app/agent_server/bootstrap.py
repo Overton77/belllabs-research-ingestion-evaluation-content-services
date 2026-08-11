@@ -7,7 +7,7 @@ from langgraph.types import interrupt
 
 from app.agent_server.context import require_runtime_scope
 from app.agent_server.runtime_composition import get_bootstrap_reconciler
-from app.application.runtime_bootstrap import (
+from app.application.runtime.runtime_bootstrap import (
     BootstrapRequest,
     CheckpointRuntimeProjection,
     RuntimeBootstrapReconciler,

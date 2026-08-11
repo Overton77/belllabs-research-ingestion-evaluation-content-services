@@ -6,7 +6,7 @@ from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from app.application.operation_executor import (
+from app.application.operations.operation_executor import (
     CancellationContext,
     CancelledOperationOutcome,
     CompletedOperationOutcome,
@@ -14,7 +14,7 @@ from app.application.operation_executor import (
     OperationExecutionOutcome,
     StageOperationRequest,
 )
-from app.application.reference_research import (
+from app.application.reference_research.service import (
     ImmutableManifestStore,
     ReferenceOperationManifest,
     classify_reference_fixture,

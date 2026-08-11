@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import pytest
 from deepagents.middleware import async_subagents as deepagents_async
 
-from app.application.async_subagents import (
+from app.application.async_subagents.service import (
     AsyncSubagentError,
     AsyncSubagentService,
     AsyncSubagentSpawnRequest,

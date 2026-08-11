@@ -4,7 +4,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel, TypeAdapter
 
 from app.agent_server.common_state import CommonStateMetadata
-from app.application.operation_executor import (
+from app.application.operations.operation_executor import (
     OperationExecutionOutcome,
     OperationExecutionOutcomeV2,
 )

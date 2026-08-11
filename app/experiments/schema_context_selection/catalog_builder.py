@@ -1,4 +1,4 @@
-from app.application.schema_catalog import (
+from app.application.schema.schema_catalog import (
     CATALOG_GENERATOR_VERSION,
     SchemaCatalog,
     materialize_schema_catalog,

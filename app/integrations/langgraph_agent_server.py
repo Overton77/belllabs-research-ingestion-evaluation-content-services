@@ -8,9 +8,9 @@ from uuid import NAMESPACE_URL, uuid5
 from langgraph.types import Overwrite
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.application.agent_server_actions import ResolvedAgentServerAction
-from app.application.runtime_execution_bindings import RuntimeExecutionBindingRepository
-from app.application.runtime_repairs import (
+from app.application.runtime.agent_server_actions import ResolvedAgentServerAction
+from app.application.runtime.runtime_execution_bindings import RuntimeExecutionBindingRepository
+from app.application.runtime.runtime_repairs import (
     PrivilegedRepairObservation,
 )
 from app.domain.control_plane.canonical import sha256_digest

@@ -6,7 +6,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from app.application.schema_authority_issuance import (
+from app.application.schema.schema_authority_issuance import (
     SchemaDeploymentEvidenceProvisioningService,
 )
 from app.config import get_settings

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.application.runtime_bootstrap import (
+from app.application.runtime.runtime_bootstrap import (
     AuthoritativeRuntimeProjection,
     RuntimeBootstrapReconciler,
 )

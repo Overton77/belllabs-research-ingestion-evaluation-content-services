@@ -8,12 +8,12 @@ from statistics import median
 from time import perf_counter
 from typing import Any, TypedDict
 
-from app.application.capability_search import (
+from app.application.capability.capability_search import (
     CapabilitySearchResponse,
     CapabilitySearchService,
 )
-from app.application.control_plane_repository import BeanieDefinitionRepository
-from app.application.postgres_capability_search_repository import (
+from app.application.control_plane.control_plane_repository import BeanieDefinitionRepository
+from app.application.capability.postgres_capability_search_repository import (
     PostgresCatalogSearchRepository,
 )
 from app.config import Settings

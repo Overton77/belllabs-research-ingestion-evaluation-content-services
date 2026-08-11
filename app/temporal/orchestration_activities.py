@@ -7,8 +7,8 @@ from temporalio.client import Client
 from temporalio.exceptions import ApplicationError
 from temporalio.worker import Worker
 
-from app.application.coordinator_results import TerminalWorkflowCompletionPort
-from app.application.orchestration import (
+from app.application.coordinator.coordinator_results import TerminalWorkflowCompletionPort
+from app.application.orchestration.service import (
     RunControlLifecycleGateway,
     StageGraphDecisionService,
     StageGraphOperationMaterializer,

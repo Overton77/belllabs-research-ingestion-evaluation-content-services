@@ -5,7 +5,7 @@ from typing import Protocol
 
 from openai import AsyncOpenAI
 
-from app.application.capability_search_repository import CapabilityEmbedding
+from app.application.capability.capability_search_repository import CapabilityEmbedding
 from app.config import Settings
 from app.domain.coordinator.errors import CoordinatorDomainError, CoordinatorErrorCode
 from app.integrations.langsmith_tracing import (

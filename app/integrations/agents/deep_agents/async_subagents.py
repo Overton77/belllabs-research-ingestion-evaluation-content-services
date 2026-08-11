@@ -11,7 +11,7 @@ from langchain.tools import ToolRuntime
 from langchain_core.messages import ToolMessage
 from langgraph.types import Command
 
-from app.application.async_subagents import ProviderAsyncObservation
+from app.application.async_subagents.service import ProviderAsyncObservation
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.operation_execution.contracts import (
     AsyncSubagentContract,

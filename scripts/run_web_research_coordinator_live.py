@@ -99,7 +99,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     MongoDB, PostgreSQL, Temporal, embedding providers, or browser runtimes.
     """
 
-    from app.application.web_research_coordinator_live import run_live_coordinator
+    from app.application.runners.web_research_coordinator_live import run_live_coordinator
 
     return await run_live_coordinator(args, artifact_root=_checked_artifact_root(args.artifact_dir))
 

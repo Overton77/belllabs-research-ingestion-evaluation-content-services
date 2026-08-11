@@ -5,16 +5,16 @@ from temporalio.client import Client
 from temporalio.exceptions import ApplicationError
 from temporalio.worker import Worker
 
-from app.application.coordinator_results import TerminalWorkflowCompletionPort
-from app.application.goal_directed import (
+from app.application.coordinator.coordinator_results import TerminalWorkflowCompletionPort
+from app.application.orchestration.goal_directed import (
     GoalDirectedDocumentRepository,
     GoalDirectedOperationPreparationService,
     GoalDirectedOperationResultService,
     GoalOperationTemplateProvider,
 )
-from app.application.orchestration import RunControlLifecycleGateway
-from app.application.run_control import RunControlService
-from app.application.semantic_operation_bindings import SemanticOperationBindingRepository
+from app.application.orchestration.service import RunControlLifecycleGateway
+from app.application.run_control.service import RunControlService
+from app.application.operations.semantic_operation_bindings import SemanticOperationBindingRepository
 from app.domain.coordinator.launch import LaunchAuthorizationError, TerminalWorkflowCompletion
 from app.domain.orchestration.contracts import (
     LifecycleCommandOutcome,

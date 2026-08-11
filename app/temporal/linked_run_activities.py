@@ -7,7 +7,7 @@ from temporalio import activity
 from temporalio.client import Client
 from temporalio.worker import Worker
 
-from app.application.linked_runs import LinkedRunService
+from app.application.orchestration.linked_runs import LinkedRunService
 from app.domain.composition.contracts import (
     LinkedChildResolution,
     LinkedChildResultObservation,

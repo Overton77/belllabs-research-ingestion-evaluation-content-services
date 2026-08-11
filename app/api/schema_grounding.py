@@ -9,7 +9,7 @@ from app.api.control_plane import (
     get_control_plane_principal,
     get_control_plane_service,
 )
-from app.application.schema_grounding_repository import (
+from app.application.schema.schema_grounding_repository import (
     BeanieSchemaGroundingRecordRepository,
     SchemaGroundingRecordRepository,
 )

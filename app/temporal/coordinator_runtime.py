@@ -10,41 +10,41 @@ from temporalio.api.workflowservice.v1 import DescribeTaskQueueRequest
 from temporalio.client import Client
 from temporalio.worker import Worker
 
-from app.application.coordinator_results import TerminalWorkflowCompletionPort
-from app.application.goal_directed import (
+from app.application.coordinator.coordinator_results import TerminalWorkflowCompletionPort
+from app.application.orchestration.goal_directed import (
     GoalDirectedDocumentRepository,
     GoalOperationTemplateProvider,
 )
-from app.application.orchestration import (
+from app.application.orchestration.service import (
     RunControlLifecycleGateway,
     StageGraphDecisionService,
     StageGraphOperationPreparationService,
     StageGraphOperationTemplateProvider,
 )
-from app.application.orchestration_binding_repository import (
+from app.application.orchestration.orchestration_binding_repository import (
     RunSemanticInputBindingRepository,
     RunSemanticInputBindingService,
 )
-from app.application.orchestration_routing import (
+from app.application.orchestration.orchestration_routing import (
     OperationExecutionBindingReader,
     SemanticHandlerRegistry,
 )
-from app.application.postgres_orchestration_binding_repository import (
+from app.application.orchestration.postgres_orchestration_binding_repository import (
     PostgresRunSemanticInputBindingRepository,
 )
-from app.application.run_control import RunControlService
-from app.application.run_control_repository import RunControlRepository
-from app.application.schema_catalog_build import SchemaCatalogBuildService
-from app.application.schema_context_selection import ReviewAgentPort, SelectionAgentPort
-from app.application.schema_context_stage_handlers import (
+from app.application.run_control.service import RunControlService
+from app.application.run_control.run_control_repository import RunControlRepository
+from app.application.schema.schema_catalog_build import SchemaCatalogBuildService
+from app.application.schema.schema_context_selection import ReviewAgentPort, SelectionAgentPort
+from app.application.schema.schema_context_stage_handlers import (
     register_schema_context_stage_handlers,
 )
-from app.application.schema_grounding_repository import SchemaGroundingRecordRepository
-from app.application.semantic_operation_bindings import SemanticOperationBindingRepository
-from app.application.supporting_graph_reconciliation import (
+from app.application.schema.schema_grounding_repository import SchemaGroundingRecordRepository
+from app.application.operations.semantic_operation_bindings import SemanticOperationBindingRepository
+from app.application.schema.supporting_graph_reconciliation import (
     SupportingGraphReconciliationWorkflow,
 )
-from app.application.web_research_semantic_handlers import (
+from app.application.web_research.web_research_semantic_handlers import (
     WebResearchHandlerDependencies,
     register_web_research_stagegraph_handlers,
 )

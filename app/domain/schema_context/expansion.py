@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from graphql import parse
 
-from app.application.schema_catalog import SchemaCatalog
+from app.application.schema.schema_catalog import SchemaCatalog
 from app.domain.schema_context.canonicalization import sha256_digest
 from app.domain.schema_context.contracts import (
     AcceptedSchemaContextSelection,

@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from app.application.control_plane import ControlPlaneService
-from app.application.control_plane_repository import BeanieDefinitionRepository
+from app.application.control_plane.service import ControlPlaneService
+from app.application.control_plane.control_plane_repository import BeanieDefinitionRepository
 from app.config import Settings
 from app.domain.control_plane.contracts import (
     Definition,

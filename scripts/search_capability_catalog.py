@@ -5,9 +5,9 @@ import asyncio
 import json
 from typing import Any
 
-from app.application.capability_search import CapabilitySearchService
-from app.application.control_plane_repository import BeanieDefinitionRepository
-from app.application.postgres_capability_search_repository import (
+from app.application.capability.capability_search import CapabilitySearchService
+from app.application.control_plane.control_plane_repository import BeanieDefinitionRepository
+from app.application.capability.postgres_capability_search_repository import (
     PostgresCatalogSearchRepository,
 )
 from app.config import Settings

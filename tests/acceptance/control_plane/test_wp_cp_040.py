@@ -14,7 +14,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.store.memory import InMemoryStore
 from pydantic import ValidationError
 
-from app.application.operation_execution import bind_operation_execution_request
+from app.application.operations.operation_execution import bind_operation_execution_request
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import DefinitionKind, ExactDefinitionRef, SecretRef
 from app.domain.operation_execution.contracts import (
@@ -53,7 +53,7 @@ from app.integrations.agents.deep_agents import (
     ResolvedSkillBundle,
     StateSandboxFactory,
 )
-from tests.test_operation_execution import operation_request
+from tests.unit.operations.test_operation_execution import operation_request
 
 DIGEST_A = "sha256:" + "a" * 64
 MCP_TOOL_SCHEMA_DIGEST = (

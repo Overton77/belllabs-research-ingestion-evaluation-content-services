@@ -8,7 +8,7 @@ from uuid import NAMESPACE_URL, uuid5
 
 from neo4j import READ_ACCESS, AsyncDriver, Query
 
-from app.application.graph_query import (
+from app.application.schema.graph_query import (
     compile_query_intent,
     intent_digest,
     validate_query_intent,

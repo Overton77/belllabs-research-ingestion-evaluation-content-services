@@ -6,18 +6,18 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-from app.application.catalog_projection import CatalogProjector
-from app.application.catalog_projection_admin import (
+from app.application.capability.catalog_projection import CatalogProjector
+from app.application.capability.catalog_projection_admin import (
     filter_projection_refs,
     rebuild_capability_search_projection,
     verify_capability_search_projection,
 )
-from app.application.catalog_projection_metadata import build_workflow_compatibility
-from app.application.control_plane_repository import BeanieDefinitionRepository
-from app.application.postgres_capability_search_generation_repository import (
+from app.application.capability.catalog_projection_metadata import build_workflow_compatibility
+from app.application.control_plane.control_plane_repository import BeanieDefinitionRepository
+from app.application.capability.postgres_capability_search_generation_repository import (
     PostgresProjectionGenerationRepository,
 )
-from app.application.postgres_capability_search_repository import (
+from app.application.capability.postgres_capability_search_repository import (
     PostgresCatalogSearchRepository,
 )
 from app.config import Settings

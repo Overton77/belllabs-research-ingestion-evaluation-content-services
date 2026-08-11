@@ -8,8 +8,8 @@ from temporalio.client import Client
 from temporalio.exceptions import ApplicationError
 from temporalio.worker import Worker
 
-from app.application.artifact_promotion import ArtifactPromotionService
-from app.application.workspace_candidates import WorkspaceCandidateCaptureService
+from app.application.workspaces.artifact_promotion import ArtifactPromotionService
+from app.application.workspaces.workspace_candidates import WorkspaceCandidateCaptureService
 from app.domain.operation_execution.contracts import (
     ArtifactPromotionPlan,
     ArtifactPromotionRequest,

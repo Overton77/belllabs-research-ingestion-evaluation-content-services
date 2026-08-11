@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from app.application.run_control import RunControlOutboxRelay
-from app.application.run_control_repository import InMemoryRunControlRepository
+from app.application.run_control.service import RunControlOutboxRelay
+from app.application.run_control.run_control_repository import InMemoryRunControlRepository
 from app.domain.control_plane.canonical import canonical_json, sha256_digest
 from app.domain.run_control.contracts import (
     AsyncChildDecisionOutcome,
@@ -28,7 +28,7 @@ from app.domain.run_control.contracts import (
     TerminalizationProposal,
     TerminalizeAction,
 )
-from tests.test_run_control import (
+from tests.unit.run_control.test_run_control import (
     EMPTY_EVIDENCE_DIGEST,
     INITIAL_EVIDENCE_FRONTIER,
     WORKFLOW_DIGEST,

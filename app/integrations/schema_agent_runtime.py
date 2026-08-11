@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal, Protocol
 
-from app.application.operation_execution import OperationExecutionService
-from app.application.schema_context_selection import AgentRunOutput
+from app.application.operations.operation_execution import OperationExecutionService
+from app.application.schema.schema_context_selection import AgentRunOutput
 from app.domain.operation_execution.contracts import (
     OperationExecutionRequest,
     OperationExecutionResult,

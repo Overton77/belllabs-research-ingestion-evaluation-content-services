@@ -15,11 +15,11 @@ from app.agent_server.runtime_composition import (
 from app.agent_server.tracing import configure_agent_server_tracing
 from app.api.dependencies import require_agent_principal
 from app.api.graph_runtime_schemas import router as graph_runtime_contract_router
-from app.application.postgres_runtime_authority import (
+from app.application.runtime.postgres_runtime_authority import (
     PostgresBootstrapAuthority,
     PostgresBootstrapDecisionBridge,
 )
-from app.application.runtime_bootstrap import RuntimeBootstrapReconciler
+from app.application.runtime.runtime_bootstrap import RuntimeBootstrapReconciler
 from app.config import get_settings
 from app.integrations.postgres import create_application_postgres_pool
 

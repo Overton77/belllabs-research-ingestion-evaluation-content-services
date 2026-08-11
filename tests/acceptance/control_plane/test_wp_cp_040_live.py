@@ -9,7 +9,7 @@ from temporalio import activity
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
-from app.application.operation_execution import bind_operation_execution_request
+from app.application.operations.operation_execution import bind_operation_execution_request
 from app.config import Settings
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import SecretRef
@@ -28,7 +28,7 @@ from app.integrations.agents.deep_agents import (
 )
 from app.temporal.workflows.operation import OperationWorkflow
 from tests.acceptance.control_plane.test_wp_cp_040 import exact_fixture
-from tests.test_operation_execution import operation_request
+from tests.unit.operations.test_operation_execution import operation_request
 
 
 class QualificationActivities:

@@ -27,13 +27,13 @@ from app.api.run_control import (
 )
 from app.api.run_control import router as run_control_router
 from app.api.schema_grounding import router as schema_grounding_router
-from app.application.coordinator_composition import (
+from app.application.coordinator.coordinator_composition import (
     CoordinatorProductionDependencies,
     ReadOnlyCoordinatorRuntimeReadiness,
     build_production_coordinator_facade,
     load_coordinator_catalog_bindings,
 )
-from app.application.coordinator_facade import CoordinatorLimits
+from app.application.coordinator.coordinator_facade import CoordinatorLimits
 from app.config import Settings, get_settings
 from app.domain.control_plane.errors import ControlPlaneError
 from app.domain.operation_execution.contracts import RuntimeApprovalDecision

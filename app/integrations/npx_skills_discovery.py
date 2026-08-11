@@ -12,7 +12,7 @@ from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.application.external_capability_discovery import (
+from app.application.web_research.external_capability_discovery import (
     ExternalDiscoveryBatch,
     ExternalDiscoveryCandidate,
     ExternalDiscoveryEvidence,

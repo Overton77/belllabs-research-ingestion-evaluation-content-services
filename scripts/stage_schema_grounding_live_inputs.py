@@ -5,7 +5,7 @@ import asyncio
 import json
 from pathlib import Path
 
-from app.application.schema_catalog import DEFAULT_SEMANTIC_OVERLAY
+from app.application.schema.schema_catalog import DEFAULT_SEMANTIC_OVERLAY
 from app.config import PROJECT_ROOT, Settings
 from app.integrations.schema_grounding_payloads import (
     SCHEMA_GROUNDING_INPUT_FORMATS,

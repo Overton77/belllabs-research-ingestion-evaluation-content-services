@@ -7,10 +7,10 @@ import os
 from pathlib import Path
 from typing import Any
 
-from app.application.external_candidate_repository import (
+from app.application.web_research.external_candidate_repository import (
     BeanieExternalCandidateRepository,
 )
-from app.application.external_capability_discovery import (
+from app.application.web_research.external_capability_discovery import (
     ExternalCapabilityDiscoveryService,
 )
 from app.config import Settings

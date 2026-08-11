@@ -8,17 +8,17 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-from app.application.control_plane_repository import BeanieDefinitionRepository
-from app.application.mongo_operation_execution_repository import (
+from app.application.control_plane.control_plane_repository import BeanieDefinitionRepository
+from app.application.operations.mongo_operation_execution_repository import (
     MongoOperationBindingRepository,
 )
-from app.application.orchestration_binding_repository import (
+from app.application.orchestration.orchestration_binding_repository import (
     InMemoryRunSemanticInputBindingRepository,
 )
-from app.application.web_research_semantic_binding import (
+from app.application.web_research.web_research_semantic_binding import (
     verify_web_research_operation_bindings,
 )
-from app.application.web_research_semantic_handlers import (
+from app.application.web_research.web_research_semantic_handlers import (
     resolve_web_research_run_authority,
 )
 from app.config import PROJECT_ROOT, Settings

@@ -4,24 +4,24 @@ from dataclasses import dataclass
 
 from temporalio.client import Client
 
-from app.application.orchestration import (
+from app.application.orchestration.service import (
     RunControlLifecycleGateway,
     StageGraphDecisionService,
     StageGraphOperationMaterializer,
 )
-from app.application.orchestration_binding_repository import (
+from app.application.orchestration.orchestration_binding_repository import (
     RunSemanticInputBindingRepository,
 )
-from app.application.orchestration_routing import (
+from app.application.orchestration.orchestration_routing import (
     SemanticHandlerRegistry,
 )
-from app.application.schema_catalog_build import SchemaCatalogBuildService
-from app.application.schema_context_selection import ReviewAgentPort, SelectionAgentPort
-from app.application.schema_context_stage_handlers import (
+from app.application.schema.schema_catalog_build import SchemaCatalogBuildService
+from app.application.schema.schema_context_selection import ReviewAgentPort, SelectionAgentPort
+from app.application.schema.schema_context_stage_handlers import (
     parse_schema_grounding_record_ref,
     register_schema_context_stage_handlers,
 )
-from app.application.schema_grounding_repository import SchemaGroundingRecordRepository
+from app.application.schema.schema_grounding_repository import SchemaGroundingRecordRepository
 from app.domain.control_plane.contracts import (
     GoalDirectedBlueprint,
     StageGraphBlueprint,

@@ -10,7 +10,7 @@ from typing import Any
 from neo4j import READ_ACCESS, WRITE_ACCESS, AsyncDriver
 from pydantic import BaseModel
 
-from app.application.schema_artifact_cleanup import (
+from app.application.schema.schema_artifact_cleanup import (
     TARGET_LABELS,
     SchemaArtifactCleanupPlan,
     TargetLabelUsage,

@@ -23,12 +23,12 @@ from app.domain.control_plane.contracts import (
     PromptDefinition,
 )
 from app.domain.control_plane.errors import CompilationRejected
-from tests.test_agentic_asset_definitions import (
+from tests.unit.control_plane.test_agentic_asset_definitions import (
     server_definition,
     skill_definition,
     tool_definition,
 )
-from tests.test_control_plane import authority, configured_service, invocation, publish
+from tests.unit.control_plane.test_control_plane import authority, configured_service, invocation, publish
 
 
 async def _publish_capability(

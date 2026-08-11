@@ -45,7 +45,7 @@ def _project_path(path: Path, *, argument: str) -> Path:
 
 
 async def run(args: argparse.Namespace) -> dict[str, Any]:
-    from app.application.scenario_b_live import run_scenario_b_live
+    from app.application.runners.scenario_b_live import run_scenario_b_live
 
     return await run_scenario_b_live(
         tenant_scope=args.tenant_scope,

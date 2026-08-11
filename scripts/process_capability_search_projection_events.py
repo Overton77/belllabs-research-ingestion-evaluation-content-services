@@ -6,15 +6,15 @@ import json
 import socket
 from datetime import timedelta
 
-from app.application.catalog_projection import CatalogProjector
-from app.application.catalog_projection_events import (
+from app.application.capability.catalog_projection import CatalogProjector
+from app.application.capability.catalog_projection_events import (
     CatalogProjectionEventProcessor,
 )
-from app.application.control_plane_repository import BeanieDefinitionRepository
-from app.application.postgres_capability_search_generation_repository import (
+from app.application.control_plane.control_plane_repository import BeanieDefinitionRepository
+from app.application.capability.postgres_capability_search_generation_repository import (
     PostgresProjectionGenerationRepository,
 )
-from app.application.postgres_capability_search_repository import (
+from app.application.capability.postgres_capability_search_repository import (
     PostgresCatalogSearchRepository,
 )
 from app.config import Settings

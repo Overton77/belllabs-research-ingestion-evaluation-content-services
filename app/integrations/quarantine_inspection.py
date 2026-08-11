@@ -12,7 +12,7 @@ from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.application.external_candidate_inspection import (
+from app.application.web_research.external_candidate_inspection import (
     InspectionFinding,
     QuarantineInspectionExecution,
     QuarantineInspectionObservations,

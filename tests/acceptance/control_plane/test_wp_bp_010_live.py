@@ -18,24 +18,24 @@ from temporalio.worker import Worker
 
 from app.api.control_plane import ControlPlanePrincipal, get_control_plane_principal
 from app.api.run_control import get_run_control_service, router
-from app.application.operation_execution import (
+from app.application.operations.operation_execution import (
     InMemoryOperationBindingRepository,
     RunControlOperationBudgetAuthority,
     bind_operation_execution_request,
 )
-from app.application.orchestration import (
+from app.application.orchestration.service import (
     StageGraphDecisionService,
     StageGraphOperationPreparationService,
     StaticStageGraphOperationTemplateProvider,
     orchestration_lifecycle_actor,
     register_stagegraph_family_mutations,
 )
-from app.application.run_control import (
+from app.application.run_control.service import (
     AdmissionPolicyRegistry,
     FamilyAdmissionRegistry,
     RunControlService,
 )
-from app.application.run_control_repository import InMemoryRunControlRepository
+from app.application.run_control.run_control_repository import InMemoryRunControlRepository
 from app.config import Settings
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import (
@@ -71,9 +71,9 @@ from app.temporal.workflows.belllabs_run import BellLabsRunWorkflow
 from app.temporal.workflows.operation import OperationWorkflow
 from app.temporal.workflows.stagegraph import StageGraphWorkflow
 from tests.acceptance.control_plane.test_wp_cp_040 import exact_fixture
-from tests.test_operation_execution import operation_request
-from tests.test_run_control import request as run_request
-from tests.test_wp_bp_010_temporal import _blueprint
+from tests.unit.operations.test_operation_execution import operation_request
+from tests.unit.run_control.test_run_control import request as run_request
+from tests.integration.temporal.test_wp_bp_010_temporal import _blueprint
 
 LIVE_QUEUE = "wp-bp-010-live-family"
 COGNITIVE_QUEUE = "agent-cognitive"

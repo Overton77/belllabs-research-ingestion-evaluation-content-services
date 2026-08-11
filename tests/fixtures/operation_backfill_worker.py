@@ -8,14 +8,14 @@ import asyncpg
 from beanie import init_beanie
 from pymongo import AsyncMongoClient
 
-from app.application.mongo_operation_journal_backfill import (
+from app.application.operations.mongo_operation_journal_backfill import (
     MongoLegacyOperationJournalSource,
 )
-from app.application.operation_journal_backfill import (
+from app.application.operations.operation_journal_backfill import (
     BackfillBatch,
     OperationJournalBackfillService,
 )
-from app.application.postgres_operation_journal_backfill import (
+from app.application.operations.postgres_operation_journal_backfill import (
     PostgresOperationJournalBackfillRepository,
 )
 from app.integrations.mongodb import BEANIE_MODELS

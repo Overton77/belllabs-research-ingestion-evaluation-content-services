@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from hashlib import sha256
 
-from app.application.artifact_promotion import ArtifactPayloadAddress
+from app.application.workspaces.artifact_promotion import ArtifactPayloadAddress
 from app.config import Settings
 from app.domain.operation_execution.errors import WorkspaceDigestMismatch
 from app.integrations.s3 import s3_client

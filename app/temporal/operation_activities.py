@@ -7,7 +7,7 @@ from temporalio.client import Client
 from temporalio.exceptions import ApplicationError
 from temporalio.worker import Worker
 
-from app.application.operation_execution import (
+from app.application.operations.operation_execution import (
     OperationExecutionInProgress,
     OperationExecutionService,
 )

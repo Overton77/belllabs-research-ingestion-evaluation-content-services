@@ -1,0 +1,1113 @@
+from __future__ import annotations
+
+import inspect
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Protocol
+from uuid import NAMESPACE_URL, uuid5
+
+from pydantic import ValidationError
+
+from app.application.control_plane.service import ControlPlaneService
+from app.application.run_control.run_control_repository import (
+    AdmissionMutation,
+    CommandMutation,
+    FamilyAdmissionCommit,
+    RunControlRepository,
+    authority_state_digest,
+)
+from app.domain.control_plane.canonical import sha256_digest
+from app.domain.control_plane.errors import ControlPlaneError
+from app.domain.run_control.contracts import (
+    ActorContext,
+    AdmissionDecision,
+    ApplyAuthorityBatchAction,
+    BudgetLedgerEntry,
+    BudgetLedgerKind,
+    BudgetState,
+    CommandResult,
+    CommandStatus,
+    ConsumerApplyResult,
+    DecisionStatus,
+    DomainEventEnvelope,
+    EffectLedgerEntry,
+    EffectLedgerState,
+    LifecycleCommand,
+    LifecycleTransitionRecord,
+    OutboxCursor,
+    OutboxRecord,
+    RunPhase,
+    RunProjection,
+    RunRequest,
+    VerifiedRunConfiguration,
+)
+from app.domain.run_control.errors import (
+    AdmissionRejected,
+    CommandRejected,
+    ConfigurationVerificationFailed,
+    IdempotencyConflict,
+    RunVersionConflict,
+)
+from app.domain.run_control.family_admission import (
+    AtomicFamilyMutation,
+    AuthorityStateConflict,
+    FamilyAdmissionReceipt,
+    FamilyMutationReceipt,
+)
+from app.domain.run_control.reducer import (
+    ACTION_PERMISSIONS as _ACTION_PERMISSIONS,
+)
+from app.domain.run_control.reducer import (
+    LIFECYCLE_ACTION_KINDS,
+    ReductionRejected,
+    reduce_lifecycle,
+    required_action_permissions,
+)
+
+ACTION_PERMISSIONS = _ACTION_PERMISSIONS
+AdmissionValidator = Callable[
+    [RunRequest, VerifiedRunConfiguration], Awaitable[str | None] | str | None
+]
+AuthorityBatchBindingValidator = Callable[
+    [AtomicFamilyMutation, ApplyAuthorityBatchAction], str | None
+]
+
+REQUIRED_SHARED_BUDGET_DIMENSIONS = frozenset(
+    {
+        "currency.estimated_micros",
+        "currency.actual_micros",
+        "tokens.input",
+        "tokens.output",
+        "tokens.total",
+        "time.elapsed_ms",
+        "time.active_compute_ms",
+        "model.turns",
+        "tool.calls.total",
+        "mcp.calls.total",
+        "external.quotas.total",
+        "stage.cycles",
+        "workflow.cycles",
+        "goal.iterations",
+        "operation.attempts",
+        "subagent.spawns",
+        "concurrency.slots",
+    }
+)
+
+
+class RunConfigurationVerifier(Protocol):
+    async def verify(self, request: RunRequest) -> VerifiedRunConfiguration: ...
+
+
+class DomainEventPublisher(Protocol):
+    async def publish(self, envelope: DomainEventEnvelope) -> None: ...
+
+
+class F1RunConfigurationVerifier:
+    """Digest-verifies immutable F1 configuration without copying its payload to PostgreSQL."""
+
+    def __init__(self, control_plane: ControlPlaneService) -> None:
+        self._control_plane = control_plane
+
+    async def verify(self, request: RunRequest) -> VerifiedRunConfiguration:
+        try:
+            erc = await self._control_plane.retrieve_for_admission(
+                request.effective_configuration_digest
+            )
+        except ControlPlaneError as error:
+            raise ConfigurationVerificationFailed(error.message) from error
+        workflow_ref = next(
+            (ref for ref in erc.source_refs if ref.kind.value == "workflow_type"),
+            None,
+        )
+        if workflow_ref is None:
+            raise ConfigurationVerificationFailed(
+                "effective configuration has no exact Workflow Type reference"
+            )
+        if (
+            erc.context.authority_subject_id != request.actor.actor_id
+            or erc.context.authority_scope != request.request_scope
+        ):
+            raise ConfigurationVerificationFailed(
+                "effective configuration authority subject or tenant scope mismatch"
+            )
+        return VerifiedRunConfiguration(
+            effective_configuration_digest=erc.digest,
+            workflow_type_ref=workflow_ref,
+            input_manifest=erc.input_manifest,
+            effective_budget_ceilings=erc.effective_authority.budgets.dimensions,
+            max_concurrency=erc.effective_authority.max_concurrency,
+            input_admission_contract=erc.workflow_type.input_admission_contract,
+            invariant_refs=erc.workflow_type.invariants,
+            obligation_revision=sha256_digest(sorted(erc.workflow_type.obligations)),
+            required_obligation_refs=erc.workflow_type.obligations,
+        )
+
+
+class AdmissionPolicyRegistry:
+    """Deny-by-default executable boundary for admission contracts and invariants."""
+
+    def __init__(self) -> None:
+        self._validators: dict[str, AdmissionValidator] = {}
+
+    def register(self, contract_ref: str, validator: AdmissionValidator) -> None:
+        if contract_ref in self._validators:
+            raise ValueError(f"admission validator already registered: {contract_ref}")
+        self._validators[contract_ref] = validator
+
+    async def validate(self, request: RunRequest, configuration: VerifiedRunConfiguration) -> None:
+        refs = (configuration.input_admission_contract, *sorted(configuration.invariant_refs))
+        for contract_ref in refs:
+            validator = self._validators.get(contract_ref)
+            if validator is None:
+                raise AdmissionRejected(
+                    f"no executable admission validator is registered for {contract_ref}"
+                )
+            result = validator(request, configuration)
+            reason = await result if inspect.isawaitable(result) else result
+            if reason is not None:
+                raise AdmissionRejected(f"{contract_ref}: {reason}")
+
+
+@dataclass(frozen=True)
+class FamilyAdmissionPolicy:
+    mutation_type: type[AtomicFamilyMutation]
+    family_kind: str
+    mutation_kind: str
+    required_permission: str
+    allowed_action_kinds: frozenset[str]
+    allowed_batch_action_kinds: frozenset[str]
+    required_batch_action_kinds: frozenset[str]
+    batch_binding_validator: AuthorityBatchBindingValidator | None
+
+
+class FamilyAdmissionRegistry:
+    """Closed exact-type registry for family mutations admitted by run control."""
+
+    def __init__(self) -> None:
+        self._policies: dict[type[AtomicFamilyMutation], FamilyAdmissionPolicy] = {}
+
+    def register(
+        self,
+        mutation_type: type[AtomicFamilyMutation],
+        *,
+        family_kind: str,
+        mutation_kind: str,
+        required_permission: str,
+        allowed_action_kinds: frozenset[str],
+        allowed_batch_action_kinds: frozenset[str] = frozenset(),
+        required_batch_action_kinds: frozenset[str] = frozenset(),
+        batch_binding_validator: AuthorityBatchBindingValidator | None = None,
+    ) -> None:
+        if not issubclass(mutation_type, AtomicFamilyMutation):
+            raise TypeError(
+                "family mutation registration requires an AtomicFamilyMutation subclass"
+            )
+        if mutation_type is AtomicFamilyMutation:
+            raise ValueError("the abstract family mutation envelope cannot be registered")
+        if mutation_type in self._policies:
+            raise ValueError(f"family mutation type already registered: {mutation_type.__name__}")
+        if not family_kind or not mutation_kind:
+            raise ValueError("family mutation policy must bind exact family and mutation kinds")
+        if not required_permission or not allowed_action_kinds:
+            raise ValueError("family mutation policy must declare permission and allowed actions")
+        unknown_actions = allowed_action_kinds - LIFECYCLE_ACTION_KINDS
+        if unknown_actions:
+            raise ValueError(
+                "family mutation policy contains unknown lifecycle actions: "
+                + ", ".join(sorted(unknown_actions))
+            )
+        batch_enabled = "apply_authority_batch" in allowed_action_kinds
+        valid_batch_actions = {
+            "record_usage",
+            "settle_pending_usage",
+            "observe_effect",
+            "settle_effect",
+            "record_obligation_evidence",
+            "record_output_evidence",
+            "record_operation_settlement_evidence",
+        }
+        unknown_batch_actions = allowed_batch_action_kinds - valid_batch_actions
+        if unknown_batch_actions:
+            raise ValueError(
+                "family mutation policy contains forbidden batch actions: "
+                + ", ".join(sorted(unknown_batch_actions))
+            )
+        if not required_batch_action_kinds <= allowed_batch_action_kinds:
+            raise ValueError("required batch actions must be a subset of allowed batch actions")
+        if batch_enabled and (
+            not allowed_batch_action_kinds or batch_binding_validator is None
+        ):
+            raise ValueError(
+                "batch-enabled family policy must bind nested actions and references"
+            )
+        if not batch_enabled and (
+            allowed_batch_action_kinds
+            or required_batch_action_kinds
+            or batch_binding_validator is not None
+        ):
+            raise ValueError(
+                "batch policy constraints require apply_authority_batch admission"
+            )
+        self._policies[mutation_type] = FamilyAdmissionPolicy(
+            mutation_type=mutation_type,
+            family_kind=family_kind,
+            mutation_kind=mutation_kind,
+            required_permission=required_permission,
+            allowed_action_kinds=frozenset(allowed_action_kinds),
+            allowed_batch_action_kinds=frozenset(allowed_batch_action_kinds),
+            required_batch_action_kinds=frozenset(required_batch_action_kinds),
+            batch_binding_validator=batch_binding_validator,
+        )
+
+    def resolve(self, mutation: AtomicFamilyMutation) -> FamilyAdmissionPolicy:
+        policy, _validated = self.resolve_validated(mutation)
+        return policy
+
+    def resolve_validated(
+        self,
+        mutation: AtomicFamilyMutation,
+    ) -> tuple[FamilyAdmissionPolicy, AtomicFamilyMutation]:
+        policy = self._policies.get(type(mutation))
+        if policy is None:
+            raise CommandRejected(
+                f"no exact family mutation registration for {type(mutation).__name__}"
+            )
+        try:
+            validated = policy.mutation_type.model_validate(
+                mutation.model_dump(mode="python", warnings=False)
+            )
+        except (ValidationError, TypeError, ValueError) as error:
+            raise CommandRejected(
+                "family mutation failed strict exact-type contract revalidation"
+            ) from error
+        if type(validated) is not policy.mutation_type:
+            raise CommandRejected("family mutation validation returned a non-exact type")
+        if (
+            validated.family_kind != policy.family_kind
+            or validated.mutation_kind != policy.mutation_kind
+        ):
+            raise CommandRejected(
+                "family mutation kinds do not match their exact registered policy"
+            )
+        return policy, validated
+
+    @staticmethod
+    def validate_batch(
+        policy: FamilyAdmissionPolicy,
+        mutation: AtomicFamilyMutation,
+        batch: ApplyAuthorityBatchAction,
+    ) -> None:
+        actual_kinds = frozenset(action.kind for action in batch.actions)
+        if not actual_kinds <= policy.allowed_batch_action_kinds:
+            raise CommandRejected(
+                "authority batch contains actions outside the family mutation policy"
+            )
+        if not policy.required_batch_action_kinds <= actual_kinds:
+            raise CommandRejected(
+                "authority batch omits actions required by the family mutation policy"
+            )
+        validator = policy.batch_binding_validator
+        if validator is None:
+            raise CommandRejected("family mutation policy has no authority batch binding")
+        reason = validator(mutation, batch)
+        if reason is not None:
+            raise CommandRejected(f"family mutation authority batch binding failed: {reason}")
+
+
+class RunControlService:
+    def __init__(
+        self,
+        repository: RunControlRepository,
+        configuration_verifier: RunConfigurationVerifier,
+        policies: AdmissionPolicyRegistry,
+        family_admissions: FamilyAdmissionRegistry | None = None,
+    ) -> None:
+        self._repository = repository
+        self._configuration_verifier = configuration_verifier
+        self._policies = policies
+        self._family_admissions = family_admissions or FamilyAdmissionRegistry()
+
+    async def admit(self, request: RunRequest) -> AdmissionDecision:
+        if "workflow_run.admit" not in request.actor.permissions:
+            raise AdmissionRejected("actor lacks workflow_run.admit permission")
+        fingerprint = _fingerprint(request, exclude={"requested_at"})
+        prior = await self._repository.get_admission_decision(
+            request.request_scope, request.idempotency_issuer, request.request_id
+        )
+        if prior is not None:
+            _require_same_fingerprint(prior.request_fingerprint, fingerprint, "run request")
+            return prior
+
+        try:
+            if not request.delegation_authority_refs <= request.actor.authority_refs:
+                raise AdmissionRejected("requested delegation exceeds the actor authority context")
+            configuration = await self._configuration_verifier.verify(request)
+            self._validate_configuration_binding(request, configuration)
+            self._validate_budget_envelope(request, configuration)
+            await self._validate_parent_binding(request)
+            await self._policies.validate(request, configuration)
+        except (AdmissionRejected, ConfigurationVerificationFailed) as error:
+            decision = AdmissionDecision(
+                request_scope=request.request_scope,
+                idempotency_issuer=request.idempotency_issuer,
+                request_id=request.request_id,
+                request_fingerprint=fingerprint,
+                status=DecisionStatus.REJECTED,
+                reason_code=error.code,
+                reason=error.message,
+                recorded_at=request.requested_at,
+            )
+            return await self._repository.commit_admission(AdmissionMutation(decision=decision))
+
+        run_id = run_identity_for(
+            request.request_scope,
+            request.idempotency_issuer,
+            request.request_id,
+        )
+        account_id = _stable_id("budget-account", run_id)
+        projection = RunProjection(
+            run_id=run_id,
+            request_scope=request.request_scope,
+            idempotency_issuer=request.idempotency_issuer,
+            request_id=request.request_id,
+            version=1,
+            phase=RunPhase.PENDING,
+            effective_configuration_digest=request.effective_configuration_digest,
+            workflow_type_ref=request.workflow_type_ref,
+            input_manifest=request.input_manifest,
+            obligation_revision=configuration.obligation_revision,
+            required_obligation_refs=configuration.required_obligation_refs,
+            evidence_frontier_digest=sha256_digest(
+                {
+                    "input_manifest_digest": request.input_manifest.digest,
+                    "obligation_evidence": [],
+                    "output_evidence": [],
+                }
+            ),
+            updated_at=request.requested_at,
+        )
+        reservations = (
+            {"baseline": dict(request.budget_envelope.baseline_reservations)}
+            if request.budget_envelope.baseline_reservations
+            else {}
+        )
+        budget = BudgetState(
+            account_id=account_id,
+            run_id=run_id,
+            parent_account_id=request.budget_envelope.parent_account_id,
+            limits=request.budget_envelope.dimensions,
+            reserved=dict(request.budget_envelope.baseline_reservations),
+            reservations=reservations,
+        )
+        effects = EffectLedgerState(run_id=run_id)
+        ledger = (
+            BudgetLedgerEntry(
+                entry_id=_stable_id("ledger", account_id, "baseline"),
+                account_id=account_id,
+                run_id=run_id,
+                kind=BudgetLedgerKind.RESERVATION,
+                idempotency_id="baseline",
+                amounts=dict(request.budget_envelope.baseline_reservations),
+                occurred_at=request.requested_at,
+                parent_account_id=request.budget_envelope.parent_account_id,
+            ),
+        )
+        actor = request.actor
+        transition = LifecycleTransitionRecord(
+            transition_id=_stable_id("transition", run_id, "1"),
+            run_id=run_id,
+            command_id=f"admission:{request.request_id}",
+            prior_version=0,
+            resulting_version=1,
+            prior_phase=None,
+            resulting_phase=RunPhase.PENDING,
+            prior_projection=None,
+            resulting_projection=projection,
+            actor=actor,
+            reason="Run Request admitted",
+            evidence_refs=request.admission_evidence_refs,
+            occurred_at=request.requested_at,
+            correlation_id=request.correlation_id,
+            causation_id=request.causation_id,
+        )
+        events = (
+            _event(
+                run_id,
+                1,
+                1,
+                "workflow_run.admitted",
+                request.requested_at,
+                actor,
+                request.correlation_id,
+                request.causation_id or request.request_id,
+                {
+                    "request_scope": request.request_scope,
+                    "request_id": request.request_id,
+                    "phase": RunPhase.PENDING.value,
+                    "effective_configuration_digest": request.effective_configuration_digest,
+                },
+                is_version_final=False,
+            ),
+            _event(
+                run_id,
+                1,
+                2,
+                "workflow_run.start_requested",
+                request.requested_at,
+                actor,
+                request.correlation_id,
+                request.request_id,
+                {"run_id": run_id, "expected_run_version": 1},
+            ),
+        )
+        decision = AdmissionDecision(
+            request_scope=request.request_scope,
+            idempotency_issuer=request.idempotency_issuer,
+            request_id=request.request_id,
+            request_fingerprint=fingerprint,
+            status=DecisionStatus.ACCEPTED,
+            run_id=run_id,
+            reason_code="accepted",
+            reason="Run Request admitted",
+            recorded_at=request.requested_at,
+        )
+        try:
+            return await self._repository.commit_admission(
+                AdmissionMutation(
+                    decision=decision,
+                    projection=projection,
+                    budget=budget,
+                    effects=effects,
+                    transition=transition,
+                    ledger_entries=ledger,
+                    events=events,
+                )
+            )
+        except ReductionRejected as error:
+            rejected = decision.model_copy(
+                update={
+                    "status": DecisionStatus.REJECTED,
+                    "run_id": None,
+                    "reason_code": error.code,
+                    "reason": error.message,
+                }
+            )
+            return await self._repository.commit_admission(AdmissionMutation(decision=rejected))
+
+    async def execute(self, command: LifecycleCommand) -> CommandResult:
+        for _attempt in range(8):
+            try:
+                return await self._execute_once(command)
+            except (RunVersionConflict, AuthorityStateConflict):
+                continue
+        raise AuthorityStateConflict(
+            "lifecycle command authority changed during every deterministic retry"
+        )
+
+    async def _execute_once(self, command: LifecycleCommand) -> CommandResult:
+        command = self._validated_lifecycle_command(command)
+        try:
+            required_permissions = required_action_permissions(command.action)
+        except ValueError as error:
+            raise CommandRejected(str(error)) from error
+        for required_permission in sorted(required_permissions):
+            if required_permission not in command.actor.permissions:
+                raise CommandRejected(f"actor lacks {required_permission} permission")
+        fingerprint = _fingerprint(command, exclude={"occurred_at"})
+        prior = await self._repository.get_command_result(
+            command.request_scope,
+            command.run_id,
+            command.idempotency_issuer,
+            command.command_id,
+        )
+        if prior is not None:
+            _require_same_fingerprint(prior.command_fingerprint, fingerprint, "lifecycle command")
+            return prior
+
+        projection = await self._repository.get_run(command.request_scope, command.run_id)
+        budget = await self._repository.get_budget(command.request_scope, command.run_id)
+        effects = await self._repository.get_effects(command.request_scope, command.run_id)
+        if command.expected_run_version != projection.version:
+            return await self._commit_non_transition_result(
+                command,
+                fingerprint,
+                projection,
+                budget,
+                effects,
+                CommandStatus.STALE,
+                "stale_run_version",
+                f"expected version {command.expected_run_version}, current version is "
+                f"{projection.version}",
+            )
+        try:
+            reduction = reduce_lifecycle(projection, budget, effects, command, fingerprint)
+        except ReductionRejected as error:
+            return await self._commit_non_transition_result(
+                command,
+                fingerprint,
+                projection,
+                budget,
+                effects,
+                (
+                    CommandStatus.STALE
+                    if error.code == "stale_run_version"
+                    else CommandStatus.REJECTED
+                ),
+                error.code,
+                error.message,
+            )
+        mutation = CommandMutation(
+            result=reduction.result,
+            request_scope=command.request_scope,
+            expected_version=projection.version,
+            expected_budget_digest=authority_state_digest(budget),
+            expected_effects_digest=authority_state_digest(effects),
+            projection=reduction.projection,
+            budget=reduction.budget,
+            effects=reduction.effects,
+            transition=reduction.transition,
+            ledger_entries=reduction.ledger_entries,
+            effect_entries=reduction.effect_entries,
+            events=reduction.events,
+        )
+        try:
+            return await self._repository.commit_command(mutation)
+        except ReductionRejected as error:
+            return await self._commit_non_transition_result(
+                command,
+                fingerprint,
+                projection,
+                budget,
+                effects,
+                CommandStatus.REJECTED,
+                error.code,
+                error.message,
+            )
+        except RunVersionConflict:
+            current = await self._repository.get_run(command.request_scope, command.run_id)
+            current_budget = await self._repository.get_budget(
+                command.request_scope, command.run_id
+            )
+            current_effects = await self._repository.get_effects(
+                command.request_scope, command.run_id
+            )
+            return await self._commit_non_transition_result(
+                command,
+                fingerprint,
+                current,
+                current_budget,
+                current_effects,
+                CommandStatus.STALE,
+                "stale_run_version",
+                f"expected version {command.expected_run_version}, current version is "
+                f"{current.version}",
+            )
+
+    async def execute_family_admission(
+        self,
+        command: LifecycleCommand,
+        family_mutation: AtomicFamilyMutation,
+    ) -> FamilyAdmissionReceipt:
+        for _attempt in range(8):
+            try:
+                return await self._execute_family_admission_once(command, family_mutation)
+            except (RunVersionConflict, AuthorityStateConflict):
+                continue
+        raise AuthorityStateConflict(
+            "family admission authority changed during every deterministic retry"
+        )
+
+    async def _execute_family_admission_once(
+        self,
+        command: LifecycleCommand,
+        family_mutation: AtomicFamilyMutation,
+    ) -> FamilyAdmissionReceipt:
+        command = self._validated_lifecycle_command(command)
+        policy, family_mutation = self._family_admissions.resolve_validated(
+            family_mutation
+        )
+        try:
+            action_permissions = required_action_permissions(command.action)
+        except ValueError as error:
+            raise CommandRejected(str(error)) from error
+        for action_permission in sorted(action_permissions):
+            if action_permission not in command.actor.permissions:
+                raise CommandRejected(f"actor lacks {action_permission} permission")
+        if policy.required_permission not in command.actor.permissions:
+            raise CommandRejected(f"actor lacks {policy.required_permission} permission")
+        if command.action.kind not in policy.allowed_action_kinds:
+            raise CommandRejected(
+                f"lifecycle action {command.action.kind} is not allowed for family admission"
+            )
+        if isinstance(command.action, ApplyAuthorityBatchAction):
+            self._family_admissions.validate_batch(
+                policy,
+                family_mutation,
+                command.action,
+            )
+        if (
+            family_mutation.request_scope != command.request_scope
+            or family_mutation.run_id != command.run_id
+        ):
+            raise CommandRejected("family mutation scope and run must match the lifecycle command")
+
+        command_fingerprint = _fingerprint(command, exclude={"occurred_at"})
+        family_fingerprint = _fingerprint(family_mutation, exclude={"decided_at"})
+        prior = await self._repository.get_family_admission_receipt(
+            command.request_scope,
+            command.run_id,
+            command.idempotency_issuer,
+            command.command_id,
+        )
+        if prior is not None:
+            _require_same_fingerprint(
+                prior.command_result.command_fingerprint,
+                command_fingerprint,
+                "lifecycle command",
+            )
+            _require_same_fingerprint(
+                prior.family_mutation_fingerprint,
+                family_fingerprint,
+                "family mutation",
+            )
+            return prior
+
+        projection = await self._repository.get_run(command.request_scope, command.run_id)
+        budget = await self._repository.get_budget(command.request_scope, command.run_id)
+        effects = await self._repository.get_effects(command.request_scope, command.run_id)
+        budget_digest = authority_state_digest(budget)
+        effects_digest = authority_state_digest(effects)
+        if command.expected_run_version != projection.version:
+            result = self._non_transition_result(
+                command,
+                command_fingerprint,
+                projection,
+                CommandStatus.STALE,
+                "stale_run_version",
+                f"expected version {command.expected_run_version}, current version is "
+                f"{projection.version}",
+            )
+            mutation = CommandMutation(
+                result=result,
+                request_scope=command.request_scope,
+                expected_version=projection.version,
+                expected_budget_digest=budget_digest,
+                expected_effects_digest=effects_digest,
+            )
+            receipt = FamilyAdmissionReceipt(
+                command_result=result,
+                family_mutation_fingerprint=family_fingerprint,
+            )
+        else:
+            try:
+                reduction = reduce_lifecycle(
+                    projection, budget, effects, command, command_fingerprint
+                )
+            except ReductionRejected as error:
+                result = self._non_transition_result(
+                    command,
+                    command_fingerprint,
+                    projection,
+                    CommandStatus.REJECTED,
+                    error.code,
+                    error.message,
+                )
+                mutation = CommandMutation(
+                    result=result,
+                    request_scope=command.request_scope,
+                    expected_version=projection.version,
+                    expected_budget_digest=budget_digest,
+                    expected_effects_digest=effects_digest,
+                )
+                receipt = FamilyAdmissionReceipt(
+                    command_result=result,
+                    family_mutation_fingerprint=family_fingerprint,
+                )
+            else:
+                family_version = family_mutation.expected_family_version + 1
+                events = self._compose_family_admission_events(
+                    reduction.events,
+                    command,
+                    family_mutation,
+                    family_fingerprint,
+                    family_version,
+                )
+                mutation = CommandMutation(
+                    result=reduction.result,
+                    request_scope=command.request_scope,
+                    expected_version=projection.version,
+                    expected_budget_digest=budget_digest,
+                    expected_effects_digest=effects_digest,
+                    projection=reduction.projection,
+                    budget=reduction.budget,
+                    effects=reduction.effects,
+                    transition=reduction.transition,
+                    ledger_entries=reduction.ledger_entries,
+                    effect_entries=reduction.effect_entries,
+                    events=events,
+                )
+                receipt = FamilyAdmissionReceipt(
+                    command_result=reduction.result,
+                    family_mutation_fingerprint=family_fingerprint,
+                    family_receipt=FamilyMutationReceipt(
+                        family_kind=family_mutation.family_kind,
+                        mutation_kind=family_mutation.mutation_kind,
+                        mutation_id=family_mutation.mutation_id,
+                        mutation_fingerprint=family_fingerprint,
+                        family_version=family_version,
+                        exact_operation_request_ref=(
+                            family_mutation.exact_operation_request_ref
+                        ),
+                    ),
+                )
+        return await self._repository.commit_family_admission(
+            FamilyAdmissionCommit(
+                command=mutation,
+                family_mutation=family_mutation,
+                family_mutation_fingerprint=family_fingerprint,
+                receipt=receipt,
+            )
+        )
+
+    @staticmethod
+    def _validated_lifecycle_command(command: LifecycleCommand) -> LifecycleCommand:
+        try:
+            return LifecycleCommand.model_validate(
+                command.model_dump(mode="python", warnings=False)
+            )
+        except (ValidationError, TypeError, ValueError) as error:
+            raise CommandRejected(
+                "lifecycle command failed strict contract revalidation"
+            ) from error
+
+    async def get_run(self, request_scope: str, run_id: str) -> RunProjection:
+        return await self._repository.get_run(request_scope, run_id)
+
+    async def get_command_result(
+        self,
+        request_scope: str,
+        run_id: str,
+        idempotency_issuer: str,
+        command_id: str,
+    ) -> CommandResult | None:
+        return await self._repository.get_command_result(
+            request_scope,
+            run_id,
+            idempotency_issuer,
+            command_id,
+        )
+
+    async def get_budget(self, request_scope: str, run_id: str) -> BudgetState:
+        return await self._repository.get_budget(request_scope, run_id)
+
+    async def get_effects(self, request_scope: str, run_id: str) -> EffectLedgerState:
+        return await self._repository.get_effects(request_scope, run_id)
+
+    async def list_effect_ledger(
+        self, request_scope: str, run_id: str
+    ) -> tuple[EffectLedgerEntry, ...]:
+        return await self._repository.list_effect_ledger(request_scope, run_id)
+
+    async def reconstruct_projection(self, request_scope: str, run_id: str) -> RunProjection:
+        transitions = await self._repository.list_transitions(request_scope, run_id)
+        if not transitions:
+            raise ValueError("a run must have at least its admission transition")
+        expected = 1
+        projection: RunProjection | None = None
+        for transition in transitions:
+            if (
+                transition.run_id != run_id
+                or transition.prior_version != expected - 1
+                or transition.resulting_version != expected
+                or transition.resulting_projection.run_id != run_id
+                or transition.resulting_projection.version != expected
+                or transition.resulting_projection.phase != transition.resulting_phase
+            ):
+                raise ValueError(f"invalid transition metadata at expected version {expected}")
+            if transition.prior_projection != projection:
+                raise ValueError("transition prior projection does not match reconstructed state")
+            if projection is None:
+                if transition.prior_phase is not None:
+                    raise ValueError("admission transition must not have a prior phase")
+            elif (
+                transition.prior_phase != projection.phase
+                or transition.prior_version != projection.version
+            ):
+                raise ValueError("transition prior metadata does not match reconstructed state")
+            projection = transition.resulting_projection
+            expected += 1
+        assert projection is not None
+        return projection
+
+    async def list_transitions(
+        self, request_scope: str, run_id: str
+    ) -> tuple[LifecycleTransitionRecord, ...]:
+        return await self._repository.list_transitions(request_scope, run_id)
+
+    async def pending_outbox(
+        self,
+        request_scope: str,
+        *,
+        after: OutboxCursor | None = None,
+        limit: int = 100,
+    ) -> tuple[OutboxRecord, ...]:
+        records = await self._repository.list_outbox(request_scope, after=after, limit=limit)
+        return tuple(record for record in records if record.delivered_at is None)
+
+    async def mark_delivered(
+        self, request_scope: str, event_id: str, delivered_at: datetime
+    ) -> None:
+        await self._repository.mark_outbox_delivered(request_scope, event_id, delivered_at)
+
+    async def apply_consumer_event(
+        self,
+        request_scope: str,
+        consumer_id: str,
+        envelope: DomainEventEnvelope,
+    ) -> ConsumerApplyResult:
+        return await self._repository.apply_consumer_event(request_scope, consumer_id, envelope)
+
+    async def _commit_non_transition_result(
+        self,
+        command: LifecycleCommand,
+        fingerprint: str,
+        projection: RunProjection,
+        budget: BudgetState,
+        effects: EffectLedgerState,
+        status: CommandStatus,
+        reason_code: str,
+        reason: str,
+    ) -> CommandResult:
+        result = CommandResult(
+            command_id=command.command_id,
+            idempotency_issuer=command.idempotency_issuer,
+            run_id=command.run_id,
+            command_fingerprint=fingerprint,
+            status=status,
+            resulting_run_version=projection.version,
+            phase=projection.phase,
+            terminal_outcome=projection.terminal_outcome,
+            reason_code=reason_code,
+            reason=reason,
+            recorded_at=command.occurred_at,
+        )
+        return await self._repository.commit_command(
+            CommandMutation(
+                result=result,
+                request_scope=command.request_scope,
+                expected_version=projection.version,
+                expected_budget_digest=authority_state_digest(budget),
+                expected_effects_digest=authority_state_digest(effects),
+            )
+        )
+
+    @staticmethod
+    def _non_transition_result(
+        command: LifecycleCommand,
+        fingerprint: str,
+        projection: RunProjection,
+        status: CommandStatus,
+        reason_code: str,
+        reason: str,
+    ) -> CommandResult:
+        return CommandResult(
+            command_id=command.command_id,
+            idempotency_issuer=command.idempotency_issuer,
+            run_id=command.run_id,
+            command_fingerprint=fingerprint,
+            status=status,
+            resulting_run_version=projection.version,
+            phase=projection.phase,
+            terminal_outcome=projection.terminal_outcome,
+            reason_code=reason_code,
+            reason=reason,
+            recorded_at=command.occurred_at,
+        )
+
+    @staticmethod
+    def _compose_family_admission_events(
+        events: tuple[DomainEventEnvelope, ...],
+        command: LifecycleCommand,
+        mutation: AtomicFamilyMutation,
+        mutation_fingerprint: str,
+        family_version: int,
+    ) -> tuple[DomainEventEnvelope, ...]:
+        if not events:
+            raise ValueError("accepted family admission requires a lifecycle event")
+        lifecycle_events = tuple(
+            event.model_copy(update={"is_version_final": False}) for event in events
+        )
+        version = lifecycle_events[-1].aggregate_version
+        family_event = _event(
+            command.run_id,
+            version,
+            max(event.sequence for event in lifecycle_events) + 1,
+            "workflow_run.family_admission_committed",
+            command.occurred_at,
+            command.actor,
+            command.correlation_id,
+            command.causation_id or command.command_id,
+            {
+                "family_kind": mutation.family_kind,
+                "mutation_kind": mutation.mutation_kind,
+                "mutation_id": mutation.mutation_id,
+                "mutation_fingerprint": mutation_fingerprint,
+                "family_version": family_version,
+                "operation_request_ref_digest": sha256_digest(
+                    mutation.exact_operation_request_ref
+                ),
+            },
+        )
+        return (*lifecycle_events, family_event)
+
+    @staticmethod
+    def _validate_configuration_binding(
+        request: RunRequest, configuration: VerifiedRunConfiguration
+    ) -> None:
+        if configuration.effective_configuration_digest != request.effective_configuration_digest:
+            raise ConfigurationVerificationFailed("configuration digest binding mismatch")
+        if configuration.workflow_type_ref != request.workflow_type_ref:
+            raise ConfigurationVerificationFailed("Workflow Type exact reference mismatch")
+        if configuration.input_manifest != request.input_manifest:
+            raise ConfigurationVerificationFailed("Run Input Manifest exact reference mismatch")
+
+    @staticmethod
+    def _validate_budget_envelope(
+        request: RunRequest, configuration: VerifiedRunConfiguration
+    ) -> None:
+        dimensions = {item.dimension: item for item in request.budget_envelope.dimensions}
+        undeclared_shared = REQUIRED_SHARED_BUDGET_DIMENSIONS - dimensions.keys()
+        if undeclared_shared:
+            raise AdmissionRejected(
+                "budget envelope must explicitly declare shared dimensions: "
+                + ", ".join(sorted(undeclared_shared))
+            )
+        concurrency = dimensions.get("concurrency.slots")
+        if (
+            concurrency is None
+            or concurrency.hard_cap is None
+            or concurrency.hard_cap > configuration.max_concurrency
+        ):
+            raise AdmissionRejected(
+                "concurrency.slots must be bounded by effective concurrency authority"
+            )
+        missing = configuration.effective_budget_ceilings.keys() - dimensions.keys()
+        if missing:
+            raise AdmissionRejected(
+                f"budget envelope omits configured dimensions: {', '.join(sorted(missing))}"
+            )
+        for dimension, ceiling in configuration.effective_budget_ceilings.items():
+            requested = dimensions[dimension]
+            if requested.hard_cap is None or requested.hard_cap > ceiling:
+                raise AdmissionRejected(
+                    f"budget hard cap for {dimension} exceeds effective authority"
+                )
+
+    async def _validate_parent_binding(self, request: RunRequest) -> None:
+        if request.parent_run_id is None:
+            return
+        authority_ref = f"workflow_run.parent:{request.parent_run_id}:sponsor"
+        if authority_ref not in request.actor.authority_refs:
+            raise AdmissionRejected("actor lacks authority to sponsor the parent-linked run")
+        parent = await self._repository.get_run(request.request_scope, request.parent_run_id)
+        if parent.phase in {
+            RunPhase.CANCELLING,
+            RunPhase.TERMINAL,
+        }:
+            raise AdmissionRejected("parent run cannot sponsor new linked work")
+        parent_budget = await self._repository.get_budget(
+            request.request_scope, request.parent_run_id
+        )
+        if request.budget_envelope.parent_account_id != parent_budget.account_id:
+            raise AdmissionRejected("parent budget account does not match parent run")
+
+
+def _fingerprint(value: object, *, exclude: set[str]) -> str:
+    if not hasattr(value, "model_dump"):
+        raise TypeError("fingerprinted values must be Pydantic contracts")
+    payload = value.model_dump(mode="json", exclude=exclude)
+    return sha256_digest(payload)
+
+
+def _require_same_fingerprint(actual: str, expected: str, subject: str) -> None:
+    if actual != expected:
+        raise IdempotencyConflict(f"{subject} identity was reused with a conflicting payload")
+
+
+def _stable_id(*parts: str) -> str:
+    return str(uuid5(NAMESPACE_URL, ":".join(parts)))
+
+
+def run_identity_for(
+    request_scope: str,
+    idempotency_issuer: str,
+    request_id: str,
+) -> str:
+    """Return the immutable run identity used by authoritative admission."""
+
+    if not request_scope or not idempotency_issuer or not request_id:
+        raise ValueError("run identity inputs must be non-empty")
+    return _stable_id("run", request_scope, idempotency_issuer, request_id)
+
+
+def _event(
+    run_id: str,
+    version: int,
+    sequence: int,
+    event_type: str,
+    occurred_at: datetime,
+    actor: ActorContext,
+    correlation_id: str,
+    causation_id: str | None,
+    payload: dict[str, object],
+    *,
+    is_version_final: bool = True,
+) -> DomainEventEnvelope:
+    return DomainEventEnvelope(
+        event_id=_stable_id("event", run_id, str(version), str(sequence), event_type),
+        event_type=event_type,
+        aggregate_id=run_id,
+        aggregate_version=version,
+        sequence=sequence,
+        is_version_final=is_version_final,
+        occurred_at=occurred_at,
+        recorded_at=occurred_at,
+        actor=actor,
+        correlation_id=correlation_id,
+        causation_id=causation_id,
+        payload=payload,
+    )
+
+
+class RunControlOutboxRelay:
+    """At-least-once relay; ambiguous publish/ack failures remain durably redeliverable."""
+
+    def __init__(self, service: RunControlService, publisher: DomainEventPublisher) -> None:
+        self._service = service
+        self._publisher = publisher
+
+    async def relay_pending(
+        self,
+        request_scope: str,
+        *,
+        after: OutboxCursor | None = None,
+        limit: int = 100,
+        delivered_at: datetime,
+    ) -> tuple[str, ...]:
+        records = await self._service.pending_outbox(
+            request_scope,
+            after=after,
+            limit=limit,
+        )
+        delivered: list[str] = []
+        for record in records:
+            await self._publisher.publish(record.envelope)
+            await self._service.mark_delivered(
+                request_scope,
+                record.envelope.event_id,
+                delivered_at,
+            )
+            delivered.append(record.envelope.event_id)
+        return tuple(delivered)
