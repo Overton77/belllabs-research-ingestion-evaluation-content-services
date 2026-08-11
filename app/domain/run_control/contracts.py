@@ -11,9 +11,13 @@ from pydantic import (
     model_validator,
 )
 
+from app.domain.control_plane.canonical import canonical_json, sha256_digest
 from app.domain.control_plane.contracts import ExactDefinitionRef, RunInputManifestRef
 
 DIGEST_PATTERN = r"^sha256:[0-9a-f]{64}$"
+MAX_AUTHORITY_BATCH_BYTES = 65_536
+MAX_AUTHORITY_BATCH_IDENTITY_SUMMARY_BYTES = 32_768
+MAX_LIFECYCLE_COMMAND_BYTES = 65_536
 
 
 class Contract(BaseModel):
@@ -382,6 +386,7 @@ class ReserveBudgetAction(Contract):
 class RecordUsageAction(Contract):
     kind: Literal["record_usage"] = "record_usage"
     usage_id: str = Field(min_length=1)
+    authority_ref: str | None = Field(default=None, min_length=1)
     actual_amounts: dict[str, int]
     reservation_id: str | None = None
     release_amounts: dict[str, int] = Field(default_factory=dict)
@@ -391,6 +396,7 @@ class RecordUsageAction(Contract):
 class SettlePendingUsageAction(Contract):
     kind: Literal["settle_pending_usage"] = "settle_pending_usage"
     settlement_id: str = Field(min_length=1)
+    usage_id: str = Field(min_length=1)
     actual_amounts: dict[str, int]
     pending_release_amounts: dict[str, int] = Field(default_factory=dict)
 
@@ -402,6 +408,7 @@ class ClaimEffectAction(Contract):
     operation_ref: str = Field(min_length=1)
     provider_idempotency_key: str = Field(min_length=1)
     reservation_id: str = Field(min_length=1)
+    claim_payload_digest: str | None = Field(default=None, pattern=DIGEST_PATTERN)
 
 
 class ObserveEffectAction(Contract):
@@ -518,6 +525,157 @@ class RecordOutputEvidenceAction(Contract):
     evidence: AcceptedOutputEvidence
 
 
+class AcceptedOperationSettlementEvidence(Contract):
+    settlement_id: str = Field(min_length=1)
+    settlement_payload_digest: str = Field(pattern=DIGEST_PATTERN)
+    accepted_by_authority_ref: str = Field(min_length=1)
+
+
+class RecordOperationSettlementEvidenceAction(Contract):
+    kind: Literal["record_operation_settlement_evidence"] = (
+        "record_operation_settlement_evidence"
+    )
+    evidence: AcceptedOperationSettlementEvidence
+
+
+AuthoritySettlementAction = Annotated[
+    RecordUsageAction
+    | SettlePendingUsageAction
+    | ObserveEffectAction
+    | SettleEffectAction
+    | RecordObligationEvidenceAction
+    | RecordOutputEvidenceAction
+    | RecordOperationSettlementEvidenceAction,
+    Field(discriminator="kind"),
+]
+AUTHORITY_SETTLEMENT_ACTION_TYPES = (
+    RecordUsageAction,
+    SettlePendingUsageAction,
+    ObserveEffectAction,
+    SettleEffectAction,
+    RecordObligationEvidenceAction,
+    RecordOutputEvidenceAction,
+    RecordOperationSettlementEvidenceAction,
+)
+
+
+class ApplyAuthorityBatchAction(Contract):
+    kind: Literal["apply_authority_batch"] = "apply_authority_batch"
+    actions: tuple[AuthoritySettlementAction, ...] = Field(min_length=1, max_length=64)
+
+    @model_validator(mode="after")
+    def actions_are_unique_and_canonically_ordered(self) -> ApplyAuthorityBatchAction:
+        if not self.actions or len(self.actions) > 64:
+            raise ValueError("authority batch must contain between 1 and 64 actions")
+        if any(type(action) not in AUTHORITY_SETTLEMENT_ACTION_TYPES for action in self.actions):
+            raise ValueError("authority batch contains a forbidden or non-exact nested action")
+        keys = [_authority_settlement_order_key(action) for action in self.actions]
+        if len(set(keys)) != len(keys):
+            raise ValueError("authority batch action identities must be unique")
+        if keys != sorted(keys):
+            raise ValueError("authority batch actions must use canonical deterministic ordering")
+        effect_settlements = [
+            action.effect_id for action in self.actions if isinstance(action, SettleEffectAction)
+        ]
+        if len(set(effect_settlements)) != len(effect_settlements):
+            raise ValueError("authority batch may settle each effect at most once")
+        obligation_refs = [
+            action.evidence.obligation_ref
+            for action in self.actions
+            if isinstance(action, RecordObligationEvidenceAction)
+        ]
+        output_refs = [
+            action.evidence.output_ref
+            for action in self.actions
+            if isinstance(action, RecordOutputEvidenceAction)
+        ]
+        if len(set(obligation_refs)) != len(obligation_refs):
+            raise ValueError("authority batch obligation references must be unique")
+        if len(set(output_refs)) != len(output_refs):
+            raise ValueError("authority batch output references must be unique")
+        settlement_refs = [
+            action.evidence.settlement_id
+            for action in self.actions
+            if isinstance(action, RecordOperationSettlementEvidenceAction)
+        ]
+        if len(set(settlement_refs)) != len(settlement_refs):
+            raise ValueError("authority batch settlement evidence identities must be unique")
+        if len(canonical_json(self)) > MAX_AUTHORITY_BATCH_BYTES:
+            raise ValueError(
+                f"authority batch exceeds {MAX_AUTHORITY_BATCH_BYTES} serialized bytes"
+            )
+        if (
+            len(canonical_json(self.canonical_identity_summary()))
+            > MAX_AUTHORITY_BATCH_IDENTITY_SUMMARY_BYTES
+        ):
+            raise ValueError("authority batch identity summary exceeds its serialized byte limit")
+        return self
+
+    def canonical_identity_summary(self) -> tuple[dict[str, str], ...]:
+        """Return bounded digests that let consumers match every nested authority identity."""
+
+        return tuple(_authority_settlement_identity(action) for action in self.actions)
+
+
+def _authority_settlement_order_key(action: AuthoritySettlementAction) -> tuple[int, str, str]:
+    if isinstance(action, RecordUsageAction):
+        return (0, action.usage_id, "")
+    if isinstance(action, SettlePendingUsageAction):
+        return (1, action.settlement_id, "")
+    if isinstance(action, ObserveEffectAction):
+        return (2, action.effect_id, action.observation_id)
+    if isinstance(action, SettleEffectAction):
+        return (3, action.effect_id, action.settlement_id)
+    if isinstance(action, RecordObligationEvidenceAction):
+        return (4, action.evidence.obligation_ref, "")
+    if isinstance(action, RecordOutputEvidenceAction):
+        return (5, action.evidence.output_ref, "")
+    return (6, action.evidence.settlement_id, "")
+
+
+def _authority_settlement_identity(action: AuthoritySettlementAction) -> dict[str, str]:
+    if isinstance(action, RecordUsageAction):
+        return {
+            "action_kind": action.kind,
+            "usage_id_digest": sha256_digest(action.usage_id),
+        }
+    if isinstance(action, SettlePendingUsageAction):
+        return {
+            "action_kind": action.kind,
+            "settlement_id_digest": sha256_digest(action.settlement_id),
+        }
+    if isinstance(action, ObserveEffectAction):
+        return {
+            "action_kind": action.kind,
+            "effect_id_digest": sha256_digest(action.effect_id),
+            "observation_id_digest": sha256_digest(action.observation_id),
+        }
+    if isinstance(action, SettleEffectAction):
+        return {
+            "action_kind": action.kind,
+            "effect_id_digest": sha256_digest(action.effect_id),
+            "observation_id_digest": sha256_digest(action.observation_id),
+            "settlement_id_digest": sha256_digest(action.settlement_id),
+            "usage_settlement_ref_digest": sha256_digest(
+                action.usage_settlement_ref
+            ),
+        }
+    if isinstance(action, RecordObligationEvidenceAction):
+        return {
+            "action_kind": action.kind,
+            "obligation_ref_digest": sha256_digest(action.evidence.obligation_ref),
+        }
+    if isinstance(action, RecordOutputEvidenceAction):
+        return {
+            "action_kind": action.kind,
+            "output_ref_digest": sha256_digest(action.evidence.output_ref),
+        }
+    return {
+        "action_kind": action.kind,
+        "settlement_id_digest": sha256_digest(action.evidence.settlement_id),
+    }
+
+
 class RecordReadinessAction(Contract):
     kind: Literal["record_readiness"] = "record_readiness"
     decision: OutputReadinessDecision
@@ -545,6 +703,8 @@ LifecycleAction = Annotated[
     | RecordFinalizationResultAction
     | RecordObligationEvidenceAction
     | RecordOutputEvidenceAction
+    | RecordOperationSettlementEvidenceAction
+    | ApplyAuthorityBatchAction
     | TerminalizeAction
     | RecordReadinessAction,
     Field(discriminator="kind"),
@@ -565,6 +725,14 @@ class LifecycleCommand(Contract):
     occurred_at: AwareDatetime
     correlation_id: str = Field(min_length=1)
     causation_id: str | None = None
+
+    @model_validator(mode="after")
+    def serialized_command_is_bounded(self) -> LifecycleCommand:
+        if len(canonical_json(self)) > MAX_LIFECYCLE_COMMAND_BYTES:
+            raise ValueError(
+                f"lifecycle command exceeds {MAX_LIFECYCLE_COMMAND_BYTES} serialized bytes"
+            )
+        return self
 
 
 class RunProjection(Contract):
@@ -587,6 +755,9 @@ class RunProjection(Contract):
     required_obligation_refs: frozenset[str] = Field(default_factory=frozenset)
     accepted_obligation_evidence: tuple[AcceptedObligationEvidence, ...] = ()
     accepted_output_evidence: tuple[AcceptedOutputEvidence, ...] = ()
+    accepted_operation_settlement_evidence: tuple[
+        AcceptedOperationSettlementEvidence, ...
+    ] = ()
     evidence_frontier_digest: str = Field(pattern=DIGEST_PATTERN)
     accepted_continuation_proposals: frozenset[str] = Field(default_factory=frozenset)
     pending_continuation_proposals: tuple[ContinuationProposal, ...] = ()
@@ -603,6 +774,43 @@ class RunProjection(Contract):
         return self
 
 
+class UsageRecord(Contract):
+    usage_id: str = Field(min_length=1)
+    reservation_id: str = Field(min_length=1)
+    authority_ref: str | None = Field(default=None, min_length=1)
+    actual_amounts: dict[str, int]
+    release_amounts: dict[str, int] = Field(default_factory=dict)
+    pending_external_amounts: dict[str, int] = Field(default_factory=dict)
+
+
+class UsageSettlementRecord(Contract):
+    settlement_id: str = Field(min_length=1)
+    usage_id: str = Field(min_length=1)
+    reservation_id: str = Field(min_length=1)
+    authority_ref: str | None = Field(default=None, min_length=1)
+    settled_amounts: dict[str, int]
+    released_amounts: dict[str, int] = Field(default_factory=dict)
+    source_pending_amounts: dict[str, int] = Field(default_factory=dict)
+    provenance_digest: str = Field(pattern=DIGEST_PATTERN)
+
+    @model_validator(mode="after")
+    def provenance_is_exact(self) -> UsageSettlementRecord:
+        expected = sha256_digest(
+            {
+                "settlement_id": self.settlement_id,
+                "usage_id": self.usage_id,
+                "reservation_id": self.reservation_id,
+                "authority_ref": self.authority_ref,
+                "settled_amounts": self.settled_amounts,
+                "released_amounts": self.released_amounts,
+                "source_pending_amounts": self.source_pending_amounts,
+            }
+        )
+        if self.provenance_digest != expected:
+            raise ValueError("usage settlement provenance digest mismatch")
+        return self
+
+
 class BudgetState(Contract):
     schema_version: Literal["1"] = "1"
     account_id: str
@@ -615,6 +823,10 @@ class BudgetState(Contract):
     reservations: dict[str, dict[str, int]] = Field(default_factory=dict)
     usage_ids: frozenset[str] = Field(default_factory=frozenset)
     settlement_ids: frozenset[str] = Field(default_factory=frozenset)
+    usage_records: dict[str, UsageRecord] = Field(default_factory=dict)
+    usage_settlements: dict[str, UsageSettlementRecord] = Field(default_factory=dict)
+    outstanding_usage_ids: frozenset[str] = Field(default_factory=frozenset)
+    usage_settlement_effect_refs: dict[str, str] = Field(default_factory=dict)
 
 
 class BudgetLedgerEntry(Contract):

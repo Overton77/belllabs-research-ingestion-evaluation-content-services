@@ -14,12 +14,21 @@ from app.domain.operation_execution.journal import (
     OperationTechnicalAttempt,
 )
 from app.domain.run_control.contracts import (
+    ApplyAuthorityBatchAction,
     BudgetLedgerEntry,
     BudgetState,
+    ClaimEffectAction,
     CommandResult,
+    CommandStatus,
     DomainEventEnvelope,
+    EffectSettlementOutcome,
+    LifecycleCommand,
     LifecycleTransitionRecord,
+    RecordOperationSettlementEvidenceAction,
+    RecordUsageAction,
     RunProjection,
+    SettleEffectAction,
+    SettlePendingUsageAction,
 )
 from app.domain.run_control.errors import IdempotencyConflict, RunVersionConflict
 
@@ -34,6 +43,9 @@ class OperationJournalMutation:
     claim: OperationEffectClaim
     attempt: OperationTechnicalAttempt | None = None
     settlement: OperationJournalSettlement | None = None
+    prior_settlement: OperationJournalSettlement | None = None
+    authority_command: LifecycleCommand | None = None
+    authority_result: CommandResult | None = None
     command_result: CommandResult | None = None
     resulting_run: RunProjection | None = None
     resulting_budget: BudgetState | None = None
@@ -46,7 +58,10 @@ class OperationJournalMutation:
         if self.transition is not None:
             return f"run-transition:{self.transition.transition_id}"
         if self.settlement is not None:
-            return f"settlement:{self.settlement.settlement_id}"
+            return (
+                f"settlement:{self.settlement.settlement_id}:"
+                f"revision:{self.settlement.settlement_revision}"
+            )
         if self.attempt is not None:
             return f"attempt:{self.attempt.operation_attempt_id}"
         return f"claim:{self.claim.effect_claim_id}"
@@ -61,6 +76,9 @@ class OperationJournalMutation:
                 "claim": self.claim,
                 "attempt": self.attempt,
                 "settlement": self.settlement,
+                "prior_settlement": self.prior_settlement,
+                "authority_command": self.authority_command,
+                "authority_result": self.authority_result,
                 "command_result": self.command_result,
                 "resulting_run": self.resulting_run,
                 "resulting_budget": self.resulting_budget,
@@ -71,6 +89,24 @@ class OperationJournalMutation:
         )
 
     def validate(self) -> None:
+        for subject, value in (
+            ("claim", self.claim),
+            ("attempt", self.attempt),
+            ("settlement", self.settlement),
+            ("prior settlement", self.prior_settlement),
+            ("authority command", self.authority_command),
+            ("authority result", self.authority_result),
+        ):
+            if value is None:
+                continue
+            try:
+                validated = type(value).model_validate(
+                    value.model_dump(mode="python", warnings=False)
+                )
+            except (TypeError, ValueError) as error:
+                raise ValueError(f"{subject} failed strict revalidation") from error
+            if type(validated) is not type(value) or validated != value:
+                raise ValueError(f"{subject} failed exact reconstruction")
         if (
             self.claim.request_scope != self.request_scope
             or self.claim.belllabs_run_id != self.belllabs_run_id
@@ -84,8 +120,102 @@ class OperationJournalMutation:
         if self.settlement is not None and (
             self.settlement.request_scope != self.request_scope
             or self.settlement.effect_claim_id != self.claim.effect_claim_id
+            or self.settlement.digest_version != "complete-v2"
         ):
-            raise ValueError("settlement does not belong to the effect claim")
+            raise ValueError(
+                "new settlement must use complete-v2 digest and match the effect claim"
+            )
+        if self.prior_settlement is not None and (
+            self.settlement is None
+            or self.prior_settlement.request_scope != self.request_scope
+            or self.prior_settlement.effect_claim_id != self.claim.effect_claim_id
+            or self.prior_settlement.settlement_id != self.settlement.settlement_id
+            or self.prior_settlement.settlement_revision + 1
+            != self.settlement.settlement_revision
+            or self.prior_settlement.status != "reconciliation_required"
+        ):
+            raise ValueError("prior operation settlement proof is invalid")
+        if (
+            self.settlement is not None
+            and self.settlement.settlement_revision > 1
+            and self.prior_settlement is None
+        ):
+            raise ValueError("revised settlement requires its exact prior revision")
+        if self.settlement is not None:
+            authority = self.authority_result or self.command_result
+            expected_authority_version = (
+                self.expected_run_version
+                if self.authority_result is not None
+                else self.expected_run_version + 1
+            )
+            if (
+                authority is None
+                or authority.status != CommandStatus.ACCEPTED
+                or authority.run_id != self.belllabs_run_id
+                or authority.resulting_run_version != expected_authority_version
+                or (
+                    self.authority_result is not None
+                    and (
+                        authority.idempotency_issuer != "operation-journal"
+                        or authority.command_id
+                        != (
+                            f"operation-authority-settlement:{self.settlement.settlement_id}:"
+                            f"revision:{self.settlement.settlement_revision}"
+                        )
+                    )
+                )
+            ):
+                raise ValueError(
+                    "journal settlement must bind its exact accepted authority result"
+                )
+            if self.authority_result is not None:
+                command = self.authority_command
+                if command is None:
+                    raise ValueError(
+                        "journal-only settlement requires its exact lifecycle command"
+                    )
+                fingerprint = sha256_digest(
+                    command.model_dump(mode="json", exclude={"occurred_at"})
+                )
+                if (
+                    command.request_scope != self.request_scope
+                    or command.run_id != self.belllabs_run_id
+                    or command.command_id != authority.command_id
+                    or command.idempotency_issuer != authority.idempotency_issuer
+                    or command.expected_run_version + 1
+                    != authority.resulting_run_version
+                    or fingerprint != authority.command_fingerprint
+                ):
+                    raise ValueError(
+                        "journal authority command and accepted result do not match"
+                    )
+                self._validate_authority_action(command)
+        elif self.authority_result is not None or self.authority_command is not None:
+            command = self.authority_command
+            authority = self.authority_result
+            if command is None or authority is None:
+                raise ValueError("claim authority requires exact command and result")
+            fingerprint = sha256_digest(
+                command.model_dump(mode="json", exclude={"occurred_at"})
+            )
+            if (
+                authority.status != CommandStatus.ACCEPTED
+                or command.request_scope != self.request_scope
+                or command.run_id != self.belllabs_run_id
+                or command.command_id != authority.command_id
+                or command.idempotency_issuer != authority.idempotency_issuer
+                or command.expected_run_version + 1
+                != authority.resulting_run_version
+                or fingerprint != authority.command_fingerprint
+                or not isinstance(command.action, ClaimEffectAction)
+                or command.action.effect_id != self.claim.effect_claim_id
+                or command.action.operation_ref != self.claim.semantic_binding_id
+                or command.action.provider_idempotency_key
+                != self.claim.idempotency_key
+                or command.action.claim_payload_digest
+                != sha256_digest(self.claim.model_dump(mode="json"))
+            ):
+                raise ValueError("claim authority command or payload proof is unrelated")
         coordinated = (
             self.resulting_run,
             self.resulting_budget,
@@ -136,6 +266,146 @@ class OperationJournalMutation:
             for entry in self.ledger_entries
         ):
             raise ValueError("operation ledger entries must be caused by the effect claim")
+
+    def _validate_authority_action(self, command: LifecycleCommand) -> None:
+        assert self.settlement is not None
+        action = command.action
+        manifest_ref = self.settlement.result_manifest_ref
+        if manifest_ref is None or manifest_ref not in command.evidence_refs:
+            raise ValueError("journal authority command omits the exact result manifest")
+        if self.settlement.status == "reconciliation_required":
+            if not isinstance(action, ApplyAuthorityBatchAction):
+                raise ValueError("pending journal authority requires an authority batch")
+            pending_usage_actions = [
+                item for item in action.actions if isinstance(item, RecordUsageAction)
+            ]
+            evidence_actions = [
+                item
+                for item in action.actions
+                if isinstance(item, RecordOperationSettlementEvidenceAction)
+            ]
+            if (
+                len(action.actions) != 2
+                or len(pending_usage_actions) != 1
+                or len(evidence_actions) != 1
+            ):
+                raise ValueError("pending journal authority action is incomplete")
+            pending_usage = pending_usage_actions[0]
+            evidence = evidence_actions[0].evidence
+            if (
+                pending_usage.usage_id != self.settlement.settlement_id
+                or pending_usage.authority_ref != self.claim.semantic_binding_id
+                or pending_usage.actual_amounts != self.settlement.usage
+                or pending_usage.release_amounts != self.settlement.released_usage
+                or pending_usage.pending_external_amounts
+                != self.settlement.pending_external_usage
+                or not self.settlement.pending_external_usage
+                or evidence.settlement_id != self.settlement.settlement_id
+                or evidence.settlement_payload_digest
+                != self.settlement.settlement_digest
+                or evidence.accepted_by_authority_ref
+                != self.claim.semantic_binding_id
+            ):
+                raise ValueError("pending journal authority action is unrelated")
+            return
+        if not isinstance(action, ApplyAuthorityBatchAction):
+            raise ValueError("terminal journal settlement requires an authority batch")
+        effect_actions = [
+            item for item in action.actions if isinstance(item, SettleEffectAction)
+        ]
+        usage_actions = [
+            item
+            for item in action.actions
+            if isinstance(item, RecordUsageAction | SettlePendingUsageAction)
+        ]
+        evidence_actions = [
+            item
+            for item in action.actions
+            if isinstance(item, RecordOperationSettlementEvidenceAction)
+        ]
+        if (
+            len(action.actions) != 3
+            or len(effect_actions) != 1
+            or len(usage_actions) != 1
+            or len(evidence_actions) != 1
+        ):
+            raise ValueError(
+                "journal authority batch must bind usage, effect, and settlement evidence"
+            )
+        effect = effect_actions[0]
+        usage = usage_actions[0]
+        evidence = evidence_actions[0].evidence
+        usage_ref = (
+            usage.usage_id
+            if isinstance(usage, RecordUsageAction)
+            else usage.settlement_id
+        )
+        usage_authority = (
+            usage.authority_ref
+            if isinstance(usage, RecordUsageAction)
+            else self.claim.semantic_binding_id
+        )
+        expected_outcome = EffectSettlementOutcome(
+            "succeeded"
+            if self.settlement.status == "completed"
+            else "cancelled"
+            if self.settlement.status == "cancelled"
+            else "failed"
+        )
+        usage_matches = False
+        if isinstance(usage, RecordUsageAction):
+            usage_matches = (
+                self.prior_settlement is None
+                and usage.actual_amounts == self.settlement.usage
+                and usage.release_amounts == self.settlement.released_usage
+                and usage.pending_external_amounts
+                == self.settlement.pending_external_usage
+                and not self.settlement.pending_external_usage
+            )
+        elif self.prior_settlement is not None:
+            prior = self.prior_settlement
+            usage_matches = (
+                usage.usage_id == prior.settlement_id
+                and usage.settlement_id
+                == f"pending:{self.settlement.settlement_id}"
+                and not self.settlement.pending_external_usage
+                and {
+                    dimension: prior.usage.get(dimension, 0)
+                    + usage.actual_amounts.get(dimension, 0)
+                    for dimension in prior.usage.keys()
+                    | usage.actual_amounts.keys()
+                }
+                == self.settlement.usage
+                and {
+                    dimension: prior.released_usage.get(dimension, 0)
+                    + usage.pending_release_amounts.get(dimension, 0)
+                    for dimension in prior.released_usage.keys()
+                    | usage.pending_release_amounts.keys()
+                }
+                == self.settlement.released_usage
+                and {
+                    dimension: usage.actual_amounts.get(dimension, 0)
+                    + usage.pending_release_amounts.get(dimension, 0)
+                    for dimension in usage.actual_amounts.keys()
+                    | usage.pending_release_amounts.keys()
+                }
+                == prior.pending_external_usage
+            )
+        if (
+            effect.effect_id != self.claim.effect_claim_id
+            or effect.settlement_id != self.settlement.settlement_id
+            or effect.usage_settlement_ref != usage_ref
+            or effect.outcome != expected_outcome
+            or effect.evidence_refs != (manifest_ref,)
+            or usage_authority != self.claim.semantic_binding_id
+            or not usage_matches
+            or evidence.settlement_id != self.settlement.settlement_id
+            or evidence.settlement_payload_digest
+            != self.settlement.settlement_digest
+            or evidence.accepted_by_authority_ref
+            != self.claim.semantic_binding_id
+        ):
+            raise ValueError("journal authority batch effect or usage binding is unrelated")
 
 
 class AtomicOperationJournalRepository(Protocol):
@@ -194,16 +464,73 @@ class InMemoryAtomicOperationJournalRepository:
         self._ledger: dict[str, list[BudgetLedgerEntry]] = {}
         self._outbox: dict[str, DomainEventEnvelope] = {}
         self._mutations: dict[tuple[str, str], str] = {}
+        self._authority_proofs: dict[
+            tuple[str, str, str],
+            tuple[LifecycleCommand, CommandResult, DomainEventEnvelope],
+        ] = {}
 
     def seed_run(self, run: RunProjection, budget: BudgetState) -> None:
         self._run_versions[(run.request_scope, run.run_id)] = run.version
         self._budgets[run.run_id] = deepcopy(budget)
+
+    def seed_authority_proof(
+        self,
+        command: LifecycleCommand,
+        result: CommandResult,
+        event: DomainEventEnvelope,
+    ) -> None:
+        key = (command.run_id, command.idempotency_issuer, command.command_id)
+        self._authority_proofs[key] = (
+            deepcopy(command),
+            deepcopy(result),
+            deepcopy(event),
+        )
 
     async def commit(
         self,
         mutation: OperationJournalMutation,
     ) -> OperationClaimResult:
         mutation.validate()
+        if _is_journal_only_authority_mutation(mutation):
+            assert mutation.authority_command is not None
+            assert mutation.authority_result is not None
+            proof_key = (
+                mutation.authority_command.run_id,
+                mutation.authority_command.idempotency_issuer,
+                mutation.authority_command.command_id,
+            )
+            proof = self._authority_proofs.get(proof_key)
+            expected_event_type = (
+                "workflow_run.apply_authority_batch"
+                if isinstance(
+                    mutation.authority_command.action,
+                    ApplyAuthorityBatchAction,
+                )
+                else "workflow_run.record_usage"
+                if isinstance(mutation.authority_command.action, RecordUsageAction)
+                else "workflow_run.claim_effect"
+            )
+            if (
+                proof is None
+                or proof[0] != mutation.authority_command
+                or proof[1] != mutation.authority_result
+                or proof[2].aggregate_version
+                != mutation.authority_result.resulting_run_version
+                or proof[2].event_type != expected_event_type
+                or proof[2].payload.get("command_id")
+                != mutation.authority_command.command_id
+                or (
+                    isinstance(
+                        mutation.authority_command.action,
+                        ApplyAuthorityBatchAction,
+                    )
+                    and proof[2].payload.get("authority_batch_digest")
+                    != sha256_digest(mutation.authority_command.action)
+                )
+            ):
+                raise IdempotencyConflict(
+                    "journal settlement authority proof is missing or unrelated"
+                )
         key = (
             mutation.request_scope,
             mutation.claim.operation_contract_digest,
@@ -279,7 +606,11 @@ class InMemoryAtomicOperationJournalRepository:
 
             run_key = (mutation.request_scope, mutation.belllabs_run_id)
             current_version = self._run_versions.get(run_key, mutation.expected_run_version)
-            if current_version != mutation.expected_run_version:
+            journal_only_settlement = _is_journal_only_authority_mutation(mutation)
+            if current_version != mutation.expected_run_version and not (
+                journal_only_settlement
+                and current_version >= mutation.expected_run_version
+            ):
                 raise RunVersionConflict(
                     f"expected version {mutation.expected_run_version}, current version "
                     f"is {current_version}"
@@ -344,9 +675,26 @@ class InMemoryAtomicOperationJournalRepository:
         if mutation.settlement is not None:
             prior_settlement = self._settlements.get(claim_id)
             if prior_settlement is None:
+                if mutation.settlement.settlement_revision != 1:
+                    raise IdempotencyConflict(
+                        "initial operation settlement revision must be 1"
+                    )
                 self._settlements[claim_id] = deepcopy(mutation.settlement)
-            elif prior_settlement.settlement_digest != mutation.settlement.settlement_digest:
-                raise IdempotencyConflict("operation settlement replay conflicts")
+            elif (
+                prior_settlement.settlement_revision
+                == mutation.settlement.settlement_revision
+            ):
+                if prior_settlement.settlement_digest != mutation.settlement.settlement_digest:
+                    raise IdempotencyConflict("operation settlement replay conflicts")
+            elif (
+                prior_settlement.status == "reconciliation_required"
+                and mutation.settlement.settlement_revision
+                == prior_settlement.settlement_revision + 1
+                and mutation.prior_settlement == prior_settlement
+            ):
+                self._settlements[claim_id] = deepcopy(mutation.settlement)
+            else:
+                raise IdempotencyConflict("operation settlement revision conflicts")
             claim_status = (
                 EffectClaimStatus.RECONCILIATION_REQUIRED
                 if mutation.settlement.status == "reconciliation_required"
@@ -421,6 +769,8 @@ def _has_claim_children(mutation: OperationJournalMutation) -> bool:
         for value in (
             mutation.attempt,
             mutation.settlement,
+            mutation.authority_command,
+            mutation.authority_result,
             mutation.resulting_run,
             mutation.resulting_budget,
             mutation.transition,
@@ -445,3 +795,18 @@ def _same_claim_intent(
         "claim_mode",
     )
     return all(getattr(prior, field) == getattr(candidate, field) for field in fields)
+
+
+def _is_journal_only_authority_mutation(
+    mutation: OperationJournalMutation,
+) -> bool:
+    return (
+        mutation.authority_command is not None
+        and mutation.authority_result is not None
+        and mutation.resulting_run is None
+        and mutation.resulting_budget is None
+        and mutation.transition is None
+        and mutation.command_result is None
+        and not mutation.ledger_entries
+        and not mutation.outbox_events
+    )

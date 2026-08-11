@@ -12,6 +12,10 @@ from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
 
+from app.application.artifact_promotion import ArtifactPayloadAddress
+from app.application.journaled_operation_execution import (
+    JournaledOperationExecutionCoordinator,
+)
 from app.application.operation_execution import (
     InMemoryOperationBindingRepository,
     OperationBudgetReconciliationInProgress,
@@ -21,6 +25,7 @@ from app.application.operation_execution import (
     RunControlOperationAuthority,
     RunControlOperationBudgetAuthority,
 )
+from app.application.operation_journal import OperationJournalMutation
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import (
     DefinitionKind,
@@ -36,6 +41,7 @@ from app.domain.operation_execution.contracts import (
     ModelPolicy,
     NativeOperationExecutionPlacement,
     OperationAttemptIdentity,
+    OperationExecutionBinding,
     OperationExecutionRequest,
     OperationSettlement,
     OperationWorkflowRequest,
@@ -49,11 +55,17 @@ from app.domain.operation_execution.contracts import (
 )
 from app.domain.operation_execution.journal import OperationClaimResult, OperationEffectClaim
 from app.domain.run_control.contracts import (
+    AcceptedOutputEvidence,
     ActorContext,
     CommandResult,
     CommandStatus,
     LifecycleCommand,
+    RecordOutputEvidenceAction,
+    RunOutcome,
     RunPhase,
+    StartAction,
+    TerminalizationProposal,
+    TerminalizeAction,
 )
 from app.domain.run_control.errors import IdempotencyConflict
 from app.integrations.conformance_operation_runtime import (
@@ -71,6 +83,7 @@ from app.temporal.operation_activities import (
 )
 from app.temporal.workflow_sandbox import coordinator_workflow_runner
 from app.temporal.workflows.operation import OperationWorkflow
+from tests.test_run_control import actor, command, request, service
 
 NOW = datetime(2026, 7, 19, 20, 0, tzinfo=UTC)
 DIGEST = "sha256:" + "a" * 64
@@ -914,6 +927,256 @@ async def test_post_settlement_retry_completes_events_without_provider_reexecuti
     assert runtime.effect_count == 1
     assert len(events.events) == 1
     assert len(budget.settlements) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("pending_external", "crash_after_authority"),
+    [(False, False), (False, True), (True, False), (True, True)],
+)
+async def test_journaled_operation_settles_usage_effect_and_terminalizes(
+    pending_external: bool,
+    crash_after_authority: bool,
+) -> None:
+    class Journal:
+        def __init__(self) -> None:
+            self.mutations: list[OperationJournalMutation] = []
+            self.settlement = None
+            self.failed_revisions: set[int] = set()
+            self.claim_failed = False
+
+        async def commit(self, mutation: OperationJournalMutation) -> OperationClaimResult:
+            self.mutations.append(mutation)
+            if (
+                crash_after_authority
+                and mutation.settlement is None
+                and not self.claim_failed
+            ):
+                self.claim_failed = True
+                raise RuntimeError("crash after run-control claim authority")
+            if mutation.settlement is not None:
+                revision = mutation.settlement.settlement_revision
+                if (
+                    crash_after_authority
+                    and revision not in self.failed_revisions
+                ):
+                    self.failed_revisions.add(revision)
+                    raise RuntimeError("crash after run-control authority commit")
+                self.settlement = mutation.settlement
+            return OperationClaimResult(
+                status="acquired",
+                claim=mutation.claim,
+                reason="operation authority recorded",
+            )
+
+        async def get_settlement(
+            self, request_scope: str, effect_claim_id: str
+        ):  # type: ignore[no-untyped-def]
+            if (
+                self.settlement is not None
+                and self.settlement.request_scope == request_scope
+                and self.settlement.effect_claim_id == effect_claim_id
+            ):
+                return self.settlement
+            return None
+
+    class Results:
+        def __init__(self) -> None:
+            self.payloads: dict[str, bytes] = {}
+
+        async def stage(
+            self,
+            *,
+            artifact_id: str,
+            content: bytes,
+            content_digest: str,
+            media_type: str,
+        ) -> ArtifactPayloadAddress:
+            del media_type
+            self.payloads[artifact_id] = content
+            return ArtifactPayloadAddress(
+                object_ref=f"artifact:{artifact_id}",
+                content_digest=content_digest,
+                size_bytes=len(content),
+            )
+
+        async def retrieve(self, address: ArtifactPayloadAddress) -> bytes:
+            return self.payloads[address.object_ref.removeprefix("artifact:")]
+
+    run_service, _repository = service()
+    admitted = await run_service.admit(
+        request(request_id=f"journal-operation-settlement-{pending_external}")
+    )
+    assert admitted.run_id is not None
+    run_id = admitted.run_id
+    started = await run_service.execute(command(run_id, 1, "start-operation-run", StartAction()))
+    assert started.status == CommandStatus.ACCEPTED
+    binding = OperationExecutionBinding.model_construct(
+        binding_id="binding:journal-operation",
+        semantic_attempt_key=f"{run_id}:operation:journal:attempt:1",
+        request_fingerprint=DIGEST,
+        request_scope="tenant-1",
+        run_id=run_id,
+        operation_id="journal-operation",
+        operation_attempt=1,
+        prior_binding_id=None,
+        effective_configuration_digest=DIGEST,
+        run_control_revision=2,
+        operation_contract_ref="operation:journal@1",
+        prompt_sources=(),
+        model_policy={"provider": "test", "model": "test"},
+        tools=(),
+        mcp_servers=(),
+        skills=(),
+        plugins=(),
+        output_schema=None,
+        guardrails=(),
+        delegations=(),
+        delegation_ceiling={},
+        session_id=None,
+        agent_profile_ref={"definition_id": "agent", "revision": 1, "digest": DIGEST},
+        capability_grant={"capabilities": frozenset()},
+        workspace={
+            "namespace_id": "namespace",
+            "workspace_id": "workspace",
+            "provider": "test",
+        },
+        secret_refs=(),
+        budget_reservation_id="baseline",
+        budget_limits={"tokens.total": 20},
+        tracing_policy_ref="trace:test",
+        sensitive_data_policy_ref="sensitive:test",
+        snapshot_policy_ref="snapshot:test",
+        applied_degradations=(),
+        execution_runtime="native",
+        native_placement={"adapter_kind": "test", "placement_id": "test"},
+        deep_agent_binding=None,
+        side_effect_key="effect-key:journal-operation",
+        bound_at=NOW,
+    )
+    journal = Journal()
+    coordinator = JournaledOperationExecutionCoordinator(
+        journal=cast(Any, journal),
+        run_control=run_service,
+        results=Results(),
+        actor=actor(),
+    )
+    if crash_after_authority:
+        with pytest.raises(RuntimeError, match="claim authority"):
+            await coordinator.acquire(binding, claimed_by="worker:test")
+        advanced = await run_service.execute(
+            command(
+                run_id,
+                3,
+                "advance-after-claim-authority",
+                RecordOutputEvidenceAction(
+                    evidence=AcceptedOutputEvidence(
+                        output_ref="output:advance-after-claim-authority",
+                        evidence_digest=DIGEST,
+                        accepted_by_authority_ref="authority:lifecycle",
+                    )
+                ),
+            )
+        )
+        assert advanced.status == CommandStatus.ACCEPTED
+    acquired = await coordinator.acquire(binding, claimed_by="worker:test")
+    assert acquired.status == "acquired"
+    assert acquired.claim is not None
+    settlement = OperationSettlement(
+        settlement_id="settlement:journal-operation",
+        binding_id=binding.binding_id,
+        status="completed",
+        output_text="done",
+        usage=RuntimeUsage(
+            amounts={"tokens.total": 5},
+            pending_external_amounts=(
+                {"tokens.total": 5} if pending_external else {}
+            ),
+        ),
+        provider_run_id="provider:journal-operation",
+        settled_at=NOW,
+    )
+
+    if crash_after_authority:
+        with pytest.raises(RuntimeError, match="crash after"):
+            await coordinator.settle(
+                binding,
+                acquired.claim,
+                settlement,
+                started_at=NOW,
+            )
+    result = await coordinator.settle(
+        binding,
+        acquired.claim,
+        settlement,
+        started_at=NOW,
+    )
+
+    assert result == settlement
+    if pending_external:
+        effects = await run_service.get_effects("tenant-1", run_id)
+        assert effects.claims[acquired.claim.effect_claim_id].settlement is None
+        assert journal.settlement is not None
+        assert journal.settlement.status == "reconciliation_required"
+        if crash_after_authority:
+            with pytest.raises(RuntimeError, match="crash after"):
+                await coordinator.settle_pending_usage(
+                    binding,
+                    acquired.claim,
+                    settlement,
+                    actual_amounts={"tokens.total": 5},
+                    release_amounts={},
+                    reconciled_at=NOW,
+                )
+        await coordinator.settle_pending_usage(
+            binding,
+            acquired.claim,
+            settlement,
+            actual_amounts={"tokens.total": 5},
+            release_amounts={},
+            reconciled_at=NOW,
+        )
+    budget = await run_service.get_budget("tenant-1", run_id)
+    assert budget.consumed["tokens.total"] == (10 if pending_external else 5)
+    assert not any(budget.reserved.values())
+    expected_usage_settlement = (
+        "pending:settlement:journal-operation"
+        if pending_external
+        else "settlement:journal-operation"
+    )
+    assert expected_usage_settlement in budget.usage_settlements
+    effects = await run_service.get_effects("tenant-1", run_id)
+    assert effects.claims[acquired.claim.effect_claim_id].settlement is not None
+    projection = await run_service.get_run("tenant-1", run_id)
+    terminal = await run_service.execute(
+        command(
+            run_id,
+            projection.version,
+            "terminalize-journal-operation",
+            TerminalizeAction(
+                proposal=TerminalizationProposal(
+                    proposal_id="terminal:journal-operation",
+                    expected_run_version=projection.version,
+                    workflow_type_digest=projection.workflow_type_ref.digest,
+                    obligation_revision=projection.obligation_revision,
+                    evidence_frontier_digest=projection.evidence_frontier_digest,
+                    accepted_obligation_evidence_digest=sha256_digest([]),
+                    proposing_execution_binding_ref=binding.binding_id,
+                    required_obligations_accepted=True,
+                    valid_output_refs=(
+                        ("output:advance-after-claim-authority",)
+                        if crash_after_authority
+                        else ()
+                    ),
+                    budget_settled=True,
+                    effects_settled=True,
+                    proposed_at=NOW,
+                )
+            ),
+        )
+    )
+    assert terminal.status == CommandStatus.ACCEPTED
+    assert terminal.terminal_outcome == RunOutcome.COMPLETED
 
 
 @pytest.mark.asyncio

@@ -7,18 +7,22 @@ from datetime import datetime
 from typing import Protocol
 from uuid import NAMESPACE_URL, uuid5
 
+from pydantic import ValidationError
+
 from app.application.control_plane import ControlPlaneService
 from app.application.run_control_repository import (
     AdmissionMutation,
     CommandMutation,
     FamilyAdmissionCommit,
     RunControlRepository,
+    authority_state_digest,
 )
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.errors import ControlPlaneError
 from app.domain.run_control.contracts import (
     ActorContext,
     AdmissionDecision,
+    ApplyAuthorityBatchAction,
     BudgetLedgerEntry,
     BudgetLedgerKind,
     BudgetState,
@@ -52,13 +56,21 @@ from app.domain.run_control.family_admission import (
     FamilyMutationReceipt,
 )
 from app.domain.run_control.reducer import (
-    ACTION_PERMISSIONS,
+    ACTION_PERMISSIONS as _ACTION_PERMISSIONS,
+)
+from app.domain.run_control.reducer import (
+    LIFECYCLE_ACTION_KINDS,
     ReductionRejected,
     reduce_lifecycle,
+    required_action_permissions,
 )
 
+ACTION_PERMISSIONS = _ACTION_PERMISSIONS
 AdmissionValidator = Callable[
     [RunRequest, VerifiedRunConfiguration], Awaitable[str | None] | str | None
+]
+AuthorityBatchBindingValidator = Callable[
+    [AtomicFamilyMutation, ApplyAuthorityBatchAction], str | None
 ]
 
 REQUIRED_SHARED_BUDGET_DIMENSIONS = frozenset(
@@ -165,6 +177,9 @@ class FamilyAdmissionPolicy:
     mutation_kind: str
     required_permission: str
     allowed_action_kinds: frozenset[str]
+    allowed_batch_action_kinds: frozenset[str]
+    required_batch_action_kinds: frozenset[str]
+    batch_binding_validator: AuthorityBatchBindingValidator | None
 
 
 class FamilyAdmissionRegistry:
@@ -181,6 +196,9 @@ class FamilyAdmissionRegistry:
         mutation_kind: str,
         required_permission: str,
         allowed_action_kinds: frozenset[str],
+        allowed_batch_action_kinds: frozenset[str] = frozenset(),
+        required_batch_action_kinds: frozenset[str] = frozenset(),
+        batch_binding_validator: AuthorityBatchBindingValidator | None = None,
     ) -> None:
         if not issubclass(mutation_type, AtomicFamilyMutation):
             raise TypeError(
@@ -194,11 +212,43 @@ class FamilyAdmissionRegistry:
             raise ValueError("family mutation policy must bind exact family and mutation kinds")
         if not required_permission or not allowed_action_kinds:
             raise ValueError("family mutation policy must declare permission and allowed actions")
-        unknown_actions = allowed_action_kinds - ACTION_PERMISSIONS.keys()
+        unknown_actions = allowed_action_kinds - LIFECYCLE_ACTION_KINDS
         if unknown_actions:
             raise ValueError(
                 "family mutation policy contains unknown lifecycle actions: "
                 + ", ".join(sorted(unknown_actions))
+            )
+        batch_enabled = "apply_authority_batch" in allowed_action_kinds
+        valid_batch_actions = {
+            "record_usage",
+            "settle_pending_usage",
+            "observe_effect",
+            "settle_effect",
+            "record_obligation_evidence",
+            "record_output_evidence",
+            "record_operation_settlement_evidence",
+        }
+        unknown_batch_actions = allowed_batch_action_kinds - valid_batch_actions
+        if unknown_batch_actions:
+            raise ValueError(
+                "family mutation policy contains forbidden batch actions: "
+                + ", ".join(sorted(unknown_batch_actions))
+            )
+        if not required_batch_action_kinds <= allowed_batch_action_kinds:
+            raise ValueError("required batch actions must be a subset of allowed batch actions")
+        if batch_enabled and (
+            not allowed_batch_action_kinds or batch_binding_validator is None
+        ):
+            raise ValueError(
+                "batch-enabled family policy must bind nested actions and references"
+            )
+        if not batch_enabled and (
+            allowed_batch_action_kinds
+            or required_batch_action_kinds
+            or batch_binding_validator is not None
+        ):
+            raise ValueError(
+                "batch policy constraints require apply_authority_batch admission"
             )
         self._policies[mutation_type] = FamilyAdmissionPolicy(
             mutation_type=mutation_type,
@@ -206,22 +256,64 @@ class FamilyAdmissionRegistry:
             mutation_kind=mutation_kind,
             required_permission=required_permission,
             allowed_action_kinds=frozenset(allowed_action_kinds),
+            allowed_batch_action_kinds=frozenset(allowed_batch_action_kinds),
+            required_batch_action_kinds=frozenset(required_batch_action_kinds),
+            batch_binding_validator=batch_binding_validator,
         )
 
     def resolve(self, mutation: AtomicFamilyMutation) -> FamilyAdmissionPolicy:
+        policy, _validated = self.resolve_validated(mutation)
+        return policy
+
+    def resolve_validated(
+        self,
+        mutation: AtomicFamilyMutation,
+    ) -> tuple[FamilyAdmissionPolicy, AtomicFamilyMutation]:
         policy = self._policies.get(type(mutation))
         if policy is None:
             raise CommandRejected(
                 f"no exact family mutation registration for {type(mutation).__name__}"
             )
+        try:
+            validated = policy.mutation_type.model_validate(
+                mutation.model_dump(mode="python", warnings=False)
+            )
+        except (ValidationError, TypeError, ValueError) as error:
+            raise CommandRejected(
+                "family mutation failed strict exact-type contract revalidation"
+            ) from error
+        if type(validated) is not policy.mutation_type:
+            raise CommandRejected("family mutation validation returned a non-exact type")
         if (
-            mutation.family_kind != policy.family_kind
-            or mutation.mutation_kind != policy.mutation_kind
+            validated.family_kind != policy.family_kind
+            or validated.mutation_kind != policy.mutation_kind
         ):
             raise CommandRejected(
                 "family mutation kinds do not match their exact registered policy"
             )
-        return policy
+        return policy, validated
+
+    @staticmethod
+    def validate_batch(
+        policy: FamilyAdmissionPolicy,
+        mutation: AtomicFamilyMutation,
+        batch: ApplyAuthorityBatchAction,
+    ) -> None:
+        actual_kinds = frozenset(action.kind for action in batch.actions)
+        if not actual_kinds <= policy.allowed_batch_action_kinds:
+            raise CommandRejected(
+                "authority batch contains actions outside the family mutation policy"
+            )
+        if not policy.required_batch_action_kinds <= actual_kinds:
+            raise CommandRejected(
+                "authority batch omits actions required by the family mutation policy"
+            )
+        validator = policy.batch_binding_validator
+        if validator is None:
+            raise CommandRejected("family mutation policy has no authority batch binding")
+        reason = validator(mutation, batch)
+        if reason is not None:
+            raise CommandRejected(f"family mutation authority batch binding failed: {reason}")
 
 
 class RunControlService:
@@ -415,9 +507,14 @@ class RunControlService:
         )
 
     async def _execute_once(self, command: LifecycleCommand) -> CommandResult:
-        required_permission = ACTION_PERMISSIONS[command.action.kind]
-        if required_permission not in command.actor.permissions:
-            raise CommandRejected(f"actor lacks {required_permission} permission")
+        command = self._validated_lifecycle_command(command)
+        try:
+            required_permissions = required_action_permissions(command.action)
+        except ValueError as error:
+            raise CommandRejected(str(error)) from error
+        for required_permission in sorted(required_permissions):
+            if required_permission not in command.actor.permissions:
+                raise CommandRejected(f"actor lacks {required_permission} permission")
         fingerprint = _fingerprint(command, exclude={"occurred_at"})
         prior = await self._repository.get_command_result(
             command.request_scope,
@@ -465,8 +562,8 @@ class RunControlService:
             result=reduction.result,
             request_scope=command.request_scope,
             expected_version=projection.version,
-            expected_budget_digest=_fingerprint(budget, exclude=set()),
-            expected_effects_digest=_fingerprint(effects, exclude=set()),
+            expected_budget_digest=authority_state_digest(budget),
+            expected_effects_digest=authority_state_digest(effects),
             projection=reduction.projection,
             budget=reduction.budget,
             effects=reduction.effects,
@@ -527,15 +624,28 @@ class RunControlService:
         command: LifecycleCommand,
         family_mutation: AtomicFamilyMutation,
     ) -> FamilyAdmissionReceipt:
-        policy = self._family_admissions.resolve(family_mutation)
-        action_permission = ACTION_PERMISSIONS[command.action.kind]
-        if action_permission not in command.actor.permissions:
-            raise CommandRejected(f"actor lacks {action_permission} permission")
+        command = self._validated_lifecycle_command(command)
+        policy, family_mutation = self._family_admissions.resolve_validated(
+            family_mutation
+        )
+        try:
+            action_permissions = required_action_permissions(command.action)
+        except ValueError as error:
+            raise CommandRejected(str(error)) from error
+        for action_permission in sorted(action_permissions):
+            if action_permission not in command.actor.permissions:
+                raise CommandRejected(f"actor lacks {action_permission} permission")
         if policy.required_permission not in command.actor.permissions:
             raise CommandRejected(f"actor lacks {policy.required_permission} permission")
         if command.action.kind not in policy.allowed_action_kinds:
             raise CommandRejected(
                 f"lifecycle action {command.action.kind} is not allowed for family admission"
+            )
+        if isinstance(command.action, ApplyAuthorityBatchAction):
+            self._family_admissions.validate_batch(
+                policy,
+                family_mutation,
+                command.action,
             )
         if (
             family_mutation.request_scope != command.request_scope
@@ -567,8 +677,8 @@ class RunControlService:
         projection = await self._repository.get_run(command.request_scope, command.run_id)
         budget = await self._repository.get_budget(command.request_scope, command.run_id)
         effects = await self._repository.get_effects(command.request_scope, command.run_id)
-        budget_digest = _fingerprint(budget, exclude=set())
-        effects_digest = _fingerprint(effects, exclude=set())
+        budget_digest = authority_state_digest(budget)
+        effects_digest = authority_state_digest(effects)
         if command.expected_run_version != projection.version:
             result = self._non_transition_result(
                 command,
@@ -661,8 +771,33 @@ class RunControlService:
             )
         )
 
+    @staticmethod
+    def _validated_lifecycle_command(command: LifecycleCommand) -> LifecycleCommand:
+        try:
+            return LifecycleCommand.model_validate(
+                command.model_dump(mode="python", warnings=False)
+            )
+        except (ValidationError, TypeError, ValueError) as error:
+            raise CommandRejected(
+                "lifecycle command failed strict contract revalidation"
+            ) from error
+
     async def get_run(self, request_scope: str, run_id: str) -> RunProjection:
         return await self._repository.get_run(request_scope, run_id)
+
+    async def get_command_result(
+        self,
+        request_scope: str,
+        run_id: str,
+        idempotency_issuer: str,
+        command_id: str,
+    ) -> CommandResult | None:
+        return await self._repository.get_command_result(
+            request_scope,
+            run_id,
+            idempotency_issuer,
+            command_id,
+        )
 
     async def get_budget(self, request_scope: str, run_id: str) -> BudgetState:
         return await self._repository.get_budget(request_scope, run_id)
@@ -763,8 +898,8 @@ class RunControlService:
                 result=result,
                 request_scope=command.request_scope,
                 expected_version=projection.version,
-                expected_budget_digest=_fingerprint(budget, exclude=set()),
-                expected_effects_digest=_fingerprint(effects, exclude=set()),
+                expected_budget_digest=authority_state_digest(budget),
+                expected_effects_digest=authority_state_digest(effects),
             )
         )
 

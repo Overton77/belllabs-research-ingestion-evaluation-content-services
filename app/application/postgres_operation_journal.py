@@ -7,7 +7,11 @@ from typing import Any
 
 import asyncpg
 
-from app.application.operation_journal import OperationJournalMutation
+from app.application.operation_journal import (
+    OperationJournalMutation,
+    _is_journal_only_authority_mutation,
+)
+from app.domain.control_plane.canonical import sha256_digest
 from app.domain.operation_execution.journal import (
     OperationClaimResult,
     OperationEffectClaim,
@@ -15,7 +19,13 @@ from app.domain.operation_execution.journal import (
     OperationTechnicalAttempt,
 )
 from app.domain.run_control.budget import roll_up_child_budget
-from app.domain.run_control.contracts import BudgetLedgerEntry, BudgetState, RunProjection
+from app.domain.run_control.contracts import (
+    ApplyAuthorityBatchAction,
+    BudgetLedgerEntry,
+    BudgetState,
+    RecordUsageAction,
+    RunProjection,
+)
 from app.domain.run_control.errors import (
     IdempotencyConflict,
     RunControlNotFound,
@@ -92,11 +102,83 @@ class PostgresAtomicOperationJournalRepository:
             )
             if run_row is None:
                 raise RunControlNotFound(f"workflow run not found: {mutation.belllabs_run_id}")
-            if run_row["version"] != mutation.expected_run_version:
+            journal_only_settlement = _is_journal_only_authority_mutation(mutation)
+            if run_row["version"] != mutation.expected_run_version and not (
+                journal_only_settlement
+                and run_row["version"] >= mutation.expected_run_version
+            ):
                 raise RunVersionConflict(
                     f"expected version {mutation.expected_run_version}, "
                     f"current version is {run_row['version']}"
                 )
+            if journal_only_settlement:
+                assert mutation.authority_result is not None
+                assert mutation.authority_command is not None
+                persisted_authority = await connection.fetchrow(
+                    """
+                    SELECT command_fingerprint, result
+                    FROM belllabs_control.lifecycle_command_results
+                    WHERE run_id = $1 AND idempotency_issuer = $2 AND command_id = $3
+                    """,
+                    mutation.authority_result.run_id,
+                    mutation.authority_result.idempotency_issuer,
+                    mutation.authority_result.command_id,
+                )
+                if (
+                    persisted_authority is None
+                    or persisted_authority["command_fingerprint"]
+                    != mutation.authority_result.command_fingerprint
+                    or _json(persisted_authority["result"])
+                    != mutation.authority_result.model_dump(mode="json")
+                ):
+                    raise IdempotencyConflict(
+                        "journal settlement authority result is missing or unrelated"
+                    )
+                authority_evidence = await connection.fetchrow(
+                    """
+                    SELECT transition->>'command_id' AS transition_command_id,
+                           outbox.event_type,
+                           outbox.envelope
+                    FROM belllabs_control.lifecycle_transitions AS transitions
+                    JOIN belllabs_control.outbox AS outbox
+                      ON outbox.aggregate_id = transitions.run_id
+                     AND outbox.aggregate_version = transitions.resulting_version
+                     AND outbox.sequence = 1
+                    WHERE transitions.run_id = $1
+                      AND transitions.resulting_version = $2
+                    """,
+                    mutation.authority_result.run_id,
+                    mutation.authority_result.resulting_run_version,
+                )
+                action = mutation.authority_command.action
+                expected_event_type = (
+                    "workflow_run.apply_authority_batch"
+                    if isinstance(action, ApplyAuthorityBatchAction)
+                    else "workflow_run.record_usage"
+                    if isinstance(action, RecordUsageAction)
+                    else "workflow_run.claim_effect"
+                )
+                envelope = (
+                    _json(authority_evidence["envelope"])
+                    if authority_evidence is not None
+                    else {}
+                )
+                if (
+                    authority_evidence is None
+                    or authority_evidence["transition_command_id"]
+                    != mutation.authority_command.command_id
+                    or authority_evidence["event_type"] != expected_event_type
+                    or envelope.get("payload", {}).get("command_id")
+                    != mutation.authority_command.command_id
+                    or (
+                        isinstance(action, ApplyAuthorityBatchAction)
+                        and envelope.get("payload", {}).get("authority_batch_digest")
+                        != sha256_digest(action)
+                    )
+                ):
+                    raise IdempotencyConflict(
+                        "journal settlement authority transition or event is unrelated"
+                    )
             prior_row = await connection.fetchrow(
                 """
                 SELECT *
@@ -376,6 +458,38 @@ class PostgresAtomicOperationJournalRepository:
         settlement = mutation.settlement
         if settlement is None:
             return
+        latest_payload = await connection.fetchval(
+            """
+            SELECT settlement_payload
+            FROM belllabs_control.operation_settlements
+            WHERE request_scope = $1 AND effect_claim_id = $2
+            ORDER BY settlement_revision DESC
+            LIMIT 1
+            """,
+            settlement.request_scope,
+            settlement.effect_claim_id,
+        )
+        latest = (
+            OperationJournalSettlement.model_validate(_json(latest_payload))
+            if latest_payload is not None
+            else None
+        )
+        if latest is None and settlement.settlement_revision != 1:
+            raise IdempotencyConflict("initial operation settlement revision must be 1")
+        if latest is not None:
+            if settlement.settlement_revision == latest.settlement_revision:
+                if settlement.settlement_digest != latest.settlement_digest:
+                    raise IdempotencyConflict("operation settlement replay conflicts")
+                return
+            if (
+                latest.status != "reconciliation_required"
+                or settlement.settlement_revision != latest.settlement_revision + 1
+                or settlement.settlement_id != latest.settlement_id
+                or settlement.request_scope != latest.request_scope
+                or settlement.effect_claim_id != latest.effect_claim_id
+                or mutation.prior_settlement != latest
+            ):
+                raise IdempotencyConflict("operation settlement revision chain conflicts")
         prior = await connection.fetchrow(
             """
             SELECT settlement_id, settlement_digest
@@ -688,6 +802,8 @@ def _has_claim_children(mutation: OperationJournalMutation) -> bool:
         for value in (
             mutation.attempt,
             mutation.settlement,
+            mutation.authority_command,
+            mutation.authority_result,
             mutation.resulting_run,
             mutation.resulting_budget,
             mutation.transition,
