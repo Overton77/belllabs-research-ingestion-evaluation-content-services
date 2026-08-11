@@ -20,13 +20,7 @@ from app.domain.control_plane.contracts import (
 from app.domain.orchestration.bindings import RunSemanticInputBinding
 from app.domain.orchestration.contracts import (
     GoalDirectedRunInput,
-    GoalExecutionClaim,
-    GoalExecutionResult,
-    GoalHandoffRequest,
-    GoalHandoffResult,
     GoalRevision,
-    GoalVerificationRequest,
-    GoalVerificationResult,
     LifecycleCommandOutcome,
     LifecycleCommandRequest,
     StageGraphRunInput,
@@ -191,17 +185,29 @@ class GoalDirectedLaunchService:
         if blueprint_ref is None or blueprint_ref.digest != sha256_digest(blueprint):
             raise ValueError("exact GoalDirected reference does not match the frozen blueprint")
         budget = await self._run_control.get_budget(request_scope, run_id)
-        protected_scope_digest = sha256_digest(
+        envelope_digest = sha256_digest(
             {
                 "initial_goal": initial_goal,
                 "objective_contract": blueprint.objective_contract,
                 "acceptance_contract": blueprint.acceptance_contract,
                 "workflow_invariants": configuration.workflow_type.invariants,
                 "admitted_input_manifest": configuration.input_manifest,
+                "admitted_input_classes": blueprint.admitted_input_classes,
                 "effective_authority": configuration.effective_authority,
+                "blueprint_authority_ceiling": blueprint.authority_ceiling,
                 "budget_limits": budget.limits,
-                "prohibited_work": configuration.workflow_type.non_goals,
+                "prohibited_work": blueprint.prohibited_work,
+                "required_output_contracts": blueprint.required_output_contracts,
+                "required_obligation_refs": blueprint.required_obligation_refs,
                 "allowed_operation_classes": blueprint.allowed_operation_classes,
+                "allowed_async_subgoal_classes": blueprint.allowed_async_subgoal_classes,
+                "allowed_linked_run_slot_ids": blueprint.allowed_linked_run_slot_ids,
+                "verifier_policy": blueprint.verifier_policy,
+                "session_policy": blueprint.session_policy,
+                "handoff_policy": blueprint.handoff_policy,
+                "workspace_policy": blueprint.workspace_policy,
+                "convergence_policy": blueprint.convergence_policy,
+                "max_iterations": blueprint.max_iterations,
                 "protected_fields": blueprint.protected_scope_policy.protected_fields,
             }
         )
@@ -211,18 +217,40 @@ class GoalDirectedLaunchService:
                 "execution_epoch": execution_epoch,
                 "revision": 1,
                 "objective": initial_goal,
-                "protected_scope_digest": protected_scope_digest,
+                "envelope_digest": envelope_digest,
+            }
+        )
+        revision_digest = sha256_digest(
+            {
+            "schema_version": "belllabs.goal-revision.v1",
+            "revision_id": initial_revision_id,
+            "revision": 1,
+            "parent_revision_id": None,
+            "envelope_digest": envelope_digest,
+            "objective": initial_goal,
+            "tactical_changes": (),
+            "evidence_refs": (configuration.input_manifest.digest,),
+            "unmet_obligations": tuple(sorted(projection.required_obligation_refs)),
+            "proposer": "application:goal-launch",
+            "deciding_authority": orchestration_authority_ref,
+            "applicability": "remaining_run",
+            "tactics": (),
+            "subgoals": (),
+            "coverage_emphasis": (),
             }
         )
         initial_revision = GoalRevision(
+            schema_version="belllabs.goal-revision.v1",
             revision_id=initial_revision_id,
             revision=1,
             parent_revision_id=None,
-            protected_scope_digest=protected_scope_digest,
+            canonical_digest=revision_digest,
+            envelope_digest=envelope_digest,
             objective=initial_goal,
+            tactical_changes=(),
             evidence_refs=(configuration.input_manifest.digest,),
             unmet_obligations=tuple(sorted(projection.required_obligation_refs)),
-            author="application:goal-launch",
+            proposer="application:goal-launch",
             deciding_authority=orchestration_authority_ref,
             applicability="remaining_run",
         )
@@ -232,7 +260,7 @@ class GoalDirectedLaunchService:
             effective_configuration_digest=configuration.digest,
             blueprint_digest=blueprint_ref.digest,
             blueprint=blueprint.model_dump(mode="json"),
-            protected_scope_digest=protected_scope_digest,
+            envelope_digest=envelope_digest,
             initial_revision=initial_revision,
             initial_run_version=projection.version,
             execution_epoch=execution_epoch,
@@ -241,6 +269,9 @@ class GoalDirectedLaunchService:
             correlation_id=f"orchestration:{run_id}:epoch:{execution_epoch}",
             baseline_reservation=dict(budget.reservations.get("baseline", {})),
             required_obligation_refs=tuple(sorted(projection.required_obligation_refs)),
+            required_output_contract_refs=tuple(
+                sorted(configuration.workflow_type.output_contracts)
+            ),
             semantic_input_binding_ref=semantic_input_binding_ref,
         )
 
@@ -346,18 +377,6 @@ class StageOperationExecutor(Protocol):
     """F4 seam for bounded runtime execution; issue 3 uses explicit fakes."""
 
     async def execute(self, request: StageOperationRequest) -> StageOperationResult: ...
-
-
-class GoalIterationExecutor(Protocol):
-    async def execute(self, claim: GoalExecutionClaim) -> GoalExecutionResult: ...
-
-
-class GoalHandoffPreparer(Protocol):
-    async def prepare(self, request: GoalHandoffRequest) -> GoalHandoffResult: ...
-
-
-class GoalIndependentVerifier(Protocol):
-    async def verify(self, request: GoalVerificationRequest) -> GoalVerificationResult: ...
 
 
 class WorkflowEvaluator(Protocol):

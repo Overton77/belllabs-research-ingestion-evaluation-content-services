@@ -12,7 +12,11 @@ from app.domain.control_plane.contracts import (
     EvaluationProfileDefinition,
     ExactDefinitionRef,
     ExtensionIdentity,
+    GoalConvergencePolicy,
     GoalDirectedBlueprint,
+    GoalHandoffPolicy,
+    GoalSessionRolloverPolicy,
+    GoalVerifierPolicy,
     LinkedRunSlotConstraint,
     ModelPolicy,
     NamespacedExtension,
@@ -700,6 +704,61 @@ def _reconciliation_goal_blueprint() -> GoalDirectedBlueprint:
         ),
         objective_contract="objective:supporting-graph-reconciliation:v1",
         acceptance_contract="evaluation:supporting-graph-reconciliation:v1",
+        admitted_input_classes=frozenset({"schema-context", "graph-capability"}),
+        authority_ceiling=AuthorityCeiling(
+            capabilities=frozenset(
+                {
+                    "capability:bounded-neo4j-read:v1",
+                    "capability:schema-reconciliation:v1",
+                }
+            ),
+            budgets=SHARED_BUDGETS,
+            max_concurrency=2,
+        ),
+        prohibited_work=frozenset(
+            {"graph mutation", "schema authoring", "arbitrary cypher"}
+        ),
+        required_output_contracts=frozenset(
+            {"schema:supporting-graph-reconciliation-record:v1"}
+        ),
+        required_obligation_refs=frozenset(
+            {
+                "obligation:schema-context-derived:v1",
+                "obligation:graph-gate-admitted:v1",
+                "obligation:bounded-query-evidence:v1",
+            }
+        ),
+        verifier_policy=GoalVerifierPolicy(
+            operation_class="independent_reconciliation_verifier",
+            binding_ref="verifier:supporting-graph-reconciliation@1",
+            rubric_ref="rubric:supporting-graph-reconciliation@1",
+            rubric_version=1,
+            acceptance_version=1,
+            output_contract_ref="schema:supporting-graph-reconciliation-record:v1",
+        ),
+        allowed_operation_classes=frozenset({"supporting_graph_reconciliation"}),
+        allowed_async_subgoal_classes=frozenset({"bounded_evidence_lookup"}),
+        allowed_linked_run_slot_ids=frozenset({"schema_context_selection"}),
+        session_policy=GoalSessionRolloverPolicy(
+            context_selection_policy_ref="context-selection:goal-reconciliation@1",
+            context_compaction_policy_ref="context-compaction:goal-reconciliation@1",
+            protected_fact_classes=frozenset(
+                {"objective", "acceptance", "invariants", "obligations"}
+            ),
+            max_rollovers=4,
+            compaction_failure_action="fresh_from_handoff",
+        ),
+        handoff_policy=GoalHandoffPolicy(
+            max_instruction_bytes=16_384,
+            allowed_workspace_ref_classes=frozenset({"goal-workspace"}),
+            allowed_snapshot_ref_classes=frozenset({"goal-snapshot"}),
+        ),
+        convergence_policy=GoalConvergencePolicy(
+            authority_breach_action="fail",
+            no_progress_action="revise",
+            repeated_blocker_action="escalate",
+            soft_budget_action="reduce_effort",
+        ),
         max_iterations=12,
         variant_names=frozenset({"required-seed-intents"}),
     )

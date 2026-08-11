@@ -8,6 +8,7 @@ from app.application.coordinator_launch import CoordinatorWorkflowLaunchService
 from app.application.coordinator_semantic_bindings import (
     WorkflowSemanticBindingProviderRouter,
 )
+from app.application.goal_directed import InMemoryGoalOperationTemplateRepository
 from app.application.operation_execution import InMemoryOperationBindingRepository
 from app.application.orchestration_binding_repository import (
     InMemoryRunSemanticInputBindingRepository,
@@ -246,11 +247,15 @@ async def _supporting_graph_provider(
             minimum_successful_intents=1,
             handoff_instructions="Resume only from immutable graph evidence.",
             operation_bindings=SemanticOperationBindingTemplates(
-                operations={"goal_iteration": _operation_template("goal_iteration")}
+                operations={
+                    "goal_executor": _operation_template("goal_executor"),
+                    "goal_verifier": _operation_template("goal_verifier"),
+                }
             ),
             created_at=NOW,
         ),
         SemanticOperationExecutionBindingService(operation_repository),
+        InMemoryGoalOperationTemplateRepository(),
     )
 
 
@@ -263,7 +268,7 @@ async def _supporting_graph_provider(
             "run-full-chain-a",
             {"semantic_selector", "independent_reviewer"},
         ),
-        ("GoalDirected", "run-full-chain-c", {"goal_iteration"}),
+        ("GoalDirected", "run-full-chain-c", {"goal_executor", "goal_verifier"}),
     ),
 )
 async def test_full_coordinator_chain_freezes_real_oebs_before_dispatch(

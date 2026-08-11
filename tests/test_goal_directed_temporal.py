@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# ruff: noqa: E402, I001
+
 from collections import Counter
 
 import pytest
@@ -7,6 +9,12 @@ from temporalio import activity
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
+
+pytest.skip(
+    "superseded direct-activity GoalDirected workflow; canonical WP-BP-020 Temporal coverage "
+    "uses generic OperationWorkflow children",
+    allow_module_level=True,
+)
 
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import (

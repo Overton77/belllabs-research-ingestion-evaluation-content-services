@@ -2,16 +2,13 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field
 
-from app.application.orchestration_routing import SemanticHandlerRegistry, SemanticRoutingError
-from app.application.schema_grounding_repository import SchemaGroundingRecordRepository
+from app.application.goal_directed import GoalOperationTemplateRepository
+from app.application.orchestration_routing import SemanticRoutingError
 from app.application.semantic_operation_bindings import (
     SemanticOperationBindingTemplates,
     SemanticOperationExecutionBindingService,
-)
-from app.application.supporting_graph_reconciliation import (
-    SupportingGraphReconciliationWorkflow,
 )
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import (
@@ -30,15 +27,6 @@ from app.domain.orchestration.bindings import (
     SemanticHandlerBinding,
     SemanticInputPayload,
 )
-from app.domain.orchestration.contracts import (
-    GoalExecutionClaim,
-    GoalExecutionResult,
-    GoalHandoffCheckpoint,
-    GoalHandoffRequest,
-    GoalHandoffResult,
-    GoalVerificationRequest,
-    GoalVerificationResult,
-)
 from app.domain.schema_context.contracts import GraphReconciliationEvidence
 from app.domain.schema_grounding.contracts import (
     SupportingGraphReconciliationRecord,
@@ -49,27 +37,6 @@ SUPPORTING_GRAPH_ITERATION_HANDLER = "schema-grounding.reconcile"
 SUPPORTING_GRAPH_VERIFIER_HANDLER = "schema-grounding.verify-reconciliation"
 SUPPORTING_GRAPH_HANDOFF_HANDLER = "schema-grounding.reconciliation-handoff"
 SUPPORTING_GRAPH_HANDLER_REVISION = 1
-
-
-class SupportingGraphIterationInput(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    request: SupportingGraphReconciliationRequest
-    evidence: GraphReconciliationEvidence | None = None
-
-
-class SupportingGraphVerificationInput(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    reconciliation_id: str = Field(min_length=1)
-    acceptance_contract_ref: str = Field(min_length=1)
-    minimum_successful_intents: int = Field(default=1, ge=1)
-
-
-class SupportingGraphHandoffInput(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    instructions: str = Field(min_length=1)
 
 
 class SupportingGraphBindingPlanInput(BaseModel):
@@ -85,162 +52,6 @@ class SupportingGraphBindingPlanInput(BaseModel):
     created_at: datetime
 
 
-ITERATION_INPUT_ADAPTER = TypeAdapter(SupportingGraphIterationInput)
-VERIFICATION_INPUT_ADAPTER = TypeAdapter(SupportingGraphVerificationInput)
-HANDOFF_INPUT_ADAPTER = TypeAdapter(SupportingGraphHandoffInput)
-
-
-class SupportingGraphGoalIterationHandler:
-    """Execute the application-owned bounded reconciliation service for one claim."""
-
-    def __init__(self, workflow: SupportingGraphReconciliationWorkflow) -> None:
-        self._workflow = workflow
-
-    async def execute(
-        self,
-        claim: GoalExecutionClaim,
-        binding: SemanticHandlerBinding,
-    ) -> GoalExecutionResult:
-        value = binding.input.decode(ITERATION_INPUT_ADAPTER)
-        request = value.request
-        if (
-            request.request_scope != claim.request_scope
-            or request.run_id != claim.identity.iteration.run_id
-        ):
-            raise SemanticRoutingError(
-                "supporting-graph request is outside the active GoalDirected run"
-            )
-        record = await self._workflow.run(request, evidence=value.evidence)
-        output_ref = supporting_graph_result_ref(record)
-        if record.status == "completed":
-            return GoalExecutionResult(
-                identity=claim.identity,
-                disposition="completed",
-                output_refs=(output_ref,),
-                completion_claim=True,
-                actual_usage={"graph.reads": len(record.intent_result_references)},
-                output_contract_ref=binding.output_contract_ref,
-            )
-        if record.status == "rejected":
-            return GoalExecutionResult(
-                identity=claim.identity,
-                disposition="failed",
-                output_refs=(output_ref,),
-                authority_breach_ref=(
-                    "schema-grounding:admission:"
-                    + (record.admission_decision.failure_code or "rejected")
-                ),
-                output_contract_ref=binding.output_contract_ref,
-            )
-        return GoalExecutionResult(
-            identity=claim.identity,
-            disposition="failed",
-            output_refs=(output_ref,),
-            irrecoverable_failure_ref=(
-                f"schema-grounding:reconciliation-failed:{record.reconciliation_id}"
-            ),
-            output_contract_ref=binding.output_contract_ref,
-        )
-
-
-class SupportingGraphGoalVerifier:
-    """Independently rehydrate and verify the immutable reconciliation record."""
-
-    def __init__(self, records: SchemaGroundingRecordRepository) -> None:
-        self._records = records
-
-    async def verify(
-        self,
-        request: GoalVerificationRequest,
-        binding: SemanticHandlerBinding,
-    ) -> GoalVerificationResult:
-        value = binding.input.decode(VERIFICATION_INPUT_ADAPTER)
-        if value.acceptance_contract_ref != request.acceptance_contract_ref:
-            raise SemanticRoutingError(
-                "supporting-graph verifier input does not match the frozen acceptance contract"
-            )
-        envelope = await self._records.get(
-            request.claim.request_scope,
-            "reconciliation",
-            value.reconciliation_id,
-        )
-        record = SupportingGraphReconciliationRecord.model_validate(envelope.payload)
-        expected_ref = supporting_graph_result_ref(record)
-        evidence_bound = (
-            expected_ref in request.execution_result.output_refs
-            and envelope.run_id == request.claim.identity.iteration.run_id
-            and record.run_id == request.claim.identity.iteration.run_id
-        )
-        completed = (
-            evidence_bound
-            and record.status == "completed"
-            and record.successful_count >= value.minimum_successful_intents
-            and record.failed_count == 0
-            and record.rejected_count == 0
-            and record.evidence is not None
-            and record.evidence.intent_result_references == record.intent_result_references
-        )
-        return GoalVerificationResult(
-            identity=request.claim.identity,
-            action="verified_completion" if completed else "repair",
-            verification_ref=(
-                "verification:supporting-graph:"
-                + sha256_digest(
-                    {
-                        "record": record,
-                        "expected_ref": expected_ref,
-                        "acceptance_contract_ref": value.acceptance_contract_ref,
-                    }
-                ).removeprefix("sha256:")
-            ),
-            verifier_ref=request.verifier_ref,
-            acceptance_contract_ref=request.acceptance_contract_ref,
-            progress_made=record.successful_count > 0,
-            evidence_refs=(expected_ref,) if evidence_bound else (),
-            unmet_obligations=(() if completed else ("verified-supporting-graph-reconciliation",)),
-            output_contract_ref=binding.output_contract_ref,
-        )
-
-
-class SupportingGraphGoalHandoffHandler:
-    """Create a deterministic continuation checkpoint from accepted run facts."""
-
-    async def prepare(
-        self,
-        request: GoalHandoffRequest,
-        binding: SemanticHandlerBinding,
-    ) -> GoalHandoffResult:
-        value = binding.input.decode(HANDOFF_INPUT_ADAPTER)
-        checkpoint = GoalHandoffCheckpoint(
-            checkpoint_id=(
-                "checkpoint:supporting-graph:"
-                + sha256_digest(
-                    {
-                        "semantic_key": request.claim.identity.semantic_key,
-                        "verification_ref": request.verification_ref,
-                        "fallback": request.fallback,
-                    }
-                ).removeprefix("sha256:")
-            ),
-            agent_run_identity=request.claim.identity,
-            goal_revision_id=request.claim.identity.iteration.goal_revision_id,
-            protected_scope_digest=request.protected_scope_digest,
-            instructions=(
-                value.instructions
-                if not request.fallback
-                else "System fallback. " + value.instructions
-            ),
-            state_refs=request.execution_result.output_refs,
-            artifact_refs=request.execution_result.output_refs,
-            workspace_ref=request.claim.workspace_namespace,
-        )
-        return GoalHandoffResult(
-            checkpoint=checkpoint,
-            fallback_used=request.fallback,
-            output_contract_ref=binding.output_contract_ref,
-        )
-
-
 class SupportingGraphSemanticBindingProvider:
     """Freeze and author the exact GoalDirected Scenario C semantic authority."""
 
@@ -248,9 +59,11 @@ class SupportingGraphSemanticBindingProvider:
         self,
         inputs: SupportingGraphBindingPlanInput,
         operation_bindings: SemanticOperationExecutionBindingService,
+        operation_templates: GoalOperationTemplateRepository,
     ) -> None:
         self._inputs = inputs
         self._operation_bindings = operation_bindings
+        self._operation_templates = operation_templates
 
     async def prepare(
         self,
@@ -276,10 +89,13 @@ class SupportingGraphSemanticBindingProvider:
                 "supporting-graph binding inputs belong to a different request scope"
             )
         request = self._inputs.request
-        if set(self._inputs.operation_bindings.operations) != {"goal_iteration"}:
+        if set(self._inputs.operation_bindings.operations) != {
+            "goal_executor",
+            "goal_verifier",
+        }:
             raise SemanticRoutingError(
-                "supporting-graph model-backed iteration requires one exact "
-                "Operation Execution Binding template"
+                "supporting-graph GoalDirected execution requires exact executor and "
+                "independent-verifier Operation Execution Request templates"
             )
         exact_refs: tuple[str, ...] = (
             (
@@ -359,7 +175,7 @@ class SupportingGraphSemanticBindingProvider:
             run_id=run_id,
             bound_at=inputs.created_at,
         )
-        return build_supporting_graph_run_binding(
+        binding = build_supporting_graph_run_binding(
             request=request,
             effective_configuration_digest=ticket.effective_configuration_digest,
             blueprint_digest=ticket.blueprint_ref.digest,
@@ -370,29 +186,14 @@ class SupportingGraphSemanticBindingProvider:
             handoff_instructions=inputs.handoff_instructions,
             operation_execution_binding_refs=operation_binding_refs,
         )
-
-
-def register_supporting_graph_goal_handlers(
-    registry: SemanticHandlerRegistry,
-    *,
-    workflow: SupportingGraphReconciliationWorkflow,
-    records: SchemaGroundingRecordRepository,
-) -> None:
-    registry.register_goal_iteration(
-        SUPPORTING_GRAPH_ITERATION_HANDLER,
-        SUPPORTING_GRAPH_HANDLER_REVISION,
-        SupportingGraphGoalIterationHandler(workflow),
-    )
-    registry.register_goal_verifier(
-        SUPPORTING_GRAPH_VERIFIER_HANDLER,
-        SUPPORTING_GRAPH_HANDLER_REVISION,
-        SupportingGraphGoalVerifier(records),
-    )
-    registry.register_goal_handoff(
-        SUPPORTING_GRAPH_HANDOFF_HANDLER,
-        SUPPORTING_GRAPH_HANDLER_REVISION,
-        SupportingGraphGoalHandoffHandler(),
-    )
+        await self._operation_templates.persist_templates(
+            request_scope=ticket.request_scope,
+            semantic_input_binding_ref=binding.binding_id,
+            executor=inputs.operation_bindings.operations["goal_executor"],
+            verifier=inputs.operation_bindings.operations["goal_verifier"],
+            recorded_at=inputs.created_at,
+        )
+        return binding
 
 
 def build_supporting_graph_run_binding(
@@ -424,7 +225,7 @@ def build_supporting_graph_run_binding(
             },
         ),
         output_contract_ref="schema:supporting-graph-reconciliation-record:v1",
-        operation_execution_binding_ref=operation_refs.get(operation_class),
+        operation_execution_binding_ref=operation_refs.get("goal_executor"),
     )
     verifier = SemanticHandlerBinding(
         handler_id=SUPPORTING_GRAPH_VERIFIER_HANDLER,
@@ -438,6 +239,7 @@ def build_supporting_graph_run_binding(
             },
         ),
         output_contract_ref="schema:supporting-graph-verification-result:v1",
+        operation_execution_binding_ref=operation_refs.get("goal_verifier"),
     )
     handoff = SemanticHandlerBinding(
         handler_id=SUPPORTING_GRAPH_HANDOFF_HANDLER,

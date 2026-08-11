@@ -341,17 +341,33 @@ class StageGraphRunResult:
     lineage: tuple[StageOperationResult, ...]
 
 
-GoalVerifierAction = Literal[
-    "continue",
-    "repair",
-    "degrade",
-    "stop",
-    "fork",
-    "escalate",
-    "verified_completion",
+GoalVerifierDecision = Literal["accepted", "rejected", "revision_required", "repair_required"]
+GoalOperationRole = Literal["executor", "verifier"]
+GoalExecutionStatus = Literal[
+    "ready",
+    "executing",
+    "awaiting_verification",
+    "waiting",
+    "paused",
+    "stopping",
 ]
-
-GoalStopReason = Literal[
+GoalConvergenceAction = Literal[
+    "continue",
+    "reduce_effort",
+    "skip_degradable",
+    "revise",
+    "repair",
+    "pause",
+    "escalate",
+    "fork",
+    "linked_run",
+    "control_revision",
+    "new_run",
+    "complete",
+    "partial_or_fail",
+    "fail",
+]
+GoalConvergenceReason = Literal[
     "authority_breach",
     "hard_budget_exhausted",
     "verified_completion",
@@ -359,17 +375,12 @@ GoalStopReason = Literal[
     "no_progress",
     "repeated_blocker",
     "iteration_limit",
-    "degraded",
-    "verifier_stop",
-    "fork_requested",
-    "escalation_requested",
-]
-
-GoalExecutionStatus = Literal[
-    "ready",
-    "executing",
-    "awaiting_verification",
-    "terminal",
+    "soft_budget_response",
+    "bounded_revision",
+    "repair_requested",
+    "continue",
+    "scope_expansion",
+    "compaction_failure",
 ]
 
 
@@ -404,14 +415,17 @@ class GoalAgentRunIdentity:
 
 @dataclass(frozen=True)
 class GoalRevision:
+    schema_version: Literal["belllabs.goal-revision.v1"]
     revision_id: str
     revision: int
     parent_revision_id: str | None
-    protected_scope_digest: str
+    canonical_digest: str
+    envelope_digest: str
     objective: str
+    tactical_changes: tuple[str, ...]
     evidence_refs: tuple[str, ...]
     unmet_obligations: tuple[str, ...]
-    author: str
+    proposer: str
     deciding_authority: str
     applicability: Literal["next_iteration", "remaining_run"]
     tactics: tuple[str, ...] = ()
@@ -423,26 +437,67 @@ class GoalRevision:
             raise ValueError("goal revisions require an identity and positive revision")
         if (self.revision == 1) != (self.parent_revision_id is None):
             raise ValueError("only the initial Goal Revision omits a parent")
-        if not self.protected_scope_digest or not self.objective:
-            raise ValueError("goal revisions require a protected scope and objective")
-        if not self.author or not self.deciding_authority:
-            raise ValueError("goal revisions require author and deciding authority")
+        if not self.canonical_digest or not self.envelope_digest or not self.objective:
+            raise ValueError("goal revisions require canonical and envelope digests")
+        if not self.proposer or not self.deciding_authority:
+            raise ValueError("goal revisions require proposer and deciding authority")
 
 
 @dataclass(frozen=True)
-class GoalHandoffCheckpoint:
-    checkpoint_id: str
-    agent_run_identity: GoalAgentRunIdentity
+class GoalHandoff:
+    schema_version: Literal["belllabs.goal-handoff.v1"]
+    handoff_id: str
+    handoff_digest: str
+    run_id: str
+    execution_epoch: int
     goal_revision_id: str
-    protected_scope_digest: str
-    instructions: str
-    state_refs: tuple[str, ...] = ()
+    source_iteration: GoalIterationIdentity
+    accepted_fact_refs: tuple[str, ...]
+    evidence_refs: tuple[str, ...]
     artifact_refs: tuple[str, ...] = ()
-    workspace_ref: str = ""
+    attempted_tactics: tuple[str, ...] = ()
+    rejected_tactics: tuple[tuple[str, str], ...] = ()
+    unresolved_obligations: tuple[str, ...] = ()
+    blockers: tuple[str, ...] = ()
+    effect_frontier_refs: tuple[str, ...] = ()
+    pending_liability_refs: tuple[str, ...] = ()
+    consumed_budget: dict[str, int] = field(default_factory=dict)
+    reserved_budget: dict[str, int] = field(default_factory=dict)
+    remaining_budget: dict[str, int] = field(default_factory=dict)
+    remaining_iterations: int = 0
+    protected_context_facts: tuple[tuple[str, str], ...] = ()
+    context_selection_policy_ref: str = ""
+    context_compaction_policy_ref: str = ""
+    context_selection_refs: tuple[str, ...] = ()
+    compaction_decision_ref: str = ""
+    compaction_status: Literal["accepted", "failed"] = "accepted"
+    compaction_attempt: int = 1
+    compaction_failure_ref: str = ""
+    workspace_refs: tuple[str, ...] = ()
+    snapshot_refs: tuple[str, ...] = ()
+    source_document_digests: tuple[str, ...] = ()
+    source_binding_digests: tuple[str, ...] = ()
+    continuation_instructions: str = ""
 
     def __post_init__(self) -> None:
-        if not self.checkpoint_id or not self.instructions:
-            raise ValueError("goal handoff checkpoints require identity and instructions")
+        if not self.handoff_id or not self.handoff_digest or not self.continuation_instructions:
+            raise ValueError(
+                "goal handoffs require identity, digest, and continuation instructions"
+            )
+        if self.run_id != self.source_iteration.run_id:
+            raise ValueError("goal handoff run does not match its source iteration")
+        if self.execution_epoch != self.source_iteration.execution_epoch:
+            raise ValueError("goal handoff epoch does not match its source iteration")
+        if self.goal_revision_id != self.source_iteration.goal_revision_id:
+            raise ValueError("goal handoff revision does not match its source iteration")
+        if self.remaining_iterations < 0:
+            raise ValueError("goal handoff remaining iterations cannot be negative")
+        if self.compaction_attempt < 1:
+            raise ValueError("goal handoff compaction attempt must be positive")
+        if (self.compaction_status == "failed") != bool(self.compaction_failure_ref):
+            raise ValueError(
+                "failed handoff compaction requires exactly one failure reference"
+            )
 
 
 @dataclass(frozen=True)
@@ -451,7 +506,8 @@ class GoalExecutionClaim:
     idempotency_key: str
     operation_class: str
     objective: str
-    protected_scope_digest: str
+    envelope_digest: str
+    goal_revision_digest: str
     reservation_id: str
     reservation: dict[str, int]
     session_mode: Literal["reuse", "fresh", "fresh_from_handoff"]
@@ -459,7 +515,7 @@ class GoalExecutionClaim:
     workspace_mode: Literal["shared", "fresh", "fresh_from_snapshot"]
     workspace_namespace: str
     snapshot_mode: Literal["none", "on_rollover", "every_iteration", "on_failure"]
-    prior_checkpoint_id: str = ""
+    prior_handoff_ref: str = ""
     fresh_agent_token_threshold: int = 0
     handoff_token_reserve: int = 0
     token_budget_remaining: int = 0
@@ -473,6 +529,11 @@ class GoalExecutionClaim:
 class GoalExecutionResult:
     identity: GoalAgentRunIdentity
     disposition: Literal["completed", "failed", "blocked"]
+    operation_identity: str
+    operation_binding_ref: str
+    session_id: str
+    workspace_id: str
+    writable_paths: tuple[str, ...]
     output_refs: tuple[str, ...] = ()
     completion_claim: bool = False
     actual_usage: dict[str, int] = field(default_factory=dict)
@@ -480,56 +541,140 @@ class GoalExecutionResult:
     authority_breach_ref: str = ""
     hard_budget_exhausted_dimensions: tuple[str, ...] = ()
     irrecoverable_failure_ref: str = ""
-    handoff_checkpoint: GoalHandoffCheckpoint | None = None
-    temporal_activity_attempt: int = 1
-    output_contract_ref: str = ""
-
-
-@dataclass(frozen=True)
-class GoalHandoffRequest:
-    claim: GoalExecutionClaim
-    execution_result: GoalExecutionResult
-    protected_scope_digest: str
-    verification_ref: str = ""
-    unmet_obligations: tuple[str, ...] = ()
-    fallback: bool = False
-    failure_reason: str = ""
-
-
-@dataclass(frozen=True)
-class GoalHandoffResult:
-    checkpoint: GoalHandoffCheckpoint
-    actual_usage: dict[str, int] = field(default_factory=dict)
-    fallback_used: bool = False
+    accepted_fact_refs: tuple[str, ...] = ()
+    evidence_refs: tuple[str, ...] = ()
+    effect_frontier_refs: tuple[str, ...] = ()
+    pending_liability_refs: tuple[str, ...] = ()
+    handoff: GoalHandoff | None = None
     output_contract_ref: str = ""
 
 
 @dataclass(frozen=True)
 class GoalVerificationRequest:
-    claim: GoalExecutionClaim
+    executor_claim: GoalExecutionClaim
     execution_result: GoalExecutionResult
-    verifier_ref: str
+    verifier_operation_identity: str
+    verifier_binding_ref: str
+    verifier_session_id: str
+    verifier_workspace_id: str
+    verifier_writable_paths: tuple[str, ...]
+    rubric_ref: str
+    rubric_version: int
     acceptance_contract_ref: str
-    accepted_output_refs: tuple[str, ...] = ()
+    acceptance_version: int
+    admitted_output_refs: tuple[str, ...]
+    admitted_evidence_refs: tuple[str, ...]
+    required_obligation_refs: tuple[str, ...]
+    stale_frontier_digest: str
 
 
 @dataclass(frozen=True)
 class GoalVerificationResult:
-    identity: GoalAgentRunIdentity
-    action: GoalVerifierAction
+    schema_version: Literal["belllabs.goal-verification.v1"]
+    verification_id: str
+    verification_digest: str
+    executor_identity: GoalAgentRunIdentity
+    verifier_operation_identity: str
+    verifier_binding_ref: str
+    verifier_policy_binding_ref: str
+    verifier_session_id: str
+    verifier_workspace_id: str
+    verifier_writable_paths: tuple[str, ...]
+    decision: GoalVerifierDecision
     verification_ref: str
-    verifier_ref: str
+    rubric_ref: str
+    rubric_version: int
     acceptance_contract_ref: str
+    acceptance_version: int
     progress_made: bool
+    accepted_obligation_refs: tuple[str, ...] = ()
+    findings: tuple[str, ...] = ()
     evidence_refs: tuple[str, ...] = ()
+    admitted_executor_output_refs: tuple[str, ...] = ()
+    admitted_executor_evidence_refs: tuple[str, ...] = ()
     unmet_obligations: tuple[str, ...] = ()
+    obligation_applicability: tuple[tuple[str, bool], ...] = ()
+    stale_frontier_digest: str = ""
     blocker_class: str = ""
     authority_breach_ref: str = ""
     hard_budget_exhausted_dimensions: tuple[str, ...] = ()
+    soft_budget_dimensions: tuple[str, ...] = ()
     irrecoverable_failure_ref: str = ""
     proposed_revision: GoalRevision | None = None
+    scope_expansion_route: Literal[
+        "control_revision", "fork", "linked_run", "new_run"
+    ] | None = None
+    route_ref: str = ""
     actual_usage: dict[str, int] = field(default_factory=dict)
+    effect_refs: tuple[str, ...] = ()
     output_contract_ref: str = ""
+
+
+@dataclass(frozen=True)
+class GoalConvergenceFacts:
+    authority_breach: bool = False
+    hard_budget_exhausted: bool = False
+    all_required_obligations_verified: bool = False
+    irrecoverable_failure: bool = False
+    no_progress_threshold_reached: bool = False
+    repeated_blocker_threshold_reached: bool = False
+    iteration_limit_reached: bool = False
+    soft_budget_response_required: bool = False
+    bounded_revision: GoalRevision | None = None
+    repair_requested: bool = False
+    scope_expansion_route: Literal[
+        "control_revision", "fork", "linked_run", "new_run"
+    ] | None = None
+
+
+@dataclass(frozen=True)
+class GoalConvergenceProposal:
+    proposal_id: str
+    action: GoalConvergenceAction
+    reason: GoalConvergenceReason
+    goal_revision_id: str
+    source_iteration: GoalIterationIdentity
+    verification_ref: str
+    evidence_refs: tuple[str, ...] = ()
+    route_ref: str = ""
+
+
+@dataclass(frozen=True)
+class GoalTerminalizationProposal:
+    proposal_id: str
+    expected_run_version: int
+    goal_revision_id: str
+    verifier_decision_ref: str
+    obligation_evidence_refs: tuple[str, ...]
+    output_refs: tuple[str, ...]
+    degradation_refs: tuple[str, ...]
+    blocker_refs: tuple[str, ...]
+    budget_state_digest: str
+    effect_frontier_digest: str
+    stale_frontier_digest: str
+    effects_settled: bool
+    proposed_outcome: Literal["complete", "partial_or_fail", "fail"]
+
+
+@dataclass(frozen=True)
+class GoalContinuationState:
+    active_revision: GoalRevision
+    accepted_revisions: tuple[GoalRevision, ...]
+    next_goal_iteration: int
+    next_agent_run: int
+    session_generation: int
+    session_token_usage: int
+    workspace_generation: int
+    handoffs: tuple[GoalHandoff, ...]
+    output_refs: tuple[str, ...]
+    no_progress_iterations: int
+    repeated_blocker_count: int
+    last_blocker_class: str
+    rollover_count: int
+    next_session_mode: Literal["reuse", "fresh", "fresh_from_handoff"]
+    completed_goal_iterations: int = 0
+    completed_agent_runs: int = 0
+    lineage_digest: str = ""
 
 
 @dataclass(frozen=True)
@@ -539,7 +684,7 @@ class GoalDirectedRunInput:
     effective_configuration_digest: str
     blueprint_digest: str
     blueprint: dict[str, Any]
-    protected_scope_digest: str
+    envelope_digest: str
     initial_revision: GoalRevision
     initial_run_version: int = 1
     execution_epoch: int = 1
@@ -549,7 +694,12 @@ class GoalDirectedRunInput:
     correlation_id: str = ""
     baseline_reservation: dict[str, int] = field(default_factory=dict)
     required_obligation_refs: tuple[str, ...] = ()
+    required_output_contract_refs: tuple[str, ...] = ()
     semantic_input_binding_ref: str = ""
+    family_version: int = 0
+    technical_segment: int = 1
+    continuation_handoff: GoalHandoff | None = None
+    continuation_state: GoalContinuationState | None = None
     tenant_scope: str = ""
     materialize_typed_result: bool = False
     durable_operation_children: bool = False
@@ -559,7 +709,7 @@ class GoalDirectedRunInput:
 class GoalDirectedExecutionState:
     run_id: str
     execution_epoch: int
-    protected_scope_digest: str
+    envelope_digest: str
     active_revision: GoalRevision
     accepted_revisions: tuple[GoalRevision, ...]
     next_goal_iteration: int = 1
@@ -572,7 +722,7 @@ class GoalDirectedExecutionState:
     pending_result: GoalExecutionResult | None = None
     execution_results: tuple[GoalExecutionResult, ...] = ()
     verification_results: tuple[GoalVerificationResult, ...] = ()
-    handoff_checkpoints: tuple[GoalHandoffCheckpoint, ...] = ()
+    handoffs: tuple[GoalHandoff, ...] = ()
     output_refs: tuple[str, ...] = ()
     no_progress_iterations: int = 0
     repeated_blocker_count: int = 0
@@ -580,27 +730,31 @@ class GoalDirectedExecutionState:
     rollover_count: int = 0
     next_session_mode: Literal["reuse", "fresh", "fresh_from_handoff"] = "reuse"
     degraded: bool = False
-    stop_reason: GoalStopReason | None = None
-    final_action: GoalVerifierAction | None = None
+    convergence_proposal: GoalConvergenceProposal | None = None
+    terminalization_proposal: GoalTerminalizationProposal | None = None
     request_scope: str = ""
     semantic_input_binding_ref: str = ""
     effective_configuration_digest: str = ""
     blueprint_digest: str = ""
+    completed_goal_iterations: int = 0
+    completed_agent_runs: int = 0
+    lineage_digest: str = ""
 
 
 @dataclass(frozen=True)
 class GoalDirectedRunResult:
     run_id: str
     execution_epoch: int
-    status: Literal["terminal"]
-    stop_reason: GoalStopReason
-    final_action: GoalVerifierAction
+    status: Literal["stopping"]
+    convergence_proposal: GoalConvergenceProposal
+    terminalization_proposal: GoalTerminalizationProposal | None
     goal_iterations: int
     agent_runs: int
     rollover_count: int
     active_revision_id: str
     accepted_revision_ids: tuple[str, ...]
     output_refs: tuple[str, ...]
-    handoff_checkpoints: tuple[GoalHandoffCheckpoint, ...]
+    handoffs: tuple[GoalHandoff, ...]
     execution_results: tuple[GoalExecutionResult, ...]
     verification_results: tuple[GoalVerificationResult, ...]
+    lineage_digest: str = ""

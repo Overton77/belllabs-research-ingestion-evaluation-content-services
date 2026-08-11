@@ -383,6 +383,11 @@ class GoalSessionRolloverPolicy(Contract):
     fresh_agent_token_threshold: int = Field(default=100_000, ge=1)
     handoff_token_reserve: int = Field(default=4_000, ge=0)
     rollover_mode: Literal["fresh", "fresh_from_handoff"] = "fresh_from_handoff"
+    context_selection_policy_ref: str = Field(min_length=1)
+    context_compaction_policy_ref: str = Field(min_length=1)
+    protected_fact_classes: frozenset[str] = Field(min_length=1)
+    max_rollovers: int = Field(ge=0)
+    compaction_failure_action: Literal["retry", "fresh_from_handoff", "pause", "escalate"]
 
 
 class GoalWorkspaceSnapshotPolicy(Contract):
@@ -411,6 +416,30 @@ class GoalWorkspaceSnapshotPolicy(Contract):
 class GoalConvergencePolicy(Contract):
     max_no_progress_iterations: int = Field(default=3, ge=1)
     max_repeated_blockers: int = Field(default=3, ge=1)
+    authority_breach_action: Literal["fail", "escalate"]
+    hard_budget_action: Literal["partial_or_fail"] = "partial_or_fail"
+    irrecoverable_failure_action: Literal["partial_or_fail"] = "partial_or_fail"
+    no_progress_action: Literal["pause", "revise", "escalate", "partial_or_fail"]
+    repeated_blocker_action: Literal["pause", "revise", "escalate", "partial_or_fail"]
+    iteration_limit_action: Literal["partial_or_fail"] = "partial_or_fail"
+    soft_budget_action: Literal["continue", "reduce_effort", "skip_degradable"]
+
+
+class GoalVerifierPolicy(Contract):
+    operation_class: str = Field(min_length=1)
+    binding_ref: str = Field(min_length=1)
+    rubric_ref: str = Field(min_length=1)
+    rubric_version: int = Field(ge=1)
+    acceptance_version: int = Field(ge=1)
+    output_contract_ref: str = Field(min_length=1)
+
+
+class GoalHandoffPolicy(Contract):
+    schema_version: Literal["belllabs.goal-handoff.v1"] = "belllabs.goal-handoff.v1"
+    handoff_required_for_fresh_session: Literal[True] = True
+    max_instruction_bytes: int = Field(ge=1, le=65_536)
+    allowed_workspace_ref_classes: frozenset[str] = Field(min_length=1)
+    allowed_snapshot_ref_classes: frozenset[str] = Field(min_length=1)
 
 
 GoalProtectedField = Literal[
@@ -421,6 +450,8 @@ GoalProtectedField = Literal[
     "authority",
     "budget",
     "prohibited_work",
+    "required_outputs",
+    "linked_run_permissions",
 ]
 
 
@@ -436,6 +467,8 @@ class GoalProtectedScopePolicy(Contract):
             "authority",
             "budget",
             "prohibited_work",
+            "required_outputs",
+            "linked_run_permissions",
         }
     )
     expansion_route: Literal[
@@ -458,6 +491,8 @@ class GoalProtectedScopePolicy(Contract):
             "authority",
             "budget",
             "prohibited_work",
+            "required_outputs",
+            "linked_run_permissions",
         }
         if value != required:
             raise ValueError("GoalDirected revisions must protect the complete launch envelope")
@@ -469,17 +504,22 @@ class GoalDirectedBlueprint(DefinitionBase):
     family: Literal["GoalDirected"] = "GoalDirected"
     objective_contract: str = Field(min_length=1)
     acceptance_contract: str = Field(min_length=1)
+    admitted_input_classes: frozenset[str] = Field(min_length=1)
+    authority_ceiling: AuthorityCeiling
+    prohibited_work: frozenset[str] = Field(min_length=1)
+    required_output_contracts: frozenset[str] = Field(min_length=1)
+    required_obligation_refs: frozenset[str] = Field(min_length=1)
     independent_verification_required: Literal[True] = True
-    independent_verifier_ref: str = Field(
-        default="verifier:independent-goal-acceptance@1",
-        min_length=1,
-    )
-    allowed_operation_classes: frozenset[str] = frozenset({"goal_iteration"})
-    session_policy: GoalSessionRolloverPolicy = Field(default_factory=GoalSessionRolloverPolicy)
+    verifier_policy: GoalVerifierPolicy
+    allowed_operation_classes: frozenset[str] = Field(min_length=1)
+    allowed_async_subgoal_classes: frozenset[str] = Field(min_length=1)
+    allowed_linked_run_slot_ids: frozenset[str] = Field(min_length=1)
+    session_policy: GoalSessionRolloverPolicy
+    handoff_policy: GoalHandoffPolicy
     workspace_policy: GoalWorkspaceSnapshotPolicy = Field(
         default_factory=GoalWorkspaceSnapshotPolicy
     )
-    convergence_policy: GoalConvergencePolicy = Field(default_factory=GoalConvergencePolicy)
+    convergence_policy: GoalConvergencePolicy
     iteration_reservation: dict[str, int] = Field(default_factory=lambda: {"goal.iterations": 1})
     protected_scope_policy: GoalProtectedScopePolicy = Field(
         default_factory=GoalProtectedScopePolicy
@@ -487,11 +527,19 @@ class GoalDirectedBlueprint(DefinitionBase):
     max_iterations: int = Field(ge=1)
     variant_names: frozenset[str] = Field(default_factory=frozenset)
 
-    @field_validator("allowed_operation_classes")
+    @field_validator(
+        "admitted_input_classes",
+        "prohibited_work",
+        "required_output_contracts",
+        "required_obligation_refs",
+        "allowed_operation_classes",
+        "allowed_async_subgoal_classes",
+        "allowed_linked_run_slot_ids",
+    )
     @classmethod
-    def operation_classes_are_declared(cls, value: frozenset[str]) -> frozenset[str]:
+    def governed_sets_are_declared(cls, value: frozenset[str]) -> frozenset[str]:
         if not value or any(not item for item in value):
-            raise ValueError("GoalDirected requires at least one allowed operation class")
+            raise ValueError("GoalDirected governed sets require non-empty values")
         return value
 
     @field_validator("iteration_reservation")
@@ -502,6 +550,23 @@ class GoalDirectedBlueprint(DefinitionBase):
         if value.get("goal.iterations", 0) < 1:
             raise ValueError("goal iteration reservations require one goal.iterations unit")
         return value
+
+    @model_validator(mode="after")
+    def envelope_is_complete_and_bounded(self) -> GoalDirectedBlueprint:
+        if self.verifier_policy.operation_class in self.allowed_operation_classes:
+            raise ValueError(
+                "independent verifier operation class must differ from executor classes"
+            )
+        if any(
+            amount > self.authority_ceiling.budgets.dimensions.get(dimension, -1)
+            for dimension, amount in self.iteration_reservation.items()
+        ):
+            raise ValueError("goal iteration reservation exceeds the frozen authority budget")
+        if self.session_policy.rollover_mode == "fresh_from_handoff" and (
+            not self.handoff_policy.handoff_required_for_fresh_session
+        ):
+            raise ValueError("fresh-from-handoff rollover requires a typed handoff")
+        return self
 
 
 WorkflowBlueprint = Annotated[

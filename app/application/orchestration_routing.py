@@ -15,12 +15,6 @@ from app.domain.orchestration.bindings import (
     SemanticHandlerBinding,
 )
 from app.domain.orchestration.contracts import (
-    GoalExecutionClaim,
-    GoalExecutionResult,
-    GoalHandoffRequest,
-    GoalHandoffResult,
-    GoalVerificationRequest,
-    GoalVerificationResult,
     StageOperationRequest,
     StageOperationResult,
     WorkflowEvaluationRequest,
@@ -57,39 +51,12 @@ class WorkflowEvaluationSemanticHandler(Protocol):
     ) -> WorkflowEvaluationResult: ...
 
 
-class GoalIterationSemanticHandler(Protocol):
-    async def execute(
-        self,
-        claim: GoalExecutionClaim,
-        binding: SemanticHandlerBinding,
-    ) -> GoalExecutionResult: ...
-
-
-class GoalVerificationSemanticHandler(Protocol):
-    async def verify(
-        self,
-        request: GoalVerificationRequest,
-        binding: SemanticHandlerBinding,
-    ) -> GoalVerificationResult: ...
-
-
-class GoalHandoffSemanticHandler(Protocol):
-    async def prepare(
-        self,
-        request: GoalHandoffRequest,
-        binding: SemanticHandlerBinding,
-    ) -> GoalHandoffResult: ...
-
-
 class SemanticHandlerRegistry:
     """Process-local implementations addressed only by exact cataloged revisions."""
 
     def __init__(self) -> None:
         self._stage: dict[str, StageSemanticHandler] = {}
         self._workflow_evaluator: dict[str, WorkflowEvaluationSemanticHandler] = {}
-        self._goal_iteration: dict[str, GoalIterationSemanticHandler] = {}
-        self._goal_verifier: dict[str, GoalVerificationSemanticHandler] = {}
-        self._goal_handoff: dict[str, GoalHandoffSemanticHandler] = {}
 
     def register_stage(
         self,
@@ -107,30 +74,6 @@ class SemanticHandlerRegistry:
     ) -> None:
         self._register(self._workflow_evaluator, handler_id, revision, handler)
 
-    def register_goal_iteration(
-        self,
-        handler_id: str,
-        revision: int,
-        handler: GoalIterationSemanticHandler,
-    ) -> None:
-        self._register(self._goal_iteration, handler_id, revision, handler)
-
-    def register_goal_verifier(
-        self,
-        handler_id: str,
-        revision: int,
-        handler: GoalVerificationSemanticHandler,
-    ) -> None:
-        self._register(self._goal_verifier, handler_id, revision, handler)
-
-    def register_goal_handoff(
-        self,
-        handler_id: str,
-        revision: int,
-        handler: GoalHandoffSemanticHandler,
-    ) -> None:
-        self._register(self._goal_handoff, handler_id, revision, handler)
-
     def stage(self, binding: SemanticHandlerBinding) -> StageSemanticHandler:
         return self._resolve(self._stage, binding)
 
@@ -139,24 +82,6 @@ class SemanticHandlerRegistry:
         binding: SemanticHandlerBinding,
     ) -> WorkflowEvaluationSemanticHandler:
         return self._resolve(self._workflow_evaluator, binding)
-
-    def goal_iteration(
-        self,
-        binding: SemanticHandlerBinding,
-    ) -> GoalIterationSemanticHandler:
-        return self._resolve(self._goal_iteration, binding)
-
-    def goal_verifier(
-        self,
-        binding: SemanticHandlerBinding,
-    ) -> GoalVerificationSemanticHandler:
-        return self._resolve(self._goal_verifier, binding)
-
-    def goal_handoff(
-        self,
-        binding: SemanticHandlerBinding,
-    ) -> GoalHandoffSemanticHandler:
-        return self._resolve(self._goal_handoff, binding)
 
     @staticmethod
     def _register(
@@ -285,156 +210,6 @@ class BoundWorkflowEvaluator:
         if result.output_contract_ref != route.output_contract_ref:
             raise SemanticRoutingError("workflow evaluator returned a different output contract")
         return result
-
-
-class BoundGoalIterationExecutor:
-    def __init__(
-        self,
-        repository: RunSemanticInputBindingRepository,
-        registry: SemanticHandlerRegistry,
-        operation_bindings: OperationExecutionBindingReader | None = None,
-    ) -> None:
-        self._repository = repository
-        self._registry = registry
-        self._operation_bindings = operation_bindings
-
-    async def execute(self, claim: GoalExecutionClaim) -> GoalExecutionResult:
-        binding = await _load_goal(self._repository, claim)
-        route = next(
-            (
-                item.handler
-                for item in binding.goal_operation_handlers
-                if item.operation_class == claim.operation_class
-            ),
-            None,
-        )
-        if route is None:
-            raise SemanticRoutingError(
-                "no semantic handler is bound for GoalDirected operation class: "
-                f"{claim.operation_class}"
-            )
-        await _verify_operation_authority(
-            self._operation_bindings,
-            route,
-            request_scope=claim.request_scope,
-            run_id=claim.identity.iteration.run_id,
-            effective_configuration_digest=claim.effective_configuration_digest,
-            operation_id=claim.operation_class,
-        )
-        result = await _validated_handler_call(
-            self._registry.goal_iteration(route).execute(claim, route),
-            route,
-        )
-        if result.identity != claim.identity:
-            raise SemanticRoutingError(
-                "goal iteration handler returned a mismatched execution identity"
-            )
-        if result.output_contract_ref != route.output_contract_ref:
-            raise SemanticRoutingError(
-                "goal iteration handler returned a different output contract"
-            )
-        return result
-
-
-class BoundGoalIndependentVerifier:
-    def __init__(
-        self,
-        repository: RunSemanticInputBindingRepository,
-        registry: SemanticHandlerRegistry,
-        operation_bindings: OperationExecutionBindingReader | None = None,
-    ) -> None:
-        self._repository = repository
-        self._registry = registry
-        self._operation_bindings = operation_bindings
-
-    async def verify(
-        self,
-        request: GoalVerificationRequest,
-    ) -> GoalVerificationResult:
-        binding = await _load_goal(self._repository, request.claim)
-        route = binding.goal_verifier
-        if route is None:
-            raise SemanticRoutingError("GoalDirected verifier binding is unavailable")
-        await _verify_operation_authority(
-            self._operation_bindings,
-            route,
-            request_scope=request.claim.request_scope,
-            run_id=request.claim.identity.iteration.run_id,
-            effective_configuration_digest=(request.claim.effective_configuration_digest),
-            operation_id="goal_verifier",
-        )
-        result = await _validated_handler_call(
-            self._registry.goal_verifier(route).verify(request, route),
-            route,
-        )
-        if result.identity != request.claim.identity:
-            raise SemanticRoutingError("goal verifier returned a mismatched execution identity")
-        if (
-            result.verifier_ref != request.verifier_ref
-            or result.acceptance_contract_ref != request.acceptance_contract_ref
-        ):
-            raise SemanticRoutingError(
-                "goal verifier result is not bound to the frozen acceptance authority"
-            )
-        if result.output_contract_ref != route.output_contract_ref:
-            raise SemanticRoutingError("goal verifier returned a different output contract")
-        return result
-
-
-class BoundGoalHandoffPreparer:
-    def __init__(
-        self,
-        repository: RunSemanticInputBindingRepository,
-        registry: SemanticHandlerRegistry,
-        operation_bindings: OperationExecutionBindingReader | None = None,
-    ) -> None:
-        self._repository = repository
-        self._registry = registry
-        self._operation_bindings = operation_bindings
-
-    async def prepare(self, request: GoalHandoffRequest) -> GoalHandoffResult:
-        binding = await _load_goal(self._repository, request.claim)
-        route = binding.goal_handoff
-        if route is None:
-            raise SemanticRoutingError("GoalDirected handoff binding is unavailable")
-        await _verify_operation_authority(
-            self._operation_bindings,
-            route,
-            request_scope=request.claim.request_scope,
-            run_id=request.claim.identity.iteration.run_id,
-            effective_configuration_digest=(request.claim.effective_configuration_digest),
-            operation_id="goal_handoff",
-        )
-        result = await _validated_handler_call(
-            self._registry.goal_handoff(route).prepare(request, route),
-            route,
-        )
-        checkpoint = result.checkpoint
-        if (
-            checkpoint.agent_run_identity != request.claim.identity
-            or checkpoint.protected_scope_digest != request.protected_scope_digest
-        ):
-            raise SemanticRoutingError(
-                "goal handoff result is outside the active run and protected scope"
-            )
-        if result.output_contract_ref != route.output_contract_ref:
-            raise SemanticRoutingError("goal handoff handler returned a different output contract")
-        return result
-
-
-async def _load_goal(
-    repository: RunSemanticInputBindingRepository,
-    claim: GoalExecutionClaim,
-) -> RunSemanticInputBinding:
-    return await _load(
-        repository,
-        binding_ref=claim.semantic_input_binding_ref,
-        request_scope=claim.request_scope,
-        run_id=claim.identity.iteration.run_id,
-        family="GoalDirected",
-        effective_configuration_digest=claim.effective_configuration_digest,
-        blueprint_digest=claim.blueprint_digest,
-    )
 
 
 async def _verify_operation_authority(
