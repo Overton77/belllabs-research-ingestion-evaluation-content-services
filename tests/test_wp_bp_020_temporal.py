@@ -738,4 +738,7 @@ async def test_goal_workflow_cancels_active_operation_and_replays_reconciliation
         ).replay_workflow(history)
 
     assert "cancel" in activities.lifecycle_kinds
+    # Cancellation enters the shared reconciliation saga with reservations retained;
+    # terminalization is forbidden until that saga settles budget/effects.
     assert "terminalize" not in activities.lifecycle_kinds
+    assert activities.lifecycle_kinds.count("cancel") == 1

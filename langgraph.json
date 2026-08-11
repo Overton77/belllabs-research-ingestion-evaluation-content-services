@@ -1,10 +1,7 @@
 {
   "$schema": "https://langgra.ph/schema.json",
   "dependencies": ["."],
-  "graphs": {
-    "belllabs_stagegraph": "./app/agent_server/stagegraph/graph.py:graph",
-    "belllabs_goal_directed": "./app/agent_server/goal_directed/graph.py:graph"
-  },
+  "graphs": {},
   "env": ".env",
   "auth": {
     "path": "app.agent_server.auth:auth",

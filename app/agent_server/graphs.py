@@ -1,11 +1,9 @@
-"""Stable graph registry. Importing this module performs no external I/O."""
+"""Stable graph registry. Importing this module performs no external I/O.
 
-from app.agent_server.goal_directed.graph import graph as goal_directed_graph
-from app.agent_server.stagegraph.graph import graph as stagegraph_graph
+StageGraph and GoalDirected Agent Server macro graphs were deleted after Temporal
+parity ownership moved to `app/temporal/workflows/{stagegraph,goal_directed}.py`.
+"""
 
-GRAPH_REGISTRY = {
-    "belllabs_stagegraph": stagegraph_graph,
-    "belllabs_goal_directed": goal_directed_graph,
-}
+GRAPH_REGISTRY: dict[str, object] = {}
 
-__all__ = ["GRAPH_REGISTRY", "goal_directed_graph", "stagegraph_graph"]
+__all__ = ["GRAPH_REGISTRY"]

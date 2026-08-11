@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from app.agent_server.graphs import goal_directed_graph, stagegraph_graph
 from app.domain.graph_runtime.definitions import GraphAssemblyDefinition, RunPlan, RunPlanV3
 
 
@@ -9,14 +8,15 @@ def graph_from_exact_definitions(
     assembly: GraphAssemblyDefinition,
     run_plan: RunPlan | RunPlanV3,
 ) -> object:
-    """Select immutable topology only after exact assembly/RunPlan agreement."""
+    """Reject retired Agent Server macro families; Temporal owns StageGraph/GoalDirected."""
 
     if run_plan.graph_assembly.graph_assembly_ref.digest != assembly.graph.graph_assembly_digest:
         raise ValueError("RunPlan and GraphAssemblyDefinition digests do not match")
     if run_plan.graph_assembly.state_schema_digest != assembly.state_schema_ref.digest:
         raise ValueError("RunPlan and graph state schema digests do not match")
-    if assembly.graph.graph_family == "StageGraph":
-        return stagegraph_graph
-    if assembly.graph.graph_family == "GoalDirected":
-        return goal_directed_graph
-    raise ValueError("Stage 2 exports only StageGraph and GoalDirected families")
+    if assembly.graph.graph_family in {"StageGraph", "GoalDirected"}:
+        raise ValueError(
+            "Agent Server StageGraph/GoalDirected macro graphs were deleted; "
+            "use Temporal family workflows under app/temporal/workflows/"
+        )
+    raise ValueError(f"unsupported Agent Server graph family: {assembly.graph.graph_family}")

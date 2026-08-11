@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+import pytest
+
+pytest.skip(
+    "Agent Server StageGraph/GoalDirected macro graphs deleted after Temporal ownership cut",
+    allow_module_level=True,
+)
+
 import importlib
 import json
 import os
