@@ -12,8 +12,8 @@ from app.application.run_control_repository import (
     AdmissionMutation,
     CommandMutation,
     FamilyAdmissionCommit,
+    authority_state_digest,
 )
-from app.domain.control_plane.canonical import sha256_digest
 from app.domain.run_control.budget import roll_up_child_budget
 from app.domain.run_control.contracts import (
     AdmissionDecision,
@@ -305,9 +305,9 @@ class PostgresRunControlRepository:
             prior_effects = EffectLedgerState.model_validate(_json(prior_effects_raw))
             if (
                 mutation.expected_budget_digest
-                != sha256_digest(prior_budget.model_dump(mode="json"))
+                != authority_state_digest(prior_budget)
                 or mutation.expected_effects_digest
-                != sha256_digest(prior_effects.model_dump(mode="json"))
+                != authority_state_digest(prior_effects)
             ):
                 raise AuthorityStateConflict(
                     "budget or effect authority changed while the command was being decided"
@@ -542,9 +542,9 @@ class PostgresRunControlRepository:
             prior_effects = EffectLedgerState.model_validate(_json(prior_effects_raw))
             if (
                 command.expected_budget_digest
-                != sha256_digest(prior_budget.model_dump(mode="json"))
+                != authority_state_digest(prior_budget)
                 or command.expected_effects_digest
-                != sha256_digest(prior_effects.model_dump(mode="json"))
+                != authority_state_digest(prior_effects)
             ):
                 raise AuthorityStateConflict(
                     "budget or effect authority changed while the command was being decided"

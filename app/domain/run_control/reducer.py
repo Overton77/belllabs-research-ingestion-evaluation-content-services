@@ -4,11 +4,14 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from uuid import NAMESPACE_URL, uuid5
 
+from pydantic import ValidationError
+
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.run_control.contracts import (
     AcceptedObligationEvidence,
     AcceptedOutputEvidence,
     AcceptFinalizationPlanAction,
+    ApplyAuthorityBatchAction,
     AsyncChildAuthorityState,
     AsyncChildDecisionOutcome,
     AsyncChildDependencyClass,
@@ -43,6 +46,7 @@ from app.domain.run_control.contracts import (
     RecordAsyncChildFactAction,
     RecordFinalizationResultAction,
     RecordObligationEvidenceAction,
+    RecordOperationSettlementEvidenceAction,
     RecordOutputEvidenceAction,
     RecordReadinessAction,
     RecordUsageAction,
@@ -59,6 +63,8 @@ from app.domain.run_control.contracts import (
     SetWaitAction,
     StartAction,
     TerminalizeAction,
+    UsageRecord,
+    UsageSettlementRecord,
     WaitCondition,
 )
 
@@ -104,9 +110,36 @@ ACTION_PERMISSIONS: dict[str, str] = {
     "record_finalization_result": "workflow_run.record_finalization",
     "record_obligation_evidence": "workflow_run.accept_obligation_evidence",
     "record_output_evidence": "workflow_run.accept_output_evidence",
+    "record_operation_settlement_evidence": "workflow_run.accept_output_evidence",
     "terminalize": "workflow_run.terminalize",
     "record_readiness": "workflow_run.decide_readiness",
 }
+LIFECYCLE_ACTION_KINDS = frozenset((*ACTION_PERMISSIONS, "apply_authority_batch"))
+AUTHORITY_BATCH_ACTION_TYPES = (
+    RecordUsageAction,
+    SettlePendingUsageAction,
+    ObserveEffectAction,
+    SettleEffectAction,
+    RecordObligationEvidenceAction,
+    RecordOutputEvidenceAction,
+    RecordOperationSettlementEvidenceAction,
+)
+
+
+def required_action_permissions(action: object) -> frozenset[str]:
+    if type(action) is ApplyAuthorityBatchAction:
+        return frozenset(
+            permission
+            for nested in action.actions
+            for permission in required_action_permissions(nested)
+        )
+    kind = getattr(action, "kind", None)
+    if not isinstance(kind, str) or kind not in ACTION_PERMISSIONS:
+        raise ValueError("unknown lifecycle action has no permission mapping")
+    permission = ACTION_PERMISSIONS.get(kind)
+    if permission is None:
+        raise ValueError(f"lifecycle action {kind} has no permission mapping")
+    return frozenset({permission})
 
 
 def reduce_lifecycle(
@@ -116,6 +149,15 @@ def reduce_lifecycle(
     command: LifecycleCommand,
     command_fingerprint: str,
 ) -> Reduction:
+    try:
+        command = LifecycleCommand.model_validate(
+            command.model_dump(mode="python", warnings=False)
+        )
+    except (ValidationError, TypeError, ValueError) as error:
+        raise ReductionRejected(
+            "invalid_lifecycle_command",
+            "lifecycle command failed strict contract revalidation",
+        ) from error
     if command.run_id != projection.run_id:
         raise ReductionRejected("run_identity_mismatch", "command targets another run")
     if command.expected_run_version != projection.version:
@@ -124,15 +166,28 @@ def reduce_lifecycle(
             f"expected version {command.expected_run_version}, "
             f"current version is {projection.version}",
         )
-    permission = ACTION_PERMISSIONS[command.action.kind]
-    if permission not in command.actor.permissions:
-        raise ReductionRejected("unauthorized_command", f"missing permission: {permission}")
+    try:
+        permissions = required_action_permissions(command.action)
+    except ValueError as error:
+        raise ReductionRejected("unknown_action_permission", str(error)) from error
+    for permission in sorted(permissions):
+        if permission not in command.actor.permissions:
+            raise ReductionRejected("unauthorized_command", f"missing permission: {permission}")
     if projection.phase == RunPhase.TERMINAL and not isinstance(
         command.action, RecordReadinessAction
     ):
         raise ReductionRejected("run_is_terminal", "terminal lifecycle state is immutable")
 
     action = command.action
+    if isinstance(action, ApplyAuthorityBatchAction):
+        return _reduce_authority_batch(
+            projection,
+            budget,
+            effects,
+            command,
+            command_fingerprint,
+            action,
+        )
     phase = projection.phase
     waits = list[WaitCondition](projection.active_waits)
     pauses = list[PauseDecision](projection.active_pauses)
@@ -146,6 +201,9 @@ def reduce_lifecycle(
     finalization_omission_reason = projection.finalization_omission_reason
     obligation_evidence = list[AcceptedObligationEvidence](projection.accepted_obligation_evidence)
     output_evidence = list[AcceptedOutputEvidence](projection.accepted_output_evidence)
+    operation_settlement_evidence = list(
+        projection.accepted_operation_settlement_evidence
+    )
     async_children = list[AsyncChildAuthorityState](projection.async_children)
     evidence_frontier_digest = projection.evidence_frontier_digest
     next_budget = budget
@@ -218,7 +276,9 @@ def reduce_lifecycle(
         next_effects, effect_entry = _observe_effect(next_effects, action, command)
         effect_entries.append(effect_entry)
     elif isinstance(action, SettleEffectAction):
-        next_effects, effect_entry = _settle_effect(next_effects, action, command)
+        next_effects, next_budget, effect_entry = _settle_effect(
+            next_effects, next_budget, action, command
+        )
         effect_entries.append(effect_entry)
     elif isinstance(action, RegisterAsyncChildAction):
         if action.reservation_id not in next_budget.reservations:
@@ -386,6 +446,17 @@ def reduce_lifecycle(
             obligation_evidence,
             output_evidence,
         )
+    elif isinstance(action, RecordOperationSettlementEvidenceAction):
+        if action.evidence.accepted_by_authority_ref not in command.actor.authority_refs:
+            raise ReductionRejected(
+                "invalid_operation_settlement_authority",
+                "operation settlement evidence authority was not granted",
+            )
+        operation_settlement_evidence = [
+            item
+            for item in operation_settlement_evidence
+            if item.settlement_id != action.evidence.settlement_id
+        ] + [action.evidence]
     elif isinstance(action, TerminalizeAction):
         terminal_projection = projection.model_copy(
             update={"async_children": tuple(async_children)}
@@ -418,6 +489,9 @@ def reduce_lifecycle(
             "finalization_omission_reason": finalization_omission_reason,
             "accepted_obligation_evidence": tuple(obligation_evidence),
             "accepted_output_evidence": tuple(output_evidence),
+            "accepted_operation_settlement_evidence": tuple(
+                operation_settlement_evidence
+            ),
             "async_children": tuple(async_children),
             "evidence_frontier_digest": evidence_frontier_digest,
             "updated_at": command.occurred_at,
@@ -479,6 +553,121 @@ def reduce_lifecycle(
         transition=transition,
         result=result,
         ledger_entries=tuple(ledger),
+        effect_entries=tuple(effect_entries),
+        events=(event,),
+    )
+
+
+def _reduce_authority_batch(
+    projection: RunProjection,
+    budget: BudgetState,
+    effects: EffectLedgerState,
+    command: LifecycleCommand,
+    command_fingerprint: str,
+    batch: ApplyAuthorityBatchAction,
+) -> Reduction:
+    if not batch.actions or len(batch.actions) > 64:
+        raise ReductionRejected(
+            "invalid_authority_batch",
+            "authority batch must contain between 1 and 64 actions",
+        )
+    if any(type(action) not in AUTHORITY_BATCH_ACTION_TYPES for action in batch.actions):
+        raise ReductionRejected(
+            "invalid_authority_batch",
+            "authority batch contains a forbidden or non-exact nested action",
+        )
+    current_projection = projection
+    current_budget = budget
+    current_effects = effects
+    ledger_entries: list[BudgetLedgerEntry] = []
+    effect_entries: list[EffectLedgerEntry] = []
+    for action in batch.actions:
+        nested_command = command.model_copy(
+            update={
+                "expected_run_version": current_projection.version,
+                "action": action,
+            }
+        )
+        nested = reduce_lifecycle(
+            current_projection,
+            current_budget,
+            current_effects,
+            nested_command,
+            command_fingerprint,
+        )
+        current_projection = nested.projection
+        current_budget = nested.budget
+        current_effects = nested.effects
+        ledger_entries.extend(nested.ledger_entries)
+        effect_entries.extend(nested.effect_entries)
+
+    version = projection.version + 1
+    final_projection = current_projection.model_copy(
+        update={"version": version, "updated_at": command.occurred_at}
+    )
+    final_projection = RunProjection.model_validate(final_projection.model_dump(mode="python"))
+    transition = LifecycleTransitionRecord(
+        transition_id=_stable_id("transition", projection.run_id, str(version)),
+        run_id=projection.run_id,
+        command_id=command.command_id,
+        prior_version=projection.version,
+        resulting_version=version,
+        prior_phase=projection.phase,
+        resulting_phase=final_projection.phase,
+        prior_projection=projection,
+        resulting_projection=final_projection,
+        actor=command.actor,
+        reason=command.reason,
+        evidence_refs=command.evidence_refs,
+        occurred_at=command.occurred_at,
+        correlation_id=command.correlation_id,
+        causation_id=command.causation_id,
+    )
+    result = CommandResult(
+        command_id=command.command_id,
+        idempotency_issuer=command.idempotency_issuer,
+        run_id=projection.run_id,
+        command_fingerprint=command_fingerprint,
+        status=CommandStatus.ACCEPTED,
+        resulting_run_version=version,
+        phase=final_projection.phase,
+        terminal_outcome=final_projection.terminal_outcome,
+        reason_code="accepted",
+        reason="lifecycle command accepted",
+        recorded_at=command.occurred_at,
+    )
+    event_type = "workflow_run.apply_authority_batch"
+    event = DomainEventEnvelope(
+        event_id=_stable_id("event", projection.run_id, str(version), event_type),
+        event_type=event_type,
+        aggregate_id=projection.run_id,
+        aggregate_version=version,
+        sequence=1,
+        occurred_at=command.occurred_at,
+        recorded_at=command.occurred_at,
+        actor=command.actor,
+        correlation_id=command.correlation_id,
+        causation_id=command.causation_id or command.command_id,
+        payload={
+            "command_id": command.command_id,
+            "prior_phase": projection.phase.value,
+            "resulting_phase": final_projection.phase.value,
+            "terminal_outcome": (
+                final_projection.terminal_outcome.value
+                if final_projection.terminal_outcome
+                else None
+            ),
+            "authority_batch_digest": sha256_digest(batch),
+            "action_identity_summary": batch.canonical_identity_summary(),
+        },
+    )
+    return Reduction(
+        projection=final_projection,
+        budget=current_budget,
+        effects=current_effects,
+        transition=transition,
+        result=result,
+        ledger_entries=tuple(ledger_entries),
         effect_entries=tuple(effect_entries),
         events=(event,),
     )
@@ -553,6 +742,9 @@ def _reserve(
 def _record_usage(
     state: BudgetState, action: RecordUsageAction, command: LifecycleCommand
 ) -> tuple[BudgetState, tuple[BudgetLedgerEntry, ...]]:
+    _validate_amounts(state, action.actual_amounts)
+    _validate_amounts(state, action.pending_external_amounts)
+    _validate_amounts(state, action.release_amounts)
     all_amounts = {
         **action.actual_amounts,
         **{
@@ -571,10 +763,16 @@ def _record_usage(
     _validate_amounts(state, all_amounts)
     if action.usage_id in state.usage_ids:
         raise ReductionRejected("usage_exists", "usage identity already exists")
+    if action.usage_id in state.settlement_ids:
+        raise ReductionRejected(
+            "settlement_exists",
+            "usage identity collides with an existing settlement identity",
+        )
     if action.reservation_id is None or action.reservation_id not in state.reservations:
         raise ReductionRejected(
             "reservation_required", "observed usage must reconcile an existing reservation"
         )
+    reservation_id = action.reservation_id
     consumed = dict(state.consumed)
     pending = dict(state.pending_settlement)
     reserved = dict(state.reserved)
@@ -604,6 +802,29 @@ def _record_usage(
         reservations[action.reservation_id] = remainder
     else:
         reservations.pop(action.reservation_id, None)
+    usage_record = UsageRecord(
+        usage_id=action.usage_id,
+        reservation_id=reservation_id,
+        authority_ref=action.authority_ref,
+        actual_amounts=action.actual_amounts,
+        release_amounts=action.release_amounts,
+        pending_external_amounts=action.pending_external_amounts,
+    )
+    usage_settlements = dict(state.usage_settlements)
+    settlement_ids = state.settlement_ids
+    outstanding_usage_ids = state.outstanding_usage_ids
+    if not any(action.pending_external_amounts.values()):
+        direct_settlement = _usage_settlement_record(
+            settlement_id=action.usage_id,
+            usage=usage_record,
+            settled_amounts=action.actual_amounts,
+            released_amounts=action.release_amounts,
+            source_pending_amounts={},
+        )
+        usage_settlements[action.usage_id] = direct_settlement
+        settlement_ids = settlement_ids | {action.usage_id}
+    else:
+        outstanding_usage_ids = outstanding_usage_ids | {action.usage_id}
     updated = state.model_copy(
         update={
             "consumed": consumed,
@@ -611,6 +832,10 @@ def _record_usage(
             "reserved": reserved,
             "reservations": reservations,
             "usage_ids": state.usage_ids | {action.usage_id},
+            "settlement_ids": settlement_ids,
+            "usage_records": {**state.usage_records, action.usage_id: usage_record},
+            "usage_settlements": usage_settlements,
+            "outstanding_usage_ids": outstanding_usage_ids,
         }
     )
     entries = [
@@ -644,9 +869,58 @@ def _record_usage(
 def _settle_pending(
     state: BudgetState, action: SettlePendingUsageAction, command: LifecycleCommand
 ) -> tuple[BudgetState, tuple[BudgetLedgerEntry, ...]]:
-    _validate_amounts(state, action.actual_amounts | action.pending_release_amounts)
+    _validate_amounts(state, action.actual_amounts)
+    _validate_amounts(state, action.pending_release_amounts)
+    if action.settlement_id in state.usage_ids:
+        raise ReductionRejected(
+            "settlement_identity_collision",
+            "settlement identity collides with an authoritative usage identity",
+        )
     if action.settlement_id in state.settlement_ids:
         raise ReductionRejected("settlement_exists", "settlement identity already exists")
+    usage = state.usage_records.get(action.usage_id)
+    if usage is None:
+        raise ReductionRejected(
+            "usage_not_found",
+            "pending usage settlement must reference an authoritative usage record",
+        )
+    if action.usage_id not in state.outstanding_usage_ids:
+        raise ReductionRejected(
+            "usage_already_settled",
+            "originating usage is not outstanding for settlement",
+        )
+    if any(
+        settlement.usage_id == action.usage_id
+        for settlement in state.usage_settlements.values()
+    ):
+        raise ReductionRejected(
+            "usage_already_settled",
+            "originating usage already has an authoritative settlement",
+        )
+    source_pending = {
+        dimension: amount
+        for dimension, amount in usage.pending_external_amounts.items()
+        if amount > 0
+    }
+    settlement_amounts = {
+        dimension: action.actual_amounts.get(dimension, 0)
+        + action.pending_release_amounts.get(dimension, 0)
+        for dimension in action.actual_amounts.keys()
+        | action.pending_release_amounts.keys()
+        if action.actual_amounts.get(dimension, 0)
+        + action.pending_release_amounts.get(dimension, 0)
+        > 0
+    }
+    if not settlement_amounts:
+        raise ReductionRejected(
+            "empty_usage_settlement",
+            "pending usage settlement must settle or release a positive amount",
+        )
+    if settlement_amounts != source_pending:
+        raise ReductionRejected(
+            "usage_settlement_provenance_mismatch",
+            "pending usage settlement must exactly reconcile its originating usage",
+        )
     pending = dict(state.pending_settlement)
     consumed = dict(state.consumed)
     for dimension in action.actual_amounts.keys() | action.pending_release_amounts.keys():
@@ -658,11 +932,24 @@ def _settle_pending(
             )
         pending[dimension] = pending.get(dimension, 0) - actual - release
         consumed[dimension] = consumed.get(dimension, 0) + actual
+    settlement = _usage_settlement_record(
+        settlement_id=action.settlement_id,
+        usage=usage,
+        settled_amounts=action.actual_amounts,
+        released_amounts=action.pending_release_amounts,
+        source_pending_amounts=source_pending,
+    )
     updated = state.model_copy(
         update={
             "pending_settlement": pending,
             "consumed": consumed,
             "settlement_ids": state.settlement_ids | {action.settlement_id},
+            "usage_settlements": {
+                **state.usage_settlements,
+                action.settlement_id: settlement,
+            },
+            "outstanding_usage_ids": state.outstanding_usage_ids
+            - {action.usage_id},
         }
     )
     entries = [
@@ -681,6 +968,29 @@ def _settle_pending(
             )
         )
     return updated, tuple(entries)
+
+
+def _usage_settlement_record(
+    *,
+    settlement_id: str,
+    usage: UsageRecord,
+    settled_amounts: dict[str, int],
+    released_amounts: dict[str, int],
+    source_pending_amounts: dict[str, int],
+) -> UsageSettlementRecord:
+    payload = {
+        "settlement_id": settlement_id,
+        "usage_id": usage.usage_id,
+        "reservation_id": usage.reservation_id,
+        "authority_ref": usage.authority_ref,
+        "settled_amounts": settled_amounts,
+        "released_amounts": released_amounts,
+        "source_pending_amounts": source_pending_amounts,
+    }
+    return UsageSettlementRecord(
+        **payload,
+        provenance_digest=sha256_digest(payload),
+    )
 
 
 def _claim_effect(
@@ -770,9 +1080,10 @@ def _observe_effect(
 
 def _settle_effect(
     state: EffectLedgerState,
+    budget: BudgetState,
     action: SettleEffectAction,
     command: LifecycleCommand,
-) -> tuple[EffectLedgerState, EffectLedgerEntry]:
+) -> tuple[EffectLedgerState, BudgetState, EffectLedgerEntry]:
     claim = state.claims.get(action.effect_id)
     if claim is None:
         raise ReductionRejected(
@@ -792,6 +1103,30 @@ def _settle_effect(
         raise ReductionRejected(
             "effect_settlement_mismatch", "settlement outcome must match the bound observation"
         )
+    usage_settlement = budget.usage_settlements.get(action.usage_settlement_ref)
+    if usage_settlement is None:
+        raise ReductionRejected(
+            "usage_settlement_not_found",
+            "effect settlement must bind an authoritative usage settlement",
+        )
+    if usage_settlement.reservation_id != claim.reservation_id:
+        raise ReductionRejected(
+            "usage_settlement_provenance_mismatch",
+            "effect and usage settlement must originate from the same reservation",
+        )
+    if usage_settlement.authority_ref != claim.operation_ref:
+        raise ReductionRejected(
+            "usage_settlement_authority_mismatch",
+            "effect and usage settlement must bind the same operation authority",
+        )
+    prior_effect_id = budget.usage_settlement_effect_refs.get(
+        action.usage_settlement_ref
+    )
+    if prior_effect_id is not None and prior_effect_id != action.effect_id:
+        raise ReductionRejected(
+            "usage_settlement_already_applied",
+            "usage settlement already authorized another effect",
+        )
     settlement = EffectSettlement(
         settlement_id=action.settlement_id,
         observation_id=action.observation_id,
@@ -805,7 +1140,15 @@ def _settle_effect(
     )
     updated_claim = ConsequentialEffectClaim.model_validate(updated_claim.model_dump(mode="python"))
     updated = state.model_copy(update={"claims": {**state.claims, action.effect_id: updated_claim}})
-    return updated, EffectLedgerEntry(
+    updated_budget = budget.model_copy(
+        update={
+            "usage_settlement_effect_refs": {
+                **budget.usage_settlement_effect_refs,
+                action.usage_settlement_ref: action.effect_id,
+            }
+        }
+    )
+    return updated, updated_budget, EffectLedgerEntry(
         entry_id=_stable_id(
             "effect-entry", state.run_id, action.effect_id, "settlement", action.settlement_id
         ),

@@ -102,6 +102,7 @@ async def test_effect_ambiguity_requires_one_authoritative_settlement() -> None:
             "release-baseline",
             RecordUsageAction(
                 usage_id="usage:effect:1",
+                authority_ref="operation:1",
                 reservation_id="baseline",
                 actual_amounts={},
                 release_amounts={"tokens.total": 20},
@@ -139,7 +140,7 @@ async def test_effect_ambiguity_requires_one_authoritative_settlement() -> None:
                 settlement_id="settlement:email:1",
                 observation_id="observation:success",
                 outcome=EffectSettlementOutcome.SUCCEEDED,
-                usage_settlement_ref="usage-settlement:email:1",
+                usage_settlement_ref="usage:effect:1",
             ),
         )
     )
@@ -154,7 +155,7 @@ async def test_effect_ambiguity_requires_one_authoritative_settlement() -> None:
                 settlement_id="settlement:email:2",
                 observation_id="observation:success",
                 outcome=EffectSettlementOutcome.SUCCEEDED,
-                usage_settlement_ref="usage-settlement:email:1",
+                usage_settlement_ref="usage:effect:1",
             ),
         )
     )

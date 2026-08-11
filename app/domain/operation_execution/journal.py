@@ -84,6 +84,7 @@ class OperationJournalSettlement(Contract):
     request_scope: str = Field(min_length=1)
     effect_claim_id: str = Field(min_length=1)
     settlement_revision: int = Field(ge=1)
+    digest_version: Literal["legacy-v1", "complete-v2"]
     settlement_digest: str = Field(pattern=DIGEST_PATTERN)
     status: Literal[
         "completed",
@@ -93,6 +94,7 @@ class OperationJournalSettlement(Contract):
         "reconciliation_required",
     ]
     usage: dict[str, int] = Field(default_factory=dict)
+    released_usage: dict[str, int] = Field(default_factory=dict)
     pending_external_usage: dict[str, int] = Field(default_factory=dict)
     result_manifest_ref: str | None = None
     result_manifest_digest: str | None = Field(default=None, pattern=DIGEST_PATTERN)
@@ -100,6 +102,21 @@ class OperationJournalSettlement(Contract):
     failure_code: str | None = None
     detail: dict[str, Any] = Field(default_factory=dict)
     settled_at: AwareDatetime
+
+    @model_validator(mode="before")
+    @classmethod
+    def detect_legacy_digest_shape(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        payload = dict(value)
+        if "digest_version" not in payload:
+            if "released_usage" in payload:
+                raise ValueError(
+                    "digest_version is required when released_usage is present"
+                )
+            payload["digest_version"] = "legacy-v1"
+            payload["released_usage"] = {}
+        return payload
 
     @field_validator("detail")
     @classmethod
@@ -131,23 +148,47 @@ class OperationJournalSettlement(Contract):
             raise ValueError("completed settlements cannot carry a failure code")
         if any(
             not dimension or amount < 0
-            for usage in (self.usage, self.pending_external_usage)
+            for usage in (
+                self.usage,
+                self.released_usage,
+                self.pending_external_usage,
+            )
             for dimension, amount in usage.items()
         ):
             raise ValueError("settlement usage must be non-negative and dimensioned")
-        content = self.model_dump(mode="json", exclude={"settlement_digest"})
+        if self.digest_version == "legacy-v1":
+            if self.settlement_revision != 1 or self.released_usage:
+                raise ValueError("legacy settlement digest shape is not canonical")
+            content = self.model_dump(
+                mode="json",
+                exclude={
+                    "settlement_digest",
+                    "digest_version",
+                    "released_usage",
+                },
+            )
+        else:
+            content = self.model_dump(mode="json", exclude={"settlement_digest"})
         if sha256_digest(content) != self.settlement_digest:
             raise ValueError("operation journal settlement digest mismatch")
         return self
 
     @classmethod
     def create(cls, **values: object) -> OperationJournalSettlement:
+        values = dict(values)
+        values.pop("digest_version", None)
+        values.pop("settlement_digest", None)
         draft = cast(Any, cls).model_construct(
             **values,
+            digest_version="complete-v2",
             settlement_digest="sha256:" + "0" * 64,
         )
         digest = sha256_digest(draft.model_dump(mode="json", exclude={"settlement_digest"}))
-        return cls(**values, settlement_digest=digest)
+        return cls(
+            **values,
+            digest_version="complete-v2",
+            settlement_digest=digest,
+        )
 
 
 class OperationClaimResult(Contract):
