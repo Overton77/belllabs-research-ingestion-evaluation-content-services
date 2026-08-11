@@ -526,6 +526,14 @@ def _validate_implementation_binding(
             blueprint.objective_contract,
             blueprint.acceptance_contract,
         }
+        if blueprint.required_obligation_refs != definitions.workflow_type.obligations:
+            raise CompilationRejected(
+                "GoalDirected blueprint obligations must exactly match the Workflow Type"
+            )
+        if blueprint.required_output_contracts != definitions.workflow_type.output_contracts:
+            raise CompilationRejected(
+                "GoalDirected blueprint outputs must exactly match the Workflow Type"
+            )
         if any(
             realization.realization_kind != "goal_acceptance"
             or realization.realization_ref not in goal_contracts
@@ -533,6 +541,13 @@ def _validate_implementation_binding(
         ):
             raise CompilationRejected(
                 "GoalDirected obligations must bind to its objective or acceptance contract"
+            )
+        if any(
+            realization.output_contract_ref not in blueprint.required_output_contracts
+            for realization in binding.output_contract_realizations
+        ):
+            raise CompilationRejected(
+                "GoalDirected output realization is outside the frozen required outputs"
             )
 
 

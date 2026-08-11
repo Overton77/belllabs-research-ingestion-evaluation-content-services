@@ -51,6 +51,7 @@ from app.domain.control_plane.errors import (
     RetiredDefinition,
 )
 from app.domain.control_plane.extensions import ExtensionRegistry
+from app.domain.control_plane.fixtures import GENERIC_GOAL_DIRECTED
 from app.integrations.control_plane_payloads import (
     ContentAddressedPayloadStore,
     InMemoryPayloadStore,
@@ -272,23 +273,24 @@ def test_canonicalization_sorts_sets_but_preserves_lists() -> None:
 
 
 def test_goal_directed_requires_bounded_independent_verification() -> None:
-    goal = GoalDirectedBlueprint(
-        logical_id="generic.goal",
-        title="Generic goal",
-        description="Contract fixture",
-        objective_contract="contract:objective@1",
-        acceptance_contract="contract:acceptance@1",
-        max_iterations=2,
+    goal = GoalDirectedBlueprint.model_validate(
+        {
+            **GENERIC_GOAL_DIRECTED.model_dump(mode="python"),
+            "logical_id": "generic.goal",
+            "title": "Generic goal",
+            "description": "Contract fixture",
+            "objective_contract": "contract:objective@1",
+            "acceptance_contract": "contract:acceptance@1",
+            "max_iterations": 2,
+        }
     )
     assert goal.independent_verification_required is True
     with pytest.raises(ValidationError):
-        GoalDirectedBlueprint(
-            logical_id="generic.goal",
-            title="Generic goal",
-            description="Contract fixture",
-            objective_contract="contract:objective@1",
-            acceptance_contract="contract:acceptance@1",
-            max_iterations=0,
+        GoalDirectedBlueprint.model_validate(
+            {
+                **goal.model_dump(mode="python"),
+                "max_iterations": 0,
+            }
         )
 
 
@@ -389,13 +391,16 @@ async def test_authoring_head_uses_optimistic_revisions_and_publishes_exact_draf
         ExtensionRegistry(),
         InMemoryPayloadStore(),
     )
-    draft = GoalDirectedBlueprint(
-        logical_id="draft.generic-goal",
-        title="Draft goal",
-        description="Mutable authoring content",
-        objective_contract="contract:objective@1",
-        acceptance_contract="contract:acceptance@1",
-        max_iterations=1,
+    draft = GoalDirectedBlueprint.model_validate(
+        {
+            **GENERIC_GOAL_DIRECTED.model_dump(mode="python"),
+            "logical_id": "draft.generic-goal",
+            "title": "Draft goal",
+            "description": "Mutable authoring content",
+            "objective_contract": "contract:objective@1",
+            "acceptance_contract": "contract:acceptance@1",
+            "max_iterations": 1,
+        }
     )
     first = await service.save_draft(
         SaveDraftRequest(

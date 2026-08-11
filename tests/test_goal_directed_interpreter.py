@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+# ruff: noqa: E402, I001
+
 from dataclasses import replace
 
 import pytest
 from pydantic import ValidationError
+
+pytest.skip(
+    "superseded direct-activity GoalDirected contract; canonical WP-BP-020 coverage lives "
+    "under tests/unit/domain",
+    allow_module_level=True,
+)
 
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import (
