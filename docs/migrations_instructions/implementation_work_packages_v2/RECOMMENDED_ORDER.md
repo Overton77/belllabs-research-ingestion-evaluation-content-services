@@ -14,9 +14,8 @@ WP-CP-001 (accepted)
 
 ## Current frontier
 
-`WP-CP-001` through `WP-CP-045` are accepted. Implement `WP-BP-010` and `WP-BP-020` in parallel
-from the same accepted `WP-CP-045` baseline, then integrate them under
-[`PARALLEL_WORKTREE_PROTOCOL.md`](PARALLEL_WORKTREE_PROTOCOL.md).
+`WP-CP-001` through `WP-CP-045`, `WP-BP-010`, and `WP-BP-020` are accepted. `WP-CP-050` is the
+current implementation frontier.
 
 `WP-BP-020` does not depend on `WP-BP-010`; they share only frozen foundation seams and
 integrator-owned files. Run `WP-CP-050` last, after both blueprint packages are accepted.

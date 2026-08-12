@@ -1,7 +1,7 @@
 ---
 id: WP-BP-020
 title: Implement canonical GoalDirected runtime
-status: ready
+status: accepted
 implements: [REQ-BP-GD-001, REQ-BP-GD-002, REQ-BP-GD-003, REQ-BP-GD-004, REQ-BP-GD-005, REQ-BP-GD-006, REQ-BP-GD-007, REQ-BP-GD-008, REQ-BP-GD-009, REQ-BP-GD-010]
 governed_by: [ADR-0003, SPEC-BP-GOAL-DIRECTED]
 contracts: [CON-BP-GOAL-DIRECTED-V1, CON-BP-GOAL-HANDOFF-V1, CON-BP-GOAL-VERIFICATION-V1, CON-CP-ASYNC-SUBAGENT-V1]
@@ -59,14 +59,14 @@ re-export shim is not the accepted runtime.
 
 ## Acceptance criteria
 
-- [ ] Objective envelope and revision bounds reject expansion.
-- [ ] Every significant iteration is independently durable.
-- [ ] Completion always requires an independent accepted verifier.
-- [ ] Fresh empty sessions resume from typed handoff/context slices.
-- [ ] Context rollover preserves protected facts and semantic identity.
-- [ ] Convergence precedence is deterministic.
-- [ ] Async subgoals are classified and governed correctly.
-- [ ] Broader changes route to control/fork/linked-run paths.
+- [x] Objective envelope and revision bounds reject expansion.
+- [x] Every significant iteration is independently durable.
+- [x] Completion always requires an independent accepted verifier.
+- [x] Fresh empty sessions resume from typed handoff/context slices.
+- [x] Context rollover preserves protected facts and semantic identity.
+- [x] Convergence precedence is deterministic.
+- [x] Async subgoals are classified and governed correctly.
+- [x] Broader changes route to control/fork/linked-run paths.
 
 ## Qualification and evidence
 

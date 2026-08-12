@@ -1,6 +1,6 @@
 # WP-BP-020 parallel-worktree handoff
 
-Disposition: `ready_for_review`
+Disposition: `accepted`
 
 ## Kickoff record
 
@@ -31,11 +31,28 @@ Disposition: `ready_for_review`
   - emptied Agent Server `GRAPH_REGISTRY` / `langgraph.json` graphs
   - relocated shared run-state validation to `app/agent_server/common.py`
 
-## Remaining before acceptance
+## Acceptance closure
 
-- Credential-gated live API-to-Temporal vertical remains pending
-- Integrator combined gate with WP-BP-010 and evidence publication remain required
-- Do not claim `accepted`
+- The credential-gated API-to-Temporal vertical passed with `gpt-5.6-luna`.
+- A token threshold forced one fresh agent session and a typed, host-mediated handoff.
+- The durable executor workspace survived replacement and was exposed to the independent verifier
+  as a read-only mount; the verifier accepted the Moderna/Spikevax artifact.
+- Four real provider calls completed and run control terminalized the run as `completed`.
+
+## 2026-08-11 qualification addendum
+
+- Published `evidence_v2/WP-BP-020/README.md`.
+- Corrected the production operation-result envelope seam and host-owned token accounting.
+- Bound LangGraph checkpoint continuity to governed session identity.
+- Added and ran the real Deep Agents 0.7.5 Docker filesystem sandbox vertical with forced token
+  rollover, persisted mediated handoff, empty replacement session, persistent workspace artifact,
+  separate executor/verifier operations, and reducer-authorized completion.
+- Added model-observation-only executor/verifier/handoff schemas; canonical identities, authority,
+  usage, reservations, remaining budgets, and remaining iterations are now host-bound.
+- Added the explicit credential-gated API-to-Temporal real-OpenAI qualification using the Docker
+  sandbox. It collects and skips safely until the operator flag and credentials are supplied.
+- Focused GoalDirected/Deep Agents gate passed; full mypy passed. Repository-wide baseline failures
+  are recorded in evidence and remain outside this package's changed paths.
 
 ## Focused verification
 
@@ -43,4 +60,4 @@ Disposition: `ready_for_review`
 uv run pytest -q tests/test_wp_bp_020_goal_directed.py tests/test_wp_bp_020_temporal.py --tb=short
 ```
 
-FINAL_DISPOSITION: READY_FOR_REVIEW
+FINAL_DISPOSITION: ACCEPTED

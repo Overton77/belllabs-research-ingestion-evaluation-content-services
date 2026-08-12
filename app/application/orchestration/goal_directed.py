@@ -7,19 +7,24 @@ from typing import Literal, Protocol
 from pydantic import TypeAdapter
 
 from app.application.operations.operation_execution import bind_operation_execution_request
+from app.application.operations.semantic_operation_bindings import (
+    SemanticOperationBindingRepository,
+)
 from app.application.run_control.service import (
     FamilyAdmissionRegistry,
     RunControlService,
 )
-from app.application.operations.semantic_operation_bindings import SemanticOperationBindingRepository
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.operation_execution.contracts import (
     DeepAgentExecutionBinding,
     OperationAttemptIdentity,
     OperationExecutionRequest,
+    OperationExecutionResult,
     OperationWorkflowRequest,
     PromptSegment,
     WorkspaceContract,
+    WorkspaceMount,
+    workspace_durable_reference,
 )
 from app.domain.orchestration.contracts import (
     GoalExecutionClaim,
@@ -29,11 +34,14 @@ from app.domain.orchestration.contracts import (
     GoalVerificationResult,
 )
 from app.domain.orchestration.goal_directed_runtime import (
+    GoalExecutorObservation,
     GoalFamilyDecisionMutation,
+    GoalHandoffDraft,
     GoalOperationDispatch,
     GoalOperationPreparationRequest,
     GoalOperationReconciliationRequest,
     GoalOperationReconciliationResult,
+    GoalVerifierObservation,
 )
 from app.domain.run_control.contracts import (
     ActorContext,
@@ -256,8 +264,8 @@ class GoalDirectedOperationResultService:
 
     def __init__(self, documents: GoalDirectedDocumentRepository) -> None:
         self._documents = documents
-        self._execution_adapter = TypeAdapter(GoalExecutionResult)
-        self._verification_adapter = TypeAdapter(GoalVerificationResult)
+        self._execution_adapter = TypeAdapter(GoalExecutorObservation)
+        self._verification_adapter = TypeAdapter(GoalVerifierObservation)
 
     async def reconcile(
         self, request: GoalOperationReconciliationRequest
@@ -275,8 +283,34 @@ class GoalDirectedOperationResultService:
             or observed.result is None
         ):
             raise ValueError("GoalDirected operation result does not match its durable request")
+        provider_result = OperationExecutionResult.model_validate(observed.result)
+        if (
+            provider_result.status != "completed"
+            or provider_result.binding_id != request.operation_binding_ref
+            or provider_result.semantic_attempt_key
+            != request.operation_request.semantic_attempt_id
+            or provider_result.structured_output is None
+        ):
+            mismatches = []
+            if provider_result.status != "completed":
+                mismatches.append(f"status={provider_result.status!r}")
+            if provider_result.binding_id != request.operation_binding_ref:
+                mismatches.append("binding_id")
+            if (
+                provider_result.semantic_attempt_key
+                != request.operation_request.semantic_attempt_id
+            ):
+                mismatches.append("semantic_attempt_key")
+            if provider_result.structured_output is None:
+                mismatches.append("structured_output=None")
+            raise ValueError(
+                "GoalDirected provider result is not the exact completed structured operation: "
+                + ", ".join(mismatches)
+            )
+        provider_payload = provider_result.structured_output
+        observed_usage = dict(provider_result.usage.amounts)
         if request.operation_role == "executor":
-            parsed = self._execution_adapter.validate_python(observed.result)
+            parsed = self._execution_adapter.validate_python(provider_payload)
             if parsed.output_contract_ref not in request.required_output_contract_refs:
                 raise ValueError(
                     "executor result is outside the frozen required output contracts"
@@ -286,6 +320,12 @@ class GoalDirectedOperationResultService:
                     parsed.handoff,
                     claim=request.claim,
                     operation_identity=operation.identity.semantic_key,
+                    actual_usage=observed_usage,
+                    remaining_iterations=request.remaining_iterations,
+                    protected_fact_classes=request.protected_fact_classes,
+                    context_selection_policy_ref=request.context_selection_policy_ref or "",
+                    context_compaction_policy_ref=request.context_compaction_policy_ref or "",
+                    workspace_ref_class=request.workspace_ref_class or "",
                 )
                 if parsed.handoff is not None
                 else None
@@ -306,14 +346,25 @@ class GoalDirectedOperationResultService:
                         else "fresh_from_handoff"
                     ),
                 )
-            result = replace(
-                parsed,
+            result = GoalExecutionResult(
                 identity=request.claim.identity,
+                disposition=parsed.disposition,
                 operation_identity=operation.identity.semantic_key,
                 operation_binding_ref=request.operation_binding_ref,
                 session_id=operation.session_id or "",
                 workspace_id=operation.workspace.workspace_id,
                 writable_paths=operation.workspace.exclusive_write_paths,
+                output_refs=parsed.output_refs,
+                completion_claim=parsed.completion_claim,
+                actual_usage=observed_usage,
+                blocker_class=parsed.blocker_class,
+                authority_breach_ref=parsed.authority_breach_ref,
+                hard_budget_exhausted_dimensions=(
+                    parsed.hard_budget_exhausted_dimensions
+                ),
+                irrecoverable_failure_ref=parsed.irrecoverable_failure_ref,
+                accepted_fact_refs=parsed.accepted_fact_refs,
+                evidence_refs=parsed.evidence_refs,
                 effect_frontier_refs=tuple(
                     dict.fromkeys((*parsed.effect_frontier_refs, *observed.effect_frontier))
                 ),
@@ -329,6 +380,7 @@ class GoalDirectedOperationResultService:
                     )
                 ),
                 handoff=handoff,
+                output_contract_ref=parsed.output_contract_ref,
             )
             detail_ref = await self._documents.persist_iteration(
                 request.request_scope,
@@ -348,8 +400,8 @@ class GoalDirectedOperationResultService:
                 detail_ref=detail_ref,
             )
 
-        verification = self._verification_adapter.validate_python(observed.result)
-        if verification.output_contract_ref not in request.required_output_contract_refs:
+        observation = self._verification_adapter.validate_python(provider_payload)
+        if observation.output_contract_ref not in request.required_output_contract_refs:
             raise ValueError(
                 "verifier result is outside the frozen required output contracts"
             )
@@ -379,9 +431,10 @@ class GoalDirectedOperationResultService:
         verification_id = (
             "goal-verification:" + verification_identity.removeprefix("sha256:")
         )
-        verification = replace(
-            verification,
+        verification_result = GoalVerificationResult(
+            schema_version="belllabs.goal-verification.v1",
             verification_id=verification_id,
+            verification_digest="pending",
             executor_identity=request.claim.identity,
             verifier_operation_identity=operation.identity.semantic_key,
             verifier_binding_ref=request.operation_binding_ref,
@@ -393,8 +446,15 @@ class GoalDirectedOperationResultService:
             rubric_version=rubric_version,
             acceptance_contract_ref=acceptance_contract_ref,
             acceptance_version=acceptance_version,
+            decision=observation.decision,
+            progress_made=observation.progress_made,
+            accepted_obligation_refs=observation.accepted_obligation_refs,
+            findings=observation.findings,
+            evidence_refs=observation.evidence_refs,
             admitted_executor_output_refs=executor_result.output_refs,
             admitted_executor_evidence_refs=executor_result.evidence_refs,
+            unmet_obligations=observation.unmet_obligations,
+            obligation_applicability=observation.obligation_applicability,
             verification_ref=f"{verification_id}@{verification_identity}",
             stale_frontier_digest=sha256_digest(
                 {
@@ -404,10 +464,21 @@ class GoalDirectedOperationResultService:
                     "pending_liability_refs": executor_result.pending_liability_refs,
                 }
             ),
+            blocker_class=observation.blocker_class,
+            authority_breach_ref=observation.authority_breach_ref,
+            hard_budget_exhausted_dimensions=(
+                observation.hard_budget_exhausted_dimensions
+            ),
+            soft_budget_dimensions=observation.soft_budget_dimensions,
+            irrecoverable_failure_ref=observation.irrecoverable_failure_ref,
+            proposed_revision=observation.proposed_revision,
+            scope_expansion_route=observation.scope_expansion_route,
+            route_ref=observation.route_ref,
+            actual_usage=observed_usage,
             effect_refs=tuple(
                 dict.fromkeys(
                     (
-                        *verification.effect_refs,
+                        *observation.effect_refs,
                         *observed.effect_frontier,
                         *(
                             f"async-child:{child_id}"
@@ -416,23 +487,24 @@ class GoalDirectedOperationResultService:
                     )
                 )
             ),
+            output_contract_ref=observation.output_contract_ref,
         )
-        verification_payload = asdict(verification)
+        verification_payload = asdict(verification_result)
         verification_payload.pop("verification_digest")
-        verification = replace(
-            verification,
+        verification_result = replace(
+            verification_result,
             verification_digest=sha256_digest(verification_payload),
         )
         detail_ref = await self._documents.persist_verification(
             request.request_scope,
             request.claim.identity.iteration.run_id,
             request.goal_revision_id,
-            verification,
+            verification_result,
             request.recorded_at,
         )
         return GoalOperationReconciliationResult(
             operation_role="verifier",
-            verification_result=verification,
+            verification_result=verification_result,
             detail_ref=detail_ref,
         )
 
@@ -481,21 +553,18 @@ def _instantiate_operation_request(
 
 
 def _bind_handoff(
-    handoff: GoalHandoff,
+    handoff: GoalHandoffDraft,
     *,
     claim: GoalExecutionClaim,
     operation_identity: str,
+    actual_usage: dict[str, int],
+    remaining_iterations: int,
+    protected_fact_classes: tuple[str, ...],
+    context_selection_policy_ref: str,
+    context_compaction_policy_ref: str,
+    workspace_ref_class: str,
 ) -> GoalHandoff:
-    provider_content = asdict(handoff)
-    for field_name in (
-        "handoff_id",
-        "handoff_digest",
-        "run_id",
-        "execution_epoch",
-        "goal_revision_id",
-        "source_iteration",
-    ):
-        provider_content.pop(field_name)
+    provider_content = handoff.model_dump(mode="python")
     identity_digest = sha256_digest(
         {
             "agent_run_identity": claim.identity.semantic_key,
@@ -503,18 +572,52 @@ def _bind_handoff(
             "content": provider_content,
         }
     )
-    bound = replace(
-        handoff,
+    provider_content.pop("schema_version")
+    bound = GoalHandoff(
+        schema_version="belllabs.goal-handoff.v1",
         handoff_id=f"goal-handoff:{identity_digest.removeprefix('sha256:')}",
         handoff_digest="pending",
         run_id=claim.identity.iteration.run_id,
         execution_epoch=claim.identity.iteration.execution_epoch,
         goal_revision_id=claim.identity.iteration.goal_revision_id,
         source_iteration=claim.identity.iteration,
+        consumed_budget=actual_usage,
+        reserved_budget=claim.reservation,
+        remaining_budget={
+            dimension: max(limit - actual_usage.get(dimension, 0), 0)
+            for dimension, limit in claim.reservation.items()
+        },
+        remaining_iterations=remaining_iterations,
+        protected_context_facts=tuple(
+            (fact_class, _protected_context_value(fact_class, claim))
+            for fact_class in protected_fact_classes
+        ),
+        context_selection_policy_ref=context_selection_policy_ref,
+        context_compaction_policy_ref=context_compaction_policy_ref,
+        workspace_refs=(f"{workspace_ref_class}:{claim.workspace_namespace}",),
+        snapshot_refs=(),
+        source_document_digests=(claim.goal_revision_digest,),
+        source_binding_digests=(sha256_digest(operation_identity),),
+        **provider_content,
     )
     digest_payload = asdict(bound)
     digest_payload.pop("handoff_digest")
     return replace(bound, handoff_digest=sha256_digest(digest_payload))
+
+
+def _protected_context_value(fact_class: str, claim: GoalExecutionClaim) -> str:
+    values = {
+        "objective": claim.objective,
+        "envelope_digest": claim.envelope_digest,
+        "goal_revision_digest": claim.goal_revision_digest,
+        "operation_class": claim.operation_class,
+    }
+    try:
+        return values[fact_class]
+    except KeyError as error:
+        raise ValueError(
+            f"unsupported protected GoalDirected context fact class: {fact_class}"
+        ) from error
 
 
 def _recover_handoff_compaction(
@@ -558,12 +661,30 @@ def _workspace_for(
 ) -> WorkspaceContract:
     role_root = f"/goal/{request.goal_iteration}/{request.operation_role}"
     payload = template.model_dump(mode="python")
+    namespace_id = f"run/{request.run_id}"
+    read_mounts: tuple[WorkspaceMount, ...] = ()
+    if request.read_workspace_id is not None:
+        read_mounts = (
+            WorkspaceMount(
+                logical_path=f"{role_root}/input",
+                durable_ref=workspace_durable_reference(
+                    namespace_id, request.read_workspace_id
+                ),
+                content_digest=sha256_digest(
+                    {
+                        "workspace_id": request.read_workspace_id,
+                        "input_refs": request.verifier_input_refs,
+                    }
+                ),
+            ),
+        )
     payload.update(
         {
-            "namespace_id": f"run/{request.run_id}",
+            "namespace_id": namespace_id,
             "workspace_id": request.workspace_id,
             "slot_bindings": (),
             "exclusive_write_paths": (f"{role_root}/work",),
+            "read_mounts": read_mounts,
             "restore_snapshot_id": None,
         }
     )

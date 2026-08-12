@@ -1,6 +1,5 @@
 ---
-description: Parallel StageGraph and GoalDirected worktree ownership and integration
-alwaysApply: true
+alwaysApply: false
 ---
 
 # Parallel blueprint worktrees

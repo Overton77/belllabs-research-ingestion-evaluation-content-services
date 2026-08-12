@@ -128,6 +128,15 @@ class WorkspaceMount(Contract):
     read_only: Literal[True] = True
 
 
+def workspace_durable_reference(namespace_id: str, workspace_id: str) -> str:
+    """Return the opaque local durable reference for a governed workspace."""
+
+    identity = sha256_digest(
+        {"workspace_id": workspace_id, "namespace_id": namespace_id}
+    ).removeprefix("sha256:")
+    return f"workspace://{identity}"
+
+
 class WorkspaceContract(Contract):
     namespace_id: str = Field(min_length=1)
     workspace_id: str = Field(min_length=1)
@@ -552,7 +561,7 @@ class DeepAgentMCPServerComponent(Contract):
 
 class DeepAgentSandboxComponent(Contract):
     ref: ExactDefinitionRef
-    backend: Literal["langsmith", "daytona", "state"]
+    backend: Literal["langsmith", "daytona", "docker", "state"]
     runtime_digest: str = Field(pattern=DIGEST_PATTERN)
     snapshot_ref: str | None = None
     credential_refs: tuple[SecretRef, ...] = ()
@@ -843,7 +852,7 @@ class DeepAgentExecutionPlacementProfile(Contract):
     streaming_behavior: Literal["state_updates", "messages"]
     message_injection_behavior: Literal["invoke_only", "remote_thread"]
     reconnect_behavior: Literal["checkpoint_resume", "remote_run_reconnect"]
-    sandbox_backends: frozenset[Literal["langsmith", "daytona", "state"]]
+    sandbox_backends: frozenset[Literal["langsmith", "daytona", "docker", "state"]]
     trace_behavior: Literal["langsmith"] = "langsmith"
     qualification_refs: tuple[str, ...] = Field(min_length=1)
     silent_fallback: Literal[False] = False

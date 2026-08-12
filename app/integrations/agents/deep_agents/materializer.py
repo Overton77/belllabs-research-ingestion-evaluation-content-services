@@ -43,7 +43,7 @@ from app.domain.operation_execution.errors import (
 ResolvedSecrets = Mapping[str, str]
 ModelFactory = Callable[[DeepAgentExecutionBinding, ResolvedSecrets], BaseChatModel]
 SandboxFactory = Callable[
-    [DeepAgentSandboxComponent, ResolvedSecrets],
+    [DeepAgentExecutionBinding, ResolvedSecrets],
     AbstractAsyncContextManager[BackendProtocol],
 ]
 
@@ -93,6 +93,9 @@ class ExactComponentRegistry:
     sandbox_factories: Mapping[str, SandboxFactory] = dataclass_field(default_factory=dict)
     checkpointers: Mapping[str, BaseCheckpointSaver[Any]] = dataclass_field(default_factory=dict)
     stores: Mapping[str, BaseStore] = dataclass_field(default_factory=dict)
+    structured_output_schemas: Mapping[str, type[Any] | dict[str, Any]] = dataclass_field(
+        default_factory=dict
+    )
 
 
 @dataclass(frozen=True)
@@ -110,14 +113,16 @@ class MaterializedDeepAgentArguments:
     store: BaseStore
     initial_state: dict[str, object]
     resolved_attachments: tuple[dict[str, str], ...]
+    response_format: type[Any] | dict[str, Any] | None
 
 
 class StateSandboxFactory:
     def __call__(
         self,
-        component: DeepAgentSandboxComponent,
+        binding: DeepAgentExecutionBinding,
         _secrets: ResolvedSecrets,
     ) -> AbstractAsyncContextManager[BackendProtocol]:
+        component = binding.sandbox
         if component.backend != "state":
             raise DeepAgentUnsupportedPlacement("state backend factory cannot change placement")
 
@@ -170,9 +175,10 @@ class OpenAIExactModelFactory:
 class LangSmithSandboxFactory:
     def __call__(
         self,
-        component: DeepAgentSandboxComponent,
+        binding: DeepAgentExecutionBinding,
         secrets: ResolvedSecrets,
     ) -> AbstractAsyncContextManager[BackendProtocol]:
+        component = binding.sandbox
         if component.backend != "langsmith":
             raise DeepAgentUnsupportedPlacement("LangSmith factory cannot change placement")
         api_key = _single_secret(component, secrets)
@@ -206,6 +212,8 @@ class ExactDeepAgentMaterializer:
         self,
         binding: DeepAgentExecutionBinding,
         secrets: ResolvedSecrets,
+        *,
+        output_schema_digest: str | None = None,
     ) -> AsyncIterator[MaterializedDeepAgentArguments]:
         self._verify_runtime(binding)
         async with AsyncExitStack() as stack:
@@ -220,7 +228,7 @@ class ExactDeepAgentMaterializer:
                 binding.sandbox.ref.digest,
                 "sandbox",
             )
-            backend = await stack.enter_async_context(backend_factory(binding.sandbox, secrets))
+            backend = await stack.enter_async_context(backend_factory(binding, secrets))
             skill_sources, state_skill_files = await self._mount_skills(binding, backend)
             tools = [
                 self._resolve_tool(item.ref.digest, item.schema_digest, item.tool_name)
@@ -253,6 +261,16 @@ class ExactDeepAgentMaterializer:
             }
             if state_skill_files:
                 initial_state["files"] = state_skill_files
+            response_format = (
+                _exact(
+                    self._registry.structured_output_schemas,
+                    output_schema_digest,
+                    "structured output schema",
+                )
+                if output_schema_digest is not None
+                and output_schema_digest in self._registry.structured_output_schemas
+                else None
+            )
             yield MaterializedDeepAgentArguments(
                 model=model,
                 tools=tuple(tools),
@@ -270,6 +288,7 @@ class ExactDeepAgentMaterializer:
                     item.model_copy(update={"status": "resolved"}).model_dump(mode="json")
                     for item in binding.intended_attachments
                 ),
+                response_format=response_format,
             )
 
     def _materialize_subagents(

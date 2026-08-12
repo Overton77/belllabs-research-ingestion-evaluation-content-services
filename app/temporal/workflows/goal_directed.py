@@ -108,6 +108,7 @@ class GoalDirectedWorkflow:
                 claim.reservation,
                 claim.session_id,
                 claim.workspace_namespace,
+                None,
                 claim.prior_handoff_ref or None,
                 (
                     claimed_state.handoffs[-1]
@@ -137,9 +138,12 @@ class GoalDirectedWorkflow:
             )
             if executor_accepted.execution_result is None:
                 raise ApplicationError("executor reconciliation omitted its typed result")
-            projected = interpreter.apply_execution_result(
-                claimed_state, executor_accepted.execution_result
-            )
+            try:
+                projected = interpreter.apply_execution_result(
+                    claimed_state, executor_accepted.execution_result
+                )
+            except GoalDirectedExecutionError as error:
+                raise ApplicationError(str(error), non_retryable=True) from error
             run_version = await self._settle_operation(
                 run_input,
                 run_version,
@@ -163,6 +167,7 @@ class GoalDirectedWorkflow:
                 claim.reservation,
                 f"{claim.session_id}:verifier",
                 f"{claim.workspace_namespace}:verifier",
+                executor_accepted.execution_result.workspace_id,
                 None,
                 None,
                 executor_accepted.execution_result.output_refs,
@@ -262,7 +267,16 @@ class GoalDirectedWorkflow:
                 timeout,
             )
             run_version = lifecycle.resulting_run_version
-        for output_ref in result.output_refs:
+        # Failed/partial convergence may retain produced artifact references for
+        # diagnosis, but those artifacts are not authoritatively valid outputs.
+        # Promoting them and then proposing an empty terminal output set would
+        # contradict the run-control terminalization contract.
+        promotable_output_refs = (
+            result.output_refs
+            if terminalization_proposal.proposed_outcome == "complete"
+            else ()
+        )
+        for output_ref in promotable_output_refs:
             lifecycle = await self._lifecycle(
                 run_input,
                 LifecycleCommandRequest(
@@ -422,6 +436,7 @@ class GoalDirectedWorkflow:
         reservation: dict[str, int],
         session_id: str,
         workspace_id: str,
+        read_workspace_id: str | None,
         handoff_ref: str | None,
         handoff: GoalHandoff | None,
         verifier_input_refs: tuple[str, ...],
@@ -452,6 +467,7 @@ class GoalDirectedWorkflow:
                 reservation=reservation,
                 session_id=session_id,
                 workspace_id=workspace_id,
+                read_workspace_id=read_workspace_id,
                 handoff_ref=handoff_ref,
                 handoff=handoff,
                 verifier_input_refs=verifier_input_refs,
@@ -487,6 +503,31 @@ class GoalDirectedWorkflow:
                 claim=claim,
                 executor_result=executor_result,
                 operation_result=result,
+                remaining_iterations=max(
+                    blueprint.max_iterations
+                    - claim.identity.iteration.goal_iteration,
+                    0,
+                ),
+                protected_fact_classes=(
+                    tuple(sorted(blueprint.session_policy.protected_fact_classes))
+                    if role == "executor"
+                    else ()
+                ),
+                context_selection_policy_ref=(
+                    blueprint.session_policy.context_selection_policy_ref
+                    if role == "executor"
+                    else None
+                ),
+                context_compaction_policy_ref=(
+                    blueprint.session_policy.context_compaction_policy_ref
+                    if role == "executor"
+                    else None
+                ),
+                workspace_ref_class=(
+                    sorted(blueprint.handoff_policy.allowed_workspace_ref_classes)[0]
+                    if role == "executor"
+                    else None
+                ),
                 compaction_failure_action=(
                     blueprint.session_policy.compaction_failure_action
                     if role == "executor"
@@ -513,7 +554,10 @@ class GoalDirectedWorkflow:
             ),
             result_type=GoalOperationReconciliationResult,
             start_to_close_timeout=activity_timeout,
-            retry_policy=RetryPolicy(maximum_attempts=3),
+            # Reconciliation is deterministic validation/persistence. Replaying an
+            # invalid completed provider payload cannot repair it and obscures the
+            # original boundary failure.
+            retry_policy=RetryPolicy(maximum_attempts=1),
         )
 
     async def _settle_operation(
@@ -573,7 +617,9 @@ class GoalDirectedWorkflow:
             ),
             result_type=LifecycleCommandOutcome,
             start_to_close_timeout=activity_timeout,
-            retry_policy=RetryPolicy(maximum_attempts=0),
+            # Temporal uses zero for unlimited attempts. Lifecycle commands are
+            # idempotent but authority/schema defects must fail visibly, not hot-loop.
+            retry_policy=RetryPolicy(maximum_attempts=1),
         )
         if not outcome.accepted:
             raise ApplicationError(

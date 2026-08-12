@@ -1,6 +1,5 @@
 ---
-description: Keep BellLabs contracts framework-neutral under Temporal macro-runtime authority and bounded Deep Agents cognition
-alwaysApply: true
+alwaysApply: false
 ---
 
 # Agent framework coexistence

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from typing import Any, cast
 
@@ -40,7 +41,14 @@ class DeepAgentRuntimeAdapter:
             raise DeepAgentMaterializationError(
                 "Deep Agent adapter requires the exact canonical execution binding"
             )
-        async with self._materializer.prepare(binding, resolved_secrets) as materialized:
+        output_binding = invocation.binding.output_schema
+        async with self._materializer.prepare(
+            binding,
+            resolved_secrets,
+            output_schema_digest=(
+                output_binding.schema_digest if output_binding is not None else None
+            ),
+        ) as materialized:
             system_prompt, user_prompt = _prompts(invocation)
             permissions = (
                 None
@@ -60,6 +68,7 @@ class DeepAgentRuntimeAdapter:
                 context_schema=materialized.context_schema,
                 checkpointer=materialized.checkpointer,
                 store=materialized.store,
+                response_format=materialized.response_format,
                 name=f"belllabs-{binding.operation_id}",
             )
             state = {
@@ -68,9 +77,19 @@ class DeepAgentRuntimeAdapter:
             }
             disclosure_observer = _SkillDisclosureObserver(binding)
             config: RunnableConfig = {
-                "configurable": {"thread_id": binding.binding_id},
+                # Session identity is governed by GoalDirected. Reused iterations share
+                # a checkpoint thread; token rollover advances the session identity and
+                # therefore starts a genuinely empty Deep Agent session.
+                "configurable": {
+                    "thread_id": invocation.binding.session_id or binding.binding_id
+                },
                 "callbacks": [disclosure_observer],
             }
+            prior_snapshot = await agent.aget_state(config)
+            prior_messages = cast(
+                list[BaseMessage],
+                prior_snapshot.values.get("messages", []),
+            )
             result = cast(
                 dict[str, Any],
                 await agent.ainvoke(
@@ -85,7 +104,7 @@ class DeepAgentRuntimeAdapter:
         messages = cast(list[BaseMessage], actual_state.get("messages", result.get("messages", [])))
         final = next((item for item in reversed(messages) if isinstance(item, AIMessage)), None)
         output_text = _message_text(final) if final is not None else ""
-        structured = result.get("structured_response")
+        structured = _structured_output(result.get("structured_response"), output_text)
         inspection = _inspect_state(
             binding,
             actual_state,
@@ -97,10 +116,20 @@ class DeepAgentRuntimeAdapter:
         return RuntimeResult(
             output_text=output_text,
             structured_output=structured if isinstance(structured, dict) else None,
-            usage=_usage(invocation, messages),
+            usage=_usage(invocation, messages[len(prior_messages) :]),
             provider_run_id=(str(final.id) if final is not None and final.id else None),
             event_payloads=(inspection,),
         )
+
+
+def _structured_output(value: object, output_text: str) -> object:
+    if isinstance(value, dict):
+        return value
+    try:
+        decoded = json.loads(output_text)
+    except (TypeError, ValueError):
+        return None
+    return decoded if isinstance(decoded, dict) else None
 
 
 def _prompts(invocation: RuntimeInvocation) -> tuple[str, str]:
@@ -127,6 +156,14 @@ def _permissions(binding: DeepAgentExecutionBinding) -> list[FilesystemPermissio
             FilesystemPermission(
                 operations=["read"],
                 paths=sorted({str(item.mount_root) for item in binding.skills}),
+                mode="allow",
+            )
+        )
+    if binding.workspace.read_mounts:
+        permissions.append(
+            FilesystemPermission(
+                operations=["read"],
+                paths=[mount.logical_path for mount in binding.workspace.read_mounts],
                 mode="allow",
             )
         )

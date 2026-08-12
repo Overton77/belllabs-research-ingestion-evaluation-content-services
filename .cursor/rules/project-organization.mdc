@@ -38,3 +38,4 @@ alwaysApply: true
   including common-base, family-region ownership, and integrator-only shared paths.
 - Treat `docs/interview_and_research_result_documentation/CODEBASE_DOMAIN_WORKFLOW_GUIDE.md` as as-built reference. Historical plans,
   experiments, scratch files, and superseded recommendations are non-normative.
+- For the compact `app/` package map and placement test, see `codebase-organization.mdc` (glob-applied).

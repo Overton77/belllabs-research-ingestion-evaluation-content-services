@@ -70,16 +70,16 @@ Canonical metadata revision: `c48867a240d09a98db9cdfb4937f55176f30adf1`.
 | REQ-BP-SG-008 | Pre-research F3 invalidation | ADR-0003 | SPEC-BP-STAGEGRAPH | CON-BP-STAGEGRAPH-V2; CON-BP-STAGE-DECISION-V1 | WP-BP-010 | local Markdown | minimal reuse and invalid-generation lineage tests | evidence_v2/WP-BP-010/README.md | accepted |
 | REQ-BP-SG-009 | Pre-research F3 waits/cancellation | ADR-0003 | SPEC-BP-STAGEGRAPH | CON-BP-STAGEGRAPH-V2; CON-BP-STAGE-DECISION-V1 | WP-BP-010 | local Markdown | wait/cancel; slow-sibling routing; veto/rule precedence; late-result effects | evidence_v2/WP-BP-010/README.md | accepted |
 | REQ-BP-SG-010 | Pre-research F3 obligations | ADR-0003 | SPEC-BP-STAGEGRAPH | CON-BP-STAGEGRAPH-V2; CON-BP-STAGE-DECISION-V1 | WP-BP-010, WP-CP-050 | local Markdown | obligation completion and producer-liability closure | evidence_v2/WP-BP-010/README.md | accepted |
-| REQ-BP-GD-001 | Pre-research F3 objective envelope | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-BP-GOAL-DIRECTED-V1 | WP-BP-020 | local Markdown | envelope publication/control | evidence_v2/WP-BP-020 | planned |
-| REQ-BP-GD-002 | Proposal §7.4 revisions | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-BP-GOAL-DIRECTED-V1 | WP-BP-020 | local Markdown | revision-boundary tests | evidence_v2/WP-BP-020 | planned |
-| REQ-BP-GD-003 | Proposal §7.4 iterations | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-BP-GOAL-DIRECTED-V1 | WP-BP-020 | local Markdown | operation durability tests | evidence_v2/WP-BP-020 | planned |
-| REQ-BP-GD-004 | Proposal §7.4 | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-BP-GOAL-VERIFICATION-V1 | WP-BP-020, WP-CP-050 | local Markdown | independent verifier proof; cohesive vertical | evidence_v2/WP-BP-020; evidence_v2/WP-CP-050 | planned |
-| REQ-BP-GD-005 | Proposal §7.4 handoff | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-BP-GOAL-HANDOFF-V1 | WP-BP-020, WP-CP-050 | local Markdown | empty-session resume; cohesive vertical | evidence_v2/WP-BP-020; evidence_v2/WP-CP-050 | planned |
-| REQ-BP-GD-006 | Proposal §12 rollover | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-BP-GOAL-HANDOFF-V1 | WP-BP-020, WP-CP-050 | local Markdown | rollover/protected facts; cohesive vertical | evidence_v2/WP-BP-020; evidence_v2/WP-CP-050 | planned |
-| REQ-BP-GD-007 | Pre-research F3 convergence | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-BP-GOAL-DIRECTED-V1 | WP-BP-020, WP-CP-050 | local Markdown | precedence/property tests | evidence_v2/WP-BP-020 | planned |
-| REQ-BP-GD-008 | Foundation async-subgoal decision | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-CP-ASYNC-SUBAGENT-V1 | WP-BP-020 | local Markdown | delegation classifier tests | evidence_v2/WP-BP-020 | planned |
-| REQ-BP-GD-009 | Pre-research F3 fork boundary | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-BP-GOAL-DIRECTED-V1 | WP-BP-020 | local Markdown | protected-field/fork tests | evidence_v2/WP-BP-020 | planned |
-| REQ-BP-GD-010 | Pre-research F3 terminality | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-BP-GOAL-DIRECTED-V1 | WP-BP-020 | local Markdown | proposal/reducer tests | evidence_v2/WP-BP-020 | planned |
+| REQ-BP-GD-001 | Pre-research F3 objective envelope | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-BP-GOAL-DIRECTED-V1 | WP-BP-020 | local Markdown | envelope publication/control | evidence_v2/WP-BP-020/README.md | accepted |
+| REQ-BP-GD-002 | Proposal §7.4 revisions | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-BP-GOAL-DIRECTED-V1 | WP-BP-020 | local Markdown | revision-boundary tests | evidence_v2/WP-BP-020/README.md | accepted |
+| REQ-BP-GD-003 | Proposal §7.4 iterations | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-BP-GOAL-DIRECTED-V1 | WP-BP-020 | local Markdown | operation durability tests | evidence_v2/WP-BP-020/README.md | accepted |
+| REQ-BP-GD-004 | Proposal §7.4 | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-BP-GOAL-VERIFICATION-V1 | WP-BP-020, WP-CP-050 | local Markdown | independent verifier proof; cohesive vertical | evidence_v2/WP-BP-020/README.md; evidence_v2/WP-CP-050 | accepted |
+| REQ-BP-GD-005 | Proposal §7.4 handoff | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-BP-GOAL-HANDOFF-V1 | WP-BP-020, WP-CP-050 | local Markdown | empty-session resume; cohesive vertical | evidence_v2/WP-BP-020/README.md; evidence_v2/WP-CP-050 | accepted |
+| REQ-BP-GD-006 | Proposal §12 rollover | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-BP-GOAL-HANDOFF-V1 | WP-BP-020, WP-CP-050 | local Markdown | rollover/protected facts; cohesive vertical | evidence_v2/WP-BP-020/README.md; evidence_v2/WP-CP-050 | accepted |
+| REQ-BP-GD-007 | Pre-research F3 convergence | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-BP-GOAL-DIRECTED-V1 | WP-BP-020, WP-CP-050 | local Markdown | precedence/property tests | evidence_v2/WP-BP-020/README.md | accepted |
+| REQ-BP-GD-008 | Foundation async-subgoal decision | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-CP-ASYNC-SUBAGENT-V1 | WP-BP-020 | local Markdown | delegation classifier tests | evidence_v2/WP-BP-020/README.md | accepted |
+| REQ-BP-GD-009 | Pre-research F3 fork boundary | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-BP-GOAL-DIRECTED-V1 | WP-BP-020 | local Markdown | protected-field/fork tests | evidence_v2/WP-BP-020/README.md | accepted |
+| REQ-BP-GD-010 | Pre-research F3 terminality | ADR-0003 | SPEC-BP-GOAL-DIRECTED | CON-BP-GOAL-DIRECTED-V1 | WP-BP-020 | local Markdown | proposal/reducer tests | evidence_v2/WP-BP-020/README.md | accepted |
 
 ## Blueprint runtime qualification projection
 

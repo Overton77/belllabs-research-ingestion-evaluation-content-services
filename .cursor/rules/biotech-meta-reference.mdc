@@ -1,0 +1,51 @@
+---
+description: Manual — biotech-meta canonical specs/ADRs reading order and authority (read-only unless tasked)
+alwaysApply: false
+---
+
+# Biotech-meta reference (Apply Manually)
+
+## Role
+
+| Repo | Role |
+|------|------|
+| `../biotech-meta` | Accepted SPEC-*/ADR/vocabulary/authority |
+| This evaluation system | Implementation (`app/`), `WP-*`, as-built code/tests |
+
+Canonical SPECs own requirements; `WP-*` cannot amend them.
+
+## Engagement (read-only default)
+
+- Default: **read-only** on `../biotech-meta`.
+- Edit meta only when the task explicitly requests SPEC/ADR/registry changes.
+- Never let WP text, as-built code, LangGraph checkpoints, or MCP availability override accepted SPECs/ADRs.
+
+## Reading order (control-plane / Temporal / Deep Agents)
+
+1. `../biotech-meta/docs/tech_stack_and_operational_authority.md`
+2. `../biotech-meta/docs/adr/0003-temporal-deepagents-control-plane-runtime.md`
+3. `../biotech-meta/docs/specs/control-plane-foundations/README.md` → SPEC-CP 01→04 (05 / ADR-0004 if cognitive schemas; draft/proposed)
+4. `../biotech-meta/docs/specs/workflow-blueprints/README.md` → `stagegraph.md` / `goal-directed.md`
+5. `../biotech-meta/docs/CONTEXT.md` for vocabulary
+6. Optional nav: `../biotech-meta/docs/governance/document-registry.yaml`
+
+Then return to this repo’s v2 `WP-*` / code.
+
+## Normative vs not
+
+- **Normative:** `docs/specs/control-plane-foundations/` (canonical), `docs/specs/workflow-blueprints/`, ADR-0003 (accepted), tech_stack authority, CONTEXT vocabulary.
+- **Non-normative:** `docs/research/`, `docs/spec_synthesis/`, `docs/checkpoints/`, `docs/specs/pre-research/` (superseded provenance).
+- **Draft/proposed:** ADR-0004, SPEC-CP-05 — not frozen.
+
+## Top docs (pointers only)
+
+| Path | Use |
+|------|-----|
+| `docs/tech_stack_and_operational_authority.md` | Stack / ops authority |
+| `docs/adr/0003-*.md` | Temporal + Deep Agents control plane |
+| `docs/specs/control-plane-foundations/README.md` | SPEC-CP index (01–04; 05 draft) |
+| `docs/specs/workflow-blueprints/README.md` | Stagegraph / goal-directed |
+| `docs/CONTEXT.md` | Shared vocabulary |
+| `docs/governance/document-registry.yaml` | Registry / status nav |
+| `docs/adr/0004-*.md` | Cognitive schemas (proposed) |
+| `docs/specs/pre-research/` | Superseded — provenance only |

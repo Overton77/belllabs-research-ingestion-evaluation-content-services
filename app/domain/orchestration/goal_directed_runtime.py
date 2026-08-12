@@ -19,6 +19,7 @@ from app.domain.orchestration.contracts import (
     GoalHandoff,
     GoalRevision,
     GoalVerificationResult,
+    GoalVerifierDecision,
 )
 from app.domain.run_control.contracts import Contract
 from app.domain.run_control.family_admission import AtomicFamilyMutation
@@ -76,6 +77,7 @@ class GoalOperationPreparationRequest(Contract):
     reservation: dict[str, int] = Field(min_length=1)
     session_id: str = Field(min_length=1)
     workspace_id: str = Field(min_length=1)
+    read_workspace_id: str | None = Field(default=None, min_length=1)
     handoff_ref: str | None = None
     handoff: GoalHandoff | None = None
     verifier_input_refs: tuple[str, ...] = ()
@@ -96,6 +98,11 @@ class GoalOperationPreparationRequest(Contract):
             or self.handoff.goal_revision_id != self.goal_revision_id
         ):
             raise ValueError("operation preparation handoff does not match its exact reference")
+        if self.operation_role == "verifier":
+            if self.read_workspace_id is None:
+                raise ValueError("verifier preparation requires its executor read workspace")
+        elif self.read_workspace_id is not None:
+            raise ValueError("executor preparation cannot mount a prior read workspace")
         return self
 
 
@@ -123,6 +130,11 @@ class GoalOperationReconciliationRequest(Contract):
     claim: GoalExecutionClaim
     executor_result: GoalExecutionResult | None = None
     operation_result: OperationWorkflowResult
+    remaining_iterations: int = Field(ge=0)
+    protected_fact_classes: tuple[str, ...] = ()
+    context_selection_policy_ref: str | None = Field(default=None, min_length=1)
+    context_compaction_policy_ref: str | None = Field(default=None, min_length=1)
+    workspace_ref_class: str | None = Field(default=None, min_length=1)
     compaction_failure_action: Literal[
         "retry", "fresh_from_handoff", "pause", "escalate"
     ] | None = None
@@ -156,6 +168,13 @@ class GoalOperationReconciliationRequest(Contract):
                 raise ValueError(
                     "verifier reconciliation cannot carry a compaction failure action"
                 )
+            if (
+                self.protected_fact_classes
+                or self.context_selection_policy_ref is not None
+                or self.context_compaction_policy_ref is not None
+                or self.workspace_ref_class is not None
+            ):
+                raise ValueError("verifier reconciliation cannot carry handoff authority")
         elif any(value is not None for value in values):
             raise ValueError("executor reconciliation cannot carry verifier policy authority")
         elif self.executor_result is not None:
@@ -164,7 +183,93 @@ class GoalOperationReconciliationRequest(Contract):
             raise ValueError(
                 "executor reconciliation requires its frozen compaction failure action"
             )
+        elif (
+            not self.protected_fact_classes
+            or self.context_selection_policy_ref is None
+            or self.context_compaction_policy_ref is None
+            or self.workspace_ref_class is None
+        ):
+            raise ValueError("executor reconciliation requires frozen handoff authority")
         return self
+
+
+class GoalHandoffDraft(Contract):
+    """Model-authored handoff content; application authority binds its identity."""
+
+    schema_version: Literal["belllabs.goal-handoff-draft.v1"] = (
+        "belllabs.goal-handoff-draft.v1"
+    )
+    accepted_fact_refs: tuple[str, ...] = Field(min_length=1)
+    evidence_refs: tuple[str, ...] = Field(min_length=1)
+    artifact_refs: tuple[str, ...] = ()
+    attempted_tactics: tuple[str, ...] = ()
+    rejected_tactics: tuple[tuple[str, str], ...] = ()
+    unresolved_obligations: tuple[str, ...] = ()
+    blockers: tuple[str, ...] = ()
+    effect_frontier_refs: tuple[str, ...] = ()
+    pending_liability_refs: tuple[str, ...] = ()
+    context_selection_refs: tuple[str, ...] = Field(min_length=1)
+    compaction_decision_ref: str = Field(min_length=1)
+    compaction_status: Literal["accepted", "failed"] = "accepted"
+    compaction_attempt: int = Field(default=1, ge=1)
+    compaction_failure_ref: str = ""
+    continuation_instructions: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def compaction_failure_is_exact(self) -> GoalHandoffDraft:
+        if (self.compaction_status == "failed") != bool(self.compaction_failure_ref):
+            raise ValueError(
+                "failed handoff compaction requires exactly one failure reference"
+            )
+        return self
+
+
+class GoalExecutorObservation(Contract):
+    """Cognitive executor output with no lifecycle, identity, or usage authority."""
+
+    schema_version: Literal["belllabs.goal-executor-observation.v1"] = (
+        "belllabs.goal-executor-observation.v1"
+    )
+    disposition: Literal["completed", "failed", "blocked"]
+    output_refs: tuple[str, ...] = ()
+    completion_claim: bool = False
+    blocker_class: str = ""
+    authority_breach_ref: str = ""
+    hard_budget_exhausted_dimensions: tuple[str, ...] = ()
+    irrecoverable_failure_ref: str = ""
+    accepted_fact_refs: tuple[str, ...] = ()
+    evidence_refs: tuple[str, ...] = ()
+    effect_frontier_refs: tuple[str, ...] = ()
+    pending_liability_refs: tuple[str, ...] = ()
+    handoff: GoalHandoffDraft | None = None
+    output_contract_ref: str = Field(min_length=1)
+
+
+class GoalVerifierObservation(Contract):
+    """Cognitive verifier output; application authority binds applicability."""
+
+    schema_version: Literal["belllabs.goal-verifier-observation.v1"] = (
+        "belllabs.goal-verifier-observation.v1"
+    )
+    decision: GoalVerifierDecision
+    progress_made: bool
+    accepted_obligation_refs: tuple[str, ...] = ()
+    findings: tuple[str, ...] = ()
+    evidence_refs: tuple[str, ...] = ()
+    unmet_obligations: tuple[str, ...] = ()
+    obligation_applicability: tuple[tuple[str, bool], ...] = ()
+    blocker_class: str = ""
+    authority_breach_ref: str = ""
+    hard_budget_exhausted_dimensions: tuple[str, ...] = ()
+    soft_budget_dimensions: tuple[str, ...] = ()
+    irrecoverable_failure_ref: str = ""
+    proposed_revision: GoalRevision | None = None
+    scope_expansion_route: Literal[
+        "control_revision", "fork", "linked_run", "new_run"
+    ] | None = None
+    route_ref: str = ""
+    effect_refs: tuple[str, ...] = ()
+    output_contract_ref: str = Field(min_length=1)
 
 
 class GoalOperationReconciliationResult(Contract):
@@ -213,9 +318,12 @@ def route_goal_async_subgoal(
 __all__ = [
     "GoalAsyncSubgoalRouting",
     "GoalFamilyDecisionMutation",
+    "GoalExecutorObservation",
+    "GoalHandoffDraft",
     "GoalOperationDispatch",
     "GoalOperationPreparationRequest",
     "GoalOperationReconciliationRequest",
     "GoalOperationReconciliationResult",
+    "GoalVerifierObservation",
     "route_goal_async_subgoal",
 ]

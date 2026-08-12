@@ -194,7 +194,7 @@ def exact_fixture(
     with_child_slices: bool = False,
     model_name: str = "fixture-model",
     model_settings: dict[str, object] | None = None,
-    sandbox_backend: Literal["langsmith", "daytona", "state"] = "state",
+    sandbox_backend: Literal["langsmith", "daytona", "docker", "state"] = "state",
     sandbox_credentials: tuple[SecretRef, ...] = (),
 ) -> tuple[DeepAgentExecutionBinding, DeepAgentProfile, ResolvedSkillBundle]:
     request = operation_request()
@@ -379,6 +379,49 @@ class SkillReadingModel(BaseChatModel):
         return ChatResult(generations=[ChatGeneration(message=message)])
 
 
+class SessionProbeModel(BaseChatModel):
+    observed_human_counts: list[int] = []
+
+    @property
+    def _llm_type(self) -> str:
+        return "wp-cp-040-session-probe"
+
+    def bind_tools(
+        self,
+        tools: Sequence[BaseTool | dict[str, Any] | type | Any],
+        *,
+        tool_choice: str | None = None,
+        **kwargs: Any,
+    ) -> BaseChatModel:
+        del tools, tool_choice, kwargs
+        return self
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: Any = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        del stop, run_manager, kwargs
+        human_count = sum(message.type == "human" for message in messages)
+        self.observed_human_counts.append(human_count)
+        return ChatResult(
+            generations=[
+                ChatGeneration(
+                    message=AIMessage(
+                        content=f"human-count:{human_count}",
+                        usage_metadata={
+                            "input_tokens": 2,
+                            "output_tokens": 3,
+                            "total_tokens": 5,
+                        },
+                    )
+                )
+            ]
+        )
+
+
 def runtime_invocation(binding: DeepAgentExecutionBinding) -> RuntimeInvocation:
     base = operation_request()
     payload = base.model_dump(mode="python")
@@ -525,6 +568,38 @@ async def test_actual_deep_agent_progressively_loads_skill_md_into_messages() ->
     )
     assert inspection["skill_instruction_messages"][0]["path"].endswith("SKILL.md")
     assert model.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_governed_session_id_reuses_checkpoint_and_fresh_id_starts_empty() -> None:
+    binding, _profile, bundle = exact_fixture()
+    model = SessionProbeModel()
+    adapter = DeepAgentRuntimeAdapter(
+        ExactDeepAgentMaterializer(registry(binding, bundle, model))
+    )
+    base_invocation = runtime_invocation(binding)
+    first = base_invocation.model_copy(
+        update={
+            "binding": base_invocation.binding.model_copy(
+                update={"session_id": "goal-session:1"}
+            )
+        }
+    )
+    first_result = await adapter.execute(first, {})
+    second_result = await adapter.execute(first, {})
+    fresh = first.model_copy(
+        update={
+            "binding": first.binding.model_copy(
+                update={"session_id": f"{first.binding.session_id}:rollover"}
+            )
+        }
+    )
+    fresh_result = await adapter.execute(fresh, {})
+
+    assert model.observed_human_counts == [1, 2, 1]
+    assert first_result.usage.amounts["tokens.total"] == 5
+    assert second_result.usage.amounts["tokens.total"] == 5
+    assert fresh_result.usage.amounts["tokens.total"] == 5
 
 
 @pytest.mark.asyncio
