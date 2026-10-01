@@ -1,7 +1,7 @@
 # Next agent session: prerequisite implementation only
 
 Recorded: 2026-10-01
-Paste the prompt below into Claude Code from the application repository. The audit and ticket creation are already complete; do not restart M0 as an unbounded planning task.
+Paste the prompt below into Claude Code from the application repository. For an agent team, use [`RESEARCH_RUNTIME_AGENT_TEAM_COORDINATOR_PROMPT.md`](RESEARCH_RUNTIME_AGENT_TEAM_COORDINATOR_PROMPT.md) instead. The audit and ticket creation are already complete; do not restart M0 as an unbounded planning task.
 
 ```text
 Work in C:\Users\Pinda\Proyectos\Biotech\biotech-research-ingestion-evaluation-system.

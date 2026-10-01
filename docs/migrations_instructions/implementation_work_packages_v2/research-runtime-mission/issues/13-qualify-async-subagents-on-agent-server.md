@@ -18,14 +18,11 @@
 - `langgraph.json` registers no graphs. `ASYNC_SUBAGENT_SPAWNING_ENABLED` defaults to false.
 - Prior art for a persistent self-hosted server: the Block C qualification topology (`langgraph.block_c*.json`, the `langgraph up --postgres-uri` recipe in `tests/fixtures/agent_server_block_c.py`, auth and restart drills). It is qualification topology only and must not be revived as a macro runtime.
 
-## Decision to record first
+## Placement decision (recorded 2026-10-01)
 
-Choose and record the Agent Server placement for this mission, with the user's confirmation:
+The user confirmed that their LangSmith Pro plan includes deployments. They chose to **prove the capability now on the local self-hosted Agent Server**, using `langgraph up` with dedicated durable Postgres and Redis and following the Block C recipe already in the codebase. A LangSmith-hosted deployment is an optional later step and does not gate this ticket. Before relying on a `langgraph up` license or API-key prerequisite, check it against the installed CLI and record it as a fact.
 
-- self-hosted `langgraph up` with dedicated Postgres and Redis (Block C recipe), or
-- a LangSmith-hosted deployment, if the user's plan includes one.
-
-`langgraph dev` and in-memory servers do not count as qualification. Record licensing and plan prerequisites as checked facts, not assumptions.
+`langgraph dev` and in-memory servers do not count as qualification. Use a dedicated Agent Server config file for the async subagent graphs. The root `langgraph.json` keeps registering no BellLabs macro graphs; `test_root_langgraph_does_not_select_block_c_auth_or_graphs` guards that.
 
 ## Acceptance
 
