@@ -3,7 +3,7 @@
 **What to build:** a reviewable specification/contract inventory that makes the checkpoint, inspection, fork and intervention implementation issues executable under canonical authority.
 
 **Blocked by:** None for authoring; implementation of new contracts remains gated on recorded specification acceptance.
-**Status:** authored; independent review pending (meta `spec/research-runtime-lifecycle` at `d879129`, amendment AMD-RRM-001 `proposed_for_acceptance`; not accepted; see [RRM-001 contract authority](../RRM-001-contract-authority.md))
+**Status:** accepted 2026-10-01 (meta `6c89143`, merged into meta `main` at `a50d833`; AMD-RRM-001 accepted after independent review under the user's recorded pre-authorization; see [RRM-001 contract authority](../RRM-001-contract-authority.md))
 **Branch:** `spec/research-runtime-lifecycle` in the meta repository; application traceability on an issue branch
 **Authority:** Existing EXEC-003–008/011/012, RUN-003–010, DA-003/004/013–015, SG/GD canonical requirements; see the parent ticket index.
 **Evidence:** reviewed meta commit, contract disposition table, requirement-to-ticket/test map; no executable evidence directory until execution exists
@@ -17,7 +17,7 @@ Publish the minimum canonical amendments needed for stable runtime-unit identiti
 - [x] Define public read/projection freshness/redaction and command accepted/delivered/applied/rejected receipts; queries remain diagnostic. (authored: RUN-011/012, EXEC-006/007/015)
 - [x] Specify GoalDirected durable pause/resume and safe continuation without turning a pause into workflow failure. (authored: GD-011, RUN-004)
 - [x] Preserve independently admitted forks/new runs and parent-child ownership; prohibit implicit message/effect cloning. (authored: EXEC-012/016)
-- [ ] Record review disposition and accepted canonical revision before dependent implementation. Do not claim draft publication alone is acceptance.
+- [x] Record review disposition and accepted canonical revision before dependent implementation. Do not claim draft publication alone is acceptance.
 - [x] Update the durable ticket index and owning acceptance tests/seams; no remote issue publication. (authored: contract authority §4; ticket Authority lines 03–09/13)
 
 Out of scope: generalized framework extraction, company fixtures, arbitrary mid-invocation cognitive editing. If review requires a user decision, present the concrete spec diff and exact unresolved decision; complete all independent authoring first.

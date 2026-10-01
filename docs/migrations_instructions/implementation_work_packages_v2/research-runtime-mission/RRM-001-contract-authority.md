@@ -1,18 +1,20 @@
 # RRM-001 — Lifecycle contract authority (traceability)
 
 Recorded: 2026-10-01
-Status: **authored; independent review pending**. This document is not acceptance. Implementation of the new contracts (RRM-003 onward) waits for the recorded acceptance of the meta revision below.
+Status: **accepted 2026-10-01**. Accepted canonical meta revision: `6c89143` on `spec/research-runtime-lifecycle`, merged into meta `main` at `a50d833`. RRM-003 onward implement against that revision.
+
+**Acceptance authority (recorded verbatim).** When asked how to handle the RRM-001 user checkpoint, the user selected: "Pre-authorize after review (Recommended)". The option read: "I author the spec amendments, get an independent Opus review, fix the findings, and record your pre-authorization word for word as acceptance. Then I continue through RRM-003…RRM-010 without stopping. You can still review the meta diff later." For the cognitive-schemas/ADR-0004 disposition, the user selected "Let RRM-001 recommend".
 Application base: integration `e946742` (branch `wp/rrm-001-lifecycle-contracts`)
 
-## 1. Canonical revision under review
+## 1. Accepted canonical revision
 
 | Item | Value |
 |---|---|
 | Meta repository | `../biotech-meta` |
 | Branch | `spec/research-runtime-lifecycle`, based on meta `main` at `c48867a` |
-| Commits | `6cb20af` (AMD-RRM-001 lifecycle amendments and disposition index); `d879129` (cognitive schemas and ADR-0004 narrowed-acceptance recommendation); `18f44b7` (independent review fixes, verdict `accept_with_fixes`, §9) |
-| Amendment ID | `AMD-RRM-001`, status `proposed_for_acceptance` in every amended spec's frontmatter and amendment record |
-| Who flips status | The coordinator, after independent review; spec 05 `status` and ADR-0004 `status` are flipped only by the reviewer |
+| Commits | `6cb20af` (AMD-RRM-001 lifecycle amendments and disposition index); `d879129` (cognitive schemas and ADR-0004 narrowed-acceptance recommendation); `18f44b7` (independent review fixes, verdict `accept_with_fixes`, §9); `6c89143` (acceptance commit with the re-review wording fixes, §9.1); merged into meta `main` at `a50d833` |
+| Amendment ID | `AMD-RRM-001`, status `accepted` (2026-10-01) in every amended spec's frontmatter and amendment record; spec 05 `canonical` with REQ-CP-CS-006/008 deferred; ADR-0004 `accepted` with decision 5 and the Workflow Type part of decision 2 deferred |
+| Who flipped status | The coordinator, in `6c89143`, after the independent re-review |
 
 Authoring followed the `to-spec` process: explore, choose test seams, then synthesize. No user interview was held; decisions are recorded in §8 as open decisions with recommendations. Canonical text was amended in place, following each spec's conventions: frontmatter `requirements`, `contracts` and `version`, a new `amendments` key, and an `## Amendment record` section. No parallel lifecycle spec was created.
 
@@ -144,8 +146,8 @@ The proposed test modules prefer existing seams; a new module is listed only whe
   - The Workflow Type / WorkflowConfiguration pack declaration, split out as CS-008. No definition owns pack allowlists today.
 
   No mission ticket needs either.
-- **ADR-0004.** Accept decisions 1, 3, 4, and 6, plus the binding and adapter part of decision 2. Defer decision 5 and Workflow Type pack ownership. Decision 6 is to be enforced by RRM-003/004 through the stamped digest. Status stays `proposed` until the reviewer flips it.
-- **Acceptance mechanism (prepared, not applied).** The acceptance commit changes only status lines:
+- **ADR-0004.** Accept decisions 1, 3, 4, and 6, plus the binding and adapter part of decision 2. Defer decision 5 and Workflow Type pack ownership. Decision 6 is to be enforced by RRM-003/004 through the stamped digest. Accepted in meta `6c89143`.
+- **Acceptance mechanism (applied in meta `6c89143`).** The acceptance commit changed the status lines:
   - spec 05 `status: draft` becomes `status: canonical`, keeping `deferred_requirements: [REQ-CP-CS-006, REQ-CP-CS-008]` as non-authority;
   - ADR-0004 `status: proposed` becomes `status: accepted`, keeping `deferred_decisions` (decision 5, and the Workflow Type part of decision 2) as proposed;
   - each `AMD-RRM-001` amendment status becomes accepted.
@@ -231,7 +233,7 @@ Recovery qualification must use the persistent saver and application database wi
 
 ## 9. Independent review disposition (verdict `accept_with_fixes`)
 
-All findings were applied in meta `18f44b7` and in this branch's fix commit. No finding is disputed. Nothing was flipped to accepted.
+All findings were applied in meta `18f44b7` and in this branch's fix commit. No finding is disputed.
 
 | # | Finding | Resolution |
 |---|---|---|
@@ -251,3 +253,16 @@ All findings were applied in meta `18f44b7` and in this branch's fix commit. No 
 | 14 | Spec 05 and ADR-0004 wording | **Applied.** CS-004 is labelled amended ("…unless the colliding channel definitions are identical"). ADR decision 6 now reads "to be enforced by RRM-003/004". The CS-006 deferral names the Deep Agents default (`deepagents/middleware/subagents.py:484, 537`: `messages`, `todos`, `structured_response`, and private channels excluded; returned channels merged back). |
 | 15 | Acceptance mechanism | **Applied without flipping.** Spec 05 has `deferred_requirements: [REQ-CP-CS-006, REQ-CP-CS-008]`, and ADR-0004 has `deferred_decisions`. Both carry status-line comments, so acceptance changes only status lines (§5). `TRACEABILITY.md` CS-004, CS-006, and CS-007 rows are annotated in this branch. |
 | 16 | Hygiene | **Applied.** RUN-007 and DA-018 now cite `reconcile_unit` in `CON-CP-LIFECYCLE-V1`. `reconcile_unit` is marked new. EXEC-005 states its reinterpretation of "disruptive restart". A `reconcile_unit` test seam was added (§4, RRM-004, `tests/unit/run_control/test_run_control.py`). RUN-011 historical reads go through the saver (`aget_tuple`/`alist`). The generic artifact route is stated to be outside EXEC-013 (§8 item 10 and `CON-CP-RUNTIME-UNIT-V1`). Disposition rows 50–51 require the new migration to relax FKs to retired tables. The "12 decisions" count was already correct in §8 (the earlier report summarized 11 lines); no change was needed. |
+
+### 9.1 Re-review (verdict `accept_with_fixes`, no blocking items) and acceptance
+
+The re-review confirmed that blocking findings 1–3 are resolved everywhere they appear. The coordinator applied its remaining wording fixes in the acceptance commit `6c89143`:
+
+| # | Finding | Resolution |
+|---|---|---|
+| R1 | The Search Attribute policy must be deterministic under replay | **Applied** to EXEC-015. The policy is carried in the root, family and `OperationWorkflow` inputs and through Continue-As-New. Workflow code never reads it from worker configuration. An absent field means `disabled`, and production composition rejects `disabled`. |
+| R2 | The async `in_doubt` exits contradicted `orphaned` and DA-019 | **Applied** to DA-008. The observation exit requires the served graph identity to verify under DA-019. `orphan_child` cancels every provider run carrying the spawn key and records their usage as pending. `orphaned` is also reachable after `orphan_child`. |
+| R3 | The DA-017 head rule was too broad | **Applied.** It now applies to a stamped root checkpoint of the unit generation that does not descend from that generation's expected source. |
+| R4 | GD-012 versus the EXEC-005 seed | **Applied.** GD-012 runs fresh-from-handoff unless the accepted decision names a seed under REQ-CP-EXEC-005. |
+
+The spec statuses were flipped in the same commit, and the spec branch was merged into meta `main` at `a50d833`.
