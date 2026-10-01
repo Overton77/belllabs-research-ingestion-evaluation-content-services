@@ -1,0 +1,52 @@
+# Research runtime mission: local ticket index
+
+Recorded: 2026-10-01
+Publication: local Markdown only; no GitHub issues created
+Audit: [current implementation audit](../../RESEARCH_RUNTIME_IMPLEMENTATION_AUDIT_2026-10-01.md)
+Mission: [special handoff](../../RESEARCH_RUNTIME_MISSION_SPECIAL_HANDOFF_2026-10-01.md)
+Agent instruction: [next implementation session](../../RESEARCH_RUNTIME_NEXT_SESSION_PROMPT.md)
+
+These RRM tickets are mission-specific local issues, not replacements for canonical WP/REQ/CON identifiers. The tracked files under `research-runtime-mission/issues/` are the durable source of truth. Identical local mirrors live under `.scratch/research-runtime-mission/issues/`; regenerate those mirrors from the tracked files in a fresh worktree, since `.scratch/` is ignored. Full ticket bodies are committed so the plan does not depend on this checkout.
+
+## Session boundary: mandatory
+
+**Prerequisite implementation sessions must not create or run the Qualia Life / GenerationLab research fixtures after completing the issues.** Complete RRM-001–010, perform technical qualification and review, merge accepted work, emit `ready_for_separate_fixture_session`, and stop. The user will initiate the fixture session. Do not create an automation, send a task message, spawn an agent, or auto-continue into RRM-011. No fixture launch is authorized merely because prerequisite tests pass.
+
+Technical unit/integration fixtures and opted-in provider/service qualifications are allowed for prerequisite acceptance. Company report runs and their semantic fork executions remain held. Full CP-050 acceptance follows the later tracer/fixture evidence; completing its capability prerequisite is not full CP-050 acceptance.
+
+## Issues and actual frontier
+
+| Ticket | Outcome | Blocked by | Current status / branch |
+|---|---|---|---|
+| [RRM-001](research-runtime-mission/issues/01-lifecycle-contract-authority.md) | Reviewable, accepted lifecycle contract/spec coverage and reusable contract inventory | None for drafting; acceptance follows project review | ready-for-agent (specification); `spec/research-runtime-lifecycle` |
+| [RRM-002](research-runtime-mission/issues/02-repair-verification-baseline.md) | Reproducible green owning/shared baseline without weakened assertions | None | **ready-for-agent; next code issue**; `wp/rrm-002-baseline` |
+| [RRM-003](research-runtime-mission/issues/03-persist-qualified-checkpoint-lineage.md) | Production operation records exact runtime unit, Activity attempts and checkpoint lineage | 001, 002 | blocked; `wp/rrm-003-checkpoint-lineage` |
+| [RRM-004](research-runtime-mission/issues/04-reconcile-checkpoint-crash-windows.md) | Retry/worker-loss convergence without duplicate prompt/provider/effect application | 003 | blocked; `wp/rrm-004-checkpoint-recovery` |
+| [RRM-005](research-runtime-mission/issues/05-inspect-runtime-and-checkpoint-history.md) | Scoped active/terminal unit inspection and qualified historical state reads | 004 | blocked; `wp/rrm-005-inspection` |
+| [RRM-006](research-runtime-mission/issues/06-admit-safe-semantic-forks.md) | Macro snapshots and independently admitted derived runs using qualified checkpoint lineage | 004, 005 | blocked; `wp/rrm-006-forks` |
+| [RRM-007](research-runtime-mission/issues/07-apply-boundary-interventions.md) | Governed wait/pause/resume applied to both running family workflows | 004 | blocked; `wp/rrm-007-intervention` |
+| [RRM-008](research-runtime-mission/issues/08-reconcile-running-cancellation.md) | Running cancellation quiesces cognition/children and settles effects/usage | 004, 007 | blocked; `wp/rrm-008-cancellation` |
+| [RRM-009](research-runtime-mission/issues/09-qualify-production-capability-composition.md) | CP-050 capability prerequisite: real persistence, worker composition, Skills/MCP/browser/search/sandbox, subagents and artifacts | 001, 002, 004 | blocked; `wp/rrm-009-capability-composition` |
+| [RRM-010](research-runtime-mission/issues/10-merge-prerequisite-readiness-gate.md) | Integrated, reviewed prerequisite readiness manifest and merge | 005, 006, 007, 008, 009 | blocked; `integration/research-runtime-mission` |
+| [RRM-011](research-runtime-mission/issues/11-company-fixtures-separate-session.md) | Two useful company reports, forks, live tracer and aggregate CP-050 evidence | 010 **and a separate user-started fixture session** | held; `wp/research-company-fixtures` |
+
+Recommended serial order: 002 -> 001 -> 003 -> 004 -> 005 -> 006 -> 007 -> 008 -> 009 -> 010; then stop. 001 drafting and 002 repair can proceed independently. 007 and 009 need not wait for 006 where shared-file ownership allows parallel work. Numeric identifiers are stable; dependency edges determine readiness.
+
+## Authority references
+
+- Existing [WP index](README.md), [readiness contract](IMPLEMENTATION_READINESS.md), [CP-050](WP-CP-050-foundation-capability-materialization-vertical.md), and [evidence contract](../evidence_v2/README.md).
+- Canonical [durable execution](../../../../biotech-meta/docs/specs/control-plane-foundations/03-temporal-run-operation-continuity-and-linked-runs.md): EXEC-003–008, EXEC-011/012.
+- Canonical [run control](../../../../biotech-meta/docs/specs/control-plane-foundations/02-transactional-admission-lifecycle-budgets-and-events.md): RUN-003–010.
+- Canonical [Deep Agent runtime](../../../../biotech-meta/docs/specs/control-plane-foundations/04-deep-agent-materialization-subagents-workspaces-and-artifacts.md): DA-001–015.
+- Canonical [StageGraph](../../../../biotech-meta/docs/specs/workflow-blueprints/stagegraph.md) and [GoalDirected](../../../../biotech-meta/docs/specs/workflow-blueprints/goal-directed.md).
+- Draft cognitive-state spec and proposed ADR-0004 must be classified by RRM-001; do not infer acceptance from their presence.
+
+## Evidence and branch ownership
+
+Each issue records exact paths touched, migrations, test IDs, sanitized outputs, actual base/head/integration commits, unresolved gates, and reviewer disposition. Store lifecycle ticket evidence under `docs/migrations_instructions/evidence_v2/research-runtime-mission/RRM-NNN/` only after executable evidence exists. CP-050 aggregate evidence remains in its canonical assigned directory after the later tracer qualifies. Planning is not acceptance evidence.
+
+Use one issue branch per implementation issue and isolated worktrees for parallel agents. Base each dependent branch on the reviewed prerequisite integration commit. The integrator owns shared operation contracts, adapter/materializer, migrations, registries, and lifecycle services. Canonical meta changes belong on a separate branch in the meta repository with their own review/merge; record its accepted commit in application evidence.
+
+Existing unrelated dirty code must remain untouched unless its owner and scope are explicitly established. A commit/worktree does not include untracked component work or the local lifecycle brief. The tracked audit and issue bodies contain the required current findings; obtain a reviewed owner commit before depending on other local work.
+
+Only merge an issue into integration after its owning checks and review pass. Only merge integration into `main` after RRM-010's combined gate. Do not publish remote issues/PRs or push unless separately authorized. After the prerequisite merge, stop and hand the readiness manifest to the user.

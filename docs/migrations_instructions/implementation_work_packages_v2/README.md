@@ -52,6 +52,8 @@ flowchart LR
 
 ## Immediate implementation frontier
 
+The user-directed research runtime mission has a [concrete prerequisite ticket index](RESEARCH_RUNTIME_MISSION_TICKETS.md), [current implementation audit](../../RESEARCH_RUNTIME_IMPLEMENTATION_AUDIT_2026-10-01.md), and [next-session prompt](../../RESEARCH_RUNTIME_NEXT_SESSION_PROMPT.md). RRM-002 baseline repair is the next code issue; RRM-001 specification reconciliation gates new lifecycle contracts. Complete prerequisites through RRM-010 and stop. Qualia Life and GenerationLab fixtures are held for a separate user-started session (RRM-011); prerequisite completion does not authorize launching them. This supplemental mission plan does not change existing accepted WP dispositions or declare CP-050 accepted.
+
 `WP-CP-001` through `WP-CP-045`, `WP-BP-010`, and `WP-BP-020` are accepted. `WP-CP-050` is the
 implementation frontier now that both blueprint runtimes are accepted.
 BellLabs is pre-production, so new canonical schemas may replace local prototype persistence

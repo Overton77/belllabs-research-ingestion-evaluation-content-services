@@ -3,6 +3,7 @@
 Date: 2026-10-01 (America/New_York)
 Repository: `biotech-research-ingestion-evaluation-system`
 Status: user-directed mission and implementation handoff; accepted specifications remain authoritative
+Session boundary: prerequisite implementation first; company fixtures only in a separate user-started session
 Target integration branch: `integration/research-runtime-mission`
 Target delivery branch: `main`
 
@@ -18,6 +19,8 @@ Use real search and browser-control Agent Skills, exact capability bindings, san
 Demonstrate a running-workflow intervention at a declared semantic boundary. Mid-invocation Deep Agent steering is conditional on the additional contracts and qualification described below; it must not be silently represented as complete by accepting a message at the root.
 
 This is one delivery mission within the full system plan. Finish CP-050 and explicit lifecycle follow-on work; do not replace the architecture, rebuild the accepted family interpreters, or extract a generic framework during this mission. Keep reusable runtime behavior separate from company objectives and integrations so aiengineer can later consume it.
+
+**User sequencing requirement (2026-10-01): the agent/session completing prerequisite issues must not create or run the company fixtures afterward.** Complete prerequisite code, technical qualifications, review, integration merge and readiness handoff, then stop. The user will initiate a separate fixture session. Do not auto-start it through an automation, another agent, task message, or continuation. Technical tests/provider qualification for prerequisite acceptance are allowed; the Qualia Life and GenerationLab research/report/fork missions remain held until that separate session.
 
 ## 2. Required reading and current baseline
 
@@ -166,17 +169,17 @@ Mid-invocation steering requires immutable command identity/sequence, expected g
 
 ## 8. Work sequence and local ticket plan
 
-Create concrete requirement-linked local tickets before code. GitHub publication is not requested by this handoff; use local Markdown mirrors and retain `github_issue: null` until separately authorized. The labels below are proposed local delivery slices, not new accepted canonical WP identifiers.
+Concrete requirement-linked local tickets have now been created; see the [durable ticket index](migrations_instructions/implementation_work_packages_v2/RESEARCH_RUNTIME_MISSION_TICKETS.md) and [implementation audit](RESEARCH_RUNTIME_IMPLEMENTATION_AUDIT_2026-10-01.md). GitHub publication is not requested; these are local files only. The M labels below describe mission slices, not new accepted canonical WP identifiers; RRM ticket bodies/dependencies now govern execution of those slices.
 
 | Slice | Work | Dependencies / acceptance |
 |---|---|---|
-| M0 | Inventory dirty work, reconcile stale checklists, establish current focused/full baseline; audit intervention and runtime contracts | Immutable reviewed base; classified failures and actual provider/runtime availability |
+| M0 | Current implementation audit and local ticket creation complete; tracked audit records fresh checks, diagnosed gaps and dirty ownership | Baseline repair and spec acceptance remain open under RRM-002 and RRM-001; provider/service deployment readiness not yet established |
 | M1 | CP-050 production capability composition prerequisite: real Skills/MCP/tool availability, sandbox/egress, shared persistence, sync/async subagents | Accepted CP packages; qualify composition with small technical inputs before company missions; full CP-050 acceptance follows M6 |
 | M2 | Runtime-unit identity, checkpoint fence, exact observations, crash reconciliation, compatibility gates | Accepted canonical spec amendments and local ticket; existing contract/persistence audit |
 | M3 | Visibility/projections, scoped run/unit/history inspection and historical state reads | M2; no raw checkpoint-body public API |
 | M4 | Safe macro snapshots, validated patches, fork admission/start and reuse frontier | M2 + M3; parent isolation and technical fork qualification for each family before company missions |
 | M5 | Governed boundary intervention, cancellation settlement, GoalDirected durable pause/resume | Core command specs + wiring audit; coordinate shared adapter/contracts with M2 owner |
-| M6 | Create and run the two company fixtures, reports and forks; live acceptance, recovery/replay, CP-050 aggregate evidence, merge review | M0–M5 prerequisites completed and reviewed; mid-invocation steering stays separately gated |
+| M6 | Separate user-started session creates/runs company fixtures, reports and forks; live acceptance and CP-050 aggregate evidence | RRM-010 readiness accepted AND a new user-started fixture session; held for all prerequisite agents |
 
 The lifecycle brief is a design brief pending canonical specification/ticket acceptance. M2–M5 must first identify which requirements are already accepted and publish/accept any necessary canonical amendments in `biotech-meta`, then ticket the implementation. This handoff does not override that authority order. Complete amendments as the first delivery phase; do not stop at identifying the missing specs.
 
@@ -184,11 +187,11 @@ The lifecycle brief is a design brief pending canonical specification/ticket acc
 
 User sequencing clarification: **complete the prerequisite issues before creating/running the Qualia Life and GenerationLab fixtures.** Small technical integration/provider qualifications needed to prove an issue remain allowed; they are not the company missions. Full CP-050 acceptance requires M6, so distinguish its completed capability prerequisite from its later aggregate acceptance.
 
-The next session starts with **M0: audit and spec/ticket readiness**. Then the first lifecycle implementation issue is **M2: runtime-unit identity and checkpoint fencing/reconciliation**. Recommended serial order is M0 -> M2 -> M3 -> M4 -> M5 -> M1 -> M6. M1 capability prerequisites may proceed in parallel after the reviewed base and shared-file ownership are established; fixture work stays gated on all prerequisites.
+M0 audit/ticket publication is complete. The next code issue is **RRM-002: repair the verification baseline**; **RRM-001: canonical contract/spec reconciliation** can be authored independently. New checkpoint implementation begins with RRM-003 only after both are accepted. Follow the concrete ticket index rather than rerunning M0 or jumping straight into company fixtures.
 
 Existing accepted packages and CP-050 live in `docs/migrations_instructions/implementation_work_packages_v2/`; their qualification evidence lives in `docs/migrations_instructions/evidence_v2/`. The lifecycle source brief lives at `docs/RUNTIME_LIFECYCLE_INSPECTION_AND_CONTROL_IMPLEMENTATION_BRIEF.md`. Canonical requirements live in `../biotech-meta/docs/specs/control-plane-foundations/` and `../biotech-meta/docs/specs/workflow-blueprints/`.
 
-**M0–M6 are presently handoff labels, not existing issue files.** Create a dependency index and concrete local issue mirrors under `.scratch/research-runtime-mission/issues/` during M0, following the repository ticket workflow; assign stable ticket IDs, spec/requirement links, owners, branches, acceptance tests, and evidence destinations. If `.scratch` is ignored, also commit a durable ticket/dependency index under `docs/migrations_instructions/implementation_work_packages_v2/` referencing the mirrors, and ensure ticket content is available to each worktree/session. Do not claim that these files or GitHub issues already exist. Do not publish remote issues without authorization.
+**RRM-001–011 are now actual local issue files.** Their committed source lives under `docs/migrations_instructions/implementation_work_packages_v2/research-runtime-mission/issues/`, with matching ignored mirrors under `.scratch/research-runtime-mission/issues/`. The durable index links complete bodies, blockers, branches, authority and evidence locations. Regenerate scratch mirrors from tracked bodies in a fresh worktree. No GitHub issues were published. RRM-011 is held for the later user-started fixture session.
 
 M2 can be split into identity/contract audit and checkpoint fencing implementation if reviewable scope requires it. Do not start M3/M4 operational endpoint work before the fencing qualification passes. Each issue must finish implementation, tests, review, evidence, and integration merge before its dependent issue begins.
 
@@ -236,7 +239,8 @@ Put CP-050 evidence in its assigned `docs/migrations_instructions/evidence_v2/WP
 ## 11. Completion checklist and next-session instruction
 
 - [ ] Reviewed spec/ticket coverage exists for every new lifecycle seam.
-- [ ] CP-050 accepted with shared real capability composition and both families.
+- [ ] Prerequisite capability composition and lifecycle gate accepted as `ready_for_separate_fixture_session`; agent stops and hands readiness to the user.
+- [ ] Separate fixture session initiated by the user; only then complete company mission work and CP-050 aggregate acceptance.
 - [ ] Qualia Life StageGraph and GenerationLab GoalDirected reports are useful, cited, bounded, and durable.
 - [ ] Lifecycle inspection works during execution and after settlement.
 - [ ] Earlier cognitive checkpoints are inspectable with exact lineage and compatibility checks.
@@ -247,4 +251,4 @@ Put CP-050 evidence in its assigned `docs/migrations_instructions/evidence_v2/WP
 - [ ] Mid-invocation cognitive steering is proven or explicitly deferred with its prerequisite ticket.
 - [ ] Integration gates and review pass, evidence identifies the tested revision, and branches merge into `main`.
 
-Start with M0 and specification/ticket acceptance for the lifecycle additions. Then implement the branches in dependency order and carry the work through real qualification, reports, review, and merge. Deliver the reports plus a concise matrix of proven behavior, remaining limitations, exact commits, and follow-on tickets. Do not substitute architecture prose or mocked provider success for the user's real research missions.
+Start with RRM-002 baseline repair and RRM-001 specification/contract acceptance, then implement prerequisite tickets in dependency order through technical qualification, review and integration merge. Deliver the readiness manifest and stop; do not produce company reports in that session. The separate user-started fixture session later delivers the reports, CP-050 tracer evidence and a concise matrix of proven behavior, limitations, commits and follow-on tickets. Use the [next-session prompt](RESEARCH_RUNTIME_NEXT_SESSION_PROMPT.md).
