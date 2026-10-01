@@ -25,13 +25,24 @@ Technical unit/integration fixtures and opted-in provider/service qualifications
 | [RRM-005](research-runtime-mission/issues/05-inspect-runtime-and-checkpoint-history.md) | Scoped active/terminal unit inspection and qualified historical state reads | 004 | blocked; `wp/rrm-005-inspection` |
 | [RRM-006](research-runtime-mission/issues/06-admit-safe-semantic-forks.md) | Macro snapshots and independently admitted derived runs using qualified checkpoint lineage | 004, 005 | blocked; `wp/rrm-006-forks` |
 | [RRM-007](research-runtime-mission/issues/07-apply-boundary-interventions.md) | Governed wait/pause/resume applied to both running family workflows | 004 | blocked; `wp/rrm-007-intervention` |
-| [RRM-008](research-runtime-mission/issues/08-reconcile-running-cancellation.md) | Running cancellation quiesces cognition/children and settles effects/usage | 004, 007 | blocked; `wp/rrm-008-cancellation` |
-| [RRM-009](research-runtime-mission/issues/09-qualify-production-capability-composition.md) | CP-050 capability prerequisite: real persistence, worker composition, Skills/MCP/browser/search/sandbox, subagents and artifacts | 001, 002, 004 | blocked; `wp/rrm-009-capability-composition` |
-| [RRM-010](research-runtime-mission/issues/10-merge-prerequisite-readiness-gate.md) | Integrated, reviewed prerequisite readiness manifest and merge | 005, 006, 007, 008, 009 | blocked; `integration/research-runtime-mission` |
+| [RRM-008](research-runtime-mission/issues/08-reconcile-running-cancellation.md) | Running cancellation quiesces cognition/children and settles effects/usage | 004, 007, 013 | blocked; `wp/rrm-008-cancellation` |
+| [RRM-009](research-runtime-mission/issues/09-qualify-production-capability-composition.md) | CP-050 capability prerequisite: real persistence, worker composition, Skills/MCP/browser/search/sandbox, subagents and artifacts | 001, 002, 004, 013 | blocked; `wp/rrm-009-capability-composition` |
+| [RRM-010](research-runtime-mission/issues/10-merge-prerequisite-readiness-gate.md) | Integrated, reviewed prerequisite readiness manifest and merge | 005, 006, 007, 008, 009, 013 | blocked; `integration/research-runtime-mission` |
 | [RRM-011](research-runtime-mission/issues/11-company-fixtures-separate-session.md) | Two useful company reports, forks, live tracer and aggregate CP-050 evidence | 010 **and a separate user-started fixture session** | held; `wp/research-company-fixtures` |
 | [RRM-012](research-runtime-mission/issues/12-reconcile-reference-research-journal-authority.md) | Stage 0–2 reference-research harness settles through run-control authority, or is retired | None (found by RRM-002); not mission-blocking | ready-for-agent (repair or retirement); `wp/rrm-012-reference-journal-authority` |
+| [RRM-013](research-runtime-mission/issues/13-qualify-async-subagents-on-agent-server.md) | Real async subagents on a persistent Agent Server, spawned from Deep Agents inside `operation.execute` under BellLabs authority | 001, 004 | blocked; `wp/rrm-013-async-subagent-agent-server` |
 
-RRM-002 was accepted on 2026-10-01, so the next frontier is RRM-001. Recommended serial order: 002 -> 001 -> 003 -> 004 -> 005 -> 006 -> 007 -> 008 -> 009 -> 010; then stop. RRM-012 is independent and can be scheduled at any point. 001 drafting and 002 repair can proceed independently. 007 and 009 need not wait for 006 where shared-file ownership allows parallel work. Numeric identifiers are stable; dependency edges determine readiness.
+RRM-002 was accepted on 2026-10-01, so the next frontier is RRM-001. Recommended serial order: 002 -> 001 -> 003 -> 004 -> 013 -> 005 -> 006 -> 007 -> 008 -> 009 -> 010; then stop. RRM-013 can run in parallel with 005-007 once 004 is accepted. RRM-012 is independent and can be scheduled at any point. 001 drafting and 002 repair can proceed independently. 007 and 009 need not wait for 006 where shared-file ownership allows parallel work. Numeric identifiers are stable; dependency edges determine readiness.
+
+## Mission horizon (user direction, 2026-10-01)
+
+This mission demonstrates Temporal and Deep Agents working together. That covers real StageGraph and GoalDirected runs; Deep Agents with sync and async subagents (RRM-013); and crash recovery, inspection, forks and interventions. After the company fixtures, the user plans to generalize this mission-control runtime and the knowledge services that currently live in the aiengineer app. Those knowledge services are being customized per data model and application use case.
+
+Implications for RRM-003 to RRM-010:
+
+- Keep reusable lifecycle, recovery, inspection, fork, intervention and subagent mechanisms in their existing owners, separated from company objectives, fixture definitions and provider-specific integrations.
+- Do not extract a generic framework or new packages during this mission. Generalization is a later, separately specified effort.
+- Record seams that look reusable in ticket evidence, so the later generalization work starts from facts.
 
 ## Authority references
 

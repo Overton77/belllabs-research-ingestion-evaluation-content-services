@@ -2,7 +2,7 @@
 
 **What to build:** a reproducible production-shaped composition can execute bounded technical operations with real persistence, frozen search/browser skills and MCP tools, sandbox/workspace, governed subagents, and durable artifacts.
 
-**Blocked by:** RRM-001, RRM-002 and RRM-004.
+**Blocked by:** RRM-001, RRM-002, RRM-004 and RRM-013.
 **Status:** blocked
 **Branch:** `wp/rrm-009-capability-composition`
 **Authority:** accepted CP-010/040/045 and CP-050 authorized slice; DA-001–015 and capability-binding requirements
@@ -15,7 +15,7 @@ Provide the deployment-supplied worker activity composition rather than relying 
 - [ ] Search and browser skill bundles/tools are digest/revision pinned, mounted/disclosed and actually invoked by the bounded runtime agent.
 - [ ] Research outbound access is provided by a qualified mediated service or explicit constrained egress placement; existing network-disabled isolation is not removed wholesale.
 - [ ] Report/output workspace slots and artifact promotion use existing governed contracts; worker-local files are not the only durable output.
-- [ ] One sync subagent and one async subordinate operation are qualified with explicit capability slices, reservations, dependency/result decisions and cancellation/reconnect behavior.
+- [ ] One sync subagent (in-process) and one async subagent on the RRM-013 Agent Server are qualified inside the production worker composition. Each has explicit capability slices, reservations, dependency/result decisions and cancellation/reconnect behavior. A fake Agent Protocol client does not satisfy this.
 - [ ] Credential references, exact filters/tool schemas, runtime/placement digests, capability invocation and observed usage appear in sanitized lineage.
 - [ ] Small technical API-to-Temporal provider/service qualification proves availability and accepted persistence; no Qualia/GenerationLab definitions, searches or report runs.
 - [ ] Document deployment prerequisites, reproducible launch commands, explicit live opt-in flags and cleanup; replay/recovery regressions pass.
