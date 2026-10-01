@@ -60,7 +60,7 @@ None. RRM-002 restores verification under existing accepted authority. One produ
 
 ## Changed paths and migrations
 
-- Production: `app/application/schema/schema_catalog.py` (overlay root). Ruff import order only (`858c721`): 21 `app/` modules, 10 `scripts/` and 14 `tests/` files. `scripts/reorganize_tests.py` has wrapped dict entries; `MOVE_MAP` was verified identical with `ast.literal_eval`.
+- Production: `app/application/schema/schema_catalog.py` (overlay root). Ruff import order only (`858c721`): 20 `app/` modules, 9 `scripts/` and 16 `tests/` files. `scripts/reorganize_tests.py` has wrapped dict entries; `MOVE_MAP` was verified identical with `ast.literal_eval`.
 - Tests: the repairs above plus import-order-only edits. New fixture `tests/fixtures/schema_context/` (report and README).
 - Docs: this README, ticket RRM-012, and the RRM-002 ticket/index status.
 - Migrations: none. Registrations: none. Deleted owners: none.
