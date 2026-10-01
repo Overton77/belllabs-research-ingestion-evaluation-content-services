@@ -5,7 +5,7 @@
 **Blocked by:** RRM-004 and RRM-005.
 **Status:** blocked
 **Branch:** `wp/rrm-006-forks`
-**Authority:** EXEC-012, RUN admission/effect/budget requirements, DA-015 where sandbox cloning applies, accepted RRM-001 snapshot/patch contracts
+**Authority:** EXEC-012, RUN admission/effect/budget requirements, DA-015 where sandbox cloning applies, accepted RRM-001 snapshot/patch contracts: REQ-CP-EXEC-012 (clarified), REQ-CP-EXEC-016, `CON-CP-CONTINUATION-V1` (`RunSnapshotManifest`, `RunForkPatch`), REQ-CP-DA-016 (seed keys) — AMD-RRM-001 (meta `spec/research-runtime-lifecycle`, proposed; see [RRM-001 contract authority](../RRM-001-contract-authority.md) §4)
 **Evidence:** `docs/migrations_instructions/evidence_v2/research-runtime-mission/RRM-006/`
 
 Wire the existing fork admission/copy saga to local Deep Agent checkpoint lineage and a real immutable macro RunSnapshotManifest. Snapshot at declared semantic boundaries or classify/quiesce active work under the accepted protocol. Compute exact invalidation/reuse and independently compile/admit the target.

@@ -5,7 +5,7 @@
 **Blocked by:** RRM-004.
 **Status:** blocked
 **Branch:** `wp/rrm-007-intervention`
-**Authority:** EXEC-001/006/007/011, RUN-004, canonical family semantics and accepted command-routing details from RRM-001
+**Authority:** EXEC-001/006/007/011, RUN-004, canonical family semantics and accepted command-routing details from RRM-001: receipt states in `CON-CP-WORKFLOW-MESSAGE-V1`, REQ-CP-RUN-004 and REQ-BP-SG-009 (clarified), REQ-BP-GD-011 (durable pause) — AMD-RRM-001 (meta `spec/research-runtime-lifecycle`, proposed; see [RRM-001 contract authority](../RRM-001-contract-authority.md) §4)
 **Evidence:** `docs/migrations_instructions/evidence_v2/research-runtime-mission/RRM-007/`
 
 Connect the run-control facade/ledger/outbox to exact root/family operation boundaries. Existing root receipts do not forward generic messages into cognition. StageGraph signals need governed routing; GoalDirected's non-retryable goal_paused path must become a durable paused execution that awaits accepted resume.
