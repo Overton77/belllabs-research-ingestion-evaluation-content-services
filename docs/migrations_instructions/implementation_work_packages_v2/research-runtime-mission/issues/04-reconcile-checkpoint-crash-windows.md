@@ -5,7 +5,7 @@
 **Blocked by:** RRM-003.
 **Status:** blocked
 **Branch:** `wp/rrm-004-checkpoint-recovery`
-**Authority:** EXEC-004/005/008, RUN effect/settlement requirements, accepted checkpoint protocol from RRM-001
+**Authority:** EXEC-004/005/008, RUN effect/settlement requirements, accepted checkpoint protocol from RRM-001: REQ-CP-DA-018 and `CON-CP-CHECKPOINT-LINEAGE-V1` crash windows, REQ-CP-EXEC-014 (claim fence), REQ-CP-EXEC-005 and REQ-CP-RUN-007 (clarified) — AMD-RRM-001 (meta `spec/research-runtime-lifecycle`, proposed; see [RRM-001 contract authority](../RRM-001-contract-authority.md) §4)
 **Evidence:** `docs/migrations_instructions/evidence_v2/research-runtime-mission/RRM-004/`
 
 Integrate checkpoint observations with durable operation claims, attempt leases, result manifests and authoritative settlement. Reconcile claimed-but-unsettled work before provider invocation. Separate intermediate-checkpoint resume from terminal-result reconstruction. Recognize that durability of graph state does not make arbitrary tool side effects transactional.

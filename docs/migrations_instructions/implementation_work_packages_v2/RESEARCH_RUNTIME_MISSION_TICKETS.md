@@ -19,7 +19,7 @@ Technical unit/integration fixtures and opted-in provider/service qualifications
 
 | Ticket | Outcome | Blocked by | Current status / branch |
 |---|---|---|---|
-| [RRM-001](research-runtime-mission/issues/01-lifecycle-contract-authority.md) | Reviewable, accepted lifecycle contract/spec coverage and reusable contract inventory | None for drafting; acceptance follows project review | **ready-for-agent; next frontier** (specification); `spec/research-runtime-lifecycle` |
+| [RRM-001](research-runtime-mission/issues/01-lifecycle-contract-authority.md) | Reviewable, accepted lifecycle contract/spec coverage and reusable contract inventory | None for drafting; acceptance follows project review | **authored; independent review pending** (meta `d879129`, AMD-RRM-001 proposed; [contract authority](research-runtime-mission/RRM-001-contract-authority.md)); `spec/research-runtime-lifecycle` + `wp/rrm-001-lifecycle-contracts` |
 | [RRM-002](research-runtime-mission/issues/02-repair-verification-baseline.md) | Reproducible green owning/shared baseline without weakened assertions | None | **accepted 2026-10-01** (`ea0f529`, merged into integration); [evidence](../evidence_v2/research-runtime-mission/RRM-002/README.md); `wp/rrm-002-baseline` |
 | [RRM-003](research-runtime-mission/issues/03-persist-qualified-checkpoint-lineage.md) | Production operation records exact runtime unit, Activity attempts and checkpoint lineage | 001, 002 | blocked; `wp/rrm-003-checkpoint-lineage` |
 | [RRM-004](research-runtime-mission/issues/04-reconcile-checkpoint-crash-windows.md) | Retry/worker-loss convergence without duplicate prompt/provider/effect application | 003 | blocked; `wp/rrm-004-checkpoint-recovery` |

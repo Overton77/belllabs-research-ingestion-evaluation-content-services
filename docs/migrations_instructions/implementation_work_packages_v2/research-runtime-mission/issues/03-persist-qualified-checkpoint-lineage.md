@@ -5,7 +5,7 @@
 **Blocked by:** RRM-001 accepted contract coverage; RRM-002 baseline repair.
 **Status:** blocked
 **Branch:** `wp/rrm-003-checkpoint-lineage`
-**Authority:** EXEC-003–005, DA exact binding/placement requirements, accepted RRM-001 amendments
+**Authority:** EXEC-003–005, DA exact binding/placement requirements, accepted RRM-001 amendments: REQ-CP-EXEC-013/014, REQ-CP-DA-016/017, REQ-BP-GD-012, REQ-CP-CS-007 (amended) — AMD-RRM-001 (meta `spec/research-runtime-lifecycle`, proposed; see [RRM-001 contract authority](../RRM-001-contract-authority.md) §4)
 **Evidence:** `docs/migrations_instructions/evidence_v2/research-runtime-mission/RRM-003/`
 
 Carry stable structured unit identity and its canonical key through the bound operation, Temporal attempt observation, exact Deep Agent invocation and PostgreSQL checkpoint observation. Capture source/result checkpoints with namespace, ancestry, binding/schema digests, generation and result manifest references. Use real persistent checkpointer and application repository technical integration, not just in-memory contract objects.
