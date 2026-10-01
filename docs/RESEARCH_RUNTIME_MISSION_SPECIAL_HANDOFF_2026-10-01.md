@@ -171,14 +171,26 @@ Create concrete requirement-linked local tickets before code. GitHub publication
 | Slice | Work | Dependencies / acceptance |
 |---|---|---|
 | M0 | Inventory dirty work, reconcile stale checklists, establish current focused/full baseline; audit intervention and runtime contracts | Immutable reviewed base; classified failures and actual provider/runtime availability |
-| M1 | CP-050 production capability composition and two real fixture definitions/report obligations | Accepted CP packages; real skill/tool availability, sandbox/egress, shared persistence |
+| M1 | CP-050 production capability composition prerequisite: real Skills/MCP/tool availability, sandbox/egress, shared persistence, sync/async subagents | Accepted CP packages; qualify composition with small technical inputs before company missions; full CP-050 acceptance follows M6 |
 | M2 | Runtime-unit identity, checkpoint fence, exact observations, crash reconciliation, compatibility gates | Accepted canonical spec amendments and local ticket; existing contract/persistence audit |
 | M3 | Visibility/projections, scoped run/unit/history inspection and historical state reads | M2; no raw checkpoint-body public API |
-| M4 | Safe macro snapshots, validated patches, fork admission/start and reuse frontier | M2 + M3; parent isolation; one qualified fork per family |
+| M4 | Safe macro snapshots, validated patches, fork admission/start and reuse frontier | M2 + M3; parent isolation and technical fork qualification for each family before company missions |
 | M5 | Governed boundary intervention, cancellation settlement, GoalDirected durable pause/resume | Core command specs + wiring audit; coordinate shared adapter/contracts with M2 owner |
-| M6 | Live acceptance, recovery/replay, CP-050 aggregate evidence, merge review | M1–M5 mandatory gates; mid-invocation steering stays separately gated |
+| M6 | Create and run the two company fixtures, reports and forks; live acceptance, recovery/replay, CP-050 aggregate evidence, merge review | M0–M5 prerequisites completed and reviewed; mid-invocation steering stays separately gated |
 
 The lifecycle brief is a design brief pending canonical specification/ticket acceptance. M2–M5 must first identify which requirements are already accepted and publish/accept any necessary canonical amendments in `biotech-meta`, then ticket the implementation. This handoff does not override that authority order. Complete amendments as the first delivery phase; do not stop at identifying the missing specs.
+
+### Prerequisites first: next issue and ticket locations
+
+User sequencing clarification: **complete the prerequisite issues before creating/running the Qualia Life and GenerationLab fixtures.** Small technical integration/provider qualifications needed to prove an issue remain allowed; they are not the company missions. Full CP-050 acceptance requires M6, so distinguish its completed capability prerequisite from its later aggregate acceptance.
+
+The next session starts with **M0: audit and spec/ticket readiness**. Then the first lifecycle implementation issue is **M2: runtime-unit identity and checkpoint fencing/reconciliation**. Recommended serial order is M0 -> M2 -> M3 -> M4 -> M5 -> M1 -> M6. M1 capability prerequisites may proceed in parallel after the reviewed base and shared-file ownership are established; fixture work stays gated on all prerequisites.
+
+Existing accepted packages and CP-050 live in `docs/migrations_instructions/implementation_work_packages_v2/`; their qualification evidence lives in `docs/migrations_instructions/evidence_v2/`. The lifecycle source brief lives at `docs/RUNTIME_LIFECYCLE_INSPECTION_AND_CONTROL_IMPLEMENTATION_BRIEF.md`. Canonical requirements live in `../biotech-meta/docs/specs/control-plane-foundations/` and `../biotech-meta/docs/specs/workflow-blueprints/`.
+
+**M0–M6 are presently handoff labels, not existing issue files.** Create a dependency index and concrete local issue mirrors under `.scratch/research-runtime-mission/issues/` during M0, following the repository ticket workflow; assign stable ticket IDs, spec/requirement links, owners, branches, acceptance tests, and evidence destinations. If `.scratch` is ignored, also commit a durable ticket/dependency index under `docs/migrations_instructions/implementation_work_packages_v2/` referencing the mirrors, and ensure ticket content is available to each worktree/session. Do not claim that these files or GitHub issues already exist. Do not publish remote issues without authorization.
+
+M2 can be split into identity/contract audit and checkpoint fencing implementation if reviewable scope requires it. Do not start M3/M4 operational endpoint work before the fencing qualification passes. Each issue must finish implementation, tests, review, evidence, and integration merge before its dependent issue begins.
 
 ## 9. Branch, review, and merge workflow
 
