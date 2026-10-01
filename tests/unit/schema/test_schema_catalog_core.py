@@ -108,7 +108,7 @@ def test_overlay_drift_fails_closed() -> None:
 
 
 def test_governed_trudiagnostic_overlay_validates_against_authoritative_sdl() -> None:
-    project_root = Path(__file__).resolve().parents[1]
+    project_root = Path(__file__).resolve().parents[3]
     authoritative_sdl = (
         project_root.parent / "biotech-kg" / "src" / "schema" / "neo4jbiotechschema.graphql"
     )
@@ -123,7 +123,7 @@ def test_governed_trudiagnostic_overlay_validates_against_authoritative_sdl() ->
 
 
 def test_published_schema_reference_matches_authoritative_source() -> None:
-    project_root = Path(__file__).resolve().parents[1]
+    project_root = Path(__file__).resolve().parents[3]
     authoritative_sdl = project_root.parent / "biotech-kg/src/schema/neo4jbiotechschema.graphql"
     reference = json.loads(
         (project_root / "schema-catalog/source-reference.v1.json").read_text(encoding="utf-8")
@@ -147,7 +147,7 @@ def test_legacy_workflow_catalog_digest_is_portable_and_receives_semantics() -> 
     plain_second = parse_schema_catalog(SDL, "/other/schema.graphql")
     assert plain_first.catalog_digest == plain_second.catalog_digest
 
-    project_root = Path(__file__).resolve().parents[1]
+    project_root = Path(__file__).resolve().parents[3]
     authoritative_sdl = (
         project_root.parent / "biotech-kg" / "src" / "schema" / "neo4jbiotechschema.graphql"
     )

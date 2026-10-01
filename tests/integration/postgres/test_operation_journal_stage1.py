@@ -1000,7 +1000,10 @@ async def test_postgres_journal_crash_rolls_back_claim_attempt_and_settlement(
             request_scope="tenant-1",
             run_id=admitted.run_id,
             expected_run_version=observed.resulting_run_version,
-            actor=actor(),
+            # Production settles as the operation actor extended with the exact binding.
+            actor=actor().model_copy(
+                update={"authority_refs": actor().authority_refs | {"mongo-binding-1"}}
+            ),
             action=ApplyAuthorityBatchAction(
                 actions=(
                     RecordUsageAction(
@@ -1008,7 +1011,6 @@ async def test_postgres_journal_crash_rolls_back_claim_attempt_and_settlement(
                         authority_ref="mongo-binding-1",
                         reservation_id="baseline",
                         actual_amounts={"tokens.total": 7},
-                        release_amounts={"tokens.total": 13},
                     ),
                     SettleEffectAction(
                         effect_id="claim-1",
@@ -1016,15 +1018,25 @@ async def test_postgres_journal_crash_rolls_back_claim_attempt_and_settlement(
                         observation_id="observation:settlement-1",
                         outcome=EffectSettlementOutcome.FAILED,
                         usage_settlement_ref="settlement-1",
+                        evidence_refs=("artifact:settlement-1",),
+                    ),
+                    RecordOperationSettlementEvidenceAction(
+                        evidence=AcceptedOperationSettlementEvidence(
+                            settlement_id="settlement-1",
+                            settlement_payload_digest=settlement().settlement_digest,
+                            accepted_by_authority_ref="mongo-binding-1",
+                        )
                     ),
                 )
             ),
             reason="postgres journal authority",
+            evidence_refs=("mongo-binding-1", "artifact:settlement-1"),
             occurred_at=NOW,
             correlation_id="operation:test",
             causation_id="claim-1",
         )
         accepted_authority = await run_service.execute(accepted_command)
+        assert accepted_authority.status == CommandStatus.ACCEPTED
         mutation = OperationJournalMutation(
             request_scope="tenant-1",
             belllabs_run_id=admitted.run_id,
@@ -1058,14 +1070,24 @@ async def test_postgres_journal_crash_rolls_back_claim_attempt_and_settlement(
         )
         with pytest.raises(RuntimeError, match="injected"):
             await failing.commit(mutation)
-        assert await failing.get_claim("tenant-1", "claim-1") is None
+        # The authority-bound claim was committed earlier; the crash rolls back the
+        # attempt and settlement written by this mutation.
+        assert await failing.get_settlement("tenant-1", "claim-1") is None
+        assert await failing.get_claim("tenant-1", "claim-1") == operation_claim
 
         repository = PostgresAtomicOperationJournalRepository(pool)
-        assert (await repository.commit(mutation)).status == "acquired"
+        # The claim already exists, so the recovered settlement commit reports "existing"
+        # while applying the attempt and settlement; the replay is then a no-op.
         assert (await repository.commit(mutation)).status == "existing"
         persisted = await repository.get_settlement("tenant-1", "claim-1")
         assert persisted == settlement()
-        with pytest.raises(IdempotencyConflict, match="conflicting immutable intent"):
+        assert (await repository.commit(mutation)).status == "existing"
+        assert await repository.get_settlement("tenant-1", "claim-1") == persisted
+        # The authority-bound claim mutation already owns `claim:claim-1`, so a conflicting
+        # claim is rejected at the mutation-identity check before the claim-row comparison.
+        with pytest.raises(
+            IdempotencyConflict, match="mutation identity has conflicting intent"
+        ):
             await repository.commit(
                 OperationJournalMutation(
                     request_scope="tenant-1",

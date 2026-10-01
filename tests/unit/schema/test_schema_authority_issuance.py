@@ -589,7 +589,7 @@ def test_exact_index_descriptors_resolve_aliased_physical_properties() -> None:
 
 def test_canonical_schema_exact_comparison_is_compatible_without_stale_artifacts() -> None:
     schema_path = (
-        Path(__file__).resolve().parents[2] / "biotech-kg" / "typedefs.graphql"
+        Path(__file__).resolve().parents[4] / "biotech-kg" / "typedefs.graphql"
     )
     canonical_sdl = schema_path.read_text(encoding="utf-8")
     schema_ref = "schema-definition:canonical-alias-regression"

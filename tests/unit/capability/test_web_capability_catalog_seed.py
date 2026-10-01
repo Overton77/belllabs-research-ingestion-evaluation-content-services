@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from app.application.control_plane.service import ControlPlaneService
 from app.application.control_plane.control_plane_repository import InMemoryDefinitionRepository
+from app.application.control_plane.service import ControlPlaneService
 from app.domain.control_plane.canonical import canonical_json, sha256_digest
 from app.domain.control_plane.contracts import (
     AgentProfileDefinition,
@@ -225,14 +225,24 @@ def test_workflow_fixture_freezes_browser_runtime_workspace_and_artifact_contrac
         "browser_evidence",
         "research_output",
     }
-    stages = {stage.stage_id: stage for stage in blueprint.stages}
-    assert stages["search_firecrawl"].depends_on == frozenset({"admit_public_goal"})
-    assert stages["search_tavily"].depends_on == frozenset({"admit_public_goal"})
-    assert stages["synthesize_citations"].depends_on == frozenset(
-        {"search_firecrawl", "search_tavily"}
-    )
-    assert stages["browser_verify"].depends_on == frozenset({"synthesize_citations"})
-    assert blueprint.max_parallel_stages == 2
+    # CON-BP-STAGEGRAPH-V2 expresses topology as typed dependencies, not per-stage lists.
+    producers: dict[str, set[str]] = {}
+    for dependency in blueprint.dependencies:
+        assert dependency.dependency_class == "required"
+        producers.setdefault(dependency.consumer_stage_id, set()).add(
+            dependency.producer_stage_id
+        )
+    assert producers["search_firecrawl"] == {"admit_public_goal"}
+    assert producers["search_tavily"] == {"admit_public_goal"}
+    assert producers["synthesize_citations"] == {"search_firecrawl", "search_tavily"}
+    assert producers["browser_verify"] == {"synthesize_citations"}
+    assert "admit_public_goal" not in producers
+    workflow_concurrency = [
+        ceiling.amount
+        for ceiling in blueprint.capacity_ceilings
+        if ceiling.scope_kind == "workflow" and ceiling.dimension_kind == "concurrency"
+    ]
+    assert workflow_concurrency == [2]
 
 
 def test_publication_order_places_every_exact_dependency_before_its_consumer() -> None:

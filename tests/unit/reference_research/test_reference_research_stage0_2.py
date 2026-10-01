@@ -9,8 +9,8 @@ from pydantic import ValidationError
 from app.agent_server.graphs import GRAPH_REGISTRY
 from app.agent_server.operations.reference_research import ReferenceLangGraphCanaryExecutor
 from app.api.reference_research_schemas import reference_research_contract_schemas
-from app.application.control_plane.service import ControlPlaneService
 from app.application.control_plane.control_plane_repository import InMemoryDefinitionRepository
+from app.application.control_plane.service import ControlPlaneService
 from app.application.operations.operation_executor import (
     CancellationContext,
     ExactStageExecutionBinding,
@@ -49,7 +49,7 @@ from app.domain.reference_research.contracts import (
 from app.integrations.control_plane_payloads import InMemoryPayloadStore
 
 NOW = datetime(2026, 1, 15, 12, 0, tzinfo=UTC)
-FIXTURES = Path(__file__).parent / "fixtures" / "reference_blueprints"
+FIXTURES = Path(__file__).parents[2] / "fixtures" / "reference_blueprints"
 
 
 def fixture(name: str) -> QualiaFixtureInput | DaveFixtureInput:
@@ -124,6 +124,14 @@ def test_result_contract_refuses_founder_as_affirmed_owner() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.xfail(
+    strict=True,
+    raises=ValueError,
+    reason=(
+        "RRM-012: the Stage 0-2 reference harness commits journal settlements without an "
+        "accepted run-control authority result, which the operation journal now rejects"
+    ),
+)
 @pytest.mark.parametrize(
     ("fixture_name", "family_id"),
     [

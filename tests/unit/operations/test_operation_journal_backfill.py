@@ -26,7 +26,7 @@ from app.domain.operation_execution.contracts import (
 
 DIGEST = "sha256:" + "b" * 64
 NOW = datetime(2026, 8, 5, tzinfo=UTC)
-PROJECT_ROOT = Path(__file__).parents[1]
+PROJECT_ROOT = Path(__file__).parents[3]
 
 
 def _binding() -> OperationExecutionBinding:

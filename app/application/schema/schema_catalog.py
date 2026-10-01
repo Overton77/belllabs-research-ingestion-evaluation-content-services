@@ -8,6 +8,7 @@ from graphql import GraphQLError, parse
 from graphql.language.ast import DocumentNode
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.config import PROJECT_ROOT
 from app.domain.schema_catalog import (
     CATALOG_CORE_GENERATOR_VERSION,
     CatalogParseError,
@@ -28,9 +29,7 @@ from app.domain.schema_context.canonicalization import (
 from app.domain.schema_context.errors import SchemaParseError
 
 CATALOG_GENERATOR_VERSION = CATALOG_CORE_GENERATOR_VERSION
-DEFAULT_SEMANTIC_OVERLAY = (
-    Path(__file__).resolve().parents[2] / "schema-catalog" / "semantic-overlay.v1.json"
-)
+DEFAULT_SEMANTIC_OVERLAY = PROJECT_ROOT / "schema-catalog" / "semantic-overlay.v1.json"
 
 
 class SchemaCatalog(BaseModel):

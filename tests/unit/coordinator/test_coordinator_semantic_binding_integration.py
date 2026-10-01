@@ -8,8 +8,12 @@ from app.application.coordinator.coordinator_launch import CoordinatorWorkflowLa
 from app.application.coordinator.coordinator_semantic_bindings import (
     WorkflowSemanticBindingProviderRouter,
 )
-from app.application.orchestration.goal_directed import InMemoryGoalOperationTemplateRepository
 from app.application.operations.operation_execution import InMemoryOperationBindingRepository
+from app.application.operations.semantic_operation_bindings import (
+    SemanticOperationBindingTemplates,
+    SemanticOperationExecutionBindingService,
+)
+from app.application.orchestration.goal_directed import InMemoryGoalOperationTemplateRepository
 from app.application.orchestration.orchestration_binding_repository import (
     InMemoryRunSemanticInputBindingRepository,
     RunSemanticInputBindingService,
@@ -27,10 +31,6 @@ from app.application.schema.schema_context_stage_handlers import (
 from app.application.schema.schema_grounding_semantic_handlers import (
     SupportingGraphBindingPlanInput,
     SupportingGraphSemanticBindingProvider,
-)
-from app.application.operations.semantic_operation_bindings import (
-    SemanticOperationBindingTemplates,
-    SemanticOperationExecutionBindingService,
 )
 from app.application.web_research.web_research_semantic_binding import (
     SemanticServiceWebResearchOperationBindingAuthor,
@@ -321,11 +321,17 @@ async def test_full_coordinator_chain_freezes_real_oebs_before_dispatch(
             if route.handler.operation_execution_binding_ref is not None
         }
     else:
-        refs = {
+        # CON-BP-GOAL-DIRECTED-V1 routes the independent verifier through its own slot.
+        executor_refs = {
             route.handler.operation_execution_binding_ref
             for route in dispatcher.binding.goal_operation_handlers
             if route.handler.operation_execution_binding_ref is not None
         }
+        assert dispatcher.binding.goal_verifier is not None
+        verifier_ref = dispatcher.binding.goal_verifier.operation_execution_binding_ref
+        assert verifier_ref is not None
+        assert verifier_ref not in executor_refs
+        refs = executor_refs | {verifier_ref}
     assert len(refs) == len(expected_operations)
     persisted = {
         operation_id: await operation_repository.get_binding(

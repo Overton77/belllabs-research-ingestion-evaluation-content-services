@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from app.application.run_control.service import RunControlOutboxRelay
 from app.application.run_control.run_control_repository import InMemoryRunControlRepository
+from app.application.run_control.service import RunControlOutboxRelay
 from app.domain.control_plane.canonical import canonical_json, sha256_digest
 from app.domain.run_control.contracts import (
     AsyncChildDecisionOutcome,
@@ -296,7 +296,7 @@ def test_domain_owner_has_no_runtime_or_persistence_authority_imports() -> None:
     forbidden = ("temporalio", "asyncpg", "beanie", "langgraph", "deepagents")
     assert not any(name in domain_source for name in forbidden)
     journaled_operation = (
-        root / "app" / "application" / "journaled_operation_execution.py"
+        root / "app" / "application" / "operations" / "journaled_operation_execution.py"
     ).read_text(encoding="utf-8")
     assert "reduce_lifecycle" not in journaled_operation
     assert all(

@@ -11,7 +11,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.application.workspaces.artifact_promotion import ArtifactPayloadAddress
 from app.application.orchestration.service import (
     ORCHESTRATION_AUTHORITY_REF,
     orchestration_lifecycle_actor,
@@ -30,6 +29,7 @@ from app.application.runners.web_research_coordinator_live import (
 from app.application.web_research.web_research_semantic_binding import (
     REQUIRED_SELECTED_IDENTITIES,
 )
+from app.application.workspaces.artifact_promotion import ArtifactPayloadAddress
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import (
     AgentProfileDefinition,
@@ -43,7 +43,7 @@ from app.domain.coordinator.contracts import AuthorizationState
 from app.domain.run_control.contracts import ActorContext
 from scripts.run_web_research_coordinator_live import parse_args
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / "scripts" / "run_web_research_coordinator_live.py"
 
 

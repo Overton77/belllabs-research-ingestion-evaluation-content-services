@@ -7,13 +7,12 @@ import pytest
 from beanie import init_beanie
 from pymongo import AsyncMongoClient
 
-from app.application.control_plane.service import ControlPlaneService
 from app.application.control_plane.control_plane_repository import BeanieDefinitionRepository
+from app.application.control_plane.service import ControlPlaneService
 from app.domain.control_plane.contracts import (
     AliasRef,
     DefinitionKind,
     DefinitionSelector,
-    GoalDirectedBlueprint,
     MoveAliasRequest,
     PublishDraftRequest,
     RetireRequest,
@@ -21,6 +20,7 @@ from app.domain.control_plane.contracts import (
 )
 from app.domain.control_plane.errors import DefinitionConflict
 from app.domain.control_plane.extensions import ExtensionRegistry
+from app.domain.control_plane.fixtures import GENERIC_GOAL_DIRECTED
 from app.integrations.control_plane_payloads import InMemoryPayloadStore
 from app.integrations.mongodb import BEANIE_MODELS
 from app.models.control_plane import PublishedDefinitionDocument
@@ -45,13 +45,14 @@ async def test_real_mongodb_published_revision_is_immutable_and_readable(
         repository = BeanieDefinitionRepository()
         service = ControlPlaneService(repository, ExtensionRegistry(), InMemoryPayloadStore())
         now = datetime.now(UTC)
-        definition = GoalDirectedBlueprint(
-            logical_id="integration.generic-goal",
-            title="Mongo integration fixture",
-            description="Contract-only fixture",
-            objective_contract="contract:objective@1",
-            acceptance_contract="contract:acceptance@1",
-            max_iterations=1,
+        definition = GENERIC_GOAL_DIRECTED.model_copy(
+            update={
+                "logical_id": "integration.generic-goal",
+                "title": "Mongo integration fixture",
+                "description": "Contract-only fixture",
+                "objective_contract": "contract:objective@1",
+                "acceptance_contract": "contract:acceptance@1",
+            }
         )
         head = await service.save_draft(
             SaveDraftRequest(

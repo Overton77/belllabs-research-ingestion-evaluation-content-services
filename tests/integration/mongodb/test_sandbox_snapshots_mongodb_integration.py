@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC
+from datetime import UTC, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -14,6 +14,7 @@ from app.application.workspaces.sandbox_snapshots import (
 )
 from app.integrations.mongodb import BEANIE_MODELS
 from tests.unit.workspaces.test_sandbox_snapshots import (
+    NOW,
     Authority,
     Resources,
     Sandbox,
@@ -43,6 +44,7 @@ async def test_mongodb_persists_immutable_snapshot_and_clone_lineage(
             sandbox=Sandbox(),
             authority=Authority(),
             resources=Resources(),
+            clock=lambda: NOW + timedelta(hours=1),
         )
 
         snapshot = await service.create(create_request())

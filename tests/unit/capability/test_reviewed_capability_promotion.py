@@ -7,8 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from app.application.control_plane.service import ControlPlaneService
-from app.application.control_plane.control_plane_repository import InMemoryDefinitionRepository
 from app.application.capability.reviewed_capability_promotion import (
     AGENT_BROWSER_COMMIT,
     FIRECRAWL_COMMIT,
@@ -24,6 +22,8 @@ from app.application.capability.reviewed_capability_promotion import (
     build_reviewed_capability_bundle,
     promote_reviewed_capabilities,
 )
+from app.application.control_plane.control_plane_repository import InMemoryDefinitionRepository
+from app.application.control_plane.service import ControlPlaneService
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import (
     AgentProfileDefinition,
@@ -46,10 +46,10 @@ from app.integrations.control_plane_payloads import InMemoryPayloadStore
 
 NOW = datetime(2026, 7, 26, 14, 0, tzinfo=UTC)
 PAYLOADS = (
-    Path(__file__).resolve().parents[1] / "app" / "domain" / "coordinator" / "reviewed_payloads"
+    Path(__file__).resolve().parents[3] / "app" / "domain" / "coordinator" / "reviewed_payloads"
 )
 WORKSPACE_AGENT_BROWSER = (
-    Path(__file__).resolve().parents[2] / ".agents" / "skills" / "agent-browser"
+    Path(__file__).resolve().parents[4] / ".agents" / "skills" / "agent-browser"
 )
 
 

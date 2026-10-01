@@ -7,9 +7,10 @@ from app.api.control_plane import (
     get_control_plane_service,
 )
 from app.api.run_control import get_run_control_service
-from app.application.control_plane.service import ControlPlaneService
 from app.application.control_plane.control_plane_repository import InMemoryDefinitionRepository
+from app.application.control_plane.service import ControlPlaneService
 from app.domain.control_plane.extensions import ExtensionRegistry
+from app.domain.control_plane.fixtures import GENERIC_GOAL_DIRECTED
 from app.integrations.control_plane_payloads import InMemoryPayloadStore
 from app.server import api
 from tests.unit.run_control.test_run_control import request as run_request
@@ -67,12 +68,30 @@ def test_control_plane_schema_and_typed_not_found_error() -> None:
 
 
 def test_control_plane_publish_route_uses_strict_contracts() -> None:
-    request = {
-        "definition": {
-            "schema_version": "1",
+    definition = GENERIC_GOAL_DIRECTED.model_copy(
+        update={
             "logical_id": "api.generic-goal",
             "title": "API generic goal",
             "description": "Contract-only API fixture",
+            "objective_contract": "contract:objective@1",
+            "acceptance_contract": "contract:acceptance@1",
+        }
+    )
+    request = {
+        "definition": definition.model_dump(mode="json"),
+        "actor_id": "api-test",
+        "published_at": "2026-01-02T03:04:00Z",
+        "expected_head_revision": 0,
+    }
+    # Pre-CON-BP-GOAL-DIRECTED-V1 shape: no envelope, verifier, session, handoff or
+    # convergence policy, plus fields the strict contract does not define.
+    legacy_request = {
+        **request,
+        "definition": {
+            "schema_version": "1",
+            "logical_id": "api.legacy-goal",
+            "title": "Legacy goal",
+            "description": "Pre-envelope GoalDirected shape",
             "kind": "blueprint",
             "family": "GoalDirected",
             "objective_contract": "contract:objective@1",
@@ -81,9 +100,6 @@ def test_control_plane_publish_route_uses_strict_contracts() -> None:
             "max_iterations": 1,
             "variant_names": [],
         },
-        "actor_id": "api-test",
-        "published_at": "2026-01-02T03:04:00Z",
-        "expected_head_revision": 0,
     }
     api.dependency_overrides[get_control_plane_service] = _test_service
     api.dependency_overrides[get_control_plane_principal] = lambda: ControlPlanePrincipal(
@@ -92,12 +108,14 @@ def test_control_plane_publish_route_uses_strict_contracts() -> None:
     try:
         with TestClient(api) as client:
             response = client.post("/control-plane/v1/definitions", json=request)
+            legacy_response = client.post("/control-plane/v1/definitions", json=legacy_request)
     finally:
         api.dependency_overrides.pop(get_control_plane_service, None)
         api.dependency_overrides.pop(get_control_plane_principal, None)
 
     assert response.status_code == 201
     assert response.json()["ref"]["revision"] == 1
+    assert legacy_response.status_code == 422
 
 
 def test_run_control_route_uses_authenticated_actor_and_exports_schemas() -> None:

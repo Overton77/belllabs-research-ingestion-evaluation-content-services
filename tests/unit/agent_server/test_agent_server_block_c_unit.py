@@ -50,7 +50,7 @@ from tests.fixtures.agent_server_block_c import (
     is_missing_n_graph_on_n1_error,
 )
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 ROOT_LANGGRAPH = PROJECT_ROOT / "langgraph.json"
 QUAL_PKG_DIR = Path(block_c_pkg.__file__).resolve().parent
 BLOCK_C_ENV_FILE = PROJECT_ROOT / "langgraph.block_c.env"

@@ -8,7 +8,10 @@ import pytest
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from temporalio.exceptions import WorkflowAlreadyStartedError
 
-from app.experiments.langgraph_temporal_stagegraph.config import load_settings
+from app.experiments.langgraph_temporal_stagegraph.config import (
+    ExperimentSettings,
+    load_settings,
+)
 from app.experiments.langgraph_temporal_stagegraph.contracts import CompletionRecord, digest_text
 from app.experiments.langgraph_temporal_stagegraph.graph import (
     choose_synthesis_inputs,
@@ -91,9 +94,19 @@ async def test_launch_idempotency_uses_one_workflow_identity() -> None:
     assert len(repository.bindings) == 1
 
 
+def _opted_in_settings(dsn: str, monkeypatch: pytest.MonkeyPatch) -> ExperimentSettings:
+    """Use the explicitly opted-in disposable database, never the developer .env database."""
+
+    monkeypatch.setenv("APPLICATION_DATABASE_DIRECT", dsn)
+    monkeypatch.setenv("APPLICATION_MIGRATION_DATABASE_DIRECT", dsn)
+    return load_settings(require_openai=False)
+
+
 @pytest.mark.asyncio
-async def test_completion_and_admission_are_idempotent_and_cover_early_wake() -> None:
-    settings = load_settings(require_openai=False)
+async def test_completion_and_admission_are_idempotent_and_cover_early_wake(
+    test_application_postgres_dsn: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = _opted_in_settings(test_application_postgres_dsn, monkeypatch)
     repository = await ExperimentRepository.connect(settings.application_database_dsn)
     run_id = f"test-{uuid.uuid4().hex[:10]}"
     thread_id = f"thread:{run_id}"
@@ -134,8 +147,10 @@ async def test_completion_and_admission_are_idempotent_and_cover_early_wake() ->
 
 
 @pytest.mark.asyncio
-async def test_postgres_checkpoint_persists_interrupt() -> None:
-    settings = load_settings(require_openai=False)
+async def test_postgres_checkpoint_persists_interrupt(
+    test_application_postgres_dsn: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = _opted_in_settings(test_application_postgres_dsn, monkeypatch)
     repository = await ExperimentRepository.connect(settings.application_database_dsn)
     run_id = f"checkpoint-{uuid.uuid4().hex[:10]}"
     thread_id = f"thread:{run_id}"
