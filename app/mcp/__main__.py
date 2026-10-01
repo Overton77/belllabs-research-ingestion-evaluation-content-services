@@ -4,6 +4,7 @@ import argparse
 import asyncio
 from contextlib import AsyncExitStack
 
+from app.application.capability.postgres_capability_search_repository import PostgresPool
 from app.application.coordinator.coordinator_composition import (
     CoordinatorProductionDependencies,
     ReadOnlyCoordinatorRuntimeReadiness,
@@ -14,7 +15,6 @@ from app.application.coordinator.coordinator_facade import (
     CoordinatorLimits,
     ProductionCoordinatorFacade,
 )
-from app.application.capability.postgres_capability_search_repository import PostgresPool
 from app.config import Settings, get_settings
 from app.integrations.mongodb import create_mongodb
 from app.integrations.postgres import (

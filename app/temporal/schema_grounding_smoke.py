@@ -4,16 +4,16 @@ from dataclasses import dataclass
 
 from temporalio.client import Client
 
-from app.application.orchestration.service import (
-    RunControlLifecycleGateway,
-    StageGraphDecisionService,
-    StageGraphOperationMaterializer,
-)
 from app.application.orchestration.orchestration_binding_repository import (
     RunSemanticInputBindingRepository,
 )
 from app.application.orchestration.orchestration_routing import (
     SemanticHandlerRegistry,
+)
+from app.application.orchestration.service import (
+    RunControlLifecycleGateway,
+    StageGraphDecisionService,
+    StageGraphOperationMaterializer,
 )
 from app.application.schema.schema_catalog_build import SchemaCatalogBuildService
 from app.application.schema.schema_context_selection import ReviewAgentPort, SelectionAgentPort

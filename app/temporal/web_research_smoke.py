@@ -6,16 +6,18 @@ from temporalio.client import Client
 from temporalio.worker import Worker
 
 from app.application.coordinator.coordinator_results import TerminalWorkflowCompletionPort
+from app.application.orchestration.orchestration_binding_repository import (
+    RunSemanticInputBindingRepository,
+)
 from app.application.orchestration.service import (
     RunControlLifecycleGateway,
     StageGraphDecisionService,
     StageGraphOperationMaterializer,
 )
-from app.application.orchestration.orchestration_binding_repository import (
-    RunSemanticInputBindingRepository,
-)
 from app.application.web_research.web_research_repository import web_research_record_ref
-from app.application.web_research.web_research_semantic_handlers import WebResearchHandlerDependencies
+from app.application.web_research.web_research_semantic_handlers import (
+    WebResearchHandlerDependencies,
+)
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import StageGraphBlueprint
 from app.domain.coordinator.launch import BlueprintFamily

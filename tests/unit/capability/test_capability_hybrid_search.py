@@ -15,8 +15,8 @@ from app.application.capability.capability_search_repository import (
     RankedCapabilityDocument,
 )
 from app.application.capability.catalog_projection import CatalogProjectionError, CatalogProjector
-from app.application.control_plane.control_plane_repository import InMemoryDefinitionRepository
 from app.application.capability.postgres_capability_search_repository import _filtered_query
+from app.application.control_plane.control_plane_repository import InMemoryDefinitionRepository
 from app.domain.control_plane.contracts import (
     CatalogPayloadRef,
     DefinitionKind,

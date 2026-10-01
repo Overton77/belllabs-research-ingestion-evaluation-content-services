@@ -3,20 +3,20 @@ from __future__ import annotations
 import asyncpg
 import pytest
 
-from app.application.workspaces.postgres_artifact_repository import (
-    PostgresArtifactDurableReferenceRepository,
-)
 from app.application.run_control.postgres_run_control_repository import (
     PostgresRunControlRepository,
+)
+from app.application.workspaces.postgres_artifact_repository import (
+    PostgresArtifactDurableReferenceRepository,
 )
 from app.domain.operation_execution.contracts import (
     ArtifactMetadataRevision,
     ArtifactPromotionState,
 )
 from app.integrations.postgres import apply_application_migrations
-from tests.unit.workspaces.test_artifact_promotion import CONTENT_DIGEST, NOW, OWNER
 from tests.unit.run_control.test_run_control import request as run_request
 from tests.unit.run_control.test_run_control import service as run_control_service
+from tests.unit.workspaces.test_artifact_promotion import CONTENT_DIGEST, NOW, OWNER
 
 
 def admitted_revision(run_id: str) -> ArtifactMetadataRevision:

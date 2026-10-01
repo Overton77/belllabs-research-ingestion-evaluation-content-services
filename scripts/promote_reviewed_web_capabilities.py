@@ -7,8 +7,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from app.application.control_plane.service import ControlPlaneService
-from app.application.control_plane.control_plane_repository import BeanieDefinitionRepository
 from app.application.capability.reviewed_capability_promotion import (
     build_reviewed_capability_bundle,
     build_scenario_d_execution_correction,
@@ -16,6 +14,8 @@ from app.application.capability.reviewed_capability_promotion import (
     promote_reviewed_capabilities,
     publish_scenario_d_execution_correction,
 )
+from app.application.control_plane.control_plane_repository import BeanieDefinitionRepository
+from app.application.control_plane.service import ControlPlaneService
 from app.config import Settings
 from app.domain.control_plane.contracts import AliasBinding, AliasRef, ExactDefinitionRef
 from app.domain.control_plane.extensions import ExtensionRegistry

@@ -12,16 +12,16 @@ import pytest
 from pydantic import SecretStr, ValidationError
 
 from app.application.coordinator.coordinator_facade import CoordinatorAuditEvent
-from app.application.web_research.external_capability_discovery import (
-    ExternalDiscoveryCandidate,
-    ExternalDiscoverySource,
-)
-from app.application.orchestration.orchestration_routing import SemanticRoutingError
 from app.application.coordinator.postgres_coordinator_audit_repository import (
     PostgresCoordinatorAuditSink,
 )
 from app.application.operations.semantic_operation_bindings import (
     SemanticOperationBindingTemplates,
+)
+from app.application.orchestration.orchestration_routing import SemanticRoutingError
+from app.application.web_research.external_capability_discovery import (
+    ExternalDiscoveryCandidate,
+    ExternalDiscoverySource,
 )
 from app.application.web_research.web_research_semantic_binding import (
     WebResearchBindingPlanInput,

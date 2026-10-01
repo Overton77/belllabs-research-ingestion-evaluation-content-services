@@ -3,8 +3,8 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from app.application.coordinator.coordinator_facade import CoordinatorAuditEvent
 from app.application.capability.postgres_capability_search_repository import PostgresPool
+from app.application.coordinator.coordinator_facade import CoordinatorAuditEvent
 
 
 class PostgresCoordinatorAuditSink:

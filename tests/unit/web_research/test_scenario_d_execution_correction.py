@@ -4,12 +4,12 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.application.control_plane.service import ControlPlaneService
-from app.application.control_plane.control_plane_repository import InMemoryDefinitionRepository
 from app.application.capability.reviewed_capability_promotion import (
     build_scenario_d_execution_correction,
     publish_scenario_d_execution_correction,
 )
+from app.application.control_plane.control_plane_repository import InMemoryDefinitionRepository
+from app.application.control_plane.service import ControlPlaneService
 from app.application.web_research.web_research_semantic_handlers import (
     resolve_web_research_run_authority,
 )

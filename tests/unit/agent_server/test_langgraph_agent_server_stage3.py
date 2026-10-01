@@ -4,7 +4,10 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.application.runtime.graph_runtime_dispatch import ExactRuntimeSelector, GraphRuntimeDispatchService
+from app.application.runtime.graph_runtime_dispatch import (
+    ExactRuntimeSelector,
+    GraphRuntimeDispatchService,
+)
 from app.application.runtime.runtime_execution_bindings import InMemoryRuntimeCoordinationRepository
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import DefinitionKind, ExactDefinitionRef

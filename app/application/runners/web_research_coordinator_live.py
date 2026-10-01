@@ -12,13 +12,18 @@ from time import perf_counter
 from typing import Any, Literal, Protocol, cast
 from uuid import uuid4
 
-from app.application.workspaces.artifact_promotion import ArtifactPayloadAddress
 from app.application.capability.capability_search import (
     CapabilitySearchResponse,
     CapabilitySearchService,
 )
-from app.application.control_plane.service import ControlPlaneService
+from app.application.capability.postgres_capability_search_generation_repository import (
+    PostgresProjectionGenerationRepository,
+)
+from app.application.capability.postgres_capability_search_repository import (
+    PostgresCatalogSearchRepository,
+)
 from app.application.control_plane.control_plane_repository import BeanieDefinitionRepository
+from app.application.control_plane.service import ControlPlaneService
 from app.application.coordinator.coordinator_composition import CoordinatorLaunchProductionInputs
 from app.application.coordinator.coordinator_facade import (
     BlueprintRuntimeStatus,
@@ -36,15 +41,28 @@ from app.application.coordinator.coordinator_results import (
     TerminalWorkflowCompletionService,
 )
 from app.application.coordinator.coordinator_run_resources import CoordinatorRunResourceService
-from app.application.web_research.external_candidate_repository import (
-    BeanieExternalCandidateRepository,
+from app.application.coordinator.postgres_coordinator_audit_repository import (
+    PostgresCoordinatorAuditSink,
 )
-from app.application.web_research.external_capability_discovery import (
-    ExternalCapabilityDiscoveryService,
-    ExternalDiscoveryBatch,
+from app.application.coordinator.postgres_launch_ticket_repository import (
+    PostgresLaunchTicketRepository,
+)
+from app.application.coordinator.postgres_workflow_result_repository import (
+    PostgresWorkflowResultRepository,
 )
 from app.application.operations.mongo_operation_execution_repository import (
     create_semantic_operation_binding_repository,
+)
+from app.application.operations.semantic_operation_bindings import (
+    SemanticOperationBindingRepository,
+    SemanticOperationBindingTemplates,
+    SemanticOperationExecutionBindingService,
+)
+from app.application.orchestration.orchestration_binding_repository import (
+    RunSemanticInputBindingService,
+)
+from app.application.orchestration.postgres_orchestration_binding_repository import (
+    PostgresRunSemanticInputBindingRepository,
 )
 from app.application.orchestration.service import (
     F1OrchestrationBindingVerifier,
@@ -56,29 +74,8 @@ from app.application.orchestration.service import (
     WorkflowLaunchDispatcher,
     orchestration_lifecycle_actor,
 )
-from app.application.orchestration.orchestration_binding_repository import (
-    RunSemanticInputBindingService,
-)
-from app.application.capability.postgres_capability_search_generation_repository import (
-    PostgresProjectionGenerationRepository,
-)
-from app.application.capability.postgres_capability_search_repository import (
-    PostgresCatalogSearchRepository,
-)
-from app.application.coordinator.postgres_coordinator_audit_repository import (
-    PostgresCoordinatorAuditSink,
-)
-from app.application.coordinator.postgres_launch_ticket_repository import (
-    PostgresLaunchTicketRepository,
-)
-from app.application.orchestration.postgres_orchestration_binding_repository import (
-    PostgresRunSemanticInputBindingRepository,
-)
 from app.application.run_control.postgres_run_control_repository import (
     PostgresRunControlRepository,
-)
-from app.application.coordinator.postgres_workflow_result_repository import (
-    PostgresWorkflowResultRepository,
 )
 from app.application.run_control.service import (
     REQUIRED_SHARED_BUDGET_DIMENSIONS,
@@ -86,19 +83,22 @@ from app.application.run_control.service import (
     F1RunConfigurationVerifier,
     RunControlService,
 )
-from app.application.operations.semantic_operation_bindings import (
-    SemanticOperationBindingRepository,
-    SemanticOperationBindingTemplates,
-    SemanticOperationExecutionBindingService,
-)
 from app.application.run_control.web_research_admission import (
     register_web_research_admission_policies,
+)
+from app.application.web_research.external_candidate_repository import (
+    BeanieExternalCandidateRepository,
+)
+from app.application.web_research.external_capability_discovery import (
+    ExternalCapabilityDiscoveryService,
+    ExternalDiscoveryBatch,
 )
 from app.application.web_research.web_research_semantic_binding import (
     REQUIRED_SELECTED_IDENTITIES,
     SemanticServiceWebResearchOperationBindingAuthor,
     WebResearchSemanticBindingProvider,
 )
+from app.application.workspaces.artifact_promotion import ArtifactPayloadAddress
 from app.config import PROJECT_ROOT, Settings
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import (

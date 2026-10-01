@@ -4,8 +4,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.application.control_plane.service import ControlPlaneService
 from app.application.control_plane.control_plane_repository import InMemoryDefinitionRepository
+from app.application.control_plane.service import ControlPlaneService
 from app.domain.control_plane.contracts import PublishRequest
 from app.domain.control_plane.extensions import ExtensionRegistry
 from app.domain.schema_grounding.definitions import (

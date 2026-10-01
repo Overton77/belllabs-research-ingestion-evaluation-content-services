@@ -7,8 +7,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from app.application.control_plane.service import ControlPlaneService
 from app.application.control_plane.control_plane_repository import BeanieDefinitionRepository
+from app.application.control_plane.service import ControlPlaneService
 from app.application.coordinator.coordinator_surface_promotion import (
     build_coordinator_surface,
     plan_coordinator_surface_promotion,

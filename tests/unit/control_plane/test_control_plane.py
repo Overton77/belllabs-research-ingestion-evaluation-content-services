@@ -7,11 +7,11 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 from pydantic import ValidationError
 
-from app.application.control_plane.service import ControlPlaneService
 from app.application.control_plane.control_plane_repository import (
     DefinitionRepository,
     InMemoryDefinitionRepository,
 )
+from app.application.control_plane.service import ControlPlaneService
 from app.domain.control_plane.canonical import canonical_json
 from app.domain.control_plane.contracts import (
     AliasRef,

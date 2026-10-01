@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.application.control_plane.service import ControlPlaneService
 from app.application.control_plane.control_plane_repository import InMemoryDefinitionRepository
+from app.application.control_plane.service import ControlPlaneService
 from app.application.coordinator.coordinator_composition import CoordinatorLaunchProductionInputs
 from app.application.coordinator.coordinator_launch import (
     CoordinatorLaunchPreparationService,

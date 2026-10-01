@@ -5,8 +5,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.application.run_control.service import AdmissionPolicyRegistry, RunControlService
 from app.application.run_control.run_control_repository import InMemoryRunControlRepository
+from app.application.run_control.service import AdmissionPolicyRegistry, RunControlService
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import (
     DefinitionKind,

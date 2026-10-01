@@ -12,7 +12,6 @@ from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
 
-from app.application.workspaces.artifact_promotion import ArtifactPayloadAddress
 from app.application.operations.journaled_operation_execution import (
     JournaledOperationExecutionCoordinator,
 )
@@ -26,6 +25,7 @@ from app.application.operations.operation_execution import (
     RunControlOperationBudgetAuthority,
 )
 from app.application.operations.operation_journal import OperationJournalMutation
+from app.application.workspaces.artifact_promotion import ArtifactPayloadAddress
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import (
     DefinitionKind,

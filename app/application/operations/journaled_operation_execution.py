@@ -6,8 +6,11 @@ from datetime import datetime
 from typing import Protocol
 from uuid import NAMESPACE_URL, uuid5
 
+from app.application.operations.operation_journal import (
+    OperationJournalMutation,
+    OperationJournalService,
+)
 from app.application.workspaces.artifact_promotion import ArtifactPayloadAddress
-from app.application.operations.operation_journal import OperationJournalMutation, OperationJournalService
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.operation_execution.contracts import (
     OperationExecutionBinding,
