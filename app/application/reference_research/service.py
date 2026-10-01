@@ -18,7 +18,10 @@ from app.application.operations.operation_executor import (
     OperationExecutorConformanceHarness,
     StageOperationRequest,
 )
-from app.application.operations.operation_journal import OperationJournalMutation, OperationJournalService
+from app.application.operations.operation_journal import (
+    OperationJournalMutation,
+    OperationJournalService,
+)
 from app.application.runtime.runtime_run_plan import (
     compile_run_plan_v4,
     compile_structural_graph_assembly_v3,

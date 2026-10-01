@@ -12,6 +12,10 @@ from urllib.parse import quote, unquote
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
+from app.application.operations.semantic_operation_bindings import (
+    SemanticOperationBindingTemplates,
+    SemanticOperationExecutionBindingService,
+)
 from app.application.orchestration.orchestration_routing import (
     SemanticHandlerRegistry,
     SemanticRoutingError,
@@ -22,10 +26,6 @@ from app.application.schema.schema_context_selection import ReviewAgentPort, Sel
 from app.application.schema.schema_grounding_repository import (
     SchemaGroundingRecordRepository,
     schema_grounding_record,
-)
-from app.application.operations.semantic_operation_bindings import (
-    SemanticOperationBindingTemplates,
-    SemanticOperationExecutionBindingService,
 )
 from app.domain.control_plane.canonical import sha256_digest as canonical_digest
 from app.domain.control_plane.contracts import (

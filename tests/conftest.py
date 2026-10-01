@@ -6,10 +6,30 @@ import sys
 
 import pytest
 
-from app.application.control_plane.service import ControlPlaneService
 from app.application.control_plane.control_plane_repository import InMemoryDefinitionRepository
+from app.application.control_plane.service import ControlPlaneService
+from app.config import PROJECT_ROOT
 from app.domain.control_plane.extensions import ExtensionRegistry
 from app.integrations.control_plane_payloads import InMemoryPayloadStore
+
+# Fresh checkouts and worktrees have no `.env`, but `app.server` builds `Settings()` at
+# import. Supply non-routable placeholders for the required fields only in that case;
+# explicit environment values always win, and service/provider tests keep their own opt-ins.
+_OFFLINE_SETTINGS_PLACEHOLDERS = {
+    "SUPABASE_URL": "https://offline-placeholder.invalid",
+    "SUPABASE_PUBLISHABLE_KEY": "offline-placeholder",
+    "SUPABASE_SECRET_KEY": "offline-placeholder",
+    "OPENAI_API_KEY": "offline-placeholder",
+    "MONGODB_URI": "mongodb://offline-placeholder.invalid:27017",
+    "NEO4J_URI": "neo4j://offline-placeholder.invalid:7687",
+    "NEO4J_AURA_USERNAME": "offline-placeholder",
+    "NEO4J_AURA_PASSWORD": "offline-placeholder",
+    "DATABASE_URL": "postgresql://offline-placeholder.invalid:5432/offline",
+    "APPLICATION_DATABASE_URL": "postgresql://offline-placeholder.invalid:5432/offline",
+}
+if not (PROJECT_ROOT / ".env").exists():
+    for _name, _value in _OFFLINE_SETTINGS_PLACEHOLDERS.items():
+        os.environ.setdefault(_name, _value)
 
 
 def pytest_asyncio_loop_factories(config, item):  # type: ignore[no-untyped-def]

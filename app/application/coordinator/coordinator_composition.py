@@ -4,6 +4,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from app.application.capability.capability_search import CapabilitySearchService
+from app.application.capability.postgres_capability_search_repository import (
+    PostgresCatalogSearchRepository,
+    PostgresPool,
+)
 from app.application.control_plane.control_plane_repository import BeanieDefinitionRepository
 from app.application.coordinator.coordinator_facade import (
     BlueprintRuntimeStatus,
@@ -36,6 +40,16 @@ from app.application.coordinator.coordinator_results import (
     RunProjectionPort,
 )
 from app.application.coordinator.coordinator_run_resources import CoordinatorRunResourceService
+from app.application.coordinator.postgres_coordinator_audit_repository import (
+    PostgresCoordinatorAuditSink,
+)
+from app.application.coordinator.postgres_workflow_result_repository import (
+    PostgresWorkflowResultRepository,
+)
+from app.application.orchestration.orchestration_binding_repository import (
+    RunSemanticInputBindingRepository,
+    RunSemanticInputBindingService,
+)
 from app.application.web_research.external_candidate_inspection import (
     ExternalCandidateInspectionService,
 )
@@ -44,20 +58,6 @@ from app.application.web_research.external_candidate_repository import (
 )
 from app.application.web_research.external_capability_discovery import (
     ExternalCapabilityDiscoveryService,
-)
-from app.application.orchestration.orchestration_binding_repository import (
-    RunSemanticInputBindingRepository,
-    RunSemanticInputBindingService,
-)
-from app.application.capability.postgres_capability_search_repository import (
-    PostgresCatalogSearchRepository,
-    PostgresPool,
-)
-from app.application.coordinator.postgres_coordinator_audit_repository import (
-    PostgresCoordinatorAuditSink,
-)
-from app.application.coordinator.postgres_workflow_result_repository import (
-    PostgresWorkflowResultRepository,
 )
 from app.config import Settings
 from app.domain.control_plane.contracts import (

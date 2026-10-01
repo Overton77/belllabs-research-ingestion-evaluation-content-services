@@ -32,7 +32,7 @@ from app.models.operation_execution import (
 )
 from tests.unit.operations.test_operation_execution import operation_request
 
-WORKER = Path(__file__).parent / "fixtures" / "operation_backfill_worker.py"
+WORKER = Path(__file__).parents[2] / "fixtures" / "operation_backfill_worker.py"
 
 
 def _require_disposable_targets(postgres_dsn: str, mongodb_uri: str) -> None:
@@ -71,7 +71,7 @@ async def _run_worker(
     process = await asyncio.create_subprocess_exec(
         sys.executable,
         str(WORKER),
-        cwd=Path(__file__).parents[1],
+        cwd=Path(__file__).parents[3],
         env=environment,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,

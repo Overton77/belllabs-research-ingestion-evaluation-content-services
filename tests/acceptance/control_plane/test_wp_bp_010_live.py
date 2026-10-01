@@ -30,12 +30,12 @@ from app.application.orchestration.service import (
     orchestration_lifecycle_actor,
     register_stagegraph_family_mutations,
 )
+from app.application.run_control.run_control_repository import InMemoryRunControlRepository
 from app.application.run_control.service import (
     AdmissionPolicyRegistry,
     FamilyAdmissionRegistry,
     RunControlService,
 )
-from app.application.run_control.run_control_repository import InMemoryRunControlRepository
 from app.config import Settings
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import (
@@ -71,9 +71,9 @@ from app.temporal.workflows.belllabs_run import BellLabsRunWorkflow
 from app.temporal.workflows.operation import OperationWorkflow
 from app.temporal.workflows.stagegraph import StageGraphWorkflow
 from tests.acceptance.control_plane.test_wp_cp_040 import exact_fixture
+from tests.integration.temporal.test_wp_bp_010_temporal import _blueprint
 from tests.unit.operations.test_operation_execution import operation_request
 from tests.unit.run_control.test_run_control import request as run_request
-from tests.integration.temporal.test_wp_bp_010_temporal import _blueprint
 
 LIVE_QUEUE = "wp-bp-010-live-family"
 COGNITIVE_QUEUE = "agent-cognitive"

@@ -37,11 +37,12 @@ def test_profiles_mount_one_representation_per_candidate(tmp_path: Path) -> None
 
 
 def test_authoritative_schema_tier0_is_bounded_and_workload_candidates_are_present() -> None:
-    repository = Path(__file__).resolve().parents[2]
-    schema_path = repository / "biotech-kg/src/schema/neo4jbiotechschema.graphql"
+    workspace = Path(__file__).resolve().parents[4]
+    schema_path = workspace / "biotech-kg/src/schema/neo4jbiotechschema.graphql"
+    # Tracked copy of the live-windows-bind-9 input report; see tests/fixtures/schema_context/.
     report_path = (
-        Path(__file__).resolve().parents[1]
-        / ".scratch/schema-context-selection-runs/live-windows-bind-9/inputs/report.md"
+        Path(__file__).resolve().parents[2]
+        / "fixtures/schema_context/trudiagnostic_report_2026-03-30.md"
     )
     source = schema_path.read_bytes()
     catalog = parse_schema_catalog(source, str(schema_path))
@@ -59,8 +60,8 @@ def test_authoritative_schema_tier0_is_bounded_and_workload_candidates_are_prese
 def test_tier0_exposes_governed_ontological_categories() -> None:
     from app.application.schema.schema_catalog import DEFAULT_SEMANTIC_OVERLAY
 
-    repository = Path(__file__).resolve().parents[2]
-    schema_path = repository / "biotech-kg/src/schema/neo4jbiotechschema.graphql"
+    workspace = Path(__file__).resolve().parents[4]
+    schema_path = workspace / "biotech-kg/src/schema/neo4jbiotechschema.graphql"
     catalog = parse_schema_catalog(
         schema_path.read_bytes(),
         str(schema_path),

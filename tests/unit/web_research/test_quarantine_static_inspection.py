@@ -38,7 +38,7 @@ from app.integrations.quarantine_inspection import (
 
 NOW = datetime(2026, 7, 26, 20, 0, tzinfo=UTC)
 RAW_DIGEST = f"sha256:{'a' * 64}"
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SCANNER = PROJECT_ROOT / "scripts" / "quarantine_static_scan.py"
 PYTHON_EXECUTABLE = Path(sys.executable).resolve()
 

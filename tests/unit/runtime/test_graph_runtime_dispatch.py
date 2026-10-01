@@ -5,11 +5,11 @@ from datetime import UTC, datetime
 
 import pytest
 
+from app.application.operations.operation_execution import bind_operation_execution_request
 from app.application.runtime.graph_runtime_dispatch import (
     ExactRuntimeSelector,
     GraphRuntimeDispatchService,
 )
-from app.application.operations.operation_execution import bind_operation_execution_request
 from app.application.runtime.runtime_execution_bindings import (
     InMemoryRuntimeCoordinationRepository,
 )

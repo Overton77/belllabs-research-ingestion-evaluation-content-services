@@ -31,6 +31,9 @@ from app.application.coordinator.coordinator_launch import (
     CoordinatorWorkflowLaunchService,
 )
 from app.application.coordinator.coordinator_results import CoordinatorResultService
+from app.application.orchestration.orchestration_binding_repository import (
+    SemanticInputBindingNotFound,
+)
 from app.application.web_research.external_candidate_inspection import (
     ExternalCandidateInspectionReport,
     ExternalCandidateInspectionRequest,
@@ -42,9 +45,6 @@ from app.application.web_research.external_candidate_repository import ExternalC
 from app.application.web_research.external_capability_discovery import (
     ExternalCapabilityDiscoveryDisabled,
     ExternalCapabilityDiscoveryService,
-)
-from app.application.orchestration.orchestration_binding_repository import (
-    SemanticInputBindingNotFound,
 )
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import (

@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 DATASET = (
-    Path(__file__).resolve().parent
+    Path(__file__).resolve().parents[2]
     / "fixtures"
     / "coordinator_retrieval_evaluation.json"
 )

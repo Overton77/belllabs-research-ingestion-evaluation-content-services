@@ -18,8 +18,8 @@ Technical unit/integration fixtures and opted-in provider/service qualifications
 
 | Ticket | Outcome | Blocked by | Current status / branch |
 |---|---|---|---|
-| [RRM-001](research-runtime-mission/issues/01-lifecycle-contract-authority.md) | Reviewable, accepted lifecycle contract/spec coverage and reusable contract inventory | None for drafting; acceptance follows project review | ready-for-agent (specification); `spec/research-runtime-lifecycle` |
-| [RRM-002](research-runtime-mission/issues/02-repair-verification-baseline.md) | Reproducible green owning/shared baseline without weakened assertions | None | **ready-for-agent; next code issue**; `wp/rrm-002-baseline` |
+| [RRM-001](research-runtime-mission/issues/01-lifecycle-contract-authority.md) | Reviewable, accepted lifecycle contract/spec coverage and reusable contract inventory | None for drafting; acceptance follows project review | **ready-for-agent; next frontier** (specification); `spec/research-runtime-lifecycle` |
+| [RRM-002](research-runtime-mission/issues/02-repair-verification-baseline.md) | Reproducible green owning/shared baseline without weakened assertions | None | **accepted 2026-10-01** (`ea0f529`, merged into integration); [evidence](../evidence_v2/research-runtime-mission/RRM-002/README.md); `wp/rrm-002-baseline` |
 | [RRM-003](research-runtime-mission/issues/03-persist-qualified-checkpoint-lineage.md) | Production operation records exact runtime unit, Activity attempts and checkpoint lineage | 001, 002 | blocked; `wp/rrm-003-checkpoint-lineage` |
 | [RRM-004](research-runtime-mission/issues/04-reconcile-checkpoint-crash-windows.md) | Retry/worker-loss convergence without duplicate prompt/provider/effect application | 003 | blocked; `wp/rrm-004-checkpoint-recovery` |
 | [RRM-005](research-runtime-mission/issues/05-inspect-runtime-and-checkpoint-history.md) | Scoped active/terminal unit inspection and qualified historical state reads | 004 | blocked; `wp/rrm-005-inspection` |
@@ -29,8 +29,9 @@ Technical unit/integration fixtures and opted-in provider/service qualifications
 | [RRM-009](research-runtime-mission/issues/09-qualify-production-capability-composition.md) | CP-050 capability prerequisite: real persistence, worker composition, Skills/MCP/browser/search/sandbox, subagents and artifacts | 001, 002, 004 | blocked; `wp/rrm-009-capability-composition` |
 | [RRM-010](research-runtime-mission/issues/10-merge-prerequisite-readiness-gate.md) | Integrated, reviewed prerequisite readiness manifest and merge | 005, 006, 007, 008, 009 | blocked; `integration/research-runtime-mission` |
 | [RRM-011](research-runtime-mission/issues/11-company-fixtures-separate-session.md) | Two useful company reports, forks, live tracer and aggregate CP-050 evidence | 010 **and a separate user-started fixture session** | held; `wp/research-company-fixtures` |
+| [RRM-012](research-runtime-mission/issues/12-reconcile-reference-research-journal-authority.md) | Stage 0–2 reference-research harness settles through run-control authority, or is retired | None (found by RRM-002); not mission-blocking | ready-for-agent (repair or retirement); `wp/rrm-012-reference-journal-authority` |
 
-Recommended serial order: 002 -> 001 -> 003 -> 004 -> 005 -> 006 -> 007 -> 008 -> 009 -> 010; then stop. 001 drafting and 002 repair can proceed independently. 007 and 009 need not wait for 006 where shared-file ownership allows parallel work. Numeric identifiers are stable; dependency edges determine readiness.
+RRM-002 was accepted on 2026-10-01, so the next frontier is RRM-001. Recommended serial order: 002 -> 001 -> 003 -> 004 -> 005 -> 006 -> 007 -> 008 -> 009 -> 010; then stop. RRM-012 is independent and can be scheduled at any point. 001 drafting and 002 repair can proceed independently. 007 and 009 need not wait for 006 where shared-file ownership allows parallel work. Numeric identifiers are stable; dependency edges determine readiness.
 
 ## Authority references
 

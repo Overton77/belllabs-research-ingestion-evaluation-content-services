@@ -12,7 +12,9 @@ from app.application.workspaces.mongo_artifact_repository import (
 )
 from app.domain.operation_execution.contracts import ArtifactPromotionState
 from app.integrations.mongodb import BEANIE_MODELS
-from tests.integration.postgres.test_artifact_promotion_postgres_integration import admitted_revision
+from tests.integration.postgres.test_artifact_promotion_postgres_integration import (
+    admitted_revision,
+)
 
 
 async def test_mongodb_artifact_revisions_are_immutable_and_reconcilable(

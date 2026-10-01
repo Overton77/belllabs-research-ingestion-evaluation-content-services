@@ -21,7 +21,11 @@ from app.domain.run_control.contracts import (
 from app.domain.run_control.errors import CommandRejected, IdempotencyConflict, RunControlNotFound
 from app.domain.run_control.family_admission import FamilyAdmissionReceipt
 from app.integrations.postgres import apply_application_migrations
-from tests.unit.run_control.test_atomic_family_admission import authority_batch, family_mutation, family_service
+from tests.unit.run_control.test_atomic_family_admission import (
+    authority_batch,
+    family_mutation,
+    family_service,
+)
 from tests.unit.run_control.test_run_control import command, request
 
 
@@ -453,8 +457,9 @@ async def test_postgres_atomic_family_admission_contract(
                   (SELECT count(*) FROM belllabs_control.family_admission_heads) AS heads,
                   (SELECT count(*) FROM belllabs_control.family_admission_journal) AS journal,
                   (SELECT count(*) FROM belllabs_control.family_admission_results) AS results,
+                  -- Reservation ledger entries are keyed by reservation identity.
                   (SELECT count(*) FROM belllabs_control.budget_ledger
-                   WHERE idempotency_id LIKE 'command:concurrent-%') AS ledger,
+                   WHERE idempotency_id IN ('concurrent-a', 'concurrent-b')) AS ledger,
                   (SELECT count(*) FROM belllabs_control.outbox
                    WHERE aggregate_version = 2) AS outbox
                 """
@@ -799,7 +804,8 @@ async def test_postgres_authority_batch_is_atomic_and_preserves_outbox_finality(
             )
             outbox = await connection.fetch(
                 """
-                SELECT event_type, sequence, is_version_final,
+                SELECT event_type, sequence,
+                       (envelope->>'is_version_final')::boolean AS is_version_final,
                        envelope->'payload'->>'authority_batch_digest' AS batch_digest,
                        CASE
                          WHEN envelope->'payload' ? 'action_identity_summary'

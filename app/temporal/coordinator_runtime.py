@@ -11,15 +11,12 @@ from temporalio.client import Client
 from temporalio.worker import Worker
 
 from app.application.coordinator.coordinator_results import TerminalWorkflowCompletionPort
+from app.application.operations.semantic_operation_bindings import (
+    SemanticOperationBindingRepository,
+)
 from app.application.orchestration.goal_directed import (
     GoalDirectedDocumentRepository,
     GoalOperationTemplateProvider,
-)
-from app.application.orchestration.service import (
-    RunControlLifecycleGateway,
-    StageGraphDecisionService,
-    StageGraphOperationPreparationService,
-    StageGraphOperationTemplateProvider,
 )
 from app.application.orchestration.orchestration_binding_repository import (
     RunSemanticInputBindingRepository,
@@ -32,15 +29,20 @@ from app.application.orchestration.orchestration_routing import (
 from app.application.orchestration.postgres_orchestration_binding_repository import (
     PostgresRunSemanticInputBindingRepository,
 )
-from app.application.run_control.service import RunControlService
+from app.application.orchestration.service import (
+    RunControlLifecycleGateway,
+    StageGraphDecisionService,
+    StageGraphOperationPreparationService,
+    StageGraphOperationTemplateProvider,
+)
 from app.application.run_control.run_control_repository import RunControlRepository
+from app.application.run_control.service import RunControlService
 from app.application.schema.schema_catalog_build import SchemaCatalogBuildService
 from app.application.schema.schema_context_selection import ReviewAgentPort, SelectionAgentPort
 from app.application.schema.schema_context_stage_handlers import (
     register_schema_context_stage_handlers,
 )
 from app.application.schema.schema_grounding_repository import SchemaGroundingRecordRepository
-from app.application.operations.semantic_operation_bindings import SemanticOperationBindingRepository
 from app.application.schema.supporting_graph_reconciliation import (
     SupportingGraphReconciliationWorkflow,
 )

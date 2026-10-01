@@ -5,13 +5,13 @@ from typing import Protocol
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
-from app.application.orchestration.orchestration_routing import (
-    OperationExecutionBindingReader,
-    SemanticRoutingError,
-)
 from app.application.operations.semantic_operation_bindings import (
     SemanticOperationBindingTemplates,
     SemanticOperationExecutionBindingService,
+)
+from app.application.orchestration.orchestration_routing import (
+    OperationExecutionBindingReader,
+    SemanticRoutingError,
 )
 from app.application.web_research.web_research_semantic_handlers import (
     build_web_research_run_binding,

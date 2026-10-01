@@ -14,15 +14,15 @@ from app.api.run_control import (
     compose_api_run_control_service,
     configure_family_admission_registry,
 )
-from app.application.run_control.service import (
-    AdmissionPolicyRegistry,
-    FamilyAdmissionRegistry,
-    RunControlService,
-)
 from app.application.run_control.run_control_repository import (
     InMemoryRunControlRepository,
     authority_state_digest,
     upgrade_legacy_operation_pending_usage,
+)
+from app.application.run_control.service import (
+    AdmissionPolicyRegistry,
+    FamilyAdmissionRegistry,
+    RunControlService,
 )
 from app.domain.control_plane.canonical import canonical_json, sha256_digest
 from app.domain.operation_execution.journal import OperationJournalSettlement
@@ -976,7 +976,7 @@ def test_family_mutations_inherit_payload_and_sensitive_data_bounds() -> None:
 
 def test_migration_has_private_repository_dml_and_no_attachment_function() -> None:
     migration = (
-        Path(__file__).parents[1]
+        Path(__file__).parents[3]
         / "app"
         / "migrations"
         / "0017_atomic_family_admission_v1.sql"
@@ -987,9 +987,10 @@ def test_migration_has_private_repository_dml_and_no_attachment_function() -> No
     assert "FROM PUBLIC, belllabs_control_runtime" in migration
     assert "GRANT belllabs_family_repository_writer TO belllabs_app" not in migration
     repository = (
-        Path(__file__).parents[1]
+        Path(__file__).parents[3]
         / "app"
         / "application"
+        / "run_control"
         / "postgres_run_control_repository.py"
     ).read_text(encoding="utf-8")
     assert "family_writer_pool: asyncpg.Pool | None = None" in repository
@@ -999,7 +1000,7 @@ def test_migration_has_private_repository_dml_and_no_attachment_function() -> No
 
 def test_operation_settlement_revision_key_uses_forward_migration() -> None:
     migration = (
-        Path(__file__).parents[1]
+        Path(__file__).parents[3]
         / "app"
         / "migrations"
         / "0018_operation_settlement_revisions_v1.sql"
@@ -1013,7 +1014,7 @@ def test_operation_settlement_revision_key_uses_forward_migration() -> None:
     assert "'{usage_records}'" in migration
     assert "'{outstanding_usage_ids}'" in migration
     original = (
-        Path(__file__).parents[1]
+        Path(__file__).parents[3]
         / "app"
         / "migrations"
         / "0012_graph_runtime_operation_journal.sql"

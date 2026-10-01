@@ -5,8 +5,8 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
-from app.application.control_plane.service import ControlPlaneService
 from app.application.control_plane.control_plane_repository import InMemoryDefinitionRepository
+from app.application.control_plane.service import ControlPlaneService
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import (
     AgentProfileDefinition,

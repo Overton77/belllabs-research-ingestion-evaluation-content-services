@@ -4,12 +4,12 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.application.orchestration.goal_directed import GoalOperationTemplateRepository
-from app.application.orchestration.orchestration_routing import SemanticRoutingError
 from app.application.operations.semantic_operation_bindings import (
     SemanticOperationBindingTemplates,
     SemanticOperationExecutionBindingService,
 )
+from app.application.orchestration.goal_directed import GoalOperationTemplateRepository
+from app.application.orchestration.orchestration_routing import SemanticRoutingError
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import (
     EffectiveRunConfiguration,

@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from app.application.control_plane.service import ControlPlaneService
 from app.application.control_plane.control_plane_repository import InMemoryDefinitionRepository
+from app.application.control_plane.service import ControlPlaneService
 from app.application.coordinator.coordinator_surface_promotion import (
     build_coordinator_surface,
     plan_coordinator_surface_promotion,
@@ -20,7 +20,7 @@ from app.domain.control_plane.contracts import (
 from app.domain.control_plane.extensions import ExtensionRegistry
 from app.integrations.control_plane_payloads import InMemoryPayloadStore
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SKILL_ROOT = PROJECT_ROOT / ".agents" / "skills" / "belllabs-workflow-coordinator"
 
 

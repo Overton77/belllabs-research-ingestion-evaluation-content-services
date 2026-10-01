@@ -16,7 +16,6 @@ from urllib.parse import urlsplit
 from mcp.types import TextContent, Tool
 from pydantic import SecretStr
 
-from app.application.workspaces.artifact_promotion import ArtifactPayloadPort
 from app.application.web_research.web_research_repository import (
     BeanieWebResearchRecordRepository,
 )
@@ -26,6 +25,7 @@ from app.application.web_research.web_research_semantic_handlers import (
     TavilySearchPort,
     WebResearchHandlerDependencies,
 )
+from app.application.workspaces.artifact_promotion import ArtifactPayloadPort
 from app.config import Settings
 from app.domain.control_plane.contracts import ExactDefinitionRef
 from app.domain.coordinator.web_research_runtime import (

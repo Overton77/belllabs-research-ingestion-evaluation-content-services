@@ -161,6 +161,7 @@ def service():
             sandbox=sandbox,
             authority=authority,
             resources=Resources(),
+            clock=lambda: NOW + timedelta(hours=1),
         ),
         repository,
         payloads,

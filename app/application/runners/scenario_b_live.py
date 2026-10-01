@@ -12,6 +12,9 @@ from uuid import uuid4
 from pydantic import ValidationError
 
 from app.application.capability.capability_search import CapabilitySearchService
+from app.application.capability.postgres_capability_search_repository import (
+    PostgresCatalogSearchRepository,
+)
 from app.application.control_plane.control_plane_repository import BeanieDefinitionRepository
 from app.application.web_research.external_candidate_inspection import (
     BeanieExternalCandidateInspectionRepository,
@@ -27,9 +30,6 @@ from app.application.web_research.external_candidate_repository import (
 from app.application.web_research.external_capability_discovery import (
     ExternalCapabilityDiscoveryService,
     ExternalDiscoveryBatch,
-)
-from app.application.capability.postgres_capability_search_repository import (
-    PostgresCatalogSearchRepository,
 )
 from app.config import PROJECT_ROOT, Settings
 from app.domain.control_plane.canonical import sha256_digest
