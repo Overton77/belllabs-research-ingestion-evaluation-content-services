@@ -5,6 +5,7 @@ Publication: local Markdown only; no GitHub issues created
 Audit: [current implementation audit](../../RESEARCH_RUNTIME_IMPLEMENTATION_AUDIT_2026-10-01.md)
 Mission: [special handoff](../../RESEARCH_RUNTIME_MISSION_SPECIAL_HANDOFF_2026-10-01.md)
 Agent instruction: [next implementation session](../../RESEARCH_RUNTIME_NEXT_SESSION_PROMPT.md)
+Agent-team coordinator brief: [coordinator prompt](../../RESEARCH_RUNTIME_AGENT_TEAM_COORDINATOR_PROMPT.md) (RRM-001, RRM-003 to RRM-010 and RRM-013, with up to five clean-code passes)
 
 These RRM tickets are mission-specific local issues, not replacements for canonical WP/REQ/CON identifiers. The tracked files under `research-runtime-mission/issues/` are the durable source of truth. Identical local mirrors live under `.scratch/research-runtime-mission/issues/`; regenerate those mirrors from the tracked files in a fresh worktree, since `.scratch/` is ignored. Full ticket bodies are committed so the plan does not depend on this checkout.
 
