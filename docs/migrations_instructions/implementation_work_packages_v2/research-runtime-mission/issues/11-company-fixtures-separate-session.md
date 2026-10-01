@@ -14,6 +14,7 @@ The fixture session must load the readiness manifest and recheck capabilities/de
 - [ ] Resolve current official company/offer identity at execution; freeze bounded objectives, source/visit/iteration/time/spend ceilings and exact capabilities.
 - [ ] Qualia StageGraph proves early provisional synthesis and final accepted evidence/liability closure.
 - [ ] GenerationLab GoalDirected proves independent verification, bounded repair/convergence and qualified handoff.
+- [ ] Both fixtures use Deep Agents with real subagents: each family exercises at least one in-process sync subagent, and at least one fixture runs a governed async subagent on the qualified Agent Server.
 - [ ] Produce durable cited reports, claim/source manifests, verifier findings, usage/effect settlement and exact lineage.
 - [ ] Inspect active/terminal lifecycle and earlier checkpoints; replay captured history; run one compatible semantic-boundary fork per family with immutable parents and derived reports.
 - [ ] Demonstrate the already qualified boundary intervention; never imply unrestricted mid-invocation edits are supported.
