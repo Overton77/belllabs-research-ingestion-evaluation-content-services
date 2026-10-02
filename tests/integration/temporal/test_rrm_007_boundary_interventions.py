@@ -75,6 +75,7 @@ from app.temporal.workflows.belllabs_run import BellLabsRunWorkflow
 from app.temporal.workflows.goal_directed import GoalDirectedWorkflow
 from app.temporal.workflows.operation import OperationWorkflow
 from app.temporal.workflows.stagegraph import StageGraphWorkflow, wait_condition_id
+from tests.fixtures.operation_activities import wait_heartbeating
 from tests.integration.temporal.test_wp_bp_010_temporal import (
     QUEUE,
     FakeStageGraphActivities,
@@ -280,7 +281,7 @@ class GovernedStageGraphActivities(FakeStageGraphActivities):
         operation_id = str(request["identity"]["operation_id"])
         if ":stage:slow:" in operation_id:
             self.slow_started.set()
-            await self.slow_release.wait()
+            await wait_heartbeating(self.slow_release)
             self.slow_completed.set()
             stage_id = "slow"
         elif ":stage:downstream:" in operation_id:
@@ -288,7 +289,7 @@ class GovernedStageGraphActivities(FakeStageGraphActivities):
             stage_id = "downstream"
         else:
             if self.gate_fast_on_slow:
-                await self.slow_started.wait()
+                await wait_heartbeating(self.slow_started)
             stage_id = "fast"
         return {"output_refs": [f"artifact:{stage_id}"]}
 
@@ -512,10 +513,10 @@ class GovernedGoalActivities(FakeGoalDirectedActivities):
         operation_id = str(request["identity"]["operation_id"])
         if operation_id.endswith("/1/executor"):
             self.executor_started.set()
-            await self.release_executor.wait()
+            await wait_heartbeating(self.release_executor)
         elif operation_id.endswith(f"/{self._complete_at_iteration}/executor"):
             self.final_executor_started.set()
-            await self.release_executor.wait()
+            await wait_heartbeating(self.release_executor)
         self.operation_started.set()
         return {"operation_id": str(request["identity"])}
 

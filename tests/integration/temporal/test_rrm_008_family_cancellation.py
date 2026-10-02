@@ -98,6 +98,7 @@ from tests.fixtures.goal_directed_journaled import (
     goal_run_control,
     goal_run_input,
 )
+from tests.fixtures.operation_activities import cancelled_operation_result, wait_heartbeating
 from tests.fixtures.temporal_history import patch_ids, scheduled_activity_inputs
 from tests.integration.temporal.test_rrm_007_boundary_interventions import (
     GOAL_QUEUE,
@@ -120,6 +121,9 @@ from tests.integration.temporal.test_wp_bp_020_temporal import _run_input as goa
 from tests.integration.temporal.test_wp_bp_020_temporal import fake_settlement
 
 BASELINE = {"tokens.total": 20}
+# The fixture families' operation heartbeat timeout: a cancel reaches the running fake
+# `operation.execute` on its next heartbeat (it heartbeats while it waits).
+CANCEL_HEARTBEAT_SECONDS = 5
 GOAL_COMPOSITION_QUEUE = "rrm008-goal-directed"
 
 
@@ -138,6 +142,7 @@ class CancellableStageGraphActivities(GovernedStageGraphActivities):
 
     def __init__(self, authority: Authority) -> None:
         super().__init__(authority, gate_fast_on_slow=False)
+        self.operation_heartbeat_timeout_seconds = CANCEL_HEARTBEAT_SECONDS
         self.cancel_settlements: list[str] = []
         self.fast_release = asyncio.Event()
         self.fast_cancelled = asyncio.Event()
@@ -151,7 +156,7 @@ class CancellableStageGraphActivities(GovernedStageGraphActivities):
         if ":stage:fast:" in operation_id:
             # Held by the test so that the join never releases before the cancel lands.
             try:
-                await self.fast_release.wait()
+                await wait_heartbeating(self.fast_release)
             except asyncio.CancelledError:
                 self.fast_cancelled.set()
                 raise
@@ -159,7 +164,7 @@ class CancellableStageGraphActivities(GovernedStageGraphActivities):
         if ":stage:slow:" in operation_id:
             self.slow_started.set()
             try:
-                await self.slow_release.wait()
+                await wait_heartbeating(self.slow_release)
             except asyncio.CancelledError:
                 # The cancel reached the running Activity (heartbeat or worker shutdown).
                 self.slow_cancelled.set()
@@ -183,12 +188,7 @@ class CancellableStageGraphActivities(GovernedStageGraphActivities):
                     "failure_message": "an accepted generation boundary superseded it",
                     "reconciliation_incident_id": "incident:fixture:superseded",
                 }
-        return {
-            "binding_id": f"binding:{operation_id}",
-            "semantic_attempt_key": str(request["identity"]),
-            "status": "cancelled",
-            "failure_code": "cancelled",
-        }
+        return cancelled_operation_result(request)
 
     @activity.defn(name="stagegraph.complete")
     async def complete(
@@ -199,9 +199,8 @@ class CancellableStageGraphActivities(GovernedStageGraphActivities):
 
         return await terminalize_through_run_control(self.authority.run_control, request)
 
-    @property
-    def functions(self) -> list[object]:
-        return [*super().functions, self.cancel_operation]
+    # `functions` is inherited: the WP-BP-010 base already lists `operation.cancel`, which this
+    # class overrides (a second entry would be a duplicate activity name).
 
 
 async def terminalize_through_run_control(
@@ -290,6 +289,7 @@ class CancellableGoalActivities(GovernedGoalActivities):
         self, authority: Authority, blueprint: GoalDirectedBlueprint, **kwargs: Any
     ) -> None:
         super().__init__(authority, **kwargs)
+        self.operation_heartbeat_timeout_seconds = CANCEL_HEARTBEAT_SECONDS
         self.executor_cancelled = asyncio.Event()
         self.cancel_settlements: list[str] = []
         # Review note: `operation.cancel` may report a unit whose generation was superseded
@@ -314,7 +314,7 @@ class CancellableGoalActivities(GovernedGoalActivities):
         if operation_id.endswith("/1/executor"):
             self.executor_started.set()
             try:
-                await self.release_executor.wait()
+                await wait_heartbeating(self.release_executor)
             except asyncio.CancelledError:
                 self.executor_cancelled.set()
                 raise

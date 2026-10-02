@@ -174,7 +174,7 @@ async def test_inspect_a_two_checkpoint_technical_run_and_read_a_historical_chec
                 Worker(
                     env.client,
                     task_queue=stack.binding.task_queue,
-                    activities=[activities.execute],
+                    activities=[activities.execute, activities.cancel],
                 ),
             ):
                 handle = await env.client.start_workflow(

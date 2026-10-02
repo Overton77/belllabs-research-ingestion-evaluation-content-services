@@ -1115,7 +1115,7 @@ async def test_lost_wake_up_hint_is_recovered_by_resending_the_same_decision() -
             Worker(
                 environment.client,
                 task_queue=workflow_request.activity_task_queue,
-                activities=[activities.execute],
+                activities=[activities.execute, activities.cancel],
             ),
         ):
             handle = await environment.client.start_workflow(

@@ -58,6 +58,7 @@ from app.temporal.workflow_sandbox import coordinator_workflow_runner
 from app.temporal.workflows.goal_directed import GoalDirectedWorkflow
 from app.temporal.workflows.operation import OperationWorkflow
 from tests.fixtures.goal_directed_journaled import goal_template_workspace
+from tests.fixtures.operation_activities import sleep_heartbeating
 
 DIGEST = "sha256:" + "a" * 64
 NOW = datetime(2026, 8, 10, 20, 0, tzinfo=UTC)
@@ -208,6 +209,9 @@ class FakeGoalDirectedActivities:
         self.lifecycle_kinds: list[str] = []
         self.cancelled_operations: list[str] = []
         self.operation_started = asyncio.Event()
+        # RRM-008: a test that cancels a running unit may shorten its heartbeat timeout (the
+        # cancel is delivered to the running `operation.execute` on its next heartbeat).
+        self.operation_heartbeat_timeout_seconds: int | None = None
         self._slow_operation = slow_operation
         self._complete_at_iteration = complete_at_iteration
         self._scope_expansion_route = scope_expansion_route
@@ -222,6 +226,11 @@ class FakeGoalDirectedActivities:
             execution_generation=request.execution_generation,
             operation_kind="bound_operation",
             operation=operation,
+            **(
+                {"heartbeat_timeout_seconds": self.operation_heartbeat_timeout_seconds}
+                if self.operation_heartbeat_timeout_seconds is not None
+                else {}
+            ),
         )
         return GoalOperationDispatch(
             workflow_request=workflow_request,
@@ -247,7 +256,7 @@ class FakeGoalDirectedActivities:
     async def execute_operation(self, request: dict[str, Any]) -> dict[str, Any]:
         self.operation_started.set()
         if self._slow_operation:
-            await asyncio.sleep(60)
+            await sleep_heartbeating(60)
         return {"operation_id": str(request["identity"])}
 
     @activity.defn(name="operation.cancel")
