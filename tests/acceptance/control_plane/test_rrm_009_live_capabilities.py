@@ -54,6 +54,7 @@ from tests.fixtures.checkpoint_lineage import bind_unit, stage_unit
 from tests.fixtures.rrm009_live_capabilities import (
     ASYNC_CHILD_MARKER,
     LIVE_CEILINGS,
+    NETWORK_HOSTS,
     OPERATION_LIMITS,
     PAGE_URL,
     SYNC_CHILD_MARKER,
@@ -257,6 +258,8 @@ async def test_pinned_capabilities_and_both_subagents_run_in_the_production_comp
             lineage["mounted"]["tools"][0]["schema_digest"]
             == pins.tool("agent_browser_page").schema_digest
         )
+        # Constrained egress: the grant the governed browser was bound by, as disclosed.
+        assert lineage["mounted"]["capability_grant"]["network_hosts"] == sorted(NETWORK_HOSTS)
         assert (
             lineage["placement"]["checkpointer_ref"]["digest"] == pins.checkpointers[0].ref.digest
         )
