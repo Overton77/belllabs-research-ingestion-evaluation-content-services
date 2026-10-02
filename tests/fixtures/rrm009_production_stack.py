@@ -132,7 +132,11 @@ TECHNICAL_CEILINGS = {
     "goal.iterations": 6,
 }
 MAX_CONCURRENCY = 2
-CAPABILITIES = frozenset({"model.invoke", "sandbox.execute", "mcp.call", "subagent.task"})
+# `artifact.promote` is the governed promotion authority the generic artifact path verifies
+# on the producer binding (`ArtifactPromotionService._validate_authority`).
+CAPABILITIES = frozenset(
+    {"model.invoke", "sandbox.execute", "mcp.call", "subagent.task", "artifact.promote"}
+)
 
 
 def _login_dsn(owner_dsn: str, login: str, password: str) -> str:
@@ -318,6 +322,13 @@ def goal_blueprint(*, max_iterations: int = 2) -> GoalDirectedBlueprint:
                 "budgets": {"dimensions": reservation},
             },
             "iteration_reservation": reservation,
+            # A fresh workspace per iteration. With the default `shared` mode the second
+            # iteration's executor re-materializes the same workspace identity with its
+            # iteration-rooted slots and the governed materializer refuses it (RRM-020).
+            "workspace_policy": {
+                **GENERIC_GOAL_DIRECTED.workspace_policy.model_dump(mode="python"),
+                "workspace_mode": "fresh",
+            },
         }
     )
 
@@ -469,6 +480,15 @@ def technical_admission_policies() -> AdmissionPolicyRegistry:
     return policies
 
 
+def baseline_reservation(family: str) -> dict[str, int]:
+    """The admitted baseline reservation. GoalDirected settles its baseline at closing;
+    StageGraph never settles one, so a StageGraph run admitted with a baseline cannot
+    terminalize (`budget_not_settled`, RRM-021) and its technical runs admit none, as the
+    WP-BP-010 live gate does."""
+
+    return {"tokens.total": 20} if family == "GoalDirected" else {}
+
+
 def admission_request(catalog: TechnicalCatalog, request_id: str) -> RunRequest:
     """A run request bound to the compiled ERC, with hard caps at the effective ceilings."""
 
@@ -494,7 +514,7 @@ def admission_request(catalog: TechnicalCatalog, request_id: str) -> RunRequest:
             "workflow_type_ref": catalog.workflow_ref,
             "input_manifest": catalog.erc.input_manifest,
             "budget_envelope": BudgetEnvelope(
-                dimensions=dimensions, baseline_reservations={"tokens.total": 20}
+                dimensions=dimensions, baseline_reservations=baseline_reservation(catalog.family)
             ),
         }
     )
@@ -660,9 +680,11 @@ def stage_templates(
         templates[f"{stage}/execute/default"] = _template(
             technical,
             objective=f"RRM-009 technical stage {stage}. Produce the stage record.",
+            # One namespace per stage: both stages bind the Workflow Type's exclusive
+            # `/workspace/output` slot, and two workspaces never own one slot in a namespace.
             workspace=_workspace(
                 catalog.workspace_ref,
-                namespace="workspace-namespace:{run_id}",
+                namespace=f"workspace-namespace:{{run_id}}:stage:{stage}",
                 workspace_id=f"workspace:{{run_id}}:stage:{stage}",
                 contract=stage_workspace_contract(),
                 owner=WorkspaceOwner(kind=WorkspaceOwnerKind.STAGE, owner_id=f"stage:{stage}"),
@@ -713,7 +735,7 @@ def stage_input(
         task_timeout_seconds=180,
         semantic_input_binding_ref=binding_ref,
         correlation_id=f"rrm009:{run_id}",
-        baseline_reservation={"tokens.total": 20},
+        baseline_reservation=baseline_reservation("StageGraph"),
     )
 
 
@@ -752,7 +774,7 @@ def goal_input(
         initial_revision=revision,
         initial_run_version=version,
         task_timeout_seconds=180,
-        baseline_reservation={"tokens.total": 20},
+        baseline_reservation=baseline_reservation("GoalDirected"),
         required_obligation_refs=(GOAL_OBLIGATION,),
         required_output_contract_refs=(GOAL_OUTPUT_CONTRACT,),
         semantic_input_binding_ref=binding_ref,

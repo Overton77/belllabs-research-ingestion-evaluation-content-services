@@ -56,7 +56,10 @@ from app.application.run_control.postgres_run_control_repository import Postgres
 from app.application.run_control.run_launch import fork_semantic_input_binding_ref
 from app.application.run_control.service import F1RunConfigurationVerifier
 from app.application.runtime.run_forks import ForkPatchPolicyRegistry
-from app.application.workspaces.artifact_promotion import StaticArtifactValidationAuthority
+from app.application.workspaces.artifact_promotion import (
+    ArtifactPayloadAddress,
+    StaticArtifactValidationAuthority,
+)
 from app.config import Settings, get_settings
 from app.domain.control_plane.extensions import ExtensionRegistry
 from app.domain.operation_execution.contracts import (
@@ -71,8 +74,10 @@ from app.domain.run_control.contracts import (
     ActorContext,
     LifecycleCommand,
     PauseAction,
+    PauseDecision,
     ReserveBudgetAction,
     ResumeAction,
+    ResumeDecision,
     RunOutcome,
     SatisfyWaitAction,
     StartAction,
@@ -80,14 +85,19 @@ from app.domain.run_control.contracts import (
 from app.domain.run_control.forks import ForkPatchPolicy, PatchablePath, stage_objective_path
 from app.integrations.control_plane_payloads import UnavailablePayloadStore
 from app.integrations.mongodb import create_mongodb
+from app.integrations.operation_runtime_ports import FilesystemArtifactPayloadStore
 from app.integrations.postgres import (
     create_application_family_writer_pool,
     create_application_postgres_pool,
 )
-from app.models import OperationSettlementDocument, WorkspaceCandidateDocument
+from app.models import WorkspaceCandidateDocument
 from app.server import api
 from app.temporal.deployment_composition import ProductionWorkerActivityCompositionFactory
-from app.temporal.search_attributes import BELLLABS_SEARCH_ATTRIBUTE_KEYS
+from app.temporal.search_attributes import (
+    BELLLABS_SEARCH_ATTRIBUTE_KEYS,
+    SearchAttributeRegistrationError,
+    register_belllabs_search_attributes,
+)
 from app.temporal.worker import (
     WorkerActivityComposition,
     compose_worker_run_control_service,
@@ -102,7 +112,6 @@ from tests.fixtures.checkpoint_lineage import bind_unit, stage_unit
 from tests.fixtures.rrm009_production_stack import (
     AGENT_COGNITIVE_QUEUE,
     ANSWER_MARKER,
-    CHILD_MARKER,
     LANGGRAPH_SCHEMA,
     NODE_EXECUTABLE,
     OPERATOR,
@@ -192,9 +201,10 @@ class ProductionStack:
 
 async def _start_local(database: Path) -> WorkflowEnvironment:
     try:
+        # No Search Attributes at start: the deployment's administrative step registers them
+        # (REQ-CP-EXEC-015), and the database file keeps them across the restart drill.
         return await WorkflowEnvironment.start_local(
             port=TEMPORAL_PORT,
-            search_attributes=BELLLABS_SEARCH_ATTRIBUTE_KEYS,
             dev_server_extra_args=["--db-filename", str(database)],
             dev_server_log_level="error",
         )
@@ -261,6 +271,19 @@ async def stack(
     async with AsyncExitStack() as resources:
         await initialize_run_control_resources(api)
         policies = ForkPatchPolicyRegistry()
+        # Readiness only verifies: before the administrative registration the API refuses to
+        # compose, and registration is idempotent.
+        with pytest.raises(SearchAttributeRegistrationError):
+            await compose_runtime_control(
+                api, settings, client=env.client, stack=resources, fork_patch_policies=policies
+            )
+        assert set(
+            await register_belllabs_search_attributes(env.client, settings.temporal_namespace)
+        ) == {key.name for key in BELLLABS_SEARCH_ATTRIBUTE_KEYS}
+        assert (
+            await register_belllabs_search_attributes(env.client, settings.temporal_namespace)
+            == ()
+        )
         await compose_runtime_control(
             api, settings, client=env.client, stack=resources, fork_patch_policies=policies
         )
@@ -349,6 +372,10 @@ async def _diagnose(stack: ProductionStack, run_id: str) -> str:
     (printed on failure only, before the dev server is torn down)."""
 
     lines: list[str] = [f"model_log={json.dumps(stack.model_log)[:2000]}"]
+    budget = await stack.http.get(
+        f"/run-control/v1/runs/{run_id}/budget", params={"request_scope": SCOPE}
+    )
+    lines.append(f"budget={budget.text[:3000]}")
     async for execution in stack.client.list_workflows(f"BellLabsRunId = '{run_id}'"):
         try:
             history = await stack.client.get_workflow_handle(execution.id).fetch_history()
@@ -373,7 +400,7 @@ async def _diagnose(stack: ProductionStack, run_id: str) -> str:
                     f"scheduled {attributes.activity_type.name} on {attributes.task_queue.name} "
                     f"(activity pollers: {len(pollers.pollers)})"
                 )
-            if event.event_type in {14, 24, 26, 42}:  # failed / timed out activities and tasks
+            if event.event_type in {3, 14, 24, 26, 42}:  # failed runs, activities and tasks
                 lines.append(str(event)[:900])
     return " | ".join(lines)
 
@@ -479,12 +506,15 @@ async def _release_wait(stack: ProductionStack, run_id: str) -> None:
 
 
 async def _visible(client: Client, query: str, expected: int) -> int:
-    async with asyncio.timeout(60):
-        while True:
-            count = (await client.count_workflows(query)).count
-            if count == expected:
-                return count
-            await asyncio.sleep(0.25)
+    """The Visibility count once it reaches `expected`, or the last count after 60 s."""
+
+    count = -1
+    for _ in range(240):
+        count = (await client.count_workflows(query)).count
+        if count == expected:
+            return count
+        await asyncio.sleep(0.25)
+    return count
 
 
 async def _replay(client: Client, workflow_ids: list[str]) -> int:
@@ -505,13 +535,87 @@ async def _replay(client: Client, workflow_ids: list[str]) -> int:
     return events
 
 
-async def _settlement_facts() -> list[dict[str, Any] | None]:
-    """The parent's structured facts of every settlement in this test's Mongo database."""
+async def _operation_payloads(stack: ProductionStack, run_id: str) -> list[dict[str, Any]]:
+    """The digest-bound output payloads of the run's journaled settlements.
 
-    documents = await OperationSettlementDocument.find_all().to_list()
+    Read exactly as the journal restores them: the settlement row's result manifest address,
+    then the manifest's output payload address, both verified by the payload store.
+    """
+
+    store = FilesystemArtifactPayloadStore(stack.payload_root)
+    async with stack.owner_pool.acquire() as connection:
+        rows = await connection.fetch(
+            """
+            SELECT s.result_manifest_ref, s.result_manifest_digest, s.result_manifest_size_bytes
+            FROM belllabs_control.operation_settlements s
+            JOIN belllabs_control.operation_effect_claims c
+              ON c.request_scope = s.request_scope AND c.effect_claim_id = s.effect_claim_id
+            WHERE c.belllabs_run_id = $1 AND s.result_manifest_ref IS NOT NULL
+            ORDER BY s.settled_at
+            """,
+            run_id,
+        )
+    payloads: list[dict[str, Any]] = []
+    for row in rows:
+        manifest = json.loads(
+            await store.retrieve(
+                ArtifactPayloadAddress(
+                    object_ref=row["result_manifest_ref"],
+                    content_digest=row["result_manifest_digest"],
+                    size_bytes=row["result_manifest_size_bytes"],
+                )
+            )
+        )
+        if manifest.get("output_payload_ref") is None:
+            continue
+        payloads.append(
+            json.loads(
+                await store.retrieve(
+                    ArtifactPayloadAddress(
+                        object_ref=manifest["output_payload_ref"],
+                        content_digest=manifest["output_payload_digest"],
+                        size_bytes=manifest["output_payload_size_bytes"],
+                    )
+                )
+            )
+        )
+    return payloads
+
+
+def _pinned_summary(stack: ProductionStack) -> dict[str, Any]:
+    """The worker's mounted pins by digest (the full disclosure is in the factory)."""
+
+    assert stack.factory.operation is not None
+    disclosure = stack.factory.operation.capabilities.disclosure()
+    return {
+        "mcp_servers": {
+            item["server_id"]: {
+                "module_digest": item["module_digest"],
+                "schema_digest": item["schema_digest"],
+                "tools": len(item["tools"]),
+                "credential_ref": item["credential_ref"],
+            }
+            for item in cast(list[dict[str, Any]], disclosure["mcp_servers"])
+        },
+        "skills": {
+            item["skill_name"]: item["bundle_digest"]
+            for item in cast(list[dict[str, Any]], disclosure["skills"])
+        },
+        "tools": {
+            item["tool_name"]: item["entrypoint_digest"]
+            for item in cast(list[dict[str, Any]], disclosure["tools"])
+        },
+        "checkpointer_digests": disclosure["checkpointer_digests"],
+        "store_digests": disclosure["store_digests"],
+    }
+
+
+def _lineages(payloads: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
-        (document.payload.get("structured_output") or {}).get("facts")  # type: ignore[union-attr]
-        for document in documents
+        event["capability_lineage"]
+        for payload in payloads
+        for event in payload.get("event_payloads", ())
+        if "capability_lineage" in event
     ]
 
 
@@ -604,7 +708,16 @@ async def test_stagegraph_runs_through_the_production_composition_with_fork_rela
             "stagegraph": asdict(stage_input(catalog, source_run, source_binding, 1)),
         },
     )
-    assert again.status_code in {202, 409}, again.text
+    # While the run is still pending the duplicate start resolves to the same execution;
+    # once the family has started it the launch is refused, never started twice.
+    if again.status_code == 202:
+        assert (again.json()["workflow_id"], again.json()["temporal_run_id"]) == (
+            receipt["workflow_id"],
+            receipt["temporal_run_id"],
+        ), again.text
+    else:
+        assert again.status_code == 409, again.text
+        assert again.json()["detail"]["code"] == "run_not_pending", again.text
 
     # `draft` settles (sync subagent, report written, MCP called); the run holds its wait.
     await _wait_for(stack, source_run, lambda: _holds_wait(stack, source_run), 150)
@@ -674,7 +787,7 @@ async def test_stagegraph_runs_through_the_production_composition_with_fork_rela
             )
         )["draft/execute/default"]
     )
-    await _visible(stack.client, f"BellLabsParentRunId = '{source_run}'", 1)
+    assert await _visible(stack.client, f"BellLabsParentRunId = '{source_run}'", 1) == 1
     await _release_wait(stack, derived_run)
     await _wait_for(stack, derived_run, lambda: _terminal(stack, derived_run), 240)
 
@@ -686,7 +799,22 @@ async def test_stagegraph_runs_through_the_production_composition_with_fork_rela
     paused = await _send(
         stack,
         source_run,
-        _command(source_run, run["version"], pause_id, PauseAction(), "workflow_run.pause"),
+        _command(
+            source_run,
+            run["version"],
+            pause_id,
+            PauseAction(
+                decision=PauseDecision(
+                    decision_id=pause_id,
+                    scope=frozenset({"run"}),
+                    reason="RRM-009 relay drill: operator hold while the transport is down",
+                    authority_ref="authority:lifecycle",
+                ),
+                # The source holds its declared wait, so no admissible work remains.
+                runnable_work_remains=False,
+            ),
+            "workflow_run.pause",
+        ),
     )
     assert (
         paused["status"] == "accepted" and paused["reason_code"] == "accepted_pending_application"
@@ -711,7 +839,20 @@ async def test_stagegraph_runs_through_the_production_composition_with_fork_rela
     await _send(
         stack,
         source_run,
-        _command(source_run, run["version"], resume_id, ResumeAction(), "workflow_run.resume"),
+        _command(
+            source_run,
+            run["version"],
+            resume_id,
+            ResumeAction(
+                decision=ResumeDecision(
+                    decision_id=resume_id,
+                    pause_decision_id=pause_id,
+                    reason="RRM-009 relay drill: operator release",
+                    authority_ref="authority:lifecycle",
+                )
+            ),
+            "workflow_run.resume",
+        ),
     )
 
     async def resumed() -> bool:
@@ -723,7 +864,26 @@ async def test_stagegraph_runs_through_the_production_composition_with_fork_rela
 
     # Visibility (REQ-CP-EXEC-015) on the persistent namespace: root, family and operations.
     assert await _visible(stack.client, f"BellLabsRunId = '{source_run}'", 4) == 4
-    assert await _visible(stack.client, f"BellLabsRunId = '{derived_run}'", 3) == 3
+    # The derived run's `draft` unit also runs its operation workflow, which reuses the
+    # source's settled result by immutable ref (RRM-006) without any cognition.
+    assert await _visible(stack.client, f"BellLabsRunId = '{derived_run}'", 4) == 4
+    derived_ids = sorted(
+        [
+            execution.id
+            async for execution in stack.client.list_workflows(f"BellLabsRunId = '{derived_run}'")
+        ]
+    )
+    assert derived_ids == sorted(
+        [
+            f"belllabs-run/{derived_run}",
+            f"family/{derived_run}/1",
+            *(
+                f"operation/{derived_run}:operation:execution-epoch:1:stage:{stage}:mapped:none:"
+                "workflow-cycle:0:stage-cycle:0:slot:execute:attempt:1"
+                for stage in ("draft", "review")
+            ),
+        ]
+    )
     source = await _run(stack, source_run)
     derived = await _run(stack, derived_run)
     assert (source["phase"], source["terminal_outcome"]) == ("terminal", "completed")
@@ -741,8 +901,27 @@ async def test_stagegraph_runs_through_the_production_composition_with_fork_rela
     calls = _calls(stack, source_run)
     assert sorted(calls) and all(value == {"parent": 4, "child": 1} for value in calls.values())
     assert {"parent": 4, "child": 1} == next(iter(_calls(stack, derived_run).values()))
-    facts = await _settlement_facts()
-    assert len(facts) >= 3 and all(item == {"child": True, "mcp": True} for item in facts), facts
+    payloads = [
+        *await _operation_payloads(stack, source_run),
+        *await _operation_payloads(stack, derived_run),
+    ]
+    facts = [(payload["structured_output"] or {}).get("facts") for payload in payloads]
+    # Source draft and review, the derived draft's reused result (the source draft's output,
+    # with no cognition of its own) and the derived review.
+    assert len(facts) == 4 and all(item == {"child": True, "mcp": True} for item in facts), facts
+    lineages = _lineages(payloads)
+    assert len(lineages) == 3  # a reused result carries no lineage of its own
+    for lineage in lineages:
+        # The sync subagent's model call is charged to the parent operation (REQ-CP-DA-007).
+        assert lineage["usage"]["amounts"] == {"model.turns": 5, "tokens.total": 25}
+        assert [call["scope"] for call in lineage["usage"]["model_calls"]].count("subordinate") == 1
+        assert lineage["invoked"] == {
+            "framework": ["write_file"],
+            "mcp": ["lookup_binding_marker"],
+            "sync_subagent": ["task"],
+        }
+        assert lineage["credential_refs"] == ["environment:OPENAI_API_KEY"]
+        assert lineage["placement"]["task_queue"] == AGENT_COGNITIVE_QUEUE
     candidates = await WorkspaceCandidateDocument.find(
         WorkspaceCandidateDocument.logical_path == REPORT_PATH
     ).to_list()
@@ -757,16 +936,16 @@ async def test_stagegraph_runs_through_the_production_composition_with_fork_rela
         f"/run-control/v1/inspection/runs/{source_run}", params={"request_scope": SCOPE}
     )
     assert read.status_code == 200, read.text
-    sections = {item["name"]: item for item in read.json()["sections"]}
+    sections = read.json()["sections"]
     assert sections["temporal"]["freshness"] == "current", sections["temporal"]
-    assert sections["async_children_detail"]["freshness"] != "unavailable"
+    assert sections["async_children_detail"]["freshness"] == "current", sections
     unit_key = read.json()["data"]["units"][0]["unit_key"]
     history = await stack.http.get(
         f"/run-control/v1/inspection/runs/{source_run}/units/{unit_key}/checkpoints",
         params={"request_scope": SCOPE},
     )
     assert history.status_code == 200, history.text
-    history_sections = {item["name"]: item for item in history.json()["sections"]}
+    history_sections = history.json()["sections"]
     assert history_sections["checkpoints"]["freshness"] == "current", history_sections
     assert len(history.json()["data"]["entries"]) >= 4
     assert await _saver_checkpoints(stack.owner_pool) > 0
@@ -796,9 +975,8 @@ async def test_stagegraph_runs_through_the_production_composition_with_fork_rela
                 "inspection": {name: item["freshness"] for name, item in sections.items()},
                 "replayed_events": replayed,
                 "readiness": ready.json(),
-                "capabilities": stack.factory.operation.capabilities.disclosure()  # type: ignore[union-attr]
-                if stack.factory.operation is not None
-                else None,
+                "capabilities": _pinned_summary(stack),
+                "lineage": lineages[0],
             },
             sort_keys=True,
             default=str,
@@ -963,12 +1141,20 @@ async def test_generic_artifact_operation_promotes_the_captured_report_durably(
             owner=WorkspaceOwner(kind=WorkspaceOwnerKind.STAGE, owner_id="stage:draft"),
             permission_ref="permission:rrm009",
             permission_outcome="allowed",
-            output_contract_ref="output:report@1",
+            output_contract_ref=operation.operation_contract_ref,
         ),
     )
-    response = await stack.http.post(
-        f"/run-control/v1/runs/{run_id}/operations", json=submission.model_dump(mode="json")
-    )
+    try:
+        response = await stack.http.post(
+            f"/run-control/v1/runs/{run_id}/operations", json=submission.model_dump(mode="json")
+        )
+    except Exception:
+        async for execution in stack.client.list_workflows():
+            history = await stack.client.get_workflow_handle(execution.id).fetch_history()
+            for event in history.events:
+                if event.event_type in (11, 12, 13):
+                    print("DEBUGEVENT", execution.id, str(event)[:6000])
+        raise
     assert response.status_code == 201, response.text
     result = response.json()
     assert result["operation"]["status"] == "completed"
@@ -985,7 +1171,16 @@ async def test_generic_artifact_operation_promotes_the_captured_report_durably(
         )
     assert durable == 1
     assert ANSWER_MARKER in result["operation"]["output_text"]
-    assert CHILD_MARKER in json.dumps(stack.model_log) or _calls(stack, run_id)
+    assert _calls(stack, run_id) == {
+        "execution-epoch:1:stage:report:mapped:none:workflow-cycle:0:stage-cycle:0:slot:default": {
+            "parent": 4,
+            "child": 1,
+        }
+    }
+    assert json.loads(result["operation"]["output_text"])["facts"] == {
+        "child": True,
+        "mcp": True,
+    }
     print(
         "RRM-009 EVIDENCE artifact:",
         json.dumps(
