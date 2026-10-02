@@ -3,7 +3,7 @@
 **What to build:** an authorized application command pauses/resumes or releases a declared wait in a running family workflow, with durable proof of application rather than only message acceptance.
 
 **Blocked by:** RRM-004.
-**Status:** implemented; independent review pending
+**Status:** accepted 2026-10-02 (tested head `0475079`, integration merge `aeb0c62`; [evidence](../../../evidence_v2/research-runtime-mission/RRM-007/README.md))
 **Branch:** `wp/rrm-007-intervention`
 **Authority:** EXEC-001/006/007/011, RUN-004, canonical family semantics and accepted command-routing details from RRM-001: receipt states in `CON-CP-WORKFLOW-MESSAGE-V1`, REQ-CP-RUN-004 and REQ-BP-SG-009 (clarified), REQ-BP-GD-011 (durable pause) — AMD-RRM-001 (accepted 2026-10-01 at meta `6c89143`, merged into meta main `a50d833`; see [RRM-001 contract authority](../RRM-001-contract-authority.md) §4)
 **Evidence:** `docs/migrations_instructions/evidence_v2/research-runtime-mission/RRM-007/`

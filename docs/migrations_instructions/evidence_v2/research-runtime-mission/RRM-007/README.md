@@ -1,6 +1,6 @@
 # RRM-007 implementation evidence
 
-Disposition: ready_for_review
+Disposition: accepted 2026-10-02 (independent review approve after two fix rounds (F1-F8, N1); tested head `0475079`; merged into integration at `aeb0c62`)
 Recorded date: 2026-10-02 (America/New_York)
 Qualification identity: RRM-007 apply governed boundary interventions to running family workflows. Requirements: REQ-CP-EXEC-001 (one stable root routes commands), REQ-CP-EXEC-006 (authoritative message ledger, clarified receipt states), REQ-CP-EXEC-007 (Updates return delivery, never application; raw signals release nothing; queries diagnostic), REQ-CP-EXEC-011 (pending commands, satisfied waits and durable pause survive Continue-As-New), REQ-CP-RUN-004 (requested and applied are separate axes), REQ-BP-SG-009 (declared wait inspectable and released only through the facade), REQ-BP-GD-011 (durable, resumable pause), REQ-BP-GD-012 (resume continues the exact frontier). Contracts: `CON-CP-WORKFLOW-MESSAGE-V1` (receipt states, special cases, closed rejection reasons) and `CON-CP-LIFECYCLE-V1` `reconcile_unit` governed delivery (RRM-004 review item). AMD-RRM-001, accepted meta `main` `a50d833`.
 Base revision and head revision: base `d46f548` (integration `integration/research-runtime-mission`: RRM-001/003/004/005/015 and CR-1 merged). Code commits on `wp/rrm-007-intervention`: `e4bea19` (implementation), `b63b86e` (independent-review fixes F1-F8), `0475079` (re-review fix N1), then the merge of `integration/research-runtime-mission` at `15096b9` (RRM-013 merged) as `554afff`, which is the tested code head. Documentation commits (`b3b2dee`, `ba7191b` and the one recording the re-review) change no code. Not merged into integration (the coordinator owns review and merge).
@@ -150,6 +150,18 @@ Nothing deleted. The raw `satisfy_wait` signal remains registered as a hint (leg
 - `deliver_boundary_command` Update + `BoundaryCommandAck`: the family-side delivery protocol (duplicate / stale generation / stale target).
 - `GoalPausedState`: a durable pause record bound to the receipt.
 
+## Integration merge gates (coordinator, merge commit `aeb0c62`)
+
+Tested head `0475079` merged `--no-ff` into `integration/research-runtime-mission` at `aeb0c62`.
+
+| Command | Result |
+|---|---|
+| `uv run --no-sync ruff check app tests scripts` | All checks passed |
+| `uv run --no-sync mypy app` | no issues, 361 files |
+| `hermetic full pytest (DSNs unset)` | 913 passed, 65 skipped, 2 xfailed, 0 failed |
+| `full pytest with Postgres/Mongo DSNs and --env-file` | 948 passed, 30 skipped, 2 xfailed, 0 failed |
+| `git diff --check` | clean |
+
 ## Final disposition
 
-ready_for_review
+accepted
