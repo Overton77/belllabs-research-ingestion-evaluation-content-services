@@ -6,7 +6,7 @@
 **Blocks:** Any completing GoalDirected run whose iterations produce distinct output refs, including the GoalDirected company fixture (RRM-011). Whether it blocks RRM-010 is the coordinator's decision.
 **Status:** ready-for-agent (found by RRM-016, 2026-10-02)
 **Branch:** `wp/rrm-019-goal-directed-terminal-outputs`
-**Authority:** REQ-BP-GD-010 (stopping produces a proposal, not terminality), REQ-CP-RUN-006 terminalization rules (`terminal_output_mismatch`: terminal outputs equal the authoritatively accepted outputs)
+**Authority:** REQ-BP-GD-010 (stopping produces a proposal, not terminality), REQ-CP-RUN-005 (terminality follows accepted evidence; the reducer rejects `terminal_output_mismatch` when terminal outputs differ from the accepted outputs)
 
 ## Diagnosis (RRM-016, 2026-10-02)
 

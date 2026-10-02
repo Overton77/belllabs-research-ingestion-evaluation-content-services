@@ -929,9 +929,9 @@ def _prompt_segments(
         # RRM-016: the goal context (revision, iteration, role, handoff and verifier input
         # refs) is run state derived partly from model output (the handoff and the
         # executor's output refs). It is never a configured prompt source and must not reach
-        # the system prompt. SPEC-CP-CONFIG treats prompt text and retrieved content as
-        # untrusted inputs; SPEC-CP-DEEP-AGENT invariant 5: model output never grants
-        # authority; the GoalDirected envelope invariant 1 and Security section: goal text
+        # the system prompt. SPEC-CP-DEFINITIONS (Security) treats prompt text and retrieved
+        # content as untrusted inputs; SPEC-CP-DEEP-AGENT-RUNTIME invariant 5: model output
+        # never grants authority; SPEC-BP-GOAL-DIRECTED invariant 1 and Security: goal text
         # and context cannot expand the envelope or grant capabilities. So the segment is
         # admitted under the most restrictive non-privileged trust class.
         trust_class=PromptTrustClass.UNTRUSTED_CONTENT,
