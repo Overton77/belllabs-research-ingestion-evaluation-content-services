@@ -1,0 +1,212 @@
+# RRM-006 implementation evidence
+
+Disposition: ready_for_review (implemented; independent review pending)
+Recorded date: 2026-10-02 (America/New_York)
+Qualification identity: RRM-006 admit semantic forks from safe macro snapshots. Requirements: REQ-CP-EXEC-012 (clarified: patch, reuse frontier, epoch 1, nothing implicit copied, `cognitive_seed`), REQ-CP-EXEC-016 (snapshots only at safe boundaries), REQ-CP-RUN-001/002 (independent transactional admission of the derived run), REQ-CP-RUN-006/007 (budgets and effects never copied), REQ-CP-DA-015 (sandbox snapshots are distinct; referenced only), REQ-CP-DA-016 (seed keys; seed deferred), REQ-CP-EXEC-015 (`BellLabsParentRunId` on fork roots). Contracts: `CON-CP-CONTINUATION-V1` (`RunSnapshotManifest` `belllabs.run-snapshot.v1`, `RunForkPatch` `belllabs.run-fork-patch.v1`), `CON-CP-RUNTIME-UNIT-V1` (reuse matching) (AMD-RRM-001, accepted meta `main` `a50d833`).
+Base revision and head revision: base `d46f548` (integration: RRM-001, 003, 004, 005, 015 and CR-1 merged). Tested code head: see "Deterministic verification" (`2572e54`). Branch `wp/rrm-006-forks`; not merged (the coordinator owns review and merge).
+Framework/package baseline: `uv sync --frozen` from the committed `uv.lock` (no dependency change); CPython 3.12 (Codex runtime), pytest 8.4.2, ruff 0.15.22, mypy 1.20.2, pydantic 2.13.4, langgraph 1.2.10, langgraph-checkpoint 4.1.1, langgraph-checkpoint-postgres 3.1.1, deepagents 0.7.5, temporalio 1.30.0 (`start_local`: Temporal CLI 1.9.1, Server 1.32.0), asyncpg 0.31.0, psycopg 3.3.4.
+
+## Worktree provenance
+
+- Worktree: `C:\Users\Pinda\Proyectos\Biotech\biotech-research-ingestion-evaluation-system-rrm-006`, branch `wp/rrm-006-forks`, created by the coordinator from integration `d46f548`; clean at kickoff.
+- The main checkout and the main `biotech-meta` checkout were not touched. No `.env` was copied or printed; the services gate loads it with `--env-file ../biotech-research-ingestion-evaluation-system/.env`.
+- Disposable services (coordinator-owned, shared): `rrm-app-postgres` (`127.0.0.1:55432/belllabs`) and `rrm-app-mongodb` (`127.0.0.1:27017`). Every run that set the service DSNs, and every full pytest run, held the shared stack lock (`stack_lock.py acquire/release RRM-006`). No container was created, stopped or removed. The demonstrations create and drop the saver schema `rrm006_fork_saver` and a Mongo database `rrm006_forks_<random>`.
+- Temporal ran only as `WorkflowEnvironment.start_local(search_attributes=…)` (ephemeral, one at a time) and the time-skipping test server. No Temporal persistence database was read.
+- RRM-007 and RRM-013 run concurrently. `app/integrations/agents/deep_agents/async_subagents.py`, `app/application/async_subagents/` and `app/agent_server/` were not edited. Run-control edits are additive (a new role, a read helper); the reducer and service are unchanged. Family workflows are unchanged; the root workflow gained one additive input field.
+
+## Implemented contracts and seams
+
+**Contracts (`app/domain/run_control/forks.py`, pure, provider- and company-neutral).**
+- `RunSnapshotManifest` (`belllabs.run-snapshot.v1`): snapshot identity (`run-snapshot:` + SHA-256 of scope, run, projection version and boundary) and content digest (every field except the digest and `taken_at`, via `stable_json_digest`); source scope, run, epoch, family, authoritative projection version and phase; ERC digest, Workflow Type ref, input manifest, obligation revision, evidence frontier digest, blueprint and semantic-input-binding digests when recorded; boundary kind and ref (and a quiescence ref slot); the family position (`FamilyPosition`: family head kind, version, mutation id, kind and fingerprint; StageGraph accepted projection digest, workflow cycle, accepted stage ids; GoalDirected revision id and digest, iteration, head role, handoff ref); accepted obligation, output and operation-settlement evidence refs with digests; reuse candidates (`ReuseCandidate`: unit identity and key, generation, binding id and digest, state-schema digest, settlement id, result manifest ref, digest and size, result checkpoint key); excluded units with reasons; sandbox snapshot refs (references only, DA-015); budget frontier and effect frontier (informational, never copied); async-child and linked-run dispositions; pending commands (audit only). The validator refuses an active child or linked run, an unsettled effect, a candidate from another run or epoch, and a digest mismatch.
+- `RunForkPatch` (`belllabs.run-fork-patch.v1`): source snapshot id and digest, target admission request ref, typed changes (`path`, JSON value), sorted invalidation frontier (stage ids or `*`), optional `cognitive_seed`, content digest.
+- `ForkPatchPolicy` / `PatchablePath`: the declared patchable fields and the closed stage set each change invalidates. `PROTECTED_PATCH_PATHS` covers identity, scope, epoch, unit keys, authority, capability grants, permissions, budgets and ceilings, accepted evidence and results, effects, settlements, terminality, binding digests and the Workflow Type. `required_invalidation_frontier` rejects `protected_field` first, then `field_not_patchable`, value-type errors and an uncovered frontier (`invalid_patch`), and `cognitive_seed_not_supported`.
+- `derived_unit_identity` (substitute `belllabs_run_id` and `execution_epoch = 1`, nothing else) and `compute_reuse_decisions` → `ForkReuseDecision` (`belllabs.fork-reuse-decision.v1`): `reuse` (settled compatible outside the frontier; carries the candidate), `invalidated`, `not_reusable` (GoalDirected: revision identity is run-bound), `excluded` (with the snapshot's reason).
+- Versioned saga contracts: `RunForkRequest` (`belllabs.run-fork-request.v2`, replaces graph_runtime `ForkRequest`: scope, source run and epoch, snapshot id and digest, the patch, the compiled `RunRequest` target, the derived run id, the reuse decisions, actor, reason) and `RunForkReceipt` (`belllabs.run-fork-receipt.v2`, replaces `ForkReceipt`: target run at epoch 1, admission ref, admitted ERC digest, `ForkLineageManifest` (`belllabs.fork-lineage-manifest.v1`: source run and epoch, snapshot, patch digest, seed checkpoint, derived run, epoch 1, admission ref, reuse-manifest digest, reused and invalidated unit keys, lineage digest)). `fork_request_fingerprint` is the idempotency identity without the request times. `ForkRejected(code, message, reasons)` is the typed, fail-closed error.
+
+**Saga (`app/application/runtime/runtime_recovery.py`, RRM-001 row 33 "version").** `RuntimeForkService` keeps reserve → admit → record admission → materialize ("copy" claim) → one receipt, with the advisory guard, claims and reconciliation. Changed: the identical-run-plan check is removed (RRM-001 §7 #12), the admission must target the derived run at epoch 1 and bind the compiled target's ERC; the provider `copy_checkpoint` is replaced by `ForkMaterializer` (recorded lineage and reuse decisions; nothing is copied); an ambiguous materialization fails closed (`fork_materialization_ambiguous`); a later replay continues the persisted intent. `PostgresForkRepository` (row 35 "version") resolves and digest-checks the source snapshot instead of the retired binding and stores the v2 columns.
+
+**Application (`app/application/runtime/run_forks.py`).**
+- `RunSnapshotService.take(scope, run, expected_run_version)`: reads one `InspectionReadRepository` snapshot (RRM-005, one read-only transaction) plus the family head, linked runs and semantic binding (`ForkSourceReader`), re-reads when the run version moved between them (`snapshot_source_moving` after 3 attempts), classifies async children through `AsyncChildForkClassifier`, builds the manifest (`build_run_snapshot`) and stores it idempotently. Never sends a workflow Query.
+- `build_run_snapshot` collects every quiescence reason (`snapshot_not_quiescent`): `run_cancelling`, `budget_reservation_open:<id>` (any non-baseline reservation), `usage_pending_settlement`, `effect_claim_unsettled:<id>`, `operator_reconciliation_wait:<id>`, `continuation_pending:<id>`, `async_child_active:<id>`, `linked_run_active:<id>`, `unit_unsettled:<unit>`, `unit_in_doubt:<unit>`, `cognition_in_flight:<unit>`, `operation_claim_unsettled:<claim>`, and family reasons `stage_liability_open:<attempt>`, `stage_active:<instance>`, `goal_iteration_in_progress`, `goal_verifier_unsettled`. A pending run, a missing family head or a StageGraph without an accepted result is `unsupported_boundary`.
+- `SemanticForkService.prepare/fork`: requires `workflow_run.fork`; scope-bound snapshot lookup (`ForkSnapshotNotFound`); `stale_snapshot` on a digest mismatch; resolves the Workflow Type's `ForkPatchPolicy` (`ForkPatchPolicyRegistry`, family default otherwise); compiles the derived `RunRequest` (`compile_fork_admission`: same scope and Workflow Type, the source's budget limits as protected ceilings, the caller's baseline reservations, a fresh account, no parent link, admission evidence = snapshot ref and patch digest, ERC and input manifest from the patch when declared); computes the reuse decisions for the deterministic derived run id; runs the saga. An invalid compiled admission is `fork_admission_rejected` / `invalid_admission_request`.
+- `RunControlForkAuthority`: admits through `RunControlService.admit` (REQ-CP-RUN-001/002) and reconciles from the recorded admission decision; a rejected admission is `fork_admission_rejected`.
+- `RecordingForkMaterializer` + `ForkMaterializationStore`: one transaction records the reuse decisions, the lineage-journal record (`fork-lineage:<request>`, edges `derived_from` snapshot, `contains` source → snapshot, `reuses` per reused manifest) and the materialization payload.
+- `ForkReuseResolver` (port `ForkReusePort` of `OperationExecutionService`): for a unit of a fork-derived run with a `reuse` decision, returns the source settlement restored from its digest-bound manifest. It fails closed with `fork_not_materialized`, or `incompatible_restore` when the state-schema digest differs, the run-normalized binding (`reuse_compatibility_digest`) drifted, or the manifest is not the recorded settlement.
+- `AuthorityAsyncChildForkClassifier`: the default async-child classifier over the 0016 authority lifecycle facts (`completed`, `failed`, `cancelled`, `orphaned` are terminal; anything else, including `in_doubt` and no fact, is active).
+
+**Operation execution (`app/application/operations/operation_execution.py`).** `OperationExecutionService(fork_reuse=...)`: after the settled/observed/incident classification and before dispatch, a reused unit settles by reference (`_settle_reused`): status `completed`, the source's output, zero usage of its own, no provider run, no events, no checkpoint transition, and `OperationSettlement.reused_result` (`ReusedResultRef`). It goes through the same journal, claim fence and fenced result observation, in the derived run only.
+
+**PostgreSQL (`app/application/runtime/postgres_run_forks.py`).** `PostgresRunSnapshotRepository` (insert-only, idempotent, `stale_snapshot` on a different digest), `PostgresForkSourceReader` (read-only repeatable-read: family heads, linked runs with terminal records, semantic binding), `PostgresForkMaterializationStore`.
+
+**API (`app/api/run_forks.py`, separate from `graph_runtime_schemas.py`).** All routes require the scope (else 404) and a permission (else 403); typed rejections are `{"code", "message", "reasons"}`.
+
+| Route | Permission | Result |
+|---|---|---|
+| `POST /run-control/v1/runs/{run_id}/snapshots` `{request_scope, expected_run_version?}` | `workflow_run.snapshot` | 201 `RunSnapshotManifest`; 409 `snapshot_not_quiescent` (reasons), `stale_expected_version`, `snapshot_source_moving`, `unsupported_boundary` |
+| `GET /run-control/v1/runs/{run_id}/snapshots/{snapshot_id}` | `workflow_run.snapshot` | 200 manifest; 404 |
+| `POST /run-control/v1/runs/{run_id}/forks` (snapshot id and digest, changes, invalidation frontier, seed, baseline reservations, sponsorship, approvals, reason) | `workflow_run.fork` (+ `workflow_run.admit` for the admission) | 201 `RunForkReceipt` (idempotent); 422 `protected_field`, `field_not_patchable`, `invalid_patch`, `cognitive_seed_not_supported`; 409 `stale_snapshot`, `fork_admission_rejected`, `incompatible_restore`, `idempotency_conflict`; 503 `fork_materialization_ambiguous`; 404 unknown snapshot |
+| `GET /run-control/v1/forks/{request_id}` | `workflow_run.fork` | 200 receipt and reuse decisions |
+
+New role `fork_operator` = {`workflow_run.read`, `workflow_run.snapshot`, `workflow_run.fork`}; no existing role gains a fork permission. Production composition: `compose_run_fork_services(pool, run_control, policies=app.state.fork_patch_policies, async_children=app.state.async_child_fork_classifier)`.
+
+**Temporal.** `BellLabsRunInput.parent_run_id` (additive, default `None`): the root carries `BellLabsParentRunId` on itself only (never the family or operations). `TemporalWorkflowSubmitter.submit(..., parent_run_id=...)` starts a fork root with it. Under `disabled` (every captured history) nothing changes.
+
+## Requirement-to-evidence map
+
+| Requirement | Test → observed assertion |
+|---|---|
+| EXEC-016 snapshot binds authority | `tests/unit/runtime/test_run_snapshot_manifest.py::test_snapshot_binds_authority_at_a_settled_stage_boundary` → projection version, phase, ERC, Workflow Type, input manifest, evidence frontier, family version, accepted stage ids, projection digest; the one candidate equals the lineage generation (binding id/digest, schema digest) and result observation (settlement id, manifest ref/digest) with the result checkpoint thread; settlement evidence; budget limits equal the run's; effects all settled; same version → same snapshot; tampered budget → digest error; other scope → not found |
+| EXEC-016 reads never mutate | `…::test_snapshot_reads_authority_without_mutating_it` → run, budget, effect and lineage state deep-equal before and after |
+| EXEC-016 quiescence | `…::test_open_reservation_or_unsettled_effect_is_not_quiescent` (`budget_reservation_open:reservation:review`, `effect_claim_unsettled:tool-effect:send`); `…::test_unsettled_or_in_doubt_units_are_not_quiescent_and_never_reusable` (`unit_unsettled`, `unit_in_doubt`); `…::test_open_stage_liability_cancelling_run_and_unsupported_boundaries` (open liability and active stage rejected, a closed liability accepted, no head / no accepted result → `unsupported_boundary`, `run_cancelling`) |
+| EXEC-016 / RRM-001 §8 #6 active async child | `…::test_active_async_child_or_linked_run_prohibits_the_snapshot` → `async_child_active:async-child-1` and `linked_run_active:child-a` reported; the completed child and terminal link are not; classifier dispositions `[active, terminal]` |
+| GoalDirected boundary | `…::test_goal_directed_boundary_requires_the_settled_verifier` → head executor → `goal_iteration_in_progress`; head verifier without its result → `goal_verifier_unsettled`; after the verifier settles → `goal_verifier_settled`, iteration 1; every decision `not_reusable` / `goal_revision_identity_is_run_bound` |
+| Stale version, moving source, unknown run | `…::test_stale_expected_version_moving_source_and_unknown_run_fail_safely` → `stale_expected_version`, `snapshot_source_moving`, other scope → not found; nothing stored |
+| EXEC-012 protected fields (14 paths) | `…::test_protected_fields_cannot_be_patched[*]` → `protected_field` with the exact path, through the domain and the service; nothing reserved |
+| EXEC-012 declared fields, frontier, values, seed | `…::test_undeclared_values_frontier_and_seed_are_validated` → `field_not_patchable`, uncovered frontier `invalid_patch` (`review`), empty text and malformed manifest rejected, `cognitive_seed_not_supported`, covered frontier `{review}`, the family default does not declare stage objectives, tampered patch → digest error |
+| EXEC-012 reuse frontier | `…::test_reuse_frontier_reuses_only_settled_compatible_results` → `draft` `reuse` with its candidate, `review` `invalidated`; the derived identity equals the source with only the run substituted (epoch 1); `*` invalidates all; derived = source run rejected |
+| EXEC-012 independent admission at epoch 1, nothing copied | `…::test_semantic_fork_admits_an_independent_run_at_epoch_one` → derived run `pending` v1, own budget account, source limits, `{baseline: {tokens.total: 15}}`, no consumption, no parent account, no effects, no settlement evidence, no children or waits; source run, budget and effects unchanged; reuse decision recorded; lineage edges `derived_from`, `contains`, `reuses`; replay later → same receipt; different intent → `IdempotencyConflict` |
+| Unauthorized, stale, cross-scope, rejected admission | `…::test_unauthorized_stale_unknown_and_rejected_forks_fail_safely` → `unauthorized`, `stale_snapshot`, cross-scope → not found, over-ceiling baseline → `fork_admission_rejected` / `invalid_admission_request`, run-control policy rejection twice → `fork_admission_rejected` / `admission_rejected`, no receipt, no materialization |
+| Request binding and fingerprint | `…::test_fork_request_binds_scope_snapshot_patch_and_admission` → fingerprint ignores request times only; cross scope, same run, linked child, other snapshot, other admission request rejected |
+| EXEC-015 fork root | `…::test_fork_root_parent_run_is_carried_on_the_root_only` → root carries `BellLabsParentRunId`, family does not; ordinary roots and decoded histories have none; parent = self rejected |
+| Saga: epoch 1, patched ERC, one receipt (§7 #12) | `tests/unit/runtime/test_runtime_recovery_stage3.py::test_fork_admits_new_run_at_epoch_one_once_with_one_durable_receipt`, `::test_patched_configuration_is_admitted_and_epoch_must_be_one` (patched ERC admitted; epoch 2 → `execution epoch 1` error, no receipt, no materialization), `::test_conflicting_fork_intent_is_rejected` |
+| Saga crash recovery | `…::test_fork_recovers_persisted_admission_after_materialization_timeout`, `::test_fork_recovers_admission_claim_after_timeout`, `::test_fork_reclaims_admission_only_after_definitive_absence`, `::test_concurrent_fork_retries_serialize_admission_and_materialization` → one admission and one materialization; `::test_ambiguous_materialization_fails_closed_without_a_receipt` → `fork_materialization_ambiguous` twice, no receipt, then one re-materialization |
+| Reuse through the operation boundary | `tests/unit/operations/test_fork_reuse_execution.py::test_derived_unit_reuses_the_source_result_and_invalidated_unit_reexecutes` → derived `draft` settles `completed` with the source output and output refs, zero usage, no transition or result checkpoint, no model call, an empty derived namespace, a new manifest naming the source (fork, run, unit, settlement, manifest ref and digest), reservation released; the source unit and namespace unchanged; the invalidated `review` runs 2 model calls in its own namespace |
+| Incompatible restore fails closed | `…::test_reuse_resolver_fails_closed_on_every_inconsistency` → no fork / invalidated → fresh; unmaterialized → `fork_not_materialized`; other schema, drifted binding, other settlement → `incompatible_restore`; compatibility digests equal across runs |
+| API | `tests/unit/run_control/test_run_forks_api.py::test_snapshot_and_fork_through_the_run_control_facade`, `::test_scope_permission_and_quiescence_are_enforced` → 409 stale version, 201 snapshot and read, 404 other run, 422 `protected_field` body, 409 `stale_snapshot`, 404 unknown snapshot, 403 sponsorship, 201 fork and identical replay, 409 `idempotency_conflict`, fork view; 404 foreign scope, 403 `workflow_run.snapshot permission required`, 403 fork, 404 unknown run, 409 `snapshot_not_quiescent` with `["budget_reservation_open:reservation:open"]` |
+| Migration 0024, RLS, least privilege | `tests/integration/postgres/test_run_forks_postgres.py::test_migration_0024_forces_rls_and_least_privilege` → both tables force RLS; runtime SELECT/INSERT only, read-only SELECT only; lineage CHECK includes `derived_from`, `seeded_from`, `reuses`; v2 shape constraint |
+| Crash windows on PostgreSQL under `SET ROLE` | `…::test_fork_saga_recovers_crashes_under_the_runtime_role_with_one_receipt` → under `belllabs_control_runtime` (not superuser, no `BYPASSRLS`): admission committed then lost, materialization committed then lost, retry → one admission, one materialization, one receipt, identical replay; derived run `pending` v1; decisions `reuse`/`invalidated`; fork row `accepted`, v2, snapshot, patch, target, no binding; edges `contains`, `derived_from`, `reuses`; UPDATE decisions / DELETE snapshots denied; read-only role counts `(1, 2, 1)` in scope, 0 in another, DELETE denied; conflicting materialization → `IdempotencyConflict`; audited fork purge removes the fork and its decisions |
+| Source reader | `…::test_fork_source_reader_reads_family_heads_and_linked_runs` → head kind and version, active link, scope isolation |
+| Stage3 slice (versioned) | `tests/integration/postgres/test_stage3_kernel_postgres_integration.py::test_stage3_kernel_postgres_persistence_slice` → v2 reserve, claims, admission, receipt, concurrent admission claims (1 of 8) |
+| Both families, API to Temporal | `tests/acceptance/control_plane/test_rrm_006_semantic_forks.py` → see "Live runtime qualification" |
+
+## Changed paths and migrations
+
+**Shared-seam edits (coordinator-authorized, all additive):**
+- `app/domain/operation_execution/contracts.py`: `ReusedResultRef`; `OperationSettlement.reused_result` (default `None`, validated: completed, no transition, checkpoint, provider run, events or usage).
+- `app/domain/orchestration/contracts.py`: `BellLabsRunInput.parent_run_id` (default `None`; must differ from `run_id`).
+- `app/temporal/workflows/belllabs_run.py`: the root's own attributes include `parent_run_id` (root only). No signal, query, update, command or name changed.
+- `app/domain/graph_runtime/kernel.py`: `LineageKind.RUN_SNAPSHOT`, `RUNTIME_UNIT`, `LANGGRAPH_CHECKPOINT`; `LineageParentEdge.relationship` gains `derived_from`, `seeded_from`, `reuses` (RRM-001 row 30).
+- Run control: `app/api/run_control.py` (`fork_operator` role); `app/application/run_control/run_control_repository.py` (`InMemoryRunControlRepository.family_head_records`, read-only). Reducer and service: **unchanged**.
+- `app/migrations/0024_run_snapshots_semantic_forks_v1.sql`: new (below).
+- `app/temporal/registration/*` and `app/domain/graph_runtime/identities.py`: **unchanged**.
+
+**Other changed production paths:** `app/application/runtime/runtime_recovery.py` (saga versioned; v1 `ForkRequest`-typed protocols replaced), `app/application/runtime/postgres_stage3_kernel_repository.py` (`PostgresForkRepository` v2; lineage insert factored into `append_lineage_in_transaction`; edge digest via `stable_json_digest`, value-identical for the set-free edge), `app/application/operations/operation_execution.py` (fork-reuse port and `_settle_reused`; `settlement_result_manifest` omits `reused_result` when absent, so every existing manifest is byte-identical), `app/integrations/temporal_workflow_submission.py` (`parent_run_id`), `app/server.py` (router). New: `app/domain/run_control/forks.py`, `app/application/runtime/run_forks.py`, `app/application/runtime/postgres_run_forks.py`, `app/api/run_forks.py`.
+
+**Tests:** new `tests/unit/runtime/test_run_snapshot_manifest.py`, `tests/unit/operations/test_fork_reuse_execution.py`, `tests/unit/run_control/test_run_forks_api.py`, `tests/integration/postgres/test_run_forks_postgres.py`, `tests/acceptance/control_plane/test_rrm_006_semantic_forks.py`, `tests/fixtures/run_forks.py`, `tests/fixtures/rrm006_fork_stack.py`; versioned `tests/unit/runtime/test_runtime_recovery_stage3.py` and the fork slice of `tests/integration/postgres/test_stage3_kernel_postgres_integration.py`; `tests/fixtures/checkpoint_recovery.py` (harness exposes its repository, payload store and binding store, accepts `fork_reuse`); `tests/unit/control_plane/test_digest_set_order_guard.py` (two audit entries removed: both sites now use `stable_json_digest`); `tests/conftest.py` (selector loop for the demonstration).
+
+**Migration `0024_run_snapshots_semantic_forks_v1.sql`** (forward-only; 0021 and 0023 belong to RRM-013 and RRM-007). Schema identities `belllabs.run-snapshot.v1`, `belllabs.run-fork-request.v2`, `belllabs.fork-reuse-decision.v1` (`belllabs.run-fork-receipt.v2` and `belllabs.fork-lineage-manifest.v1` are payloads):
+- `run_snapshot_manifests`: insert-only, PK `(scope, snapshot_id)`, unique digest, FK to `workflow_runs`, CHECKs on identity, family, boundary and digest.
+- `runtime_fork_requests` (row 51 "version"): `schema_version`, `source_run_id`, `source_snapshot_id` (FK to the snapshot), `patch_digest`, `target_run_id` (unique per scope), `materialization_payload`; a v2 row must bind all of them and leave `source_binding_id` NULL. The `copying` status is the v2 materialization claim.
+- `run_fork_reuse_decisions`: insert-only, unique per `(scope, derived_run, derived_unit)`, FK to the fork (`ON DELETE CASCADE` for the audited fork purge) and to the derived run; `reuse` ⇔ manifest ref present; derived ≠ source run.
+- `runtime_lineage_edges` relationship CHECK extended (row 49).
+- Forced RLS on both new tables; `belllabs_control_runtime` SELECT, INSERT; `belllabs_operations_readonly` SELECT.
+
+Deleted owners: none. The graph_runtime `ForkRequest`/`ForkReceipt`/`ForkFromCheckpointIntervention` stay inert prior art (still exported by `/v2/graph-runtime/schemas`, RRM-001 rows 23–27).
+
+## Deterministic verification
+
+All commands ran from the worktree with `unset VIRTUAL_ENV`, one pytest process at a time; every run with the service DSNs and every full run held the stack lock. Tested code head `2572e54` (code commits `6543b7e`, `2572e54`); the evidence/ticket commit follows it and changes documentation only.
+
+| Command | Result |
+|---|---|
+| Owning suites, both DSNs: `pytest tests/unit/runtime tests/unit/operations/test_fork_reuse_execution.py tests/unit/run_control/test_run_forks_api.py tests/unit/control_plane/test_digest_set_order_guard.py tests/integration/postgres/test_run_forks_postgres.py tests/integration/postgres/test_stage3_kernel_postgres_integration.py tests/acceptance/control_plane/test_rrm_006_semantic_forks.py` | 167 passed |
+| `uv run --no-sync ruff check app tests scripts` | All checks passed! |
+| `uv run --no-sync mypy app` | Success: no issues found in 353 source files |
+| `BELLABS_RUN_WP_BP_010_LIVE=0 BELLABS_RUN_WP_BP_020_LIVE=0 BELLABS_RUN_WP_CP_040_LIVE=0 LANGSMITH_TRACING=false uv run --no-sync pytest -q -rs` (hermetic, no DSNs) | 883 passed, 61 skipped, 2 xfailed, 0 failed |
+| The same flags with `TEST_APPLICATION_POSTGRES_DSN`, `TEST_MONGODB_URI` and `uv run --no-sync --env-file ../biotech-research-ingestion-evaluation-system/.env pytest -q -rs` | 920 passed, 24 skipped, 2 xfailed, 0 failed |
+| `git diff --check d46f548` | clean |
+
+Delta against the baseline (hermetic 850 passed, 56 skipped, 2 xfailed; services 882 passed, 24 skipped, 2 xfailed):
+- **Hermetic +33 passed** (new unit, API and saga tests); **+5 skipped**: the three `test_run_forks_postgres.py` tests and the two demonstrations, all DSN-gated; they run in the services gate.
+- **Services +38 passed** (33 + those 5) with the same 24 skips (19 Agent Server endpoint, 3 live-provider flags, 1 WSL, 1 pre-existing retirement).
+- Versioned (not weakened): the fork tests of `test_runtime_recovery_stage3.py` and the fork slice of `test_stage3_kernel_postgres_integration.py` now exercise the v2 saga contracts; two audit entries left `test_digest_set_order_guard.py` because both sites now digest with `stable_json_digest`. Nothing was skipped, xfailed or deselected.
+
+## Live runtime qualification
+
+No live LLM call. **Spend: USD 0.**
+
+`TEST_APPLICATION_POSTGRES_DSN`, `TEST_MONGODB_URI`, `LANGSMITH_TRACING=false`, under the stack lock: `uv run --no-sync pytest -q -s tests/acceptance/control_plane/test_rrm_006_semantic_forks.py` → 2 passed (StageGraph about 17 s, GoalDirected about 18 s). Each test: admission through `POST /run-control/v1/run-requests` (FastAPI `api`, `httpx.ASGITransport`, principal `operator` + `fork_operator`), root started by `TemporalWorkflowSubmitter.for_production(..., "required")` on a `start_local` dev server with the attributes registered; family activities are the production `StageGraphActivities` / `GoalDirectedActivities` over application PostgreSQL run control (with the family writer pool); `operation.execute` is the production `OperationExecutionActivities` → `OperationExecutionService` → `DeepAgentRuntimeAdapter` (real `create_deep_agent`, deterministic `TechnicalModel`: one `write_todos` call, then a JSON answer) over the real `AsyncPostgresSaver`, PostgreSQL lineage, MongoDB operation bindings and file payloads. Snapshot and fork go through `/run-control/v1/runs/{run}/snapshots` and `/forks` (the fork is replayed once: identical receipt). The derived root is started with `parent_run_id`; Visibility lists exactly one execution by `BellLabsParentRunId`.
+
+**StageGraph** (`draft` → stage wait `release-review` → `review`; journaled operations, real `RunControlOperationAuthority`). Sanitized record (IDs vary per run):
+
+```text
+snapshot: run-snapshot:46b4f814…, sha256:02a4e97d…, boundary stage_settled
+  (family-head:stagegraph:result-47524ec4…), projection version 7, phase active,
+  family version 2, accepted stages [draft], reuse candidates [draft unit e491bfa7…],
+  budget reservations [] (no open reservation), effects settled, async children [],
+  rejections before the boundary: [unsupported_boundary]
+patch: sha256:43d79579…, changes [stage_objectives.review], invalidation frontier [review]
+reuse: draft reuse / settled_compatible_outside_frontier (source e491bfa7… -> derived d0eb6178…)
+lineage: sha256:25ba53b2…, derived epoch 1, admission admission:tenant-1:operator:fork-d90093ce,
+  reused [d0eb6178…], seed none
+model calls: source [2, 2]; derived {review: 2} (draft: 0)
+outputs: source  [artifact:rrm006:draft:444c9647…, artifact:rrm006:review:4fed2bae…]
+         derived [artifact:rrm006:draft:444c9647…, artifact:rrm006:review:5c27187b…]
+terminal: completed, completed; replayed events 140
+```
+
+Asserted: the snapshot was refused until the boundary and then taken while the source waited; the source's authority rows (run, budget, effects, family head, units, results, transitions, claims, namespaces) and its saver checkpoints are md5-identical before and after the fork; the derived run is `pending` v1 after the fork; the derived run's `draft` used no model call, its result observation has no transition, and its manifest's `reused_result` names the source manifest; the four result manifests are pairwise distinct between runs; the source draft manifest bytes are unchanged; `draft` artifact equal (reused, immutable), `review` artifact distinct (patched objective); both runs `terminal`/`completed`; the derived root and family and the source family histories replay.
+
+**GoalDirected** (one iteration, executor then independent verifier; `journaled=False` composition, see RRM-016):
+
+```text
+snapshot: run-snapshot:e6a59bc3…, sha256:53c8ee53…, boundary goal_verifier_settled,
+  projection version 9, phase terminal, iteration 1, head role verifier,
+  reuse candidates 0, excluded [executor not_accepted, verifier not_accepted]
+patch: sha256:f0df7c75…, changes [goal.objective], invalidation frontier [*]
+reuse: excluded/not_accepted x2 (no reuse; GoalDirected identity is run-bound in any case)
+lineage: sha256:3f6224ce…, derived epoch 1, reused []
+outputs: source [artifact:rrm006-goal:1954ac12…]; derived [artifact:rrm006-goal:9d5758f4…]
+model calls: source [2, 2]; derived [2, 2]; replayed events 194
+```
+
+Asserted: source authority unchanged by the fork; the derived run started fresh with the patched objective (a new run-bound revision), both runs `terminal`/`completed`, disjoint output artifacts, four histories replay.
+
+## Replay and recovery artifacts
+
+| Command | Result |
+|---|---|
+| `uv run --no-sync pytest -q tests/unit tests/integration/temporal` (hermetic; every pre-existing captured-history replay, the RRM-005 `start_local` Search Attribute tests) | 804 passed, 22 skipped (DSN-gated and the WSL-only BP-010 recovery), 2 xfailed |
+| Demonstrations | StageGraph: derived root, derived family and source family replay (140 events); GoalDirected: both roots and families replay (194 events) |
+
+Replay compatibility: `BellLabsRunInput.parent_run_id` and `OperationSettlement.reused_result` are defaulted fields; under `disabled` (the default and every existing history) the root emits nothing new; no workflow, activity, signal, query or payload field was renamed; family workflows are unchanged, so no `workflow.patched` was needed.
+
+## Replacement and deletion checks
+
+- Fork saga: versioned in place. The v1 Agent Server-shaped request/receipt are no longer used by the saga or `PostgresForkRepository`; legacy v1 rows (if any) stay readable as rows, and v2 reads filter `schema_version IS NOT NULL`.
+- No competing lifecycle store: the derived run is an ordinary run-control admission; snapshots and reuse decisions are append-only authority, read by the derived run's units through the operation boundary.
+- `create_semantic_fork` (orchestration prior art, WP-CP-030 test) is untouched and unused by the mission path.
+
+## Unresolved risks and drift checks
+
+- **Proven fork boundary (exact).** (1) StageGraph `stage_settled`: the family head's last decision leaves no open producer liability and no admitted/running stage, at least one stage result is accepted, and every generic quiescence condition holds; proven mid-run while the source waits on a declared stage wait, and covers terminal runs. (2) GoalDirected `goal_verifier_settled`: the head is the iteration's verifier admission and that verifier unit has a completed fenced result with no open incident, before the next iteration is claimed; proven on a terminal run (a mid-run GoalDirected boundary needs RRM-007's durable pause). Cognition in the derived run starts fresh (new namespaces); StageGraph units outside the frontier are reused by immutable ref; GoalDirected units are never reused.
+- **Deferred.** Explicit `cognitive_seed` (rejected `cognitive_seed_not_supported`; RRM-001 §8 #5 allows deferral; RRM-017); executable forks from intermediate or arbitrary graph-node checkpoints; fork from a GoalDirected durable pause and from a recorded declared-wait or quiescence record (RRM-007 makes waits and pauses durable; `quiescence_ref` and the boundary kinds are the slots); restoring sandbox snapshots (manifests reference them; no fork restores them yet, DA-015 clone-and-reauthorize not exercised); Temporal Reset (never a product fork); provider-effect rollback; company forks (RRM-011).
+- **Stale expected checkpoint.** With seeds rejected, the only checkpoint a fork names is inside the immutable snapshot (candidate result keys) bound by the snapshot digest, so a stale snapshot digest is `stale_snapshot`; a seed-specific "not the recorded terminal result" check lands with RRM-017.
+- **Patchable-field declaration.** Workflow Types do not yet declare patchable fields; a composition-registered `ForkPatchPolicy` stands in (family defaults invalidate everything). RRM-017.
+- **GoalDirected composition.** GoalDirected operations cannot run through the run-control journal and `RunControlOperationAuthority` today (the family records usage and versions itself; the goal-context segment is privileged). Their snapshot units are `excluded/not_accepted`. RRM-016.
+- **Launch path.** The fork admits the derived run; starting it (with `parent_run_id`) and applying semantic-input patches (stage objectives, goal objective) to the derived run's templates is the governed launch path's job (RRM-009). The demonstrations do it in the harness.
+- **Snapshot size.** A manifest lists every unit (run-control payload bound: 1,024 items per collection). Very large runs need paging.
+- **Inspection.** RRM-005's unit read does not yet show fork lineage; the data is in `runtime_fork_requests`, `run_fork_reuse_decisions` and the lineage journal.
+- **External gates still unrun:** Agent Server endpoint suites, live providers and the WSL-only BP-010 recovery (unchanged).
+
+### What later tickets must know
+
+- **RRM-013 (async-child port).** `AsyncChildForkClassifier.classify_async_children_for_fork(request_scope, run_id, children: tuple[AsyncChildInspection, ...]) -> tuple[AsyncChildDisposition, ...]` in `app/application/runtime/run_forks.py`; `disposition="active"` makes the snapshot `snapshot_not_quiescent` (`async_child_active:<id>`). Wire RRM-013's `classify_async_children_for_fork()` in through `app.state.async_child_fork_classifier` (API) or the `async_children=` argument of `RunSnapshotService`/`compose_run_fork_services`. `children` are the 0016 authority rows from the inspection snapshot.
+- **RRM-007.** Add durable boundary kinds (`goal_paused`, `stagegraph_declared_wait`) and the quiescence record (`quiescence_ref`) to `SnapshotBoundaryKind`; pending command receipts belong in `pending_commands` (audit only) and an `accepted`/`delivered` receipt must make the snapshot `snapshot_not_quiescent`.
+- **RRM-008.** `run_cancelling` already rejects a snapshot; a cancelled unit is `excluded/not_completed`, never reusable.
+- **RRM-009.** Compose `compose_run_fork_services` on the API pool with the deployment's `ForkPatchPolicyRegistry`, compose `ForkReuseResolver(store, results=<payload store>, bindings=<OEB store>)` as `fork_reuse=` of the worker's `OperationExecutionService`, start fork roots with `TemporalWorkflowSubmitter.submit(..., parent_run_id=source)` only after the receipt exists (a fork-derived unit refuses to run before materialization), and apply semantic-input patches to the derived run's templates; resolve RRM-016 for GoalDirected.
+- **RRM-010.** The combined smoke can call `POST /runs/{run}/snapshots` then `/forks` on a StageGraph run at a declared wait; with an active real async child the snapshot must be `snapshot_not_quiescent` (`async_child_active:<id>`).
+
+### Reusable seams (mission-horizon lens)
+
+- `RunSnapshotManifest` / `build_run_snapshot`: a content-addressed, quiescence-checked macro snapshot of any run from authority only.
+- `RunForkPatch` + `ForkPatchPolicy` + `required_invalidation_frontier`: typed, protected-field-aware patching with declared invalidation.
+- `derived_unit_identity` + `compute_reuse_decisions` + `ForkReuseResolver` + `OperationExecutionService(fork_reuse=...)`: reuse by immutable ref with run/epoch identity substitution, fail-closed compatibility.
+- `RuntimeForkService` (v2) + `ForkAuthority` / `ForkMaterializer` ports: an idempotent, crash-recoverable saga with one durable receipt over any admission authority.
+- `AsyncChildForkClassifier`: the child-quiescence port.
+
+None of these carries company, fixture or provider specifics.
+
+## Final disposition
+
+ready_for_review
