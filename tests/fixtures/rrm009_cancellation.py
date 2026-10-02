@@ -272,6 +272,7 @@ def cancellation_components(
         },
         prompts={technical.child_prompt_ref.digest: f"Reply with exactly {CHILD_MARKER}."},
         skill_bundles={technical.bundle.bundle_digest: technical.bundle},
+        mcp_servers={server.ref.digest: server for server in technical.binding.mcp_servers},
     )
 
 

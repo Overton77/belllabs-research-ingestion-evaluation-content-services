@@ -552,6 +552,9 @@ class TechnicalBinding:
                 )
             },
             skill_bundles={self.bundle.bundle_digest: self.bundle},
+            # The qualification MCP server (a Python stdio module, not a pinned package) is
+            # registered exactly; the worker refuses any other launch (RRM-009 review).
+            mcp_servers={server.ref.digest: server for server in self.binding.mcp_servers},
         )
 
 

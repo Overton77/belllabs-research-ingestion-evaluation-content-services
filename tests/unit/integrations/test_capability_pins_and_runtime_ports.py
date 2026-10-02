@@ -215,6 +215,16 @@ def test_browser_tool_reaches_public_hosts_by_name_only() -> None:
         "http://printer.local/",
         "file:///etc/hosts",
         "ftp://example.com/",
+        # RRM-009 review: non-canonical IPv4 forms are IP literals too.
+        "http://2130706433/",
+        "http://0x7f000001/",
+        "http://0177.0.0.1/",
+        "http://127.1/",
+        "http://10.1/",
+        "http://169.254.169.254/",
+        "http://example.123/",
+        "http://localhost./",
+        "http://api.localhost/",
     ):
         with pytest.raises(WebResearchRuntimeDependencyError):
             _public_host(url)
@@ -249,4 +259,136 @@ async def test_browser_tool_opens_only_hosts_the_operation_was_granted(tmp_path:
     with granted_network_hosts(frozenset()):
         with pytest.raises(WebResearchRuntimeDependencyError, match="granted network hosts"):
             await tool.ainvoke({"url": "https://example.com/"})
+    # RRM-009 review: egress is deny-by-default; with no grant bound nothing is reachable.
+    with pytest.raises(WebResearchRuntimeDependencyError, match="deny by default"):
+        await tool.ainvoke({"url": "https://example.com/"})
     assert NoSubprocess.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_browser_tool_refuses_a_granted_name_that_resolves_to_a_private_address(
+    tmp_path: Path,
+) -> None:
+    import sys
+
+    from app.integrations.agents.deep_agents.browser_tool import (
+        AgentBrowserPageTool,
+        granted_network_hosts,
+    )
+    from app.integrations.web_research_runtime import WebResearchRuntimeDependencyError
+
+    answers = {
+        "internal.example.com": ("93.184.215.14", "10.0.0.7"),
+        "meta.example.com": ("169.254.169.254",),
+        "v6.example.com": ("::1",),
+        "gone.example.com": (),
+    }
+    resolved: list[str] = []
+
+    async def resolver(host: str) -> tuple[str, ...]:
+        resolved.append(host)
+        return answers[host]
+
+    class NoSubprocess:
+        async def run(self, request: object) -> object:
+            raise AssertionError("no subprocess for a non-public resolution")
+
+    entrypoint = tmp_path / "agent-browser.js"
+    entrypoint.write_text("// pinned entrypoint stand-in", encoding="utf-8")
+    tool = AgentBrowserPageTool(
+        node_executable=Path(sys.executable),
+        entrypoint=entrypoint,
+        runner=NoSubprocess(),
+        resolver=resolver,
+    )
+    with granted_network_hosts(frozenset(answers)):
+        for host in answers:
+            with pytest.raises(WebResearchRuntimeDependencyError, match="resolve"):
+                await tool.ainvoke({"url": f"https://{host}/"})
+    assert resolved == list(answers)
+
+
+def test_worker_launches_only_the_pinned_mcp_module_command_and_arguments(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """RRM-009 review: the worker re-verifies the pinned module digest and requires the
+    pinned command and arguments; a binding that keeps the pinned schema digest but names
+    another command or module, or a tampered module, is refused before any launch."""
+
+    import sys
+    from types import SimpleNamespace
+
+    import app.integrations.capability_pins as capability_pins
+
+    monkeypatch.setattr(capability_pins, "workspace_root", lambda: tmp_path)
+    package = tmp_path / ".tools" / "fixture-mcp"
+    (package / "dist").mkdir(parents=True)
+    module = package / "dist" / "index.js"
+    module.write_bytes(b"// reviewed fixture MCP server")
+    (package / "package.json").write_text(
+        json.dumps({"name": "fixture-mcp", "version": "1.0.0"}), encoding="utf-8"
+    )
+    pin = capability_pins.PinnedMCPServer.model_validate(
+        {
+            "server_id": "fixture-mcp",
+            "server_name": "fixture",
+            "ref": {
+                "kind": "mcp_server",
+                "logical_id": "mcp.fixture",
+                "revision": 1,
+                "digest": MCP_DIGEST,
+            },
+            "package_name": "fixture-mcp",
+            "package_version": "1.0.0",
+            "module_locator": "workspace://.tools/fixture-mcp/dist/index.js",
+            "module_digest": "sha256:" + sha256(module.read_bytes()).hexdigest(),
+            "schema_digest": MCP_DIGEST,
+            "credential_env": "FIXTURE_API_KEY",
+            "tools": [{"tool_name": "lookup_fixture", "schema_digest": MCP_DIGEST}],
+        }
+    )
+    node = Path(sys.executable)
+    pins = CapabilityPins(mcp_servers=(pin,))
+    verifier = PinnedCapabilityAssetVerifier(pins, node_executable=node)
+    exact = pin.component(node_executable=node)
+
+    def binding(*components: object) -> object:
+        return SimpleNamespace(deep_agent_binding=SimpleNamespace(mcp_servers=components))
+
+    verifier.verify_launch(binding(exact))  # type: ignore[arg-type]
+    other_command = exact.model_copy(update={"command": str(tmp_path / "evil.exe")})
+    other_module = exact.model_copy(update={"arguments": (str(tmp_path / "evil.js"),)})
+    no_credential = exact.model_copy(update={"credential_refs": ()})
+    for drifted in (other_command, other_module, no_credential):
+        assert drifted.schema_digest == pin.schema_digest
+        with pytest.raises(ValueError, match="launch differs from its pin"):
+            verifier.verify_launch(binding(drifted))  # type: ignore[arg-type]
+    unpinned = exact.model_copy(
+        update={"ref": exact.ref.model_copy(update={"digest": "sha256:" + "7" * 64})}
+    )
+    with pytest.raises(ValueError, match="is not pinned"):
+        verifier.verify_launch(binding(unpinned))  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="requires the deployment's node"):
+        PinnedCapabilityAssetVerifier(pins).verify_launch(binding(exact))  # type: ignore[arg-type]
+    # A tampered module is refused even though the binding is unchanged.
+    module.write_bytes(b"// tampered")
+    with pytest.raises(ValueError, match="failed verification"):
+        verifier.verify_launch(binding(exact))  # type: ignore[arg-type]
+    # A component the deployment registered exactly is compared by full equality.
+    registered = PinnedCapabilityAssetVerifier(
+        CapabilityPins.empty(), registered_mcp_servers={exact.ref.digest: exact}
+    )
+    registered.verify_launch(binding(exact))  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="registered component"):
+        registered.verify_launch(binding(other_command))  # type: ignore[arg-type]
+    # Missing pins fail closed in the production compositions.
+    from app.config import get_settings
+
+    monkeypatch.setenv("CAPABILITY_PINS_PATH", str(tmp_path / "absent.json"))
+    get_settings.cache_clear()
+    try:
+        with pytest.raises(capability_pins.CapabilityPinError, match="required but absent"):
+            CapabilityPins.from_settings(get_settings())
+        assert CapabilityPins.from_settings(get_settings(), required=False) == CapabilityPins()
+    finally:
+        get_settings.cache_clear()

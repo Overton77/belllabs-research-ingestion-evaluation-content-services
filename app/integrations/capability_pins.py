@@ -268,11 +268,17 @@ class CapabilityPins(BaseModel):
         return cls()
 
     @classmethod
-    def from_settings(cls, settings: Settings) -> CapabilityPins:
-        """The deployment's pins, or none when the file is absent (no capability mounts)."""
+    def from_settings(cls, settings: Settings, *, required: bool = True) -> CapabilityPins:
+        """The deployment's pins. The production compositions (launch-enabled workers, the
+        Temporal-enabled API) require the file: a missing pin file fails closed instead of
+        silently mounting nothing (RRM-009 review). `required=False` is for tooling only."""
 
         path = settings.capability_pins_path
-        return cls.load(path) if path.exists() else cls.empty()
+        if path.exists():
+            return cls.load(path)
+        if required:
+            raise CapabilityPinError(f"capability pins are required but absent: {path}")
+        return cls.empty()
 
     def mcp_server(self, server_id: str) -> PinnedMCPServer:
         for server in self.mcp_servers:

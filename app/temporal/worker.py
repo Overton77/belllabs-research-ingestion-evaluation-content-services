@@ -187,6 +187,21 @@ def create_production_workers(
     )
 
 
+async def production_workers_or_close(
+    client: Client, settings: Settings, composition: WorkerActivityComposition
+) -> ProductionWorkerSet:
+    """`create_production_workers`, closing the composition's resources (the persistent saver
+    and store) when the worker set refuses to start, for example on a drain that is not
+    shorter than a heartbeat timeout (RRM-009 review)."""
+
+    try:
+        return create_production_workers(client, settings, composition)
+    except BaseException:
+        if composition.resources is not None:
+            await composition.resources.aclose()
+        raise
+
+
 def compose_worker_run_control_service(
     repository: RunControlRepository,
     configuration_verifier: RunConfigurationVerifier,
@@ -272,7 +287,7 @@ async def main(
                 run_control=run_control,
                 postgres_pool=postgres_pool,
             )
-            production = create_production_workers(client, settings, composition)
+            production = await production_workers_or_close(client, settings, composition)
             coordinator_workers = production.coordinator
             operation_worker = production.operation
             artifact_worker = production.artifacts

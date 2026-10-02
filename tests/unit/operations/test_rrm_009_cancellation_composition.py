@@ -490,3 +490,106 @@ async def test_a_refused_completion_is_proposed_again_under_a_new_identity() -> 
         command_result=SimpleNamespace(status=CommandStatus.ACCEPTED, recorded_at=third)
     )
     assert await identity(request(third), base) == f"{base}:retry:2"
+
+
+@pytest.mark.asyncio
+async def test_deployment_runtime_verifies_the_mcp_launch_before_any_materialization() -> None:
+    """RRM-009 review: cognition and the cancellation path's `observe_latest` both start the
+    agent's stdio MCP servers, so both verify the launch against the pins first."""
+
+    import app.temporal.deployment_composition as composition
+
+    calls: list[str] = []
+
+    class Refusing:
+        def verify_launch(self, binding: Any) -> None:
+            calls.append(f"verify:{binding.binding_id}")
+            raise ValueError("MCP server fixture launch differs from its pin")
+
+    class Inner:
+        async def execute(self, invocation: Any, secrets: Any) -> Any:
+            calls.append("execute")
+
+        async def observe_latest(self, invocation: Any, secrets: Any) -> Any:
+            calls.append("observe")
+
+    runtime = composition.DeploymentOperationRuntime(
+        cast(Any, Inner()),
+        cast(Any, object()),
+        pool=cast(Any, "pool"),
+        policies={},
+        wait_seconds=5,
+        launch_verifier=cast(Any, Refusing()),
+    )
+    for call in (runtime.execute, runtime.observe_latest):
+        with pytest.raises(ValueError, match="differs from its pin"):
+            await call(_invocation(), {})
+    assert calls == ["verify:binding-1", "verify:binding-1"]
+
+
+@pytest.mark.asyncio
+async def test_composition_resources_are_closed_when_build_or_worker_start_fails(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """RRM-009 review: a factory build that fails partway (here: the pin file is absent and
+    production composition fails closed) closes the saver/store it opened; a worker set that
+    refuses to start closes the composition's resources."""
+
+    from contextlib import AsyncExitStack
+
+    import app.temporal.deployment_composition as composition
+    from app.integrations.capability_pins import CapabilityPinError
+    from app.temporal.worker import WorkerActivityComposition, production_workers_or_close
+
+    events: list[str] = []
+
+    class Lifespan:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        async def __aenter__(self) -> Any:
+            events.append("opened")
+            return SimpleNamespace(saver=object(), store=object())
+
+        async def __aexit__(self, *exc: Any) -> None:
+            events.append("closed")
+
+    monkeypatch.setattr(composition, "StandalonePersistenceLifespan", Lifespan)
+    settings = SimpleNamespace(
+        langgraph_checkpoint_dsn="postgresql://unused",
+        langgraph_checkpoint_setup=False,
+        capability_pins_path=tmp_path / "absent.json",
+    )
+    factory = composition.ProductionWorkerActivityCompositionFactory(cast(Any, object()))
+    with pytest.raises(CapabilityPinError, match="required but absent"):
+        await factory.build(
+            settings=cast(Any, settings),
+            control_plane=cast(Any, object()),
+            run_control=cast(Any, object()),
+            postgres_pool=cast(Any, object()),
+        )
+    assert events == ["opened", "closed"]
+
+    events.clear()
+    resources = AsyncExitStack()
+    resources.push_async_callback(lambda: _record(events, "resources closed"))
+    get_settings.cache_clear()
+    monkeypatch.setenv("WORKER_GRACEFUL_SHUTDOWN_SECONDS", "60")
+    try:
+        with pytest.raises(ValueError, match="shorter than the shortest"):
+            await production_workers_or_close(
+                cast(Any, object()),
+                get_settings(),
+                WorkerActivityComposition(
+                    coordinator=cast(Any, object()),
+                    operation=cast(Any, object()),
+                    resources=resources,
+                ),
+            )
+    finally:
+        get_settings.cache_clear()
+    assert events == ["resources closed"]
+
+
+async def _record(events: list[str], event: str) -> None:
+    events.append(event)

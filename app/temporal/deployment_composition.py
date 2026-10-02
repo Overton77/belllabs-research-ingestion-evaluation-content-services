@@ -114,6 +114,7 @@ from app.domain.operation_execution.contracts import (
     AsyncChildCancellationRecord,
     AsyncSubagentContract,
     AsyncSubagentDependencyClass,
+    DeepAgentMCPServerComponent,
     OperationExecutionBinding,
     RuntimeInvocation,
     RuntimeResult,
@@ -192,6 +193,9 @@ class DeploymentCapabilityComponents:
     structured_output_schemas: Mapping[str, type[Any] | dict[str, Any]] = field(
         default_factory=dict
     )
+    # Exact MCP server components (by ref digest) the worker may launch besides the pinned
+    # ones; compared by full equality before every launch (qualification harnesses only).
+    mcp_servers: Mapping[str, DeepAgentMCPServerComponent] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -396,16 +400,26 @@ class DeploymentOperationRuntime:
         pool: asyncpg.Pool,
         policies: Mapping[str, AdmissionRule],
         wait_seconds: float,
+        launch_verifier: PinnedCapabilityAssetVerifier | None = None,
     ) -> None:
         self._runtime = runtime
         self._children = children
         self._pool = pool
         self._policies = dict(policies)
         self._wait_seconds = wait_seconds
+        self._launch_verifier = launch_verifier
+
+    def _verify_launch(self, invocation: RuntimeInvocation) -> None:
+        # RRM-009 review: every path that materializes the agent (and so starts its stdio
+        # MCP servers) verifies the launch against the pins first, including the
+        # cancellation path's `observe_latest`.
+        if self._launch_verifier is not None:
+            self._launch_verifier.verify_launch(invocation.binding)
 
     async def execute(
         self, invocation: RuntimeInvocation, resolved_secrets: Mapping[str, str]
     ) -> RuntimeResult:
+        self._verify_launch(invocation)
         with granted_network_hosts(invocation.binding.capability_grant.network_hosts):
             result = await self._runtime.execute(invocation, resolved_secrets)
         deep = invocation.binding.deep_agent_binding
@@ -434,6 +448,7 @@ class DeploymentOperationRuntime:
     async def observe_latest(
         self, invocation: RuntimeInvocation, resolved_secrets: Mapping[str, str]
     ) -> RuntimeResult:
+        self._verify_launch(invocation)
         with granted_network_hosts(invocation.binding.capability_grant.network_hosts):
             return await self._runtime.observe_latest(invocation, resolved_secrets)
 
@@ -489,15 +504,33 @@ class ProductionWorkerActivityCompositionFactory:
     ) -> WorkerActivityComposition:
         resources = AsyncExitStack()
         try:
-            persistence = await resources.enter_async_context(
-                StandalonePersistenceLifespan(
-                    settings.langgraph_checkpoint_dsn,
-                    run_setup=settings.langgraph_checkpoint_setup,
-                )
+            return await self._build(
+                resources,
+                settings=settings,
+                control_plane=control_plane,
+                run_control=run_control,
+                postgres_pool=postgres_pool,
             )
         except BaseException:
+            # RRM-009 review: a composition that fails partway closes what it opened.
             await resources.aclose()
             raise
+
+    async def _build(
+        self,
+        resources: AsyncExitStack,
+        *,
+        settings: Settings,
+        control_plane: ControlPlaneService,
+        run_control: RunControlService,
+        postgres_pool: asyncpg.Pool,
+    ) -> WorkerActivityComposition:
+        persistence = await resources.enter_async_context(
+            StandalonePersistenceLifespan(
+                settings.langgraph_checkpoint_dsn,
+                run_setup=settings.langgraph_checkpoint_setup,
+            )
+        )
         pins = self._pins if self._pins is not None else CapabilityPins.from_settings(settings)
         capabilities = build_deployment_capability_registry(
             settings,
@@ -544,6 +577,13 @@ class ProductionWorkerActivityCompositionFactory:
             allow_new_spawns=settings.async_subagent_spawning_enabled,
             submitter_identity=settings.async_subagent_submitter_identity,
         )
+        verifier = PinnedCapabilityAssetVerifier(
+            pins,
+            node_executable=settings.web_research_agent_browser_node,
+            registered_mcp_servers=(
+                self._additional.mcp_servers if self._additional is not None else None
+            ),
+        )
         adapter = DeploymentOperationRuntime(
             DeepAgentRuntimeAdapter(
                 ExactDeepAgentMaterializer(capabilities.registry),
@@ -554,8 +594,8 @@ class ProductionWorkerActivityCompositionFactory:
             pool=postgres_pool,
             policies=self._async_result_policies,
             wait_seconds=settings.async_subagent_completion_wait_seconds,
+            launch_verifier=verifier,
         )
-        verifier = PinnedCapabilityAssetVerifier(pins)
         secrets = EnvironmentSecretResolver()
         service = OperationExecutionService(
             authority=RunControlOperationAuthority(run_control, control_plane),

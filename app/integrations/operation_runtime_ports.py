@@ -19,9 +19,12 @@ from pathlib import Path
 from app.application.workspaces.artifact_promotion import ArtifactPayloadAddress
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import SecretRef
-from app.domain.operation_execution.contracts import OperationExecutionBinding
+from app.domain.operation_execution.contracts import (
+    DeepAgentMCPServerComponent,
+    OperationExecutionBinding,
+)
 from app.domain.operation_execution.errors import WorkspaceDigestMismatch
-from app.integrations.capability_pins import CapabilityPins
+from app.integrations.capability_pins import CapabilityPinError, CapabilityPins
 
 logger = logging.getLogger(__name__)
 
@@ -145,11 +148,30 @@ class PinnedCapabilityAssetVerifier:
     REQ-CP-DA-005: MCP server schema digests and immutable asset (Skill, plugin) manifest
     digests must equal the pinned revision; anything unpinned is refused before any
     provider work. The same object serves `CapabilityAssetPort` and `MCPRuntimePort`.
+
+    RRM-009 review: the worker also verifies what it will *launch*. Every MCP server
+    component of the Deep Agent binding must be either a pinned server, re-derived here from
+    the pin with the module digest re-read from disk (and the package name/version checked),
+    with exactly the pinned command (the deployment's node executable), arguments,
+    credential references, tool filter and schema digest; or an exact component the
+    deployment registered (`registered_mcp_servers`, full equality; qualification
+    harnesses only). A binding that names the pinned schema digest but another command or
+    module is refused. Residual: the pin covers the entry module and the package metadata,
+    not the package's transitive `node_modules` tree.
     """
 
-    def __init__(self, pins: CapabilityPins) -> None:
+    def __init__(
+        self,
+        pins: CapabilityPins,
+        *,
+        node_executable: Path | None = None,
+        registered_mcp_servers: Mapping[str, DeepAgentMCPServerComponent] | None = None,
+    ) -> None:
         self._mcp = dict(pins.mcp_schema_digests())
         self._assets = dict(pins.asset_manifest_digests())
+        self._pinned_servers = {server.ref.digest: server for server in pins.mcp_servers}
+        self._node_executable = node_executable
+        self._registered = dict(registered_mcp_servers or {})
 
     async def verify(self, binding: OperationExecutionBinding) -> None:
         for server in binding.mcp_servers:
@@ -162,6 +184,41 @@ class PinnedCapabilityAssetVerifier:
 
     async def verify_servers(self, binding: OperationExecutionBinding) -> None:
         await self.verify(binding)
+        self.verify_launch(binding)
+
+    def verify_launch(self, binding: OperationExecutionBinding) -> None:
+        """Refuse any MCP server launch that is not exactly a pinned or registered one."""
+
+        deep = binding.deep_agent_binding
+        if deep is None:
+            return
+        for component in deep.mcp_servers:
+            registered = self._registered.get(component.ref.digest)
+            if registered is not None:
+                if component != registered:
+                    raise ValueError(
+                        f"MCP server {component.server_name} differs from its registered component"
+                    )
+                continue
+            pin = self._pinned_servers.get(component.ref.digest)
+            if pin is None:
+                raise ValueError(f"MCP server {component.server_name} is not pinned")
+            if self._node_executable is None:
+                raise ValueError("a pinned stdio MCP server requires the deployment's node")
+            try:
+                expected = pin.component(
+                    node_executable=self._node_executable,
+                    attachment_target=component.attachment_target,
+                )
+            except (CapabilityPinError, OSError) as error:
+                raise ValueError(
+                    f"pinned MCP server {component.server_name} failed verification: {error}"
+                ) from error
+            if component != expected:
+                raise ValueError(
+                    f"MCP server {component.server_name} launch differs from its pin "
+                    "(command, arguments, credentials, tools or schema)"
+                )
 
 
 def _verify(content: bytes, content_digest: str, size_bytes: int) -> None:

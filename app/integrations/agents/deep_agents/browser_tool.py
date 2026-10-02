@@ -5,8 +5,14 @@ stays network-isolated, and this tool runs the reviewed `agent-browser` entrypoi
 worker-side subprocess with a sanitized environment, a per-page host allowlist, bounded
 output and a fresh single-host browser profile per call. The page's host must also be one
 of the running operation's granted `network_hosts` (`granted_network_hosts`, bound by the
-deployment runtime around each invocation). It returns the page's final URL,
-title and a text excerpt as JSON text; it never returns screenshots or cookies.
+deployment runtime around each invocation). Egress is deny-by-default: with no grant bound
+the tool refuses every page (RRM-009 review). Hosts are reached by DNS name only: every IP
+literal is refused, including the non-canonical IPv4 forms (`2130706433`, `0x7f000001`,
+`0177.0.0.1`, `127.1`), and a granted name that resolves to a non-public address is refused
+before the browser starts. Residual: the browser resolves the name again, so a DNS answer
+that changes between this check and the browser's own lookup (rebinding) is not prevented
+here. It returns the page's final URL, title and a text excerpt as JSON text; it never
+returns screenshots or cookies.
 
 The tool's input-schema digest is pinned in the capability pin file and verified by the
 materializer (`_resolve_tool`), so the model-facing surface cannot drift silently.
@@ -14,11 +20,14 @@ materializer (`_resolve_tool`), so the model-facing surface cannot drift silentl
 
 from __future__ import annotations
 
+import asyncio
+import ipaddress
 import json
 import os
 import re
+import socket
 import tempfile
-from collections.abc import Iterator, Mapping
+from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
@@ -54,7 +63,19 @@ def granted_network_hosts(hosts: frozenset[str]) -> Iterator[None]:
         GRANTED_NETWORK_HOSTS.reset(token)
 
 
+HostResolver = Callable[[str], Awaitable[Sequence[str]]]
+
+
+async def resolve_host_addresses(host: str) -> tuple[str, ...]:
+    """Every address the worker's resolver returns for `host` (A and AAAA)."""
+
+    infos = await asyncio.get_running_loop().getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    return tuple(sorted({str(info[4][0]) for info in infos}))
+
+
 _SESSION_SAFE = re.compile(r"[^A-Za-z0-9_-]+")
+# One component of an inet_aton-style numeric IPv4 host: hexadecimal, octal or decimal.
+_NUMERIC_PART = re.compile(r"^(0x[0-9a-f]*|0[0-7]*|[1-9][0-9]*)$")
 _BASE_ENVIRONMENT_KEYS = ("PATH", "PATHEXT", "SYSTEMROOT", "COMSPEC", "WINDIR")
 
 
@@ -81,6 +102,7 @@ class AgentBrowserPageTool(BaseTool):
     _node_executable: Path = PrivateAttr()
     _entrypoint: Path = PrivateAttr()
     _runner: BrowserSubprocessRunner = PrivateAttr()
+    _resolver: HostResolver = PrivateAttr()
     _command_timeout_seconds: float = PrivateAttr()
     _max_output_bytes: int = PrivateAttr()
     _excerpt_characters: int = PrivateAttr()
@@ -91,6 +113,7 @@ class AgentBrowserPageTool(BaseTool):
         node_executable: Path,
         entrypoint: Path,
         runner: BrowserSubprocessRunner | None = None,
+        resolver: HostResolver | None = None,
         command_timeout_seconds: float = 25,
         max_output_bytes: int = 250_000,
         excerpt_characters: int = 4_000,
@@ -99,6 +122,7 @@ class AgentBrowserPageTool(BaseTool):
         self._node_executable = node_executable.resolve(strict=True)
         self._entrypoint = entrypoint.resolve(strict=True)
         self._runner = runner or AsyncioBrowserSubprocessRunner()
+        self._resolver = resolver or resolve_host_addresses
         self._command_timeout_seconds = command_timeout_seconds
         self._max_output_bytes = max_output_bytes
         self._excerpt_characters = excerpt_characters
@@ -109,10 +133,15 @@ class AgentBrowserPageTool(BaseTool):
     async def _arun(self, url: str) -> str:
         host = _public_host(url)
         granted = GRANTED_NETWORK_HOSTS.get()
-        if granted is not None and host not in granted:
+        if granted is None:
+            raise WebResearchRuntimeDependencyError(
+                "agent_browser_page has no granted network hosts bound (deny by default)"
+            )
+        if host not in granted:
             raise WebResearchRuntimeDependencyError(
                 "agent_browser_page host is outside the operation's granted network hosts"
             )
+        await _require_public_resolution(host, self._resolver)
         with tempfile.TemporaryDirectory(
             prefix="belllabs-agent-browser-", ignore_cleanup_errors=True
         ) as directory:
@@ -196,16 +225,68 @@ class AgentBrowserPageTool(BaseTool):
             ) from error
 
 
+def _numeric_part(part: str) -> int:
+    if part.startswith("0x"):
+        return int(part[2:] or "0", 16)
+    if len(part) > 1 and part.startswith("0"):
+        return int(part, 8)
+    return int(part)
+
+
+def numeric_ipv4(host: str) -> ipaddress.IPv4Address | None:
+    """The address an inet_aton-style numeric host denotes (`2130706433`, `0x7f000001`,
+    `0177.0.0.1`, `127.1`, `1.2.3.4`), or None when the host is not such a form."""
+
+    parts = host.split(".")
+    if not 1 <= len(parts) <= 4 or not all(_NUMERIC_PART.match(part) for part in parts):
+        return None
+    *leading, last = (_numeric_part(part) for part in parts)
+    if any(value > 255 for value in leading) or last >= 256 ** (4 - len(leading)):
+        return None
+    number = 0
+    for value in leading:
+        number = number * 256 + value
+    return ipaddress.IPv4Address(number * 256 ** (4 - len(leading)) + last)
+
+
 def _public_host(url: str) -> str:
     parts = urlsplit(url)
-    host = (parts.hostname or "").lower()
+    host = (parts.hostname or "").lower().rstrip(".")
     if parts.scheme not in {"http", "https"} or not host or host in {"localhost"}:
         raise WebResearchRuntimeDependencyError("agent_browser_page requires a public http(s) URL")
-    # IP literals (IPv4, and IPv6, whose hostname contains ':') and local names are refused:
-    # the tool reaches public hosts by name only.
-    if host.endswith(".local") or ":" in host or re.fullmatch(r"\d+\.\d+\.\d+\.\d+", host):
+    # The tool reaches public hosts by DNS name only. Refused: IPv6 literals (the hostname
+    # contains ':'), every IPv4 form an inet_aton-style parser accepts (checked with
+    # `ipaddress` after normalizing decimal, hex and octal parts), a numeric or hex final
+    # label (no public TLD is one) and local names.
+    final_label = host.rsplit(".", 1)[-1]
+    if (
+        ":" in host
+        or numeric_ipv4(host) is not None
+        or final_label.isdigit()
+        or final_label.startswith("0x")
+        or host.endswith((".local", ".localhost"))
+    ):
         raise WebResearchRuntimeDependencyError("agent_browser_page refuses local addresses")
     return host
+
+
+async def _require_public_resolution(host: str, resolver: HostResolver) -> None:
+    """Refuse a granted name that does not resolve, or resolves to any non-global address
+    (loopback, private, link-local, shared, reserved)."""
+
+    try:
+        addresses = await resolver(host)
+    except OSError as error:
+        raise WebResearchRuntimeDependencyError(
+            "agent_browser_page host does not resolve"
+        ) from error
+    if not addresses:
+        raise WebResearchRuntimeDependencyError("agent_browser_page host does not resolve")
+    for address in addresses:
+        if not ipaddress.ip_address(address.split("%", 1)[0]).is_global:
+            raise WebResearchRuntimeDependencyError(
+                "agent_browser_page host resolves to a non-public address"
+            )
 
 
 def _environment(
