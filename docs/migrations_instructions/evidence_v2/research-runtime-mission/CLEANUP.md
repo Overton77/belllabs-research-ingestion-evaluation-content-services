@@ -43,3 +43,45 @@ The coordinator checked the diff independently: it extracts shared checkpoint-re
 - Hermetic pytest: 748 passed, 54 skipped, 2 xfailed.
 - Pytest with the disposable Postgres/Mongo stack and `--env-file`: 778 passed, 24 skipped, 2 xfailed.
 
+
+## CR-2
+
+Scope: async-subagent deployment and graph files (RRM-013), runtime inspection API, projection and read models (RRM-005). Base `6e77850`; code changed by `git diff 08def14..6e77850 --stat -- app tests`. Branch `cleanup/rrm-cr-2`.
+
+### Findings
+- Names follow the snapshot / checkpoint / unit / attempt / generation / receipt vocabulary. No `v2`/`new`/`tmp`/`helper`/`manager`/`util` names were added.
+- Placement is sound: contracts in `domain/run_control` and `domain/operation_execution`, services and ports in `application`, Temporal/DeepAgents/Agent Server adapters in `integrations`, `agent_server` and `temporal`, transport in `api`.
+- `application/run_control/inspection.py` held the cursor codec, which has no dependency on the rest of the module.
+- Three symbols had no reference anywhere (app, tests, scripts, docs): `RunListFilter`, `AsyncChildLineageReader`, `SearchAttributeValueType`.
+
+### Changes
+1. `refactor:` `InspectionCursorCodec`, `CURSOR_TTL` and `Clock` moved to `app/application/run_control/inspection_cursor.py`. `inspection.py` imports them, so all existing import paths (`api/runtime_inspection.py`, tests) still resolve. Cursor format and signing prefix are unchanged.
+2. `refactor:` deleted `RunListFilter`, `AsyncChildLineageReader`, `SearchAttributeValueType`.
+
+### Deliberate non-changes
+- `InMemoryInspectionReadRepository` stays in `inspection.py`: it depends on `RunRecord`/`RunSnapshot`/`UnitRecord`, and moving it would need a re-export cycle or break tests on RRM-006's branch that import it from here.
+- `InspectionReadRepository`, `classify_async_children_for_fork`, `AsyncSubagentService` untouched (RRM-006).
+- `SEARCH_ATTRIBUTES_DISABLED` is unreferenced but mirrors `SEARCH_ATTRIBUTES_REQUIRED`; kept for symmetry.
+- `service.py` (~1,600 lines) in `async_subagents` and `integrations/.../async_subagents.py` (~900) stay whole: each is cohesive around one service/adapter and RRM-006 and RRM-016 edit nearby.
+- No wire or persisted identity touched (graph IDs, `/belllabs/async-subagents/served-graphs`, `/run-control/v1/inspection/...`, Temporal names, search-attribute names, stamps, migrations). No file moved except adding one new module; `langgraph.async_subagents.*` untouched, so no path sweep was needed.
+- Ticket-named test files kept; evidence READMEs reference them.
+
+### Commands and results
+- `ruff check app tests scripts`: pass. `mypy app`: pass (362 files).
+- Hermetic pytest: 913 passed, 65 skipped, 2 xfailed (equals baseline).
+- Pytest with Postgres and Mongo (`uv run --env-file ...`): 948 passed, 30 skipped, 2 xfailed (equals baseline).
+- `git diff --check`: clean.
+
+### Candidate generalization seams (not extracted)
+- `inspection_cursor.py`: a signed, scoped, expiring cursor codec usable for any paged read API.
+- `RuntimeInspectionService` source ports (`TemporalVisibilityReader`, `CheckpointHistoryReader`, `AsyncChildDetailReader`): provider-neutral multi-source read composition with per-section freshness.
+- Async-child submission fence and reconciliation decisions: a generic "provider-run adoption with in-doubt incident" pattern independent of Agent Server.
+
+### CR-2 integration
+
+The coordinator checked the diff independently: the cursor codec was extracted unchanged and three unreferenced symbols were deleted, with no wire or persisted identity changes. It was merged `--no-ff` at `c850526`. Merge gates:
+- ruff: clean.
+- mypy: 362 files, no issues.
+- Hermetic pytest: 913 passed, 65 skipped, 2 xfailed.
+- Pytest with the disposable Postgres/Mongo stack and `--env-file`: 948 passed, 30 skipped, 2 xfailed.
+

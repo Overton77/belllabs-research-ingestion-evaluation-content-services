@@ -15,7 +15,6 @@ from types import MappingProxyType
 from typing import Final, Literal
 
 SearchAttributePolicy = Literal["required", "disabled"]
-SearchAttributeValueType = Literal["keyword", "int"]
 WorkflowKind = Literal["root", "family", "operation"]
 SearchAttributeFamily = Literal["stage_graph", "goal_directed"]
 
