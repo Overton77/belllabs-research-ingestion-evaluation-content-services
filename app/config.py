@@ -207,9 +207,10 @@ class Settings(BaseSettings):
     # Content-addressed artifact and result payloads when no S3 bucket is configured: a
     # directory every worker and the API can reach (a local object-store stand-in).
     artifact_payload_root: Path | None = None
-    async_subagent_submitter_identity: str = Field(
-        default="belllabs-async-submitter", min_length=1
-    )
+    async_subagent_submitter_identity: str = Field(default="belllabs-async-submitter", min_length=1)
+    # How long the parent operation boundary waits for its async children to finish before
+    # settling the parent; an unfinished child stays an unsettled effect of the run.
+    async_subagent_completion_wait_seconds: float = Field(default=120.0, ge=0, le=3_600)
     # Digest/revision pins of the search and browser capabilities the deployment mounts.
     capability_pins_path: Path = (
         PROJECT_ROOT / "infra" / "capability-pins" / "research-capabilities.json"

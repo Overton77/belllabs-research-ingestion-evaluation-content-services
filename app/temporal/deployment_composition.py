@@ -39,6 +39,11 @@ from temporalio.client import Client
 from app.application.async_subagents.mongo_async_subagent_repository import (
     MongoAsyncSubagentDetailRepository,
 )
+from app.application.async_subagents.parent_completion import (
+    AdmissionRule,
+    AsyncChildCompletion,
+    admit_typed_manifest,
+)
 from app.application.async_subagents.parent_effects import RunControlAsyncChildEffects
 from app.application.async_subagents.postgres_async_subagents import PostgresAsyncSubagentAuthority
 from app.application.async_subagents.service import AsyncSubagentService
@@ -108,6 +113,8 @@ from app.domain.operation_execution.contracts import (
     AsyncSubagentContract,
     AsyncSubagentDependencyClass,
     OperationExecutionBinding,
+    RuntimeInvocation,
+    RuntimeResult,
 )
 from app.domain.run_control.contracts import ActorContext
 from app.integrations.agents.deep_agents import (
@@ -152,6 +159,12 @@ from app.temporal.operation_activities import OperationExecutionActivities
 from app.temporal.worker import WorkerActivityComposition
 
 DEFAULT_ARTIFACT_PAYLOAD_ROOT = PROJECT_ROOT / ".artifact-payloads"
+ASYNC_CHILD_COMPLETION_KIND = "async_child_completion.v1"
+# The result admission policies this deployment decides at the parent boundary, by the
+# contract's `result_admission_policy_ref`; a child of any other policy is left undecided.
+DEFAULT_ASYNC_RESULT_POLICIES: Mapping[str, AdmissionRule] = {
+    "policy:async-result:technical-child@1": admit_typed_manifest,
+}
 DEFAULT_WORKSPACE_ROOT = PROJECT_ROOT / ".workspaces"
 GOAL_DIRECTED_WORKER_ACTOR = "goal-directed-worker"
 
@@ -285,12 +298,11 @@ class ProductionAsyncSubagentMiddlewareFactory:
         self._submitter_identity = submitter_identity
         self._dependency_class = dependency_class
 
-    def middleware(
-        self,
-        binding: OperationExecutionBinding,
-        contracts: tuple[AsyncSubagentContract, ...],
-        resolved_secrets: Mapping[str, str],
-    ) -> BellLabsAsyncSubagentMiddleware:
+    def service(
+        self, binding: OperationExecutionBinding, resolved_secrets: Mapping[str, str]
+    ) -> tuple[AsyncSubagentService, DeepAgentsAsyncSubagentAdapter]:
+        """The governed service of one parent operation, over its scope-bound credential."""
+
         adapter = DeepAgentsAsyncSubagentAdapter(
             secrets=resolved_secrets, request_scope=binding.request_scope
         )
@@ -302,6 +314,15 @@ class ProductionAsyncSubagentMiddlewareFactory:
             allow_new_spawns=self._allow_new_spawns,
             submitter_identity=self._submitter_identity,
         )
+        return service, adapter
+
+    def middleware(
+        self,
+        binding: OperationExecutionBinding,
+        contracts: tuple[AsyncSubagentContract, ...],
+        resolved_secrets: Mapping[str, str],
+    ) -> BellLabsAsyncSubagentMiddleware:
+        service, adapter = self.service(binding, resolved_secrets)
         return BellLabsAsyncSubagentMiddleware(
             service=service,
             adapter=adapter,
@@ -309,6 +330,61 @@ class ProductionAsyncSubagentMiddlewareFactory:
             contracts=contracts,
             dependency_class=self._dependency_class,
         )
+
+
+class AsyncChildCompletingRuntime:
+    """The deployment's operation runtime: bounded cognition, then the parent-boundary
+    completion of the async children it spawned (`AsyncChildCompletion`).
+
+    The completion records travel with the runtime's event payloads into the settlement's
+    digest-bound output payload. Every other runtime capability (for example RRM-008's
+    `observe_latest`) is the wrapped adapter's.
+    """
+
+    def __init__(
+        self,
+        runtime: DeepAgentRuntimeAdapter,
+        children: ProductionAsyncSubagentMiddlewareFactory,
+        *,
+        pool: asyncpg.Pool,
+        policies: Mapping[str, AdmissionRule],
+        wait_seconds: float,
+    ) -> None:
+        self._runtime = runtime
+        self._children = children
+        self._pool = pool
+        self._policies = dict(policies)
+        self._wait_seconds = wait_seconds
+
+    async def execute(
+        self, invocation: RuntimeInvocation, resolved_secrets: Mapping[str, str]
+    ) -> RuntimeResult:
+        result = await self._runtime.execute(invocation, resolved_secrets)
+        deep = invocation.binding.deep_agent_binding
+        if deep is None or not deep.async_subagents:
+            return result
+        service, _adapter = self._children.service(invocation.binding, resolved_secrets)
+        records = await AsyncChildCompletion(
+            service,
+            PostgresAsyncSubagentAuthority(self._pool),
+            policies=self._policies,
+            wait_seconds=self._wait_seconds,
+        ).complete(invocation.binding, execution_generation=deep.execution_generation)
+        return result.model_copy(
+            update={
+                "event_payloads": (
+                    *result.event_payloads,
+                    {
+                        "kind": ASYNC_CHILD_COMPLETION_KIND,
+                        "binding_id": invocation.binding.binding_id,
+                        "children": [record.as_payload() for record in records],
+                    },
+                )
+            }
+        )
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._runtime, name)
 
 
 @dataclass(frozen=True)
@@ -334,8 +410,14 @@ class ProductionWorkerActivityCompositionFactory:
         artifact_validation: ArtifactValidationAuthorityPort | None = None,
         worker_identity: str | None = None,
         claim_lease: timedelta | None = None,
+        async_result_policies: Mapping[str, AdmissionRule] | None = None,
     ) -> None:
         self._client = client
+        self._async_result_policies = dict(
+            async_result_policies
+            if async_result_policies is not None
+            else DEFAULT_ASYNC_RESULT_POLICIES
+        )
         self._pins = pins
         self._additional = additional_components
         self._artifact_validation = artifact_validation
@@ -401,16 +483,23 @@ class ProductionWorkerActivityCompositionFactory:
             verifier=LangGraphCheckpointDescendantVerifier(capabilities.checkpointers),
             default_lease=self._claim_lease or DEFAULT_CLAIM_LEASE,
         )
-        adapter = DeepAgentRuntimeAdapter(
-            ExactDeepAgentMaterializer(capabilities.registry),
-            async_subagents=ProductionAsyncSubagentMiddlewareFactory(
-                pool=postgres_pool,
-                run_control=run_control,
-                actor=actor,
-                allow_new_spawns=settings.async_subagent_spawning_enabled,
-                submitter_identity=settings.async_subagent_submitter_identity,
+        children = ProductionAsyncSubagentMiddlewareFactory(
+            pool=postgres_pool,
+            run_control=run_control,
+            actor=actor,
+            allow_new_spawns=settings.async_subagent_spawning_enabled,
+            submitter_identity=settings.async_subagent_submitter_identity,
+        )
+        adapter = AsyncChildCompletingRuntime(
+            DeepAgentRuntimeAdapter(
+                ExactDeepAgentMaterializer(capabilities.registry),
+                async_subagents=children,
+                workspace_outputs=candidates,
             ),
-            workspace_outputs=candidates,
+            children,
+            pool=postgres_pool,
+            policies=self._async_result_policies,
+            wait_seconds=settings.async_subagent_completion_wait_seconds,
         )
         verifier = PinnedCapabilityAssetVerifier(pins)
         service = OperationExecutionService(
@@ -508,6 +597,9 @@ class _DurableInputsFromPayloads:
 
 
 __all__ = [
+    "ASYNC_CHILD_COMPLETION_KIND",
+    "AsyncChildCompletingRuntime",
+    "DEFAULT_ASYNC_RESULT_POLICIES",
     "DeploymentCapabilityComponents",
     "DeploymentCapabilityRegistry",
     "ProductionAsyncSubagentMiddlewareFactory",
