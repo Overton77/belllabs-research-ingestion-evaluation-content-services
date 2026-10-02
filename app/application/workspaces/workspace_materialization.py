@@ -460,4 +460,3 @@ def _stable_id(*parts: str) -> str:
 def _path_within_slot(logical_path: str, slot_path: str) -> bool:
     normalized_slot = slot_path.rstrip("/")
     return logical_path == normalized_slot or logical_path.startswith(normalized_slot + "/")
-

@@ -134,4 +134,3 @@ class MongoWorkspaceManifestRepository:
             if prior != manifest:
                 raise IdempotencyConflict("workspace manifest identity conflict") from None
             return prior
-
