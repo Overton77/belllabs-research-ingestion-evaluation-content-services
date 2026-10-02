@@ -730,9 +730,7 @@ class AsyncSubagentUsage(Contract):
     the parent run's budget; pending or ambiguous amounts stay pending and are never dropped.
     """
 
-    schema_version: Literal["belllabs.async-subagent-usage.v1"] = (
-        "belllabs.async-subagent-usage.v1"
-    )
+    schema_version: Literal["belllabs.async-subagent-usage.v1"] = "belllabs.async-subagent-usage.v1"
     provider_run_id: str = Field(min_length=1)
     attribution: Literal["provider_attributed", "pending", "ambiguous"]
     attributed_amounts: dict[str, int] = Field(default_factory=dict)

@@ -260,32 +260,32 @@ def aggregate_child_usage(
     REQ-CP-RUN-009 / REQ-CP-DA-008 (RRM-013 review B1): a run whose usage the provider did
     not attribute (a cancelled duplicate, an orphaned or failed run, a cancel whose outcome is
     unknown) makes the pending amounts non-empty. When its amounts are unknown, the child's
-    budget limit is the pending ceiling, so the parent's effect stays unsettled until the
-    usage is reconciled. The completed run's manifest usage replaces its record's usage.
+    budget limit is the pending ceiling (one ceiling shared by every such run), so the
+    parent's effect stays unsettled until the usage is reconciled. Provider-attributed
+    amounts are facts and are never capped, even above the child's reservation. The completed
+    run's manifest usage replaces its record's usage.
     """
 
     attributed: dict[str, int] = {}
     pending: dict[str, int] = {}
+    unknown = False
     for record in records:
         usage = record.usage
         if manifest_usage is not None and manifest_usage.provider_run_id == record.provider_run_id:
             usage = manifest_usage
         if usage.attribution == "provider_attributed":
+            # Provider-attributed facts are never capped, even beyond the reservation.
             for dimension, amount in usage.attributed_amounts.items():
                 if dimension in budget_limits:
                     attributed[dimension] = attributed.get(dimension, 0) + amount
-            continue
-        amounts: Mapping[str, int] = (
-            usage.pending_amounts if any(usage.pending_amounts.values()) else budget_limits
-        )
-        for dimension, amount in amounts.items():
-            if dimension in budget_limits:
-                pending[dimension] = pending.get(dimension, 0) + amount
-    for dimension, limit in budget_limits.items():
-        # Attributed plus pending never exceeds the child's reservation: the ceiling is the
-        # reservation itself (the manifest keeps any larger reported amount).
-        total = attributed.get(dimension, 0) + pending.get(dimension, 0)
-        if total > limit:
-            pending[dimension] = max(0, limit - attributed.get(dimension, 0))
-            attributed[dimension] = min(attributed.get(dimension, 0), limit)
+        elif any(usage.pending_amounts.values()):
+            for dimension, amount in usage.pending_amounts.items():
+                if dimension in budget_limits:
+                    pending[dimension] = pending.get(dimension, 0) + amount
+        else:
+            unknown = True
+    if unknown:
+        # Runs of unknown usage share one ceiling: the child's budget limit per dimension.
+        for dimension, limit in budget_limits.items():
+            pending[dimension] = max(pending.get(dimension, 0), limit)
     return attributed, {dimension: amount for dimension, amount in pending.items() if amount > 0}

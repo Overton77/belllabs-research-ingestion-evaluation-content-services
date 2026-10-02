@@ -49,8 +49,10 @@ from app.domain.operation_execution.contracts import (
 )
 from app.domain.run_control.contracts import EffectDisposition
 from app.integrations.agents.deep_agents.async_subagents import (
+    PROVIDER_USAGE_STATE_KEY,
     REQUEST_SCOPE_HEADER,
     SPAWN_KEY_METADATA,
+    attribute_usage,
 )
 from tests.fixtures.rrm013_live_stack import (
     SAVER_SCHEMA,
@@ -435,14 +437,59 @@ async def test_parent_cancel_reaches_the_provider_run_and_records_the_acknowledg
         recorded = await facts(test_application_postgres_dsn, child.child_execution_id)
         assert ("cancellation", link.cancellation_receipt) in recorded
         assert len(await provider_runs(child.child_execution_id)) == 1
+        usage_outcome = "not_terminal"
         if cancelled.lifecycle in TERMINAL:
-            await settle_child(stack, child.child_execution_id, admit=False)
+            # B1: a cancelled run's usage is unknown to BellLabs until the provider attributes
+            # it, so the settlement records pending usage up to the budget ceiling and leaves
+            # the parent effect unsettled.
+            await stack.async_subagents.decide_result(
+                SCOPE,
+                child.child_execution_id,
+                "reject",
+                parent_open=True,
+                current_generation=1,
+                decided_at=datetime.now(UTC),
+            )
+            settled_link = await stack.async_subagents.settle(
+                SCOPE,
+                child.child_execution_id,
+                f"settlement:{child.child_execution_id}",
+                datetime.now(UTC),
+            )
+            assert settled_link.settled is False
+            assert settled_link.usage_disposition == "pending_usage"
+            budget = await stack.run_control.get_budget(SCOPE, run_id)
+            usage = budget.usage_records[async_child_usage_id(child.child_execution_id)]
+            assert usage.pending_external_amounts == dict(stack.contract.budget_limits)
             effects = await stack.run_control.get_effects(SCOPE, run_id)
-            assert effects.claims[async_child_effect_id(child.child_execution_id)].disposition in {
-                EffectDisposition.CANCELLED,
-                EffectDisposition.FAILED,
-                EffectDisposition.SUCCEEDED,
-            }
+            assert (
+                effects.claims[async_child_effect_id(child.child_execution_id)].settlement is None
+            )
+            # N1: reconcile from the provider's durable thread state once it is attributable.
+            state = await sdk_client().threads.get_state(child.child_execution_id)
+            values = state.get("values") or {}
+            observed = attribute_usage(
+                child.provider_run_id,
+                values.get("messages"),
+                stack.contract.budget_limits,
+                provider_usage=values.get(PROVIDER_USAGE_STATE_KEY),
+            )
+            reconciled = await stack.async_subagents.reconcile_usage(
+                SCOPE,
+                child.child_execution_id,
+                run_usage={child.provider_run_id: observed},
+                settlement_ref=f"settlement:{child.child_execution_id}",
+                reconciled_at=datetime.now(UTC),
+            )
+            usage_outcome = f"{observed.attribution}:{reconciled.usage_disposition}"
+            if observed.attribution == "provider_attributed":
+                assert reconciled.settled is True and reconciled.settlement_revision == 2
+                effects = await stack.run_control.get_effects(SCOPE, run_id)
+                claim = effects.claims[async_child_effect_id(child.child_execution_id)]
+                assert claim.disposition == EffectDisposition.CANCELLED
+                assert claim.settlement is not None
+            else:
+                assert reconciled.settled is False
         _evidence(
             "cancel",
             {
@@ -451,6 +498,7 @@ async def test_parent_cancel_reaches_the_provider_run_and_records_the_acknowledg
                 "provider_status_after_cancel": status,
                 "cancellation_receipt": link.cancellation_receipt,
                 "lifecycle": cancelled.lifecycle.value,
+                "usage_reconciliation": usage_outcome,
             },
         )
 

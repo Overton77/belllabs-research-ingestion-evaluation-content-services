@@ -629,9 +629,9 @@ async def test_adopted_child_with_a_duplicate_keeps_the_duplicate_usage_pending(
     assert link.settled is False and link.usage_disposition == "pending_usage"
     view = await parent_budget_view(run_control, run_id, child_id)
     # The adopted run's 7 tokens are attributed; the duplicate's unknown usage is pending up
-    # to the remaining reservation; the effect is not settled.
+    # to the child's budget ceiling; the effect is not settled.
     assert view["actual"] == {"tokens.total": 7}
-    assert view["pending"] == {"tokens.total": 3}
+    assert view["pending"] == {"tokens.total": 10}
     assert view["outstanding"] is True and view["effect_settled"] is False
 
 
