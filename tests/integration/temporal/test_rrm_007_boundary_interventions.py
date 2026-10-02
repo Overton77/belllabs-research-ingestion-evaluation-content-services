@@ -45,6 +45,8 @@ from app.domain.orchestration.contracts import (
     GoalDirectedRunInput,
     LifecycleCommandOutcome,
     LifecycleCommandRequest,
+    StageGraphCompletionActivityRequest,
+    StageGraphCompletionActivityResult,
     StageGraphInitializeRequest,
     StageGraphInitializeResult,
 )
@@ -863,8 +865,10 @@ async def test_policy_pause_then_operator_resume_through_the_root_is_applied() -
 
 @pytest.mark.asyncio
 async def test_cancel_never_blocks_a_later_command_at_the_root() -> None:
-    """N1: a cancel is sequenced in its own space (its delivery is RRM-008's), so a later
-    operator command is the root's sequence 1 and is delivered and applied."""
+    """N1: a cancel is sequenced in its own space, so a later operator command is still the
+    root's sequence 1 and is delivered. RRM-008: the cancel itself is delivered root-first
+    (`accepted`, `delivered`) and the family runs its cancellation saga; the later release is
+    delivered but never applied (nothing is admitted after the cancel)."""
 
     try:
         environment = await WorkflowEnvironment.start_time_skipping()
@@ -872,7 +876,7 @@ async def test_cancel_never_blocks_a_later_command_at_the_root() -> None:
         pytest.skip(f"Temporal test server is unavailable: {error}")
     async with environment:
         authority = Authority(environment.client)
-        activities = GovernedStageGraphActivities(authority)
+        activities = _HoldingCompletionActivities(authority)
         run_id = await authority.admit("rrm-007-root-cancel")
         run_input = replace(stage_input(_blueprint(workflow_wait=True)), run_id=run_id)
         condition_id = wait_condition_id("release-workflow")
@@ -898,7 +902,7 @@ async def test_cancel_never_blocks_a_later_command_at_the_root() -> None:
                 "cancel",
                 1,
             )
-            assert cancel.state.value == "accepted", "delivery is RRM-008's"
+            await until(lambda: _state_is(authority, run_id, "cancel", "delivered"), seconds=60)
 
             await authority.intervene(
                 run_id,
@@ -907,17 +911,41 @@ async def test_cancel_never_blocks_a_later_command_at_the_root() -> None:
                     condition_id=condition_id, verification_evidence_ref="evidence:operator"
                 ),
             )
-            await until(lambda: _state_is(authority, run_id, "release", "applied"), seconds=60)
+            await until(lambda: _state_is(authority, run_id, "release", "delivered"), seconds=60)
             release = await authority.run_control.get_boundary_command(
                 SCOPE, run_id, "operator", "release"
             )
             assert release is not None and release.command.target_sequence == 1
+            # Delivered to the cancelling family (its Update handler acknowledges while the
+            # completion activity runs); a family at its boundary rejects it `superseded`
+            # and run control's terminal closure rejects it `terminal_run` (RRM-008 suites).
+            assert [item.state.value for item in release.receipts] == ["accepted", "delivered"]
             continuity = await root.query(BellLabsRunWorkflow.continuity)
             assert [
                 (item.message_id, item.sequence, item.status)
                 for item in continuity.message_receipts
             ] == [("release", 1, "accepted")]
-            await asyncio.wait_for(activities.downstream_started.wait(), timeout=60)
-            activities.slow_release.set()
+            assert [
+                (item.command_id, item.status)
+                for item in await root.query(BellLabsRunWorkflow.cancel_receipts)
+            ] == [("cancel", "delivered")]
+            activities.complete_release.set()
             result = await asyncio.wait_for(root.result(), timeout=120)
-        assert result["output_refs"]["downstream"] == ["artifact:downstream"]
+        assert result["completion_proposal"]["cancelled"] is True
+        assert activities.admission_order == [], "nothing is admitted after the cancel"
+
+
+class _HoldingCompletionActivities(GovernedStageGraphActivities):
+    """The governed StageGraph fixture whose completion waits for the test's release, so
+    the family is still running when a later command is delivered to it."""
+
+    def __init__(self, authority: Authority) -> None:
+        super().__init__(authority)
+        self.complete_release = asyncio.Event()
+
+    @activity.defn(name="stagegraph.complete")
+    async def complete(
+        self, request: StageGraphCompletionActivityRequest
+    ) -> StageGraphCompletionActivityResult:
+        await asyncio.wait_for(self.complete_release.wait(), timeout=8)
+        return await super().complete(request)

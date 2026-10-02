@@ -56,6 +56,11 @@ class GoalFamilyDecisionMutation(AtomicFamilyMutation):
     ]
 
 
+# The ApplicationError type a preparation activity raises for a stale admission; its
+# details are the run's current version and phase (RRM-016 review fix 2).
+GOAL_ADMISSION_STALE = "goal_admission_stale"
+
+
 class GoalOperationPreparationRequest(Contract):
     schema_version: Literal["belllabs.goal-operation-preparation.v1"] = (
         "belllabs.goal-operation-preparation.v1"
@@ -86,6 +91,9 @@ class GoalOperationPreparationRequest(Contract):
     execution_epoch: int = Field(default=1, ge=1)
     agent_run: int | None = Field(default=None, ge=1)
     session_generation: int | None = Field(default=None, ge=1)
+    # RRM-016 review fix 2 (additive): 2 re-admits once after a stale admission, under a
+    # new command identity, at the run version the stale result reported.
+    admission_attempt: int = Field(default=1, ge=1, le=2)
 
     @model_validator(mode="after")
     def exact_revision(self) -> GoalOperationPreparationRequest:
@@ -355,6 +363,7 @@ def route_goal_async_subgoal(
 
 
 __all__ = [
+    "GOAL_ADMISSION_STALE",
     "GoalAsyncSubgoalRouting",
     "GoalFamilyDecisionMutation",
     "GoalExecutorObservation",

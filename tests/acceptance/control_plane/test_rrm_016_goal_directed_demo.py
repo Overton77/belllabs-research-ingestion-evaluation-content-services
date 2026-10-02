@@ -17,6 +17,11 @@ the resume continues the frontier. Each executor and verifier operation is verif
 `RunControlOperationAuthority`, claimed, fenced, observed and settled once in run control;
 the family consumes each settlement and records no operation usage.
 
+RRM-018/RRM-019: the GoalDirected family documents (Goal Revision, iterations, verifications)
+are MongoDB documents, and each iteration produces its own output ref. The unchanged Goal
+Revision is persisted by both executor preparations (one per worker) and stays one immutable
+document; the run completes and promotes exactly the verified final output.
+
 Opt-in through `TEST_APPLICATION_POSTGRES_DSN` and `TEST_MONGODB_URI` (disposable stack only).
 """
 
@@ -66,6 +71,11 @@ from app.domain.run_control.contracts import EffectDisposition, RunOutcome, RunP
 from app.integrations.mongodb import BEANIE_MODELS
 from app.integrations.temporal_boundary_commands import TemporalBoundaryCommandTransport
 from app.integrations.temporal_workflow_submission import TemporalWorkflowSubmitter
+from app.models.goal_directed import (
+    GoalIterationDocument,
+    GoalRevisionDocument,
+    GoalVerificationDocument,
+)
 from app.temporal.operation_activities import OperationExecutionActivities
 from app.temporal.registration.activities import (
     agent_cognitive_activities,
@@ -75,6 +85,7 @@ from app.temporal.workflow_sandbox import coordinator_workflow_runner
 from app.temporal.workflows.belllabs_run import BellLabsRunWorkflow
 from app.temporal.workflows.goal_directed import (
     JOURNALED_SETTLEMENT_PATCH,
+    VERIFIED_TERMINAL_OUTPUTS_PATCH,
     GoalDirectedWorkflow,
 )
 from app.temporal.workflows.operation import OperationWorkflow
@@ -86,7 +97,6 @@ from tests.fixtures.goal_directed_journaled import (
     TOKENS_PER_OPERATION,
     GoalComposition,
     GoalScriptedModel,
-    RecordingGoalDocuments,
     admit_goal_run,
     compose_goal_directed,
     goal_blueprint,
@@ -141,14 +151,13 @@ async def _worker(
     dsn: str,
     results: Path,
     identity: str,
-    documents: RecordingGoalDocuments,
 ) -> AsyncIterator[GoalComposition]:
-    """One worker process's composition: every object is new; only durable stores (and the
-    family detail documents, see RRM-018) are shared."""
+    """One worker process's composition: every object is new; only durable stores are
+    shared. The family documents and templates are MongoDB (RRM-018)."""
 
     run_control = _run_control(pool, family_pool)
     recovery = compose_postgres_operation_recovery(pool, run_control=run_control)
-    templates = MongoGoalDirectedDocumentRepository()
+    documents = MongoGoalDirectedDocumentRepository()
     async with AsyncPostgresSaver.from_conn_string(_saver_dsn(dsn)) as saver:
         composition = await compose_goal_directed(
             run_control=run_control,
@@ -157,10 +166,11 @@ async def _worker(
             results=FileArtifactPayloadStore(results),
             bindings=MongoOperationBindingRepository(),
             saver=saver,
-            model=GoalScriptedModel(),
+            # RRM-019: each iteration produces its own output ref.
+            model=GoalScriptedModel(stable_output_ref=False),
             blueprint=goal_blueprint(),
             claimed_by=CLAIMED_BY,
-            template_provider=templates,
+            template_provider=documents,
             documents=documents,
         )
         async with (
@@ -283,10 +293,7 @@ async def test_journaled_goal_directed_run_on_real_temporal(
     pool = await asyncpg.create_pool(dsn=dsn, min_size=1, max_size=10)
     family_pool = await asyncpg.create_pool(dsn=dsn, min_size=1, max_size=4)
     results = tmp_path / "results"
-    # GoalDirected detail documents stay in memory: the Mongo repository rejects the second
-    # executor's re-persisted Goal Revision (recorded_at differs), a defect outside RRM-016
-    # recorded as RRM-018. Bindings and templates are MongoDB; all authority is PostgreSQL.
-    documents = RecordingGoalDocuments()
+    # Bindings, templates and the family documents are MongoDB; all authority is PostgreSQL.
     evidence: dict[str, Any] = {}
     try:
         await init_beanie(database=mongo[mongo_database], document_models=BEANIE_MODELS)
@@ -316,7 +323,7 @@ async def test_journaled_goal_directed_run_on_real_temporal(
             run_input = goal_run_input(run_id, goal_blueprint(), baseline=BASELINE)
             async with Facade(authority) as facade:
                 async with _worker(
-                    env, pool, family_pool, dsn, results, "rrm016-worker-1", documents
+                    env, pool, family_pool, dsn, results, "rrm016-worker-1"
                 ) as first:
                     entered, gate = first.model.gate_on(1)
                     submitted = await _submitter(env.client).submit(
@@ -345,7 +352,7 @@ async def test_journaled_goal_directed_run_on_real_temporal(
                 ]
 
                 async with _worker(
-                    env, pool, family_pool, dsn, results, "rrm016-worker-2", documents
+                    env, pool, family_pool, dsn, results, "rrm016-worker-2"
                 ) as second:
                     root = env.client.get_workflow_handle(submitted.workflow_id)
                     family = env.client.get_workflow_handle(family_id)
@@ -446,6 +453,31 @@ async def test_journaled_goal_directed_run_on_real_temporal(
         assert JOURNALED_SETTLEMENT_PATCH in patch_ids(family_history)
         assert (root_runs, family_runs) == (1, 1)
 
+        # RRM-018: both executor preparations (worker 1, then worker 2 after the restart)
+        # persisted the unchanged Goal Revision; MongoDB holds it once, with iteration 1's time.
+        prepared_revisions = [
+            item["goal_revision"]["revision_id"]
+            for item in scheduled_activity_inputs(family_history, "goaldirected.prepare_executor")
+        ]
+        assert prepared_revisions == [run_input.initial_revision.revision_id] * 2
+        revision_documents = await GoalRevisionDocument.find({"run_id": run_id}).to_list()
+        iteration_documents = await GoalIterationDocument.find({"run_id": run_id}).to_list()
+        verification_documents = await GoalVerificationDocument.find({"run_id": run_id}).to_list()
+        assert [item.goal_revision_id for item in revision_documents] == [
+            run_input.initial_revision.revision_id
+        ]
+        assert len(iteration_documents) == len(verification_documents) == 2
+        iteration_outputs = sorted(
+            tuple(item.payload["output_refs"]) for item in iteration_documents
+        )
+        assert iteration_outputs == [("artifact:rrm016:1",), ("artifact:rrm016:2",)]
+        # RRM-019: distinct output refs per iteration; the family result keeps both as lineage,
+        # the run promotes and terminalizes exactly the verified final output.
+        assert root_result["output_refs"] == ["artifact:rrm016:1", "artifact:rrm016:2"]
+        assert root_result["terminalization_proposal"]["output_refs"] == ["artifact:rrm016:2"]
+        assert [item.output_ref for item in run.accepted_output_evidence] == ["artifact:rrm016:2"]
+        assert VERIFIED_TERMINAL_OUTPUTS_PATCH in patch_ids(family_history)
+
         evidence = {
             "run_id": run_id,
             "root_workflow_id": submitted.workflow_id,
@@ -474,6 +506,21 @@ async def test_journaled_goal_directed_run_on_real_temporal(
             "patches": sorted(patch_ids(family_history)),
             "replayed": {"root": root_runs, "family": family_runs},
             "terminal_outcome": str(run.terminal_outcome),
+            "rrm018_mongo_documents": {
+                "revisions": [item.goal_revision_id for item in revision_documents],
+                "revision_recorded_at": str(revision_documents[0].recorded_at),
+                "executor_preparations_persisting_revision": len(prepared_revisions),
+                "iterations": len(iteration_documents),
+                "verifications": len(verification_documents),
+            },
+            "rrm019_outputs": {
+                "iteration_outputs": iteration_outputs,
+                "family_result_output_refs": root_result["output_refs"],
+                "proposal_output_refs": root_result["terminalization_proposal"]["output_refs"],
+                "accepted_output_evidence": [
+                    item.output_ref for item in run.accepted_output_evidence
+                ],
+            },
         }
     finally:
         await pool.close()

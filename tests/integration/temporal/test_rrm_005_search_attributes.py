@@ -137,11 +137,17 @@ def _started_attributes(history: WorkflowHistory) -> set[str]:
 
 
 def _upserts(history: WorkflowHistory) -> int:
-    return sum(
-        1
-        for event in history.events
-        if event.HasField("upsert_workflow_search_attributes_event_attributes")
-    )
+    """Upserts of BellLabs attributes. A `workflow.patched` marker also upserts the SDK's
+    `TemporalChangeVersion` attribute, which is not a BellLabs attribute (RRM-008)."""
+
+    count = 0
+    for event in history.events:
+        if not event.HasField("upsert_workflow_search_attributes_event_attributes"):
+            continue
+        upsert = event.upsert_workflow_search_attributes_event_attributes
+        if any(name.startswith("BellLabs") for name in upsert.search_attributes.indexed_fields):
+            count += 1
+    return count
 
 
 async def _replay(histories: list[WorkflowHistory]) -> None:

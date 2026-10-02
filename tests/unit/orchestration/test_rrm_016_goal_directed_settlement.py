@@ -37,6 +37,8 @@ from app.application.orchestration.goal_directed import (
     GoalOperationSettlementUnavailable,
 )
 from app.domain.operation_execution.contracts import (
+    DeepAgentExecutionBinding,
+    OperationExecutionRequest,
     OperationExecutionResult,
     OperationWorkflowResult,
     PromptTrustClass,
@@ -50,15 +52,17 @@ from app.domain.orchestration.goal_directed_runtime import (
     GoalOperationReconciliationRequest,
     GoalOperationReconciliationResult,
 )
+from app.domain.orchestration.runtime_units import goal_runtime_unit
 from app.domain.run_control.contracts import (
     CommandStatus,
     EffectDisposition,
+    ExecutionTarget,
     LifecycleCommand,
     RecordUsageAction,
     StartAction,
 )
 from app.integrations.artifact_payloads import InMemoryArtifactPayloadStore
-from tests.fixtures.checkpoint_lineage import activity_attempt
+from tests.fixtures.checkpoint_lineage import activity_attempt, bind_unit, stage_unit
 from tests.fixtures.checkpoint_recovery import AcceptingAuthority, MemoryOperationJournal
 from tests.fixtures.goal_directed_journaled import (
     SCOPE,
@@ -71,6 +75,7 @@ from tests.fixtures.goal_directed_journaled import (
     goal_blueprint,
     goal_run_control,
     goal_run_input,
+    goal_start_action,
 )
 from tests.unit.run_control.test_run_control import actor, command
 
@@ -108,7 +113,9 @@ async def _composition(*, journaled: bool = True) -> tuple[GoalComposition, str]
         # ... and a family that records each operation's usage itself (no settlement port).
         composition.family._results = GoalDirectedOperationResultService(composition.documents)
     run_id = await admit_goal_run(run_control, f"rrm-016-unit-{'journal' if journaled else 'none'}")
-    started = await run_control.execute(command(run_id, 1, "rrm-016-start", StartAction()))
+    started = await run_control.execute(
+        command(run_id, 1, "rrm-016-start", goal_start_action(run_id))
+    )
     assert started.status == CommandStatus.ACCEPTED
     return composition, run_id
 
@@ -604,3 +611,117 @@ async def test_usage_accounting_before_and_after_the_governed_composition() -> N
         "accepted_operation_settlements": 2,
         "family_settlements_consumed": 2,
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target", ["StageGraph", None])
+async def test_authority_rejects_a_goal_unit_on_a_run_that_is_not_goal_directed(
+    target: str | None,
+) -> None:
+    """Review fix 1: a GoalDirected unit is admitted only on a GoalDirected run."""
+
+    composition, _goal_run = await _composition()
+    run_control = composition.run_control
+    run_id = await admit_goal_run(run_control, f"rrm-016-foreign-family-{target}")
+    start = (
+        StartAction(
+            execution_target=ExecutionTarget(family="StageGraph", family_workflow_id="family/x/1")
+        )
+        if target == "StageGraph"
+        else StartAction()
+    )
+    assert (
+        await run_control.execute(command(run_id, 1, "start", start))
+    ).status == CommandStatus.ACCEPTED
+    claim = await _claim(run_id)
+    dispatch = await composition.family.execute_iteration(
+        _preparation(run_id, claim, "executor", 2, 0)
+    )
+    authority = goal_authority(run_control, composition.templates["executor"])
+    with pytest.raises(ValueError, match="requires a GoalDirected Workflow Run"):
+        await authority.verify(dispatch.workflow_request.operation)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("iteration", "role"), [(2, "executor"), (1, "verifier")])
+async def test_authority_rejects_a_goal_unit_whose_location_is_not_its_operation(
+    iteration: int, role: str
+) -> None:
+    """Review fix 1: the unit location (iteration, role) must name the operation; otherwise
+    the workspace root it implies belongs to another unit."""
+
+    composition, run_id = await _composition()
+    claim = await _claim(run_id)
+    dispatch = await composition.family.execute_iteration(
+        _preparation(run_id, claim, "executor", 2, 0)
+    )
+    operation = dispatch.workflow_request.operation
+    assert operation.runtime_unit is not None and operation.deep_agent_binding is not None
+    location = operation.runtime_unit.location
+    foreign_unit = goal_runtime_unit(
+        request_scope=SCOPE,
+        run_id=run_id,
+        execution_epoch=1,
+        operation_id=operation.identity.operation_id,  # still goal-iteration/1/executor
+        operation_attempt=1,
+        goal_iteration=iteration,
+        goal_revision_id=location.goal_revision_id,  # type: ignore[union-attr]
+        operation_role=role,  # type: ignore[arg-type]
+        agent_run=location.agent_run,  # type: ignore[union-attr]
+        session_generation=location.session_generation,  # type: ignore[union-attr]
+    )
+    foreign = OperationExecutionRequest.model_validate(
+        {
+            **operation.model_dump(mode="python"),
+            "runtime_unit": foreign_unit,
+            "deep_agent_binding": bind_unit(operation.deep_agent_binding, foreign_unit),
+        }
+    )
+    authority = goal_authority(composition.run_control, composition.templates["executor"])
+    await authority.verify(operation)
+    with pytest.raises(ValueError, match="location does not match its operation"):
+        await authority.verify(foreign)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unit", ["none", "stage_graph"])
+async def test_goal_directed_run_rejects_an_operation_without_a_goal_unit(unit: str) -> None:
+    """Re-check (a): on a GoalDirected run every operation carries a GoalDirected unit, so
+    its slots are always rebased under its role root and executor and verifier stay
+    disjoint. An operation with no unit, or with another family's unit, is rejected."""
+
+    composition, run_id = await _composition()
+    claim = await _claim(run_id)
+    dispatch = await composition.family.execute_iteration(
+        _preparation(run_id, claim, "executor", 2, 0)
+    )
+    operation = dispatch.workflow_request.operation
+    assert operation.deep_agent_binding is not None
+    if unit == "none":
+        replacement = None
+        deep_binding = DeepAgentExecutionBinding.create(
+            **{
+                **operation.deep_agent_binding.model_dump(
+                    mode="python", exclude={"binding_digest"}
+                ),
+                "runtime_unit": None,
+                "cognitive_session_namespace": None,
+            }
+        )
+    else:
+        replacement = stage_unit(
+            request_scope=SCOPE,
+            run_id=run_id,
+            operation_id=operation.identity.operation_id,
+        )
+        deep_binding = bind_unit(operation.deep_agent_binding, replacement)
+    unitless = OperationExecutionRequest.model_validate(
+        {
+            **operation.model_dump(mode="python"),
+            "runtime_unit": replacement,
+            "deep_agent_binding": deep_binding,
+        }
+    )
+    authority = goal_authority(composition.run_control, composition.templates["executor"])
+    with pytest.raises(ValueError, match="admits only GoalDirected runtime units"):
+        await authority.verify(unitless)

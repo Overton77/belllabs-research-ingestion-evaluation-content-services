@@ -57,7 +57,6 @@ from app.domain.run_control.contracts import (
     ClaimEffectAction,
     CommandStatus,
     ReconcileUnitAction,
-    StartAction,
 )
 from tests.acceptance.control_plane.test_wp_cp_045 import DeterministicProvider
 from tests.fixtures.checkpoint_recovery import (
@@ -76,6 +75,7 @@ from tests.fixtures.goal_directed_journaled import (
     goal_blueprint,
     goal_run_control,
     goal_run_input,
+    goal_start_action,
     goal_templates,
     preparer,
 )
@@ -559,7 +559,9 @@ async def _goal_harness(label: str) -> tuple[RecoveryHarness, Any, Any, str]:
         model=GoalScriptedModel(), real_authority=True, run_control=run_control
     )
     run_id = await admit_goal_run(run_control, f"rrm-008-session-{label}")
-    started = await run_control.execute(command(run_id, 1, f"start-{label}", StartAction()))
+    started = await run_control.execute(
+        command(run_id, 1, f"start-{label}", goal_start_action(run_id))
+    )
     assert started.status == CommandStatus.ACCEPTED
     templates = _Templates(goal_templates(harness.binding, workspace=governed_workspace))
     prepare = preparer(

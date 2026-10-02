@@ -41,6 +41,7 @@ from app.application.operations.operation_execution import (
 )
 from app.application.operations.operation_journal import OperationJournalService
 from app.application.orchestration.goal_directed import (
+    GoalDirectedDocumentRepository,
     GoalDirectedOperationPreparationService,
     GoalDirectedOperationResultService,
     GoalOperationTemplateProvider,
@@ -307,6 +308,19 @@ def goal_run_input(
     )
 
 
+def goal_start_action(run_id: str) -> Any:
+    """The family's `start` fact: it binds the run to its GoalDirected execution target,
+    which the run-control authority requires of a GoalDirected unit (review fix 1)."""
+
+    from app.domain.run_control.contracts import ExecutionTarget, StartAction
+
+    return StartAction(
+        execution_target=ExecutionTarget(
+            family="GoalDirected", family_workflow_id=f"family/{run_id}/1"
+        )
+    )
+
+
 async def admit_goal_run(run_control: RunControlService, request_id: str) -> str:
     """Admit a run whose budget bounds `goal.iterations` (the iteration reservation)."""
 
@@ -348,7 +362,8 @@ class GoalScriptedModel(ScriptedRecoveryModel):
     """
 
     accept_at: int = 2
-    # One stable output record across iterations (default); `False` reproduces RRM-019.
+    # One stable output record across iterations (default); `False` gives each iteration its
+    # own output ref (the RRM-019 case: only the verified final output is promoted).
     stable_output_ref: bool = True
     # Tokens each scripted call reports (RRM-008 drives a budget violation by raising it).
     tokens_per_call: int = 5
@@ -531,7 +546,8 @@ class GoalComposition:
     run_control: RunControlService
     service: OperationExecutionService
     family: GoalDirectedActivities
-    documents: RecordingGoalDocuments
+    # `RecordingGoalDocuments` (in memory) unless a durable repository was composed (RRM-018).
+    documents: Any
     templates: dict[str, OperationExecutionRequest]
     model: GoalScriptedModel
     binding: DeepAgentExecutionBinding
@@ -550,7 +566,7 @@ async def compose_goal_directed(
     blueprint: GoalDirectedBlueprint,
     claimed_by: str = "operation-runtime:rrm-016",
     template_provider: GoalOperationTemplateProvider | None = None,
-    documents: RecordingGoalDocuments | None = None,
+    documents: GoalDirectedDocumentRepository | None = None,
     binding: DeepAgentExecutionBinding | None = None,
     async_subagents: Any = None,
     children: Any = None,
@@ -676,10 +692,12 @@ class FixtureGoalSettlements:
 
 
 def governed_result_service(
-    documents: Any, run_control: RunControlService
+    documents: Any, run_control: RunControlService, bindings: Any
 ) -> GoalDirectedOperationResultService:
+    """The governed result service; `bindings` is the operation binding store (required)."""
+
     return GoalDirectedOperationResultService(
-        documents, RunControlGoalOperationSettlements(run_control)
+        documents, RunControlGoalOperationSettlements(run_control, bindings)
     )
 
 
@@ -721,6 +739,7 @@ __all__: Sequence[str] = (
     "goal_blueprint",
     "goal_run_control",
     "goal_run_input",
+    "goal_start_action",
     "goal_templates",
     "goal_template_workspace",
     "governed_result_service",
