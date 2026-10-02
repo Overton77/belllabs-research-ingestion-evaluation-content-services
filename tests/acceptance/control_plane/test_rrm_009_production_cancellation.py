@@ -13,7 +13,9 @@ through the facade. See `tests/fixtures/rrm009_cancellation.py` for the drill.
    child. The child is cancelled at the provider and acknowledged, rejected, its usage stays
    pending and keeps the run `cancelling` until the privileged usage reconciliation route
    settles it and hints the family; the run terminalizes `cancelled`, receipts `applied`.
-   This is the core of RRM-010's combined smoke.
+   A third case replaces the worker set while the child runs: the retried attempt reconnects
+   to the same child (no second spawn or provider run; the worker shutdown settled nothing)
+   and the cancel then reaches it. This is the core of RRM-010's combined smoke.
 """
 
 from __future__ import annotations
@@ -73,9 +75,14 @@ async def test_sync_subagent_cancellation_in_the_production_composition(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("window", ["cognition", "completion_wait"])
+@pytest.mark.parametrize(
+    ("window", "restart"),
+    [("cognition", False), ("completion_wait", False), ("cognition", True)],
+    ids=["cognition", "completion_wait", "restart_then_cancel"],
+)
 async def test_async_subagent_cancellation_in_the_production_composition(
     window: CancellationWindow,
+    restart: bool,
     test_application_postgres_dsn: str,
     test_mongodb_uri: str,
     mongo_database: str,  # noqa: F811
@@ -87,7 +94,7 @@ async def test_async_subagent_cancellation_in_the_production_composition(
         pytest.skip(reason)
     endpoint = os.environ["AGENT_SERVER_ENDPOINT"]
     technical, _contract = async_child_binding(endpoint)
-    gate = CancellationGate(window)
+    gate = CancellationGate(window, restart_workers=restart)
     model_log: list[dict[str, Any]] = []
     async with open_production_stack(
         dsn=test_application_postgres_dsn,
@@ -108,4 +115,4 @@ async def test_async_subagent_cancellation_in_the_production_composition(
     ) as stack:
         evidence = await run_cancellation_drill(stack, technical, gate)
     assert evidence["child"]["cancellation_receipt"] == "provider_acknowledged"
-    _evidence(window, evidence)
+    _evidence(f"{window}{':restart' if restart else ''}", evidence)

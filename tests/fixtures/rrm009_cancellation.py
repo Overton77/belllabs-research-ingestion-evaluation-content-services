@@ -25,6 +25,7 @@ import asyncio
 import json
 import os
 import time
+from contextlib import AsyncExitStack
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
@@ -72,6 +73,7 @@ from app.integrations.agents.deep_agents.async_subagents import (
 )
 from app.server import api
 from app.temporal.deployment_composition import DeploymentCapabilityComponents
+from app.temporal.worker import create_production_workers
 from tests.acceptance.control_plane.test_rrm_009_production_composition import (
     PRINCIPAL,
     ProductionStack,
@@ -141,6 +143,9 @@ class CancellationGate:
 
     window: CancellationWindow
     held: asyncio.Event = field(default_factory=asyncio.Event)
+    # `cognition` only: replace the worker set while the child runs and the parent's call is
+    # held, so the retried attempt reconnects to the same child before the cancel lands.
+    restart_workers: bool = False
 
 
 def _since_input(messages: list[BaseMessage]) -> list[BaseMessage]:
@@ -468,6 +473,25 @@ async def launch_stagegraph(
     return run_id
 
 
+async def restart_workers(stack: ProductionStack) -> None:
+    """Shut the deployment's worker set down (graceful drain, then the in-flight Activity is
+    cancelled with `worker_shutdown`) and start a new one over the same composition."""
+
+    await stack.worker_stack.aclose()
+    replacement = AsyncExitStack()
+    workers = create_production_workers(stack.client, stack.settings, stack.composition)
+    for worker in workers.workers:
+        await replacement.enter_async_context(worker)
+    # The fixture's own exit closes the replacement set.
+    stack.worker_stack.push_async_callback(replacement.aclose)
+
+
+def _parent_calls(stack: ProductionStack, run_id: str) -> int:
+    return sum(
+        1 for item in stack.model_log if item["run_id"] == run_id and item["model"] == "parent"
+    )
+
+
 async def cancel_through_the_facade(stack: ProductionStack, run_id: str) -> str:
     run = await _run(stack, run_id)
     command_id = f"cancel:{run_id[:8]}"
@@ -542,6 +566,27 @@ async def run_cancellation_drill(
             return await provider_status(child_id, provider_run_id) == "running"
 
         await _wait_for(stack, run_id, child_running, 120)
+    if gate.restart_workers:
+        assert gate.window == "cognition"
+        await restart_workers(stack)
+
+        # The retried attempt resumes the interrupted lineage (the held call never completed,
+        # so it is asked again) and is held again; nothing was spawned twice.
+        async def resumed() -> bool:
+            return _parent_calls(stack, run_id) == 3
+
+        await _wait_for(stack, run_id, resumed, 180)
+        # A worker shutdown is not a cancel of the unit (RRM-008 F1): nothing settled.
+        assert await operation_rows(stack, run_id) == []
+        assert (await _run(stack, run_id))["phase"] == "active"
+        assert child_id is not None and provider_run_id is not None
+        children = await PostgresAsyncSubagentAuthority(stack.owner_pool).list_children(
+            SCOPE, run_id
+        )
+        assert [item.child_execution_id for item in children] == [child_id]
+        assert await provider_status(child_id, provider_run_id) == "running"
+        assert len(await provider_runs(child_id)) == 1
+        evidence["restart"] = {"parent_calls_before_cancel": _parent_calls(stack, run_id)}
     if gate.window == "completion_wait":
         # The parent's cognition finished (both calls answered); the boundary waits.
         async def cognition_finished() -> bool:
@@ -664,7 +709,9 @@ async def run_cancellation_drill(
     assert all(DRAFT_OPERATION.split(":slot:")[0] in item["operation"] for item in parent_calls)
     # sync_child: the parent's `task` call, then the child's held call; async windows: the
     # spawn call, then the held (cognition) or final (completion_wait) parent call.
-    expected_calls = (1, 1) if gate.window == "sync_child" else (2, 0)
+    expected_calls = (
+        (1, 1) if gate.window == "sync_child" else (3, 0) if gate.restart_workers else (2, 0)
+    )
     assert (len(parent_calls), len(child_calls)) == expected_calls, stack.model_log
     if async_children:
         assert child_id is not None
