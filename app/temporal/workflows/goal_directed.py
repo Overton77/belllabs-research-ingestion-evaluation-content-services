@@ -55,6 +55,7 @@ CONTINUE_AS_NEW_ITERATIONS = 20
 # the non-retryable `goal_paused` failure. Histories recorded before the patch replay the
 # failure unchanged.
 DURABLE_PAUSE_PATCH = "rrm-007-durable-goal-pause"
+CLOSING_DRAIN_PATCH = "rrm-007-closing-drain"
 POLICY_PAUSE_PREFIX = "goal-policy-pause:"
 
 
@@ -386,9 +387,10 @@ class GoalDirectedWorkflow:
         await self._stop_for_cancellation(run_input, run_version, timeout)
         # F1: drain what was delivered during the final iteration before closing; at this
         # point no pause is active, so every pending command is `not_applicable` here.
-        run_version = await self._apply_pending(
-            run_input, state, run_version, boundary_ref, timeout, blueprint, closing=True
-        )
+        if self._pending_commands and workflow.patched(CLOSING_DRAIN_PATCH):
+            run_version = await self._apply_pending(
+                run_input, state, run_version, boundary_ref, timeout, blueprint, closing=True
+            )
         terminalization_proposal = state.terminalization_proposal
         if terminalization_proposal is None:
             return interpreter.result(state)
@@ -743,11 +745,8 @@ class GoalDirectedWorkflow:
                 non_retryable=True,
             )
         run_version = accepted.resulting_run_version
-        # The self-applied command took a place in the run's sequence space; keep the
-        # family's contiguity check aligned with it (F7).
-        self._last_delivered_sequence = max(
-            self._last_delivered_sequence, accepted.target_sequence
-        )
+        # The self-issued pause is sequenced in the family's own space (N1): the root's and
+        # the family's `execution` contiguity are untouched.
         paused = self._paused_state(
             state, decision_id, command_id, run_version, run_input, blueprint
         )

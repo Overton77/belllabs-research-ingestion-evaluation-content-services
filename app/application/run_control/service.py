@@ -514,17 +514,25 @@ class RunControlService:
             )
             return await self._repository.commit_admission(AdmissionMutation(decision=rejected))
 
-    async def execute(self, command: LifecycleCommand) -> CommandResult:
+    async def execute(
+        self, command: LifecycleCommand, *, self_issued: bool = False
+    ) -> CommandResult:
+        """Execute one lifecycle command. `self_issued` marks a boundary command the family
+        issues to itself (a policy pause): accepted and applied at that boundary without
+        delivery, sequenced outside the root's `execution` space (review N1)."""
+
         for _attempt in range(8):
             try:
-                return await self._execute_once(command)
+                return await self._execute_once(command, self_issued=self_issued)
             except (RunVersionConflict, AuthorityStateConflict):
                 continue
         raise AuthorityStateConflict(
             "lifecycle command authority changed during every deterministic retry"
         )
 
-    async def _execute_once(self, command: LifecycleCommand) -> CommandResult:
+    async def _execute_once(
+        self, command: LifecycleCommand, *, self_issued: bool = False
+    ) -> CommandResult:
         command = self._validated_lifecycle_command(command)
         try:
             required_permissions = required_action_permissions(command.action)
@@ -608,7 +616,11 @@ class RunControlService:
                 ),
             )
         if is_boundary_command(command.action):
-            target = boundary_target_for(projection, command.action)  # type: ignore[arg-type]
+            target = boundary_target_for(
+                projection,
+                command.action,  # type: ignore[arg-type]
+                self_issued=self_issued and is_family_boundary_command(command.action),
+            )
             record = boundary_command_record(
                 command, target=target, target_sequence=0, accepted_run_version=projection.version
             )

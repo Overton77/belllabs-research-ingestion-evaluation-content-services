@@ -569,7 +569,16 @@ BOUNDARY_COMMAND_KINDS: frozenset[str] = frozenset(
 # (RRM-008 owns its delivery) and `reconcile_unit` by the operation boundary.
 FAMILY_BOUNDARY_COMMAND_KINDS: frozenset[str] = frozenset({"pause", "resume", "satisfy_wait"})
 BoundaryTargetKind = Literal["run_control", "root", "family", "unit"]
+# The root's contiguous message sequence: only commands the transport delivers root-first
+# (operator pause/resume/satisfy_wait) take a place in it. Cancels (`cancel`, delivered by
+# RRM-008 on its own path) and commands a family issues to itself (`boundary:<family>`)
+# have their own spaces, so they can never open a gap at the root (review N1).
 EXECUTION_SEQUENCE_SPACE = "execution"
+CANCEL_SEQUENCE_SPACE = "cancel"
+
+
+def self_issued_sequence_space(family_workflow_id: str) -> str:
+    return f"boundary:{family_workflow_id}"
 
 
 class ReceiptState(StrEnum):

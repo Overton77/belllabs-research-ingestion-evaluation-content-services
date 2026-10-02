@@ -294,7 +294,10 @@ class BoundaryCommandApplicationService:
                 causation_id=command_id,
             )
             try:
-                result = await self._run_control.execute(command)
+                # A `pause` here is the family's own policy pause: self-issued (N1).
+                result = await self._run_control.execute(
+                    command, self_issued=typed.kind == "pause"
+                )
             except CommandRejected as error:
                 raise BoundaryApplicationRejected(str(error)) from error
             if result.status != CommandStatus.STALE:

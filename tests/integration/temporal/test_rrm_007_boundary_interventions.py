@@ -37,6 +37,7 @@ from app.application.run_control.service import RunControlService
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import GoalDirectedBlueprint
 from app.domain.control_plane.fixtures import GENERIC_GOAL_DIRECTED
+from app.domain.coordinator.launch import BlueprintFamily
 from app.domain.orchestration.contracts import (
     BoundaryCommandDelivery,
     BoundaryLifecycleOutcome,
@@ -53,6 +54,7 @@ from app.domain.orchestration.goal_directed_runtime import (
 )
 from app.domain.run_control.contracts import (
     BudgetApplicability,
+    CancelAction,
     CommandStatus,
     LifecycleCommand,
     PauseAction,
@@ -64,8 +66,10 @@ from app.domain.run_control.contracts import (
     StartAction,
 )
 from app.integrations.temporal_boundary_commands import TemporalBoundaryCommandTransport
+from app.integrations.temporal_workflow_submission import TemporalWorkflowSubmitter
 from app.temporal.boundary_activities import apply_boundary_fact
 from app.temporal.workflow_sandbox import coordinator_workflow_runner
+from app.temporal.workflows.belllabs_run import BellLabsRunWorkflow
 from app.temporal.workflows.goal_directed import GoalDirectedWorkflow
 from app.temporal.workflows.operation import OperationWorkflow
 from app.temporal.workflows.stagegraph import StageGraphWorkflow, wait_condition_id
@@ -769,3 +773,138 @@ async def _segment_is(handle: WorkflowHandle[Any, Any], segment: int) -> bool:
     except Exception:
         return False
     return bool(state["technical_segment"] == segment and state["paused"] is not None)
+
+
+# --- Routed through a real root (review N1) ---------------------------------------------------
+
+ROOT_WORKFLOWS = [BellLabsRunWorkflow, StageGraphWorkflow, GoalDirectedWorkflow, OperationWorkflow]
+
+
+def _submitter(client: Any) -> TemporalWorkflowSubmitter:
+    return TemporalWorkflowSubmitter(
+        client, stagegraph_task_queue=QUEUE, goal_directed_task_queue=GOAL_QUEUE
+    )
+
+
+@pytest.mark.asyncio
+async def test_policy_pause_then_operator_resume_through_the_root_is_applied() -> None:
+    """N1: a self-issued policy pause takes no place in the root's sequence space, so the
+    operator's resume (root sequence 1) is routed root-first and applied."""
+
+    try:
+        environment = await WorkflowEnvironment.start_time_skipping()
+    except RuntimeError as error:
+        pytest.skip(f"Temporal test server is unavailable: {error}")
+    async with environment:
+        authority = Authority(environment.client)
+        activities = GovernedGoalActivities(
+            authority, complete_at_iteration=2, no_progress_until_iteration=1
+        )
+        blueprint = _goal_blueprint(
+            max_iterations=3,
+            convergence_policy={"no_progress_action": "pause", "max_no_progress_iterations": 1},
+        )
+        run_id, family_id, run_input = await _goal_run(
+            authority, "rrm-007-root-policy-pause", blueprint
+        )
+        async with Worker(
+            environment.client,
+            task_queue=GOAL_QUEUE,
+            workflows=ROOT_WORKFLOWS,
+            workflow_runner=coordinator_workflow_runner(),
+            activities=activities.functions,
+        ):
+            submitted = await _submitter(environment.client).submit(
+                run_input, workflow_id="ignored", blueprint_family=BlueprintFamily.GOAL_DIRECTED
+            )
+            root = environment.client.get_workflow_handle(submitted.workflow_id)
+            await until(lambda: _phase_is(authority, run_id, RunPhase.PAUSED), seconds=60)
+            projection = await authority.run(run_id)
+            assert projection.execution_target is not None
+            assert projection.execution_target.root_workflow_id == submitted.workflow_id
+            [policy] = await authority.run_control.list_boundary_commands(SCOPE, run_id)
+            assert policy.command.kind == "pause" and policy.state.value == "applied"
+            assert policy.command.target.sequence_space == f"boundary:{family_id}"
+            assert policy.command.target_sequence == 1, "sequenced in its own space"
+
+            await authority.intervene(
+                run_id, "resume", resume(projection.active_pauses[0].decision_id, "release")
+            )
+            await until(lambda: _state_is(authority, run_id, "resume", "applied"), seconds=60)
+            resumed = await authority.run_control.get_boundary_command(
+                SCOPE, run_id, "operator", "resume"
+            )
+            assert resumed is not None
+            assert resumed.command.target.sequence_space == "execution"
+            assert resumed.command.target_sequence == 1, "first command in the root's space"
+            continuity = await root.query(BellLabsRunWorkflow.continuity)
+            assert [
+                (item.message_id, item.sequence, item.status)
+                for item in continuity.message_receipts
+            ] == [("resume", 1, "accepted")]
+            result = await asyncio.wait_for(root.result(), timeout=120)
+        assert result["convergence_proposal"]["action"] == "complete"
+        assert result["goal_iterations"] == 2
+        assert await authority.facade.redeliver(SCOPE, run_id) == ()
+
+
+@pytest.mark.asyncio
+async def test_cancel_never_blocks_a_later_command_at_the_root() -> None:
+    """N1: a cancel is sequenced in its own space (its delivery is RRM-008's), so a later
+    operator command is the root's sequence 1 and is delivered and applied."""
+
+    try:
+        environment = await WorkflowEnvironment.start_time_skipping()
+    except RuntimeError as error:
+        pytest.skip(f"Temporal test server is unavailable: {error}")
+    async with environment:
+        authority = Authority(environment.client)
+        activities = GovernedStageGraphActivities(authority)
+        run_id = await authority.admit("rrm-007-root-cancel")
+        run_input = replace(stage_input(_blueprint(workflow_wait=True)), run_id=run_id)
+        condition_id = wait_condition_id("release-workflow")
+        async with Worker(
+            environment.client,
+            task_queue=QUEUE,
+            workflows=ROOT_WORKFLOWS,
+            workflow_runner=coordinator_workflow_runner(),
+            activities=activities.functions,
+        ):
+            submitted = await _submitter(environment.client).submit(
+                run_input, workflow_id="ignored", blueprint_family=BlueprintFamily.STAGE_GRAPH
+            )
+            root = environment.client.get_workflow_handle(submitted.workflow_id)
+            await until(lambda: _has_wait(authority, run_id, condition_id), seconds=60)
+            cancelled = await authority.intervene(run_id, "cancel", CancelAction())
+            assert cancelled.phase == RunPhase.CANCELLING
+            cancel = await authority.run_control.get_boundary_command(
+                SCOPE, run_id, "operator", "cancel"
+            )
+            assert cancel is not None
+            assert (cancel.command.target.sequence_space, cancel.command.target_sequence) == (
+                "cancel",
+                1,
+            )
+            assert cancel.state.value == "accepted", "delivery is RRM-008's"
+
+            await authority.intervene(
+                run_id,
+                "release",
+                SatisfyWaitAction(
+                    condition_id=condition_id, verification_evidence_ref="evidence:operator"
+                ),
+            )
+            await until(lambda: _state_is(authority, run_id, "release", "applied"), seconds=60)
+            release = await authority.run_control.get_boundary_command(
+                SCOPE, run_id, "operator", "release"
+            )
+            assert release is not None and release.command.target_sequence == 1
+            continuity = await root.query(BellLabsRunWorkflow.continuity)
+            assert [
+                (item.message_id, item.sequence, item.status)
+                for item in continuity.message_receipts
+            ] == [("release", 1, "accepted")]
+            await asyncio.wait_for(activities.downstream_started.wait(), timeout=60)
+            activities.slow_release.set()
+            result = await asyncio.wait_for(root.result(), timeout=120)
+        assert result["output_refs"]["downstream"] == ["artifact:downstream"]

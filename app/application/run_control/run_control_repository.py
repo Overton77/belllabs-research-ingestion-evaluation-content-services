@@ -13,6 +13,7 @@ from app.domain.control_plane.canonical import sha256_digest
 from app.domain.operation_execution.journal import OperationJournalSettlement
 from app.domain.run_control.budget import roll_up_child_budget
 from app.domain.run_control.contracts import (
+    EXECUTION_SEQUENCE_SPACE,
     FAMILY_BOUNDARY_COMMAND_KINDS,
     AdmissionDecision,
     BoundaryCommandReceipt,
@@ -359,6 +360,8 @@ def pending_delivery(status: BoundaryCommandStatus) -> bool:
         status.state == ReceiptState.ACCEPTED
         and status.command.target.kind in {"root", "family"}
         and status.command.kind in FAMILY_BOUNDARY_COMMAND_KINDS
+        # A family-self-issued command is applied by its boundary, never delivered (N1).
+        and status.command.target.sequence_space == EXECUTION_SEQUENCE_SPACE
     )
 
 

@@ -247,7 +247,7 @@ class RacingRunControl:
     def __getattr__(self, name: str) -> Any:
         return getattr(self._inner, name)
 
-    async def execute(self, lifecycle: Any) -> Any:
+    async def execute(self, lifecycle: Any, **options: Any) -> Any:
         if not self.raced and lifecycle.action.kind == "apply_boundary_command":
             self.raced = True
             run = await self._inner.get_run("tenant-1", self._run_id)
@@ -260,7 +260,7 @@ class RacingRunControl:
                 )
             )
             assert bumped.status == CommandStatus.ACCEPTED
-        return await self._inner.execute(lifecycle)
+        return await self._inner.execute(lifecycle, **options)
 
 
 @pytest.mark.asyncio

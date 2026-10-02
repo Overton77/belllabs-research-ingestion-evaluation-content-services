@@ -16,6 +16,7 @@ from datetime import datetime
 from app.domain.control_plane.canonical import contract_fingerprint
 from app.domain.run_control.contracts import (
     BOUNDARY_COMMAND_KINDS,
+    CANCEL_SEQUENCE_SPACE,
     EXECUTION_SEQUENCE_SPACE,
     FAMILY_BOUNDARY_COMMAND_KINDS,
     BoundaryCommandReceipt,
@@ -30,6 +31,7 @@ from app.domain.run_control.contracts import (
     ResumeAction,
     RunProjection,
     SatisfyWaitAction,
+    self_issued_sequence_space,
 )
 
 RUN_CONTROL_RECORDER = "run_control"
@@ -63,8 +65,15 @@ def rejection_reason_for(reason_code: str) -> BoundaryRejectionReason:
     return _REJECTION_REASONS.get(reason_code, "not_applicable")
 
 
-def boundary_target_for(projection: RunProjection, action: BoundaryAction) -> BoundaryTarget:
-    """The boundary a command targets, from the run's declared execution target."""
+def boundary_target_for(
+    projection: RunProjection, action: BoundaryAction, *, self_issued: bool = False
+) -> BoundaryTarget:
+    """The boundary a command targets, from the run's declared execution target.
+
+    `self_issued` marks a command the family boundary issues to itself (a policy pause): it
+    is applied by that boundary without delivery, so it is sequenced in the family's own
+    space and never in the root's `execution` space (review N1).
+    """
 
     if isinstance(action, ReconcileUnitAction):
         return BoundaryTarget(
@@ -89,7 +98,7 @@ def boundary_target_for(projection: RunProjection, action: BoundaryAction) -> Bo
             family_workflow_id=target.family_workflow_id,
             execution_epoch=target.execution_epoch,
             execution_generation=target.execution_generation,
-            sequence_space=EXECUTION_SEQUENCE_SPACE,
+            sequence_space=CANCEL_SEQUENCE_SPACE,
         )
     return BoundaryTarget(
         kind="family",
@@ -98,7 +107,11 @@ def boundary_target_for(projection: RunProjection, action: BoundaryAction) -> Bo
         family_workflow_id=target.family_workflow_id,
         execution_epoch=target.execution_epoch,
         execution_generation=target.execution_generation,
-        sequence_space=EXECUTION_SEQUENCE_SPACE,
+        sequence_space=(
+            self_issued_sequence_space(target.family_workflow_id)
+            if self_issued
+            else EXECUTION_SEQUENCE_SPACE
+        ),
     )
 
 
