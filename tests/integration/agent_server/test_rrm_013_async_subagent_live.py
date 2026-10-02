@@ -407,7 +407,7 @@ async def test_parent_cancel_reaches_the_provider_run_and_records_the_acknowledg
         request = await bound_parent_request(stack, run_id, stage="cancel")
         spawn = spawn_request_for(
             stack,
-            "binding:rrm-013-cancel",
+            f"binding:rrm-013-cancel:{uuid4().hex[:8]}",
             run_id=run_id,
             objective="Call wait_seconds with seconds=60, then reply with exactly PONG.",
             key="cancel-drill",
@@ -475,7 +475,7 @@ async def test_duplicate_provider_run_is_in_doubt_until_adopt_provider_run(
         request = await bound_parent_request(stack, run_id, stage="in-doubt")
         spawn = spawn_request_for(
             stack,
-            "binding:rrm-013-in-doubt",
+            f"binding:rrm-013-in-doubt:{uuid4().hex[:8]}",
             run_id=run_id,
             objective="Call wait_seconds with seconds=25, then reply with exactly PONG.",
             key="in-doubt-drill",
@@ -575,7 +575,7 @@ async def test_agent_server_restart_during_an_active_child_is_reconciled_from_du
         request = await bound_parent_request(stack, run_id, stage="restart")
         spawn = spawn_request_for(
             stack,
-            "binding:rrm-013-restart",
+            f"binding:rrm-013-restart:{uuid4().hex[:8]}",
             run_id=run_id,
             objective="Call wait_seconds with seconds=45, then reply with exactly PONG.",
             key="restart-drill",
