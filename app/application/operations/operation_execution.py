@@ -74,6 +74,16 @@ class OperationLeaseExpired(OperationExecutionInProgress):
     """The holder stopped at its lease deadline; a retry classifies and continues the unit."""
 
 
+class ForkMaterializationPending(OperationExecutionInProgress):
+    """RRM-006: the derived run started before its fork's materialization committed.
+
+    Transient: nothing settles, the lease is released and a retry resolves the reuse
+    decision once the materialization is visible.
+    """
+
+    code = "fork_not_materialized"
+
+
 class OperationBudgetViolation(ValueError):
     """Runtime usage is outside the operation's immutable budget binding."""
 
@@ -462,7 +472,8 @@ class ForkReusePort(Protocol):
     """RRM-006: the reuse decision recorded for a fork-derived unit, if any.
 
     Returns `None` for an ordinary unit or one the fork decided to re-execute; raises (fails
-    closed) for an unmaterialized fork or an incompatible restore.
+    closed) for an unmaterialized fork (transient, retried) or an incompatible restore or
+    missing fork lineage (terminal, settled `failed`).
     """
 
     async def reused_result(
@@ -712,9 +723,14 @@ class OperationExecutionService:
             try:
                 reused = await self._fork_reuse.reused_result(binding)
             except ForkRejected as error:
-                # Fail closed and terminate cleanly: the unit settles `failed` with the typed
-                # reason (claim, reservation and lease released); cognition never runs and
-                # nothing is reused.
+                if error.code == "fork_not_materialized":
+                    # Transient: the derived root started before the fork's materialization
+                    # committed. Nothing settles; the lease is released and a retry
+                    # resolves the recorded reuse decision.
+                    raise ForkMaterializationPending(error.message) from error
+                # Terminal (`incompatible_restore`, `fork_lineage_missing`): fail closed and
+                # terminate cleanly. The unit settles `failed` with the typed reason (claim,
+                # reservation and lease released); cognition never runs, nothing is reused.
                 return await self._settle(
                     binding,
                     claim,

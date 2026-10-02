@@ -15,6 +15,10 @@ from typing import Any
 
 import pytest
 
+from app.application.operations.operation_execution import (
+    ForkMaterializationPending,
+    OperationExecutionInProgress,
+)
 from app.application.runtime.run_forks import (
     ForkOfRun,
     ForkPatchPolicyRegistry,
@@ -353,3 +357,44 @@ async def test_missing_fork_lineage_of_a_fork_derived_run_fails_closed() -> None
     forks.store.decisions.clear()
     assert await forks.store.fork_of_run(SCOPE, receipt.target_run_id) is None
     await _assert_terminated_cleanly(harness, derived_draft, "fork_lineage_missing")
+
+
+@pytest.mark.asyncio
+async def test_unmaterialized_fork_is_retried_and_reuses_once_materialization_commits() -> None:
+    """The derived root may start before the fork's materialization commits: that is
+    transient. The attempt raises a retryable error and settles nothing (claim open,
+    reservation held, lease released); the retry after the commit reuses the source result."""
+
+    harness, forks, receipt, derived_draft = await _forked_harness()
+    committed = forks.store.materializations.pop((SCOPE, receipt.request_id))
+    calls = len(harness.model.calls)
+    request = await harness.request(derived_draft)
+
+    with pytest.raises(ForkMaterializationPending) as pending:
+        await harness.run(request)
+    assert isinstance(pending.value, OperationExecutionInProgress)
+    assert pending.value.code == "fork_not_materialized"
+    assert len(harness.model.calls) == calls
+    assert (SCOPE, derived_draft.unit_key, 1) not in harness.lineage.results
+    budget = await harness.run_control.get_budget(SCOPE, harness.run_id)
+    assert f"reservation:{derived_draft.unit_key}" in budget.reservations
+    effects = await harness.run_control.get_effects(SCOPE, harness.run_id)
+    assert all(item.settlement is None for item in effects.claims.values())
+    generation = harness.lineage.generations[(SCOPE, derived_draft.unit_key, 1)]
+    assert generation.lease_expires_at is not None
+    assert generation.lease_expires_at <= harness.clock()  # released for the retry
+
+    # Still not committed: the retry is refused the same way, never settled.
+    with pytest.raises(ForkMaterializationPending):
+        await harness.run(request)
+
+    forks.store.materializations[(SCOPE, receipt.request_id)] = committed
+    reused = await harness.run(request)
+    assert reused.status == "completed"
+    assert reused.usage.amounts == {}
+    assert reused.checkpoint_transition_id is None
+    assert len(harness.model.calls) == calls
+    observation = harness.lineage.results[(SCOPE, derived_draft.unit_key, 1)]
+    assert observation.status == "completed" and observation.checkpoint_transition_id is None
+    budget = await harness.run_control.get_budget(SCOPE, harness.run_id)
+    assert f"reservation:{derived_draft.unit_key}" not in budget.reservations
