@@ -8,6 +8,7 @@ Protocol SDK, PostgreSQL or any company fixture.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Final, Literal
 from uuid import NAMESPACE_URL, uuid5
 
@@ -30,6 +31,13 @@ ASYNC_SUBAGENT_INCIDENT_SCHEMA_VERSION: Final = "belllabs.async-subagent-inciden
 ASYNC_PROVIDER_RUN_SCHEMA_VERSION: Final = "belllabs.async-provider-run.v1"
 
 AsyncSubagentReconciliationDecision = Literal["adopt_provider_run", "orphan_child"]
+# The privileged permission of the typed operator decisions (sibling of
+# `workflow_run.reconcile_unit`, CON-CP-LIFECYCLE-V1); RRM-007 owns the governed route.
+ASYNC_CHILD_RECONCILE_PERMISSION: Final = "workflow_run.reconcile_async_child"
+TERMINAL_PROVIDER_RUN_STATUSES: Final = frozenset(
+    {"success", "error", "timeout", "interrupted", "cancelled"}
+)
+CANCELLED_RUN_DISPOSITIONS: Final = frozenset({"duplicate_cancelled", "orphaned_cancelled"})
 
 
 class AsyncServedGraphIdentity(Contract):
@@ -76,7 +84,9 @@ class AsyncProviderRunRecord(Contract):
     child_execution_id: str = Field(min_length=1)
     provider_thread_id: str = Field(min_length=1)
     provider_run_id: str = Field(min_length=1)
-    disposition: Literal["bound", "duplicate_cancelled", "orphaned_cancelled"]
+    # `cancel_ambiguous`: BellLabs asked the provider to cancel the run but observed no
+    # terminal status; the run stays a candidate until one is observed (RRM-013 review N2).
+    disposition: Literal["bound", "duplicate_cancelled", "orphaned_cancelled", "cancel_ambiguous"]
     provider_status: str = Field(min_length=1)
     usage: AsyncSubagentUsage
     observed_at: AwareDatetime
@@ -237,3 +247,45 @@ def classify_async_children_for_fork(
             active_child_execution_ids=active,
         )
     return AsyncChildForkClassification(admission="quiescent")
+
+
+def aggregate_child_usage(
+    records: tuple[AsyncProviderRunRecord, ...],
+    budget_limits: Mapping[str, int],
+    *,
+    manifest_usage: AsyncSubagentUsage | None = None,
+) -> tuple[dict[str, int], dict[str, int]]:
+    """Attributed and pending amounts of one child across every provider run it had.
+
+    REQ-CP-RUN-009 / REQ-CP-DA-008 (RRM-013 review B1): a run whose usage the provider did
+    not attribute (a cancelled duplicate, an orphaned or failed run, a cancel whose outcome is
+    unknown) makes the pending amounts non-empty. When its amounts are unknown, the child's
+    budget limit is the pending ceiling, so the parent's effect stays unsettled until the
+    usage is reconciled. The completed run's manifest usage replaces its record's usage.
+    """
+
+    attributed: dict[str, int] = {}
+    pending: dict[str, int] = {}
+    for record in records:
+        usage = record.usage
+        if manifest_usage is not None and manifest_usage.provider_run_id == record.provider_run_id:
+            usage = manifest_usage
+        if usage.attribution == "provider_attributed":
+            for dimension, amount in usage.attributed_amounts.items():
+                if dimension in budget_limits:
+                    attributed[dimension] = attributed.get(dimension, 0) + amount
+            continue
+        amounts: Mapping[str, int] = (
+            usage.pending_amounts if any(usage.pending_amounts.values()) else budget_limits
+        )
+        for dimension, amount in amounts.items():
+            if dimension in budget_limits:
+                pending[dimension] = pending.get(dimension, 0) + amount
+    for dimension, limit in budget_limits.items():
+        # Attributed plus pending never exceeds the child's reservation: the ceiling is the
+        # reservation itself (the manifest keeps any larger reported amount).
+        total = attributed.get(dimension, 0) + pending.get(dimension, 0)
+        if total > limit:
+            pending[dimension] = max(0, limit - attributed.get(dimension, 0))
+            attributed[dimension] = min(attributed.get(dimension, 0), limit)
+    return attributed, {dimension: amount for dimension, amount in pending.items() if amount > 0}

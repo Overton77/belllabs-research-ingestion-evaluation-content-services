@@ -62,6 +62,7 @@ from tests.fixtures.rrm013_live_stack import (
     bound_parent_request,
     live_opt_in,
     open_live_stack,
+    reconciler,
     spawn_request_for,
 )
 from tests.integration.postgres.test_checkpoint_lineage_postgres import (
@@ -516,6 +517,7 @@ async def test_duplicate_provider_run_is_in_doubt_until_adopt_provider_run(
             SCOPE,
             child_id,
             "adopt_provider_run",
+            actor=reconciler(),
             decision_id=f"decision:{child_id}:adopt",
             run_id=child.provider_run_id,
             reason="operator adopts the fenced submission's run",

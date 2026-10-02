@@ -49,6 +49,12 @@ ALTER TABLE belllabs_control.async_subagent_commands
         )
     );
 
+-- REQ-CP-DA-008: a child has at most one operator decision (adopt_provider_run or
+-- orphan_child). Concurrent decisions race on this index before any provider run is cancelled.
+CREATE UNIQUE INDEX async_subagent_commands_single_decision_idx
+    ON belllabs_control.async_subagent_commands (request_scope, child_execution_id)
+    WHERE command_kind IN ('adopt_provider_run', 'orphan_child');
+
 -- REQ-CP-DA-011 / REQ-CP-RUN-009: every provider run observed for a child, including the
 -- duplicates an adopt_provider_run cancels and the runs an orphan_child cancels, with its
 -- usage attributed, pending or ambiguous. Nothing is dropped.
@@ -59,7 +65,7 @@ CREATE TABLE belllabs_control.async_subagent_provider_runs (
     schema_version text NOT NULL CHECK (schema_version = 'belllabs.async-provider-run.v1'),
     provider_thread_id text NOT NULL,
     disposition text NOT NULL CHECK (
-        disposition IN ('bound', 'duplicate_cancelled', 'orphaned_cancelled')
+        disposition IN ('bound', 'duplicate_cancelled', 'orphaned_cancelled', 'cancel_ambiguous')
     ),
     provider_status text NOT NULL,
     usage_attribution text NOT NULL CHECK (

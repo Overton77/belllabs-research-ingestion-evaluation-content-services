@@ -73,6 +73,9 @@ SERVED_GRAPHS_PATH = "/belllabs/async-subagents/served-graphs"
 SERVED_GRAPH_STATE_KEY = "belllabs_served_graph"
 PROVIDER_USAGE_STATE_KEY = "belllabs_provider_usage"
 _CANCEL_ACK_POLLS = 10
+# Every Agent Protocol request of the governed adapter is bounded well below the submission
+# lease (120 s by default), so a fence holder never outlives its lease on a slow server.
+SDK_REQUEST_TIMEOUT_SECONDS = 60.0
 _CANCEL_ACK_INTERVAL_SECONDS = 0.5
 _TERMINAL_RUN_STATUSES = frozenset({"success", "error", "timeout", "interrupted"})
 
@@ -94,8 +97,10 @@ class DeepAgentsAsyncSubagentAdapter:
         now: Callable[[], datetime] | None = None,
         secrets: Mapping[str, str] | None = None,
         request_scope: str | None = None,
+        cancel_ack_interval_seconds: float = _CANCEL_ACK_INTERVAL_SECONDS,
     ) -> None:
         self._now = now or (lambda: datetime.now(UTC))
+        self._cancel_ack_interval = cancel_ack_interval_seconds
         self._secrets = dict(secrets or {})
         self._request_scope = request_scope
         self._middleware: dict[str, AsyncSubAgentMiddleware] = {}
@@ -145,7 +150,9 @@ class DeepAgentsAsyncSubagentAdapter:
         client = self._clients.get(contract.contract_digest)
         if client is None:
             client = deepagents_async.get_client(
-                url=contract.agent_protocol_url, headers=self._headers(contract)
+                url=contract.agent_protocol_url,
+                headers=self._headers(contract),
+                timeout=SDK_REQUEST_TIMEOUT_SECONDS,
             )
             self._clients[contract.contract_digest] = client
         return client
@@ -405,7 +412,13 @@ class DeepAgentsAsyncSubagentAdapter:
         execution: AsyncSubagentExecution,
         run_id: str,
     ) -> AsyncProviderRunRecord:
-        """Cancel a duplicate or orphaned run and record its usage as pending (REQ-CP-DA-008)."""
+        """Cancel a duplicate or orphaned run and record the outcome honestly (REQ-CP-DA-008).
+
+        A terminal status observed after the cancel yields a cancelled record with pending
+        usage. If no terminal status is observed within the acknowledgement poll, the record is
+        `cancel_ambiguous` with ambiguous usage: the run stays a candidate of later spawn-key
+        classifications until a terminal status is observed (RRM-013 review N2).
+        """
 
         self._tools(contract)
         client = self._client(contract)
@@ -415,14 +428,17 @@ class DeepAgentsAsyncSubagentAdapter:
         except APIStatusError as error:
             if error.response.status_code not in {404, 409}:
                 raise
-        status, _receipt = await self._cancel_receipt(contract, thread_id, run_id)
+        status, receipt = await self._cancel_receipt(contract, thread_id, run_id)
+        terminal = receipt == "provider_acknowledged" or status in _TERMINAL_RUN_STATUSES
         return AsyncProviderRunRecord(
             child_execution_id=thread_id,
             provider_thread_id=thread_id,
             provider_run_id=run_id,
-            disposition="duplicate_cancelled",
-            provider_status=status if status != "cancelled" else "interrupted",
-            usage=AsyncSubagentUsage(provider_run_id=run_id, attribution="pending"),
+            disposition="duplicate_cancelled" if terminal else "cancel_ambiguous",
+            provider_status="interrupted" if status == "cancelled" else status,
+            usage=AsyncSubagentUsage(
+                provider_run_id=run_id, attribution="pending" if terminal else "ambiguous"
+            ),
             observed_at=self._now(),
         )
 
@@ -443,7 +459,7 @@ class DeepAgentsAsyncSubagentAdapter:
                 return "cancelled", "provider_acknowledged"
             if last in _TERMINAL_RUN_STATUSES:
                 return last, "ambiguous"
-            await asyncio.sleep(_CANCEL_ACK_INTERVAL_SECONDS)
+            await asyncio.sleep(self._cancel_ack_interval)
         return last, "ambiguous"
 
     async def list(
@@ -549,37 +565,38 @@ def attribute_usage(
     channel `belllabs_provider_usage` (the Agent Server's serialized messages omit
     `usage_metadata`); a message-level `usage_metadata` is accepted as a fallback.
     `tokens.total` sums `total_tokens`; `model.turns` counts AI messages. Only the contract's
-    budget dimensions are reported. If nothing was reported, the usage is pending with no
-    invented amounts (REQ-CP-DA-011).
+    budget dimensions are reported. The usage is `provider_attributed` only when every AI
+    turn is reported; otherwise, and when there is no AI turn at all, it is pending with no
+    invented amounts (REQ-CP-DA-011; RRM-013 review N6).
     """
 
     if not isinstance(messages, list):
         return AsyncSubagentUsage(provider_run_id=run_id, attribution="pending")
-    turns = 0
-    tokens = 0
-    reported = False
     stamped = {
         str(item.get("message_id")): int(item.get("total_tokens") or 0)
         for item in (provider_usage if isinstance(provider_usage, list) else [])
         if isinstance(item, dict)
     }
+    turns = 0
+    tokens = 0
+    unreported = 0
     for message in messages:
         if not isinstance(message, dict) or message.get("type") != "ai":
             continue
         turns += 1
         usage = message.get("usage_metadata")
         if str(message.get("id")) in stamped:
-            reported = True
             tokens += stamped[str(message.get("id"))]
         elif isinstance(usage, dict) and usage.get("total_tokens") is not None:
-            reported = True
             tokens += int(usage.get("total_tokens") or 0)
+        else:
+            unreported += 1
     amounts: dict[str, int] = {}
     if "model.turns" in budget_limits:
         amounts["model.turns"] = turns
     if "tokens.total" in budget_limits:
         amounts["tokens.total"] = tokens
-    if turns and not reported:
+    if turns == 0 or unreported:
         return AsyncSubagentUsage(
             provider_run_id=run_id,
             attribution="pending",

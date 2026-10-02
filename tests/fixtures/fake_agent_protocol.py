@@ -39,6 +39,9 @@ class FakeAgentProtocolClient:
     fail_list_after_create: Exception | None = None
     stamp_identity: bool = True
     tokens_per_turn: int | None = 7
+    # When set, a cancel request leaves the run status unchanged (the provider never
+    # acknowledges), so the adapter must record the outcome as ambiguous.
+    cancel_sticks: bool = False
 
     def __post_init__(self) -> None:
         self.http = _Http(self)
@@ -64,6 +67,11 @@ class FakeAgentProtocolClient:
             }
         )
         return run_id
+
+    def set_status(self, thread_id: str, run_id: str, status: str) -> None:
+        for run in self.runs_of(thread_id):
+            if run["run_id"] == run_id:
+                run["status"] = status
 
     def complete(self, thread_id: str, text: str, *, run_id: str | None = None) -> None:
         for run in self.runs_of(thread_id):
@@ -186,6 +194,8 @@ class _Runs:
 
     async def cancel(self, thread_id: str, run_id: str, **_kwargs: Any) -> None:
         self._client.calls.append("sdk.runs.cancel")
+        if self._client.cancel_sticks:
+            return
         for run in self._client.runs_of(thread_id):
             if run["run_id"] == run_id and run["status"] not in {"success", "error"}:
                 run["status"] = "interrupted"

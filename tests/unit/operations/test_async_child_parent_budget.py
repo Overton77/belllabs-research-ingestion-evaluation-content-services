@@ -191,6 +191,7 @@ async def test_pending_usage_is_recorded_pending_and_blocks_effect_settlement() 
         outcome="cancelled",
         observation_id=f"async-terminal:{child_id}",
         settlement_ref="settlement:pending",
+        settlement_revision=1,
         settled_at=NOW + timedelta(seconds=1),
     )
     assert disposition == "pending_usage"
@@ -199,3 +200,48 @@ async def test_pending_usage_is_recorded_pending_and_blocks_effect_settlement() 
     assert async_child_usage_id(child_id) in budget.outstanding_usage_ids
     ledger = await run_control.get_effects("tenant-1", run_id)  # type: ignore[attr-defined]
     assert ledger.claims[async_child_effect_id(child_id)].settlement is None
+
+    # RRM-013 review N1: a later revision with the amounts known settles the outstanding usage
+    # exactly against its source pending amounts, then the effect; a replay is a no-op.
+    disposition = await effects.settle_usage(
+        "tenant-1",
+        run_id,
+        child_id,
+        reservation_id="reservation-child-1",
+        budget_limits={"tokens.total": 10},
+        attributed_amounts={"tokens.total": 3},
+        pending_amounts={},
+        outcome="cancelled",
+        observation_id=f"async-terminal:{child_id}",
+        settlement_ref="settlement:pending",
+        settlement_revision=2,
+        settled_at=NOW + timedelta(seconds=2),
+    )
+    assert disposition == "settled"
+    budget = await run_control.get_budget("tenant-1", run_id)  # type: ignore[attr-defined]
+    assert budget.pending_settlement["tokens.total"] == 0
+    assert budget.consumed["tokens.total"] == 3
+    assert async_child_usage_id(child_id) not in budget.outstanding_usage_ids
+    settlement = budget.usage_settlements[f"{async_child_usage_id(child_id)}:settlement:2"]
+    assert settlement.settled_amounts == {"tokens.total": 3}
+    assert settlement.released_amounts == {"tokens.total": 2}
+    ledger = await run_control.get_effects("tenant-1", run_id)  # type: ignore[attr-defined]
+    claim = ledger.claims[async_child_effect_id(child_id)]
+    assert claim.disposition == EffectDisposition.CANCELLED
+    assert claim.settlement is not None
+    assert claim.settlement.usage_settlement_ref == f"{async_child_usage_id(child_id)}:settlement:2"
+    replay = await effects.settle_usage(
+        "tenant-1",
+        run_id,
+        child_id,
+        reservation_id="reservation-child-1",
+        budget_limits={"tokens.total": 10},
+        attributed_amounts={"tokens.total": 3},
+        pending_amounts={},
+        outcome="cancelled",
+        observation_id=f"async-terminal:{child_id}",
+        settlement_ref="settlement:pending",
+        settlement_revision=3,
+        settled_at=NOW + timedelta(seconds=3),
+    )
+    assert replay == "settled"

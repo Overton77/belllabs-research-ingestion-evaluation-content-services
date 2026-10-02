@@ -894,7 +894,11 @@ class ParentAsyncSubagentLink(Contract):
     adopted_provider_run_id: str | None = Field(default=None, min_length=1)
     result_decision: Literal["admit", "conditionally_admit", "reject", "defer"] | None = None
     admitted_manifest_digest: str | None = Field(default=None, pattern=DIGEST_PATTERN)
+    # REQ-CP-RUN-009 (RRM-013 review): a settlement attempt is numbered; `settled` is true only
+    # once the parent ledger holds the child's usage with nothing pending.
     settled: bool = False
+    settlement_revision: int = Field(default=0, ge=0)
+    usage_disposition: Literal["settled", "pending_usage"] | None = None
     created_at: AwareDatetime
     updated_at: AwareDatetime
 

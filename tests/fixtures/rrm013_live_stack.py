@@ -63,6 +63,9 @@ from app.application.operations.postgres_operation_journal import (
 from app.application.run_control.postgres_run_control_repository import PostgresRunControlRepository
 from app.application.run_control.service import RunControlService
 from app.domain.control_plane.contracts import SecretRef
+from app.domain.operation_execution.async_subagent_reconciliation import (
+    ASYNC_CHILD_RECONCILE_PERMISSION,
+)
 from app.domain.operation_execution.checkpoint_lineage import OperationActivityAttempt
 from app.domain.operation_execution.contracts import (
     AsyncSubagentContract,
@@ -73,7 +76,12 @@ from app.domain.operation_execution.contracts import (
     OperationExecutionBinding,
     OperationExecutionRequest,
 )
-from app.domain.run_control.contracts import CommandStatus, ReserveBudgetAction, StartAction
+from app.domain.run_control.contracts import (
+    ActorContext,
+    CommandStatus,
+    ReserveBudgetAction,
+    StartAction,
+)
 from app.integrations.agents.deep_agents import (
     DeepAgentRuntimeAdapter,
     DeepAgentsAsyncSubagentAdapter,
@@ -509,3 +517,11 @@ def spawn_request_for(
 
 def tools_of(definition_tools: Sequence[BaseTool]) -> tuple[str, ...]:
     return tuple(tool.name for tool in definition_tools)
+
+
+def reconciler() -> ActorContext:
+    """A privileged operator for the typed in_doubt decisions (RRM-013 review N5)."""
+
+    return actor().model_copy(
+        update={"permissions": actor().permissions | {ASYNC_CHILD_RECONCILE_PERMISSION}}
+    )

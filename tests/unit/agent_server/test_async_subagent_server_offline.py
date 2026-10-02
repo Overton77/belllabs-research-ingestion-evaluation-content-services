@@ -195,3 +195,31 @@ def test_identity_route_requires_the_deployment_credential(
     assert not auth_module.verify_bearer("Basic offline-token")
     monkeypatch.delenv(auth_module.TOKEN_ENV)
     assert not auth_module.verify_bearer("Bearer offline-token")
+
+
+def test_hosted_context_defaults_copy_mutable_values_and_order_required_fields_first() -> None:
+    """RRM-013 review N9: defaults use factories; partially defaulted schemas still build."""
+
+    from app.domain.operation_execution.contracts import (
+        CognitiveRuntimeContextPack,
+        CognitiveRuntimeField,
+    )
+    from app.domain.operation_execution.materialization import compose_cognitive_context_schema
+    from app.integrations.agents.deep_agents.materializer import _context_type
+
+    pack = CognitiveRuntimeContextPack.create(
+        logical_id="pack.rrm013.context",
+        revision=1,
+        contributor="base",
+        fields=(
+            CognitiveRuntimeField(name="a_defaulted_map", value_kind="string_map"),
+            CognitiveRuntimeField(name="b_required", value_kind="string"),
+        ),
+    )
+    schema = compose_cognitive_context_schema(schema_id="context.rrm013", packs=(pack,))
+    context_type = _context_type(schema, defaults={"a_defaulted_map": {"k": "v"}})
+    first = context_type(b_required="x")
+    second = context_type(b_required="y")
+    assert first.a_defaulted_map == {"k": "v"}
+    assert first.a_defaulted_map is not second.a_defaulted_map  # copied per instance
+    assert context_type(b_required="z", a_defaulted_map={"o": "p"}).a_defaulted_map == {"o": "p"}

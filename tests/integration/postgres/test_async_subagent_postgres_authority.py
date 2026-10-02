@@ -154,7 +154,7 @@ async def test_runtime_role_fences_submission_and_records_in_doubt_lineage(
                     observed_at=now,
                 ),
             )
-        await authority.record_reconciliation_decision(
+        assert await authority.claim_reconciliation_decision(
             "tenant-1",
             child_id,
             "adopt_provider_run",
@@ -162,6 +162,26 @@ async def test_runtime_role_fences_submission_and_records_in_doubt_lineage(
             adopted_run_id="run-a",
             reason="operator",
         )
+        # The child holds exactly one decision command: a replay is accepted, another decision
+        # is refused (unique partial index of migration 0021).
+        assert await authority.claim_reconciliation_decision(
+            "tenant-1",
+            child_id,
+            "adopt_provider_run",
+            decision_id="decision-1",
+            adopted_run_id="run-a",
+            reason="replay",
+        )
+        assert not await authority.claim_reconciliation_decision(
+            "tenant-1",
+            child_id,
+            "orphan_child",
+            decision_id="decision-2",
+            adopted_run_id=None,
+            reason="too late",
+        )
+        listed = await authority.list_provider_runs("tenant-1", child_id)
+        assert [record.provider_run_id for record in listed] == ["run-a", "run-b"]
         await authority.resolve_incident(
             stored.model_copy(
                 update={

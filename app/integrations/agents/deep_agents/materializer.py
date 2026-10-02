@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import importlib.metadata
 import types
 from collections.abc import AsyncIterator, Callable, Mapping
@@ -606,19 +607,30 @@ def _runtime_python_type(field: CognitiveRuntimeField) -> type[Any]:
 def _context_type(
     schema: CognitiveRuntimeContextSchema, *, defaults: Mapping[str, object] | None = None
 ) -> type[Any]:
-    fields: list[tuple[str, type[Any]] | tuple[str, type[Any], Any]] = []
+    required: list[tuple[str, type[Any]]] = []
+    defaulted: list[tuple[str, type[Any], Any]] = []
     for item in schema.fields:
         python_type = _runtime_python_type(item)
         if defaults is not None and item.name in defaults:
-            fields.append((item.name, python_type, dataclass_field(default=defaults[item.name])))
+            value = defaults[item.name]
+            # A factory copies the frozen value per instance, so a mutable default (a
+            # string map) is never shared; defaulted fields follow the required ones, as a
+            # dataclass requires, and instances are built by keyword only.
+            defaulted.append(
+                (item.name, python_type, dataclass_field(default_factory=_copy_of(value)))
+            )
         else:
-            fields.append((item.name, python_type))
+            required.append((item.name, python_type))
     return make_dataclass(
         f"BellLabsContext_{schema.schema_digest.removeprefix('sha256:')[:12]}",
-        fields,
+        [*required, *defaulted],
         frozen=True,
         slots=True,
     )
+
+
+def _copy_of(value: object) -> Callable[[], object]:
+    return lambda: copy.deepcopy(value)
 
 
 def _context_instance(

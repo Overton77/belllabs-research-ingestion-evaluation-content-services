@@ -42,6 +42,7 @@ from app.domain.run_control.contracts import (
     RegisterAsyncChildAction,
     ReserveBudgetAction,
     SettleEffectAction,
+    SettlePendingUsageAction,
 )
 
 ASYNC_CHILD_EFFECT_KIND = "async_subagent.child"
@@ -195,8 +196,19 @@ class RunControlAsyncChildEffects:
         outcome: Literal["succeeded", "failed", "cancelled"],
         observation_id: str,
         settlement_ref: str,
+        settlement_revision: int,
         settled_at: datetime,
     ) -> Literal["settled", "pending_usage"]:
+        """Settle the child's usage against the parent run; revision n is one command.
+
+        First revision: record the usage (attributed consumed, unused reservation released,
+        pending amounts `pending_external`) and settle the effect only when nothing is
+        pending. A later revision with the pending amounts now known settles the outstanding
+        usage exactly against its source pending amounts (`SettlePendingUsageAction`) and then
+        the effect. Every command id carries the revision, so a revision never replays as
+        another revision's no-op (RRM-013 review N1).
+        """
+
         # Only the child's declared budget dimensions settle against the parent run; the
         # manifest and provider-run records keep every reported amount.
         attributed_amounts = {
@@ -207,61 +219,133 @@ class RunControlAsyncChildEffects:
         pending_amounts = {
             dimension: amount
             for dimension, amount in pending_amounts.items()
-            if dimension in budget_limits
+            if dimension in budget_limits and amount > 0
         }
-        release = {
-            dimension: limit
-            - min(limit, attributed_amounts.get(dimension, 0) + pending_amounts.get(dimension, 0))
-            for dimension, limit in budget_limits.items()
-            if limit > attributed_amounts.get(dimension, 0) + pending_amounts.get(dimension, 0)
-        }
-        usage_id = async_child_usage_id(child_execution_id)
-        usage = RecordUsageAction(
-            usage_id=usage_id,
-            authority_ref=None,
-            actual_amounts=dict(attributed_amounts),
-            reservation_id=reservation_id,
-            release_amounts=release,
-            pending_external_amounts=dict(pending_amounts),
-        )
-        pending = any(pending_amounts.values())
         effects = await self._run_control.get_effects(request_scope, parent_run_id)
         claim = effects.claims.get(async_child_effect_id(child_execution_id))
         if claim is None:
             raise AsyncSubagentError("the async child has no effect claim in the parent run")
-        usage = usage.model_copy(update={"authority_ref": claim.operation_ref})
-        actions: tuple[LifecycleAction, ...] = (
-            (usage,)
-            if pending
-            else (
-                usage,
-                SettleEffectAction(
-                    effect_id=claim.effect_id,
-                    settlement_id=f"async-child-settlement:{child_execution_id}",
-                    observation_id=observation_id,
-                    outcome=EffectSettlementOutcome(outcome),
-                    usage_settlement_ref=usage_id,
-                    evidence_refs=(settlement_ref,),
-                ),
-            )
+        if claim.settlement is not None:
+            return "settled"
+        # The settlement binds the claim's latest observation of this outcome (a cancelled
+        # child's terminal observation may be an orphan or cancel observation, not the generic
+        # terminal id the caller names).
+        observation_id = next(
+            (
+                item.observation_id
+                for item in reversed(claim.observations)
+                if item.disposition.value == outcome
+            ),
+            observation_id,
         )
+        budget = await self._run_control.get_budget(request_scope, parent_run_id)
+        usage_id = async_child_usage_id(child_execution_id)
+        existing = budget.usage_records.get(usage_id)
+        command_id = f"async-child-settle:{child_execution_id}:revision:{settlement_revision}"
+        correlation = f"async-child:{child_execution_id}"
+        if existing is None:
+            release = {
+                dimension: limit
+                - min(
+                    limit,
+                    attributed_amounts.get(dimension, 0) + pending_amounts.get(dimension, 0),
+                )
+                for dimension, limit in budget_limits.items()
+                if limit > attributed_amounts.get(dimension, 0) + pending_amounts.get(dimension, 0)
+            }
+            usage = RecordUsageAction(
+                usage_id=usage_id,
+                authority_ref=claim.operation_ref,
+                actual_amounts=dict(attributed_amounts),
+                reservation_id=reservation_id,
+                release_amounts=release,
+                pending_external_amounts=dict(pending_amounts),
+            )
+            pending = bool(pending_amounts)
+            actions: tuple[LifecycleAction, ...] = (
+                (usage,)
+                if pending
+                else (
+                    usage,
+                    SettleEffectAction(
+                        effect_id=claim.effect_id,
+                        settlement_id=f"async-child-settlement:{child_execution_id}",
+                        observation_id=observation_id,
+                        outcome=EffectSettlementOutcome(outcome),
+                        usage_settlement_ref=usage_id,
+                        evidence_refs=(settlement_ref,),
+                    ),
+                )
+            )
+            await self._execute(
+                request_scope,
+                parent_run_id,
+                command_id=command_id,
+                action=ApplyAuthorityBatchAction(actions=actions),
+                reason=(
+                    "Record the async child's pending usage before later reconciliation"
+                    if pending
+                    else "Settle the async child's usage and effect against the parent budget"
+                ),
+                evidence_refs=(settlement_ref,),
+                occurred_at=settled_at,
+                correlation_id=correlation,
+                causation_id=claim.effect_id,
+                tolerated={"usage_exists", "effect_already_settled"},
+            )
+            return "pending_usage" if pending else "settled"
+        if usage_id not in budget.outstanding_usage_ids:
+            return "settled"
+        if pending_amounts:
+            # The pending part is still unknown: nothing to settle yet.
+            return "pending_usage"
+        source_pending = {
+            dimension: amount
+            for dimension, amount in existing.pending_external_amounts.items()
+            if amount > 0
+        }
+        settled_now: dict[str, int] = {}
+        released_now: dict[str, int] = {}
+        for dimension, pending_amount in source_pending.items():
+            newly_attributed = max(
+                0, attributed_amounts.get(dimension, 0) - existing.actual_amounts.get(dimension, 0)
+            )
+            consumed = min(newly_attributed, pending_amount)
+            if consumed:
+                settled_now[dimension] = consumed
+            if pending_amount - consumed:
+                released_now[dimension] = pending_amount - consumed
+        settlement_id = f"{usage_id}:settlement:{settlement_revision}"
         await self._execute(
             request_scope,
             parent_run_id,
-            command_id=f"async-child-settle:{child_execution_id}",
-            action=ApplyAuthorityBatchAction(actions=actions),
-            reason=(
-                "Record the async child's pending usage before later reconciliation"
-                if pending
-                else "Settle the async child's usage and effect against the parent budget"
+            command_id=command_id,
+            action=ApplyAuthorityBatchAction(
+                actions=(
+                    SettlePendingUsageAction(
+                        settlement_id=settlement_id,
+                        usage_id=usage_id,
+                        actual_amounts=settled_now,
+                        pending_release_amounts=released_now,
+                    ),
+                    SettleEffectAction(
+                        effect_id=claim.effect_id,
+                        settlement_id=f"async-child-settlement:{child_execution_id}",
+                        observation_id=observation_id,
+                        outcome=EffectSettlementOutcome(outcome),
+                        usage_settlement_ref=settlement_id,
+                        evidence_refs=(settlement_ref,),
+                    ),
+                )
             ),
+            reason="Reconcile the async child's pending usage and settle its effect",
             evidence_refs=(settlement_ref,),
             occurred_at=settled_at,
-            correlation_id=f"async-child:{child_execution_id}",
+            correlation_id=correlation,
             causation_id=claim.effect_id,
-            tolerated={"usage_exists", "effect_already_settled"},
+            tolerated={"settlement_exists", "effect_already_settled"},
         )
-        return "pending_usage" if pending else "settled"
+        return "settled"
 
     async def _execute(
         self,

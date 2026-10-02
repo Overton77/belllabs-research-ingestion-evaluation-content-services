@@ -11,8 +11,14 @@ from datetime import datetime, timedelta
 
 import pytest
 
+from app.application.async_subagents.parent_effects import (
+    RunControlAsyncChildEffects,
+    async_child_effect_id,
+    async_child_usage_id,
+)
 from app.application.async_subagents.service import (
     AsyncServedGraphMismatch,
+    AsyncSubagentDecisionRejected,
     AsyncSubagentError,
     AsyncSubagentService,
     AsyncSubagentSubmissionInProgress,
@@ -23,7 +29,11 @@ from app.domain.operation_execution.async_subagent_reconciliation import (
     AsyncServedGraphIdentity,
     classify_async_children_for_fork,
 )
-from app.domain.operation_execution.contracts import AsyncSubagentLifecycle
+from app.domain.operation_execution.contracts import (
+    AsyncSubagentExecution,
+    AsyncSubagentLifecycle,
+    AsyncSubagentUsage,
+)
 from app.integrations.agents.deep_agents.async_subagents import DeepAgentsAsyncSubagentAdapter
 from tests.acceptance.control_plane.test_wp_cp_045 import (
     GRAPH_BINDING_DIGEST,
@@ -33,6 +43,9 @@ from tests.acceptance.control_plane.test_wp_cp_045 import (
     request,
 )
 from tests.fixtures.fake_agent_protocol import FakeAgentProtocolClient, install
+from tests.fixtures.rrm013_live_stack import reconciler
+from tests.unit.operations.test_async_child_parent_budget import admitted_parent, spawn
+from tests.unit.run_control.test_run_control import actor
 
 SECRETS = {"environment:AGENT_SERVER_TOKEN": "offline-token"}
 
@@ -208,6 +221,7 @@ async def test_multiple_provider_runs_are_in_doubt_and_adopt_provider_run_cancel
             "tenant-a",
             child_id,
             "adopt_provider_run",
+            actor=reconciler(),
             decision_id="decision-1",
             run_id="run-unknown",
             reason="operator",
@@ -217,6 +231,7 @@ async def test_multiple_provider_runs_are_in_doubt_and_adopt_provider_run_cancel
         "tenant-a",
         child_id,
         "adopt_provider_run",
+        actor=reconciler(),
         decision_id="decision-1",
         run_id=running.provider_run_id,
         reason="operator adopts the original run",
@@ -237,6 +252,7 @@ async def test_multiple_provider_runs_are_in_doubt_and_adopt_provider_run_cancel
         "tenant-a",
         child_id,
         "adopt_provider_run",
+        actor=reconciler(),
         decision_id="decision-1",
         run_id=running.provider_run_id,
         reason="resend",
@@ -261,6 +277,7 @@ async def test_orphan_child_cancels_every_run_and_records_their_usage_as_pending
         "tenant-a",
         child_id,
         "orphan_child",
+        actor=reconciler(),
         decision_id="decision-orphan",
         reason="operator orphans the child",
         decided_at=NOW,
@@ -277,6 +294,7 @@ async def test_orphan_child_cancels_every_run_and_records_their_usage_as_pending
             "tenant-a",
             child_id,
             "orphan_child",
+            actor=reconciler(),
             decision_id="decision-other",
             reason="again",
             decided_at=NOW,
@@ -471,3 +489,363 @@ async def test_parent_deep_agent_start_async_task_reserves_and_links_before_the_
     assert spawn.idempotency_key == "rrm013-start-async-task"
     assert (await service.spawn(spawn)).child_execution_id == child.child_execution_id
     assert client.calls.count("sdk.runs.create") == 1
+
+
+async def governed_with_parent(
+    client: FakeAgentProtocolClient, *, cancel_ack_interval: float = 0.0
+) -> tuple[AsyncSubagentService, object, str, InMemoryAsyncSubagentAuthority]:
+    """A governed service whose children are effects and reservations of a real in-memory run."""
+
+    run_control, run_id = await admitted_parent()
+    authority = InMemoryAsyncSubagentAuthority()
+    service = AsyncSubagentService(
+        InMemoryAsyncSubagentDetailRepository(),
+        authority,
+        DeepAgentsAsyncSubagentAdapter(
+            secrets=SECRETS,
+            request_scope="tenant-1",
+            cancel_ack_interval_seconds=cancel_ack_interval,
+        ),
+        parent_effects=RunControlAsyncChildEffects(run_control, actor=actor()),  # type: ignore[arg-type]
+        allow_new_spawns=True,
+    )
+    return service, run_control, run_id, authority
+
+
+async def parent_budget_view(run_control: object, run_id: str, child_id: str) -> dict[str, object]:
+    budget = await run_control.get_budget("tenant-1", run_id)  # type: ignore[attr-defined]
+    effects = await run_control.get_effects("tenant-1", run_id)  # type: ignore[attr-defined]
+    usage = budget.usage_records.get(async_child_usage_id(child_id))
+    claim = effects.claims[async_child_effect_id(child_id)]
+    return {
+        "actual": {k: v for k, v in usage.actual_amounts.items() if v} if usage else None,
+        "pending": dict(usage.pending_external_amounts) if usage else None,
+        "outstanding": async_child_usage_id(child_id) in budget.outstanding_usage_ids,
+        "effect_settled": claim.settlement is not None,
+        # The claim turns terminal at settlement; until then the latest observation tells.
+        "effect_disposition": (
+            claim.observations[-1].disposition.value if claim.observations else "claimed"
+        ),
+    }
+
+
+@pytest.mark.asyncio
+async def test_orphaned_child_settles_pending_usage_up_to_its_budget_ceiling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RRM-013 review B1: cancelled runs with unknown usage never settle as zero."""
+
+    client = FakeAgentProtocolClient(served=SERVED)
+    install(monkeypatch, client)
+    service, run_control, run_id, _authority = await governed_with_parent(client)
+    running = await service.spawn(spawn(run_id))
+    child_id = running.child_execution_id
+    client.add_foreign_run(child_id, child_id)
+    await service.reconcile("tenant-1", child_id)
+    orphaned = await service.reconcile_in_doubt(
+        "tenant-1",
+        child_id,
+        "orphan_child",
+        actor=reconciler(),
+        decision_id="decision-orphan",
+        reason="operator",
+        decided_at=NOW,
+    )
+    assert orphaned.lifecycle == AsyncSubagentLifecycle.ORPHANED
+    # A blocking child without a result is rejected (never admitted) before it settles.
+    with pytest.raises(AsyncSubagentError, match="requires a typed result manifest"):
+        await service.decide_result(
+            "tenant-1", child_id, "admit", parent_open=True, current_generation=1, decided_at=NOW
+        )
+    await service.decide_result(
+        "tenant-1", child_id, "reject", parent_open=True, current_generation=1, decided_at=NOW
+    )
+    link = await service.settle("tenant-1", child_id, "settlement:orphan", NOW)
+    assert link.settled is False
+    assert link.usage_disposition == "pending_usage"
+    assert link.settlement_revision == 1
+    view = await parent_budget_view(run_control, run_id, child_id)
+    # Two cancelled runs of unknown usage: the pending ceiling is the child's budget limit.
+    assert view == {
+        "actual": {},
+        "pending": {"tokens.total": 10},
+        "outstanding": True,
+        "effect_settled": False,
+        "effect_disposition": "cancelled",
+    }
+    # N1: once the provider's usage is known, reconciliation settles the outstanding usage.
+    settled = await service.reconcile_usage(
+        "tenant-1",
+        child_id,
+        run_usage={
+            run_id_: AsyncSubagentUsage(
+                provider_run_id=run_id_,
+                attribution="provider_attributed",
+                attributed_amounts={"tokens.total": amount},
+            )
+            for run_id_, amount in zip(
+                [run["run_id"] for run in client.runs_of(child_id)], (2, 1), strict=True
+            )
+        },
+        settlement_ref="settlement:orphan",
+        reconciled_at=NOW,
+    )
+    assert settled.settled is True and settled.settlement_revision == 2
+    view = await parent_budget_view(run_control, run_id, child_id)
+    assert view["effect_settled"] is True and view["outstanding"] is False
+    budget = await run_control.get_budget("tenant-1", run_id)  # type: ignore[attr-defined]
+    assert budget.consumed["tokens.total"] == 3
+    assert budget.pending_settlement["tokens.total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_adopted_child_with_a_duplicate_keeps_the_duplicate_usage_pending(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = FakeAgentProtocolClient(served=SERVED)
+    install(monkeypatch, client)
+    service, run_control, run_id, _authority = await governed_with_parent(client)
+    running = await service.spawn(spawn(run_id))
+    child_id = running.child_execution_id
+    client.add_foreign_run(child_id, child_id)
+    await service.reconcile("tenant-1", child_id)
+    await service.reconcile_in_doubt(
+        "tenant-1",
+        child_id,
+        "adopt_provider_run",
+        actor=reconciler(),
+        decision_id="decision-adopt",
+        run_id=running.provider_run_id,
+        reason="operator",
+        decided_at=NOW,
+    )
+    client.complete(child_id, "done", run_id=running.provider_run_id)
+    completed = await service.reconcile("tenant-1", child_id)
+    assert completed.lifecycle == AsyncSubagentLifecycle.COMPLETED
+    await service.decide_result(
+        "tenant-1", child_id, "admit", parent_open=True, current_generation=1, decided_at=NOW
+    )
+    link = await service.settle("tenant-1", child_id, "settlement:adopt", NOW)
+    assert link.settled is False and link.usage_disposition == "pending_usage"
+    view = await parent_budget_view(run_control, run_id, child_id)
+    # The adopted run's 7 tokens are attributed; the duplicate's unknown usage is pending up
+    # to the remaining reservation; the effect is not settled.
+    assert view["actual"] == {"tokens.total": 7}
+    assert view["pending"] == {"tokens.total": 3}
+    assert view["outstanding"] is True and view["effect_settled"] is False
+
+
+@pytest.mark.asyncio
+async def test_cancelled_running_child_and_failed_child_leave_usage_pending(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = FakeAgentProtocolClient(served=SERVED)
+    install(monkeypatch, client)
+    service, run_control, run_id, _authority = await governed_with_parent(client)
+    cancelled_child = await service.spawn(spawn(run_id))
+    cancelled = await service.cancel(
+        "tenant-1", cancelled_child.child_execution_id, "parent cancelled", NOW
+    )
+    assert cancelled.lifecycle == AsyncSubagentLifecycle.CANCELLED
+    await service.decide_result(
+        "tenant-1",
+        cancelled_child.child_execution_id,
+        "reject",
+        parent_open=True,
+        current_generation=1,
+        decided_at=NOW,
+    )
+    link = await service.settle(
+        "tenant-1", cancelled_child.child_execution_id, "settlement:cancelled", NOW
+    )
+    assert link.settled is False and link.usage_disposition == "pending_usage"
+    view = await parent_budget_view(run_control, run_id, cancelled_child.child_execution_id)
+    assert view["pending"] == {"tokens.total": 10} and view["effect_settled"] is False
+
+    failed_request = spawn(run_id).model_copy(
+        update={
+            "idempotency_key": "spawn-failed",
+            "reservation_id": "reservation-child-failed",
+        }
+    )
+    failed_child = await service.spawn(failed_request)
+    client.set_status(failed_child.child_execution_id, failed_child.provider_run_id or "", "error")
+    failed = await service.reconcile("tenant-1", failed_child.child_execution_id)
+    assert failed.lifecycle == AsyncSubagentLifecycle.FAILED
+    await service.decide_result(
+        "tenant-1",
+        failed_child.child_execution_id,
+        "reject",
+        parent_open=True,
+        current_generation=1,
+        decided_at=NOW,
+    )
+    link = await service.settle(
+        "tenant-1", failed_child.child_execution_id, "settlement:failed", NOW
+    )
+    assert link.settled is False and link.usage_disposition == "pending_usage"
+    view = await parent_budget_view(run_control, run_id, failed_child.child_execution_id)
+    assert view["pending"] == {"tokens.total": 10}
+    assert view["effect_disposition"] == "failed" and view["effect_settled"] is False
+
+
+@pytest.mark.asyncio
+async def test_unacknowledged_cancel_stays_a_candidate_until_a_terminal_status_is_observed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RRM-013 review N2."""
+
+    client = FakeAgentProtocolClient(served=SERVED, cancel_sticks=True)
+    install(monkeypatch, client)
+    service, _run_control, run_id, authority = await governed_with_parent(client)
+    running = await service.spawn(spawn(run_id))
+    child_id = running.child_execution_id
+    foreign = client.add_foreign_run(child_id, child_id)
+    await service.reconcile("tenant-1", child_id)
+    adopted = await service.reconcile_in_doubt(
+        "tenant-1",
+        child_id,
+        "adopt_provider_run",
+        actor=reconciler(),
+        decision_id="decision-adopt",
+        run_id=running.provider_run_id,
+        reason="operator",
+        decided_at=NOW,
+    )
+    assert adopted.provider_run_id == running.provider_run_id
+    records = {
+        r.provider_run_id: r for r in await authority.list_provider_runs("tenant-1", child_id)
+    }
+    assert records[foreign].disposition == "cancel_ambiguous"
+    assert records[foreign].usage.attribution == "ambiguous"
+    # The duplicate is still running on the provider: it remains a candidate, so the child is
+    # in doubt again (a new incident revision) rather than silently bound.
+    again = await service.reconcile("tenant-1", child_id)
+    assert again.lifecycle == AsyncSubagentLifecycle.IN_DOUBT
+    assert again.in_doubt_reason == "multiple_provider_runs"
+    assert authority.incidents[("tenant-1", child_id)].revision == 2
+    # Once the provider shows the duplicate terminal, it is cancelled for good and excluded.
+    client.set_status(child_id, foreign, "interrupted")
+    bound = await service.reconcile("tenant-1", child_id)
+    assert bound.lifecycle == AsyncSubagentLifecycle.RUNNING
+    assert bound.provider_run_id == running.provider_run_id
+    records = {
+        r.provider_run_id: r for r in await authority.list_provider_runs("tenant-1", child_id)
+    }
+    assert records[foreign].disposition == "duplicate_cancelled"
+    assert records[foreign].usage.attribution == "pending"
+
+
+@pytest.mark.asyncio
+async def test_in_doubt_child_whose_single_run_completed_resolves_its_incident_by_observation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RRM-013 review N3."""
+
+    client = FakeAgentProtocolClient(served=SERVED)
+    install(monkeypatch, client)
+    service, run_control, run_id, authority = await governed_with_parent(client)
+    client.fail_after_create = ConnectionError("response lost")
+    client.fail_list_after_create = ConnectionError("server unreachable")
+    in_doubt = await service.spawn(spawn(run_id))
+    child_id = in_doubt.child_execution_id
+    assert in_doubt.lifecycle == AsyncSubagentLifecycle.IN_DOUBT
+    client.fail_list = None
+    client.complete(child_id, "late but complete")
+    completed = await service.reconcile("tenant-1", child_id)
+    assert completed.lifecycle == AsyncSubagentLifecycle.COMPLETED
+    incident = authority.incidents[("tenant-1", child_id)]
+    assert incident.status == "resolved" and incident.resolution == "observation"
+    records = await authority.list_provider_runs("tenant-1", child_id)
+    assert [record.disposition for record in records] == ["bound"]
+    assert records[0].usage.attribution == "provider_attributed"
+    assert records[0].usage.attributed_amounts == {"tokens.total": 7}
+    effects = await run_control.get_effects("tenant-1", run_id)  # type: ignore[attr-defined]
+    claim = effects.claims[async_child_effect_id(child_id)]
+    # Terminal observations are recorded; the claim's disposition turns terminal at settlement.
+    assert claim.observations[-1].disposition.value == "succeeded"
+    assert claim.settlement is None
+
+
+@pytest.mark.asyncio
+async def test_operator_decisions_require_the_privilege_and_are_exclusive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RRM-013 review N5."""
+
+    import asyncio
+
+    client = FakeAgentProtocolClient(served=SERVED)
+    install(monkeypatch, client)
+    service, _run_control, run_id, authority = await governed_with_parent(client)
+    running = await service.spawn(spawn(run_id))
+    child_id = running.child_execution_id
+    client.add_foreign_run(child_id, child_id)
+    await service.reconcile("tenant-1", child_id)
+    with pytest.raises(AsyncSubagentDecisionRejected, match="reconcile_async_child"):
+        await service.reconcile_in_doubt(
+            "tenant-1",
+            child_id,
+            "orphan_child",
+            actor=actor(),
+            decision_id="unprivileged",
+            reason="no permission",
+            decided_at=NOW,
+        )
+    assert "sdk.runs.cancel" not in client.calls
+    results = await asyncio.gather(
+        service.reconcile_in_doubt(
+            "tenant-1",
+            child_id,
+            "adopt_provider_run",
+            actor=reconciler(),
+            decision_id="decision-a",
+            run_id=running.provider_run_id,
+            reason="operator a",
+            decided_at=NOW,
+        ),
+        service.reconcile_in_doubt(
+            "tenant-1",
+            child_id,
+            "orphan_child",
+            actor=reconciler(),
+            decision_id="decision-b",
+            reason="operator b",
+            decided_at=NOW,
+        ),
+        return_exceptions=True,
+    )
+    winners = [item for item in results if isinstance(item, AsyncSubagentExecution)]
+    losers = [item for item in results if isinstance(item, AsyncSubagentDecisionRejected)]
+    assert len(winners) == 1 and len(losers) == 1
+    assert client.calls.count("sdk.runs.cancel") in {1, 2}
+    held = authority.reconciliation_decisions[("tenant-1", child_id)]
+    assert held[0] in {"decision-a", "decision-b"}
+    incident = authority.incidents[("tenant-1", child_id)]
+    assert incident.status == "resolved" and incident.decision_id == held[0]
+
+
+def test_usage_is_attributed_only_when_every_ai_turn_is_reported() -> None:
+    """RRM-013 review N6."""
+
+    from app.integrations.agents.deep_agents.async_subagents import attribute_usage
+
+    limits = {"tokens.total": 100, "model.turns": 4}
+    stamped = [{"message_id": "a", "total_tokens": 5}]
+    messages = [
+        {"type": "human", "content": "x"},
+        {"type": "ai", "id": "a", "content": "y"},
+        {"type": "ai", "id": "b", "content": "z"},
+    ]
+    partial = attribute_usage("run", messages, limits, provider_usage=stamped)
+    assert partial.attribution == "pending" and partial.pending_amounts == {"model.turns": 2}
+    full = attribute_usage(
+        "run",
+        messages,
+        limits,
+        provider_usage=[*stamped, {"message_id": "b", "total_tokens": 6}],
+    )
+    assert full.attribution == "provider_attributed"
+    assert full.attributed_amounts == {"tokens.total": 11, "model.turns": 2}
+    none = attribute_usage("run", [{"type": "human", "content": "x"}], limits, provider_usage=[])
+    assert none.attribution == "pending" and none.attributed_amounts == {}

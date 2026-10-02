@@ -11,7 +11,7 @@ and is left only by observation or by the typed decisions `adopt_provider_run` a
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from typing import Literal, Protocol
@@ -20,12 +20,16 @@ from uuid import NAMESPACE_URL, uuid5
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.domain.operation_execution.async_subagent_reconciliation import (
+    ASYNC_CHILD_RECONCILE_PERMISSION,
+    CANCELLED_RUN_DISPOSITIONS,
+    TERMINAL_PROVIDER_RUN_STATUSES,
     AsyncProviderRunObservation,
     AsyncProviderRunRecord,
     AsyncServedGraphIdentity,
     AsyncSpawnKeyObservation,
     AsyncSubagentIncident,
     AsyncSubagentReconciliationDecision,
+    aggregate_child_usage,
     async_subagent_incident_id,
     classify_spawn_key_observation,
     lifecycle_for_provider_status,
@@ -43,8 +47,12 @@ from app.domain.operation_execution.contracts import (
     AsyncSubagentUsage,
     ParentAsyncSubagentLink,
 )
+from app.domain.run_control.contracts import ActorContext
 
 DEFAULT_SUBMISSION_LEASE = timedelta(seconds=120)
+# The fenced work (identity check, submission, first observation) is bounded below the lease
+# so a holder never outlives it, whatever the SDK's own timeouts (RRM-013 review N4).
+SUBMISSION_LEASE_MARGIN_SECONDS = 10.0
 
 
 class AsyncSubagentError(RuntimeError):
@@ -57,6 +65,10 @@ class AsyncSubagentSubmissionInProgress(AsyncSubagentError):
 
 class AsyncServedGraphMismatch(AsyncSubagentError):
     """REQ-CP-DA-019: the served graph identity differs from the frozen contract."""
+
+
+class AsyncSubagentDecisionRejected(AsyncSubagentError):
+    """An operator decision lacks authority or lost the exclusive claim on the incident."""
 
 
 class AsyncProviderAmbiguity(AsyncSubagentError):
@@ -172,13 +184,17 @@ class AsyncSubagentAuthorityPort(Protocol):
         """Runs BellLabs cancelled as duplicates or orphans; never candidates again."""
         ...
 
+    async def list_provider_runs(
+        self, request_scope: str, child_execution_id: str
+    ) -> tuple[AsyncProviderRunRecord, ...]: ...
+
     async def open_incident(self, incident: AsyncSubagentIncident) -> AsyncSubagentIncident: ...
     async def get_incident(
         self, request_scope: str, child_execution_id: str
     ) -> AsyncSubagentIncident | None: ...
     async def resolve_incident(self, incident: AsyncSubagentIncident) -> None: ...
 
-    async def record_reconciliation_decision(
+    async def claim_reconciliation_decision(
         self,
         request_scope: str,
         child_execution_id: str,
@@ -187,7 +203,9 @@ class AsyncSubagentAuthorityPort(Protocol):
         decision_id: str,
         adopted_run_id: str | None,
         reason: str,
-    ) -> None: ...
+    ) -> bool:
+        """Record the child's single decision command; False when another decision holds it."""
+        ...
 
     async def record_fact(
         self, request_scope: str, child_execution_id: str, fact_kind: str, fact_ref: str
@@ -248,6 +266,7 @@ class AsyncSubagentParentEffectsPort(Protocol):
         outcome: Literal["succeeded", "failed", "cancelled"],
         observation_id: str,
         settlement_ref: str,
+        settlement_revision: int,
         settled_at: datetime,
     ) -> Literal["settled", "pending_usage"]: ...
 
@@ -410,16 +429,23 @@ class AsyncSubagentService:
                 "another live submitter holds the child's submission fence; retry after its "
                 "lease expires or its observation is visible (REQ-CP-DA-008)"
             )
+        work_budget = max(
+            1.0, self._submission_lease.total_seconds() - SUBMISSION_LEASE_MARGIN_SECONDS
+        )
         try:
-            # REQ-CP-DA-019: the served identity is verified before the first submission. A
-            # mismatch fails closed here, with no provider work and the child still admitted.
-            served = await self._provider.verify_served_graph(contract)
-            if not served.matches(contract):
-                raise AsyncServedGraphMismatch(
-                    "served graph identity differs from the frozen async subagent contract"
-                )
             try:
-                observation = await self._provider.start(contract, execution, objective)
+                # The holder's provider work never outlives its lease (REQ-CP-DA-008): the
+                # identity check, the submission and its first observation share one budget
+                # below the lease, whatever the SDK's own timeouts.
+                async with asyncio.timeout(work_budget):
+                    # REQ-CP-DA-019: the served identity is verified before the first
+                    # submission. A mismatch fails closed with no provider work.
+                    served = await self._provider.verify_served_graph(contract)
+                    if not served.matches(contract):
+                        raise AsyncServedGraphMismatch(
+                            "served graph identity differs from the frozen async subagent contract"
+                        )
+                    observation = await self._provider.start(contract, execution, objective)
             except AsyncProviderAmbiguity as ambiguity:
                 return await self._enter_in_doubt(
                     request_scope,
@@ -428,9 +454,12 @@ class AsyncSubagentService:
                     reason=ambiguity.reason,
                     observation=ambiguity.observation,
                 )
+            except AsyncServedGraphMismatch:
+                raise
             except Exception as submit_error:
-                # The submission's result is unknown: classify from the provider's durable
-                # state instead of guessing. Nothing here makes the child `orphaned`.
+                # The submission's result is unknown (an error or the lease budget ran out):
+                # classify from the provider's durable state instead of guessing. Nothing
+                # here makes the child `orphaned`.
                 return await self._classify_unknown_submission(
                     request_scope, contract, execution, submit_error
                 )
@@ -546,6 +575,7 @@ class AsyncSubagentService:
         child_execution_id: str,
         decision: AsyncSubagentReconciliationDecision,
         *,
+        actor: ActorContext,
         decision_id: str,
         run_id: str | None = None,
         reason: str,
@@ -553,11 +583,18 @@ class AsyncSubagentService:
     ) -> AsyncSubagentExecution:
         """REQ-CP-DA-008 operator decisions: adopt one provider run, or orphan the child.
 
-        Every other provider run carrying the spawn key is cancelled and its usage recorded as
-        pending; nothing is re-spawned. Both decisions are recorded through the child's
-        authority and resolve its incident exactly once.
+        The decision requires the privileged permission `workflow_run.reconcile_async_child`
+        and is exclusive: the child's single decision command is claimed in authority before
+        any provider run is cancelled, so of two concurrent decisions exactly one acts. The
+        served identity is verified before anything is cancelled. Every other provider run
+        carrying the spawn key is cancelled; a run whose terminal status is not observed stays
+        `cancel_ambiguous` and a candidate until it is. Usage of cancelled runs is pending.
         """
 
+        if ASYNC_CHILD_RECONCILE_PERMISSION not in actor.permissions:
+            raise AsyncSubagentDecisionRejected(
+                f"reconciling an in_doubt async child requires {ASYNC_CHILD_RECONCILE_PERMISSION}"
+            )
         execution = await self._details.get_execution(request_scope, child_execution_id)
         incident = await self._authority.get_incident(request_scope, child_execution_id)
         if incident is not None and incident.status == "resolved":
@@ -565,7 +602,9 @@ class AsyncSubagentService:
             # a resolved incident is refused.
             if incident.decision_id == decision_id:
                 return execution
-            raise AsyncSubagentError("the incident is already resolved by another decision")
+            raise AsyncSubagentDecisionRejected(
+                "the incident is already resolved by another decision"
+            )
         if execution.lifecycle != AsyncSubagentLifecycle.IN_DOUBT:
             raise AsyncSubagentError("only an in_doubt child accepts a reconciliation decision")
         if incident is None or incident.incident_id != execution.incident_id:
@@ -574,11 +613,18 @@ class AsyncSubagentService:
             raise AsyncSubagentError("adopt_provider_run names exactly one provider run")
         contract = await self._details.get_contract(request_scope, execution.contract_id)
         link = await self._details.get_link(request_scope, child_execution_id)
+        # REQ-CP-DA-019: the deployment's served identity is verified before a run is adopted
+        # or anything is cancelled; a mismatch leaves the child in doubt.
+        served = await self._provider.verify_served_graph(contract)
+        if not served.matches(contract):
+            raise AsyncServedGraphMismatch(
+                "served graph identity differs from the frozen async subagent contract"
+            )
         spawn_key = await self._provider.observe_spawn_key(contract, execution)
         observed_ids = {run.run_id for run in spawn_key.runs}
         if run_id is not None and run_id not in observed_ids:
             raise AsyncSubagentError("the named run does not carry this child's spawn key")
-        await self._authority.record_reconciliation_decision(
+        claimed = await self._authority.claim_reconciliation_decision(
             request_scope,
             child_execution_id,
             decision,
@@ -586,22 +632,29 @@ class AsyncSubagentService:
             adopted_run_id=run_id,
             reason=reason,
         )
-        pending_records: list[AsyncProviderRunRecord] = []
+        if not claimed:
+            raise AsyncSubagentDecisionRejected(
+                "another decision already holds this child's incident"
+            )
+        recorded = {
+            record.provider_run_id: record
+            for record in await self._authority.list_provider_runs(
+                request_scope, child_execution_id
+            )
+        }
+        cancelled_kind = (
+            "duplicate_cancelled" if decision == "adopt_provider_run" else "orphaned_cancelled"
+        )
         for run in spawn_key.runs:
             if run.run_id == run_id:
                 continue
+            prior = recorded.get(run.run_id)
+            if prior is not None and prior.disposition in CANCELLED_RUN_DISPOSITIONS:
+                continue
             record = await self._provider.cancel_run(contract, execution, run.run_id)
-            record = record.model_copy(
-                update={
-                    "disposition": (
-                        "duplicate_cancelled"
-                        if decision == "adopt_provider_run"
-                        else "orphaned_cancelled"
-                    )
-                }
-            )
+            if record.disposition != "cancel_ambiguous":
+                record = record.model_copy(update={"disposition": cancelled_kind})
             await self._authority.record_provider_run(request_scope, record)
-            pending_records.append(record)
         resolved = incident.model_copy(
             update={
                 "status": "resolved",
@@ -656,10 +709,15 @@ class AsyncSubagentService:
         execution: AsyncSubagentExecution,
         run: AsyncProviderRunObservation,
     ) -> AsyncSubagentExecution:
-        """Bind the unique verified provider run, then observe it through the stock check."""
+        """Bind the unique verified provider run, then observe it through the stock check.
+
+        The incident (if any) is resolved by observation and the run is recorded before the
+        completed-run branch observes the result (RRM-013 review N3).
+        """
 
         run_id = run.run_id
         status = run.status
+        now = self._now()
         bound = execution.model_copy(
             update={
                 "lifecycle": lifecycle_for_provider_status(status),
@@ -667,17 +725,9 @@ class AsyncSubagentService:
                 "provider_run_id": run_id,
                 "in_doubt_reason": None,
                 "incident_id": None,
-                "updated_at": self._now(),
+                "updated_at": now,
             }
         )
-        if bound.lifecycle == AsyncSubagentLifecycle.COMPLETED:
-            # A completed run needs its typed result: observe it through the provider check
-            # so the manifest carries the qualified checkpoint and attributed usage.
-            running = bound.model_copy(update={"lifecycle": AsyncSubagentLifecycle.RUNNING})
-            await self._details.save_execution(request_scope, running)
-            contract = await self._details.get_contract(request_scope, execution.contract_id)
-            observation = await self._provider.check(contract, running)
-            return await self._apply_observation(request_scope, running, observation)
         incident = await self._authority.get_incident(request_scope, execution.child_execution_id)
         if (
             execution.lifecycle == AsyncSubagentLifecycle.IN_DOUBT
@@ -687,8 +737,6 @@ class AsyncSubagentService:
             await self._authority.resolve_incident(
                 incident.model_copy(update={"status": "resolved", "resolution": "observation"})
             )
-        await self._details.save_execution(request_scope, bound)
-        await self._authority.record_execution_state(request_scope, bound)
         await self._authority.record_provider_run(
             request_scope,
             AsyncProviderRunRecord(
@@ -699,9 +747,20 @@ class AsyncSubagentService:
                 provider_status=status,
                 usage=run.usage
                 or AsyncSubagentUsage(provider_run_id=run_id, attribution="pending"),
-                observed_at=bound.updated_at,
+                observed_at=now,
             ),
         )
+        if bound.lifecycle == AsyncSubagentLifecycle.COMPLETED:
+            # A completed run needs its typed result: observe it through the provider check
+            # so the manifest carries the qualified checkpoint and attributed usage.
+            running = bound.model_copy(update={"lifecycle": AsyncSubagentLifecycle.RUNNING})
+            await self._details.save_execution(request_scope, running)
+            await self._authority.record_execution_state(request_scope, running)
+            contract = await self._details.get_contract(request_scope, execution.contract_id)
+            observation = await self._provider.check(contract, running)
+            return await self._apply_observation(request_scope, running, observation)
+        await self._details.save_execution(request_scope, bound)
+        await self._authority.record_execution_state(request_scope, bound)
         await self._authority.record_fact(
             request_scope, execution.child_execution_id, "lifecycle", bound.lifecycle.value
         )
@@ -714,11 +773,9 @@ class AsyncSubagentService:
                 observation_id=f"async-bound:{run_id}",
                 provider_effect_ref=run_id,
                 evidence_refs=(),
-                observed_at=bound.updated_at,
+                observed_at=now,
             )
         return bound
-
-    # ------------------------------------------------------------------ reads
 
     async def execution(
         self, request_scope: str, child_execution_id: str
@@ -747,6 +804,7 @@ class AsyncSubagentService:
             return execution
         # Every reconnect re-verifies the spawn key: exactly one run (REQ-CP-DA-008).
         spawn_key = await self._provider.observe_spawn_key(contract, execution)
+        await self._settle_ambiguous_cancellations(request_scope, child_execution_id, spawn_key)
         classified = classify_spawn_key_observation(
             contract,
             spawn_key,
@@ -792,6 +850,45 @@ class AsyncSubagentService:
                 observation=ambiguity.observation,
             )
         return await self._apply_observation(request_scope, execution, observation)
+
+    async def _settle_ambiguous_cancellations(
+        self,
+        request_scope: str,
+        child_execution_id: str,
+        spawn_key: AsyncSpawnKeyObservation,
+    ) -> None:
+        """A `cancel_ambiguous` run whose terminal status is now observed is cancelled for good."""
+
+        records = await self._authority.list_provider_runs(request_scope, child_execution_id)
+        ambiguous = {
+            record.provider_run_id: record
+            for record in records
+            if record.disposition == "cancel_ambiguous"
+        }
+        if not ambiguous:
+            return
+        link = await self._details.get_link(request_scope, child_execution_id)
+        kind = (
+            "orphaned_cancelled"
+            if link.reconciliation_decision == "orphan_child"
+            else "duplicate_cancelled"
+        )
+        for run in spawn_key.runs:
+            record = ambiguous.get(run.run_id)
+            if record is not None and run.status in TERMINAL_PROVIDER_RUN_STATUSES:
+                await self._authority.record_provider_run(
+                    request_scope,
+                    record.model_copy(
+                        update={
+                            "disposition": kind,
+                            "provider_status": run.status,
+                            "usage": AsyncSubagentUsage(
+                                provider_run_id=run.run_id, attribution="pending"
+                            ),
+                            "observed_at": spawn_key.observed_at,
+                        }
+                    ),
+                )
 
     async def _resolved_runs(
         self, request_scope: str, execution: AsyncSubagentExecution
@@ -1001,23 +1098,30 @@ class AsyncSubagentService:
         link = await self._details.get_link(request_scope, child_execution_id)
         manifest = execution.result_manifest
         if manifest is None:
-            raise AsyncSubagentError("result admission requires a typed result manifest")
+            # A child that ended without a result (failed, cancelled, orphaned) can only be
+            # rejected or deferred; admission always needs the typed manifest (REQ-CP-DA-011).
+            if decision in {"admit", "conditionally_admit"} or execution.lifecycle not in {
+                AsyncSubagentLifecycle.FAILED,
+                AsyncSubagentLifecycle.CANCELLED,
+                AsyncSubagentLifecycle.ORPHANED,
+            }:
+                raise AsyncSubagentError("result admission requires a typed result manifest")
+            decision_ref = f"no-result:{execution.lifecycle.value}"
+        else:
+            decision_ref = manifest.manifest_digest
         late = not parent_open or execution.execution_generation != current_generation
         if late and decision in {"admit", "conditionally_admit"}:
             await self._authority.record_fact(
-                request_scope,
-                child_execution_id,
-                "result",
-                f"late_rejected:{manifest.manifest_digest}",
+                request_scope, child_execution_id, "result", f"late_rejected:{decision_ref}"
             )
             raise AsyncSubagentError("late or superseded child result cannot mutate the parent")
         await self._authority.decide_result(
-            request_scope, child_execution_id, decision, manifest.manifest_digest
+            request_scope, child_execution_id, decision, decision_ref
         )
         updated = link.model_copy(
             update={
                 "result_decision": decision,
-                "admitted_manifest_digest": manifest.manifest_digest
+                "admitted_manifest_digest": decision_ref
                 if decision in {"admit", "conditionally_admit"}
                 else None,
                 "updated_at": decided_at,
@@ -1029,7 +1133,13 @@ class AsyncSubagentService:
     async def settle(
         self, request_scope: str, child_execution_id: str, settlement_ref: str, settled_at: datetime
     ) -> ParentAsyncSubagentLink:
-        """Settle the child against the parent run's budget ledger exactly once (REQ-CP-RUN-009)."""
+        """Settle the child against the parent run's budget ledger exactly once (REQ-CP-RUN-009).
+
+        Usage is aggregated over every provider run the child had. A run whose usage the
+        provider did not attribute keeps the parent's effect unsettled (`pending_usage`) until
+        `reconcile_usage` supplies the amounts; the link is `settled` only on an actual
+        settlement. Each attempt is a numbered settlement revision.
+        """
 
         link = await self._details.get_link(request_scope, child_execution_id)
         execution = await self._details.get_execution(request_scope, child_execution_id)
@@ -1045,12 +1155,20 @@ class AsyncSubagentService:
             AsyncSubagentLifecycle.ORPHANED,
         }:
             raise AsyncSubagentError("only a terminal child settles against the parent budget")
+        if link.settled:
+            return link
         await self._authority.settle(request_scope, child_execution_id, settlement_ref)
-        if self._parent_effects is not None and not link.settled:
-            contract = await self._details.get_contract(request_scope, execution.contract_id)
-            manifest = execution.result_manifest
-            attributed = dict(manifest.usage.attributed_amounts) if manifest is not None else {}
-            pending = dict(manifest.usage.pending_amounts) if manifest is not None else {}
+        contract = await self._details.get_contract(request_scope, execution.contract_id)
+        manifest = execution.result_manifest
+        records = await self._authority.list_provider_runs(request_scope, child_execution_id)
+        attributed, pending = aggregate_child_usage(
+            records,
+            contract.budget_limits,
+            manifest_usage=manifest.usage if manifest is not None else None,
+        )
+        revision = link.settlement_revision + 1
+        disposition: Literal["settled", "pending_usage"] = "settled"
+        if self._parent_effects is not None:
             outcome: Literal["succeeded", "failed", "cancelled"] = (
                 "succeeded"
                 if execution.lifecycle == AsyncSubagentLifecycle.COMPLETED
@@ -1069,14 +1187,60 @@ class AsyncSubagentService:
                 outcome=outcome,
                 observation_id=f"async-terminal:{child_execution_id}",
                 settlement_ref=settlement_ref,
+                settlement_revision=revision,
                 settled_at=settled_at,
             )
-            await self._authority.record_fact(
-                request_scope, child_execution_id, "settlement", f"{disposition}:{settlement_ref}"
-            )
-        updated = link.model_copy(update={"settled": True, "updated_at": settled_at})
+        await self._authority.record_fact(
+            request_scope,
+            child_execution_id,
+            "settlement",
+            f"{disposition}:{settlement_ref}:revision:{revision}",
+        )
+        updated = link.model_copy(
+            update={
+                "settled": disposition == "settled",
+                "settlement_revision": revision,
+                "usage_disposition": disposition,
+                "updated_at": settled_at,
+            }
+        )
         await self._details.save_link(request_scope, updated)
         return updated
+
+    async def reconcile_usage(
+        self,
+        request_scope: str,
+        child_execution_id: str,
+        *,
+        run_usage: Mapping[str, AsyncSubagentUsage],
+        settlement_ref: str,
+        reconciled_at: datetime,
+    ) -> ParentAsyncSubagentLink:
+        """Supply provider-attributed usage for runs whose usage was pending, then settle.
+
+        REQ-CP-RUN-009: pending usage is reconciled through the parent operation's authority
+        (a later settlement revision that settles the outstanding usage), never dropped. The
+        caller supplies attributed usage per provider run (for example from the provider's
+        thread state once a cancelled run has a terminal checkpoint).
+        """
+
+        records = {
+            record.provider_run_id: record
+            for record in await self._authority.list_provider_runs(
+                request_scope, child_execution_id
+            )
+        }
+        for run_id, usage in run_usage.items():
+            record = records.get(run_id)
+            if record is None:
+                raise AsyncSubagentError(f"provider run {run_id} is not recorded for the child")
+            if usage.provider_run_id != run_id:
+                raise AsyncSubagentError("usage names a different provider run")
+            await self._authority.record_provider_run(
+                request_scope,
+                record.model_copy(update={"usage": usage, "observed_at": reconciled_at}),
+            )
+        return await self.settle(request_scope, child_execution_id, settlement_ref, reconciled_at)
 
     @staticmethod
     def parent_dependency(link: ParentAsyncSubagentLink) -> Literal["wait", "proceed", "degrade"]:
@@ -1158,7 +1322,9 @@ class AsyncSubagentService:
         )
         await self._details.save_execution(request_scope, updated)
         await self._authority.record_execution_state(request_scope, updated)
-        if bind_provider and execution.provider_run_id != observation.run_id:
+        if bind_provider and (
+            execution.provider_run_id != observation.run_id or observation.usage is not None
+        ):
             await self._authority.record_provider_run(
                 request_scope,
                 AsyncProviderRunRecord(
@@ -1281,7 +1447,7 @@ class InMemoryAsyncSubagentAuthority:
         self.states: dict[tuple[str, str], AsyncSubagentExecution] = {}
         self.provider_runs: list[tuple[str, AsyncProviderRunRecord]] = []
         self.incidents: dict[tuple[str, str], AsyncSubagentIncident] = {}
-        self.reconciliation_decisions: list[tuple[str, str, str, str, str | None]] = []
+        self.reconciliation_decisions: dict[tuple[str, str], tuple[str, str, str | None]] = {}
 
     async def reserve_and_admit(
         self, request: AsyncSubagentSpawnRequest, child_execution_id: str, link_id: str
@@ -1353,7 +1519,7 @@ class InMemoryAsyncSubagentAuthority:
             for scope, record in self.provider_runs
             if scope == request_scope
             and record.child_execution_id == child_execution_id
-            and record.disposition in {"duplicate_cancelled", "orphaned_cancelled"}
+            and record.disposition in CANCELLED_RUN_DISPOSITIONS
         )
 
     async def open_incident(self, incident: AsyncSubagentIncident) -> AsyncSubagentIncident:
@@ -1379,7 +1545,7 @@ class InMemoryAsyncSubagentAuthority:
             raise AsyncSubagentError("the incident is already resolved by another decision")
         self.incidents[key] = deepcopy(incident)
 
-    async def record_reconciliation_decision(
+    async def claim_reconciliation_decision(
         self,
         request_scope: str,
         child_execution_id: str,
@@ -1388,10 +1554,22 @@ class InMemoryAsyncSubagentAuthority:
         decision_id: str,
         adopted_run_id: str | None,
         reason: str,
-    ) -> None:
+    ) -> bool:
         del reason
-        self.reconciliation_decisions.append(
-            (request_scope, child_execution_id, decision, decision_id, adopted_run_id)
+        key = (request_scope, child_execution_id)
+        prior = self.reconciliation_decisions.get(key)
+        if prior is not None:
+            return prior[0] == decision_id
+        self.reconciliation_decisions[key] = (decision_id, decision, adopted_run_id)
+        return True
+
+    async def list_provider_runs(
+        self, request_scope: str, child_execution_id: str
+    ) -> tuple[AsyncProviderRunRecord, ...]:
+        return tuple(
+            deepcopy(record)
+            for scope, record in self.provider_runs
+            if scope == request_scope and record.child_execution_id == child_execution_id
         )
 
     async def record_fact(

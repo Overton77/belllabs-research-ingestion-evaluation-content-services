@@ -273,7 +273,7 @@ class PostgresAsyncSubagentAuthority:
                 datetime.now(UTC),
             )
 
-    async def record_reconciliation_decision(
+    async def claim_reconciliation_decision(
         self,
         request_scope: str,
         child_execution_id: str,
@@ -282,13 +282,15 @@ class PostgresAsyncSubagentAuthority:
         decision_id: str,
         adopted_run_id: str | None,
         reason: str,
-    ) -> None:
+    ) -> bool:
+        """Insert the child's single decision command (unique per child, 0021); replay-safe."""
+
         async with self._pool.acquire() as connection, connection.transaction():
             await _set_scope(connection, request_scope)
             await connection.execute(
                 """INSERT INTO belllabs_control.async_subagent_commands
                 (command_id, request_scope, child_execution_id, command_kind, payload, recorded_at)
-                VALUES ($1,$2,$3,$4,$5::jsonb,$6) ON CONFLICT (command_id) DO NOTHING""",
+                VALUES ($1,$2,$3,$4,$5::jsonb,$6) ON CONFLICT DO NOTHING""",
                 decision_id,
                 request_scope,
                 child_execution_id,
@@ -296,8 +298,30 @@ class PostgresAsyncSubagentAuthority:
                 json.dumps({"adopted_run_id": adopted_run_id, "reason": reason}),
                 datetime.now(UTC),
             )
+            holder = await connection.fetchval(
+                """SELECT command_id FROM belllabs_control.async_subagent_commands
+                   WHERE request_scope = $1 AND child_execution_id = $2
+                     AND command_kind IN ('adopt_provider_run', 'orphan_child')""",
+                request_scope,
+                child_execution_id,
+            )
+            return holder == decision_id
 
-    # ------------------------------------------------------------------ ledgers
+    async def list_provider_runs(
+        self, request_scope: str, child_execution_id: str
+    ) -> tuple[AsyncProviderRunRecord, ...]:
+        async with self._pool.acquire() as connection, connection.transaction():
+            await _set_scope(connection, request_scope)
+            rows = await connection.fetch(
+                """SELECT record_payload FROM belllabs_control.async_subagent_provider_runs
+                   WHERE request_scope = $1 AND child_execution_id = $2
+                   ORDER BY observed_at, provider_run_id""",
+                request_scope,
+                child_execution_id,
+            )
+            return tuple(
+                AsyncProviderRunRecord.model_validate(_json(row["record_payload"])) for row in rows
+            )
 
     async def record_fact(
         self, request_scope: str, child_execution_id: str, fact_kind: str, fact_ref: str
