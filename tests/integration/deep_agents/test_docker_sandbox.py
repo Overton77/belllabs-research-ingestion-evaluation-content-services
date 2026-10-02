@@ -12,6 +12,10 @@ from langchain_core.tools import BaseTool
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.store.memory import InMemoryStore
 
+from app.application.operations.checkpoint_lineage import (
+    CheckpointLineageService,
+    InMemoryCheckpointLineageRepository,
+)
 from app.domain.operation_execution.contracts import (
     WorkspaceMount,
     workspace_durable_reference,
@@ -24,7 +28,8 @@ from app.integrations.agents.deep_agents import (
 )
 from tests.acceptance.control_plane.test_wp_cp_040 import (
     exact_fixture,
-    runtime_invocation,
+    planned_invocation,
+    unit_bound,
 )
 
 
@@ -102,9 +107,10 @@ async def test_real_deep_agent_executes_inside_ephemeral_docker_sandbox(
         checkpointers={binding.checkpointer_ref.digest: InMemorySaver()},
         stores={binding.store_ref.digest: InMemoryStore()},
     )
+    lineage = CheckpointLineageService(InMemoryCheckpointLineageRepository())
     result = await DeepAgentRuntimeAdapter(
         ExactDeepAgentMaterializer(registry)
-    ).execute(runtime_invocation(binding), {})
+    ).execute(await planned_invocation(unit_bound(binding), lineage), {})
 
     assert "sandboxed-deep-agent" in result.output_text
     inspection = result.event_payloads[0]

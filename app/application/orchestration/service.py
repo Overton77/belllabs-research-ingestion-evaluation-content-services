@@ -26,6 +26,7 @@ from app.domain.control_plane.contracts import (
     GoalDirectedBlueprint,
     StageGraphBlueprint,
 )
+from app.domain.operation_execution.checkpoint_lineage import cognitive_session_namespace
 from app.domain.operation_execution.contracts import (
     OperationAttemptIdentity,
     OperationExecutionRequest,
@@ -59,6 +60,7 @@ from app.domain.orchestration.contracts import (
     WorkflowInvalidationProposal,
 )
 from app.domain.orchestration.interpreter import StageGraphInterpreter
+from app.domain.orchestration.runtime_units import stage_runtime_unit
 from app.domain.run_control.contracts import (
     AcceptedObligationEvidence,
     AcceptedOperationSettlementEvidence,
@@ -831,6 +833,8 @@ class StageGraphOperationPreparationService:
             operation_id=proposal.identity.operation_id,
             operation_attempt=proposal.identity.semantic_attempt,
         )
+        # REQ-CP-EXEC-013: the mapped instance/cycle/slot location becomes the unit identity.
+        runtime_unit = stage_runtime_unit(request.request_scope, proposal.identity)
         control_revision = request.projection.run_version + 1
         deep_binding = template.deep_agent_binding
         if deep_binding is not None:
@@ -849,6 +853,10 @@ class StageGraphOperationPreparationService:
                     "workspace": workspace,
                     "capability_grant": template.capability_grant,
                     "reservation_id": proposal.reservation_id,
+                    "runtime_unit": runtime_unit,
+                    "cognitive_session_namespace": cognitive_session_namespace(
+                        runtime_unit, proposal.identity.execution_generation
+                    ),
                 }
             )
         operation = OperationExecutionRequest.model_validate(
@@ -888,6 +896,7 @@ class StageGraphOperationPreparationService:
                     f"stagegraph:{proposal.identity.semantic_key}:"
                     f"generation:{proposal.identity.execution_generation}"
                 ),
+                "runtime_unit": runtime_unit,
             }
         )
         if operation.identity.semantic_key != proposal.identity.semantic_key:

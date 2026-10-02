@@ -15,6 +15,12 @@ from pydantic import (
 
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import ExactDefinitionRef, SecretRef
+from app.domain.graph_runtime.identities import QualifiedCheckpointKey, RuntimeUnitIdentity
+from app.domain.operation_execution.checkpoint_lineage import (
+    CheckpointCapture,
+    CheckpointInvocationPlan,
+    cognitive_session_namespace,
+)
 
 DIGEST_PATTERN = r"^sha256:[0-9a-f]{64}$"
 PLACEHOLDER_DIGEST = "sha256:" + "0" * 64
@@ -943,10 +949,33 @@ class DeepAgentExecutionBinding(Contract):
     intended_attachments: tuple[DeepAgentAttachmentRecord, ...] = Field(min_length=1)
     applied_degradations: tuple[str, ...] = ()
     silent_fallback: Literal[False] = False
+    # AMD-RRM-001 (REQ-CP-DA-016, REQ-CP-EXEC-013): the frozen runtime unit and the
+    # cognitive session namespace the worker must address. Absent fields are excluded
+    # from the digest so earlier bindings keep their content address.
+    runtime_unit: RuntimeUnitIdentity | None = None
+    cognitive_session_namespace: str | None = Field(default=None, min_length=1, max_length=1024)
     binding_digest: str = Field(pattern=DIGEST_PATTERN)
 
     @model_validator(mode="after")
     def validate_binding(self, info: ValidationInfo) -> DeepAgentExecutionBinding:
+        if (self.runtime_unit is None) != (self.cognitive_session_namespace is None):
+            raise ValueError(
+                "Deep Agent runtime unit and cognitive session namespace are bound together"
+            )
+        unit = self.runtime_unit
+        if unit is not None:
+            if (
+                unit.belllabs_run_id != self.run_id
+                or unit.semantic_operation_id != self.operation_id
+                or unit.semantic_attempt != self.operation_attempt
+            ):
+                raise ValueError("Deep Agent runtime unit does not match its binding identity")
+            if self.cognitive_session_namespace != cognitive_session_namespace(
+                unit, self.execution_generation
+            ):
+                raise ValueError(
+                    "Deep Agent cognitive session namespace is not the unit generation's"
+                )
         context_fields = {field.name: field for field in self.cognitive_context_schema.fields}
         if set(self.cognitive_context_values) != set(context_fields):
             raise ValueError("Deep Agent context values do not exactly match the frozen schema")
@@ -976,11 +1005,16 @@ class DeepAgentExecutionBinding(Contract):
             raise ValueError("Deep Agent attachment collision")
         if (
             not (info.context or {}).get("allow_placeholder_digest")
-            and sha256_digest(self.model_dump(mode="python", exclude={"binding_digest"}))
-            != self.binding_digest
+            and self.content_digest() != self.binding_digest
         ):
             raise ValueError("Deep Agent execution binding digest mismatch")
         return self
+
+    def content_digest(self) -> str:
+        excluded = {"binding_digest"}
+        if self.runtime_unit is None:
+            excluded |= {"runtime_unit", "cognitive_session_namespace"}
+        return sha256_digest(self.model_dump(mode="python", exclude=excluded))
 
     @classmethod
     def create(cls, **values: object) -> DeepAgentExecutionBinding:
@@ -993,7 +1027,7 @@ class DeepAgentExecutionBinding(Contract):
             context={"allow_placeholder_digest": True},
         )
         complete = draft.model_dump(mode="python", exclude={"binding_digest"})
-        return cls(**complete, binding_digest=sha256_digest(complete))
+        return cls(**complete, binding_digest=draft.content_digest())
 
 
 class NativeOperationExecutionPlacement(Contract):
@@ -1073,9 +1107,25 @@ class OperationExecutionRequest(Contract):
     prior_binding_id: str | None = None
     requested_at: AwareDatetime
     idempotency_key: str = Field(min_length=1)
+    # REQ-CP-EXEC-013: the structured runtime unit travels beside the wire identity.
+    runtime_unit: RuntimeUnitIdentity | None = None
 
     @model_validator(mode="after")
     def capabilities_cover_exact_bindings(self) -> OperationExecutionRequest:
+        unit = self.runtime_unit
+        if unit is not None and (
+            unit.request_scope != self.request_scope
+            or unit.belllabs_run_id != self.identity.run_id
+            or unit.semantic_operation_id != self.identity.operation_id
+            or unit.semantic_attempt != self.identity.operation_attempt
+        ):
+            raise ValueError("runtime unit does not match the operation attempt identity")
+        if (
+            self.deep_agent_binding is not None
+            and self.deep_agent_binding.runtime_unit is not None
+            and self.deep_agent_binding.runtime_unit != unit
+        ):
+            raise ValueError("Deep Agent binding runtime unit differs from the operation's")
         if (self.execution_runtime == "deep_agent") != (self.deep_agent_binding is not None):
             raise ValueError(
                 "deep_agent execution requires exactly one canonical Deep Agent binding"
@@ -1184,6 +1234,7 @@ class OperationExecutionBinding(Contract):
     deep_agent_binding: DeepAgentExecutionBinding | None = None
     side_effect_key: str
     bound_at: AwareDatetime
+    runtime_unit: RuntimeUnitIdentity | None = None
 
     @model_validator(mode="after")
     def exact_runtime_placement(self) -> OperationExecutionBinding:
@@ -1210,6 +1261,8 @@ class RuntimeInvocation(Contract):
     prompt_segments: tuple[PromptSegment, ...]
     workspace: MaterializedWorkspace
     resolved_secret_names: tuple[str, ...] = ()
+    # REQ-CP-DA-016/017: namespace, pinned expected source, and stamps for cognition.
+    checkpoint_plan: CheckpointInvocationPlan | None = None
 
 
 class RuntimeUsage(Contract):
@@ -1224,6 +1277,8 @@ class RuntimeResult(Contract):
     usage: RuntimeUsage = Field(default_factory=RuntimeUsage)
     provider_run_id: str | None = None
     event_payloads: tuple[dict[str, object], ...] = ()
+    # REQ-CP-DA-017: captured source/result checkpoint of the invocation, keys only.
+    checkpoint: CheckpointCapture | None = None
 
 
 class RuntimeEventEnvelope(Contract):
@@ -1276,6 +1331,9 @@ class OperationSettlement(Contract):
     failure_code: str | None = None
     failure_message: str | None = None
     settled_at: AwareDatetime
+    # REQ-CP-DA-017: the settlement references the result key of the transition it settles.
+    checkpoint_transition_id: str | None = None
+    result_checkpoint: QualifiedCheckpointKey | None = None
 
 
 class OperationExecutionResult(Contract):
@@ -1288,6 +1346,9 @@ class OperationExecutionResult(Contract):
     usage: RuntimeUsage = Field(default_factory=RuntimeUsage)
     failure_code: str | None = None
     failure_message: str | None = None
+    unit_key: str | None = None
+    checkpoint_transition_id: str | None = None
+    result_checkpoint: QualifiedCheckpointKey | None = None
 
 
 class OperationWorkflowRequest(Contract):

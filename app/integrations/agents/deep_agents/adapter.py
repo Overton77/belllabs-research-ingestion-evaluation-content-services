@@ -11,8 +11,18 @@ from deepagents.middleware.subagents import SubAgent
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.base import BaseCheckpointSaver, CheckpointTuple
 
 from app.domain.control_plane.canonical import sha256_digest
+from app.domain.graph_runtime.identities import QualifiedCheckpointKey
+from app.domain.operation_execution.checkpoint_lineage import (
+    ROOT_CHECKPOINT_NS,
+    STAMP_STATE_SCHEMA_DIGEST,
+    CheckpointCapture,
+    CheckpointInvocationPlan,
+    CheckpointLineageInDoubt,
+    IncompatibleCheckpointSchema,
+)
 from app.domain.operation_execution.contracts import (
     DeepAgentExecutionBinding,
     RuntimeInvocation,
@@ -41,6 +51,7 @@ class DeepAgentRuntimeAdapter:
             raise DeepAgentMaterializationError(
                 "Deep Agent adapter requires the exact canonical execution binding"
             )
+        plan = _validated_plan(invocation, binding)
         output_binding = invocation.binding.output_schema
         async with self._materializer.prepare(
             binding,
@@ -76,32 +87,66 @@ class DeepAgentRuntimeAdapter:
                 "messages": [{"role": "user", "content": user_prompt}],
             }
             disclosure_observer = _SkillDisclosureObserver(binding)
-            config: RunnableConfig = {
-                # Session identity is governed by GoalDirected. Reused iterations share
-                # a checkpoint thread; token rollover advances the session identity and
-                # therefore starts a genuinely empty Deep Agent session.
+            checkpointer = cast(BaseCheckpointSaver[Any], materialized.checkpointer)
+            # REQ-CP-DA-018 (RRM-003 scope): only `not_submitted` admits a submission. Any
+            # other observed checkpointer state fails closed before the model is invoked;
+            # resume and terminal reconstruction are the recovery protocol's job.
+            source_key = await _classify_not_submitted(checkpointer, plan)
+            thread_config: RunnableConfig = {
                 "configurable": {
-                    "thread_id": invocation.binding.session_id or binding.binding_id
+                    "thread_id": plan.namespace,
+                    "checkpoint_ns": ROOT_CHECKPOINT_NS,
+                }
+            }
+            # REQ-CP-DA-016/017: exact namespace thread, root checkpoint_ns, submission
+            # pinned to the expected source, and scalar stamps copied onto every checkpoint.
+            config: RunnableConfig = {
+                "configurable": {
+                    **thread_config["configurable"],
+                    **(
+                        {"checkpoint_id": source_key.checkpoint_id}
+                        if source_key is not None
+                        else {}
+                    ),
                 },
+                "metadata": plan.metadata_stamps(),
                 "callbacks": [disclosure_observer],
             }
-            prior_snapshot = await agent.aget_state(config)
-            prior_messages = cast(
-                list[BaseMessage],
-                prior_snapshot.values.get("messages", []),
-            )
+            prior_messages: list[BaseMessage] = []
+            if source_key is not None:
+                prior_snapshot = await agent.aget_state(
+                    {"configurable": dict(config["configurable"])}
+                )
+                prior_messages = cast(
+                    list[BaseMessage], prior_snapshot.values.get("messages", [])
+                )
             result = cast(
                 dict[str, Any],
                 await agent.ainvoke(
                     cast(Any, state),
                     context=materialized.context,
                     config=config,
+                    durability="sync",
                 ),
             )
-            snapshot = await agent.aget_state(config)
+            snapshot = await agent.aget_state(thread_config)
             actual_state = cast(dict[str, Any], snapshot.values)
+            messages = cast(
+                list[BaseMessage], actual_state.get("messages", result.get("messages", []))
+            )
+            capture = await _capture_result(
+                checkpointer,
+                plan,
+                source_key,
+                snapshot_config=snapshot.config,
+                pending=bool(snapshot.next or snapshot.interrupts),
+                summary={
+                    "state_keys": sorted(actual_state),
+                    "message_count": len(messages),
+                    "step": (snapshot.metadata or {}).get("step"),
+                },
+            )
 
-        messages = cast(list[BaseMessage], actual_state.get("messages", result.get("messages", [])))
         final = next((item for item in reversed(messages) if isinstance(item, AIMessage)), None)
         output_text = _message_text(final) if final is not None else ""
         structured = _structured_output(result.get("structured_response"), output_text)
@@ -119,7 +164,155 @@ class DeepAgentRuntimeAdapter:
             usage=_usage(invocation, messages[len(prior_messages) :]),
             provider_run_id=(str(final.id) if final is not None and final.id else None),
             event_payloads=(inspection,),
+            checkpoint=capture,
         )
+
+
+_MAX_LINEAGE_WALK = 100_000
+
+
+def _validated_plan(
+    invocation: RuntimeInvocation, binding: DeepAgentExecutionBinding
+) -> CheckpointInvocationPlan:
+    plan = invocation.checkpoint_plan
+    if plan is None or binding.cognitive_session_namespace is None:
+        raise DeepAgentMaterializationError(
+            "Deep Agent invocations require a frozen namespace and checkpoint lineage plan"
+        )
+    unit = binding.runtime_unit
+    if (
+        unit is None
+        or plan.unit_key != unit.unit_key
+        or plan.execution_generation != binding.execution_generation
+        or plan.namespace != binding.cognitive_session_namespace
+        or plan.binding_digest != binding.binding_digest
+        or plan.state_schema_digest != binding.cognitive_state_schema.schema_digest
+        or plan.checkpointer_ref_digest != binding.checkpointer_ref.digest
+    ):
+        raise DeepAgentMaterializationError(
+            "checkpoint lineage plan does not match the exact Deep Agent binding"
+        )
+    return plan
+
+
+def _checkpoint_config(namespace: str, checkpoint_id: str) -> RunnableConfig:
+    return {
+        "configurable": {
+            "thread_id": namespace,
+            "checkpoint_ns": ROOT_CHECKPOINT_NS,
+            "checkpoint_id": checkpoint_id,
+        }
+    }
+
+
+def _parent_id(item: CheckpointTuple) -> str | None:
+    if item.parent_config is None:
+        return None
+    return cast(str | None, item.parent_config["configurable"].get("checkpoint_id"))
+
+
+async def _classify_not_submitted(
+    checkpointer: BaseCheckpointSaver[Any], plan: CheckpointInvocationPlan
+) -> QualifiedCheckpointKey | None:
+    source = plan.expected_source
+    thread_config: RunnableConfig = {
+        "configurable": {"thread_id": plan.namespace, "checkpoint_ns": ROOT_CHECKPOINT_NS}
+    }
+    if source is None:
+        if await checkpointer.aget_tuple(thread_config) is not None:
+            raise CheckpointLineageInDoubt(
+                "the namespace has root checkpoints but BellLabs records no namespace head"
+            )
+        return None
+    recorded = await checkpointer.aget_tuple(
+        _checkpoint_config(plan.namespace, source.checkpoint_id)
+    )
+    if recorded is None:
+        raise CheckpointLineageInDoubt("the recorded source checkpoint is missing")
+    if recorded.metadata.get(STAMP_STATE_SCHEMA_DIGEST) != plan.state_schema_digest:
+        raise IncompatibleCheckpointSchema(
+            "source checkpoint state-schema stamp differs from the binding (REQ-CP-CS-007)"
+        )
+    if _parent_id(recorded) != source.parent_checkpoint_id:
+        raise CheckpointLineageInDoubt("the source checkpoint's ancestry differs from its record")
+    async for item in checkpointer.alist(thread_config):
+        if _parent_id(item) == source.checkpoint_id:
+            raise CheckpointLineageInDoubt(
+                "a root checkpoint already descends from the expected source"
+            )
+    return QualifiedCheckpointKey(
+        checkpointer_ref_digest=plan.checkpointer_ref_digest,
+        thread_id=plan.namespace,
+        checkpoint_ns=ROOT_CHECKPOINT_NS,
+        checkpoint_id=source.checkpoint_id,
+        parent_checkpoint_id=_parent_id(recorded),
+    )
+
+
+async def _capture_result(
+    checkpointer: BaseCheckpointSaver[Any],
+    plan: CheckpointInvocationPlan,
+    source_key: QualifiedCheckpointKey | None,
+    *,
+    snapshot_config: RunnableConfig,
+    pending: bool,
+    summary: dict[str, object],
+) -> CheckpointCapture:
+    """Capture the result config and verify a fully stamped root lineage to the source."""
+
+    if pending:
+        raise CheckpointLineageInDoubt(
+            "the invocation ended with pending tasks or interrupts; it is not terminal"
+        )
+    configurable = snapshot_config.get("configurable", {})
+    result_id = configurable.get("checkpoint_id")
+    if configurable.get("checkpoint_ns", ROOT_CHECKPOINT_NS) != ROOT_CHECKPOINT_NS or not result_id:
+        raise CheckpointLineageInDoubt("no root result checkpoint was captured")
+    stamps = plan.metadata_stamps()
+    stop_at = source_key.checkpoint_id if source_key is not None else None
+    cursor: str | None = str(result_id)
+    result_parent: str | None = None
+    stamped = 0
+    while cursor != stop_at:
+        if cursor is None or stamped >= _MAX_LINEAGE_WALK:
+            raise CheckpointLineageInDoubt("result checkpoint does not descend from the source")
+        item = await checkpointer.aget_tuple(_checkpoint_config(plan.namespace, cursor))
+        if item is None:
+            raise CheckpointLineageInDoubt("a checkpoint in the result lineage is missing")
+        if any(item.metadata.get(key) != value for key, value in stamps.items()):
+            raise CheckpointLineageInDoubt(
+                "a checkpoint between source and result lacks this invocation's stamps"
+            )
+        if stamped == 0:
+            result_parent = _parent_id(item)
+        stamped += 1
+        cursor = _parent_id(item)
+    if result_parent is None:
+        raise CheckpointLineageInDoubt("the result checkpoint has no parent")
+    result_key = QualifiedCheckpointKey(
+        checkpointer_ref_digest=plan.checkpointer_ref_digest,
+        thread_id=plan.namespace,
+        checkpoint_ns=ROOT_CHECKPOINT_NS,
+        checkpoint_id=str(result_id),
+        parent_checkpoint_id=result_parent,
+    )
+    return CheckpointCapture(
+        namespace=plan.namespace,
+        invocation_id=plan.invocation_id,
+        source_key=source_key,
+        result_key=result_key,
+        ancestry_verified=True,
+        stamped_checkpoint_count=stamped,
+        redacted_summary_digest=sha256_digest(
+            {
+                "namespace": plan.namespace,
+                "result_checkpoint_id": result_key.checkpoint_id,
+                "parent_checkpoint_id": result_parent,
+                "stamped_checkpoint_count": stamped,
+                **summary,
+            }
+        ),
+    )
 
 
 def _structured_output(value: object, output_text: str) -> object:

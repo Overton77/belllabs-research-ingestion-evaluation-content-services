@@ -13,7 +13,7 @@ from pydantic import (
 )
 
 from app.domain.control_plane.canonical import sha256_digest
-from app.domain.graph_runtime.identities import DIGEST_PATTERN
+from app.domain.graph_runtime.identities import DIGEST_PATTERN, UNIT_KEY_PATTERN
 
 
 class Contract(BaseModel):
@@ -47,6 +47,8 @@ class OperationEffectClaim(Contract):
     semantic_binding_id: str = Field(min_length=1)
     semantic_binding_digest: str = Field(pattern=DIGEST_PATTERN)
     semantic_attempt_key: str = Field(min_length=1)
+    # REQ-CP-EXEC-013: the claim carries the runtime unit it fences (absent for legacy claims).
+    unit_key: str | None = Field(default=None, pattern=UNIT_KEY_PATTERN)
     claim_mode: Literal["active", "shadow"] = "active"
     status: EffectClaimStatus = EffectClaimStatus.CLAIMED
     claimed_by: str = Field(min_length=1)

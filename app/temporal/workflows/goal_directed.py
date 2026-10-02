@@ -117,6 +117,7 @@ class GoalDirectedWorkflow:
                 ),
                 (),
                 timeout,
+                claim,
             )
             run_version = executor_dispatch.resulting_run_version
             family_version = executor_dispatch.resulting_family_version
@@ -172,6 +173,7 @@ class GoalDirectedWorkflow:
                 None,
                 executor_accepted.execution_result.output_refs,
                 timeout,
+                claim,
             )
             run_version = verifier_dispatch.resulting_run_version
             family_version = verifier_dispatch.resulting_family_version
@@ -441,6 +443,7 @@ class GoalDirectedWorkflow:
         handoff: GoalHandoff | None,
         verifier_input_refs: tuple[str, ...],
         activity_timeout: timedelta,
+        claim: GoalExecutionClaim,
     ) -> GoalOperationDispatch:
         activity_name = (
             "goaldirected.prepare_executor"
@@ -472,6 +475,9 @@ class GoalDirectedWorkflow:
                 handoff=handoff,
                 verifier_input_refs=verifier_input_refs,
                 decided_at=workflow.now(),
+                execution_epoch=claim.identity.iteration.execution_epoch,
+                agent_run=claim.identity.agent_run,
+                session_generation=claim.identity.session_generation,
             ),
             result_type=GoalOperationDispatch,
             start_to_close_timeout=activity_timeout,

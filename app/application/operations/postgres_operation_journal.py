@@ -202,6 +202,7 @@ class PostgresAtomicOperationJournalRepository:
                     or prior_row["semantic_binding_id"] != claim.semantic_binding_id
                     or prior_row["semantic_binding_digest"] != claim.semantic_binding_digest
                     or prior_row["semantic_attempt_key"] != claim.semantic_attempt_key
+                    or prior_row["unit_key"] != claim.unit_key
                     or prior_row["claim_mode"] != claim.claim_mode
                 ):
                     raise IdempotencyConflict(
@@ -249,11 +250,11 @@ class PostgresAtomicOperationJournalRepository:
                         operation_contract_digest, idempotency_key, request_digest,
                         semantic_binding_id, semantic_binding_digest, semantic_attempt_key,
                         claim_mode, status, claimed_by, claimed_at,
-                        heartbeat_at, lease_expires_at
+                        heartbeat_at, lease_expires_at, unit_key
                     )
                     VALUES (
                         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                        $11, $12, $13, $14, $15
+                        $11, $12, $13, $14, $15, $16
                     )
                     """,
                     claim.effect_claim_id,
@@ -271,6 +272,7 @@ class PostgresAtomicOperationJournalRepository:
                     claim.claimed_at,
                     claim.heartbeat_at,
                     claim.lease_expires_at,
+                    claim.unit_key,
                 )
             mutation_inserted = await connection.fetchval(
                 """
@@ -358,6 +360,7 @@ class PostgresAtomicOperationJournalRepository:
             semantic_binding_id=row["semantic_binding_id"],
             semantic_binding_digest=row["semantic_binding_digest"],
             semantic_attempt_key=row["semantic_attempt_key"],
+            unit_key=row["unit_key"],
             claim_mode=row["claim_mode"],
             status=row["status"],
             claimed_by=row["claimed_by"],
@@ -822,6 +825,7 @@ def _claim_from_row(row: asyncpg.Record) -> OperationEffectClaim:
         semantic_binding_id=row["semantic_binding_id"],
         semantic_binding_digest=row["semantic_binding_digest"],
         semantic_attempt_key=row["semantic_attempt_key"],
+        unit_key=row["unit_key"],
         claim_mode=row["claim_mode"],
         status=row["status"],
         claimed_by=row["claimed_by"],

@@ -12,6 +12,10 @@ from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
 
+from app.application.operations.checkpoint_lineage import (
+    CheckpointLineageService,
+    InMemoryCheckpointLineageRepository,
+)
 from app.application.operations.journaled_operation_execution import (
     JournaledOperationExecutionCoordinator,
 )
@@ -34,6 +38,12 @@ from app.domain.control_plane.contracts import (
     WorkflowWorkspaceContract,
     WorkspaceSlot,
 )
+from app.domain.graph_runtime.identities import (
+    NO_MAPPED_INSTANCE,
+    RuntimeUnitIdentity,
+    StageGraphUnitLocation,
+)
+from app.domain.operation_execution.checkpoint_lineage import OperationActivityAttempt
 from app.domain.operation_execution.contracts import (
     CapabilityGrant,
     ImmutableAssetBinding,
@@ -189,6 +199,8 @@ def service_fixture(
     assets: ConformanceAssetVerifier | None = None,
     runtime: ConformanceRuntime | None = None,
     journal: OperationExecutionJournalPort | None = None,
+    lineage: CheckpointLineageService | None = None,
+    authority: ConformanceAuthority | None = None,
 ) -> tuple[
     OperationExecutionService,
     InMemoryOperationBindingRepository,
@@ -206,7 +218,8 @@ def service_fixture(
         asset_manifest_digests={"skill:fixture.skill:1": SKILL_DIGEST},
     )
     service = OperationExecutionService(
-        authority=ConformanceAuthority(
+        authority=authority
+        or ConformanceAuthority(
             accepted_run_id=request.identity.run_id,
             configuration_digest=request.effective_configuration_digest,
             control_revision=request.run_control_revision,
@@ -221,6 +234,7 @@ def service_fixture(
         events=events,
         budget=budget,
         journal=journal,
+        lineage=lineage,
     )
     return service, bindings, runtime, events, budget
 
@@ -429,6 +443,7 @@ class FakeJournal:
     def __init__(self) -> None:
         self.claim: OperationEffectClaim | None = None
         self.settlement: OperationSettlement | None = None
+        self.technical_attempts: list[int] = []
 
     async def acquire(self, binding, *, claimed_by):  # type: ignore[no-untyped-def]
         self.claim = OperationEffectClaim(
@@ -454,9 +469,21 @@ class FakeJournal:
         return self.settlement
 
     async def settle(
-        self, _binding, _claim, settlement, *, started_at
+        self,
+        _binding,
+        _claim,
+        settlement,
+        *,
+        started_at,
+        technical_attempt=1,
+        before_authority=None,
     ):  # type: ignore[no-untyped-def]
         assert started_at <= settlement.settled_at
+        if before_authority is not None:
+            await before_authority(
+                f"fake-manifest:{settlement.settlement_id}", sha256_digest(settlement.binding_id)
+            )
+        self.technical_attempts.append(technical_attempt)
         self.settlement = settlement
         return settlement
 
@@ -1301,3 +1328,181 @@ async def test_operation_signal_with_start_merges_children_into_query_and_result
         "signal-before-run",
         "signal-after-start",
     )
+
+
+def native_unit() -> RuntimeUnitIdentity:
+    request = operation_request()
+    return RuntimeUnitIdentity(
+        request_scope=request.request_scope,
+        belllabs_run_id=request.identity.run_id,
+        execution_epoch=1,
+        family="stage_graph",
+        unit_kind="stage_operation",
+        semantic_operation_id=request.identity.operation_id,
+        semantic_attempt=request.identity.operation_attempt,
+        location=StageGraphUnitLocation(
+            stage_id="fixture-stage",
+            mapped_instance_id=NO_MAPPED_INSTANCE,
+            workflow_cycle_ordinal=0,
+            stage_cycle_ordinal=0,
+            operation_slot_id="default",
+        ),
+    )
+
+
+def unit_operation_request() -> OperationExecutionRequest:
+    return OperationExecutionRequest.model_validate(
+        {**operation_request().model_dump(mode="python"), "runtime_unit": native_unit()}
+    )
+
+
+class TransientAuthority(ConformanceAuthority):
+    """Fails the first verifications with a retryable infrastructure error."""
+
+    def __init__(self, failures: int) -> None:
+        request = operation_request()
+        super().__init__(
+            accepted_run_id=request.identity.run_id,
+            configuration_digest=request.effective_configuration_digest,
+            control_revision=request.run_control_revision,
+            reservation_id=request.budget_reservation_id,
+        )
+        self.remaining_failures = failures
+
+    async def verify(self, request: OperationExecutionRequest) -> None:
+        if self.remaining_failures:
+            self.remaining_failures -= 1
+            raise RuntimeError("transient authority outage")
+        await super().verify(request)
+
+
+class LoseWorkerBeforeSettlement(FakeJournal):
+    """The first holder dispatches, then is lost; later deliveries find its claim."""
+
+    async def acquire(self, binding, *, claimed_by):  # type: ignore[no-untyped-def]
+        if self.claim is not None:
+            return OperationClaimResult(
+                status="existing", claim=self.claim, reason="prior worker holds the claim"
+            )
+        return await super().acquire(binding, claimed_by=claimed_by)
+
+    async def settle(self, *_args, **_kwargs):  # type: ignore[no-untyped-def]
+        raise RuntimeError("simulated worker loss after provider dispatch")
+
+
+async def _run_operation_workflow(
+    service: OperationExecutionService, request: OperationExecutionRequest, workflow_id: str
+):  # type: ignore[no-untyped-def]
+    activities = OperationExecutionActivities(service, worker_identity="worker:exec-014")
+    async with await WorkflowEnvironment.start_time_skipping() as environment:
+        async with (
+            Worker(
+                environment.client,
+                task_queue="operation-workflow-coordinator",
+                workflows=[OperationWorkflow],
+                workflow_runner=coordinator_workflow_runner(),
+            ),
+            Worker(
+                environment.client,
+                task_queue="operation-execution-conformance",
+                activities=[activities.execute],
+            ),
+        ):
+            try:
+                return await environment.client.execute_workflow(
+                    OperationWorkflow.run,
+                    OperationWorkflowRequest(
+                        semantic_attempt_id=request.identity.semantic_key,
+                        operation_kind="bound_operation",
+                        operation=request,
+                    ),
+                    id=workflow_id,
+                    task_queue="operation-workflow-coordinator",
+                )
+            except Exception as error:  # noqa: BLE001 - the workflow failure is asserted
+                return error
+
+
+@pytest.mark.asyncio
+async def test_settled_technical_attempt_is_the_real_activity_attempt() -> None:
+    """REQ-CP-EXEC-014 / RRM-001 section 7 #13: `technical_attempt` is no longer hard-coded."""
+
+    journal = FakeJournal()
+    repository = InMemoryCheckpointLineageRepository()
+    service, _bindings, runtime, _events, _budget = service_fixture(
+        journal=journal,
+        lineage=CheckpointLineageService(repository),
+        authority=TransientAuthority(failures=1),
+    )
+    request = unit_operation_request()
+
+    workflow_result = await _run_operation_workflow(service, request, "exec-014-attempt")
+
+    result = parse_operation_result(workflow_result.result or {})
+    attempts = await repository.list_attempts("tenant-1", native_unit().unit_key)
+    assert result.status == "completed"
+    assert result.unit_key == native_unit().unit_key
+    assert journal.technical_attempts == [2]
+    assert [(item.attempt.attempt, item.dispatching) for item in attempts] == [(2, True)]
+    assert attempts[0].attempt.workflow_id == "exec-014-attempt"
+    assert attempts[0].attempt.worker_identity == "worker:exec-014"
+    assert attempts[0].namespace is None and attempts[0].expected_source is None
+    assert len(runtime.invocations) == 1
+
+
+@pytest.mark.asyncio
+async def test_three_activity_attempts_share_one_unit_key_and_dispatch_once() -> None:
+    """REQ-CP-EXEC-005/013/014: retries observe attempts under one unit; one dispatch."""
+
+    repository = InMemoryCheckpointLineageRepository()
+    service, _bindings, runtime, _events, _budget = service_fixture(
+        journal=LoseWorkerBeforeSettlement(),
+        lineage=CheckpointLineageService(repository),
+    )
+
+    outcome = await _run_operation_workflow(
+        service, unit_operation_request(), "exec-014-three-attempts"
+    )
+
+    attempts = await repository.list_attempts("tenant-1", native_unit().unit_key)
+    assert isinstance(outcome, Exception)
+    assert [(item.attempt.attempt, item.dispatching) for item in attempts] == [
+        (1, True),
+        (2, False),
+        (3, False),
+    ]
+    assert {item.unit_key for item in attempts} == {native_unit().unit_key}
+    assert {item.execution_generation for item in attempts} == {1}
+    assert {item.claim_fence for item in attempts} == {1}
+    assert len(runtime.invocations) == 1
+
+
+@pytest.mark.asyncio
+async def test_lineage_composition_rejects_units_without_identity_or_attempt() -> None:
+    service, *_rest = service_fixture(
+        lineage=CheckpointLineageService(InMemoryCheckpointLineageRepository())
+    )
+
+    with pytest.raises(ValueError, match="Activity attempt"):
+        await service.execute(unit_operation_request())
+    with pytest.raises(ValueError, match="runtime unit"):
+        await service.execute(
+            operation_request(),
+            OperationActivityAttempt(
+                workflow_id="operation/direct",
+                workflow_run_id="run",
+                activity_id="1",
+                attempt=1,
+                worker_identity="worker",
+            ),
+        )
+
+
+def test_runtime_unit_must_match_the_operation_attempt_identity() -> None:
+    with pytest.raises(ValueError, match="runtime unit does not match"):
+        OperationExecutionRequest.model_validate(
+            {
+                **operation_request(attempt=2).model_dump(mode="python"),
+                "runtime_unit": native_unit(),
+            }
+        )

@@ -19,6 +19,10 @@ from temporalio import activity
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
+from app.application.operations.checkpoint_lineage import (
+    CheckpointLineageService,
+    InMemoryCheckpointLineageRepository,
+)
 from app.application.operations.operation_execution import bind_operation_execution_request
 from app.application.orchestration.goal_directed import (
     GoalDirectedOperationPreparationService,
@@ -27,11 +31,13 @@ from app.application.orchestration.goal_directed import (
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import GoalDirectedBlueprint
 from app.domain.control_plane.fixtures import GENERIC_GOAL_DIRECTED
+from app.domain.operation_execution.checkpoint_lineage import (
+    CheckpointCapture,
+    OperationActivityAttempt,
+)
 from app.domain.operation_execution.contracts import (
-    MaterializedWorkspace,
     OperationExecutionRequest,
     OperationExecutionResult,
-    RuntimeInvocation,
     StructuredOutputBinding,
 )
 from app.domain.orchestration.contracts import (
@@ -59,6 +65,10 @@ from app.temporal.workflows.belllabs_run import BellLabsRunWorkflow
 from app.temporal.workflows.goal_directed import GoalDirectedWorkflow
 from app.temporal.workflows.operation import OperationWorkflow
 from tests.acceptance.control_plane.test_wp_cp_040 import exact_fixture
+from tests.fixtures.checkpoint_lineage import (
+    execute_with_checkpoint_lineage,
+    materialized_workspace,
+)
 from tests.unit.operations.test_operation_execution import operation_request
 
 DIGEST = "sha256:" + "a" * 64
@@ -343,6 +353,7 @@ class SandboxRolloverActivities:
     def __init__(self, *, workspace_root: Path) -> None:
         self.documents = Documents()
         self.models: list[GoalSandboxModel] = []
+        self.checkpoints: list[CheckpointCapture | None] = []
         deep_binding, _profile, bundle = exact_fixture(sandbox_backend="docker")
         template_values: dict[str, OperationExecutionRequest] = {}
         for role in ("executor", "verifier"):
@@ -397,6 +408,7 @@ class SandboxRolloverActivities:
             stores={deep_binding.store_ref.digest: InMemoryStore()},
         )
         self.adapter = DeepAgentRuntimeAdapter(ExactDeepAgentMaterializer(registry))
+        self.lineage = CheckpointLineageService(InMemoryCheckpointLineageRepository())
 
     @activity.defn(name="goaldirected.prepare_executor")
     async def prepare_executor(
@@ -414,21 +426,22 @@ class SandboxRolloverActivities:
     async def execute(self, payload: dict[str, Any]) -> dict[str, Any]:
         request = OperationExecutionRequest.model_validate(payload)
         binding = bind_operation_execution_request(request)
-        result = await self.adapter.execute(
-            RuntimeInvocation(
-                binding=binding,
-                prompt_segments=request.prompt_segments,
-                workspace=MaterializedWorkspace(
-                    workspace_id=request.workspace.workspace_id,
-                    namespace_id=request.workspace.namespace_id,
-                    provider=request.workspace.provider,
-                    runtime_digest=request.workspace.runtime_digest,
-                    image_digest=request.workspace.image_digest,
-                    mount_manifest_digest=sha256_digest("sandbox-rollover-mounts"),
-                ),
+        info = activity.info()
+        result = await execute_with_checkpoint_lineage(
+            self.adapter,
+            self.lineage,
+            request,
+            workspace=materialized_workspace(request, "sandbox-rollover-mounts"),
+            secrets={},
+            attempt=OperationActivityAttempt(
+                workflow_id=info.workflow_id,
+                workflow_run_id=info.workflow_run_id,
+                activity_id=info.activity_id,
+                attempt=info.attempt,
+                worker_identity="sandbox-rollover-worker",
             ),
-            {},
         )
+        self.checkpoints.append(result.checkpoint)
         return OperationExecutionResult(
             binding_id=binding.binding_id,
             semantic_attempt_key=binding.semantic_attempt_key,
@@ -530,3 +543,14 @@ async def test_temporal_goal_rollover_uses_fresh_deep_agent_typed_handoff_and_sa
     assert all(item["prior_ai_outputs"] == 0 for item in observations)
     assert activities.documents.handoffs
     assert list((tmp_path / "workspaces").rglob("artifact.txt"))
+    # REQ-BP-GD-012 / REQ-CP-DA-016: the rollover executor starts a new, empty session
+    # namespace instead of branching the first thread; the verifier never shares it.
+    captured = [item for item in activities.checkpoints if item is not None]
+    assert len(captured) == len(activities.checkpoints) == 4
+    executor_one, verifier_one, executor_two, verifier_two = captured
+    assert executor_one.namespace.endswith("/session/1/role/executor")
+    assert verifier_one.namespace.endswith("/session/1/role/verifier")
+    assert executor_two.namespace.endswith("/session/2/role/executor")
+    assert verifier_two.namespace.endswith("/session/2/role/verifier")
+    assert executor_two.source_key is None
+    assert all(item.ancestry_verified for item in captured)

@@ -1,16 +1,29 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+import hashlib
+import json
+from collections.abc import Awaitable, Callable, Mapping
 from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Protocol
 from uuid import NAMESPACE_URL, uuid5
 
 from app.application.control_plane.service import ControlPlaneService
+from app.application.operations.checkpoint_lineage import (
+    CheckpointLineageService,
+    transition_id_for,
+)
 from app.application.run_control.service import RunControlService
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import DefinitionKind, SecretRef
+from app.domain.operation_execution.checkpoint_lineage import (
+    CheckpointCapture,
+    CheckpointInvocationPlan,
+    CheckpointLineageError,
+    CheckpointLineageInDoubt,
+    OperationActivityAttempt,
+)
 from app.domain.operation_execution.contracts import (
     ArtifactPromotionRequest,
     MaterializedWorkspace,
@@ -253,6 +266,10 @@ class OperationBindingRepository(Protocol):
     ) -> OperationSettlement: ...
 
 
+ResultManifestObserver = Callable[[str, str], Awaitable[None]]
+"""Called with the staged result manifest ref and digest before authority settlement."""
+
+
 class OperationExecutionJournalPort(Protocol):
     async def acquire(
         self,
@@ -273,6 +290,8 @@ class OperationExecutionJournalPort(Protocol):
         settlement: OperationSettlement,
         *,
         started_at: datetime,
+        technical_attempt: int = 1,
+        before_authority: ResultManifestObserver | None = None,
     ) -> OperationSettlement: ...
 
 
@@ -344,6 +363,7 @@ class OperationExecutionService:
         budget: OperationBudgetPort,
         journal: OperationExecutionJournalPort | None = None,
         journal_claimed_by: str = "operation-runtime",
+        lineage: CheckpointLineageService | None = None,
     ) -> None:
         self._authority = authority
         self._bindings = bindings
@@ -356,8 +376,21 @@ class OperationExecutionService:
         self._budget = budget
         self._journal = journal
         self._journal_claimed_by = journal_claimed_by
+        self._lineage = lineage
 
-    async def execute(self, request: OperationExecutionRequest) -> OperationExecutionResult:
+    async def execute(
+        self,
+        request: OperationExecutionRequest,
+        attempt: OperationActivityAttempt | None = None,
+    ) -> OperationExecutionResult:
+        """Execute one bound unit; `attempt` is the observed Temporal Activity delivery."""
+
+        if self._lineage is not None and attempt is None:
+            raise ValueError("lineage-qualified execution requires the Activity attempt (EXEC-014)")
+        if request.execution_runtime == "deep_agent" and self._lineage is None:
+            raise ValueError(
+                "Deep Agent execution requires checkpoint lineage composition (REQ-CP-DA-016)"
+            )
         fingerprint = sha256_digest(request.model_dump(mode="json", exclude={"requested_at"}))
         prior = await self._bindings.get_binding(
             request.identity.semantic_key,
@@ -401,13 +434,21 @@ class OperationExecutionService:
             if settlement is not None:
                 await self._complete_post_effects(binding, settlement)
                 return _public_result(binding, settlement)
+            if self._lineage is not None and attempt is not None:
+                await self._lineage.observe_attempt(binding, attempt, dispatching=False)
             raise OperationExecutionInProgress(
                 "a prior worker owns the durable side-effect claim; retry until its "
                 "settlement is visible or explicitly reconcile the claim"
             )
+        # REQ-CP-EXEC-014: the attempt (and, for cognition, the expected source checkpoint)
+        # is durably observed while holding the claim and before any provider dispatch.
+        plan: CheckpointInvocationPlan | None = None
+        if self._lineage is not None and attempt is not None:
+            plan = await self._lineage.observe_attempt(binding, attempt, dispatching=True)
         runtime_invoked = False
         started_at = datetime.now(UTC)
         observed_usage = RuntimeUsage()
+        capture: CheckpointCapture | None = None
         try:
             self._validate_policy_support(request)
             await self._assets.verify(binding)
@@ -421,10 +462,16 @@ class OperationExecutionService:
                 resolved_secret_names=tuple(
                     sorted(f"{ref.provider}:{ref.key}" for ref in binding.secret_refs)
                 ),
+                checkpoint_plan=plan,
             )
             runtime_invoked = True
             runtime_result = await self._runtime.execute(invocation, resolved_secrets)
             observed_usage = runtime_result.usage
+            capture = runtime_result.checkpoint
+            if plan is not None and capture is None:
+                raise CheckpointLineageInDoubt(
+                    "a lineage-qualified invocation returned no captured result checkpoint"
+                )
             _validate_bound_usage(binding, runtime_result.usage)
             settlement = OperationSettlement(
                 settlement_id=_stable_id("operation-settlement", binding.binding_id),
@@ -437,7 +484,14 @@ class OperationExecutionService:
                 provider_run_id=runtime_result.provider_run_id,
                 event_payloads=runtime_result.event_payloads,
                 settled_at=datetime.now(UTC),
+                checkpoint_transition_id=(
+                    transition_id_for(plan) if plan is not None else None
+                ),
+                result_checkpoint=capture.result_key if capture is not None else None,
             )
+        except CheckpointLineageError:
+            # REQ-CP-DA-018: lineage ambiguity is never settled as an ordinary failure.
+            raise
         except Exception as error:
             settlement = OperationSettlement(
                 settlement_id=_stable_id("operation-settlement", binding.binding_id),
@@ -458,19 +512,47 @@ class OperationExecutionService:
                 settled_at=datetime.now(UTC),
             )
 
-        settlement = (
-            await self._journal.settle(
+        before_authority: ResultManifestObserver | None = None
+        if (
+            plan is not None
+            and capture is not None
+            and settlement.status == "completed"
+            and self._lineage is not None
+        ):
+            lineage = self._lineage
+            settled_plan = plan
+            settled_capture = capture
+
+            async def record_transition(manifest_ref: str, manifest_digest: str) -> None:
+                await lineage.record_transition(
+                    settled_plan,
+                    settled_capture,
+                    result_manifest_ref=manifest_ref,
+                    result_manifest_digest=manifest_digest,
+                )
+
+            before_authority = record_transition
+        technical_attempt = attempt.attempt if attempt is not None else 1
+        if self._journal is not None and claim is not None:
+            settlement = await self._journal.settle(
                 binding,
                 claim,
                 settlement,
                 started_at=started_at,
+                technical_attempt=technical_attempt,
+                before_authority=before_authority,
             )
-            if self._journal is not None and claim is not None
-            else await self._bindings.settle(
+        else:
+            if before_authority is not None:
+                manifest = settlement_result_manifest(settlement)
+                await before_authority(
+                    f"operation-settlement:{settlement.settlement_id}",
+                    f"sha256:{hashlib.sha256(manifest).hexdigest()}",
+                )
+            settlement = await self._bindings.settle(
                 settlement,
                 request_scope=binding.request_scope,
             )
-        )
         await self._complete_post_effects(binding, settlement)
         return _public_result(binding, settlement)
 
@@ -701,7 +783,21 @@ def _binding_for(request: OperationExecutionRequest, fingerprint: str) -> Operat
         deep_agent_binding=request.deep_agent_binding,
         side_effect_key=request.idempotency_key,
         bound_at=request.requested_at,
+        runtime_unit=request.runtime_unit,
     )
+
+
+def settlement_result_manifest(settlement: OperationSettlement) -> bytes:
+    """Canonical immutable result manifest bytes; transcripts and payloads stay out."""
+
+    return json.dumps(
+        settlement.model_dump(
+            mode="json",
+            exclude={"output_text", "structured_output", "event_payloads"},
+        ),
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
 
 
 def _public_result(
@@ -717,6 +813,9 @@ def _public_result(
         usage=settlement.usage,
         failure_code=settlement.failure_code,
         failure_message=settlement.failure_message,
+        unit_key=binding.runtime_unit.unit_key if binding.runtime_unit is not None else None,
+        checkpoint_transition_id=settlement.checkpoint_transition_id,
+        result_checkpoint=settlement.result_checkpoint,
     )
 
 

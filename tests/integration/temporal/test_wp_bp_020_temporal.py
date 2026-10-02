@@ -422,6 +422,9 @@ async def test_real_preparer_persists_revision_before_atomic_operation_admission
         session_id=claim.session_id,
         workspace_id=claim.workspace_namespace,
         decided_at=NOW,
+        execution_epoch=claim.identity.iteration.execution_epoch,
+        agent_run=claim.identity.agent_run,
+        session_generation=claim.identity.session_generation,
     )
     documents = RecordingGoalDocuments()
     bindings = RecordingOperationBindings()
@@ -444,6 +447,24 @@ async def test_real_preparer_persists_revision_before_atomic_operation_admission
     assert dispatch.resulting_run_version == 3
     assert dispatch.resulting_family_version == 2
     assert dispatch.workflow_request.operation.identity.run_id == run_input.run_id
+    # REQ-CP-EXEC-013: the dispatched request carries the iteration/revision/session/role unit.
+    unit = dispatch.workflow_request.operation.runtime_unit
+    assert unit is not None
+    assert (unit.family, unit.unit_kind, unit.execution_epoch) == (
+        "goal_directed",
+        "goal_executor",
+        1,
+    )
+    assert unit.location.model_dump() == {
+        "goal_iteration": 1,
+        "goal_revision_id": run_input.initial_revision.revision_id,
+        "operation_role": "executor",
+        "agent_run": claim.identity.agent_run,
+        "session_generation": claim.identity.session_generation,
+    }
+    assert bindings.bindings[0].runtime_unit == unit
+    with pytest.raises(ValueError, match="agent run and session generation"):
+        await service.prepare(request.model_copy(update={"session_generation": None}))
 
 
 @pytest.mark.asyncio

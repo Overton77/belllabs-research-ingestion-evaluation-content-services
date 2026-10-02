@@ -11,6 +11,7 @@ from app.domain.control_plane.contracts import (
     GoalSessionRolloverPolicy,
 )
 from app.domain.control_plane.fixtures import GENERIC_GOAL_DIRECTED
+from app.domain.operation_execution.checkpoint_lineage import cognitive_session_namespace
 from app.domain.operation_execution.delegation import AsyncDelegationBoundary
 from app.domain.orchestration.contracts import (
     GoalContinuationState,
@@ -28,6 +29,7 @@ from app.domain.orchestration.goal_directed import (
     GoalDirectedInterpreter,
 )
 from app.domain.orchestration.goal_directed_runtime import route_goal_async_subgoal
+from app.domain.orchestration.runtime_units import goal_runtime_unit
 
 ENVELOPE_DIGEST = sha256_digest("wp-bp-020-envelope")
 STALE_FRONTIER_DIGEST = sha256_digest("wp-bp-020-stale-frontier")
@@ -435,6 +437,56 @@ def test_fresh_rollover_requires_current_typed_handoff_and_preserves_protected_f
     assert state.next_session_mode == "fresh_from_handoff"
     assert state.session_generation == 2
     assert state.rollover_count == 1
+
+
+def _claim_namespace(claim: GoalExecutionClaim, role: str = "executor") -> str:
+    iteration = claim.identity.iteration
+    unit = goal_runtime_unit(
+        request_scope="tenant-1",
+        run_id=iteration.run_id,
+        execution_epoch=iteration.execution_epoch,
+        operation_id=f"goal-iteration/{iteration.goal_iteration}/{role}",
+        operation_attempt=1,
+        goal_iteration=iteration.goal_iteration,
+        goal_revision_id=iteration.goal_revision_id,
+        operation_role="executor" if role == "executor" else "verifier",
+        agent_run=claim.identity.agent_run,
+        session_generation=claim.identity.session_generation,
+    )
+    return cognitive_session_namespace(unit, 1)
+
+
+def test_session_reuse_shares_and_rollover_isolates_cognitive_namespaces() -> None:
+    """REQ-BP-GD-012: governed reuse continues one session namespace; rollover starts anew."""
+
+    interpreter, state, first = _claim(_blueprint(max_iterations=3))
+    state = interpreter.apply_execution_result(state, _execution(first))
+    state = interpreter.apply_verification(state, _verification(first))
+    state, reused = interpreter.claim_execution(state)
+    assert reused.identity.iteration.goal_iteration == 2
+    assert _claim_namespace(reused) == _claim_namespace(first)
+    assert _claim_namespace(first, "verifier") != _claim_namespace(first)
+
+    session_policy = GoalSessionRolloverPolicy(
+        session_mode="reuse",
+        fresh_agent_token_threshold=1,
+        handoff_token_reserve=0,
+        rollover_mode="fresh_from_handoff",
+        context_selection_policy_ref="context-selection:fixture@1",
+        context_compaction_policy_ref="context-compaction:fixture@1",
+        protected_fact_classes=frozenset({"objective"}),
+        max_rollovers=1,
+        compaction_failure_action="pause",
+    )
+    interpreter, state, first = _claim(_blueprint(max_iterations=2, session_policy=session_policy))
+    state = interpreter.apply_execution_result(
+        state, _execution(first, tokens=1, handoff=_handoff(first))
+    )
+    state = interpreter.apply_verification(state, _verification(first))
+    state, rolled = interpreter.claim_execution(state)
+    assert rolled.identity.session_generation == 2
+    assert _claim_namespace(rolled) != _claim_namespace(first)
+    assert _claim_namespace(rolled).endswith("/session/2/role/executor")
 
 
 def test_repeated_rollover_stops_at_the_frozen_limit() -> None:

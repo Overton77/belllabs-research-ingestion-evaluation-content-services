@@ -9,15 +9,16 @@ from temporalio import activity
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
-from app.application.operations.operation_execution import bind_operation_execution_request
+from app.application.operations.checkpoint_lineage import (
+    CheckpointLineageService,
+    InMemoryCheckpointLineageRepository,
+)
 from app.config import Settings
-from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import SecretRef
+from app.domain.operation_execution.checkpoint_lineage import OperationActivityAttempt
 from app.domain.operation_execution.contracts import (
-    MaterializedWorkspace,
     OperationExecutionRequest,
     OperationWorkflowRequest,
-    RuntimeInvocation,
 )
 from app.integrations.agents.deep_agents import (
     DeepAgentRuntimeAdapter,
@@ -28,6 +29,12 @@ from app.integrations.agents.deep_agents import (
 )
 from app.temporal.workflows.operation import OperationWorkflow
 from tests.acceptance.control_plane.test_wp_cp_040 import exact_fixture
+from tests.fixtures.checkpoint_lineage import (
+    bind_unit,
+    execute_with_checkpoint_lineage,
+    materialized_workspace,
+    stage_unit,
+)
 from tests.unit.operations.test_operation_execution import operation_request
 
 
@@ -39,25 +46,27 @@ class QualificationActivities:
     ) -> None:
         self._adapter = adapter
         self._secrets = secrets
+        self._lineage = CheckpointLineageService(InMemoryCheckpointLineageRepository())
 
     @activity.defn(name="operation.execute")
     async def execute(self, payload: dict[str, Any]) -> dict[str, Any]:
         request = OperationExecutionRequest.model_validate(payload)
-        binding = bind_operation_execution_request(request)
-        invocation = RuntimeInvocation(
-            binding=binding,
-            prompt_segments=request.prompt_segments,
-            workspace=MaterializedWorkspace(
-                workspace_id=request.workspace.workspace_id,
-                namespace_id=request.workspace.namespace_id,
-                provider=request.workspace.provider,
-                runtime_digest=request.workspace.runtime_digest,
-                image_digest=request.workspace.image_digest,
-                mount_manifest_digest=sha256_digest("wp-cp-040-live-mounts"),
+        info = activity.info()
+        result = await execute_with_checkpoint_lineage(
+            self._adapter,
+            self._lineage,
+            request,
+            workspace=materialized_workspace(request, "wp-cp-040-live-mounts"),
+            secrets=self._secrets,
+            attempt=OperationActivityAttempt(
+                workflow_id=info.workflow_id,
+                workflow_run_id=info.workflow_run_id,
+                activity_id=info.activity_id,
+                attempt=info.attempt,
+                worker_identity="wp-cp-040-live-worker",
             ),
             resolved_secret_names=tuple(sorted(self._secrets)),
         )
-        result = await self._adapter.execute(invocation, self._secrets)
         return result.model_dump(mode="json")
 
 
@@ -107,11 +116,18 @@ async def test_live_temporal_deep_agent_mcp_skill_and_langsmith_sandbox() -> Non
         "(4) answer with the Skill proof marker, MCP result, and sandbox output."
     )
     base = operation_request(prompt=objective)
+    unit = stage_unit(
+        request_scope=base.request_scope,
+        run_id=base.identity.run_id,
+        operation_id=base.identity.operation_id,
+    )
+    deep_binding = bind_unit(deep_binding, unit)
     payload = base.model_dump(mode="python")
     payload.update(
         execution_runtime="deep_agent",
         native_placement=None,
         deep_agent_binding=deep_binding,
+        runtime_unit=unit,
         secret_refs=(
             SecretRef(provider="environment", key="OPENAI_API_KEY"),
             langsmith_ref,
