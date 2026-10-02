@@ -5,7 +5,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Protocol
 
-from app.domain.control_plane.canonical import sha256_digest
+from app.domain.control_plane.canonical import contract_fingerprint, sha256_digest
 from app.domain.operation_execution.journal import (
     EffectClaimStatus,
     OperationClaimResult,
@@ -174,9 +174,7 @@ class OperationJournalMutation:
                     raise ValueError(
                         "journal-only settlement requires its exact lifecycle command"
                     )
-                fingerprint = sha256_digest(
-                    command.model_dump(mode="json", exclude={"occurred_at"})
-                )
+                fingerprint = contract_fingerprint(command, exclude={"occurred_at"})
                 if (
                     command.request_scope != self.request_scope
                     or command.run_id != self.belllabs_run_id
@@ -195,9 +193,7 @@ class OperationJournalMutation:
             authority = self.authority_result
             if command is None or authority is None:
                 raise ValueError("claim authority requires exact command and result")
-            fingerprint = sha256_digest(
-                command.model_dump(mode="json", exclude={"occurred_at"})
-            )
+            fingerprint = contract_fingerprint(command, exclude={"occurred_at"})
             if (
                 authority.status != CommandStatus.ACCEPTED
                 or command.request_scope != self.request_scope

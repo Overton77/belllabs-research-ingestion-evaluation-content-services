@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 from collections.abc import Awaitable, Callable, Mapping
+from contextlib import suppress
 from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Protocol
@@ -12,17 +13,24 @@ from uuid import NAMESPACE_URL, uuid5
 from app.application.control_plane.service import ControlPlaneService
 from app.application.operations.checkpoint_lineage import (
     CheckpointLineageService,
+    UnitAttempt,
     transition_id_for,
 )
 from app.application.run_control.service import RunControlService
-from app.domain.control_plane.canonical import sha256_digest
+from app.domain.control_plane.canonical import contract_fingerprint, sha256_digest
 from app.domain.control_plane.contracts import DefinitionKind, SecretRef
+from app.domain.graph_runtime.identities import QualifiedCheckpointKey
 from app.domain.operation_execution.checkpoint_lineage import (
     CheckpointCapture,
     CheckpointInvocationPlan,
+    CheckpointLineageConflict,
     CheckpointLineageError,
     CheckpointLineageInDoubt,
+    InDoubtReason,
     OperationActivityAttempt,
+    StaleClaimFence,
+    UnitReconciliationIncident,
+    UnitResultObservation,
 )
 from app.domain.operation_execution.contracts import (
     ArtifactPromotionRequest,
@@ -39,7 +47,10 @@ from app.domain.operation_execution.contracts import (
     SnapshotCloneRequest,
     SnapshotCloneResult,
 )
-from app.domain.operation_execution.errors import UnsupportedRuntimePolicy
+from app.domain.operation_execution.errors import (
+    RuntimeInvocationFailure,
+    UnsupportedRuntimePolicy,
+)
 from app.domain.operation_execution.journal import OperationClaimResult, OperationEffectClaim
 from app.domain.run_control.contracts import (
     ActorContext,
@@ -47,12 +58,18 @@ from app.domain.run_control.contracts import (
     LifecycleCommand,
     RecordUsageAction,
     RunPhase,
+    RunProjection,
+    UnitReconciliationDecision,
 )
 from app.domain.run_control.errors import IdempotencyConflict
 
 
 class OperationExecutionInProgress(RuntimeError):
     """A durable claim exists and requires retry or explicit reconciliation."""
+
+
+class OperationLeaseExpired(OperationExecutionInProgress):
+    """The holder stopped at its lease deadline; a retry classifies and continues the unit."""
 
 
 class OperationBudgetViolation(ValueError):
@@ -64,7 +81,15 @@ class OperationBudgetReconciliationInProgress(RuntimeError):
 
 
 class OperationAuthorityPort(Protocol):
-    async def verify(self, request: OperationExecutionRequest) -> None: ...
+    async def verify(self, request: OperationExecutionRequest) -> None:
+        """Admit the first binding of a semantic operation attempt."""
+        ...
+
+    async def verify_continuation(
+        self, request: OperationExecutionRequest, binding: OperationExecutionBinding
+    ) -> None:
+        """Admit a retry, takeover or recovery of an already bound attempt."""
+        ...
 
 
 class RunControlOperationAuthority:
@@ -80,6 +105,42 @@ class RunControlOperationAuthority:
             raise ValueError("operation is not bound to the accepted Run Control revision")
         if run.phase != RunPhase.ACTIVE:
             raise ValueError("semantic operations require an active Workflow Run")
+        await self._verify_bound_authority(request, run)
+
+    async def verify_continuation(
+        self, request: OperationExecutionRequest, binding: OperationExecutionBinding
+    ) -> None:
+        """Admit a technical retry, claim takeover or recovery of the same bound attempt.
+
+        REQ-CP-EXEC-005 (AMD-RRM-001): Activity attempts, worker restarts and claim takeovers
+        are not disruptive; they continue the same semantic attempt, whose own claim has
+        already advanced the run version past the bound revision. So the exact-revision check
+        of the first binding does not apply. What must still hold: the binding is the one
+        being continued, the run never went backwards, the configuration and reservation
+        are the bound ones, and the run is not terminal, paused or cancelling (cancellation
+        reconciliation is REQ-CP-EXEC-008's saga). A run that is `waiting` is admitted:
+        while a unit is `in_doubt` the run keeps its phase, and other waits do not supersede
+        a claimed unit (REQ-CP-RUN-007, REQ-CP-EXEC-014).
+        """
+
+        run = await self._run_control.get_run(request.request_scope, request.identity.run_id)
+        if (
+            binding.run_id != request.identity.run_id
+            or binding.request_scope != request.request_scope
+            or binding.run_control_revision != request.run_control_revision
+        ):
+            raise ValueError("continuation does not target the bound operation attempt")
+        if run.version < binding.run_control_revision:
+            raise ValueError("run authority is older than the operation binding")
+        if run.phase not in {RunPhase.ACTIVE, RunPhase.WAITING}:
+            raise ValueError(
+                f"a bound operation cannot continue in a {run.phase.value} Workflow Run"
+            )
+        await self._verify_bound_authority(request, run)
+
+    async def _verify_bound_authority(
+        self, request: OperationExecutionRequest, run: RunProjection
+    ) -> None:
         if run.effective_configuration_digest != request.effective_configuration_digest:
             raise ValueError("operation configuration does not match the admitted run")
         configuration = await self._control_plane.retrieve_for_admission(
@@ -266,8 +327,8 @@ class OperationBindingRepository(Protocol):
     ) -> OperationSettlement: ...
 
 
-ResultManifestObserver = Callable[[str, str], Awaitable[None]]
-"""Called with the staged result manifest ref and digest before authority settlement."""
+ResultManifestObserver = Callable[[str, str, int], Awaitable[None]]
+"""Called with the staged result manifest ref, digest and size before authority settlement."""
 
 
 class OperationExecutionJournalPort(Protocol):
@@ -293,6 +354,39 @@ class OperationExecutionJournalPort(Protocol):
         technical_attempt: int = 1,
         before_authority: ResultManifestObserver | None = None,
     ) -> OperationSettlement: ...
+
+    # --- RRM-004 recovery seams (REQ-CP-DA-018, REQ-CP-RUN-007, `reconcile_unit`) ---
+
+    async def load_result_manifest(
+        self,
+        binding: OperationExecutionBinding,
+        *,
+        manifest_ref: str,
+        manifest_digest: str,
+        manifest_size_bytes: int,
+    ) -> OperationSettlement: ...
+
+    async def record_in_doubt(
+        self,
+        binding: OperationExecutionBinding,
+        claim: OperationEffectClaim,
+        incident: UnitReconciliationIncident,
+    ) -> None: ...
+
+    async def get_unit_reconciliation(
+        self,
+        binding: OperationExecutionBinding,
+        *,
+        unit_key: str,
+        execution_generation: int,
+        incident_id: str,
+    ) -> UnitReconciliationDecision | None: ...
+
+    async def unsettled_effect_ids(
+        self,
+        binding: OperationExecutionBinding,
+        claim: OperationEffectClaim,
+    ) -> tuple[str, ...]: ...
 
 
 class RuntimePort(Protocol):
@@ -391,7 +485,7 @@ class OperationExecutionService:
             raise ValueError(
                 "Deep Agent execution requires checkpoint lineage composition (REQ-CP-DA-016)"
             )
-        fingerprint = sha256_digest(request.model_dump(mode="json", exclude={"requested_at"}))
+        fingerprint = contract_fingerprint(request, exclude={"requested_at"})
         prior = await self._bindings.get_binding(
             request.identity.semantic_key,
             request_scope=request.request_scope,
@@ -401,11 +495,14 @@ class OperationExecutionService:
                 raise IdempotencyConflict(
                     "semantic operation attempt was reused with conflicting execution intent"
                 )
+            # `settled`: an authoritative settlement returns unchanged, with no provider work.
             settlement = await self._get_settlement(prior)
             if settlement is not None:
                 await self._complete_post_effects(prior, settlement)
                 return _public_result(prior, settlement)
             binding = prior
+            # A retry, takeover or recovery continues the bound attempt (REQ-CP-EXEC-005).
+            await self._authority.verify_continuation(request, binding)
         else:
             await self._authority.verify(request)
             binding = _binding_for(request, fingerprint)
@@ -413,8 +510,7 @@ class OperationExecutionService:
                 binding,
                 request_scope=request.request_scope,
             )
-
-        await self._authority.verify(request)
+            await self._authority.verify(request)
         claim_result = (
             await self._journal.acquire(
                 binding,
@@ -424,6 +520,10 @@ class OperationExecutionService:
             else None
         )
         claim = claim_result.claim if claim_result is not None else None
+        if self._lineage is not None and attempt is not None and (
+            claim_result is None or claim is not None
+        ):
+            return await self._execute_unit(request, binding, claim, attempt, self._lineage)
         claimed = (
             claim_result.status == "acquired"
             if claim_result is not None
@@ -434,17 +534,166 @@ class OperationExecutionService:
             if settlement is not None:
                 await self._complete_post_effects(binding, settlement)
                 return _public_result(binding, settlement)
-            if self._lineage is not None and attempt is not None:
-                await self._lineage.observe_attempt(binding, attempt, dispatching=False)
             raise OperationExecutionInProgress(
                 "a prior worker owns the durable side-effect claim; retry until its "
                 "settlement is visible or explicitly reconcile the claim"
             )
-        # REQ-CP-EXEC-014: the attempt (and, for cognition, the expected source checkpoint)
-        # is durably observed while holding the claim and before any provider dispatch.
-        plan: CheckpointInvocationPlan | None = None
-        if self._lineage is not None and attempt is not None:
-            plan = await self._lineage.observe_attempt(binding, attempt, dispatching=True)
+        return await self._dispatch_and_settle(request, binding, claim, attempt=attempt)
+
+    async def _execute_unit(
+        self,
+        request: OperationExecutionRequest,
+        binding: OperationExecutionBinding,
+        claim: OperationEffectClaim | None,
+        attempt: OperationActivityAttempt,
+        lineage: CheckpointLineageService,
+    ) -> OperationExecutionResult:
+        """REQ-CP-EXEC-014 + REQ-CP-DA-018: hold the claim lease, classify, then act once.
+
+        The journal claim records that the unit's consequential effect is claimed. Whether
+        this Activity attempt may act on it is decided by the unit generation's claim lease:
+        the attempt is observed, then holds or takes over the lease (advancing the fence) or
+        stands down while a live holder works. Holding the lease, it classifies the unit
+        from durable facts before any provider work.
+        """
+
+        try:
+            admitted = await lineage.admit_attempt(binding, attempt)
+        except StaleClaimFence:
+            # REQ-CP-EXEC-005: an accepted generation boundary fences this generation; it
+            # reports the boundary instead of failing as a lineage conflict.
+            unit, generation = lineage.unit_generation(binding)
+            incident = await lineage.repository.get_incident(
+                binding.request_scope, unit.unit_key, generation
+            )
+            if incident is None or incident.decision != "start_new_generation":
+                raise
+            return _unsettled_result(
+                binding,
+                failure_code="generation_superseded",
+                message="an accepted generation boundary superseded this generation",
+                incident_id=incident.incident_id,
+            )
+        if not admitted.admission.lease_granted:
+            settlement = await self._get_settlement(binding)
+            if settlement is not None:
+                await self._complete_post_effects(binding, settlement)
+                return _public_result(binding, settlement)
+            raise OperationExecutionInProgress(
+                "a live attempt holds the unit's claim lease; retry until its settlement is "
+                "visible or the lease expires (REQ-CP-EXEC-014)"
+            )
+        budget = admitted.work_budget(lineage.now())
+        if budget <= 0:
+            with suppress(Exception):
+                await lineage.release(admitted)
+            raise OperationLeaseExpired(
+                "the attempt's claim lease is already within its safety margin"
+            )
+        try:
+            # REQ-CP-EXEC-014: a live holder never outlives its lease. It stops (cancelling
+            # in-flight cognition) before a later attempt may take the lease over, so a
+            # superseded holder cannot keep calling the model or tools.
+            async with asyncio.timeout(budget) as deadline:
+                result = await self._recover_or_dispatch(
+                    request, binding, claim, admitted, lineage
+                )
+        except TimeoutError as error:
+            with suppress(Exception):
+                await lineage.release(admitted)
+            if not deadline.expired():
+                raise
+            raise OperationLeaseExpired(
+                "the attempt reached its claim lease deadline and stopped; a later attempt "
+                "classifies and continues the unit (REQ-CP-EXEC-014)"
+            ) from error
+        except (Exception, asyncio.CancelledError):
+            # The holder knows it is stopping: release the lease so the next attempt takes it
+            # over (advancing the fence) instead of waiting for it to expire. A lost worker
+            # releases nothing; its lease simply expires with the attempt's deadline.
+            with suppress(Exception):
+                await lineage.release(admitted)
+            raise
+        with suppress(Exception):
+            await lineage.release(admitted)
+        return result
+
+    async def _recover_or_dispatch(
+        self,
+        request: OperationExecutionRequest,
+        binding: OperationExecutionBinding,
+        claim: OperationEffectClaim | None,
+        admitted: UnitAttempt,
+        lineage: CheckpointLineageService,
+    ) -> OperationExecutionResult:
+        admission = admitted.admission
+        # `settled` (a concurrent holder may have settled before this lease was granted).
+        settlement = await self._get_settlement(binding)
+        if settlement is not None:
+            await self._complete_post_effects(binding, settlement)
+            return _public_result(binding, settlement)
+        # `observed_unsettled`: the fenced result manifest settles without provider work.
+        if admission.existing_result is not None:
+            return await self._settle_recorded(binding, claim, admitted, admission.existing_result)
+        if admission.existing_transition is not None:
+            return await self._in_doubt(
+                binding, claim, admitted, reason="unrecoverable_result_manifest"
+            )
+        accepted_leaf: QualifiedCheckpointKey | None = None
+        reconciled = False
+        if admission.incident is not None:
+            decision = await self._reconciliation(binding, admitted, admission.incident)
+            if decision is None:
+                return await self._in_doubt(
+                    binding, claim, admitted, reason=admission.incident.reason
+                )
+            await lineage.repository.apply_reconciliation(binding.request_scope, decision)
+            if decision.decision == "abandon_unit":
+                return await self._settle(
+                    binding,
+                    claim,
+                    _failed_settlement(
+                        binding,
+                        failure_code="in_doubt_abandoned",
+                        message="in_doubt unit abandoned by operator reconciliation",
+                    ),
+                    started_at=datetime.now(UTC),
+                    attempt=admitted.attempt,
+                    admitted=admitted,
+                )
+            if decision.decision == "start_new_generation":
+                # REQ-CP-EXEC-005: this generation is fenced and can never settle the unit.
+                return _unsettled_result(
+                    binding,
+                    failure_code="generation_superseded",
+                    message="an accepted generation boundary superseded this generation",
+                    incident_id=admission.incident.incident_id,
+                )
+            accepted_leaf = decision.accepted_checkpoint
+            reconciled = True
+        if admitted.deep_binding is None and admission.prior_dispatch and not reconciled:
+            # A native effect dispatched by an earlier holder is ambiguous: it is reconciled
+            # through its claim, never repeated speculatively (REQ-CP-RUN-007).
+            return await self._in_doubt(binding, claim, admitted, reason="ambiguous_native_effect")
+        return await self._dispatch_and_settle(
+            request,
+            binding,
+            claim,
+            attempt=admitted.attempt,
+            admitted=admitted,
+            plan=lineage.plan(admitted, accepted_leaf=accepted_leaf),
+        )
+
+    async def _dispatch_and_settle(
+        self,
+        request: OperationExecutionRequest,
+        binding: OperationExecutionBinding,
+        claim: OperationEffectClaim | None,
+        *,
+        attempt: OperationActivityAttempt | None,
+        admitted: UnitAttempt | None = None,
+        plan: CheckpointInvocationPlan | None = None,
+    ) -> OperationExecutionResult:
         runtime_invoked = False
         started_at = datetime.now(UTC)
         observed_usage = RuntimeUsage()
@@ -470,7 +719,8 @@ class OperationExecutionService:
             capture = runtime_result.checkpoint
             if plan is not None and capture is None:
                 raise CheckpointLineageInDoubt(
-                    "a lineage-qualified invocation returned no captured result checkpoint"
+                    "a lineage-qualified invocation returned no captured result checkpoint",
+                    reason="unclassifiable",
                 )
             _validate_bound_usage(binding, runtime_result.usage)
             settlement = OperationSettlement(
@@ -489,10 +739,31 @@ class OperationExecutionService:
                 ),
                 result_checkpoint=capture.result_key if capture is not None else None,
             )
+        except CheckpointLineageInDoubt as error:
+            # REQ-CP-DA-018: ambiguity is never settled as an ordinary failure, and never
+            # re-executed: it becomes a typed incident awaiting `reconcile_unit`.
+            if admitted is None:
+                raise
+            return await self._in_doubt(
+                binding, claim, admitted, reason=error.reason, candidates=error.candidates
+            )
         except CheckpointLineageError:
-            # REQ-CP-DA-018: lineage ambiguity is never settled as an ordinary failure.
             raise
         except Exception as error:
+            if admitted is not None and not isinstance(error, OperationBudgetViolation):
+                ambiguity = await self._post_failure_ambiguity(
+                    binding, claim, admitted, error, runtime_invoked=runtime_invoked
+                )
+                if ambiguity is not None:
+                    reason, unsettled = ambiguity
+                    return await self._in_doubt(
+                        binding,
+                        claim,
+                        admitted,
+                        reason=reason,
+                        candidates=_failure_candidates(error),
+                        unsettled_effect_ids=unsettled,
+                    )
             settlement = OperationSettlement(
                 settlement_id=_stable_id("operation-settlement", binding.binding_id),
                 binding_id=binding.binding_id,
@@ -508,30 +779,89 @@ class OperationExecutionService:
                     else "preparation_failed"
                 ),
                 # Provider and secret exception text is deliberately not persisted.
-                failure_message=f"{type(error).__name__} at governed operation boundary",
+                failure_message=f"{_error_type(error)} at governed operation boundary",
                 settled_at=datetime.now(UTC),
             )
+        return await self._settle(
+            binding,
+            claim,
+            settlement,
+            started_at=started_at,
+            attempt=attempt,
+            admitted=admitted,
+            plan=plan if settlement.status == "completed" else None,
+            capture=capture if settlement.status == "completed" else None,
+        )
 
-        before_authority: ResultManifestObserver | None = None
+    async def _post_failure_ambiguity(
+        self,
+        binding: OperationExecutionBinding,
+        claim: OperationEffectClaim | None,
+        admitted: UnitAttempt,
+        error: Exception,
+        *,
+        runtime_invoked: bool,
+    ) -> tuple[InDoubtReason, tuple[str, ...]] | None:
+        """REQ-CP-RUN-007 (narrowed): `failed` only without a terminal result and with every
+        effect claim of the unit settled; otherwise the disposition is `in_doubt`."""
+
+        terminal_absent = isinstance(error, RuntimeInvocationFailure) and (
+            not error.terminal_result_observed
+        )
+        if isinstance(error, RuntimeInvocationFailure) and error.terminal_result_observed:
+            return "terminal_result_after_failure", ()  # candidates travel on the error
         if (
-            plan is not None
-            and capture is not None
-            and settlement.status == "completed"
-            and self._lineage is not None
+            admitted.deep_binding is not None
+            and admitted.admission.prior_dispatch
+            and not terminal_absent
         ):
-            lineage = self._lineage
-            settled_plan = plan
-            settled_capture = capture
+            # An earlier holder dispatched this unit generation and this attempt could not
+            # classify the checkpointer: a terminal result is not provably absent.
+            return "unclassifiable", ()
+        if not runtime_invoked or self._journal is None or claim is None:
+            return None
+        unsettled = await self._journal.unsettled_effect_ids(binding, claim)
+        if unsettled:
+            return "unsettled_effect_claims", unsettled
+        return None
 
-            async def record_transition(manifest_ref: str, manifest_digest: str) -> None:
-                await lineage.record_transition(
-                    settled_plan,
-                    settled_capture,
+    async def _settle(
+        self,
+        binding: OperationExecutionBinding,
+        claim: OperationEffectClaim | None,
+        settlement: OperationSettlement,
+        *,
+        started_at: datetime,
+        attempt: OperationActivityAttempt | None,
+        admitted: UnitAttempt | None,
+        plan: CheckpointInvocationPlan | None = None,
+        capture: CheckpointCapture | None = None,
+    ) -> OperationExecutionResult:
+        before_authority: ResultManifestObserver | None = None
+        if admitted is not None and self._lineage is not None:
+            lineage = self._lineage
+            unit_attempt = admitted
+            settled = settlement
+
+            async def record_result(
+                manifest_ref: str, manifest_digest: str, manifest_size_bytes: int
+            ) -> None:
+                # REQ-CP-EXEC-014: the result manifest is fixed by the current fence holder
+                # (with its checkpoint transition, by CAS on the namespace head) before any
+                # authority settlement. A superseded holder's write is rejected here.
+                await lineage.record_result(
+                    unit_attempt,
+                    binding_id=binding.binding_id,
+                    settlement_id=settled.settlement_id,
+                    status=settled.status,
                     result_manifest_ref=manifest_ref,
                     result_manifest_digest=manifest_digest,
+                    result_manifest_size_bytes=manifest_size_bytes,
+                    plan=plan,
+                    capture=capture,
                 )
 
-            before_authority = record_transition
+            before_authority = record_result
         technical_attempt = attempt.attempt if attempt is not None else 1
         if self._journal is not None and claim is not None:
             settlement = await self._journal.settle(
@@ -548,6 +878,7 @@ class OperationExecutionService:
                 await before_authority(
                     f"operation-settlement:{settlement.settlement_id}",
                     f"sha256:{hashlib.sha256(manifest).hexdigest()}",
+                    len(manifest),
                 )
             settlement = await self._bindings.settle(
                 settlement,
@@ -555,6 +886,117 @@ class OperationExecutionService:
             )
         await self._complete_post_effects(binding, settlement)
         return _public_result(binding, settlement)
+
+    async def _settle_recorded(
+        self,
+        binding: OperationExecutionBinding,
+        claim: OperationEffectClaim | None,
+        admitted: UnitAttempt,
+        recorded: UnitResultObservation,
+    ) -> OperationExecutionResult:
+        """`observed_unsettled`: settle exactly the recorded manifest; no provider work."""
+
+        if self._journal is None or claim is None:
+            return await self._in_doubt(
+                binding, claim, admitted, reason="unrecoverable_result_manifest"
+            )
+        settlement = await self._journal.load_result_manifest(
+            binding,
+            manifest_ref=recorded.result_manifest_ref,
+            manifest_digest=recorded.result_manifest_digest,
+            manifest_size_bytes=recorded.result_manifest_size_bytes,
+        )
+        if (
+            settlement.settlement_id != recorded.settlement_id
+            or settlement.status != recorded.status
+            or settlement.checkpoint_transition_id != recorded.checkpoint_transition_id
+        ):
+            return await self._in_doubt(
+                binding, claim, admitted, reason="unrecoverable_result_manifest"
+            )
+
+        async def verify_recorded(
+            manifest_ref: str, manifest_digest: str, manifest_size_bytes: int
+        ) -> None:
+            if (manifest_ref, manifest_digest, manifest_size_bytes) != (
+                recorded.result_manifest_ref,
+                recorded.result_manifest_digest,
+                recorded.result_manifest_size_bytes,
+            ):
+                raise CheckpointLineageConflict(
+                    "the recovered settlement manifest differs from the recorded result"
+                )
+
+        settled = await self._journal.settle(
+            binding,
+            claim,
+            settlement,
+            started_at=min(datetime.now(UTC), settlement.settled_at),
+            technical_attempt=admitted.attempt.attempt,
+            before_authority=verify_recorded,
+        )
+        await self._complete_post_effects(binding, settled)
+        return _public_result(binding, settled)
+
+    async def _reconciliation(
+        self,
+        binding: OperationExecutionBinding,
+        admitted: UnitAttempt,
+        incident: UnitReconciliationIncident,
+    ) -> UnitReconciliationDecision | None:
+        """The accepted operator decision for an in_doubt unit generation, if any."""
+
+        if self._journal is not None:
+            decision = await self._journal.get_unit_reconciliation(
+                binding,
+                unit_key=admitted.unit.unit_key,
+                execution_generation=admitted.execution_generation,
+                incident_id=incident.incident_id,
+            )
+            if decision is not None:
+                return decision
+        if incident.status == "resolved":
+            assert incident.decision is not None and incident.decision_id is not None
+            return UnitReconciliationDecision(
+                decision_id=incident.decision_id,
+                unit_key=incident.unit_key,
+                execution_generation=incident.execution_generation,
+                incident_id=incident.incident_id,
+                decision=incident.decision,
+                accepted_checkpoint=incident.accepted_checkpoint,
+                actor_id="recorded-incident",
+                decided_at=incident.recorded_at,
+            )
+        return None
+
+    async def _in_doubt(
+        self,
+        binding: OperationExecutionBinding,
+        claim: OperationEffectClaim | None,
+        admitted: UnitAttempt,
+        *,
+        reason: InDoubtReason,
+        candidates: tuple[QualifiedCheckpointKey, ...] = (),
+        unsettled_effect_ids: tuple[str, ...] = (),
+    ) -> OperationExecutionResult:
+        """REQ-CP-DA-018 / REQ-CP-RUN-007: a typed incident; no invocation; park the unit."""
+
+        assert self._lineage is not None
+        incident = await self._lineage.open_incident(
+            admitted,
+            binding=binding,
+            reason=reason,
+            candidates=candidates,
+            unsettled_effect_ids=unsettled_effect_ids,
+        )
+        if self._journal is not None and claim is not None:
+            await self._journal.record_in_doubt(binding, claim, incident)
+        return _unsettled_result(
+            binding,
+            failure_code=incident.reason,
+            message="runtime unit is in_doubt and awaits operator reconcile_unit",
+            incident_id=incident.incident_id,
+        )
 
     async def _complete_post_effects(
         self,
@@ -724,7 +1166,7 @@ def bind_operation_execution_request(
 ) -> OperationExecutionBinding:
     """Create the immutable OEB document without invoking its provider side effect."""
 
-    fingerprint = sha256_digest(request.model_dump(mode="json", exclude={"requested_at"}))
+    fingerprint = contract_fingerprint(request, exclude={"requested_at"})
     return _binding_for(request, fingerprint)
 
 
@@ -817,6 +1259,51 @@ def _public_result(
         checkpoint_transition_id=settlement.checkpoint_transition_id,
         result_checkpoint=settlement.result_checkpoint,
     )
+
+
+def _failed_settlement(
+    binding: OperationExecutionBinding, *, failure_code: str, message: str
+) -> OperationSettlement:
+    return OperationSettlement(
+        settlement_id=_stable_id("operation-settlement", binding.binding_id),
+        binding_id=binding.binding_id,
+        status="failed",
+        failure_code=failure_code,
+        failure_message=message,
+        settled_at=datetime.now(UTC),
+    )
+
+
+def _unsettled_result(
+    binding: OperationExecutionBinding,
+    *,
+    failure_code: str,
+    message: str,
+    incident_id: str,
+) -> OperationExecutionResult:
+    """An `in_doubt` disposition: no settlement exists; the claim stays unsettled."""
+
+    return OperationExecutionResult(
+        binding_id=binding.binding_id,
+        semantic_attempt_key=binding.semantic_attempt_key,
+        status="in_doubt",
+        failure_code=failure_code,
+        failure_message=message,
+        unit_key=binding.runtime_unit.unit_key if binding.runtime_unit is not None else None,
+        reconciliation_incident_id=incident_id,
+    )
+
+
+def _failure_candidates(error: BaseException) -> tuple[QualifiedCheckpointKey, ...]:
+    if not isinstance(error, RuntimeInvocationFailure):
+        return ()
+    return tuple(item for item in error.candidates if isinstance(item, QualifiedCheckpointKey))
+
+
+def _error_type(error: BaseException) -> str:
+    if isinstance(error, RuntimeInvocationFailure):
+        return error.error_type
+    return type(error).__name__
 
 
 def _validate_bound_usage(binding: OperationExecutionBinding, usage: RuntimeUsage) -> None:

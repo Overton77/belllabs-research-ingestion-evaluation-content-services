@@ -444,6 +444,7 @@ class FakeJournal:
         self.claim: OperationEffectClaim | None = None
         self.settlement: OperationSettlement | None = None
         self.technical_attempts: list[int] = []
+        self.in_doubt: list[Any] = []
 
     async def acquire(self, binding, *, claimed_by):  # type: ignore[no-untyped-def]
         self.claim = OperationEffectClaim(
@@ -481,11 +482,26 @@ class FakeJournal:
         assert started_at <= settlement.settled_at
         if before_authority is not None:
             await before_authority(
-                f"fake-manifest:{settlement.settlement_id}", sha256_digest(settlement.binding_id)
+                f"fake-manifest:{settlement.settlement_id}",
+                sha256_digest(settlement.binding_id),
+                1,
             )
         self.technical_attempts.append(technical_attempt)
         self.settlement = settlement
         return settlement
+
+    async def record_in_doubt(self, _binding, _claim, incident):  # type: ignore[no-untyped-def]
+        self.in_doubt.append(incident)
+
+    async def get_unit_reconciliation(self, _binding, **_unit):  # type: ignore[no-untyped-def]
+        return None
+
+    async def unsettled_effect_ids(self, _binding, _claim):  # type: ignore[no-untyped-def]
+        return ()
+
+    async def load_result_manifest(self, _binding, **_address):  # type: ignore[no-untyped-def]
+        assert self.settlement is not None
+        return self.settlement
 
 
 @pytest.mark.asyncio
@@ -1139,7 +1155,17 @@ async def test_journaled_operation_settles_usage_effect_and_terminalizes(
         started_at=NOW,
     )
 
-    assert result == settlement
+    # RRM-004: the settlement now carries its digest-bound output payload address, and a
+    # settled replay restores the excluded output from it unchanged.
+    assert result.output_payload_digest is not None
+    assert result.model_copy(
+        update={
+            "output_payload_ref": None,
+            "output_payload_digest": None,
+            "output_payload_size_bytes": None,
+        }
+    ) == settlement
+    assert await coordinator.get_settlement(binding) == result
     if pending_external:
         effects = await run_service.get_effects("tenant-1", run_id)
         assert effects.claims[acquired.claim.effect_claim_id].settlement is None
@@ -1450,31 +1476,107 @@ async def test_settled_technical_attempt_is_the_real_activity_attempt() -> None:
     assert len(runtime.invocations) == 1
 
 
+async def _wait_until(predicate) -> None:  # type: ignore[no-untyped-def]
+    """Poll durable state written by Temporal-driven activities (bounded)."""
+
+    async with asyncio.timeout(30):
+        for _ in range(600):
+            if await predicate():
+                return
+            await asyncio.sleep(0.05)
+    raise AssertionError("condition was not reached in time")
+
+
 @pytest.mark.asyncio
-async def test_three_activity_attempts_share_one_unit_key_and_dispatch_once() -> None:
-    """REQ-CP-EXEC-005/013/014: retries observe attempts under one unit; one dispatch."""
+async def test_lost_native_holder_is_taken_over_by_fence_and_parked_in_doubt() -> None:
+    """REQ-CP-EXEC-005/013/014, REQ-CP-RUN-007; RRM-001 section 7 #1.
+
+    Rewritten from RRM-003's `test_three_activity_attempts_share_one_unit_key_and_dispatch_once`,
+    which asserted that attempts 2 and 3 stood down behind the lost holder's claim forever
+    (`[(1, True), (2, False), (3, False)]`): the claim had no lease, so it could never be
+    taken over and the operation failed after three attempts without settlement. Now the
+    lost holder's released lease is taken over by advancing the fence. The native effect it
+    dispatched is ambiguous, so the unit parks `in_doubt` with a typed incident and is never
+    re-dispatched; a wake-up hint without an operator decision parks it again.
+    """
 
     repository = InMemoryCheckpointLineageRepository()
+    journal = LoseWorkerBeforeSettlement()
     service, _bindings, runtime, _events, _budget = service_fixture(
-        journal=LoseWorkerBeforeSettlement(),
+        journal=journal,
         lineage=CheckpointLineageService(repository),
     )
+    request = unit_operation_request()
+    unit_key = native_unit().unit_key
+    activities = OperationExecutionActivities(service, worker_identity="worker:exec-014")
+    async with await WorkflowEnvironment.start_time_skipping() as environment:
+        async with (
+            Worker(
+                environment.client,
+                task_queue="operation-workflow-coordinator",
+                workflows=[OperationWorkflow],
+                workflow_runner=coordinator_workflow_runner(),
+            ),
+            Worker(
+                environment.client,
+                task_queue="operation-execution-conformance",
+                activities=[activities.execute],
+            ),
+        ):
+            handle = await environment.client.start_workflow(
+                OperationWorkflow.run,
+                OperationWorkflowRequest(
+                    semantic_attempt_id=request.identity.semantic_key,
+                    operation_kind="bound_operation",
+                    operation=request,
+                ),
+                id="exec-014-takeover",
+                task_queue="operation-workflow-coordinator",
+            )
 
-    outcome = await _run_operation_workflow(
-        service, unit_operation_request(), "exec-014-three-attempts"
-    )
+            async def parked() -> bool:
+                return bool(journal.in_doubt)
 
-    attempts = await repository.list_attempts("tenant-1", native_unit().unit_key)
-    assert isinstance(outcome, Exception)
-    assert [(item.attempt.attempt, item.dispatching) for item in attempts] == [
-        (1, True),
-        (2, False),
-        (3, False),
+            await _wait_until(parked)
+            attempts = await repository.list_attempts("tenant-1", unit_key)
+            assert [(item.attempt.attempt, item.dispatching) for item in attempts] == [
+                (1, True),
+                (2, True),
+            ]
+            assert [item.claim_fence for item in attempts] == [1, 2]
+            assert {item.unit_key for item in attempts} == {unit_key}
+            assert {item.execution_generation for item in attempts} == {1}
+            incident = await repository.get_incident("tenant-1", unit_key, 1)
+            assert incident is not None
+            assert incident.reason == "ambiguous_native_effect"
+            assert incident.status == "operator_required"
+            assert incident.operation_workflow_id == "exec-014-takeover"
+            assert journal.in_doubt == [incident]
+            assert len(runtime.invocations) == 1
+
+            await handle.signal(OperationWorkflow.unit_reconciliation_recorded, "hint")
+
+            async def reclassified() -> bool:
+                return len(await repository.list_attempts("tenant-1", unit_key)) == 3
+
+            await _wait_until(reclassified)
+            description = await handle.describe()
+            assert description.status is not None and description.status.name == "RUNNING"
+            assert len(runtime.invocations) == 1, "a hint alone never re-dispatches"
+            await handle.terminate("test complete")
+            history = await handle.fetch_history()
+
+    # The parked history (patch marker, wake-up signal, re-classification) replays.
+    await Replayer(
+        workflows=[OperationWorkflow],
+        workflow_runner=coordinator_workflow_runner(),
+    ).replay_workflow(history)
+    scheduled = [
+        event
+        for event in history.events
+        if event.HasField("activity_task_scheduled_event_attributes")
     ]
-    assert {item.unit_key for item in attempts} == {native_unit().unit_key}
-    assert {item.execution_generation for item in attempts} == {1}
-    assert {item.claim_fence for item in attempts} == {1}
-    assert len(runtime.invocations) == 1
+    assert len(scheduled) == 2, "one execution, then one re-classification after the hint"
 
 
 @pytest.mark.asyncio

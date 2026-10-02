@@ -25,6 +25,8 @@ from app.domain.graph_runtime.identities import (
 CHECKPOINT_INVOCATION_PLAN_SCHEMA_VERSION: Final = "belllabs.checkpoint-invocation-plan.v1"
 CHECKPOINT_TRANSITION_SCHEMA_VERSION: Final = "belllabs.checkpoint-transition.v1"
 ACTIVITY_ATTEMPT_OBSERVATION_SCHEMA_VERSION: Final = "belllabs.activity-attempt-observation.v1"
+UNIT_RESULT_OBSERVATION_SCHEMA_VERSION: Final = "belllabs.unit-result-observation.v1"
+UNIT_RECONCILIATION_INCIDENT_SCHEMA_VERSION: Final = "belllabs.unit-reconciliation-incident.v1"
 ROOT_CHECKPOINT_NS: Final = ""
 
 # Scalar invocation metadata LangGraph copies onto every checkpoint (REQ-CP-DA-016).
@@ -33,6 +35,10 @@ STAMP_EXECUTION_GENERATION = "belllabs_execution_generation"
 STAMP_INVOCATION_ID = "belllabs_invocation_id"
 STAMP_BINDING_DIGEST = "belllabs_binding_digest"
 STAMP_STATE_SCHEMA_DIGEST = "belllabs_state_schema_digest"
+# RRM-004: the Activity attempt (lease holder) that wrote a checkpoint. It is not part of the
+# unit generation's attribution stamps above; it lets an attempt capture its own result tip
+# and never another, superseded attempt's checkpoint.
+STAMP_ATTEMPT_REF = "belllabs_attempt_ref"
 
 
 class Contract(BaseModel):
@@ -61,12 +67,46 @@ class CheckpointLineageConflict(CheckpointLineageError):
     """A conflicting, out-of-order, or different-content observation was rejected."""
 
 
+InDoubtReason = Literal[
+    "unclassifiable",
+    "missing_checkpoint",
+    "ancestry_mismatch",
+    "schema_mismatch",
+    "foreign_descendant",
+    "multiple_stamped_leaves",
+    "pending_interrupt",
+    "terminal_result_after_failure",
+    "unsettled_effect_claims",
+    "ambiguous_native_effect",
+    "unrecoverable_result_manifest",
+    "accepted_descendant_invalid",
+]
+
+
 class CheckpointLineageInDoubt(CheckpointLineageError):
-    """The unit generation cannot be classified as a unique safe case (REQ-CP-DA-018)."""
+    """The unit generation cannot be classified as a unique safe case (REQ-CP-DA-018).
+
+    It carries the typed reason and the candidate checkpoints an operator may accept, so the
+    incident is written from structured evidence rather than from a message.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason: InDoubtReason = "unclassifiable",
+        candidates: tuple[QualifiedCheckpointKey, ...] = (),
+    ) -> None:
+        super().__init__(message)
+        self.reason: InDoubtReason = reason
+        self.candidates = candidates
 
 
 class IncompatibleCheckpointSchema(CheckpointLineageInDoubt):
     """A stamped state-schema digest differs from the reading binding (REQ-CP-CS-007)."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, reason="schema_mismatch")
 
 
 class CheckpointNamespaceBusy(CheckpointLineageError):
@@ -79,6 +119,15 @@ class CheckpointNamespaceOwnershipError(CheckpointLineageConflict):
 
 class StaleClaimFence(CheckpointLineageConflict):
     """A write presented a superseded claim fence or execution generation (REQ-CP-EXEC-014)."""
+
+
+INVOKING_CLASSIFICATIONS: Final = frozenset(
+    {
+        CheckpointClassification.NOT_SUBMITTED,
+        CheckpointClassification.INTERRUPTED,
+        CheckpointClassification.TERMINAL_UNOBSERVED,
+    }
+)
 
 
 def cognitive_session_namespace(unit: RuntimeUnitIdentity, execution_generation: int) -> str:
@@ -141,6 +190,26 @@ class OperationActivityAttempt(Contract):
     activity_id: str = Field(min_length=1, max_length=256)
     attempt: int = Field(ge=1)
     worker_identity: str = Field(min_length=1, max_length=512)
+    # REQ-CP-EXEC-014 (RRM-004): the attempt's scheduler deadline (Temporal start time plus
+    # start-to-close timeout). It bounds this attempt's claim lease; absent means the
+    # composition default applies.
+    lease_expires_at: AwareDatetime | None = None
+
+
+def activity_attempt_observation_id(
+    request_scope: str,
+    unit_key: str,
+    execution_generation: int,
+    attempt: OperationActivityAttempt,
+) -> str:
+    """Identity of one Activity attempt of a unit generation; also its claim-lease holder."""
+
+    identity = (
+        f"activity-attempt:{request_scope}:{unit_key}:"
+        f"{execution_generation}:{attempt.workflow_id}:{attempt.workflow_run_id}:"
+        f"{attempt.activity_id}:{attempt.attempt}"
+    )
+    return f"activity-attempt:{uuid5(NAMESPACE_URL, identity)}"
 
 
 class ActivityAttemptObservation(Contract):
@@ -162,13 +231,9 @@ class ActivityAttemptObservation(Contract):
 
     @property
     def observation_id(self) -> str:
-        attempt = self.attempt
-        identity = (
-            f"activity-attempt:{self.request_scope}:{self.unit_key}:"
-            f"{self.execution_generation}:{attempt.workflow_id}:{attempt.workflow_run_id}:"
-            f"{attempt.activity_id}:{attempt.attempt}"
+        return activity_attempt_observation_id(
+            self.request_scope, self.unit_key, self.execution_generation, self.attempt
         )
-        return f"activity-attempt:{uuid5(NAMESPACE_URL, identity)}"
 
 
 class NamespaceClaim(Contract):
@@ -182,10 +247,21 @@ class NamespaceClaim(Contract):
 
 
 class AttemptAdmission(Contract):
-    """Repository answer to an attempt observation: the stored observation and prior transition."""
+    """Repository answer to an attempt observation.
+
+    It carries the stored observation, the claim lease outcome (REQ-CP-EXEC-014), and every
+    durable fact the attempt must classify before provider work (REQ-CP-DA-018): a prior
+    transition or result observation, an open incident, and whether an earlier holder
+    already dispatched this unit generation.
+    """
 
     observation: ActivityAttemptObservation
     existing_transition: CheckpointTransitionObservation | None = None
+    lease_granted: bool = True
+    took_over: bool = False
+    prior_dispatch: bool = False
+    existing_result: UnitResultObservation | None = None
+    incident: UnitReconciliationIncident | None = None
 
 
 class CheckpointInvocationPlan(Contract):
@@ -200,12 +276,18 @@ class CheckpointInvocationPlan(Contract):
     claim_fence: int = Field(ge=1)
     namespace: str = Field(min_length=1, max_length=1024)
     checkpoint_ns: Literal[""] = ROOT_CHECKPOINT_NS
+    # The invocation identity is always the unit generation's submission: a resumed or
+    # reconstructed invocation keeps the same stamps, so its checkpoints stay attributable.
     mode: Literal["submit"] = "submit"
     invocation_id: str = Field(pattern=DIGEST_PATTERN)
     expected_source: QualifiedCheckpointKey | None = None
     checkpointer_ref_digest: str = Field(pattern=DIGEST_PATTERN)
     binding_digest: str = Field(pattern=DIGEST_PATTERN)
     state_schema_digest: str = Field(pattern=DIGEST_PATTERN)
+    # `reconcile_unit` `accept_descendant`: classify as if this stamped key were the leaf.
+    accepted_leaf: QualifiedCheckpointKey | None = None
+    # The lease holder (Activity attempt observation) this invocation runs for.
+    attempt_ref: str | None = Field(default=None, min_length=1, max_length=256)
 
     @model_validator(mode="after")
     def source_is_a_root_checkpoint_of_this_namespace(self) -> CheckpointInvocationPlan:
@@ -218,6 +300,13 @@ class CheckpointInvocationPlan(Contract):
             or source.checkpointer_ref_digest != self.checkpointer_ref_digest
         ):
             raise ValueError("expected source is not a root checkpoint of this namespace")
+        leaf = self.accepted_leaf
+        if leaf is not None and (
+            leaf.thread_id != self.namespace
+            or not leaf.is_root
+            or leaf.checkpointer_ref_digest != self.checkpointer_ref_digest
+        ):
+            raise ValueError("accepted descendant is not a root checkpoint of this namespace")
         return self
 
     def metadata_stamps(self) -> dict[str, str | int]:
@@ -231,6 +320,14 @@ class CheckpointInvocationPlan(Contract):
             STAMP_STATE_SCHEMA_DIGEST: self.state_schema_digest,
         }
 
+    def invocation_metadata(self) -> dict[str, str | int]:
+        """The stamps plus this attempt's ownership marker (scalar, no secrets)."""
+
+        metadata = self.metadata_stamps()
+        if self.attempt_ref is not None:
+            metadata[STAMP_ATTEMPT_REF] = self.attempt_ref
+        return metadata
+
 
 class CheckpointCapture(Contract):
     """Adapter evidence of one invocation's source and captured result checkpoint."""
@@ -242,6 +339,8 @@ class CheckpointCapture(Contract):
     ancestry_verified: bool
     stamped_checkpoint_count: int = Field(ge=1)
     redacted_summary_digest: str = Field(pattern=DIGEST_PATTERN)
+    # REQ-CP-DA-018: the classification the adapter acted on (submit, resume, reconstruct).
+    classification: CheckpointClassification = CheckpointClassification.NOT_SUBMITTED
 
     @model_validator(mode="after")
     def result_descends_in_namespace(self) -> CheckpointCapture:
@@ -255,6 +354,8 @@ class CheckpointCapture(Contract):
             or self.source_key.checkpointer_ref_digest != result.checkpointer_ref_digest
         ):
             raise ValueError("source and result checkpoints are in different lineages")
+        if self.classification not in INVOKING_CLASSIFICATIONS:
+            raise ValueError("a capture records only a submitting, resuming or reconstructing act")
         return self
 
 
@@ -301,11 +402,7 @@ class CheckpointTransitionObservation(Contract):
         )
         if not self.ancestry_verified:
             raise ValueError("a transition is accepted only with verified ancestry")
-        if self.classification not in {
-            CheckpointClassification.NOT_SUBMITTED,
-            CheckpointClassification.INTERRUPTED,
-            CheckpointClassification.TERMINAL_UNOBSERVED,
-        }:
+        if self.classification not in INVOKING_CLASSIFICATIONS:
             raise ValueError("only invoking or reconstructing classifications record transitions")
         return self
 
@@ -314,6 +411,129 @@ class CheckpointTransitionObservation(Contract):
         """Digest for exact-duplicate detection; the observation time is not content."""
 
         return sha256_digest(self.model_dump(mode="json", exclude={"observed_at"}))
+
+
+def unit_result_observation_id(request_scope: str, unit_key: str, execution_generation: int) -> str:
+    identity = f"unit-result:{request_scope}:{unit_key}:{execution_generation}"
+    return f"unit-result:{uuid5(NAMESPACE_URL, identity)}"
+
+
+def unit_incident_id(
+    request_scope: str, unit_key: str, execution_generation: int, revision: int = 1
+) -> str:
+    """Identity of one incident revision of a unit generation (revision 1 keeps the base ID).
+
+    A unit generation re-enters `in_doubt` only when an accepted decision could not be
+    applied (for example an `accept_descendant` key that no longer classifies). That opens
+    a new revision with its own operator wait, so the unit is never stranded.
+    """
+
+    identity = f"unit-in-doubt:{request_scope}:{unit_key}:{execution_generation}"
+    if revision > 1:
+        identity = f"{identity}:revision:{revision}"
+    return f"unit-in-doubt:{uuid5(NAMESPACE_URL, identity)}"
+
+
+class UnitResultObservation(Contract):
+    """The fenced write that fixes a unit generation's result manifest (REQ-CP-EXEC-014).
+
+    Recorded by compare-and-set on the claim fence before authority settlement, for every
+    unit (native or cognitive) and every status. Once it exists only this exact manifest
+    can settle the unit generation: a later holder settles it (`observed_unsettled`)
+    without provider work, and a superseded holder's competing write is rejected.
+    """
+
+    schema_version: Literal["belllabs.unit-result-observation.v1"] = (
+        UNIT_RESULT_OBSERVATION_SCHEMA_VERSION
+    )
+    observation_id: str = Field(min_length=1)
+    request_scope: str = Field(min_length=1)
+    unit_key: str = Field(pattern=UNIT_KEY_PATTERN)
+    execution_generation: int = Field(ge=1)
+    claim_fence: int = Field(ge=1)
+    binding_id: str = Field(min_length=1)
+    settlement_id: str = Field(min_length=1)
+    status: Literal["completed", "failed", "cancelled", "timed_out"]
+    result_manifest_ref: str = Field(min_length=1)
+    result_manifest_digest: str = Field(pattern=DIGEST_PATTERN)
+    result_manifest_size_bytes: int = Field(ge=1)
+    checkpoint_transition_id: str | None = None
+    observed_at: AwareDatetime
+
+    @model_validator(mode="after")
+    def identity_is_derived(self) -> UnitResultObservation:
+        if self.observation_id != unit_result_observation_id(
+            self.request_scope, self.unit_key, self.execution_generation
+        ):
+            raise ValueError("result observation id is not derived from its unit generation")
+        return self
+
+    @property
+    def content_digest(self) -> str:
+        """The recorded result; the writer's fence and time are not result content."""
+
+        return sha256_digest(
+            self.model_dump(mode="python", exclude={"observed_at", "claim_fence"})
+        )
+
+
+IncidentDecision = Literal["accept_descendant", "abandon_unit", "start_new_generation"]
+
+
+class UnitReconciliationIncident(Contract):
+    """Typed `in_doubt` incident of one unit generation (REQ-CP-DA-018, REQ-CP-RUN-007).
+
+    It records why no unique safe classification exists and the candidate checkpoints an
+    operator may accept. It holds keys and digests only, never checkpoint bodies or prompts.
+    """
+
+    schema_version: Literal["belllabs.unit-reconciliation-incident.v1"] = (
+        UNIT_RECONCILIATION_INCIDENT_SCHEMA_VERSION
+    )
+    incident_id: str = Field(min_length=1)
+    request_scope: str = Field(min_length=1)
+    belllabs_run_id: str = Field(min_length=1)
+    unit_key: str = Field(pattern=UNIT_KEY_PATTERN)
+    execution_generation: int = Field(ge=1)
+    binding_id: str = Field(min_length=1)
+    operation_workflow_id: str = Field(min_length=1, max_length=1024)
+    classification: Literal["in_doubt"] = "in_doubt"
+    reason: InDoubtReason
+    namespace: str | None = Field(default=None, min_length=1, max_length=1024)
+    expected_source: QualifiedCheckpointKey | None = None
+    candidates: tuple[QualifiedCheckpointKey, ...] = Field(default=(), max_length=64)
+    unsettled_effect_ids: tuple[str, ...] = Field(default=(), max_length=64)
+    status: Literal["operator_required", "resolved"] = "operator_required"
+    revision: int = Field(default=1, ge=1)
+    decision: IncidentDecision | None = None
+    decision_id: str | None = None
+    accepted_checkpoint: QualifiedCheckpointKey | None = None
+    recorded_at: AwareDatetime
+
+    @model_validator(mode="after")
+    def incident_shape(self) -> UnitReconciliationIncident:
+        if self.incident_id != unit_incident_id(
+            self.request_scope, self.unit_key, self.execution_generation, self.revision
+        ):
+            raise ValueError("incident id is not derived from its unit generation revision")
+        if (self.status == "resolved") != (self.decision is not None):
+            raise ValueError("exactly a resolved incident carries its decision")
+        if (self.decision is None) != (self.decision_id is None):
+            raise ValueError("a decision carries its accepted command identity")
+        if (self.decision == "accept_descendant") != (self.accepted_checkpoint is not None):
+            raise ValueError("only accept_descendant names an accepted checkpoint")
+        return self
+
+    @property
+    def identity_digest(self) -> str:
+        identity: dict[str, object] = {
+            "request_scope": self.request_scope,
+            "unit_key": self.unit_key,
+            "execution_generation": self.execution_generation,
+        }
+        if self.revision > 1:
+            identity["revision"] = self.revision
+        return sha256_digest(identity)
 
 
 class LineageWriteRejection(Contract):

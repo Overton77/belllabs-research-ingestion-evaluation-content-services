@@ -18,5 +18,6 @@ Connect the run-control facade/ledger/outbox to exact root/family operation boun
 - [ ] Worker restart, redelivery, stale target and Continue-As-New preserve command ordering and receipts.
 - [ ] Accepted resume continues from the correct frontier without repeating settled work or mutating frozen bindings.
 - [ ] Technical real-Temporal demonstrations cover both family boundaries with persistent command/application evidence.
+- [ ] (From RRM-004 review.) `reconcile_unit` gets governed delivery: an API route over `UnitReconciliationService`, an operator role that holds `workflow_run.reconcile_unit` (the `operator` role in `app/api/run_control.py` does not today), and durable `accepted → delivered → applied` receipts. Today the `unit_reconciliation_recorded` signal is a hint transport only; the parked `OperationWorkflow` reads the accepted decision from run-control authority.
 
 Out of scope: arbitrary state edits inside a currently executing Deep Agent. Optional source/clarification steering requires an accepted typed context/binding derivation contract; do not append model messages directly as a shortcut. Cancellation's active-provider reconciliation is RRM-008.

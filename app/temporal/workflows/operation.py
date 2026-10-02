@@ -14,6 +14,16 @@ with workflow.unsafe.imports_passed_through():
         OperationWorkflowResult,
     )
 
+PARK_IN_DOUBT_PATCH = "rrm-004-park-in-doubt-units"
+
+
+def _parks(result: dict[str, object]) -> bool:
+    return (
+        result.get("status") == "in_doubt"
+        and result.get("failure_code") != "generation_superseded"
+    )
+
+
 @workflow.defn(name="belllabs.operation.v2")
 class OperationWorkflow:
     """Durable technical wrapper for one stable semantic operation attempt."""
@@ -22,10 +32,24 @@ class OperationWorkflow:
         self._cancel_requested = False
         self._execution_generation = 1
         self._active_async_child_ids: tuple[str, ...] = ()
+        self._reconciliation_nudges = 0
+        self._nudges_seen = 0
 
     @workflow.signal
     def request_cancel(self) -> None:
         self._cancel_requested = True
+
+    @workflow.signal
+    def unit_reconciliation_recorded(self, decision_ref: str) -> None:
+        """A compact wake-up hint after run control accepted `reconcile_unit`.
+
+        It releases nothing by itself (REQ-CP-EXEC-007): the next `operation.execute`
+        attempt reads the accepted decision from PostgreSQL authority, and a hint without
+        an accepted decision simply parks the unit again.
+        """
+
+        del decision_ref
+        self._reconciliation_nudges += 1
 
     @workflow.query
     def execution_generation(self) -> int:
@@ -80,14 +104,19 @@ class OperationWorkflow:
                 effect_frontier=request.effect_frontier,
                 active_async_child_ids=self._active_async_child_ids,
             )
-        result = await workflow.execute_activity(
-            "operation.execute",
-            request.operation.model_dump(mode="json"),
-            result_type=dict,
-            task_queue=request.activity_task_queue,
-            start_to_close_timeout=timedelta(seconds=request.timeout_seconds),
-            retry_policy=RetryPolicy(maximum_attempts=3),
-        )
+        self._nudges_seen = self._reconciliation_nudges
+        result = await self._execute_operation(request)
+        if _parks(result) and workflow.patched(PARK_IN_DOUBT_PATCH):
+            # REQ-CP-RUN-007 / REQ-CP-DA-018: an `in_doubt` unit keeps its claim unsettled
+            # and waits durably for operator reconciliation; it is never re-executed
+            # speculatively. Each wake-up re-runs classification, which applies only an
+            # accepted decision.
+            while _parks(result):
+                await workflow.wait_condition(
+                    lambda: self._reconciliation_nudges > self._nudges_seen
+                )
+                self._nudges_seen = self._reconciliation_nudges
+                result = await self._execute_operation(request)
         status = result.get("status", "completed")
         disposition = (
             status
@@ -102,4 +131,14 @@ class OperationWorkflow:
             message_cursor=request.message_cursor,
             effect_frontier=request.effect_frontier,
             active_async_child_ids=self._active_async_child_ids,
+        )
+
+    async def _execute_operation(self, request: OperationWorkflowRequest) -> dict[str, object]:
+        return await workflow.execute_activity(
+            "operation.execute",
+            request.operation.model_dump(mode="json"),
+            result_type=dict,
+            task_queue=request.activity_task_queue,
+            start_to_close_timeout=timedelta(seconds=request.timeout_seconds),
+            retry_policy=RetryPolicy(maximum_attempts=3),
         )

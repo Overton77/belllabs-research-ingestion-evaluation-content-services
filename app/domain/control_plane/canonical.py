@@ -61,6 +61,19 @@ def sha256_digest(value: Any) -> str:
     return f"sha256:{hashlib.sha256(canonical_json(value)).hexdigest()}"
 
 
+def contract_fingerprint(value: BaseModel, *, exclude: set[str] | None = None) -> str:
+    """Order-stable fingerprint of a contract instance.
+
+    `model_dump(mode="json")` turns every `frozenset`/`set` into a list in *iteration*
+    order, which depends on the per-process string hash seed (`PYTHONHASHSEED`) and on how
+    the set was built. Two equal contracts can therefore dump to differently ordered lists,
+    so a fingerprint of the JSON dump is not an identity. Dumping in Python mode keeps sets
+    as sets, and `_normalize` sorts them canonically.
+    """
+
+    return sha256_digest(value.model_dump(mode="python", exclude=exclude, warnings=False))
+
+
 def verify_digest(value: Any, expected: str) -> None:
     actual = sha256_digest(value)
     if actual != expected:

@@ -1,8 +1,12 @@
-"""PostgreSQL checkpoint lineage authority (migration 0019) against the disposable stack."""
+"""PostgreSQL checkpoint lineage and recovery authority (migrations 0019, 0020).
+
+Runs against the disposable stack only.
+"""
 
 from __future__ import annotations
 
 import asyncio
+from datetime import timedelta
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -19,6 +23,7 @@ from tests.fixtures.checkpoint_lineage import (
     LINEAGE_NOW,
     activity_attempt,
     assert_checkpoint_lineage_repository_contract,
+    assert_checkpoint_recovery_repository_contract,
     goal_unit,
     namespace_claim,
 )
@@ -64,6 +69,11 @@ async def test_postgres_repository_satisfies_the_checkpoint_lineage_contract(
             request_scope="tenant-1",
             run_id=run_id,
         )
+        await assert_checkpoint_recovery_repository_contract(
+            PostgresCheckpointLineageRepository(pool),
+            request_scope="tenant-1",
+            run_id=run_id,
+        )
     finally:
         await pool.close()
 
@@ -79,7 +89,7 @@ async def _assume_runtime_role(connection: asyncpg.Connection) -> None:
 async def test_runtime_role_grants_and_rls_admit_the_full_lineage_contract(
     test_application_postgres_dsn: str,
 ) -> None:
-    """Migration 0019 grants are sufficient for the production role, and no broader.
+    """Migrations 0019/0020 grants are sufficient for the production role, and no broader.
 
     Production pools connect as a non-owner member of `belllabs_control_runtime`
     (`app/integrations/postgres.py`). Every repository call here runs under that role, so
@@ -115,6 +125,28 @@ async def test_runtime_role_grants_and_rls_admit_the_full_lineage_contract(
             request_scope="tenant-1",
             run_id=run_id,
         )
+        # RRM-004: lease, fenced result, incidents and reconciliation under the same role.
+        await assert_checkpoint_recovery_repository_contract(
+            PostgresCheckpointLineageRepository(runtime),
+            request_scope="tenant-1",
+            run_id=run_id,
+        )
+        async with runtime.acquire() as connection, connection.transaction():
+            await connection.execute(
+                "SELECT set_config('belllabs.request_scope', 'tenant-1', true)"
+            )
+            # The fenced result observation is insert-only for the runtime role.
+            for statement in (
+                "UPDATE belllabs_control.runtime_unit_result_observations SET claim_fence = 9",
+                "DELETE FROM belllabs_control.runtime_unit_result_observations",
+            ):
+                with pytest.raises(asyncpg.InsufficientPrivilegeError):
+                    async with connection.transaction():
+                        await connection.execute(statement)
+            assert await connection.fetchval(
+                "SELECT count(*) FROM belllabs_control.runtime_reconciliation_incidents"
+                " WHERE unit_key IS NOT NULL"
+            ) == 3, "two unit generations' incidents, one of them at revision 2"
         async with runtime.acquire() as connection, connection.transaction():
             await connection.execute(
                 "SELECT set_config('belllabs.request_scope', 'tenant-2', true)"
@@ -125,6 +157,12 @@ async def test_runtime_role_grants_and_rls_admit_the_full_lineage_contract(
                 )
                 == 0
             ), "forced RLS hides another request scope's lineage"
+            assert (
+                await connection.fetchval(
+                    "SELECT count(*) FROM belllabs_control.runtime_unit_result_observations"
+                )
+                == 0
+            ), "forced RLS hides another request scope's results"
     finally:
         await runtime.close()
         await owner.close()
@@ -170,5 +208,49 @@ async def test_concurrent_session_invocations_serialize_on_the_namespace_row(
         busy = [item for item in outcomes if isinstance(item, CheckpointNamespaceBusy)]
         admitted = [item for item in outcomes if not isinstance(item, BaseException)]
         assert len(busy) == 1 and len(admitted) == 1
+    finally:
+        await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_recoveries_of_one_unit_serialize_on_the_claim_lease(
+    test_application_postgres_dsn: str,
+) -> None:
+    """REQ-CP-EXEC-014: after the holder's lease expired, concurrent recoveries of one unit
+    serialize on the per-unit lock; exactly one takes the lease over (fence 2)."""
+
+    require_disposable_postgres(test_application_postgres_dsn)
+    pool = await asyncpg.create_pool(dsn=test_application_postgres_dsn, min_size=2, max_size=8)
+    try:
+        await reset_application_schema(pool)
+        run_id = await admit_run(pool)
+        repository = PostgresCheckpointLineageRepository(pool)
+        unit = goal_unit(
+            request_scope="tenant-1",
+            run_id=run_id,
+            operation_id="goal-iteration/1/executor",
+            goal_iteration=1,
+        )
+
+        async def attempt(number: int, minutes: int):  # type: ignore[no-untyped-def]
+            return await repository.record_attempt(
+                unit=unit,
+                execution_generation=1,
+                attempt=activity_attempt(number, workflow_id=f"operation/{unit.unit_key}"),
+                binding_id=f"binding:{unit.unit_key}",
+                binding_digest=namespace_claim(unit).binding_digest,
+                namespace=namespace_claim(unit),
+                dispatching=True,
+                observed_at=LINEAGE_NOW + timedelta(minutes=minutes),
+                lease_expires_at=LINEAGE_NOW + timedelta(minutes=minutes + 5),
+            )
+
+        assert (await attempt(1, 0)).lease_granted
+        outcomes = await asyncio.gather(*(attempt(number, 10) for number in (2, 3, 4)))
+        granted = [item for item in outcomes if item.lease_granted]
+        assert len(granted) == 1
+        assert granted[0].took_over and granted[0].observation.claim_fence == 2
+        assert {item.observation.claim_fence for item in outcomes} == {2}
+        assert sorted(item.observation.dispatching for item in outcomes) == [False, False, True]
     finally:
         await pool.close()

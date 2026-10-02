@@ -19,7 +19,7 @@ from app.application.operations.postgres_operation_journal import (
     PostgresAtomicOperationJournalRepository,
 )
 from app.application.run_control.postgres_run_control_repository import PostgresRunControlRepository
-from app.domain.control_plane.canonical import sha256_digest
+from app.domain.control_plane.canonical import contract_fingerprint, sha256_digest
 from app.domain.operation_execution.journal import (
     OperationEffectClaim,
     OperationJournalSettlement,
@@ -173,7 +173,7 @@ def authority_result(
         idempotency_issuer="operation-journal",
         run_id=run_id,
         command_fingerprint=fingerprint
-        or sha256_digest(command.model_dump(mode="json", exclude={"occurred_at"})),
+        or contract_fingerprint(command, exclude={"occurred_at"}),
         status=CommandStatus.ACCEPTED,
         resulting_run_version=version,
         phase=RunPhase.ACTIVE,
@@ -365,9 +365,7 @@ def result_for_command(command: LifecycleCommand) -> CommandResult:
         command_id=command.command_id,
         idempotency_issuer=command.idempotency_issuer,
         run_id=command.run_id,
-        command_fingerprint=sha256_digest(
-            command.model_dump(mode="json", exclude={"occurred_at"})
-        ),
+        command_fingerprint=contract_fingerprint(command, exclude={"occurred_at"}),
         status=CommandStatus.ACCEPTED,
         resulting_run_version=command.expected_run_version + 1,
         phase=RunPhase.ACTIVE,
@@ -741,9 +739,7 @@ async def test_journal_only_settlement_survives_later_run_version_and_binds_auth
     )
     forged_result = accepted_authority.model_copy(
         update={
-            "command_fingerprint": sha256_digest(
-                forged_command.model_dump(mode="json", exclude={"occurred_at"})
-            )
+            "command_fingerprint": contract_fingerprint(forged_command, exclude={"occurred_at"})
         }
     )
     repository.seed_authority_proof(
