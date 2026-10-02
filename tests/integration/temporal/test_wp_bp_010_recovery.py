@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from dataclasses import replace
 from datetime import timedelta
 
 import pytest
@@ -9,12 +10,19 @@ from temporalio.client import Client
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
+from app.domain.run_control.contracts import SatisfyWaitAction
 from app.temporal.workflow_sandbox import coordinator_workflow_runner
 from app.temporal.workflows.operation import OperationWorkflow
-from app.temporal.workflows.stagegraph import StageGraphWorkflow
+from app.temporal.workflows.stagegraph import StageGraphWorkflow, wait_condition_id
+from tests.integration.temporal.test_rrm_007_boundary_interventions import (
+    Authority,
+    GovernedStageGraphActivities,
+    _has_wait,
+    _state_is,
+    until,
+)
 from tests.integration.temporal.test_wp_bp_010_temporal import (
     QUEUE,
-    FakeStageGraphActivities,
     _blueprint,
     _run_input,
 )
@@ -23,13 +31,19 @@ from tests.integration.temporal.test_wp_bp_010_temporal import (
 @pytest.mark.asyncio
 @pytest.mark.skipif(sys.platform == "win32", reason="qualified in the WSL Linux worker runtime")
 async def test_declared_wait_survives_worker_loss_and_resumes_from_signal() -> None:
-    activities = FakeStageGraphActivities()
+    """The declared wait survives the loss of its worker and is released only through the
+    governed facade (RRM-007, REQ-CP-EXEC-007): a raw signal releases nothing."""
+
     try:
         environment = await WorkflowEnvironment.start_time_skipping()
     except RuntimeError as error:
         pytest.skip(f"Temporal test server is unavailable: {error}")
 
-    workflow_id = "family/run-wp-bp-010-wait/1"
+    authority = Authority(environment.client)
+    activities = GovernedStageGraphActivities(authority)
+    run_id = await authority.admit("wp-bp-010-wait")
+    workflow_id = f"family/{run_id}/1"
+    condition_id = wait_condition_id("release-workflow")
     # The fixture's exact native placement binds operation activities to QUEUE,
     # so the recovery workers must poll that same queue for the child workflows
     # and their activities.
@@ -51,11 +65,12 @@ async def test_declared_wait_survives_worker_loss_and_resumes_from_signal() -> N
         try:
             handle = await environment.client.start_workflow(
                 StageGraphWorkflow.run,
-                _run_input(_blueprint(workflow_wait=True)),
+                replace(_run_input(_blueprint(workflow_wait=True)), run_id=run_id),
                 id=workflow_id,
                 task_queue=wait_queue,
             )
             await asyncio.wait_for(activities.initialized.wait(), timeout=20)
+            await until(lambda: _has_wait(authority, run_id, condition_id))
             assert activities.admission_order == []
             target_host = environment.client.service_client.config.target_host
             replacement_client = await Client.connect(target_host)
@@ -85,6 +100,15 @@ async def test_declared_wait_survives_worker_loss_and_resumes_from_signal() -> N
             await asyncio.sleep(3)
             handle = environment.client.get_workflow_handle(workflow_id)
             await handle.signal(StageGraphWorkflow.satisfy_wait, "release-workflow")
+            assert await handle.query(StageGraphWorkflow.satisfied_waits) == ()
+            await authority.intervene(
+                run_id,
+                "release",
+                SatisfyWaitAction(
+                    condition_id=condition_id, verification_evidence_ref="evidence:operator"
+                ),
+            )
+            await until(lambda: _state_is(authority, run_id, "release", "applied"))
             assert "release-workflow" in await handle.query(
                 StageGraphWorkflow.satisfied_waits
             )

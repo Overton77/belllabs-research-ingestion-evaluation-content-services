@@ -13,11 +13,16 @@ from app.application.orchestration.service import (
     StageGraphDecisionService,
     StageGraphOperationMaterializer,
 )
+from app.application.run_control.boundary_interventions import (
+    BoundaryCommandApplicationService,
+)
 from app.domain.coordinator.launch import (
     LaunchAuthorizationError,
     TerminalWorkflowCompletion,
 )
 from app.domain.orchestration.contracts import (
+    BoundaryLifecycleOutcome,
+    BoundaryLifecycleRequest,
     LifecycleCommandOutcome,
     LifecycleCommandRequest,
     StageGraphAdmissionActivityRequest,
@@ -31,6 +36,7 @@ from app.domain.orchestration.contracts import (
     StageGraphResultActivityRequest,
     StageGraphResultActivityResult,
 )
+from app.temporal.boundary_activities import apply_boundary_fact
 from app.temporal.registration.activities import coordinator_activities
 from app.temporal.registration.workflows import coordinator_workflows
 from app.temporal.workflow_sandbox import coordinator_workflow_runner
@@ -46,11 +52,13 @@ class StageGraphActivities:
         operation_materializer: StageGraphOperationMaterializer,
         lifecycle_gateway: RunControlLifecycleGateway,
         completion: TerminalWorkflowCompletionPort | None = None,
+        boundary: BoundaryCommandApplicationService | None = None,
     ) -> None:
         self._lifecycle_gateway = lifecycle_gateway
         self._completion = completion
         self._decision_service = decision_service
         self._operation_materializer = operation_materializer
+        self._boundary = boundary
 
     @property
     def completion_configured(self) -> bool:
@@ -99,6 +107,20 @@ class StageGraphActivities:
         self, request: LifecycleCommandRequest
     ) -> LifecycleCommandOutcome:
         return await self._lifecycle_gateway.execute(request)
+
+    @activity.defn(name="stagegraph.apply_boundary_command")
+    async def apply_boundary_command(
+        self, request: BoundaryLifecycleRequest
+    ) -> BoundaryLifecycleOutcome:
+        """RRM-007: the family boundary's run-control facts, bound to the current version."""
+
+        if self._boundary is None:
+            raise ApplicationError(
+                "boundary command application is not composed for StageGraph",
+                type="boundary_application_unavailable",
+                non_retryable=True,
+            )
+        return await apply_boundary_fact(self._boundary, request)
 
     @activity.defn(name="coordinator.materialize_workflow_result")
     async def materialize_workflow_result(

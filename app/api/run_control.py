@@ -13,7 +13,19 @@ from app.api.control_plane import (
     get_control_plane_principal,
     get_control_plane_service,
 )
+from app.application.operations.operation_recovery_composition import (
+    compose_postgres_operation_recovery,
+)
 from app.application.operations.operation_submission import GenericArtifactSubmissionPort
+from app.application.operations.unit_reconciliation import (
+    UnitReconciliationRejected,
+    UnitReconciliationService,
+)
+from app.application.run_control.boundary_interventions import (
+    BoundaryCommandDeliveryService,
+    BoundaryCommandTransport,
+    BoundaryInterventionService,
+)
 from app.application.run_control.postgres_run_control_repository import PostgresRunControlRepository
 from app.application.run_control.run_control_repository import RunControlRepository
 from app.application.run_control.schema_grounding_admission import (
@@ -37,6 +49,7 @@ from app.domain.operation_execution.contracts import (
 from app.domain.run_control.contracts import (
     ActorContext,
     AdmissionDecision,
+    BoundaryCommandStatus,
     BudgetState,
     CommandResult,
     EffectLedgerEntry,
@@ -44,6 +57,7 @@ from app.domain.run_control.contracts import (
     LifecycleCommand,
     LifecycleTransitionRecord,
     OutboxRecord,
+    ReconcileUnitAction,
     RunPhase,
     RunProjection,
     RunRequest,
@@ -113,6 +127,11 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     # other role holds the summary permission by default.
     "state_inspector": frozenset(
         {"workflow_run.read", "workflow_run.read_checkpoint_summary"}
+    ),
+    # RRM-007 (RRM-004 review): `reconcile_unit` is privileged; the plain operator role does
+    # not hold it. This role decides `in_doubt` units through the governed route only.
+    "reconciliation_operator": frozenset(
+        {"workflow_run.read", "workflow_run.reconcile_unit"}
     ),
     "relay": frozenset({"workflow_run.relay"}),
     # REQ-CP-EXEC-012/016 (RRM-006): snapshots and forks are separately authorized; no
@@ -223,6 +242,68 @@ async def get_run_control_service(request: Request) -> RunControlService:
         return service
 
 
+async def get_boundary_intervention_service(request: Request) -> BoundaryInterventionService:
+    """The governed intervention facade over run control (RRM-007).
+
+    Deployments attach `boundary_command_transport` (a `TemporalBoundaryCommandTransport`)
+    on `app.state`; without it, accepted commands stay pending until a transport delivers
+    them, and `redeliver` returns nothing.
+    """
+
+    state = request.app.state
+    service = getattr(state, "boundary_intervention_service", None)
+    if service is not None:
+        return service
+    run_control = await get_run_control_service(request)
+    async with _initialization_lock:
+        service = getattr(state, "boundary_intervention_service", None)
+        if service is not None:
+            return service
+        transport: BoundaryCommandTransport | None = getattr(
+            state, "boundary_command_transport", None
+        )
+        delivery = (
+            BoundaryCommandDeliveryService(run_control, transport)
+            if transport is not None
+            else None
+        )
+        service = BoundaryInterventionService(run_control, delivery)
+        state.boundary_intervention_service = service
+        return service
+
+
+async def get_unit_reconciliation_service(request: Request) -> UnitReconciliationService:
+    """`reconcile_unit` over PostgreSQL lineage, run control and the optional Temporal hint.
+
+    Deployments attach `unit_reconciliation_nudge` (a `TemporalUnitReconciliationNudge`)
+    and `unit_reconciliation_verifier` on `app.state`; the signal stays the hint transport.
+    """
+
+    state = request.app.state
+    service = getattr(state, "unit_reconciliation_service", None)
+    if service is not None:
+        return service
+    run_control = await get_run_control_service(request)
+    pool: asyncpg.Pool | None = getattr(state, "run_control_postgres_pool", None)
+    if pool is None:
+        raise HTTPException(
+            status_code=503,
+            detail="application PostgreSQL authority is not configured",
+        )
+    async with _initialization_lock:
+        service = getattr(state, "unit_reconciliation_service", None)
+        if service is not None:
+            return service
+        service = compose_postgres_operation_recovery(
+            pool,
+            run_control=run_control,
+            nudge=getattr(state, "unit_reconciliation_nudge", None),
+            verifier=getattr(state, "unit_reconciliation_verifier", None),
+        ).reconciliation
+        state.unit_reconciliation_service = service
+        return service
+
+
 async def get_generic_artifact_submitter(
     request: Request,
 ) -> GenericArtifactSubmissionPort:
@@ -285,6 +366,12 @@ def _authorize_read(principal: ControlPlanePrincipal) -> None:
 
 Service = Annotated[RunControlService, Depends(get_run_control_service)]
 Principal = Annotated[ControlPlanePrincipal, Depends(get_control_plane_principal)]
+Interventions = Annotated[
+    BoundaryInterventionService, Depends(get_boundary_intervention_service)
+]
+UnitReconciliation = Annotated[
+    UnitReconciliationService, Depends(get_unit_reconciliation_service)
+]
 ArtifactSubmitter = Annotated[
     GenericArtifactSubmissionPort,
     Depends(get_generic_artifact_submitter),
@@ -318,10 +405,49 @@ async def execute_command(
     run_id: str,
     command: LifecycleCommand,
     principal: Principal,
-    service: Service,
+    interventions: Interventions,
 ) -> CommandResult:
+    """Every public command enters here; a boundary command (pause, resume, wait release,
+    cancel) is accepted by run control and reaches Temporal only as a recorded delivery
+    (REQ-CP-EXEC-007). `reconcile_unit` has its own privileged route."""
+
     if command.run_id != run_id:
         raise HTTPException(status_code=422, detail="path and command run ids differ")
+    _authorize_scope(principal, command.request_scope)
+    if command.idempotency_issuer != principal.actor_id:
+        raise HTTPException(status_code=403, detail="idempotency issuer mismatch")
+    if isinstance(command.action, ReconcileUnitAction):
+        raise HTTPException(
+            status_code=422,
+            detail="reconcile_unit is delivered through /runs/{run_id}/reconcile-unit",
+        )
+    trusted_actor = _authorize_actor(
+        principal,
+        command.actor.actor_id,
+        command.actor.permissions,
+        command.actor.authority_refs,
+    )
+    return await interventions.execute(
+        command.model_copy(update={"actor": trusted_actor, "occurred_at": datetime.now(UTC)})
+    )
+
+
+@router.post("/runs/{run_id}/reconcile-unit", response_model=CommandResult)
+async def reconcile_unit(
+    run_id: str,
+    command: LifecycleCommand,
+    principal: Principal,
+    reconciliation: UnitReconciliation,
+    interventions: Interventions,
+) -> CommandResult:
+    """RRM-007 (RRM-004 review): governed delivery of the privileged `reconcile_unit`
+    decision. Run control records `accepted`; the lineage applies the decision; the parked
+    operation receives the wake-up hint (`delivered`) and records `applied` when it acts."""
+
+    if command.run_id != run_id:
+        raise HTTPException(status_code=422, detail="path and command run ids differ")
+    if not isinstance(command.action, ReconcileUnitAction):
+        raise HTTPException(status_code=422, detail="the command must carry reconcile_unit")
     _authorize_scope(principal, command.request_scope)
     if command.idempotency_issuer != principal.actor_id:
         raise HTTPException(status_code=403, detail="idempotency issuer mismatch")
@@ -331,9 +457,46 @@ async def execute_command(
         command.actor.permissions,
         command.actor.authority_refs,
     )
-    return await service.execute(
-        command.model_copy(update={"actor": trusted_actor, "occurred_at": datetime.now(UTC)})
-    )
+    if "workflow_run.reconcile_unit" not in trusted_actor.permissions:
+        raise HTTPException(status_code=403, detail="workflow_run.reconcile_unit required")
+    try:
+        return await reconciliation.reconcile_unit(
+            command.model_copy(
+                update={"actor": trusted_actor, "occurred_at": datetime.now(UTC)}
+            )
+        )
+    except UnitReconciliationRejected as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.get(
+    "/runs/{run_id}/boundary-commands",
+    response_model=tuple[BoundaryCommandStatus, ...],
+)
+async def get_boundary_commands(
+    run_id: str, request_scope: str, principal: Principal, interventions: Interventions
+) -> tuple[BoundaryCommandStatus, ...]:
+    """The durable command and receipt ledger of a run (REQ-CP-RUN-004 pending commands)."""
+
+    _authorize_read(principal)
+    _authorize_scope(principal, request_scope)
+    return await interventions.list_commands(request_scope, run_id)
+
+
+@router.post(
+    "/runs/{run_id}/boundary-commands/redeliver",
+    response_model=tuple[BoundaryCommandStatus, ...],
+)
+async def redeliver_boundary_commands(
+    run_id: str, request_scope: str, principal: Principal, interventions: Interventions
+) -> tuple[BoundaryCommandStatus, ...]:
+    """Re-drive delivery of accepted, undelivered commands in order (at-least-once; the
+    target de-duplicates and receipts never transition twice)."""
+
+    _authorize_scope(principal, request_scope)
+    if "workflow_run.relay" not in principal_permissions(principal):
+        raise HTTPException(status_code=403, detail="outbox relay permission required")
+    return await interventions.redeliver(request_scope, run_id)
 
 
 @router.post(
@@ -443,6 +606,7 @@ async def run_control_schemas() -> dict[str, object]:
         "effect_ledger_state": EffectLedgerState.model_json_schema(),
         "transition": LifecycleTransitionRecord.model_json_schema(),
         "outbox_record": OutboxRecord.model_json_schema(),
+        "boundary_command_status": BoundaryCommandStatus.model_json_schema(),
         "generic_artifact_workflow": GenericArtifactWorkflowRequest.model_json_schema(),
         "lifecycle_action": TypeAdapter(LifecycleCommand).json_schema(),
     }

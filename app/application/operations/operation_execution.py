@@ -390,6 +390,12 @@ class OperationExecutionJournalPort(Protocol):
         claim: OperationEffectClaim,
     ) -> tuple[str, ...]: ...
 
+    async def record_reconciliation_applied(
+        self,
+        binding: OperationExecutionBinding,
+        decision: UnitReconciliationDecision,
+    ) -> None: ...
+
 
 class RuntimePort(Protocol):
     async def execute(
@@ -674,6 +680,9 @@ class OperationExecutionService:
                     binding, claim, admitted, reason=admission.incident.reason
                 )
             await lineage.repository.apply_reconciliation(binding.request_scope, decision)
+            if self._journal is not None:
+                # RRM-007: the operation boundary applied the accepted decision.
+                await self._journal.record_reconciliation_applied(binding, decision)
             if decision.decision == "abandon_unit":
                 return await self._settle(
                     binding,

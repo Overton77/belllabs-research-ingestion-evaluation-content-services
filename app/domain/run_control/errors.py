@@ -38,3 +38,11 @@ class CommandRejected(RunControlError):
 class ConfigurationVerificationFailed(RunControlError):
     code = "configuration_verification_failed"
     status_code = 422
+
+
+class ReceiptTransitionRejected(RunControlError):
+    """A boundary receipt would leave the closed `accepted -> delivered -> applied | rejected`
+    state machine (REQ-CP-EXEC-006); terminal receipts never transition again."""
+
+    code = "receipt_transition_rejected"
+    status_code = 409

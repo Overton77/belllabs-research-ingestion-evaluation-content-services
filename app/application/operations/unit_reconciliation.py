@@ -17,13 +17,19 @@ from typing import Protocol
 from app.application.operations.checkpoint_lineage import CheckpointLineageRepository
 from app.domain.graph_runtime.identities import QualifiedCheckpointKey
 from app.domain.operation_execution.checkpoint_lineage import UnitReconciliationIncident
+from app.domain.run_control.boundary_commands import receipt as boundary_receipt
 from app.domain.run_control.contracts import (
+    BoundaryCommandReceipt,
+    BoundaryCommandStatus,
     CommandResult,
     CommandStatus,
     LifecycleCommand,
+    ReceiptState,
     ReconcileUnitAction,
     RunProjection,
 )
+
+RECONCILIATION_RECORDER = "unit-reconciliation"
 
 
 class UnitReconciliationRejected(ValueError):
@@ -34,6 +40,14 @@ class ReconciliationRunControl(Protocol):
     async def execute(self, command: LifecycleCommand) -> CommandResult: ...
 
     async def get_run(self, request_scope: str, run_id: str) -> RunProjection: ...
+
+    async def get_boundary_command(
+        self, request_scope: str, run_id: str, idempotency_issuer: str, command_id: str
+    ) -> BoundaryCommandStatus | None: ...
+
+    async def record_boundary_receipt(
+        self, request_scope: str, boundary_receipt: BoundaryCommandReceipt
+    ) -> BoundaryCommandStatus: ...
 
 
 class AcceptedCheckpointVerifier(Protocol):
@@ -139,4 +153,25 @@ class UnitReconciliationService:
                 operation_workflow_id=incident.operation_workflow_id,
                 decision_id=decision.decision_id,
             )
+            # RRM-007: the hint reached the parked unit's execution; `applied` is recorded
+            # by the operation boundary when it acts on the decision.
+            status = await self._run_control.get_boundary_command(
+                command.request_scope,
+                command.run_id,
+                command.idempotency_issuer,
+                command.command_id,
+            )
+            if status is not None and status.state == ReceiptState.ACCEPTED:
+                await self._run_control.record_boundary_receipt(
+                    command.request_scope,
+                    boundary_receipt(
+                        status.command,
+                        ordinal=1,
+                        state=ReceiptState.DELIVERED,
+                        recorded_by=RECONCILIATION_RECORDER,
+                        detail="wake-up hint signalled to the parked operation",
+                        transport_ref=incident.operation_workflow_id,
+                        recorded_at=decision.decided_at,
+                    ),
+                )
         return result

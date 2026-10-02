@@ -1178,3 +1178,18 @@ async def test_lost_wake_up_hint_is_recovered_by_resending_the_same_decision() -
     assert [item.decision_id for item in run.unit_reconciliations] == [
         "reconcile-abandon-resend"
     ]
+    # RRM-007: the governed `reconcile_unit` receipts. Acceptance by run control, delivery
+    # once the hint reached the parked operation (the resend), application when the
+    # operation boundary acted on the decision; the lost first hint left no receipt.
+    status = await harness.run_control.get_boundary_command(
+        "tenant-1", harness.run_id, "operator", "reconcile-abandon-resend"
+    )
+    assert status is not None
+    assert [(item.state.value, item.recorded_by) for item in status.receipts] == [
+        ("accepted", "run_control"),
+        ("delivered", "unit-reconciliation"),
+        ("applied", "operation-boundary"),
+    ]
+    assert status.command.kind == "reconcile_unit"
+    assert status.command.target.kind == "unit"
+    assert status.receipts[1].transport_ref == workflow_request.workflow_id

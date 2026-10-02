@@ -407,6 +407,7 @@ async def test_live_api_root_stagegraph_incremental_deep_agents_vertical() -> No
                     stage_activities.decide_result,
                     stage_activities.apply_cycle,
                     stage_activities.complete_stagegraph,
+                    stage_activities.apply_boundary_command,
                 ],
             ),
             Worker(

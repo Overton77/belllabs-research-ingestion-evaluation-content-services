@@ -34,6 +34,10 @@ from app.application.orchestration.service import (
     StageGraphDecisionService,
     StageGraphOperationPreparationService,
     StageGraphOperationTemplateProvider,
+    orchestration_lifecycle_actor,
+)
+from app.application.run_control.boundary_interventions import (
+    BoundaryCommandApplicationService,
 )
 from app.application.run_control.run_control_repository import RunControlRepository
 from app.application.run_control.service import RunControlService
@@ -150,6 +154,8 @@ def create_routed_coordinator_activities(
 
     if web_research is not None:
         register_web_research_stagegraph_handlers(handlers, web_research)
+    # RRM-007: both family boundaries apply governed commands with the orchestration
+    # identity, which holds every lifecycle permission and the orchestration authority.
     return CoordinatorWorkerActivities(
         stagegraph=StageGraphActivities(
             lifecycle_gateway=lifecycle,
@@ -162,6 +168,9 @@ def create_routed_coordinator_activities(
                 templates=stagegraph.templates,
                 operation_bindings=stagegraph.operation_bindings,
             ),
+            boundary=BoundaryCommandApplicationService(
+                stagegraph.run_control, orchestration_lifecycle_actor()
+            ),
         ),
         goal_directed=compose_goal_directed_activities(
             run_control=goal_directed.run_control,
@@ -171,6 +180,9 @@ def create_routed_coordinator_activities(
             lifecycle=lifecycle,
             actor=goal_directed.actor,
             completion=completion,
+            boundary=BoundaryCommandApplicationService(
+                goal_directed.run_control, orchestration_lifecycle_actor()
+            ),
         ),
     )
 
