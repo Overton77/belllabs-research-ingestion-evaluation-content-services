@@ -230,8 +230,9 @@ async def open_fork_stack(
     required_obligations: frozenset[str] = frozenset(),
     journaled: bool = True,
 ) -> AsyncIterator[ForkStack]:
-    """Compose the stack. `journaled=False` is the GoalDirected composition: that family
-    records its own usage and run versions, so its operations are not run-control journaled."""
+    """Compose the stack. `journaled=False` composes the operation boundary without the journal
+    and with an accepting authority (the pre-RRM-016 GoalDirected shape, kept for comparison);
+    since RRM-016 every family, GoalDirected included, runs journaled."""
 
     from tests.acceptance.control_plane.test_wp_cp_040 import exact_fixture
 

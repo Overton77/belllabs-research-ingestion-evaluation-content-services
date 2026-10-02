@@ -54,6 +54,7 @@ from app.api.run_forks import get_run_fork_services
 from app.application.orchestration.goal_directed import (
     GoalDirectedOperationPreparationService,
     GoalDirectedOperationResultService,
+    RunControlGoalOperationSettlements,
     configure_goal_directed_family_admissions,
 )
 from app.application.orchestration.service import (
@@ -984,12 +985,21 @@ def _goal_templates(stack: ForkStack) -> Templates:
     values: dict[str, OperationExecutionRequest] = {}
     for role in ("executor", "verifier"):
         base = operation_request(prompt=f"RRM-006 technical GoalDirected {role}.")
+        # RRM-016: the compiled workspace slot, bound by each role under its own root, so
+        # the real run-control authority admits the operation.
+        workspace = governed_workspace(base.workspace)
         values[role] = OperationExecutionRequest.model_validate(
             {
                 **base.model_dump(mode="python"),
                 "execution_runtime": "deep_agent",
                 "native_placement": None,
-                "deep_agent_binding": stack.binding,
+                "deep_agent_binding": DeepAgentExecutionBinding.create(
+                    **{
+                        **stack.binding.model_dump(mode="python", exclude={"binding_digest"}),
+                        "workspace": workspace,
+                    }
+                ),
+                "workspace": workspace,
                 "output_schema": StructuredOutputBinding(
                     schema_id=f"goal-{role}-output",
                     revision=1,
@@ -1027,7 +1037,8 @@ async def test_goal_directed_fork_starts_fresh_with_the_patched_goal(
             families=families,
             policies=ForkPatchPolicyRegistry(),
             required_obligations=frozenset({OBLIGATION}),
-            journaled=False,
+            # RRM-016: GoalDirected operations are journaled and settled in run control.
+            journaled=True,
         ) as stack,
         Facade(stack) as facade,
     ):
@@ -1046,7 +1057,10 @@ async def test_goal_directed_fork_starts_fresh_with_the_patched_goal(
                     authority_refs=frozenset({"authority:rrm006-goal-worker"}),
                 ),
             ),
-            results=GoalDirectedOperationResultService(documents),
+            results=GoalDirectedOperationResultService(
+                documents,
+                RunControlGoalOperationSettlements(stack.run_control, stack.bindings),
+            ),
             lifecycle=RunControlLifecycleGateway(
                 stack.run_control, ExactBindingVerifier(), orchestration_lifecycle_actor()
             ),
@@ -1144,6 +1158,20 @@ async def test_goal_directed_fork_starts_fresh_with_the_patched_goal(
             "not_reusable",
             "invalidated",
         }
+        # RRM-016: the source's GoalDirected units now carry accepted run-control
+        # settlements, so none is excluded as `not_accepted`; they are still never reused.
+        assert not any(
+            item["reason"] == "not_accepted" for item in snapshot["excluded_units"]
+        ), snapshot["excluded_units"]
+        assert receipt["lineage"]["reused_unit_keys"] == []
+        assert len(snapshot["reuse_candidates"]) == 2
+        assert {(item["decision"], item["reason"]) for item in fork["reuse_decisions"]} == {
+            ("not_reusable", "goal_revision_identity_is_run_bound")
+        }
+        accepted = {
+            item.settlement_id for item in source.accepted_operation_settlement_evidence
+        }
+        assert len(accepted) == 2
         evidence = {
             "source_run": source_run,
             "derived_run": derived_run,

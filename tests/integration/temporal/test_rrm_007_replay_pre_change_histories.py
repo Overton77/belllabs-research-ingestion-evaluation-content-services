@@ -23,6 +23,7 @@ from app.temporal.workflow_sandbox import coordinator_workflow_runner
 from app.temporal.workflows.goal_directed import GoalDirectedWorkflow
 from app.temporal.workflows.operation import OperationWorkflow
 from app.temporal.workflows.stagegraph import StageGraphWorkflow
+from tests.fixtures.temporal_history import patch_ids
 
 HISTORIES = Path(__file__).resolve().parents[2] / "fixtures" / "histories" / "rrm007_pre_change"
 CASES = (
@@ -45,12 +46,8 @@ async def test_pre_change_family_history_replays_against_the_current_code(
 ) -> None:
     history = WorkflowHistory.from_json(workflow_id, (HISTORIES / name).read_text("utf-8"))
     assert len(history.events) > 10
-    patches = {
-        event.marker_recorded_event_attributes.marker_name
-        for event in history.events
-        if event.HasField("marker_recorded_event_attributes")
-    }
-    assert not any(marker.startswith("rrm-007") for marker in patches), "captured pre-RRM-007"
+    # RRM-016: decode the patch IDs (`core_patch` markers); the marker name never names one.
+    assert not any(patch.startswith("rrm-0") for patch in patch_ids(history)), "pre-change"
     await Replayer(
         workflows=[family, OperationWorkflow], workflow_runner=coordinator_workflow_runner()
     ).replay_workflow(history)

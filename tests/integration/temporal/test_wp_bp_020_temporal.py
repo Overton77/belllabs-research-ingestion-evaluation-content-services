@@ -52,11 +52,13 @@ from app.domain.orchestration.goal_directed_runtime import (
     GoalOperationPreparationRequest,
     GoalOperationReconciliationRequest,
     GoalOperationReconciliationResult,
+    GoalOperationSettlement,
 )
 from app.domain.run_control.contracts import ActorContext, RunOutcome
 from app.temporal.workflow_sandbox import coordinator_workflow_runner
 from app.temporal.workflows.goal_directed import GoalDirectedWorkflow
 from app.temporal.workflows.operation import OperationWorkflow
+from tests.fixtures.goal_directed_journaled import goal_template_workspace
 
 DIGEST = "sha256:" + "a" * 64
 NOW = datetime(2026, 8, 10, 20, 0, tzinfo=UTC)
@@ -176,6 +178,25 @@ def _operation(request: GoalOperationPreparationRequest) -> OperationExecutionRe
     )
 
 
+def fake_settlement(
+    request: GoalOperationReconciliationRequest, usage: dict[str, int]
+) -> GoalOperationSettlement:
+    """The run-control settlement shape the family consumes (RRM-016), for fixtures whose
+    operation child is a fake: the binding's claim, observation and settlement each advance
+    the run version once past its bound revision."""
+
+    operation = request.operation_request.operation
+    return GoalOperationSettlement(
+        binding_id=request.operation_binding_ref,
+        settlement_id=f"settlement:{request.operation_binding_ref}",
+        effect_claim_id=f"effect:{request.operation_binding_ref}",
+        reservation_id=operation.budget_reservation_id,
+        usage=usage,
+        settlement_payload_digest=DIGEST,
+        settled_run_version=operation.run_control_revision + 3,
+    )
+
+
 class FakeGoalDirectedActivities:
     def __init__(
         self,
@@ -253,6 +274,7 @@ class FakeGoalDirectedActivities:
                 operation_role="executor",
                 execution_result=result,
                 detail_ref="goal-iteration:1",
+                settlement=fake_settlement(request, result.actual_usage),
             )
 
         accepted = self._scope_expansion_route is None and (
@@ -310,6 +332,7 @@ class FakeGoalDirectedActivities:
             operation_role="verifier",
             verification_result=verification,
             detail_ref="goal-verification:1",
+            settlement=fake_settlement(request, verification.actual_usage),
         )
 
     @activity.defn(name="goaldirected.apply_lifecycle_command")
@@ -430,7 +453,12 @@ async def test_real_preparer_persists_revision_before_atomic_operation_admission
     bindings = RecordingOperationBindings()
     run_control = AcceptingFamilyRunControl()
     service = GoalDirectedOperationPreparationService(
-        templates=FixedGoalTemplateProvider(_operation(request)),
+        # RRM-016: a GoalDirected template carries the compiled workspace slots.
+        templates=FixedGoalTemplateProvider(
+            _operation(request).model_copy(
+                update={"workspace": goal_template_workspace(_operation(request).workspace)}
+            )
+        ),
         operation_bindings=bindings,  # type: ignore[arg-type]
         run_control=run_control,  # type: ignore[arg-type]
         documents=documents,  # type: ignore[arg-type]

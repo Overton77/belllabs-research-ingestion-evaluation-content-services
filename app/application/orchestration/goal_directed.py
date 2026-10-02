@@ -6,7 +6,13 @@ from typing import Literal, Protocol
 
 from pydantic import TypeAdapter
 
-from app.application.operations.operation_execution import bind_operation_execution_request
+from app.application.operations.journaled_operation_execution import (
+    operation_effect_claim_id,
+)
+from app.application.operations.operation_execution import (
+    bind_operation_execution_request,
+    operation_settlement_id,
+)
 from app.application.operations.semantic_operation_bindings import (
     SemanticOperationBindingRepository,
 )
@@ -20,12 +26,16 @@ from app.domain.operation_execution.checkpoint_lineage import cognitive_session_
 from app.domain.operation_execution.contracts import (
     DeepAgentExecutionBinding,
     OperationAttemptIdentity,
+    OperationExecutionBinding,
     OperationExecutionRequest,
     OperationExecutionResult,
     OperationWorkflowRequest,
     PromptSegment,
+    PromptTrustClass,
     WorkspaceContract,
     WorkspaceMount,
+    WorkspaceOwner,
+    WorkspaceOwnerKind,
     workspace_durable_reference,
 )
 from app.domain.orchestration.contracts import (
@@ -43,13 +53,22 @@ from app.domain.orchestration.goal_directed_runtime import (
     GoalOperationPreparationRequest,
     GoalOperationReconciliationRequest,
     GoalOperationReconciliationResult,
+    GoalOperationSettlement,
     GoalVerifierObservation,
 )
-from app.domain.orchestration.runtime_units import goal_runtime_unit
+from app.domain.orchestration.runtime_units import (
+    goal_operation_id,
+    goal_runtime_unit,
+    goal_unit_workspace_root,
+)
 from app.domain.run_control.contracts import (
     ActorContext,
+    BudgetState,
+    CommandStatus,
+    EffectLedgerState,
     LifecycleCommand,
     ReserveBudgetAction,
+    RunProjection,
 )
 
 
@@ -146,6 +165,159 @@ class InMemoryGoalOperationTemplateRepository:
         return template
 
 
+class GoalOperationSettlementUnavailable(ValueError):
+    """The operation has no accepted run-control settlement the family may consume."""
+
+
+class GoalAdmissionStale(RuntimeError):
+    """An operation admission was stale: the run moved past the family's expected version."""
+
+    def __init__(self, *, current_run_version: int, phase: str) -> None:
+        super().__init__(
+            f"GoalDirected operation admission is stale: run is at version "
+            f"{current_run_version} ({phase})"
+        )
+        self.current_run_version = current_run_version
+        self.phase = phase
+
+
+class GoalOperationSettlementPort(Protocol):
+    async def observe(
+        self,
+        request: GoalOperationReconciliationRequest,
+        provider_result: OperationExecutionResult,
+    ) -> GoalOperationSettlement:
+        """The operation's accepted run-control settlement, or raise."""
+        ...
+
+
+class GoalOperationBindingReader(Protocol):
+    async def get_binding_by_id(
+        self, binding_id: str, *, request_scope: str
+    ) -> OperationExecutionBinding | None: ...
+
+
+class GoalOperationSettlementReader(Protocol):
+    async def get_run(self, request_scope: str, run_id: str) -> RunProjection: ...
+
+    async def get_budget(self, request_scope: str, run_id: str) -> BudgetState: ...
+
+    async def get_effects(self, request_scope: str, run_id: str) -> EffectLedgerState: ...
+
+
+class RunControlGoalOperationSettlements:
+    """Consume the journaled run-control settlement of one GoalDirected operation (RRM-016).
+
+    The operation boundary (`OperationExecutionService` with the journaled coordinator)
+    claims, observes and settles the operation exactly once in run control: one usage record
+    under the operation's settlement identity against its own reservation, the effect
+    settlement, and the accepted settlement evidence bound to the operation binding. The
+    family consumes that settlement as StageGraph's `decide_result` does: it verifies the
+    authoritative facts and continues from the current run version. It never records the
+    operation's usage itself (REQ-CP-RUN-006/009: a budget settles once).
+    """
+
+    def __init__(
+        self,
+        run_control: GoalOperationSettlementReader,
+        bindings: GoalOperationBindingReader,
+    ) -> None:
+        self._run_control = run_control
+        self._bindings = bindings
+
+    async def observe(
+        self,
+        request: GoalOperationReconciliationRequest,
+        provider_result: OperationExecutionResult,
+    ) -> GoalOperationSettlement:
+        operation = request.operation_request.operation
+        scope = request.request_scope
+        run_id = operation.identity.run_id
+        binding_id = request.operation_binding_ref
+        if provider_result.binding_id != binding_id or operation.request_scope != scope:
+            raise GoalOperationSettlementUnavailable(
+                "operation result does not belong to the admitted GoalDirected binding"
+            )
+        settlement_id = operation_settlement_id(binding_id)
+        effect_claim_id = operation_effect_claim_id(scope, binding_id)
+        reservation_id = operation.budget_reservation_id
+        # Review fix 4 (required since the re-check): the binding and reservation the
+        # settlement is read under are the stored binding's, the exact admitted intent.
+        stored = await self._bindings.get_binding_by_id(binding_id, request_scope=scope)
+        if (
+            stored is None
+            or stored != bind_operation_execution_request(operation)
+            or stored.budget_reservation_id != reservation_id
+        ):
+            raise GoalOperationSettlementUnavailable(
+                "operation binding is not the stored binding of the admitted operation"
+            )
+        # Settlement facts are monotonic: read them first and the run version last, so the
+        # version the family continues from is at or after the settlement.
+        budget = await self._run_control.get_budget(scope, run_id)
+        effects = await self._run_control.get_effects(scope, run_id)
+        run = await self._run_control.get_run(scope, run_id)
+        usage = budget.usage_records.get(settlement_id)
+        if (
+            usage is None
+            or usage.authority_ref != binding_id
+            or usage.reservation_id != reservation_id
+        ):
+            raise GoalOperationSettlementUnavailable(
+                "operation usage is not recorded once by its own run-control settlement"
+            )
+        if reservation_id in budget.reservations:
+            raise GoalOperationSettlementUnavailable(
+                "operation reservation is not authoritatively settled"
+            )
+        if (
+            usage.actual_amounts != provider_result.usage.amounts
+            or usage.pending_external_amounts != provider_result.usage.pending_external_amounts
+        ):
+            raise GoalOperationSettlementUnavailable(
+                "settled operation usage differs from the operation result"
+            )
+        claim = effects.claims.get(effect_claim_id)
+        if (
+            claim is None
+            or claim.operation_ref != binding_id
+            or claim.reservation_id != reservation_id
+        ):
+            raise GoalOperationSettlementUnavailable(
+                "operation has no journaled run-control effect claim"
+            )
+        pending_external = any(usage.pending_external_amounts.values())
+        if not pending_external and (
+            claim.settlement is None or claim.settlement.settlement_id != settlement_id
+        ):
+            raise GoalOperationSettlementUnavailable(
+                "operation effect claim is not settled by its own settlement"
+            )
+        evidence = [
+            item
+            for item in run.accepted_operation_settlement_evidence
+            if item.settlement_id == settlement_id
+        ]
+        if len(evidence) != 1 or evidence[0].accepted_by_authority_ref != binding_id:
+            raise GoalOperationSettlementUnavailable(
+                "operation settlement evidence is not accepted by run control"
+            )
+        if run.version < operation.run_control_revision:
+            raise GoalOperationSettlementUnavailable(
+                "run authority is older than the operation binding"
+            )
+        return GoalOperationSettlement(
+            binding_id=binding_id,
+            settlement_id=settlement_id,
+            effect_claim_id=effect_claim_id,
+            reservation_id=reservation_id,
+            usage=dict(usage.actual_amounts),
+            pending_external_usage=dict(usage.pending_external_amounts),
+            settlement_payload_digest=evidence[0].settlement_payload_digest,
+            settled_run_version=run.version,
+        )
+
+
 def configure_goal_directed_family_admissions(registry: FamilyAdmissionRegistry) -> None:
     """Register the one exact GoalDirected mutation shape on the frozen generic seam."""
 
@@ -194,14 +366,12 @@ class GoalDirectedOperationPreparationService:
             raise ValueError(
                 "GoalDirected operation template requires strict structured output"
             )
-        operation = _instantiate_operation_request(template, request)
+        # RRM-016: the operation binds the run version its own admission produces (an
+        # accepted command advances the version by exactly one), as StageGraph does. The
+        # journaled effect claim is made at exactly that revision (REQ-CP-EXEC-014).
+        bound_revision = request.expected_run_version + 1
+        operation = _instantiate_operation_request(template, request, bound_revision)
         binding = bind_operation_execution_request(operation)
-        persisted = await self._operation_bindings.create_binding(
-            binding,
-            request_scope=request.request_scope,
-        )
-        if persisted != binding:
-            raise ValueError("persisted GoalDirected operation binding differs from exact intent")
 
         operation_request_digest = sha256_digest(operation)
         operation_ref = f"goal-operation:{operation_request_digest.removeprefix('sha256:')}"
@@ -225,7 +395,13 @@ class GoalDirectedOperationPreparationService:
             convergence_action="continue",
         )
         command = LifecycleCommand(
-            command_id=f"goal-admission:{mutation.mutation_id}",
+            # RRM-016 review fix 2: a re-admission after a stale result is a new command (a
+            # stale result is stored under its command identity).
+            command_id=(
+                f"goal-admission:{mutation.mutation_id}"
+                if request.admission_attempt == 1
+                else f"goal-admission:{mutation.mutation_id}:attempt:{request.admission_attempt}"
+            ),
             idempotency_issuer="goal-directed-worker",
             request_scope=request.request_scope,
             run_id=request.run_id,
@@ -236,7 +412,7 @@ class GoalDirectedOperationPreparationService:
                 amounts=request.reservation,
             ),
             reason=f"Atomically admit GoalDirected {request.operation_role} operation",
-            evidence_refs=(operation_ref, persisted.binding_id),
+            evidence_refs=(operation_ref, binding.binding_id),
             occurred_at=request.decided_at,
             correlation_id=(
                 f"goal:{request.run_id}:iteration:{request.goal_iteration}:"
@@ -246,7 +422,28 @@ class GoalDirectedOperationPreparationService:
         )
         receipt = await self._run_control.execute_family_admission(command, mutation)
         if receipt.family_receipt is None:
+            if receipt.command_result.status == CommandStatus.STALE:
+                # A command outside the family moved the run between the family's read of
+                # its version and this admission. Nothing was admitted or bound; the family
+                # decides (re-admit once at the current version, or enter cancellation).
+                raise GoalAdmissionStale(
+                    current_run_version=receipt.command_result.resulting_run_version,
+                    phase=receipt.command_result.phase.value,
+                )
             raise ValueError("GoalDirected operation admission was not accepted")
+        if receipt.command_result.resulting_run_version != bound_revision:
+            raise ValueError(
+                "GoalDirected operation admission did not produce the bound run revision"
+            )
+        # The binding is persisted only once its admission is accepted (review fix 2): a
+        # stale admission leaves no binding behind, so the re-admission binds the same
+        # semantic attempt at the new revision without an identity conflict.
+        persisted = await self._operation_bindings.create_binding(
+            binding,
+            request_scope=request.request_scope,
+        )
+        if persisted != binding:
+            raise ValueError("persisted GoalDirected operation binding differs from exact intent")
         workflow_request = OperationWorkflowRequest(
             semantic_attempt_id=operation.identity.semantic_key,
             execution_generation=request.execution_generation,
@@ -265,8 +462,13 @@ class GoalDirectedOperationPreparationService:
 class GoalDirectedOperationResultService:
     """Validate provider output against exact operation intent and persist immutable detail."""
 
-    def __init__(self, documents: GoalDirectedDocumentRepository) -> None:
+    def __init__(
+        self,
+        documents: GoalDirectedDocumentRepository,
+        settlements: GoalOperationSettlementPort | None = None,
+    ) -> None:
         self._documents = documents
+        self._settlements = settlements
         self._execution_adapter = TypeAdapter(GoalExecutorObservation)
         self._verification_adapter = TypeAdapter(GoalVerifierObservation)
 
@@ -310,6 +512,14 @@ class GoalDirectedOperationResultService:
                 "GoalDirected provider result is not the exact completed structured operation: "
                 + ", ".join(mismatches)
             )
+        # RRM-016: the accepted run-control settlement is verified before any family document
+        # is persisted. A composition without one returns no settlement, and the family
+        # fails closed on it (no ungoverned usage recording).
+        settlement = (
+            await self._settlements.observe(request, provider_result)
+            if self._settlements is not None
+            else None
+        )
         provider_payload = provider_result.structured_output
         observed_usage = dict(provider_result.usage.amounts)
         if request.operation_role == "executor":
@@ -401,6 +611,7 @@ class GoalDirectedOperationResultService:
                 operation_role="executor",
                 execution_result=result,
                 detail_ref=detail_ref,
+                settlement=settlement,
             )
 
         observation = self._verification_adapter.validate_python(provider_payload)
@@ -509,30 +720,31 @@ class GoalDirectedOperationResultService:
             operation_role="verifier",
             verification_result=verification_result,
             detail_ref=detail_ref,
+            settlement=settlement,
         )
 
 
 def _instantiate_operation_request(
     template: OperationExecutionRequest,
     request: GoalOperationPreparationRequest,
+    bound_revision: int,
 ) -> OperationExecutionRequest:
-    operation_id = (
-        f"goal-iteration/{request.goal_iteration}/{request.operation_role}"
-    )
+    operation_id = goal_operation_id(request.goal_iteration, request.operation_role)
     identity = OperationAttemptIdentity(
         run_id=request.run_id,
         operation_id=operation_id,
         operation_attempt=request.operation_attempt,
     )
-    workspace = _workspace_for(template.workspace, request, operation_id)
-    prompt_segments = _prompt_segments(template.prompt_segments, request)
     runtime_unit = _runtime_unit_for(request, identity)
+    workspace = _workspace_for(template.workspace, request, runtime_unit)
+    prompt_segments = _prompt_segments(template.prompt_segments, request)
     deep_binding = _deep_binding_for(
         template.deep_agent_binding,
         request=request,
         identity=identity,
         workspace=workspace,
         runtime_unit=runtime_unit,
+        bound_revision=bound_revision,
     )
     payload = template.model_dump(mode="python")
     payload.update(
@@ -540,7 +752,7 @@ def _instantiate_operation_request(
             "identity": identity,
             "request_scope": request.request_scope,
             "effective_configuration_digest": request.effective_configuration_digest,
-            "run_control_revision": request.expected_run_version,
+            "run_control_revision": bound_revision,
             "prompt_segments": prompt_segments,
             "session_id": request.session_id,
             "workspace": workspace,
@@ -687,9 +899,16 @@ def _recover_handoff_compaction(
 def _workspace_for(
     template: WorkspaceContract,
     request: GoalOperationPreparationRequest,
-    operation_id: str,
+    runtime_unit: RuntimeUnitIdentity,
 ) -> WorkspaceContract:
-    role_root = f"/goal/{request.goal_iteration}/{request.operation_role}"
+    role_root = goal_unit_workspace_root(runtime_unit)
+    if role_root is None:  # pragma: no cover - `_runtime_unit_for` always builds a goal unit
+        raise ValueError("GoalDirected workspace requires a GoalDirected runtime unit")
+    if not template.slot_bindings:
+        # RRM-016 review fix 3: REQ-CP-DA-013 requires exact exclusive writable slots, and
+        # the run-control authority admits a GoalDirected unit only with the compiled slots
+        # rebased under its role root. A template without them fails closed here.
+        raise ValueError("GoalDirected operation template requires compiled workspace slots")
     payload = template.model_dump(mode="python")
     namespace_id = f"run/{request.run_id}"
     read_mounts: tuple[WorkspaceMount, ...] = ()
@@ -708,12 +927,30 @@ def _workspace_for(
                 ),
             ),
         )
+    # RRM-016 / REQ-CP-DA-013: bind the exact compiled slots under the role-scoped root,
+    # owned by this iteration's executor or verifier. The run-control authority recomputes
+    # the root from the unit identity and verifies the exact slot set.
+    owner = WorkspaceOwner(
+        kind=(
+            WorkspaceOwnerKind.ITERATION
+            if request.operation_role == "executor"
+            else WorkspaceOwnerKind.EVALUATOR
+        ),
+        owner_id=goal_operation_id(request.goal_iteration, request.operation_role),
+    )
+    slot_bindings = tuple(
+        slot.model_copy(update={"logical_path": f"{role_root}{slot.logical_path}", "owner": owner})
+        for slot in template.slot_bindings
+    )
+    writable = tuple(
+        slot.logical_path for slot in slot_bindings if slot.access == "exclusive_write"
+    )
     payload.update(
         {
             "namespace_id": namespace_id,
             "workspace_id": request.workspace_id,
-            "slot_bindings": (),
-            "exclusive_write_paths": (f"{role_root}/work",),
+            "slot_bindings": slot_bindings,
+            "exclusive_write_paths": writable,
             "read_mounts": read_mounts,
             "restore_snapshot_id": None,
         }
@@ -741,7 +978,15 @@ def _prompt_segments(
             f"{request.operation_role}"
         ),
         source_revision=request.goal_iteration,
-        trust_class="authored_instruction",
+        # RRM-016: the goal context (revision, iteration, role, handoff and verifier input
+        # refs) is run state derived partly from model output (the handoff and the
+        # executor's output refs). It is never a configured prompt source and must not reach
+        # the system prompt. SPEC-CP-DEFINITIONS (Security) treats prompt text and retrieved
+        # content as untrusted inputs; SPEC-CP-DEEP-AGENT-RUNTIME invariant 5: model output
+        # never grants authority; SPEC-BP-GOAL-DIRECTED invariant 1 and Security: goal text
+        # and context cannot expand the envelope or grant capabilities. So the segment is
+        # admitted under the most restrictive non-privileged trust class.
+        trust_class=PromptTrustClass.UNTRUSTED_CONTENT,
         content=content,
         rendered_digest=sha256_digest(content),
     )
@@ -755,6 +1000,7 @@ def _deep_binding_for(
     identity: OperationAttemptIdentity,
     workspace: WorkspaceContract,
     runtime_unit: RuntimeUnitIdentity,
+    bound_revision: int,
 ) -> DeepAgentExecutionBinding | None:
     if template is None:
         return None
@@ -773,7 +1019,7 @@ def _deep_binding_for(
             "operation_attempt": identity.operation_attempt,
             "execution_generation": request.execution_generation,
             "erc_digest": request.effective_configuration_digest,
-            "control_revision": request.expected_run_version,
+            "control_revision": bound_revision,
             "workspace": workspace,
             "reservation_id": request.reservation_id,
             "runtime_unit": runtime_unit,
@@ -797,10 +1043,16 @@ def document_payload(
 __all__ = [
     "GoalDirectedDocumentRepository",
     "GoalDirectedOperationPreparationService",
+    "GoalAdmissionStale",
     "GoalDirectedOperationResultService",
+    "GoalOperationBindingReader",
+    "GoalOperationSettlementPort",
+    "GoalOperationSettlementReader",
+    "GoalOperationSettlementUnavailable",
     "GoalOperationTemplateProvider",
     "GoalOperationTemplateRepository",
     "InMemoryGoalOperationTemplateRepository",
+    "RunControlGoalOperationSettlements",
     "configure_goal_directed_family_admissions",
     "document_payload",
 ]

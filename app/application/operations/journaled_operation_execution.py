@@ -796,7 +796,13 @@ def output_payload(settlement: OperationSettlement) -> bytes:
 
 
 def _effect_claim_id(binding: OperationExecutionBinding) -> str:
-    identity = f"operation-effect:{binding.request_scope}:{binding.binding_id}"
+    return operation_effect_claim_id(binding.request_scope, binding.binding_id)
+
+
+def operation_effect_claim_id(request_scope: str, binding_id: str) -> str:
+    """The run-control effect identity of a bound operation's consequential runtime effect."""
+
+    identity = f"operation-effect:{request_scope}:{binding_id}"
     return str(uuid5(NAMESPACE_URL, identity))
 
 

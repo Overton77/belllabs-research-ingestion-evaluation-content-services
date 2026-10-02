@@ -10,10 +10,12 @@ from app.application.operations.semantic_operation_bindings import (
     SemanticOperationBindingRepository,
 )
 from app.application.orchestration.goal_directed import (
+    GoalAdmissionStale,
     GoalDirectedDocumentRepository,
     GoalDirectedOperationPreparationService,
     GoalDirectedOperationResultService,
     GoalOperationTemplateProvider,
+    RunControlGoalOperationSettlements,
 )
 from app.application.orchestration.service import RunControlLifecycleGateway
 from app.application.run_control.boundary_interventions import (
@@ -28,6 +30,7 @@ from app.domain.orchestration.contracts import (
     LifecycleCommandRequest,
 )
 from app.domain.orchestration.goal_directed_runtime import (
+    GOAL_ADMISSION_STALE,
     GoalOperationDispatch,
     GoalOperationPreparationRequest,
     GoalOperationReconciliationRequest,
@@ -72,7 +75,7 @@ class GoalDirectedActivities:
                 type="goal_operation_role_mismatch",
                 non_retryable=True,
             )
-        return await self._operations.prepare(request)
+        return await self._prepare(request)
 
     @activity.defn(name="goaldirected.prepare_verifier")
     async def verify_iteration(
@@ -84,7 +87,21 @@ class GoalDirectedActivities:
                 type="goal_operation_role_mismatch",
                 non_retryable=True,
             )
-        return await self._operations.prepare(request)
+        return await self._prepare(request)
+
+    async def _prepare(self, request: GoalOperationPreparationRequest) -> GoalOperationDispatch:
+        try:
+            return await self._operations.prepare(request)
+        except GoalAdmissionStale as error:
+            # RRM-016 review fix 2: reported to the family, which re-admits once at the
+            # current version or enters cancellation; never retried by Temporal as-is.
+            raise ApplicationError(
+                str(error),
+                error.current_run_version,
+                error.phase,
+                type=GOAL_ADMISSION_STALE,
+                non_retryable=True,
+            ) from error
 
     @activity.defn(name="goaldirected.reconcile_operation")
     async def prepare_handoff(
@@ -153,7 +170,10 @@ def compose_goal_directed_activities(
             documents=documents,
             actor=actor,
         ),
-        results=GoalDirectedOperationResultService(documents),
+        # RRM-016: the family consumes each operation's journaled run-control settlement.
+        results=GoalDirectedOperationResultService(
+            documents, RunControlGoalOperationSettlements(run_control, operation_bindings)
+        ),
         lifecycle=lifecycle,
         completion=completion,
         boundary=boundary,

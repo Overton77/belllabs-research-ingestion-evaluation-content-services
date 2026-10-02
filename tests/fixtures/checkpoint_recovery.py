@@ -576,10 +576,16 @@ async def recovery_harness(
     model: ScriptedRecoveryModel | None = None,
     real_authority: bool = False,
     fork_reuse: Any = None,
+    run_control: RunControlService | None = None,
 ) -> RecoveryHarness:
+    """`run_control` (RRM-016) lets a family's admissions be registered on the harness; its
+    repository is then not exposed (`RecoveryHarness.repository` stays `None`)."""
+
     from tests.acceptance.control_plane.test_wp_cp_040 import exact_fixture
 
-    run_control, repository = run_control_service()
+    repository: Any = None
+    if run_control is None:
+        run_control, repository = run_control_service()
     admitted = await run_control.admit(run_request(request_id="rrm-004-recovery"))
     assert admitted.run_id is not None
     started = await run_control.execute(

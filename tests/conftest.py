@@ -39,6 +39,7 @@ _PSYCOPG_SELECTOR_MODULES = {
     ("agent_server", "test_rrm_013_async_subagent_live.py"),
     ("control_plane", "test_rrm_005_inspection.py"),
     ("control_plane", "test_rrm_006_semantic_forks.py"),
+    ("control_plane", "test_rrm_016_goal_directed_demo.py"),
 }
 
 

@@ -53,6 +53,10 @@ from app.domain.operation_execution.errors import (
     UnsupportedRuntimePolicy,
 )
 from app.domain.operation_execution.journal import OperationClaimResult, OperationEffectClaim
+from app.domain.orchestration.runtime_units import (
+    goal_unit_operation_id,
+    goal_unit_workspace_root,
+)
 from app.domain.run_control.contracts import (
     ActorContext,
     CommandStatus,
@@ -190,8 +194,14 @@ class RunControlOperationAuthority:
         )
         if workspace_ref != request.workspace.template_ref:
             raise ValueError("operation workspace does not match the frozen template")
+        _verify_family_unit(request, run)
+        # RRM-016: a GoalDirected unit binds the exact compiled slots under its role-scoped
+        # root, which is recomputed here from the digest-bound unit identity (REQ-CP-DA-013;
+        # executor and verifier writable paths stay disjoint, REQ-BP-GD-004). The unit itself
+        # was cross-checked against the run's family and the operation above.
+        slot_root = goal_unit_workspace_root(request.runtime_unit) or ""
         configured_slots = {
-            (slot.name, slot.path, slot.access)
+            (slot.name, f"{slot_root}{slot.path}", slot.access)
             for slot in configuration.workflow_workspace_contract.slots
         }
         bound_slots = {
@@ -221,6 +231,29 @@ class RunControlOperationAuthority:
             for dimension, amount in reservation.items()
         ):
             raise ValueError("operation budget limits exceed the authoritative reservation")
+
+
+def _verify_family_unit(request: OperationExecutionRequest, run: RunProjection) -> None:
+    """RRM-016 review fix 1: a GoalDirected unit is admitted only on a GoalDirected run and
+    only for the operation its location names, so the workspace root derived from it cannot
+    be borrowed by another family's or another iteration's operation. Conversely (re-check
+    a), a GoalDirected run admits only GoalDirected units: an operation without one would
+    bind unrebased slots, so executor and verifier would no longer be disjoint."""
+
+    unit = request.runtime_unit
+    target = run.execution_target
+    goal_directed_run = target is not None and target.family == "GoalDirected"
+    if unit is None or unit.family != "goal_directed":
+        if goal_directed_run:
+            raise ValueError("a GoalDirected Workflow Run admits only GoalDirected runtime units")
+        return
+    if not goal_directed_run:
+        raise ValueError("a GoalDirected runtime unit requires a GoalDirected Workflow Run")
+    if (
+        unit.belllabs_run_id != request.identity.run_id
+        or goal_unit_operation_id(unit) != request.identity.operation_id
+    ):
+        raise ValueError("GoalDirected runtime unit location does not match its operation")
 
 
 class RunControlOperationBudgetAuthority:
@@ -794,7 +827,7 @@ class OperationExecutionService:
                 )
             _validate_bound_usage(binding, runtime_result.usage)
             settlement = OperationSettlement(
-                settlement_id=_stable_id("operation-settlement", binding.binding_id),
+                settlement_id=operation_settlement_id(binding.binding_id),
                 binding_id=binding.binding_id,
                 status="completed",
                 output_text=runtime_result.output_text,
@@ -833,7 +866,7 @@ class OperationExecutionService:
                         unsettled_effect_ids=unsettled,
                     )
             settlement = OperationSettlement(
-                settlement_id=_stable_id("operation-settlement", binding.binding_id),
+                settlement_id=operation_settlement_id(binding.binding_id),
                 binding_id=binding.binding_id,
                 status="failed",
                 usage=observed_usage,
@@ -1362,7 +1395,7 @@ def _failed_settlement(
     binding: OperationExecutionBinding, *, failure_code: str, message: str
 ) -> OperationSettlement:
     return OperationSettlement(
-        settlement_id=_stable_id("operation-settlement", binding.binding_id),
+        settlement_id=operation_settlement_id(binding.binding_id),
         binding_id=binding.binding_id,
         status="failed",
         failure_code=failure_code,
@@ -1426,3 +1459,13 @@ def _validate_bound_usage(binding: OperationExecutionBinding, usage: RuntimeUsag
 
 def _stable_id(*parts: str) -> str:
     return str(uuid5(NAMESPACE_URL, ":".join(parts)))
+
+
+def operation_settlement_id(binding_id: str) -> str:
+    """The one settlement identity of a bound operation attempt (any status).
+
+    Run control records the operation's usage and settlement evidence under this identity,
+    so a family that consumes the settlement (RRM-016) can find exactly that record.
+    """
+
+    return _stable_id("operation-settlement", binding_id)

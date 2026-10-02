@@ -69,6 +69,10 @@ from tests.fixtures.checkpoint_lineage import (
     execute_with_checkpoint_lineage,
     materialized_workspace,
 )
+from tests.fixtures.goal_directed_journaled import (
+    FixtureGoalSettlements,
+    goal_template_workspace,
+)
 from tests.unit.operations.test_operation_execution import operation_request
 
 DIGEST = "sha256:" + "a" * 64
@@ -358,12 +362,20 @@ class SandboxRolloverActivities:
         template_values: dict[str, OperationExecutionRequest] = {}
         for role in ("executor", "verifier"):
             base = operation_request(prompt=f"Execute GoalDirected {role} in the sandbox.")
+            # RRM-016: the compiled `/work` slot, bound under `/goal/{iteration}/{role}`.
+            workspace = goal_template_workspace(base.workspace)
             template = OperationExecutionRequest.model_validate(
                 {
                     **base.model_dump(mode="python"),
                     "execution_runtime": "deep_agent",
                     "native_placement": None,
-                    "deep_agent_binding": deep_binding,
+                    "deep_agent_binding": deep_binding.__class__.create(
+                        **{
+                            **deep_binding.model_dump(mode="python", exclude={"binding_digest"}),
+                            "workspace": workspace,
+                        }
+                    ),
+                    "workspace": workspace,
                     "output_schema": StructuredOutputBinding(
                         schema_id=f"goal-{role}-output",
                         revision=1,
@@ -382,7 +394,13 @@ class SandboxRolloverActivities:
                 permissions=frozenset({"workflow_run.goal_directed"}),
             ),
         )
-        self.reconciler = GoalDirectedOperationResultService(self.documents)  # type: ignore[arg-type]
+        # RRM-016: this fixture's operation child and run control are fakes, so the family
+        # consumes the fixture settlement shape (the governed path is proved in the RRM-016
+        # suites with `RunControlGoalOperationSettlements`).
+        self.reconciler = GoalDirectedOperationResultService(
+            self.documents,  # type: ignore[arg-type]
+            FixtureGoalSettlements(),
+        )
         sandbox_factory = DockerSandboxFactory(workspace_root=workspace_root)
 
         def model_factory(binding: object, _secrets: object) -> BaseChatModel:

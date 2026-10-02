@@ -56,6 +56,11 @@ class GoalFamilyDecisionMutation(AtomicFamilyMutation):
     ]
 
 
+# The ApplicationError type a preparation activity raises for a stale admission; its
+# details are the run's current version and phase (RRM-016 review fix 2).
+GOAL_ADMISSION_STALE = "goal_admission_stale"
+
+
 class GoalOperationPreparationRequest(Contract):
     schema_version: Literal["belllabs.goal-operation-preparation.v1"] = (
         "belllabs.goal-operation-preparation.v1"
@@ -86,6 +91,9 @@ class GoalOperationPreparationRequest(Contract):
     execution_epoch: int = Field(default=1, ge=1)
     agent_run: int | None = Field(default=None, ge=1)
     session_generation: int | None = Field(default=None, ge=1)
+    # RRM-016 review fix 2 (additive): 2 re-admits once after a stale admission, under a
+    # new command identity, at the run version the stale result reported.
+    admission_attempt: int = Field(default=1, ge=1, le=2)
 
     @model_validator(mode="after")
     def exact_revision(self) -> GoalOperationPreparationRequest:
@@ -276,6 +284,29 @@ class GoalVerifierObservation(Contract):
     output_contract_ref: str = Field(min_length=1)
 
 
+class GoalOperationSettlement(Contract):
+    """The accepted run-control settlement of one GoalDirected operation (RRM-016).
+
+    Read from run control, never asserted by the family: the operation's journaled effect
+    claim is settled, its usage is recorded exactly once against the operation's own
+    reservation (which is released), and its settlement evidence is accepted with the
+    operation binding as authority (REQ-CP-RUN-006/007/009). The family continues from
+    `settled_run_version` instead of recording the usage itself.
+    """
+
+    schema_version: Literal["belllabs.goal-operation-settlement.v1"] = (
+        "belllabs.goal-operation-settlement.v1"
+    )
+    binding_id: str = Field(min_length=1)
+    settlement_id: str = Field(min_length=1)
+    effect_claim_id: str = Field(min_length=1)
+    reservation_id: str = Field(min_length=1)
+    usage: dict[str, int] = Field(default_factory=dict)
+    pending_external_usage: dict[str, int] = Field(default_factory=dict)
+    settlement_payload_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    settled_run_version: int = Field(ge=1)
+
+
 class GoalOperationReconciliationResult(Contract):
     schema_version: Literal["belllabs.goal-operation-reconciliation-result.v1"] = (
         "belllabs.goal-operation-reconciliation-result.v1"
@@ -284,6 +315,9 @@ class GoalOperationReconciliationResult(Contract):
     execution_result: GoalExecutionResult | None = None
     verification_result: GoalVerificationResult | None = None
     detail_ref: str = Field(min_length=1)
+    # RRM-016 (additive): the run-control settlement the family consumes. Absent in
+    # histories recorded before the journaled composition, which recorded usage themselves.
+    settlement: GoalOperationSettlement | None = None
 
     @model_validator(mode="after")
     def exact_role_result(self) -> GoalOperationReconciliationResult:
@@ -320,6 +354,7 @@ def route_goal_async_subgoal(
 
 
 __all__ = [
+    "GOAL_ADMISSION_STALE",
     "GoalAsyncSubgoalRouting",
     "GoalFamilyDecisionMutation",
     "GoalExecutorObservation",
@@ -328,6 +363,7 @@ __all__ = [
     "GoalOperationPreparationRequest",
     "GoalOperationReconciliationRequest",
     "GoalOperationReconciliationResult",
+    "GoalOperationSettlement",
     "GoalVerifierObservation",
     "route_goal_async_subgoal",
 ]
