@@ -109,8 +109,9 @@ class MaterializedDeepAgentArguments:
     state_schema: type[DeepAgentState]
     context_schema: type[Any]
     context: object
-    checkpointer: BaseCheckpointSaver[Any]
-    store: BaseStore
+    # None only for a hosted graph, whose checkpointer and store the Agent Server manages.
+    checkpointer: BaseCheckpointSaver[Any] | None
+    store: BaseStore | None
     initial_state: dict[str, object]
     resolved_attachments: tuple[dict[str, str], ...]
     response_format: type[Any] | dict[str, Any] | None
@@ -214,8 +215,17 @@ class ExactDeepAgentMaterializer:
         secrets: ResolvedSecrets,
         *,
         output_schema_digest: str | None = None,
+        hosted: bool = False,
     ) -> AsyncIterator[MaterializedDeepAgentArguments]:
-        self._verify_runtime(binding)
+        """Resolve the exact binding; `hosted` materializes a graph an Agent Server serves.
+
+        REQ-CP-DA-019: a hosted binding has a remote placement whose checkpointer and store the
+        Agent Server manages, so no local checkpointer or store is resolved for it. Everything
+        else (model, tools, Skills, MCP, middleware, schemas) is resolved exactly as for a
+        local-in-worker invocation.
+        """
+
+        self._verify_runtime(binding, hosted=hosted)
         async with AsyncExitStack() as stack:
             model_factory = _exact(
                 self._registry.model_factories,
@@ -241,12 +251,19 @@ class ExactDeepAgentMaterializer:
                 for item in binding.middleware
             )
             subagents = self._materialize_subagents(binding, secrets, skill_sources)
-            checkpointer = _exact(
-                self._registry.checkpointers,
-                binding.checkpointer_ref.digest,
-                "checkpointer",
+            # A hosted graph's checkpointer and store are the Agent Server's (REQ-CP-DA-019).
+            checkpointer: BaseCheckpointSaver[Any] | None = (
+                None
+                if hosted
+                else _exact(
+                    self._registry.checkpointers,
+                    binding.checkpointer_ref.digest,
+                    "checkpointer",
+                )
             )
-            store = _exact(self._registry.stores, binding.store_ref.digest, "store")
+            store: BaseStore | None = (
+                None if hosted else _exact(self._registry.stores, binding.store_ref.digest, "store")
+            )
             state_schema = _state_type(binding.cognitive_state_schema)
             context_schema = _context_type(binding.cognitive_context_schema)
             context = _context_instance(
@@ -350,10 +367,18 @@ class ExactDeepAgentMaterializer:
         return tuple(result)
 
     @staticmethod
-    def _verify_runtime(binding: DeepAgentExecutionBinding) -> None:
+    def _verify_runtime(binding: DeepAgentExecutionBinding, *, hosted: bool = False) -> None:
         if binding.silent_fallback:
             raise DeepAgentUnsupportedPlacement("silent Deep Agent fallback is forbidden")
-        if binding.placement != "local_in_worker":
+        if hosted:
+            if (
+                binding.placement != "remote_langsmith_deployment"
+                or binding.checkpoint_behavior != "remote_managed"
+            ):
+                raise DeepAgentUnsupportedPlacement(
+                    "a hosted async subagent graph requires a remote-managed placement"
+                )
+        elif binding.placement != "local_in_worker":
             raise DeepAgentUnsupportedPlacement(
                 "this adapter materializes only local-in-worker Deep Agent placement"
             )

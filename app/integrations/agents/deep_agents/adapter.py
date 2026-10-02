@@ -2,21 +2,28 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from contextlib import AsyncExitStack
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, NotRequired, Protocol, cast
 
 from deepagents import create_deep_agent
 from deepagents.backends.protocol import SandboxBackendProtocol
 from deepagents.middleware.filesystem import FilesystemPermission
 from deepagents.middleware.subagents import SubAgent
+from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver, CheckpointTuple
+from langgraph.runtime import Runtime
 from langgraph.types import StateSnapshot
+from typing_extensions import TypedDict
 
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.graph_runtime.identities import QualifiedCheckpointKey
+from app.domain.operation_execution.async_subagent_reconciliation import (
+    AsyncServedGraphIdentity,
+)
 from app.domain.operation_execution.checkpoint_lineage import (
     ROOT_CHECKPOINT_NS,
     STAMP_ATTEMPT_REF,
@@ -29,7 +36,9 @@ from app.domain.operation_execution.checkpoint_lineage import (
     IncompatibleCheckpointSchema,
 )
 from app.domain.operation_execution.contracts import (
+    AsyncSubagentContract,
     DeepAgentExecutionBinding,
+    OperationExecutionBinding,
     RuntimeInvocation,
     RuntimeResult,
     RuntimeUsage,
@@ -43,15 +52,68 @@ from app.integrations.agents.deep_agents.checkpoint_reads import (
     checkpoint_parent_id,
     root_checkpoint_config,
 )
-from app.integrations.agents.deep_agents.materializer import ExactDeepAgentMaterializer
+from app.integrations.agents.deep_agents.materializer import (
+    ExactDeepAgentMaterializer,
+    MaterializedDeepAgentArguments,
+)
 from app.integrations.langsmith_tracing import trace_deep_agent_execute
+
+
+class AsyncSubagentMiddlewareFactory(Protocol):
+    """Builds the governed async-subagent middleware for one parent operation binding."""
+
+    def middleware(
+        self,
+        binding: OperationExecutionBinding,
+        contracts: tuple[AsyncSubagentContract, ...],
+        resolved_secrets: Mapping[str, str],
+    ) -> AgentMiddleware[Any, Any, Any]: ...
 
 
 class DeepAgentRuntimeAdapter:
     """The sole production `create_deep_agent` composition root."""
 
-    def __init__(self, materializer: ExactDeepAgentMaterializer) -> None:
+    def __init__(
+        self,
+        materializer: ExactDeepAgentMaterializer,
+        *,
+        async_subagents: AsyncSubagentMiddlewareFactory | None = None,
+    ) -> None:
         self._materializer = materializer
+        self._async_subagents = async_subagents
+
+    async def build_hosted_async_subagent_graph(
+        self,
+        binding: DeepAgentExecutionBinding,
+        resolved_secrets: Mapping[str, str],
+        *,
+        system_prompt: str,
+        served: AsyncServedGraphIdentity,
+        stack: AsyncExitStack,
+    ) -> Any:
+        """Compile the graph an Agent Server serves for one exact async subagent binding.
+
+        REQ-CP-DA-019: the graph is materialized from the exact binding through the canonical
+        materializer and compiled here, the only `create_deep_agent` site. The server owns the
+        checkpointer, the store and scheduling; the graph stamps its served identity into the
+        thread state so the parent can verify it on every observation. Provider lifecycles the
+        materializer opens stay open on `stack` for the server process's lifetime.
+        """
+
+        if served.graph_binding_digest != binding.binding_digest:
+            raise DeepAgentMaterializationError(
+                "served graph identity does not name this exact binding"
+            )
+        materialized = await stack.enter_async_context(
+            self._materializer.prepare(binding, resolved_secrets, hosted=True)
+        )
+        return _compile(
+            materialized,
+            binding,
+            system_prompt=system_prompt,
+            extra_middleware=[ServedGraphIdentityMiddleware(served)],
+            name=f"belllabs-async-{binding.operation_id}",
+        )
 
     @trace_deep_agent_execute
     async def execute(
@@ -74,25 +136,27 @@ class DeepAgentRuntimeAdapter:
             ),
         ) as materialized:
             system_prompt, user_prompt = _prompts(invocation)
-            permissions = (
-                None
-                if isinstance(materialized.backend, SandboxBackendProtocol)
-                else _permissions(binding)
+            if materialized.checkpointer is None or materialized.store is None:
+                raise DeepAgentMaterializationError(
+                    "local-in-worker cognition requires the registered checkpointer and store"
+                )
+            # REQ-CP-DA-008: async subagents reach the Agent Server only through the governed
+            # middleware, which reserves and links each child before any provider submission.
+            governed_async: list[AgentMiddleware[Any, Any, Any]] = (
+                [
+                    self._async_subagents.middleware(
+                        invocation.binding, binding.async_subagents, resolved_secrets
+                    )
+                ]
+                if self._async_subagents is not None and binding.async_subagents
+                else []
             )
-            agent = create_deep_agent(
-                model=materialized.model,
+            permissions = _effective_permissions(materialized, binding)
+            agent = _compile(
+                materialized,
+                binding,
                 system_prompt=system_prompt,
-                tools=list(materialized.tools),
-                middleware=list(materialized.middleware),
-                subagents=cast(list[SubAgent], list(materialized.subagents)),
-                skills=list(materialized.skills),
-                permissions=permissions,
-                backend=materialized.backend,
-                state_schema=materialized.state_schema,
-                context_schema=materialized.context_schema,
-                checkpointer=materialized.checkpointer,
-                store=materialized.store,
-                response_format=materialized.response_format,
+                extra_middleware=governed_async,
                 name=f"belllabs-{binding.operation_id}",
             )
             state = {
@@ -212,6 +276,48 @@ class DeepAgentRuntimeAdapter:
                     terminal_result_observed=terminal,
                     candidates=candidates,
                 ) from error
+
+
+def _effective_permissions(
+    materialized: MaterializedDeepAgentArguments, binding: DeepAgentExecutionBinding
+) -> list[FilesystemPermission] | None:
+    """Framework filesystem permissions apply only without an executable sandbox."""
+
+    if isinstance(materialized.backend, SandboxBackendProtocol):
+        return None
+    return _permissions(binding)
+
+
+def _compile(
+    materialized: MaterializedDeepAgentArguments,
+    binding: DeepAgentExecutionBinding,
+    *,
+    system_prompt: str,
+    extra_middleware: list[AgentMiddleware[Any, Any, Any]],
+    name: str,
+) -> Any:
+    """The only `create_deep_agent` call: local cognition and hosted async graphs share it.
+
+    A hosted graph has no checkpointer or store (the Agent Server owns them) and no structured
+    response; local cognition always has the registered pair.
+    """
+
+    return create_deep_agent(
+        model=materialized.model,
+        system_prompt=system_prompt,
+        tools=list(materialized.tools),
+        middleware=[*materialized.middleware, *extra_middleware],
+        subagents=cast(list[SubAgent], list(materialized.subagents)),
+        skills=list(materialized.skills),
+        permissions=_effective_permissions(materialized, binding),
+        backend=materialized.backend,
+        state_schema=materialized.state_schema,
+        context_schema=materialized.context_schema,
+        checkpointer=materialized.checkpointer,
+        store=materialized.store,
+        response_format=materialized.response_format,
+        name=name,
+    )
 
 
 def _validated_plan(
@@ -699,3 +805,29 @@ class _SkillDisclosureObserver(BaseCallbackHandler):
                     "bundle_digest": skill.bundle_digest,
                     "skill_md_digest": skill.skill_md_digest,
                 }
+
+
+class _ServedGraphState(TypedDict):
+    belllabs_served_graph: NotRequired[dict[str, Any]]
+
+
+class ServedGraphIdentityMiddleware(AgentMiddleware[Any, Any, Any]):
+    """Stamp the hosted graph's exact identity into every thread it serves (REQ-CP-DA-019).
+
+    The parent reads it from the provider's thread state to verify the served identity on
+    every reconnect and to qualify the result checkpoint (REQ-CP-DA-011).
+    """
+
+    state_schema = _ServedGraphState
+
+    def __init__(self, served: AsyncServedGraphIdentity) -> None:
+        super().__init__()
+        self._stamp = served.model_dump(mode="json")
+
+    def before_agent(self, state: Any, runtime: Runtime[Any]) -> dict[str, Any] | None:
+        del state, runtime
+        return {"belllabs_served_graph": dict(self._stamp)}
+
+    async def abefore_agent(self, state: Any, runtime: Runtime[Any]) -> dict[str, Any] | None:
+        del state, runtime
+        return {"belllabs_served_graph": dict(self._stamp)}

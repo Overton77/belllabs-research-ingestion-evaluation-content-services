@@ -818,6 +818,9 @@ class AsyncSubagentExecution(Contract):
     provider_thread_id: str | None = Field(default=None, min_length=1)
     provider_run_id: str | None = Field(default=None, min_length=1)
     result_manifest: AsyncSubagentResultManifest | None = None
+    # Provider evidence of the completed child's final message, addressed by the manifest's
+    # output ref. It reaches the parent's cognition only after result admission (DA-011).
+    result_output_text: str | None = Field(default=None, max_length=200_000)
     # AMD-RRM-001 (REQ-CP-DA-008): why the child is `in_doubt` and the governed incident that
     # awaits observation or an operator decision. Both are set exactly while in doubt.
     in_doubt_reason: AsyncSubagentInDoubtReason | None = None

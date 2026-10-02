@@ -8,7 +8,7 @@ Protocol SDK, PostgreSQL or any company fixture.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Final, Literal
 from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import AwareDatetime, Field, model_validator
@@ -25,9 +25,9 @@ from app.domain.operation_execution.contracts import (
     Contract,
 )
 
-ASYNC_SUBAGENT_INCIDENT_TYPE = "async_submission_in_doubt"
-ASYNC_SUBAGENT_INCIDENT_SCHEMA_VERSION = "belllabs.async-subagent-incident.v1"
-ASYNC_PROVIDER_RUN_SCHEMA_VERSION = "belllabs.async-provider-run.v1"
+ASYNC_SUBAGENT_INCIDENT_TYPE: Final = "async_submission_in_doubt"
+ASYNC_SUBAGENT_INCIDENT_SCHEMA_VERSION: Final = "belllabs.async-subagent-incident.v1"
+ASYNC_PROVIDER_RUN_SCHEMA_VERSION: Final = "belllabs.async-provider-run.v1"
 
 AsyncSubagentReconciliationDecision = Literal["adopt_provider_run", "orphan_child"]
 
