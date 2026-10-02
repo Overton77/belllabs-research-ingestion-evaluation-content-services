@@ -446,6 +446,10 @@ class FakeJournal:
         self.technical_attempts: list[int] = []
         self.in_doubt: list[Any] = []
 
+    async def record_reconciliation_applied(self, binding, decision) -> None:  # type: ignore[no-untyped-def]
+        """RRM-007 receipt seam: the in-memory journal keeps no receipt ledger."""
+        return None
+
     async def acquire(self, binding, *, claimed_by):  # type: ignore[no-untyped-def]
         self.claim = OperationEffectClaim(
             effect_claim_id="journal-claim-1",

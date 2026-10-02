@@ -354,8 +354,25 @@ class ContinuationProposal(Contract):
     reason: str = Field(min_length=1)
 
 
+class ExecutionTarget(Contract):
+    """The exact macro execution that applies boundary commands for a run (RRM-007).
+
+    The family declares it in its `start` fact. While a target is bound, an accepted
+    pause, resume or wait release is a pending command delivered to that boundary; its
+    phase effect is recorded only by the boundary's `applied` fact (REQ-CP-RUN-004). With no
+    target bound, run control is itself the boundary (`CON-CP-WORKFLOW-MESSAGE-V1`).
+    """
+
+    family: Literal["StageGraph", "GoalDirected"]
+    family_workflow_id: str = Field(min_length=1, max_length=512)
+    root_workflow_id: str | None = Field(default=None, min_length=1, max_length=512)
+    execution_epoch: int = Field(default=1, ge=1)
+    execution_generation: int = Field(default=1, ge=1)
+
+
 class StartAction(Contract):
     kind: Literal["start"] = "start"
+    execution_target: ExecutionTarget | None = None
 
 
 class SetWaitAction(Contract):
@@ -543,6 +560,206 @@ class UnitReconciliationDecision(Contract):
     accepted_checkpoint: QualifiedCheckpointKey | None = None
     actor_id: str = Field(min_length=1)
     decided_at: AwareDatetime
+
+
+# --- Boundary commands and receipts (RRM-007, CON-CP-WORKFLOW-MESSAGE-V1) -----------------
+
+BoundaryCommandKind = Literal["pause", "resume", "satisfy_wait", "cancel", "reconcile_unit"]
+BOUNDARY_COMMAND_KINDS: frozenset[str] = frozenset(
+    {"pause", "resume", "satisfy_wait", "cancel", "reconcile_unit"}
+)
+# The kinds a family boundary applies; `cancel` is applied by the terminal outcome
+# (RRM-008 owns its delivery) and `reconcile_unit` by the operation boundary.
+FAMILY_BOUNDARY_COMMAND_KINDS: frozenset[str] = frozenset({"pause", "resume", "satisfy_wait"})
+BoundaryTargetKind = Literal["run_control", "root", "family", "unit"]
+# The root's contiguous message sequence: only commands the transport delivers root-first
+# (operator pause/resume/satisfy_wait) take a place in it. Cancels (`cancel`, delivered by
+# RRM-008 on its own path) and commands a family issues to itself (`boundary:<family>`)
+# have their own spaces, so they can never open a gap at the root (review N1).
+EXECUTION_SEQUENCE_SPACE = "execution"
+CANCEL_SEQUENCE_SPACE = "cancel"
+
+
+def self_issued_sequence_space(family_workflow_id: str) -> str:
+    return f"boundary:{family_workflow_id}"
+
+
+class ReceiptState(StrEnum):
+    ACCEPTED = "accepted"
+    DELIVERED = "delivered"
+    APPLIED = "applied"
+    REJECTED = "rejected"
+
+
+BoundaryRejectionReason = Literal[
+    "stale_target",
+    "stale_generation",
+    "stale_version",
+    "not_applicable",
+    "terminal_run",
+    "superseded",
+    "unauthorized",
+    "insufficient_budget",
+]
+# A command rejected at acceptance has `rejected` as its only receipt.
+RECEIPT_TRANSITIONS: dict[ReceiptState | None, frozenset[ReceiptState]] = {
+    None: frozenset({ReceiptState.ACCEPTED, ReceiptState.REJECTED}),
+    ReceiptState.ACCEPTED: frozenset({ReceiptState.DELIVERED, ReceiptState.REJECTED}),
+    ReceiptState.DELIVERED: frozenset({ReceiptState.APPLIED, ReceiptState.REJECTED}),
+    ReceiptState.APPLIED: frozenset(),
+    ReceiptState.REJECTED: frozenset(),
+}
+
+
+class BoundaryTarget(Contract):
+    kind: BoundaryTargetKind
+    # Root and family workflow identities for an execution target; the unit generation
+    # reference (`{unit_key}:gen:{n}`) for an operation boundary; empty for run control.
+    target_ref: str = ""
+    root_workflow_id: str | None = None
+    family_workflow_id: str | None = None
+    execution_epoch: int = Field(default=1, ge=1)
+    execution_generation: int = Field(default=1, ge=1)
+    # Commands routed through one root share one contiguous sequence space.
+    sequence_space: str = EXECUTION_SEQUENCE_SPACE
+
+
+BoundaryCommandAction = Annotated[
+    PauseAction | ResumeAction | SatisfyWaitAction | CancelAction | ReconcileUnitAction,
+    Field(discriminator="kind"),
+]
+
+
+class BoundaryCommandRecord(Contract):
+    """One immutable, authorized boundary command as run control accepted or rejected it."""
+
+    schema_version: Literal["belllabs.boundary-command.v1"] = "belllabs.boundary-command.v1"
+    command_id: str = Field(min_length=1)
+    idempotency_issuer: str = Field(min_length=1)
+    request_scope: str = Field(min_length=1)
+    run_id: str = Field(min_length=1)
+    kind: BoundaryCommandKind
+    # The exact action as accepted; `payload_digest` is its order-stable fingerprint.
+    action: BoundaryCommandAction
+    target: BoundaryTarget
+    # 0 means the command was rejected before it was sequenced; it never reached a target.
+    target_sequence: int = Field(ge=0)
+    accepted_run_version: int = Field(ge=1)
+    payload_digest: str = Field(pattern=DIGEST_PATTERN)
+    actor_id: str = Field(min_length=1)
+    correlation_id: str = Field(min_length=1)
+    recorded_at: AwareDatetime
+
+
+class BoundaryCommandReceipt(Contract):
+    """One durable receipt transition of a boundary command, ordered by `ordinal`."""
+
+    schema_version: Literal["belllabs.boundary-receipt.v1"] = "belllabs.boundary-receipt.v1"
+    command_id: str = Field(min_length=1)
+    # The command identity is (issuer, command_id): two principals may reuse an ID (F5).
+    idempotency_issuer: str = Field(min_length=1)
+    run_id: str = Field(min_length=1)
+    request_scope: str = Field(min_length=1)
+    ordinal: int = Field(ge=1)
+    state: ReceiptState
+    recorded_by: str = Field(min_length=1)
+    rejection_reason: BoundaryRejectionReason | None = None
+    detail: str = Field(default="", max_length=1024)
+    # The transport acknowledgement (for example the family's technical segment) or the
+    # boundary reference that applied the command.
+    transport_ref: str | None = Field(default=None, max_length=512)
+    # The run-control version whose transition applied the command (applied receipts).
+    applied_run_version: int | None = Field(default=None, ge=1)
+    # The boundary state the application bound (for example a durable paused state).
+    boundary_state: dict[str, object] = Field(default_factory=dict)
+    recorded_at: AwareDatetime
+
+    @model_validator(mode="after")
+    def rejection_reason_matches_state(self) -> BoundaryCommandReceipt:
+        if (self.state == ReceiptState.REJECTED) != (self.rejection_reason is not None):
+            raise ValueError("exactly a rejected receipt carries a typed rejection reason")
+        if self.state != ReceiptState.APPLIED and self.applied_run_version is not None:
+            raise ValueError("only an applied receipt binds the applying run version")
+        return self
+
+
+class BoundaryCommandStatus(Contract):
+    """Read model: one command with its ordered receipts and current state."""
+
+    command: BoundaryCommandRecord
+    receipts: tuple[BoundaryCommandReceipt, ...] = Field(min_length=1)
+
+    @property
+    def state(self) -> ReceiptState:
+        return self.receipts[-1].state
+
+    @model_validator(mode="after")
+    def receipts_follow_the_state_machine(self) -> BoundaryCommandStatus:
+        previous: ReceiptState | None = None
+        for index, receipt in enumerate(self.receipts, start=1):
+            if (
+                receipt.ordinal != index
+                or receipt.command_id != self.command.command_id
+                or receipt.idempotency_issuer != self.command.idempotency_issuer
+                or receipt.state not in RECEIPT_TRANSITIONS[previous]
+            ):
+                raise ValueError("boundary receipts must follow the closed receipt state machine")
+            previous = receipt.state
+        return self
+
+
+def next_receipt_state(current: ReceiptState | None, requested: ReceiptState) -> bool:
+    """Whether `requested` is a legal next receipt after `current`."""
+
+    return requested in RECEIPT_TRANSITIONS[current]
+
+
+FamilyBoundaryAction = Annotated[
+    PauseAction | ResumeAction | SatisfyWaitAction,
+    Field(discriminator="kind"),
+]
+
+
+class ApplyBoundaryCommandAction(Contract):
+    """The family boundary's `applied` fact for one accepted, delivered command.
+
+    The reducer applies the nested command exactly as the boundary saw it and records the
+    phase effect (REQ-CP-RUN-004). `resume_reservation` is the next unit of work the
+    boundary must be able to reserve again (REQ-BP-GD-011): a resume that cannot re-reserve
+    is rejected `insufficient_budget` and the run stays paused.
+    """
+
+    kind: Literal["apply_boundary_command"] = "apply_boundary_command"
+    command_id: str = Field(min_length=1)
+    # The accepting principal's idempotency issuer: with `command_id` the exact command.
+    command_issuer: str = Field(min_length=1)
+    action: FamilyBoundaryAction
+    boundary_ref: str = Field(min_length=1, max_length=512)
+    runnable_work_remains: bool
+    resume_reservation: dict[str, int] = Field(default_factory=dict)
+    boundary_state: dict[str, object] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def reservation_only_for_resume(self) -> ApplyBoundaryCommandAction:
+        if self.resume_reservation and not isinstance(self.action, ResumeAction):
+            raise ValueError("only a resume application probes a re-reservation")
+        return self
+
+
+# Family boundary facts whose stale result is never persisted (F2): the boundary binds the
+# current version and retries at the new one, so a race can never strand a command.
+BOUNDARY_FACT_KINDS: frozenset[str] = frozenset(
+    {"apply_boundary_command", "observe_quiescence", "set_wait"}
+)
+
+
+class ObserveQuiescenceAction(Contract):
+    """The family boundary's fact that admissible work ran out (or returned) under the
+    currently applied scoped waits and pauses, so the aggregate phase stays accurate."""
+
+    kind: Literal["observe_quiescence"] = "observe_quiescence"
+    boundary_ref: str = Field(min_length=1, max_length=512)
+    runnable_work_remains: bool
 
 
 class AcceptFinalizationPlanAction(Contract):
@@ -771,7 +988,9 @@ LifecycleAction = Annotated[
     | ApplyAuthorityBatchAction
     | TerminalizeAction
     | RecordReadinessAction
-    | ReconcileUnitAction,
+    | ReconcileUnitAction
+    | ApplyBoundaryCommandAction
+    | ObserveQuiescenceAction,
     Field(discriminator="kind"),
 ]
 
@@ -832,6 +1051,8 @@ class RunProjection(Contract):
     async_children: tuple[AsyncChildAuthorityState, ...] = ()
     # AMD-RRM-001: accepted `reconcile_unit` decisions, one per in_doubt unit generation.
     unit_reconciliations: tuple[UnitReconciliationDecision, ...] = ()
+    # RRM-007: the macro execution that applies boundary commands, declared at `start`.
+    execution_target: ExecutionTarget | None = None
     updated_at: AwareDatetime
 
     @model_validator(mode="after")

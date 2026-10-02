@@ -320,6 +320,10 @@ class CrashableRunControl:
 class MemoryOperationJournal:
     """Atomic journal repository for unit tests: one claim and one settlement per effect."""
 
+    async def record_reconciliation_applied(self, binding, decision) -> None:  # type: ignore[no-untyped-def]
+        """RRM-007 receipt seam: the in-memory journal keeps no receipt ledger."""
+        return None
+
     def __init__(self) -> None:
         self.claims: dict[str, OperationEffectClaim] = {}
         self.settlements: dict[str, OperationJournalSettlement] = {}

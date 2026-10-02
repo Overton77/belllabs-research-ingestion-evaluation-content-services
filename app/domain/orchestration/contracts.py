@@ -10,7 +10,7 @@ from pydantic import Field, model_validator
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.operation_execution.contracts import OperationWorkflowRequest
 from app.domain.orchestration.search_attributes import SearchAttributePolicy
-from app.domain.run_control.contracts import RunOutcome
+from app.domain.run_control.contracts import ExecutionTarget, RunOutcome
 from app.domain.run_control.family_admission import AtomicFamilyMutation
 
 StageStatus = Literal[
@@ -62,6 +62,9 @@ class WorkflowMessageReceipt:
     sequence: int
     status: Literal["accepted", "duplicate", "stale_generation", "gap"]
     technical_segment: int
+    # RRM-007 (F7): on a `duplicate`, the status the root cached for this message, so a
+    # transport never treats a cached gap or stale result as a delivery.
+    cached_status: Literal["accepted", "duplicate", "stale_generation", "gap"] = "accepted"
 
 
 @dataclass(frozen=True)
@@ -97,6 +100,117 @@ class RunContinuityState:
 
     def next_technical_segment(self) -> RunContinuityState:
         return replace(self, technical_segment=self.technical_segment + 1)
+
+
+# --- Boundary commands at a family boundary (RRM-007, CON-CP-WORKFLOW-MESSAGE-V1) -------
+
+# Family-level execution generation: the root continuity's generation, which nothing
+# advances today. A delivery for another generation is `stale_generation`.
+FAMILY_EXECUTION_GENERATION = 1
+FamilyBoundaryCommandKind = Literal["pause", "resume", "satisfy_wait"]
+BoundaryAckStatus = Literal[
+    "delivered", "duplicate", "stale_generation", "stale_target", "gap"
+]
+
+
+@dataclass(frozen=True)
+class BoundaryCommandDelivery:
+    """One accepted command as the delivery service hands it to a family boundary.
+
+    `payload` is the exact run-control action (JSON) and `payload_digest` its fingerprint,
+    so the boundary applies exactly what run control accepted.
+    """
+
+    command_id: str
+    kind: FamilyBoundaryCommandKind
+    target_sequence: int
+    execution_epoch: int
+    execution_generation: int
+    accepted_run_version: int
+    payload: dict[str, Any]
+    payload_digest: str
+    # The accepting principal's issuer: with `command_id` the exact command identity (F5).
+    idempotency_issuer: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.command_id or not self.payload_digest or self.target_sequence < 1:
+            raise ValueError("boundary deliveries require an identity, digest and sequence")
+        if self.execution_epoch < 1 or self.execution_generation < 1:
+            raise ValueError("boundary delivery epoch and generation must be positive")
+
+
+@dataclass(frozen=True)
+class BoundaryCommandAck:
+    """The family boundary's Update return value: evidence of delivery, never of application."""
+
+    command_id: str
+    status: BoundaryAckStatus
+    technical_segment: int
+    detail: str = ""
+
+
+@dataclass(frozen=True)
+class FamilyPause:
+    """A pause the family boundary applied; scope strings follow `PauseDecision.scope`."""
+
+    decision_id: str
+    scope: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class BoundaryLifecycleRequest:
+    """A family boundary's run-control fact, issued through its application activity.
+
+    `action` is the exact lifecycle action (JSON); the activity binds the current run
+    version itself, so a family never fails on version drift caused by pending commands.
+    """
+
+    command_id: str
+    action: dict[str, Any]
+    reason: str
+    boundary_ref: str
+    occurred_at: datetime | None = None
+    run_id: str = ""
+    request_scope: str = ""
+    idempotency_issuer: str = ""
+    correlation_id: str = ""
+    evidence_refs: tuple[str, ...] = ()
+    # The delivered command this fact applies or rejects (empty for waits and quiescence).
+    boundary_command_id: str = ""
+    boundary_command_issuer: str = ""
+    # Set when the boundary could not apply the delivered command; no action is executed.
+    rejection_reason: str = ""
+
+
+@dataclass(frozen=True)
+class BoundaryLifecycleOutcome:
+    accepted: bool
+    status: str
+    reason_code: str
+    resulting_run_version: int
+    phase: str
+    # The boundary command's receipt state after this fact (`applied`, `rejected`, ...) and
+    # its target sequence, so a boundary that applied its own command keeps its contiguity.
+    receipt_state: str = ""
+    target_sequence: int = 0
+
+
+@dataclass(frozen=True)
+class GoalPausedState:
+    """REQ-BP-GD-011: the durable paused state a GoalDirected family binds at a boundary."""
+
+    pause_decision_id: str
+    command_id: str
+    active_revision_id: str
+    next_goal_iteration: int
+    session_generation: int
+    next_session_mode: Literal["reuse", "fresh", "fresh_from_handoff"]
+    handoff_ref: str
+    effect_frontier_refs: tuple[str, ...]
+    held_reservation_ids: tuple[str, ...]
+    released_reservation_ids: tuple[str, ...] = ()
+    next_iteration_reservation: dict[str, int] = field(default_factory=dict)
+    paused_at_run_version: int = 0
 
 
 @dataclass(frozen=True)
@@ -538,6 +652,8 @@ class StageGraphInitializeRequest:
     occurred_at: datetime
     idempotency_issuer: str
     correlation_id: str
+    # RRM-007: the family declares the execution that applies boundary commands.
+    execution_target: ExecutionTarget | None = None
 
 
 @dataclass(frozen=True)
@@ -721,6 +837,17 @@ class StageGraphRunInput:
     continue_as_new_event_threshold: int = 10_000
     force_continue_as_new: bool = False
     search_attribute_policy: SearchAttributePolicy = "disabled"
+    technical_segment: int = 1
+    # RRM-007 (REQ-CP-EXEC-011): boundary state carried across Continue-As-New. Satisfied
+    # and declared wait identities, applied pauses, delivered-but-unapplied commands and
+    # the applied-command cache all survive the technical segment.
+    satisfied_wait_ids: tuple[str, ...] = ()
+    declared_wait_ids: tuple[str, ...] = ()
+    active_pauses: tuple[FamilyPause, ...] = ()
+    pending_boundary_commands: tuple[BoundaryCommandDelivery, ...] = ()
+    applied_boundary_command_ids: tuple[str, ...] = ()
+    quiescent: bool = False
+    last_delivered_sequence: int = 0
 
 
 @dataclass(frozen=True)
@@ -1069,6 +1196,8 @@ class GoalContinuationState:
     completed_goal_iterations: int = 0
     completed_agent_runs: int = 0
     lineage_digest: str = ""
+    # RRM-007 (REQ-BP-GD-011): a durable pause survives Continue-As-New.
+    paused: GoalPausedState | None = None
 
 
 @dataclass(frozen=True)
@@ -1098,6 +1227,14 @@ class GoalDirectedRunInput:
     materialize_typed_result: bool = False
     durable_operation_children: bool = False
     search_attribute_policy: SearchAttributePolicy = "disabled"
+    # RRM-007: delivered-but-unapplied commands and the applied-command cache carried across
+    # Continue-As-New; the segment length is configurable for forced-continuation proofs.
+    pending_boundary_commands: tuple[BoundaryCommandDelivery, ...] = ()
+    applied_boundary_command_ids: tuple[str, ...] = ()
+    continue_as_new_iterations: int = 20
+    # Forces one continuation at the next iteration boundary (also while paused).
+    force_continue_as_new: bool = False
+    last_delivered_sequence: int = 0
 
 
 @dataclass(frozen=True)

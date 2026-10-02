@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Protocol
 from uuid import NAMESPACE_URL, uuid5
 
@@ -28,6 +28,7 @@ from app.domain.operation_execution.journal import (
     OperationJournalSettlement,
     OperationTechnicalAttempt,
 )
+from app.domain.run_control.boundary_commands import receipt as boundary_receipt
 from app.domain.run_control.contracts import (
     AcceptedOperationSettlementEvidence,
     ActorContext,
@@ -41,6 +42,7 @@ from app.domain.run_control.contracts import (
     EffectSettlementOutcome,
     LifecycleCommand,
     ObserveEffectAction,
+    ReceiptState,
     RecordOperationSettlementEvidenceAction,
     RecordUsageAction,
     RunProjection,
@@ -54,6 +56,9 @@ from app.domain.run_control.contracts import (
 
 OUTPUT_PAYLOAD_MEDIA_TYPE = "application/vnd.belllabs.operation-output+json"
 SETTLEMENT_MEDIA_TYPE = "application/vnd.belllabs.operation-settlement+json"
+
+
+OPERATION_BOUNDARY_RECORDER = "operation-boundary"
 
 
 class JournalRunControlReader(Protocol):
@@ -515,6 +520,62 @@ class JournaledOperationExecutionCoordinator:
                 and item.incident_id == incident_id
             ),
             None,
+        )
+
+    async def record_reconciliation_applied(
+        self,
+        binding: OperationExecutionBinding,
+        decision: UnitReconciliationDecision,
+    ) -> None:
+        """RRM-007: the operation boundary applied the accepted `reconcile_unit` decision.
+
+        Recorded through run control's receipt ledger when the composed run control keeps
+        one; a duplicate application is a no-op there (the receipt never transitions twice).
+        """
+
+        recorder = getattr(self._run_control, "record_boundary_receipt", None)
+        lookup = getattr(self._run_control, "list_boundary_commands", None)
+        if recorder is None or lookup is None:
+            return
+        # The decision records the command ID; the issuer is found on the run's ledger.
+        status = next(
+            (
+                item
+                for item in await lookup(binding.request_scope, binding.run_id)
+                if item.command.kind == "reconcile_unit"
+                and item.command.command_id == decision.decision_id
+                and item.command.target.target_ref
+                == f"{decision.unit_key}:gen:{decision.execution_generation}"
+            ),
+            None,
+        )
+        if status is None or status.state in {ReceiptState.APPLIED, ReceiptState.REJECTED}:
+            return
+        now = datetime.now(UTC)
+        if status.state == ReceiptState.ACCEPTED:
+            await recorder(
+                binding.request_scope,
+                boundary_receipt(
+                    status.command,
+                    ordinal=1,
+                    state=ReceiptState.DELIVERED,
+                    recorded_by=OPERATION_BOUNDARY_RECORDER,
+                    detail="decision read from authority by the operation boundary",
+                    transport_ref=binding.binding_id,
+                    recorded_at=now,
+                ),
+            )
+        await recorder(
+            binding.request_scope,
+            boundary_receipt(
+                status.command,
+                ordinal=1,
+                state=ReceiptState.APPLIED,
+                recorded_by=OPERATION_BOUNDARY_RECORDER,
+                detail=f"decision {decision.decision} applied by the operation boundary",
+                transport_ref=binding.binding_id,
+                recorded_at=now,
+            ),
         )
 
     async def unsettled_effect_ids(

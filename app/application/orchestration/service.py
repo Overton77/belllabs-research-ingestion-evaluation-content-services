@@ -209,7 +209,7 @@ class StageGraphDecisionService:
                 run_id=request.run_id,
                 expected_run_version=request.expected_run_version,
                 actor=orchestration_lifecycle_actor(),
-                action=StartAction(),
+                action=StartAction(execution_target=request.execution_target),
                 reason="Canonical StageGraph execution started",
                 occurred_at=request.occurred_at,
                 correlation_id=request.correlation_id,

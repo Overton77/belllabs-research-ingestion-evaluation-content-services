@@ -12,6 +12,7 @@ from app.domain.run_control.contracts import (
     AcceptedOutputEvidence,
     AcceptFinalizationPlanAction,
     ApplyAuthorityBatchAction,
+    ApplyBoundaryCommandAction,
     AsyncChildAuthorityState,
     AsyncChildDecisionOutcome,
     AsyncChildDependencyClass,
@@ -36,9 +37,11 @@ from app.domain.run_control.contracts import (
     EffectLedgerState,
     EffectObservation,
     EffectSettlement,
+    ExecutionTarget,
     LifecycleCommand,
     LifecycleTransitionRecord,
     ObserveEffectAction,
+    ObserveQuiescenceAction,
     OutputReadinessDecision,
     PauseAction,
     PauseDecision,
@@ -118,6 +121,9 @@ ACTION_PERMISSIONS: dict[str, str] = {
     "record_readiness": "workflow_run.decide_readiness",
     # AMD-RRM-001: privileged operator reconciliation of an in_doubt runtime unit.
     "reconcile_unit": "workflow_run.reconcile_unit",
+    # RRM-007: the family boundary's application and quiescence facts.
+    "apply_boundary_command": "workflow_run.apply_boundary_command",
+    "observe_quiescence": "workflow_run.observe_wait",
 }
 LIFECYCLE_ACTION_KINDS = frozenset((*ACTION_PERMISSIONS, "apply_authority_batch"))
 AUTHORITY_BATCH_ACTION_TYPES = (
@@ -211,6 +217,7 @@ def reduce_lifecycle(
     )
     async_children = list[AsyncChildAuthorityState](projection.async_children)
     unit_reconciliations = list[UnitReconciliationDecision](projection.unit_reconciliations)
+    execution_target: ExecutionTarget | None = projection.execution_target
     evidence_frontier_digest = projection.evidence_frontier_digest
     next_budget = budget
     next_effects = effects
@@ -222,6 +229,7 @@ def reduce_lifecycle(
         if phase != RunPhase.PENDING:
             raise ReductionRejected("invalid_phase", "only a pending run can start")
         phase = RunPhase.ACTIVE
+        execution_target = action.execution_target
     elif (
         isinstance(action, SetWaitAction)
         and action.condition.kind == "operator_reconciliation"
@@ -247,39 +255,44 @@ def reduce_lifecycle(
             raise ReductionRejected("wait_exists", "wait condition identity already exists")
         waits.append(action.condition)
         phase = _progress_phase(action.runnable_work_remains, waits, pauses)
-    elif isinstance(action, SatisfyWaitAction):
-        if not any(item.condition_id == action.condition_id for item in waits):
-            raise ReductionRejected("wait_not_found", "wait condition is not active")
-        if any(
-            item.condition_id == action.condition_id and item.kind == "operator_reconciliation"
-            for item in waits
+    elif isinstance(action, SatisfyWaitAction | PauseAction | ResumeAction):
+        phase = _apply_family_boundary_action(
+            phase, waits, pauses, resumes, action, command.actor.authority_refs
+        )
+    elif isinstance(action, ApplyBoundaryCommandAction):
+        # REQ-CP-RUN-004 (AMD-RRM-001): the boundary's `applied` fact is what changes the
+        # phase, scoped-wait and scoped-pause axes. The nested command is applied exactly as
+        # accepted; the boundary reports whether admissible work remains.
+        if phase == RunPhase.PENDING:
+            raise ReductionRejected("invalid_phase", "a pending run has no boundary to apply at")
+        if execution_target is None:
+            raise ReductionRejected(
+                "no_execution_target",
+                "boundary application requires a declared execution target",
+            )
+        if execution_target.family_workflow_id != action.boundary_ref:
+            raise ReductionRejected(
+                "stale_target",
+                "the applying boundary is not the run's declared execution target",
+            )
+        nested = action.action.model_copy(
+            update={"runnable_work_remains": action.runnable_work_remains}
+        )
+        if isinstance(nested, ResumeAction) and action.resume_reservation:
+            _probe_reservation(next_budget, action.resume_reservation)
+        # The command's authority was verified when run control accepted it.
+        phase = _apply_family_boundary_action(phase, waits, pauses, resumes, nested, None)
+    elif isinstance(action, ObserveQuiescenceAction):
+        if phase not in {RunPhase.ACTIVE, RunPhase.WAITING, RunPhase.PAUSED}:
+            raise ReductionRejected(
+                "invalid_phase", "quiescence is observed only on a non-terminal, started run"
+            )
+        if execution_target is not None and (
+            execution_target.family_workflow_id != action.boundary_ref
         ):
             raise ReductionRejected(
-                "operator_decision_required",
-                "an operator reconciliation wait is released only by reconcile_unit",
+                "stale_target", "the observing boundary is not the run's execution target"
             )
-        waits = [item for item in waits if item.condition_id != action.condition_id]
-        phase = _progress_phase(action.runnable_work_remains, waits, pauses)
-    elif isinstance(action, PauseAction):
-        if phase not in {RunPhase.ACTIVE, RunPhase.WAITING, RunPhase.PAUSED}:
-            raise ReductionRejected("invalid_phase", "run cannot be paused from its current phase")
-        if action.decision.authority_ref not in command.actor.authority_refs:
-            raise ReductionRejected("invalid_pause_authority", "pause authority was not granted")
-        if any(item.decision_id == action.decision.decision_id for item in pauses):
-            raise ReductionRejected("pause_exists", "pause decision identity already exists")
-        pauses.append(action.decision)
-        phase = _progress_phase(action.runnable_work_remains, waits, pauses)
-    elif isinstance(action, ResumeAction):
-        pause = next(
-            (item for item in pauses if item.decision_id == action.decision.pause_decision_id),
-            None,
-        )
-        if pause is None:
-            raise ReductionRejected("pause_not_found", "resume must reference an active pause")
-        if action.decision.authority_ref not in command.actor.authority_refs:
-            raise ReductionRejected("invalid_resume_authority", "resume authority was not granted")
-        pauses.remove(pause)
-        resumes.append(action.decision)
         phase = _progress_phase(action.runnable_work_remains, waits, pauses)
     elif isinstance(action, CancelAction):
         phase = RunPhase.CANCELLING
@@ -528,6 +541,7 @@ def reduce_lifecycle(
             ),
             "async_children": tuple(async_children),
             "unit_reconciliations": tuple(unit_reconciliations),
+            "execution_target": execution_target,
             "evidence_frontier_digest": evidence_frontier_digest,
             "updated_at": command.occurred_at,
         }
@@ -765,6 +779,76 @@ def _reconcile_unit(
     if phase == RunPhase.WAITING and not remaining:
         phase = RunPhase.ACTIVE
     return phase, remaining
+
+
+def _apply_family_boundary_action(
+    phase: RunPhase,
+    waits: list[WaitCondition],
+    pauses: list[PauseDecision],
+    resumes: list[ResumeDecision],
+    action: SatisfyWaitAction | PauseAction | ResumeAction,
+    authority_refs: frozenset[str] | None,
+) -> RunPhase:
+    """Apply a wait release, pause or resume to the scoped axes and return the phase.
+
+    Shared by the direct path (run control is the boundary) and the boundary's `applied`
+    fact, so both record exactly the same effect. `authority_refs` is None when the
+    command's authority was already verified at acceptance.
+    """
+
+    if isinstance(action, SatisfyWaitAction):
+        if not any(item.condition_id == action.condition_id for item in waits):
+            raise ReductionRejected("wait_not_found", "wait condition is not active")
+        if any(
+            item.condition_id == action.condition_id and item.kind == "operator_reconciliation"
+            for item in waits
+        ):
+            raise ReductionRejected(
+                "operator_decision_required",
+                "an operator reconciliation wait is released only by reconcile_unit",
+            )
+        waits[:] = [item for item in waits if item.condition_id != action.condition_id]
+        return _progress_phase(action.runnable_work_remains, waits, pauses)
+    if isinstance(action, PauseAction):
+        if phase not in {RunPhase.ACTIVE, RunPhase.WAITING, RunPhase.PAUSED}:
+            raise ReductionRejected("invalid_phase", "run cannot be paused from its current phase")
+        if authority_refs is not None and action.decision.authority_ref not in authority_refs:
+            raise ReductionRejected("invalid_pause_authority", "pause authority was not granted")
+        if any(item.decision_id == action.decision.decision_id for item in pauses):
+            raise ReductionRejected("pause_exists", "pause decision identity already exists")
+        pauses.append(action.decision)
+        return _progress_phase(action.runnable_work_remains, waits, pauses)
+    pause = next(
+        (item for item in pauses if item.decision_id == action.decision.pause_decision_id),
+        None,
+    )
+    if pause is None:
+        raise ReductionRejected("pause_not_found", "resume must reference an active pause")
+    if authority_refs is not None and action.decision.authority_ref not in authority_refs:
+        raise ReductionRejected("invalid_resume_authority", "resume authority was not granted")
+    pauses.remove(pause)
+    resumes.append(action.decision)
+    return _progress_phase(action.runnable_work_remains, waits, pauses)
+
+
+def _probe_reservation(state: BudgetState, amounts: dict[str, int]) -> None:
+    """REQ-BP-GD-011: a resume must be able to reserve its next unit of work again.
+
+    The amounts are validated against the declared dimensions and hard caps exactly like a
+    reservation, but nothing is reserved: the boundary reserves at its next admission.
+    """
+
+    _validate_amounts(state, amounts)
+    reserved = dict(state.reserved)
+    for dimension, amount in amounts.items():
+        reserved[dimension] = reserved.get(dimension, 0) + amount
+    try:
+        _enforce_hard_caps(state.model_copy(update={"reserved": reserved}))
+    except ReductionRejected as error:
+        raise ReductionRejected(
+            "insufficient_budget",
+            f"resume cannot re-reserve the next unit of work: {error.message}",
+        ) from error
 
 
 def _progress_phase(

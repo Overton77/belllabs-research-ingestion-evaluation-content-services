@@ -34,6 +34,9 @@ def coordinator_activities(family: str, activities: Any) -> Sequence[ActivityCal
             activities.decide_result,
             activities.apply_cycle,
             activities.complete_stagegraph,
+            # RRM-007: the family boundary's run-control facts (waits, quiescence, applied
+            # boundary commands), bound to the current run version by the activity.
+            activities.apply_boundary_command,
         )
     if family == "GoalDirected":
         return (
@@ -42,6 +45,7 @@ def coordinator_activities(family: str, activities: Any) -> Sequence[ActivityCal
             activities.verify_iteration,
             activities.apply_lifecycle_command,
             activities.materialize_workflow_result,
+            activities.apply_boundary_command,
         )
     raise ValueError(f"undeclared BellLabs activity family: {family}")
 

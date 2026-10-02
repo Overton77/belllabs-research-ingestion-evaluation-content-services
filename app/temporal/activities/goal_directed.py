@@ -16,9 +16,14 @@ from app.application.orchestration.goal_directed import (
     GoalOperationTemplateProvider,
 )
 from app.application.orchestration.service import RunControlLifecycleGateway
+from app.application.run_control.boundary_interventions import (
+    BoundaryCommandApplicationService,
+)
 from app.application.run_control.service import RunControlService
 from app.domain.coordinator.launch import LaunchAuthorizationError, TerminalWorkflowCompletion
 from app.domain.orchestration.contracts import (
+    BoundaryLifecycleOutcome,
+    BoundaryLifecycleRequest,
     LifecycleCommandOutcome,
     LifecycleCommandRequest,
 )
@@ -29,6 +34,7 @@ from app.domain.orchestration.goal_directed_runtime import (
     GoalOperationReconciliationResult,
 )
 from app.domain.run_control.contracts import ActorContext
+from app.temporal.boundary_activities import apply_boundary_fact
 from app.temporal.registration.activities import coordinator_activities
 from app.temporal.registration.workflows import coordinator_workflows
 from app.temporal.workflow_sandbox import coordinator_workflow_runner
@@ -44,11 +50,13 @@ class GoalDirectedActivities:
         results: GoalDirectedOperationResultService,
         lifecycle: RunControlLifecycleGateway,
         completion: TerminalWorkflowCompletionPort | None = None,
+        boundary: BoundaryCommandApplicationService | None = None,
     ) -> None:
         self._operations = operations
         self._results = results
         self._lifecycle = lifecycle
         self._completion = completion
+        self._boundary = boundary
 
     @property
     def completion_configured(self) -> bool:
@@ -90,6 +98,20 @@ class GoalDirectedActivities:
     ) -> LifecycleCommandOutcome:
         return await self._lifecycle.execute(request)
 
+    @activity.defn(name="goaldirected.apply_boundary_command")
+    async def apply_boundary_command(
+        self, request: BoundaryLifecycleRequest
+    ) -> BoundaryLifecycleOutcome:
+        """RRM-007: the family boundary's run-control facts, bound to the current version."""
+
+        if self._boundary is None:
+            raise ApplicationError(
+                "boundary command application is not composed for GoalDirected",
+                type="boundary_application_unavailable",
+                non_retryable=True,
+            )
+        return await apply_boundary_fact(self._boundary, request)
+
     @activity.defn(name="coordinator.materialize_workflow_result")
     async def materialize_workflow_result(
         self, completion: TerminalWorkflowCompletion
@@ -119,6 +141,7 @@ def compose_goal_directed_activities(
     lifecycle: RunControlLifecycleGateway,
     actor: ActorContext,
     completion: TerminalWorkflowCompletionPort | None = None,
+    boundary: BoundaryCommandApplicationService | None = None,
 ) -> GoalDirectedActivities:
     """Wire production GoalDirected activities on the OperationWorkflow path."""
 
@@ -133,6 +156,7 @@ def compose_goal_directed_activities(
         results=GoalDirectedOperationResultService(documents),
         lifecycle=lifecycle,
         completion=completion,
+        boundary=boundary,
     )
 
 
