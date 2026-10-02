@@ -3,7 +3,7 @@
 **What to build:** an authorized operator can inspect active/terminal runs and semantic units, join macro and cognitive lineage, and select an earlier qualified checkpoint for a redacted state summary.
 
 **Blocked by:** RRM-004.
-**Status:** implemented; independent review pending
+**Status:** accepted 2026-10-02 (tested head `62409d8`, integration merge `ed598dd`; [evidence](../../../evidence_v2/research-runtime-mission/RRM-005/README.md))
 **Branch:** `wp/rrm-005-inspection`
 **Authority:** diagnostic EXEC-007, run-control authority, accepted inspection/projection contracts from RRM-001: REQ-CP-RUN-011/012 and `CON-CP-INSPECTION-READ-V1`, REQ-CP-EXEC-015 (Search Attributes), REQ-CP-EXEC-007 (clarified) — AMD-RRM-001 (accepted 2026-10-01 at meta `6c89143`, merged into meta main `a50d833`; see [RRM-001 contract authority](../RRM-001-contract-authority.md) §4)
 **Evidence:** `docs/migrations_instructions/evidence_v2/research-runtime-mission/RRM-005/`

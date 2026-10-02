@@ -1,6 +1,6 @@
 # RRM-005 implementation evidence
 
-Disposition: ready_for_review (independent review `approve`; review follow-ups applied in `62409d8`)
+Disposition: accepted 2026-10-02 (independent review `approve`; follow-ups in `62409d8`; merged into integration at `ed598dd`; integration fix `9a7e754`)
 Recorded date: 2026-10-02 (America/New_York)
 Qualification identity: RRM-005 inspect lifecycle and historical checkpoints. Requirements: REQ-CP-RUN-011 (scoped, non-mutating list/detail/unit/history reads; saver-based historical reads), REQ-CP-RUN-012 (freshness, `in_doubt`, redaction), REQ-CP-EXEC-007 (clarified: Queries are diagnostic only), REQ-CP-EXEC-015 (Search Attributes only). Contracts: `CON-CP-INSPECTION-READ-V1` (`belllabs.inspection-read.v1`), `CON-CP-TEMPORAL-IDENTITY-V1` (Search Attribute table), `CON-CP-CHECKPOINT-LINEAGE-V1` (namespace, stamps, recorded lineage) (AMD-RRM-001, accepted meta `main` `a50d833`).
 Base revision and head revision: base `bb964c5` (integration `integration/research-runtime-mission`: RRM-001, 003, 004 and CR-1 merged). Tested code head `ad961ee` on `wp/rrm-005-inspection`; the evidence/ticket commit follows it and changes documentation only. Not merged (the coordinator owns review and merge).
@@ -216,6 +216,18 @@ Post-review gates (tested code head `62409d8`; one pytest process at a time; eve
 
 The delta against the pre-review head is +3 passed in both full runs (the three review tests); the skips are unchanged.
 
+## Integration merge gates (coordinator)
+
+RRM-015 merged at `2b1da64`, RRM-005 at `ed598dd`. When the two met on integration, RRM-015's static guard flagged the two JSON-mode dumps in `checkpoint_summary_digest` (`app/domain/run_control/inspection.py`). The integrator fixed them in `9a7e754`, switching to `stable_json_dump`, which is value-identical for these set-free contracts. Gates on `9a7e754`:
+
+| Command | Result |
+|---|---|
+| `uv run --no-sync ruff check app tests scripts` | All checks passed |
+| `uv run --no-sync mypy app` | no issues, 349 files |
+| Hermetic full pytest | 850 passed, 56 skipped, 2 xfailed, 0 failed |
+| Full pytest with the disposable Postgres/Mongo DSNs and `--env-file` | 882 passed, 24 skipped, 2 xfailed, 0 failed |
+| `git diff --check` on each merge | clean |
+
 ## Final disposition
 
-ready_for_review
+accepted

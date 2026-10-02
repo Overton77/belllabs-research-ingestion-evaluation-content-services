@@ -1,6 +1,6 @@
 # RRM-015 implementation evidence
 
-Disposition: ready_for_review (independent review pending; not merged, the coordinator owns review and merge)
+Disposition: accepted 2026-10-02 (independent review `approve_with_fixes`; fixes in `83af2ff` and `e8017bd`; merged into integration at `2b1da64`)
 Recorded date: 2026-10-02
 Qualification identity: RRM-015 make every contract digest independent of set iteration order. Requirements: REQ-CP-RUN-003/008 and REQ-CP-EXEC-004/005 (idempotency and exact replay), CP-020 operation-journal invariants. No new contract identity, schema version, Temporal name, payload field, table, column or migration.
 Base revision and head revision: base `bb964c5` (integration `integration/research-runtime-mission`). Tested code head: `83af2ff` on `wp/rrm-015-set-order-stable-digests` (code commits `8960c53`, `1dd8013` and the review-fix commit `83af2ff`; documentation commits change documentation only). The gate numbers in "Deterministic verification" are from `1dd8013`; the post-review numbers are in "Review disposition".
@@ -210,6 +210,18 @@ Independent review: `approve_with_fixes` (nothing blocking). Fixes are in `83af2
 
 Reviewer-requested note on `Any`-typed members: the guard cannot see sets inside `Any`, `object` or `dict[str, Any]` members, so these models rely on caller discipline (their payloads are JSON documents, never Python sets). Models that dump through an audited JSON-mode digest and hold such members: `QueryExecutionIntent` (`parameters`, `redacted_parameters`, `records`), `OperationWorkflowResult` (`result` and output-contract results), `OperationSettlement` (`output_contract_results` and payload fields), `OperationJournalSettlement` (`detail`), `SemanticBindingPlan` (`payload`), `WorkflowResultRecord` (typed result payload) and `SchemaCatalog`. `OperationExecutionRequest` and `DomainEventEnvelope` also hold `Any` members; they are already on `stable_json_digest` and `stored_payload_matches`, which sort a set injected there. For the audited ones the remedy if a set is ever injected is a change to `stable_json_digest`, which is value-identical for set-free data.
 
+## Integration merge gates (coordinator)
+
+RRM-015 merged at `2b1da64`, RRM-005 at `ed598dd`. When the two met on integration, RRM-015's static guard flagged the two JSON-mode dumps in `checkpoint_summary_digest` (`app/domain/run_control/inspection.py`). The integrator fixed them in `9a7e754`, switching to `stable_json_dump`, which is value-identical for these set-free contracts. Gates on `9a7e754`:
+
+| Command | Result |
+|---|---|
+| `uv run --no-sync ruff check app tests scripts` | All checks passed |
+| `uv run --no-sync mypy app` | no issues, 349 files |
+| Hermetic full pytest | 850 passed, 56 skipped, 2 xfailed, 0 failed |
+| Full pytest with the disposable Postgres/Mongo DSNs and `--env-file` | 882 passed, 24 skipped, 2 xfailed, 0 failed |
+| `git diff --check` on each merge | clean |
+
 ## Final disposition
 
-ready_for_review
+accepted
