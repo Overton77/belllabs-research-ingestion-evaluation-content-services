@@ -197,10 +197,105 @@ async def test_relay_lists_pending_family_commands_under_the_runtime_role_and_sc
         (status,) = await run_service.list_boundary_commands("tenant-1", cancelling)
         assert status.command.target.sequence_space == CANCEL_SEQUENCE_SPACE
         assert [receipt.state.value for receipt in status.receipts] == ["accepted"]
-        assert await run_service.runs_with_pending_boundary_commands("tenant-1") == (
-            pending,
-            cancelling,
-        )
+        # Both runs' commands carry the fixture's single clock value, so acceptance order
+        # ties: the set is exact, each run once.
+        listed = await run_service.runs_with_pending_boundary_commands("tenant-1")
+        assert sorted(listed) == sorted((pending, cancelling))
     finally:
+        await runtime.close()
+        await owner.close()
+
+
+FAMILY_WRITER_ROLE = "belllabs_family_repository_writer"
+TERMINAL_RECEIPTS_MIGRATION = "0026_family_writer_terminal_boundary_receipts_v1.sql"
+
+
+async def _family_writer_role(connection: asyncpg.Connection) -> None:
+    await connection.execute(f"SET ROLE {FAMILY_WRITER_ROLE}")
+
+
+@pytest.mark.asyncio
+async def test_family_writer_closes_the_ledger_of_a_cancelled_run_only_with_migration_0026(
+    test_application_postgres_dsn: str,
+) -> None:
+    """StageGraph terminalizes through the family admission, committed as the family writer:
+    the terminal receipts of the run's boundary commands are written in that commit."""
+
+    from tests.unit.run_control.test_rrm_009_family_terminal_receipts import (
+        assert_ledger_closed,
+        cancelled_run,
+        terminal_family_service,
+        terminalize_through_the_family,
+    )
+
+    require_disposable_postgres(test_application_postgres_dsn)
+    owner = await asyncpg.create_pool(dsn=test_application_postgres_dsn, min_size=1, max_size=2)
+    runtime = await asyncpg.create_pool(
+        dsn=test_application_postgres_dsn, min_size=1, max_size=4, setup=_runtime_role
+    )
+    writer = await asyncpg.create_pool(
+        dsn=test_application_postgres_dsn, min_size=1, max_size=2, setup=_family_writer_role
+    )
+    try:
+        await reset_application_schema(owner)
+        async with owner.acquire() as connection:
+            assert await connection.fetchval(
+                "SELECT version FROM belllabs_control.schema_migrations WHERE version = $1",
+                TERMINAL_RECEIPTS_MIGRATION,
+            )
+            privileges = await connection.fetchrow(
+                """
+                SELECT
+                  has_table_privilege($1, 'belllabs_control.boundary_commands', 'SELECT')
+                    AS select_commands,
+                  has_table_privilege($1, 'belllabs_control.boundary_commands', 'INSERT')
+                    AS insert_commands,
+                  has_table_privilege($1, 'belllabs_control.boundary_command_receipts',
+                                      'SELECT') AS select_receipts,
+                  has_table_privilege($1, 'belllabs_control.boundary_command_receipts',
+                                      'INSERT') AS insert_receipts,
+                  has_table_privilege($1, 'belllabs_control.boundary_command_receipts',
+                                      'UPDATE') AS update_receipts,
+                  has_table_privilege($1, 'belllabs_control.boundary_command_receipts',
+                                      'DELETE') AS delete_receipts
+                """,
+                FAMILY_WRITER_ROLE,
+            )
+        # Least privilege: read both insert-only ledgers, append receipts, nothing else.
+        assert dict(privileges) == {
+            "select_commands": True,
+            "insert_commands": False,
+            "select_receipts": True,
+            "insert_receipts": True,
+            "update_receipts": False,
+            "delete_receipts": False,
+        }
+        run_service = terminal_family_service(
+            PostgresRunControlRepository(runtime, family_writer_pool=writer)
+        )
+        run_id = await cancelled_run(run_service)
+        # Without the 0026 grants the family writer cannot close the ledger, and the whole
+        # terminalizing commit rolls back (the run stays cancelling).
+        async with owner.acquire() as connection:
+            await connection.execute(
+                "REVOKE SELECT ON belllabs_control.boundary_commands, "
+                "belllabs_control.boundary_command_receipts "
+                f"FROM {FAMILY_WRITER_ROLE}"
+            )
+            await connection.execute(
+                "REVOKE INSERT ON belllabs_control.boundary_command_receipts "
+                f"FROM {FAMILY_WRITER_ROLE}"
+            )
+        with pytest.raises(asyncpg.InsufficientPrivilegeError):
+            await terminalize_through_the_family(run_service, run_id)
+        assert (await run_service.get_run("tenant-1", run_id)).phase == RunPhase.CANCELLING
+        async with owner.acquire() as connection:
+            await connection.execute(
+                (MIGRATIONS_ROOT / TERMINAL_RECEIPTS_MIGRATION).read_text(encoding="utf-8")
+            )
+        receipt = await terminalize_through_the_family(run_service, run_id)
+        await assert_ledger_closed(run_service, run_id, receipt)
+    finally:
+        await writer.close()
         await runtime.close()
         await owner.close()

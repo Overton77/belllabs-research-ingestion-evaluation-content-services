@@ -878,6 +878,8 @@ class PostgresRunControlRepository:
                 await self._insert_ledger(connection, command.ledger_entries)
                 await self._insert_effect_ledger(connection, command.effect_entries)
                 await self._insert_events(connection, command.events)
+            # The terminal receipts of a family-admitted terminalization (migration 0026).
+            await self._record_boundary_commands(connection, command)
             await self._inject("family_admission.after_run_control")
             if accepted:
                 await connection.execute(
