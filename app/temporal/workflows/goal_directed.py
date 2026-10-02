@@ -69,6 +69,12 @@ JOURNALED_SETTLEMENT_PATCH = "rrm-016-journaled-goal-settlement"
 # already `cancelling` is not retried: the family enters its cancellation boundary (the seam
 # RRM-008's saga owns). Pre-patch histories fail on a stale result, as they did.
 STALE_VERSION_RETRY_PATCH = "rrm-016-stale-version-retry"
+# RRM-019 (REQ-BP-GD-004, REQ-BP-GD-010, REQ-CP-RUN-005): a completed run promotes exactly the
+# outputs its terminalization proposal names, which are the final executor's outputs that the
+# accepting verifier admitted. Earlier iterations' outputs stay immutable lineage refs in the
+# result but were never accepted by a verifier, so they are not promoted. Pre-patch histories
+# promote the union of every iteration's outputs, as they did.
+VERIFIED_TERMINAL_OUTPUTS_PATCH = "rrm-019-verified-terminal-outputs"
 STALE_RUN_VERSION = "stale_run_version"
 CANCELLING = "cancelling"
 POLICY_PAUSE_PREFIX = "goal-policy-pause:"
@@ -414,10 +420,15 @@ class GoalDirectedWorkflow:
         result = interpreter.result(state)
 
         final_verification = result.verification_results[-1]
+        accepted_output_refs = (
+            terminalization_proposal.output_refs
+            if workflow.patched(VERIFIED_TERMINAL_OUTPUTS_PATCH)
+            else result.output_refs
+        )
         evidence_digest = sha256_digest(
             {
                 "verification": final_verification.verification_ref,
-                "outputs": result.output_refs,
+                "outputs": accepted_output_refs,
                 "obligations": final_verification.accepted_obligation_refs,
             }
         )
@@ -447,9 +458,7 @@ class GoalDirectedWorkflow:
         # Promoting them and then proposing an empty terminal output set would
         # contradict the run-control terminalization contract.
         promotable_output_refs = (
-            result.output_refs
-            if terminalization_proposal.proposed_outcome == "complete"
-            else ()
+            accepted_output_refs if terminalization_proposal.proposed_outcome == "complete" else ()
         )
         for output_ref in promotable_output_refs:
             lifecycle = await self._lifecycle(

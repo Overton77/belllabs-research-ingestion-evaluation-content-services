@@ -41,6 +41,7 @@ from app.application.operations.operation_execution import (
 )
 from app.application.operations.operation_journal import OperationJournalService
 from app.application.orchestration.goal_directed import (
+    GoalDirectedDocumentRepository,
     GoalDirectedOperationPreparationService,
     GoalDirectedOperationResultService,
     GoalOperationTemplateProvider,
@@ -358,7 +359,8 @@ class GoalScriptedModel(ScriptedRecoveryModel):
     """
 
     accept_at: int = 2
-    # One stable output record across iterations (default); `False` reproduces RRM-019.
+    # One stable output record across iterations (default); `False` gives each iteration its
+    # own output ref (the RRM-019 case: only the verified final output is promoted).
     stable_output_ref: bool = True
     _turns: list[dict[str, Any]] = PrivateAttr(default_factory=list)
 
@@ -539,7 +541,8 @@ class GoalComposition:
     run_control: RunControlService
     service: OperationExecutionService
     family: GoalDirectedActivities
-    documents: RecordingGoalDocuments
+    # `RecordingGoalDocuments` (in memory) unless a durable repository was composed (RRM-018).
+    documents: Any
     templates: dict[str, OperationExecutionRequest]
     model: GoalScriptedModel
     binding: DeepAgentExecutionBinding
@@ -558,7 +561,7 @@ async def compose_goal_directed(
     blueprint: GoalDirectedBlueprint,
     claimed_by: str = "operation-runtime:rrm-016",
     template_provider: GoalOperationTemplateProvider | None = None,
-    documents: RecordingGoalDocuments | None = None,
+    documents: GoalDirectedDocumentRepository | None = None,
 ) -> GoalComposition:
     """Compose the production GoalDirected activities and operation boundary."""
 
