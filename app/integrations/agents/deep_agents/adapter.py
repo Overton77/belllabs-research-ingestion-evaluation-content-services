@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 from collections.abc import Mapping
 from contextlib import AsyncExitStack
@@ -7,7 +8,9 @@ from dataclasses import dataclass
 from typing import Annotated, Any, NotRequired, Protocol, cast
 
 from deepagents import create_deep_agent
-from deepagents.backends.protocol import SandboxBackendProtocol
+from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
+from deepagents.backends.state import StateBackend
+from deepagents.backends.utils import file_data_to_string
 from deepagents.middleware.filesystem import FilesystemPermission
 from deepagents.middleware.subagents import SubAgent
 from langchain.agents.middleware.types import AgentMiddleware
@@ -37,6 +40,7 @@ from app.domain.operation_execution.checkpoint_lineage import (
 )
 from app.domain.operation_execution.contracts import (
     AsyncSubagentContract,
+    CapturedWorkspaceCandidate,
     DeepAgentExecutionBinding,
     OperationExecutionBinding,
     RuntimeInvocation,
@@ -70,6 +74,23 @@ class AsyncSubagentMiddlewareFactory(Protocol):
     ) -> AgentMiddleware[Any, Any, Any]: ...
 
 
+class WorkspaceOutputCapturePort(Protocol):
+    """Captures a file the agent wrote into one of its exclusive writable slots (RRM-009).
+
+    REQ-CP-DA-014: capture makes the bytes and descriptor durable as a workspace candidate;
+    only the governed promotion decision makes them a consumable artifact.
+    """
+
+    async def capture(
+        self, binding: OperationExecutionBinding, logical_path: str, content: bytes
+    ) -> CapturedWorkspaceCandidate: ...
+
+
+MAX_CAPTURED_OUTPUT_FILES = 64
+MAX_CAPTURED_OUTPUT_BYTES = 4_000_000
+MAX_CAPTURE_LISTING_DEPTH = 4
+
+
 class DeepAgentRuntimeAdapter:
     """The sole production `create_deep_agent` composition root."""
 
@@ -78,9 +99,11 @@ class DeepAgentRuntimeAdapter:
         materializer: ExactDeepAgentMaterializer,
         *,
         async_subagents: AsyncSubagentMiddlewareFactory | None = None,
+        workspace_outputs: WorkspaceOutputCapturePort | None = None,
     ) -> None:
         self._materializer = materializer
         self._async_subagents = async_subagents
+        self._workspace_outputs = workspace_outputs
 
     async def build_hosted_async_subagent_graph(
         self,
@@ -257,6 +280,12 @@ class DeepAgentRuntimeAdapter:
                     disclosure_observer.disclosed_skills,
                     permissions is not None,
                 )
+                # RRM-009 (REQ-CP-DA-014): the agent's writable-slot files become durable
+                # workspace candidates before the result settles; a capture failure after a
+                # terminal checkpoint is classified by the narrowed post-dispatch rule.
+                inspection["workspace_candidates"] = await self._capture_workspace_outputs(
+                    materialized.backend, invocation.binding, actual_state
+                )
                 return RuntimeResult(
                     output_text=output_text,
                     structured_output=structured if isinstance(structured, dict) else None,
@@ -276,6 +305,31 @@ class DeepAgentRuntimeAdapter:
                     terminal_result_observed=terminal,
                     candidates=candidates,
                 ) from error
+
+    async def _capture_workspace_outputs(
+        self,
+        backend: BackendProtocol,
+        binding: OperationExecutionBinding,
+        state: dict[str, Any],
+    ) -> list[dict[str, object]]:
+        if self._workspace_outputs is None:
+            return []
+        captured: list[dict[str, object]] = []
+        for logical_path, content in await _slot_files(
+            backend, binding.workspace.exclusive_write_paths, state
+        ):
+            candidate = await self._workspace_outputs.capture(binding, logical_path, content)
+            captured.append(
+                {
+                    "logical_path": candidate.logical_path,
+                    "output_slot": candidate.output_slot,
+                    "candidate_id": candidate.candidate_id,
+                    "content_digest": candidate.content_digest,
+                    "size_bytes": candidate.size_bytes,
+                    "media_type": candidate.media_type,
+                }
+            )
+        return captured
 
 
 def _effective_permissions(
@@ -548,6 +602,68 @@ async def _terminal_result_may_exist(
     assert classified.leaf_id is not None
     leaf = await checkpointer.aget_tuple(root_checkpoint_config(plan.namespace, classified.leaf_id))
     return True, ((_qualified(plan, leaf),) if leaf is not None else ())
+
+def _within(path: str, slot: str) -> bool:
+    normalized = slot.rstrip("/")
+    return path == normalized or path.startswith(normalized + "/")
+
+
+async def _slot_files(
+    backend: BackendProtocol, slots: tuple[str, ...], state: dict[str, Any]
+) -> list[tuple[str, bytes]]:
+    """Every file under the exclusive writable slots, from the state or the sandbox."""
+
+    files: list[tuple[str, bytes]] = []
+    if isinstance(backend, StateBackend):
+        state_files = state.get("files", {})
+        for path in sorted(state_files):
+            if not any(_within(path, slot) for slot in slots):
+                continue
+            file_data = state_files[path]
+            text = file_data_to_string(file_data)
+            content = (
+                text.encode("utf-8")
+                if file_data.get("encoding", "utf-8") == "utf-8"
+                else base64.standard_b64decode(text)
+            )
+            files.append((path, content))
+    elif isinstance(backend, SandboxBackendProtocol):
+        paths: list[str] = []
+        for slot in slots:
+            paths.extend(await _list_sandbox_files(backend, slot, depth=0))
+        downloaded = (
+            await backend.adownload_files(sorted(paths))
+            if hasattr(backend, "adownload_files")
+            else backend.download_files(sorted(paths))
+        )
+        for item in downloaded:
+            if item.error is None and item.content is not None:
+                files.append((item.path, item.content))
+    total = sum(len(content) for _path, content in files)
+    if len(files) > MAX_CAPTURED_OUTPUT_FILES or total > MAX_CAPTURED_OUTPUT_BYTES:
+        raise DeepAgentMaterializationError(
+            "writable-slot outputs exceed the capture bound "
+            f"({MAX_CAPTURED_OUTPUT_FILES} files, {MAX_CAPTURED_OUTPUT_BYTES} bytes)"
+        )
+    return files
+
+
+async def _list_sandbox_files(
+    backend: SandboxBackendProtocol, path: str, *, depth: int
+) -> list[str]:
+    if depth > MAX_CAPTURE_LISTING_DEPTH:
+        return []
+    listing = await backend.als(path) if hasattr(backend, "als") else backend.ls(path)
+    if listing.error is not None or not listing.entries:
+        return []
+    found: list[str] = []
+    for entry in listing.entries:
+        entry_path = str(entry["path"])
+        if entry.get("is_dir"):
+            found.extend(await _list_sandbox_files(backend, entry_path, depth=depth + 1))
+        else:
+            found.append(entry_path)
+    return found
 
 
 async def _capture_result(

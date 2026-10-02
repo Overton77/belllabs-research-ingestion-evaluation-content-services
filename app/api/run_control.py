@@ -28,6 +28,13 @@ from app.application.run_control.boundary_interventions import (
 )
 from app.application.run_control.postgres_run_control_repository import PostgresRunControlRepository
 from app.application.run_control.run_control_repository import RunControlRepository
+from app.application.run_control.run_launch import (
+    LAUNCH_PERMISSION,
+    RunLaunchReceipt,
+    RunLaunchRejected,
+    RunLaunchRequest,
+    RunLaunchService,
+)
 from app.application.run_control.schema_grounding_admission import (
     register_schema_grounding_admission_policies,
 )
@@ -304,6 +311,19 @@ async def get_unit_reconciliation_service(request: Request) -> UnitReconciliatio
         return service
 
 
+async def get_run_launch_service(request: Request) -> RunLaunchService:
+    """The governed API-to-Temporal launch (RRM-009); composed by the deployment
+    (`compose_runtime_control`) on `app.state.run_launch_service`."""
+
+    launcher = getattr(request.app.state, "run_launch_service", None)
+    if launcher is None:
+        raise HTTPException(
+            status_code=503,
+            detail="governed Temporal launch is not composed (RUN_CONTROL_TEMPORAL_ENABLED)",
+        )
+    return launcher
+
+
 async def get_generic_artifact_submitter(
     request: Request,
 ) -> GenericArtifactSubmissionPort:
@@ -376,6 +396,7 @@ ArtifactSubmitter = Annotated[
     GenericArtifactSubmissionPort,
     Depends(get_generic_artifact_submitter),
 ]
+Launcher = Annotated[RunLaunchService, Depends(get_run_launch_service)]
 
 
 @router.post("/run-requests", response_model=AdmissionDecision, status_code=201)
@@ -398,6 +419,34 @@ async def admit_run(
     return await service.admit(
         run_request.model_copy(update={"actor": trusted_actor, "requested_at": datetime.now(UTC)})
     )
+
+
+@router.post("/runs/{run_id}/launch", response_model=RunLaunchReceipt, status_code=202)
+async def launch_run(
+    run_id: str, launch: RunLaunchRequest, principal: Principal, launcher: Launcher
+) -> RunLaunchReceipt:
+    """RRM-009: start the admitted run's `BellLabsRunWorkflow` from the facade. The family
+    input is verified against the admitted authority; a fork-derived run starts with its
+    parent and patched templates; a repeated launch of a pending run is idempotent."""
+
+    if launch.run_id != run_id:
+        raise HTTPException(status_code=422, detail="path and launch run ids differ")
+    _authorize_scope(principal, launch.request_scope)
+    granted = principal_permissions(principal)
+    if LAUNCH_PERMISSION not in granted:
+        raise HTTPException(status_code=403, detail=f"{LAUNCH_PERMISSION} permission required")
+    actor = ActorContext(
+        actor_id=principal.actor_id,
+        permissions=granted,
+        authority_refs=principal.authority_refs,
+    )
+    try:
+        return await launcher.launch(launch, actor)
+    except RunLaunchRejected as error:
+        status = 409 if error.retryable or error.code == "run_not_pending" else 422
+        raise HTTPException(
+            status_code=status, detail={"code": error.code, "message": error.message}
+        ) from error
 
 
 @router.post("/runs/{run_id}/commands", response_model=CommandResult)

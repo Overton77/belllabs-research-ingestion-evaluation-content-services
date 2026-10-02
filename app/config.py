@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -176,6 +177,45 @@ class Settings(BaseSettings):
         le=2_000_000,
     )
 
+    # RRM-009: production runtime composition. The API composes Temporal-backed inspection,
+    # boundary delivery (with its relay), the governed launch path and the generic artifact
+    # submitter only when this is set; the worker verifies the Search Attributes at
+    # readiness and composes the deployment `WorkerActivityCompositionFactory` when
+    # COORDINATOR_LAUNCH_ENABLED is set.
+    run_control_temporal_enabled: bool = False
+    boundary_relay_interval_seconds: float = Field(default=5.0, ge=0.5, le=300)
+    # Scopes the delivery relay re-drives; forced RLS confines every read to one scope.
+    boundary_relay_request_scopes: tuple[str, ...] = ()
+    # One shared key for multi-replica inspection pagination (>= 16 bytes). When absent the
+    # checkpoint signing key derives it, which is also shared by every replica.
+    inspection_cursor_key: SecretStr | None = None
+    # REQ-CP-DA-004 (clarified): the persistent, registered LangGraph saver and store. The
+    # saver DSN defaults to the application authority DSN; the schema keeps checkpoints out
+    # of `belllabs_control`. `setup` runs the saver/store DDL (an administrative step).
+    langgraph_checkpoint_database_direct: SecretStr | None = None
+    langgraph_checkpoint_schema: str = Field(
+        default="belllabs_langgraph", pattern=r"^[a-z_][a-z0-9_]{0,62}$"
+    )
+    langgraph_checkpoint_setup: bool = False
+    # The exact checkpointer/store definition digests the deployment serves with that saver
+    # and store (`ExactComponentRegistry` keys); bindings naming any other digest refuse.
+    deep_agent_checkpointer_digests: tuple[str, ...] = ()
+    deep_agent_store_digests: tuple[str, ...] = ()
+    # Deployment-stable journal claimant (RRM-004): a per-worker value would make the
+    # replacement worker's claim replay conflict.
+    operation_journal_claimed_by: str = Field(default="operation-runtime:belllabs", min_length=1)
+    # Content-addressed artifact and result payloads when no S3 bucket is configured: a
+    # directory every worker and the API can reach (a local object-store stand-in).
+    artifact_payload_root: Path | None = None
+    async_subagent_submitter_identity: str = Field(
+        default="belllabs-async-submitter", min_length=1
+    )
+    # Digest/revision pins of the search and browser capabilities the deployment mounts.
+    capability_pins_path: Path = (
+        PROJECT_ROOT / "infra" / "capability-pins" / "research-capabilities.json"
+    )
+    deep_agent_sandbox_workspace_root: Path | None = None
+
     mongodb_uri: SecretStr
     mongodb_database: str = "belllabsbiotech"
     operation_binding_write_authority: Literal["legacy", "v2"] = "legacy"
@@ -266,6 +306,28 @@ class Settings(BaseSettings):
     def checkpoint_signing_key(self) -> bytes:
         secret = self.runtime_checkpoint_signing_key or self.supabase_secret_key
         return secret.get_secret_value().encode()
+
+    @property
+    def langgraph_checkpoint_dsn(self) -> str:
+        """The persistent saver/store DSN (psycopg), with the dedicated schema selected."""
+
+        value = (
+            self.langgraph_checkpoint_database_direct.get_secret_value()
+            if self.langgraph_checkpoint_database_direct is not None
+            else self.application_postgres_dsn
+        )
+        separator = "&" if "?" in value else "?"
+        return f"{value}{separator}options=-c%20search_path%3D{self.langgraph_checkpoint_schema}"
+
+    @property
+    def inspection_cursor_secret(self) -> bytes:
+        """The shared inspection cursor key: configured, or derived from the signing key."""
+
+        if self.inspection_cursor_key is not None:
+            return self.inspection_cursor_key.get_secret_value().encode()
+        return hmac.new(
+            self.checkpoint_signing_key, b"belllabs.inspection-cursor.v1", "sha256"
+        ).digest()
 
 
 @lru_cache

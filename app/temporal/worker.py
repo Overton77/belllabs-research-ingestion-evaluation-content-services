@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -55,6 +56,10 @@ from app.integrations.schema_neo4j_executor import (
     Neo4jBoundedReadExecutorFactory,
 )
 from app.integrations.temporal import create_temporal_client
+from app.temporal.artifact_activities import (
+    ArtifactPromotionActivities,
+    create_generic_artifact_worker,
+)
 from app.temporal.coordinator_runtime import (
     CoordinatorWorkerActivities,
     coordinator_task_queues,
@@ -70,19 +75,30 @@ from app.temporal.operation_activities import (
     OperationExecutionActivities,
     create_agent_cognitive_worker,
 )
-from app.temporal.registration.task_queues import BellLabsTaskQueues
+from app.temporal.registration.task_queues import (
+    BellLabsTaskQueues,
+    generic_artifact_task_queue,
+)
 from app.temporal.schema_grounding_activities import (
     SchemaGroundingActivities,
     create_schema_grounding_activity_worker,
 )
+from app.temporal.search_attributes import verify_belllabs_search_attributes
 
 
 @dataclass(frozen=True)
 class WorkerActivityComposition:
-    """Deployment-supplied, fully wired activity adapters."""
+    """Deployment-supplied, fully wired activity adapters.
+
+    `artifacts` serves `GenericArtifactWorkflow` (candidate capture and governed promotion)
+    on its own queue; `resources` holds provider lifespans the composition opened (the
+    persistent LangGraph saver and store) and is closed when the workers stop.
+    """
 
     coordinator: CoordinatorWorkerActivities
     operation: OperationExecutionActivities
+    artifacts: ArtifactPromotionActivities | None = None
+    resources: AsyncExitStack | None = None
 
 
 class WorkerActivityCompositionFactory(Protocol):
@@ -123,13 +139,20 @@ async def main(
     family_admission_registry: FamilyAdmissionRegistry | None = None,
 ) -> None:
     settings = get_settings()
-    if settings.coordinator_launch_enabled and composition_factory is None:
-        raise RuntimeError(
-            "COORDINATOR_LAUNCH_ENABLED requires a deployment WorkerActivityCompositionFactory; "
-            "refusing to advertise injection-only workers as active"
-        )
     configure_langsmith_tracing(settings)
     client = await create_temporal_client(settings)
+    if settings.coordinator_launch_enabled:
+        if composition_factory is None:
+            # RRM-009: the deployment composition is the repository's own; an explicit
+            # factory is still accepted so a deployment can register extra exact components.
+            from app.temporal.deployment_composition import (
+                ProductionWorkerActivityCompositionFactory,
+            )
+
+            composition_factory = ProductionWorkerActivityCompositionFactory(client)
+        # REQ-CP-EXEC-015: readiness verifies the namespace's Search Attributes and never
+        # mutates it; `scripts/register_belllabs_search_attributes.py` is the admin step.
+        await verify_belllabs_search_attributes(client, settings.temporal_namespace)
     mongo_client, _database = await create_mongodb(settings)
     postgres_pool = await create_application_postgres_pool(settings)
     family_writer_pool = None
@@ -164,6 +187,8 @@ async def main(
         )
         coordinator_workers = None
         operation_worker = None
+        artifact_worker = None
+        composition: WorkerActivityComposition | None = None
         if settings.coordinator_launch_enabled:
             assert composition_factory is not None
             composition = await composition_factory.build(
@@ -184,6 +209,13 @@ async def main(
                 ).agent_cognitive,
                 activities=composition.operation,
             )
+            if composition.artifacts is not None:
+                artifact_worker = create_generic_artifact_worker(
+                    client,
+                    task_queue=generic_artifact_task_queue(settings.temporal_task_queue),
+                    operations=composition.operation,
+                    artifacts=composition.artifacts,
+                )
         linked_service = LinkedRunService(
             control_plane,
             run_control,
@@ -231,7 +263,13 @@ async def main(
             workers.extend(coordinator_workers.workers)
         if operation_worker is not None:
             workers.append(operation_worker)
-        await asyncio.gather(*(worker.run() for worker in workers))
+        if artifact_worker is not None:
+            workers.append(artifact_worker)
+        try:
+            await asyncio.gather(*(worker.run() for worker in workers))
+        finally:
+            if composition is not None and composition.resources is not None:
+                await composition.resources.aclose()
     finally:
         if family_writer_pool is not None:
             await family_writer_pool.close()

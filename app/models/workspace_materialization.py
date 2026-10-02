@@ -50,3 +50,36 @@ class WorkspaceMaterializationManifestDocument(Document):
                 ]
             ),
         ]
+
+
+class WorkspaceCandidateDocument(Document):
+    """A captured writable-slot candidate's descriptor and its object-store address.
+
+    RRM-009: candidate bytes live in the content-addressed artifact payload store, so a
+    replacement worker or the promotion activity reads them without the capturing worker's
+    local disk. The descriptor is insert-once per candidate identity.
+    """
+
+    candidate_id: str
+    namespace_id: str
+    workspace_id: str
+    logical_path: str
+    content_digest: str
+    descriptor: dict[str, Any]
+    object_ref: str
+    size_bytes: int
+    recorded_at: datetime
+
+    class Settings:
+        name = "workspace_candidates"
+        indexes = [
+            IndexModel([("candidate_id", ASCENDING)], unique=True),
+            IndexModel(
+                [
+                    ("namespace_id", ASCENDING),
+                    ("workspace_id", ASCENDING),
+                    ("logical_path", ASCENDING),
+                    ("recorded_at", ASCENDING),
+                ]
+            ),
+        ]

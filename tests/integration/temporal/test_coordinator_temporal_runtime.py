@@ -267,13 +267,37 @@ async def test_worker_readiness_requires_actual_pollers_for_each_exact_queue() -
 async def test_production_worker_fails_closed_before_startup_without_real_adapters(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        production_worker,
-        "get_settings",
-        lambda: SimpleNamespace(coordinator_launch_enabled=True),
+    """RRM-009: with launch enabled the worker composes the deployment factory itself and
+    verifies the namespace's Search Attributes at readiness (never mutating them). A
+    namespace without them stops the worker before any store is opened or any worker is
+    advertised."""
+
+    from app.temporal.search_attributes import SearchAttributeRegistrationError
+
+    settings = SimpleNamespace(
+        coordinator_launch_enabled=True,
+        temporal_namespace="unregistered",
+        langsmith_tracing=False,
+        langsmith_api_key=None,
+        langsmith_project="",
+        langsmith_endpoint="",
+        langsmith_workspace_id=None,
     )
-    with pytest.raises(
-        RuntimeError,
-        match="requires a deployment WorkerActivityCompositionFactory",
-    ):
+    monkeypatch.setattr(production_worker, "get_settings", lambda: settings)
+    monkeypatch.setattr(production_worker, "configure_langsmith_tracing", lambda _settings: False)
+
+    async def connect(_settings: Any) -> object:
+        return object()
+
+    async def verify(_client: Any, namespace: str) -> None:
+        raise SearchAttributeRegistrationError(f"BellLabsRunId is not registered in {namespace}")
+
+    async def never(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("no store is opened before readiness verification passes")
+
+    monkeypatch.setattr(production_worker, "create_temporal_client", connect)
+    monkeypatch.setattr(production_worker, "verify_belllabs_search_attributes", verify)
+    monkeypatch.setattr(production_worker, "create_mongodb", never)
+    monkeypatch.setattr(production_worker, "create_application_postgres_pool", never)
+    with pytest.raises(SearchAttributeRegistrationError, match="unregistered"):
         await production_worker.main()

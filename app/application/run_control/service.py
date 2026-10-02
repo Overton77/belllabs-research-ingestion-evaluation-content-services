@@ -1111,6 +1111,15 @@ class RunControlService:
     ) -> tuple[BoundaryCommandStatus, ...]:
         return await self._repository.list_boundary_commands(request_scope, run_id)
 
+    async def runs_with_pending_boundary_commands(
+        self, request_scope: str, *, limit: int = 100
+    ) -> tuple[str, ...]:
+        """Runs whose accepted family commands await delivery (the RRM-009 relay's read)."""
+
+        return await self._repository.runs_with_pending_boundary_commands(
+            request_scope, limit=limit
+        )
+
     async def get_boundary_command(
         self, request_scope: str, run_id: str, idempotency_issuer: str, command_id: str
     ) -> BoundaryCommandStatus | None:

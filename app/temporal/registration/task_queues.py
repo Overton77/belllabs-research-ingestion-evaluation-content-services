@@ -29,3 +29,15 @@ class BellLabsTaskQueues:
             sandbox_external_job=f"{base}-sandbox-external-job",
             verification_reconciliation=f"{base}-verification-reconciliation",
         )
+
+
+def generic_artifact_task_queue(base: str) -> str:
+    """The queue of `GenericArtifactWorkflow` and its `artifact.promote` activity (RRM-009).
+
+    The workflow runs `operation.execute` on its own queue, so the worker serving it
+    registers both activities; the API's generic artifact submitter targets the same name.
+    """
+
+    if not base:
+        raise ValueError("base Temporal task queue must be non-empty")
+    return f"{base}-generic-artifact"

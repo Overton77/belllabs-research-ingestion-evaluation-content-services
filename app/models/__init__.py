@@ -39,8 +39,10 @@ from app.models.sandbox_snapshot import (
     SandboxSnapshotDocument,
 )
 from app.models.schema_grounding import SchemaGroundingRecordDocument
+from app.models.stagegraph import StageGraphOperationTemplateDocument
 from app.models.web_research import WebResearchRecordDocument
 from app.models.workspace_materialization import (
+    WorkspaceCandidateDocument,
     WorkspaceMaterializationManifestDocument,
     WorkspaceSlotReservationDocument,
 )
@@ -77,6 +79,8 @@ __all__ = [
     "SandboxSnapshotCloneDocument",
     "SandboxSnapshotDocument",
     "SchemaGroundingRecordDocument",
+    "StageGraphOperationTemplateDocument",
+    "WorkspaceCandidateDocument",
     "WorkspaceMaterializationManifestDocument",
     "WorkspaceSlotReservationDocument",
     "WebResearchRecordDocument",

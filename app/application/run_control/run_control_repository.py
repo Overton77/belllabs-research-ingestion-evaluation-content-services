@@ -318,6 +318,12 @@ class RunControlRepository(Protocol):
         self, request_scope: str, run_id: str
     ) -> tuple[BoundaryCommandStatus, ...]: ...
 
+    async def runs_with_pending_boundary_commands(
+        self, request_scope: str, *, limit: int = 100
+    ) -> tuple[str, ...]:
+        """Runs of the scope holding an accepted, undelivered family command (RRM-009 relay)."""
+        ...
+
     async def record_boundary_receipt(
         self,
         request_scope: str,
@@ -649,6 +655,24 @@ class InMemoryRunControlRepository:
             )
             if item_run == run_id
         )
+
+    async def runs_with_pending_boundary_commands(
+        self, request_scope: str, *, limit: int = 100
+    ) -> tuple[str, ...]:
+        runs: list[str] = []
+        for (item_run, _, _), status in sorted(
+            self._boundary_commands.items(), key=lambda entry: entry[1].command.recorded_at
+        ):
+            if item_run in runs or not pending_delivery(status):
+                continue
+            try:
+                self._require_scope(request_scope, item_run)
+            except RunControlNotFound:
+                continue
+            runs.append(item_run)
+            if len(runs) >= limit:
+                break
+        return tuple(runs)
 
     async def record_boundary_receipt(
         self,
