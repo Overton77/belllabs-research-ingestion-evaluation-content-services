@@ -371,7 +371,7 @@ class LiveGoalActivities(SandboxRolloverActivities):
             ),
         )
         # RRM-016: the family consumes each operation's journaled run-control settlement.
-        self.reconciler = governed_result_service(self.documents, run_control)
+        self.reconciler = governed_result_service(self.documents, run_control, bindings)
         self._lifecycle = RunControlLifecycleGateway(
             run_control,
             ExactBindingVerifier(configuration_digest, sha256_digest(blueprint)),

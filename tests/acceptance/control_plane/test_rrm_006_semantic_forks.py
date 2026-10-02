@@ -1058,7 +1058,8 @@ async def test_goal_directed_fork_starts_fresh_with_the_patched_goal(
                 ),
             ),
             results=GoalDirectedOperationResultService(
-                documents, RunControlGoalOperationSettlements(stack.run_control)
+                documents,
+                RunControlGoalOperationSettlements(stack.run_control, stack.bindings),
             ),
             lifecycle=RunControlLifecycleGateway(
                 stack.run_control, ExactBindingVerifier(), orchestration_lifecycle_actor()

@@ -220,7 +220,7 @@ class RunControlGoalOperationSettlements:
     def __init__(
         self,
         run_control: GoalOperationSettlementReader,
-        bindings: GoalOperationBindingReader | None = None,
+        bindings: GoalOperationBindingReader,
     ) -> None:
         self._run_control = run_control
         self._bindings = bindings
@@ -241,18 +241,17 @@ class RunControlGoalOperationSettlements:
         settlement_id = operation_settlement_id(binding_id)
         effect_claim_id = operation_effect_claim_id(scope, binding_id)
         reservation_id = operation.budget_reservation_id
-        if self._bindings is not None:
-            # Review fix 4: the binding and reservation the settlement is read under are the
-            # stored binding's, which is the exact admitted operation intent.
-            stored = await self._bindings.get_binding_by_id(binding_id, request_scope=scope)
-            if (
-                stored is None
-                or stored != bind_operation_execution_request(operation)
-                or stored.budget_reservation_id != reservation_id
-            ):
-                raise GoalOperationSettlementUnavailable(
-                    "operation binding is not the stored binding of the admitted operation"
-                )
+        # Review fix 4 (required since the re-check): the binding and reservation the
+        # settlement is read under are the stored binding's, the exact admitted intent.
+        stored = await self._bindings.get_binding_by_id(binding_id, request_scope=scope)
+        if (
+            stored is None
+            or stored != bind_operation_execution_request(operation)
+            or stored.budget_reservation_id != reservation_id
+        ):
+            raise GoalOperationSettlementUnavailable(
+                "operation binding is not the stored binding of the admitted operation"
+            )
         # Settlement facts are monotonic: read them first and the run version last, so the
         # version the family continues from is at or after the settlement.
         budget = await self._run_control.get_budget(scope, run_id)

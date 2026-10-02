@@ -77,7 +77,7 @@ async def _goal_unit(window: str) -> tuple[Any, Any, Any, str]:
 
 async def _consume(harness: Any, dispatch: Any, claim: Any, result: Any) -> Any:
     reconciled = await governed_result_service(
-        RecordingGoalDocuments(), harness.run_control
+        RecordingGoalDocuments(), harness.run_control, harness.service._bindings
     ).reconcile(_reconciliation(claim, "executor", dispatch, result))
     assert reconciled.settlement is not None
     return reconciled.settlement

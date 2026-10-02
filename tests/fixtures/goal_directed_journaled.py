@@ -661,10 +661,12 @@ class FixtureGoalSettlements:
 
 
 def governed_result_service(
-    documents: Any, run_control: RunControlService
+    documents: Any, run_control: RunControlService, bindings: Any
 ) -> GoalDirectedOperationResultService:
+    """The governed result service; `bindings` is the operation binding store (required)."""
+
     return GoalDirectedOperationResultService(
-        documents, RunControlGoalOperationSettlements(run_control)
+        documents, RunControlGoalOperationSettlements(run_control, bindings)
     )
 
 

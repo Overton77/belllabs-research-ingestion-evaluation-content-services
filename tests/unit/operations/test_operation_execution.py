@@ -615,6 +615,8 @@ async def test_run_control_authority_validates_exact_run_workspace_and_reservati
                 version=request.run_control_revision,
                 phase=RunPhase.ACTIVE,
                 effective_configuration_digest=request.effective_configuration_digest,
+                # A run with no declared family target (RunProjection's default).
+                execution_target=None,
             )
 
         async def get_budget(self, _scope: str, _run_id: str) -> SimpleNamespace:

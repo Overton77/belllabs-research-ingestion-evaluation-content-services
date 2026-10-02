@@ -287,6 +287,22 @@ Post-review gates (code head `0c8522f`; DSN runs and full runs under the stack l
 | Full with both DSNs exported and `--env-file ../biotech-research-ingestion-evaluation-system/.env` | **1018 passed, 30 skipped, 4 xfailed**, 0 failed (+7 over `731b770`) |
 | `git diff --check` | clean |
 
+### Re-check (verdict `approve_with_fixes`, no blockers)
+
+| Gap | Disposition |
+|---|---|
+| (a) `_verify_family_unit` returned early for an operation without a runtime unit, so on a GoalDirected run its slots would not be rebased. | **Fixed.** A run whose execution target is `GoalDirected` admits only `goal_directed` units: an operation with no unit, or with another family's unit, is rejected (`a GoalDirected Workflow Run admits only GoalDirected runtime units`). Test: `test_rrm_016_goal_directed_settlement.py::test_goal_directed_run_rejects_an_operation_without_a_goal_unit[none]` and `[stage_graph]`. A pre-existing authority test's fake run projection gained `execution_target=None` (the real projection's default), which the authority now reads for every operation. |
+| (b) The stored-binding check in `observe` was skipped when `bindings` was `None` (the default). | **Fixed.** `RunControlGoalOperationSettlements(run_control, bindings)` now requires the binding reader; there is no bypass. Production (`compose_goal_directed_activities`) passes the operation binding store, and so does every test composition: `governed_result_service(documents, run_control, bindings)`, the RRM-004 recovery harness, RRM-006's GoalDirected fork demonstration (`stack.bindings`) and the WP-BP-020 live harness. Fixtures whose run control is itself a fake keep the explicit `FixtureGoalSettlements` port. |
+
+Re-check gates (DSN runs and full runs under the stack lock):
+
+| Gate | Result |
+|---|---|
+| `uv run --no-sync ruff check app tests scripts` / `uv run --no-sync mypy app` | All checks passed / no issues in 366 source files |
+| Owning suites | 399 passed, 1 xfailed (+2: the re-check (a) cases) |
+| Full hermetic (DSNs unset) | **977 passed, 74 skipped, 3 xfailed**, 0 failed |
+| Full with both DSNs exported and `--env-file` | **1020 passed, 30 skipped, 4 xfailed**, 0 failed. A first run on the same tree took 380 s instead of about 240 s and timed out one RRM-007 time-skipping test (`test_goal_directed_policy_pause_is_durable_across_forced_continue_as_new`, a 120 s Temporal client RPC timeout under host load; the test uses fake activities and none of the changed code). It passed alone and in the hermetic run, and the full rerun above is clean. |
+
 ## Final disposition
 
 ready_for_review

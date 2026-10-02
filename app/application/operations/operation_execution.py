@@ -236,13 +236,18 @@ class RunControlOperationAuthority:
 def _verify_family_unit(request: OperationExecutionRequest, run: RunProjection) -> None:
     """RRM-016 review fix 1: a GoalDirected unit is admitted only on a GoalDirected run and
     only for the operation its location names, so the workspace root derived from it cannot
-    be borrowed by another family's or another iteration's operation."""
+    be borrowed by another family's or another iteration's operation. Conversely (re-check
+    a), a GoalDirected run admits only GoalDirected units: an operation without one would
+    bind unrebased slots, so executor and verifier would no longer be disjoint."""
 
     unit = request.runtime_unit
-    if unit is None or unit.family != "goal_directed":
-        return
     target = run.execution_target
-    if target is None or target.family != "GoalDirected":
+    goal_directed_run = target is not None and target.family == "GoalDirected"
+    if unit is None or unit.family != "goal_directed":
+        if goal_directed_run:
+            raise ValueError("a GoalDirected Workflow Run admits only GoalDirected runtime units")
+        return
+    if not goal_directed_run:
         raise ValueError("a GoalDirected runtime unit requires a GoalDirected Workflow Run")
     if (
         unit.belllabs_run_id != request.identity.run_id
