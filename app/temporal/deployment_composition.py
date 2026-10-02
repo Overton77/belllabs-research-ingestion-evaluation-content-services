@@ -128,7 +128,10 @@ from app.integrations.agents.deep_agents import (
     StateSandboxFactory,
 )
 from app.integrations.agents.deep_agents.async_subagents import BellLabsAsyncSubagentMiddleware
-from app.integrations.agents.deep_agents.browser_tool import AgentBrowserPageTool
+from app.integrations.agents.deep_agents.browser_tool import (
+    AgentBrowserPageTool,
+    granted_network_hosts,
+)
 from app.integrations.agents.deep_agents.checkpoint_verifier import (
     LangGraphCheckpointDescendantVerifier,
 )
@@ -332,13 +335,17 @@ class ProductionAsyncSubagentMiddlewareFactory:
         )
 
 
-class AsyncChildCompletingRuntime:
-    """The deployment's operation runtime: bounded cognition, then the parent-boundary
-    completion of the async children it spawned (`AsyncChildCompletion`).
+class DeploymentOperationRuntime:
+    """The deployment's operation runtime around the canonical Deep Agent adapter.
 
-    The completion records travel with the runtime's event payloads into the settlement's
-    digest-bound output payload. Every other runtime capability (for example RRM-008's
-    `observe_latest`) is the wrapped adapter's.
+    * Constrained egress: the operation's granted `network_hosts` bound every governed
+      browser page its cognition opens (`granted_network_hosts`).
+    * After cognition, the parent-boundary completion of the async children it spawned
+      (`AsyncChildCompletion`); the records travel with the runtime's event payloads into the
+      settlement's digest-bound output payload.
+
+    Every other runtime capability (for example RRM-008's `observe_latest`) is the wrapped
+    adapter's.
     """
 
     def __init__(
@@ -359,7 +366,8 @@ class AsyncChildCompletingRuntime:
     async def execute(
         self, invocation: RuntimeInvocation, resolved_secrets: Mapping[str, str]
     ) -> RuntimeResult:
-        result = await self._runtime.execute(invocation, resolved_secrets)
+        with granted_network_hosts(invocation.binding.capability_grant.network_hosts):
+            result = await self._runtime.execute(invocation, resolved_secrets)
         deep = invocation.binding.deep_agent_binding
         if deep is None or not deep.async_subagents:
             return result
@@ -490,7 +498,7 @@ class ProductionWorkerActivityCompositionFactory:
             allow_new_spawns=settings.async_subagent_spawning_enabled,
             submitter_identity=settings.async_subagent_submitter_identity,
         )
-        adapter = AsyncChildCompletingRuntime(
+        adapter = DeploymentOperationRuntime(
             DeepAgentRuntimeAdapter(
                 ExactDeepAgentMaterializer(capabilities.registry),
                 async_subagents=children,
@@ -598,7 +606,7 @@ class _DurableInputsFromPayloads:
 
 __all__ = [
     "ASYNC_CHILD_COMPLETION_KIND",
-    "AsyncChildCompletingRuntime",
+    "DeploymentOperationRuntime",
     "DEFAULT_ASYNC_RESULT_POLICIES",
     "DeploymentCapabilityComponents",
     "DeploymentCapabilityRegistry",

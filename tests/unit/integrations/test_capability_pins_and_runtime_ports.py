@@ -218,3 +218,35 @@ def test_browser_tool_reaches_public_hosts_by_name_only() -> None:
     ):
         with pytest.raises(WebResearchRuntimeDependencyError):
             _public_host(url)
+
+
+@pytest.mark.asyncio
+async def test_browser_tool_opens_only_hosts_the_operation_was_granted(tmp_path: Path) -> None:
+    import sys
+
+    from app.integrations.agents.deep_agents.browser_tool import (
+        AgentBrowserPageTool,
+        granted_network_hosts,
+    )
+    from app.integrations.web_research_runtime import WebResearchRuntimeDependencyError
+
+    class NoSubprocess:
+        calls = 0
+
+        async def run(self, request: object) -> object:
+            del request
+            NoSubprocess.calls += 1
+            raise AssertionError("no subprocess outside the grant")
+
+    entrypoint = tmp_path / "agent-browser.js"
+    entrypoint.write_text("// pinned entrypoint stand-in", encoding="utf-8")
+    tool = AgentBrowserPageTool(
+        node_executable=Path(sys.executable), entrypoint=entrypoint, runner=NoSubprocess()
+    )
+    with granted_network_hosts(frozenset({"example.com"})):
+        with pytest.raises(WebResearchRuntimeDependencyError, match="granted network hosts"):
+            await tool.ainvoke({"url": "https://other.example.org/"})
+    with granted_network_hosts(frozenset()):
+        with pytest.raises(WebResearchRuntimeDependencyError, match="granted network hosts"):
+            await tool.ainvoke({"url": "https://example.com/"})
+    assert NoSubprocess.calls == 0

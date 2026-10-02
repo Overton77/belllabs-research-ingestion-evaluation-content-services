@@ -167,13 +167,15 @@ async def test_deployment_runtime_completes_children_after_cognition_and_delegat
 ) -> None:
     import app.temporal.deployment_composition as composition
     from app.domain.operation_execution.contracts import RuntimeResult
+    from app.integrations.agents.deep_agents.browser_tool import GRANTED_NETWORK_HOSTS
 
     calls: list[str] = []
 
     class Inner:
         async def execute(self, invocation: Any, secrets: Any) -> RuntimeResult:
             del invocation, secrets
-            calls.append("cognition")
+            granted = GRANTED_NETWORK_HOSTS.get()
+            calls.append(f"cognition:{sorted(granted) if granted is not None else 'unbound'}")
             return RuntimeResult(output_text="done", event_payloads=({"kind": "inspection"},))
 
         async def observe_latest(self) -> str:
@@ -194,7 +196,7 @@ async def test_deployment_runtime_completes_children_after_cognition_and_delegat
 
     monkeypatch.setattr(composition, "AsyncChildCompletion", Completion)
     monkeypatch.setattr(composition, "PostgresAsyncSubagentAuthority", lambda pool: pool)
-    runtime = composition.AsyncChildCompletingRuntime(
+    runtime = composition.DeploymentOperationRuntime(
         cast(Any, Inner()),
         cast(Any, Children()),
         pool=cast(Any, "pool"),
@@ -204,13 +206,20 @@ async def test_deployment_runtime_completes_children_after_cognition_and_delegat
     with_children = SimpleNamespace(
         binding=SimpleNamespace(
             binding_id="binding-1",
+            capability_grant=SimpleNamespace(network_hosts=frozenset({"example.com"})),
             deep_agent_binding=SimpleNamespace(
                 async_subagents=("contract",), execution_generation=2
             ),
         )
     )
     result = await runtime.execute(cast(Any, with_children), {"environment:TOKEN": "x"})
-    assert calls == ["cognition", "service:binding-1:['environment:TOKEN']", "complete:2"]
+    # Cognition ran with the operation's granted hosts bound for its governed browser tool.
+    assert calls == [
+        "cognition:['example.com']",
+        "service:binding-1:['environment:TOKEN']",
+        "complete:2",
+    ]
+    assert GRANTED_NETWORK_HOSTS.get() is None
     assert result.event_payloads == (
         {"kind": "inspection"},
         {
@@ -223,9 +232,10 @@ async def test_deployment_runtime_completes_children_after_cognition_and_delegat
     without_children = SimpleNamespace(
         binding=SimpleNamespace(
             binding_id="binding-2",
+            capability_grant=SimpleNamespace(network_hosts=frozenset()),
             deep_agent_binding=SimpleNamespace(async_subagents=(), execution_generation=1),
         )
     )
     plain = await runtime.execute(cast(Any, without_children), {})
-    assert calls == ["cognition"] and plain.event_payloads == ({"kind": "inspection"},)
+    assert calls == ["cognition:[]"] and plain.event_payloads == ({"kind": "inspection"},)
     assert await runtime.observe_latest() == "delegated"

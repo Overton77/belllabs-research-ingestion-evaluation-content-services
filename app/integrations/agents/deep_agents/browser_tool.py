@@ -3,7 +3,9 @@
 Research outbound access for a bounded Deep Agent is mediated by the worker: the sandbox
 stays network-isolated, and this tool runs the reviewed `agent-browser` entrypoint as a
 worker-side subprocess with a sanitized environment, a per-page host allowlist, bounded
-output and a fresh single-host browser profile per call. It returns the page's final URL,
+output and a fresh single-host browser profile per call. The page's host must also be one
+of the running operation's granted `network_hosts` (`granted_network_hosts`, bound by the
+deployment runtime around each invocation). It returns the page's final URL,
 title and a text excerpt as JSON text; it never returns screenshots or cookies.
 
 The tool's input-schema digest is pinned in the capability pin file and verified by the
@@ -16,7 +18,9 @@ import json
 import os
 import re
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -32,6 +36,24 @@ from app.integrations.web_research_runtime import (
 )
 
 AGENT_BROWSER_PAGE_TOOL_NAME = "agent_browser_page"
+# The network hosts the running operation's capability grant admits. The deployment runtime
+# binds them around each invocation; a page outside them is refused before any subprocess.
+GRANTED_NETWORK_HOSTS: ContextVar[frozenset[str] | None] = ContextVar(
+    "belllabs_granted_network_hosts", default=None
+)
+
+
+@contextmanager
+def granted_network_hosts(hosts: frozenset[str]) -> Iterator[None]:
+    """Bind the operation's granted hosts for the tools its cognition runs."""
+
+    token = GRANTED_NETWORK_HOSTS.set(frozenset(host.lower() for host in hosts))
+    try:
+        yield
+    finally:
+        GRANTED_NETWORK_HOSTS.reset(token)
+
+
 _SESSION_SAFE = re.compile(r"[^A-Za-z0-9_-]+")
 _BASE_ENVIRONMENT_KEYS = ("PATH", "PATHEXT", "SYSTEMROOT", "COMSPEC", "WINDIR")
 
@@ -86,6 +108,11 @@ class AgentBrowserPageTool(BaseTool):
 
     async def _arun(self, url: str) -> str:
         host = _public_host(url)
+        granted = GRANTED_NETWORK_HOSTS.get()
+        if granted is not None and host not in granted:
+            raise WebResearchRuntimeDependencyError(
+                "agent_browser_page host is outside the operation's granted network hosts"
+            )
         with tempfile.TemporaryDirectory(
             prefix="belllabs-agent-browser-", ignore_cleanup_errors=True
         ) as directory:
