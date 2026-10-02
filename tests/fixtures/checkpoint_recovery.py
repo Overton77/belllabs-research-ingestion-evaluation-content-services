@@ -294,6 +294,13 @@ class InjectingRuntime:
             raise SimulatedWorkerCrash("worker lost after the terminal checkpoint")
         return result
 
+    async def observe_latest(self, invocation: RuntimeInvocation, secrets: Any) -> RuntimeResult:
+        """RRM-008: the cancellation saga's read of the latest durable checkpoint."""
+
+        adapter: Any = self._adapter
+        result: RuntimeResult = await adapter.observe_latest(invocation, secrets)
+        return result
+
 
 class CrashableRunControl:
     """Run control that can lose the worker after the result observation, mid-settlement."""
@@ -453,6 +460,9 @@ class AcceptingAuthority:
     async def verify_continuation(self, request: OperationExecutionRequest, binding: Any) -> None:
         del request, binding
 
+    async def verify_cancellation(self, request: OperationExecutionRequest, binding: Any) -> None:
+        del request, binding
+
 
 @dataclass
 class RecoveryHarness:
@@ -577,6 +587,8 @@ async def recovery_harness(
     real_authority: bool = False,
     fork_reuse: Any = None,
     run_control: RunControlService | None = None,
+    saver: CrashingSaver | None = None,
+    children: Any = None,
 ) -> RecoveryHarness:
     """`run_control` (RRM-016) lets a family's admissions be registered on the harness; its
     repository is then not exposed (`RecoveryHarness.repository` stays `None`)."""
@@ -594,7 +606,7 @@ async def recovery_harness(
     assert started.status == CommandStatus.ACCEPTED
     binding, _profile, bundle = exact_fixture()
     model = model or ScriptedRecoveryModel()
-    saver = CrashingSaver()
+    saver = saver or CrashingSaver()
     runtime = InjectingRuntime(
         DeepAgentRuntimeAdapter(
             ExactDeepAgentMaterializer(_registry(binding, bundle, model, saver))
@@ -632,6 +644,7 @@ async def recovery_harness(
         journal_claimed_by="worker:rrm-004",
         lineage=CheckpointLineageService(lineage, clock=clock),
         fork_reuse=fork_reuse,
+        children=children,
     )
     return RecoveryHarness(
         run_control=run_control,

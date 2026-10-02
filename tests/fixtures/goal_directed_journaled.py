@@ -347,6 +347,8 @@ class GoalScriptedModel(ScriptedRecoveryModel):
     accept_at: int = 2
     # One stable output record across iterations (default); `False` reproduces RRM-019.
     stable_output_ref: bool = True
+    # Tokens each scripted call reports (RRM-008 drives a budget violation by raising it).
+    tokens_per_call: int = 5
     _turns: list[dict[str, Any]] = PrivateAttr(default_factory=list)
 
     @property
@@ -380,7 +382,7 @@ class GoalScriptedModel(ScriptedRecoveryModel):
         return index, tools
 
     def _reply(self, tools: int) -> ChatResult:  # type: ignore[override]
-        usage = {"input_tokens": 2, "output_tokens": 3, "total_tokens": 5}
+        usage = {"input_tokens": 2, "output_tokens": 3, "total_tokens": self.tokens_per_call}
         turn = self.turns[-1]
         if tools == 0:
             message = AIMessage(

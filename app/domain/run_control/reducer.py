@@ -226,10 +226,16 @@ def reduce_lifecycle(
     event_type = f"workflow_run.{action.kind}"
 
     if isinstance(action, StartAction):
-        if phase != RunPhase.PENDING:
+        # RRM-008 (REQ-CP-EXEC-008): a cancel accepted before the family's start fact left
+        # run control as the boundary. The family still binds its execution target so that
+        # it can complete the cancellation saga; the run stays `cancelling`.
+        if phase == RunPhase.CANCELLING and execution_target is None:
+            execution_target = action.execution_target
+        elif phase != RunPhase.PENDING:
             raise ReductionRejected("invalid_phase", "only a pending run can start")
-        phase = RunPhase.ACTIVE
-        execution_target = action.execution_target
+        else:
+            phase = RunPhase.ACTIVE
+            execution_target = action.execution_target
     elif (
         isinstance(action, SetWaitAction)
         and action.condition.kind == "operator_reconciliation"
@@ -1472,7 +1478,15 @@ def _terminal_outcome(
             "obligation_acceptance_mismatch",
             "proposal obligation acceptance does not match authoritative evidence",
         )
-    if proposal.pending_wait_or_link_ids or projection.active_waits:
+    # RRM-008 (REQ-CP-EXEC-008 step 7, REQ-CP-RUN-007): a cancelled outcome cancels the run's
+    # declared waits, but an `operator_reconciliation` wait (an in_doubt unit) keeps the run
+    # cancelling with reconciliation `operator_required`.
+    blocking_waits = (
+        [item for item in projection.active_waits if item.kind == "operator_reconciliation"]
+        if projection.phase == RunPhase.CANCELLING
+        else list(projection.active_waits)
+    )
+    if proposal.pending_wait_or_link_ids or blocking_waits:
         raise ReductionRejected("unresolved_terminal_dependencies", "terminal dependencies remain")
     unresolved_children = [
         child.child_execution_id

@@ -1523,6 +1523,27 @@ class OperationExecutionResult(Contract):
     reconciliation_incident_id: str | None = None
 
 
+class AsyncChildCancellationRecord(Contract):
+    """RRM-008 (REQ-CP-EXEC-008 step 4): one async child the cancellation saga reached.
+
+    The provider's acknowledgement or its absence is recorded, never assumed; a child whose
+    usage the provider could not attribute leaves its parent effect pending (REQ-CP-RUN-009)
+    until a privileged usage reconciliation settles it.
+    """
+
+    schema_version: Literal["belllabs.async-child-cancellation.v1"] = (
+        "belllabs.async-child-cancellation.v1"
+    )
+    child_execution_id: str = Field(min_length=1)
+    # The child's effect claim in the parent run (`async_subagent.child`), whose pending
+    # usage blocks the parent's terminal settlement until reconciled.
+    effect_id: str = Field(min_length=1)
+    lifecycle: AsyncSubagentLifecycle
+    cancellation_receipt: Literal["provider_acknowledged", "ambiguous", "not_requested"]
+    usage_disposition: Literal["settled", "pending_usage", "unsettled"]
+    result_decision: str | None = None
+
+
 class OperationWorkflowRequest(Contract):
     """Typed durable wrapper for exactly one semantic operation attempt."""
 

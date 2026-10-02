@@ -435,7 +435,7 @@ def test_agent_cognitive_worker_registers_operation_activity_only(
     )
 
     assert captured["task_queue"] == "agent-cognitive"
-    assert captured["activities"] == (activities.execute,)
+    assert captured["activities"] == (activities.execute, activities.cancel)
     assert "workflows" not in captured
 
 
@@ -450,7 +450,8 @@ class FakeJournal:
         """RRM-007 receipt seam: the in-memory journal keeps no receipt ledger."""
         return None
 
-    async def acquire(self, binding, *, claimed_by):  # type: ignore[no-untyped-def]
+    async def acquire(self, binding, *, claimed_by, at_current_version=False):  # type: ignore[no-untyped-def]
+        del at_current_version
         self.claim = OperationEffectClaim(
             effect_claim_id="journal-claim-1",
             request_scope=binding.request_scope,
@@ -1409,7 +1410,8 @@ class TransientAuthority(ConformanceAuthority):
 class LoseWorkerBeforeSettlement(FakeJournal):
     """The first holder dispatches, then is lost; later deliveries find its claim."""
 
-    async def acquire(self, binding, *, claimed_by):  # type: ignore[no-untyped-def]
+    async def acquire(self, binding, *, claimed_by, at_current_version=False):  # type: ignore[no-untyped-def]
+        del at_current_version
         if self.claim is not None:
             return OperationClaimResult(
                 status="existing", claim=self.claim, reason="prior worker holds the claim"

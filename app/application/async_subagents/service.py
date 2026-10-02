@@ -36,6 +36,7 @@ from app.domain.operation_execution.async_subagent_reconciliation import (
 )
 from app.domain.operation_execution.contracts import (
     ACTIVE_ASYNC_SUBAGENT_LIFECYCLES,
+    AsyncChildCancellationRecord,
     AsyncProviderCheckpointKey,
     AsyncSubagentContract,
     AsyncSubagentDependencyClass,
@@ -45,6 +46,7 @@ from app.domain.operation_execution.contracts import (
     AsyncSubagentMessage,
     AsyncSubagentResultManifest,
     AsyncSubagentUsage,
+    OperationExecutionBinding,
     ParentAsyncSubagentLink,
 )
 from app.domain.run_control.contracts import ActorContext
@@ -215,6 +217,11 @@ class AsyncSubagentAuthorityPort(Protocol):
     async def request_cancellation(
         self, request_scope: str, child_execution_id: str, reason: str
     ) -> None: ...
+    async def list_child_ids(
+        self, request_scope: str, parent_binding_id: str
+    ) -> tuple[str, ...]:
+        """RRM-008: every child the parent operation binding spawned, in admission order."""
+        ...
     async def decide_result(
         self,
         request_scope: str,
@@ -1087,6 +1094,81 @@ class AsyncSubagentService:
         )
         return await self._apply_observation(request_scope, execution, observation)
 
+    async def cancel_children(
+        self,
+        binding: OperationExecutionBinding,
+        *,
+        reason: str,
+        requested_at: datetime,
+    ) -> tuple[AsyncChildCancellationRecord, ...]:
+        """RRM-008 (REQ-CP-EXEC-008 step 4): cancel every active child of a parent unit.
+
+        Each active child is cancelled through `cancel` (journaled intent, provider request,
+        acknowledgement or ambiguity recorded). A child that reached a terminal lifecycle is
+        then settled against the parent budget: a blocking child without a result decision is
+        rejected first (its late result can never mutate the cancelled parent). Usage the
+        provider could not attribute stays pending on the child's effect, which keeps the
+        parent run from terminalizing until a privileged `reconcile_usage` settles it
+        (REQ-CP-RUN-009). Nothing is re-spawned and no outcome is assumed.
+        """
+
+        records: list[AsyncChildCancellationRecord] = []
+        for child_id in await self._authority.list_child_ids(
+            binding.request_scope, binding.binding_id
+        ):
+            execution = await self._details.get_execution(binding.request_scope, child_id)
+            receipt: Literal["provider_acknowledged", "ambiguous", "not_requested"] = (
+                "not_requested"
+            )
+            if execution.lifecycle in ACTIVE_ASYNC_SUBAGENT_LIFECYCLES:
+                try:
+                    execution = await self.cancel(
+                        binding.request_scope, child_id, reason, requested_at
+                    )
+                except Exception:  # noqa: BLE001 - the ambiguity is recorded, never assumed
+                    execution = await self._details.get_execution(binding.request_scope, child_id)
+                link = await self._details.get_link(binding.request_scope, child_id)
+                receipt = link.cancellation_receipt or "ambiguous"
+            link = await self._details.get_link(binding.request_scope, child_id)
+            disposition: Literal["settled", "pending_usage", "unsettled"] = "unsettled"
+            if execution.lifecycle in {
+                AsyncSubagentLifecycle.COMPLETED,
+                AsyncSubagentLifecycle.FAILED,
+                AsyncSubagentLifecycle.CANCELLED,
+                AsyncSubagentLifecycle.ORPHANED,
+            }:
+                if link.result_decision is None and link.dependency_class in {
+                    AsyncSubagentDependencyClass.REQUIRED_BLOCKING,
+                    AsyncSubagentDependencyClass.DEGRADABLE_BLOCKING,
+                }:
+                    link = await self.decide_result(
+                        binding.request_scope,
+                        child_id,
+                        "reject",
+                        parent_open=True,
+                        current_generation=execution.execution_generation,
+                        decided_at=requested_at,
+                    )
+                settled = await self.settle(
+                    binding.request_scope,
+                    child_id,
+                    f"settlement:{child_id}:cancelled-parent",
+                    requested_at,
+                )
+                disposition = "settled" if settled.settled else "pending_usage"
+                link = settled
+            records.append(
+                AsyncChildCancellationRecord(
+                    child_execution_id=child_id,
+                    effect_id=f"async-child-effect:{child_id}",
+                    lifecycle=execution.lifecycle,
+                    cancellation_receipt=receipt,
+                    usage_disposition=disposition,
+                    result_decision=link.result_decision,
+                )
+            )
+        return tuple(records)
+
     async def decide_result(
         self,
         request_scope: str,
@@ -1608,6 +1690,15 @@ class InMemoryAsyncSubagentAuthority:
         self, request_scope: str, child_execution_id: str, reason: str
     ) -> None:
         self.cancellations.setdefault((request_scope, child_execution_id), reason)
+
+    async def list_child_ids(
+        self, request_scope: str, parent_binding_id: str
+    ) -> tuple[str, ...]:
+        return tuple(
+            child_id
+            for (scope, child_id), execution in self.states.items()
+            if scope == request_scope and execution.parent_binding_id == parent_binding_id
+        )
 
     async def decide_result(
         self,

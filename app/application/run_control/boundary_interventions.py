@@ -32,6 +32,7 @@ from app.application.run_control.service import RunControlService
 from app.domain.run_control.boundary_commands import receipt
 from app.domain.run_control.contracts import (
     BOUNDARY_FACT_KINDS,
+    CANCEL_SEQUENCE_SPACE,
     ActorContext,
     BoundaryCommandReceipt,
     BoundaryCommandStatus,
@@ -138,11 +139,18 @@ class BoundaryCommandDeliveryService:
                 if pending_delivery(status)
             ),
             key=lambda status: (
+                # RRM-008: the `cancel` space is delivered first; every other space keeps
+                # its own order and stops at its own first failure.
+                status.command.target.sequence_space != CANCEL_SEQUENCE_SPACE,
                 status.command.target.sequence_space,
                 status.command.target_sequence,
             ),
         )
+        halted_spaces: set[str] = set()
         for status in pending:
+            space = status.command.target.sequence_space
+            if space in halted_spaces:
+                continue
             try:
                 ack = await self._transport.deliver(status)
             except Exception:
@@ -150,7 +158,8 @@ class BoundaryCommandDeliveryService:
                     "boundary command delivery failed; later commands wait for redelivery",
                     extra={"run_id": run_id, "command_id": status.command.command_id},
                 )
-                break
+                halted_spaces.add(space)
+                continue
             delivered.append(await self._record(request_scope, status, ack))
         return tuple(delivered)
 

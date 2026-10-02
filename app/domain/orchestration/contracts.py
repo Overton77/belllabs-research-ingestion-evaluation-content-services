@@ -149,6 +149,46 @@ class BoundaryCommandAck:
     detail: str = ""
 
 
+CancelAckStatus = Literal["delivered", "duplicate", "stale_generation", "stale_target"]
+
+
+@dataclass(frozen=True)
+class CancelDelivery:
+    """RRM-008 (REQ-CP-EXEC-008 step 2): one accepted cancel as the delivery service hands
+    it to the root and then to the family, through the dedicated `deliver_cancel` Update.
+
+    A cancel is sequenced in its own `cancel` space (RRM-007 N1): it never takes a place in
+    the root's contiguous `execution` sequence, so it can neither open a gap there nor be
+    blocked by one.
+    """
+
+    command_id: str
+    idempotency_issuer: str
+    target_sequence: int
+    execution_epoch: int
+    execution_generation: int
+    accepted_run_version: int
+    payload_digest: str
+    reason: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.command_id or not self.payload_digest or self.target_sequence < 1:
+            raise ValueError("cancel deliveries require an identity, digest and sequence")
+        if self.execution_epoch < 1 or self.execution_generation < 1:
+            raise ValueError("cancel delivery epoch and generation must be positive")
+
+
+@dataclass(frozen=True)
+class CancelAck:
+    """The root's or family's `deliver_cancel` return value: evidence that the journaled
+    cancellation intent reached that execution, never that the run is cancelled."""
+
+    command_id: str
+    status: CancelAckStatus
+    technical_segment: int
+    detail: str = ""
+
+
 @dataclass(frozen=True)
 class FamilyPause:
     """A pause the family boundary applied; scope strings follow `PauseDecision.scope`."""
