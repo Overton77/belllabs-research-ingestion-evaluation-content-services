@@ -19,10 +19,24 @@ from app.application.run_control.run_control_repository import (
 )
 from app.domain.control_plane.canonical import contract_fingerprint, sha256_digest
 from app.domain.control_plane.errors import ControlPlaneError
+from app.domain.run_control.boundary_commands import (
+    RUN_CONTROL_RECORDER,
+    boundary_command_record,
+    boundary_target_for,
+    is_boundary_command,
+    is_family_boundary_command,
+    receipt,
+    rejection_reason_for,
+    run_control_boundary_receipts,
+)
 from app.domain.run_control.contracts import (
     ActorContext,
     AdmissionDecision,
     ApplyAuthorityBatchAction,
+    ApplyBoundaryCommandAction,
+    BoundaryCommandReceipt,
+    BoundaryCommandRecord,
+    BoundaryCommandStatus,
     BudgetLedgerEntry,
     BudgetLedgerKind,
     BudgetState,
@@ -37,9 +51,12 @@ from app.domain.run_control.contracts import (
     LifecycleTransitionRecord,
     OutboxCursor,
     OutboxRecord,
+    ReceiptState,
+    RunOutcome,
     RunPhase,
     RunProjection,
     RunRequest,
+    TerminalizeAction,
     VerifiedRunConfiguration,
 )
 from app.domain.run_control.errors import (
@@ -540,7 +557,19 @@ class RunControlService:
                 "stale_run_version",
                 f"expected version {command.expected_run_version}, current version is "
                 f"{projection.version}",
+                boundary_commands=self._rejected_boundary_command(
+                    command, projection, "stale_run_version"
+                ),
             )
+        boundary_records: tuple[BoundaryCommandRecord, ...] = ()
+        boundary_receipts: tuple[BoundaryCommandReceipt, ...] = ()
+        pending_status: BoundaryCommandStatus | None = None
+        if isinstance(command.action, ApplyBoundaryCommandAction):
+            pending_status, refusal = await self._boundary_application_target(command)
+            if refusal is not None:
+                return await self._commit_non_transition_result(
+                    command, fingerprint, projection, budget, effects, *refusal
+                )
         try:
             reduction = reduce_lifecycle(projection, budget, effects, command, fingerprint)
         except ReductionRejected as error:
@@ -557,7 +586,38 @@ class RunControlService:
                 ),
                 error.code,
                 error.message,
+                boundary_commands=self._rejected_boundary_command(
+                    command, projection, error.code
+                ),
+                boundary_receipts=self._rejected_boundary_application(
+                    command, pending_status, error.code
+                ),
             )
+        if is_boundary_command(command.action):
+            target = boundary_target_for(projection, command.action)  # type: ignore[arg-type]
+            record = boundary_command_record(
+                command, target=target, target_sequence=0, accepted_run_version=projection.version
+            )
+            if target.kind in {"root", "family"} and is_family_boundary_command(command.action):
+                # REQ-CP-RUN-004 (AMD-RRM-001): the command is accepted as pending; the phase
+                # changes only when the family boundary's `applied` fact is accepted. The
+                # reduction above validated it against the exact version it binds.
+                return await self._commit_pending_boundary_command(
+                    command, fingerprint, projection, budget, effects, record
+                )
+            boundary_records = (record,)
+            boundary_receipts = run_control_boundary_receipts(
+                command, target=target, resulting_run_version=reduction.result.resulting_run_version
+            )
+        elif pending_status is not None:
+            boundary_receipts = self._applied_boundary_receipts(
+                command, pending_status, reduction.result.resulting_run_version
+            )
+        elif (
+            isinstance(command.action, TerminalizeAction)
+            and reduction.projection.terminal_outcome == RunOutcome.CANCELLED
+        ):
+            boundary_receipts = await self._cancel_applied_receipts(command)
         mutation = CommandMutation(
             result=reduction.result,
             request_scope=command.request_scope,
@@ -571,6 +631,8 @@ class RunControlService:
             ledger_entries=reduction.ledger_entries,
             effect_entries=reduction.effect_entries,
             events=reduction.events,
+            boundary_commands=boundary_records,
+            boundary_receipts=boundary_receipts,
         )
         try:
             return await self._repository.commit_command(mutation)
@@ -771,6 +833,241 @@ class RunControlService:
             )
         )
 
+    # --- Boundary commands and receipts (RRM-007, CON-CP-WORKFLOW-MESSAGE-V1) ---------------
+
+    async def _commit_pending_boundary_command(
+        self,
+        command: LifecycleCommand,
+        fingerprint: str,
+        projection: RunProjection,
+        budget: BudgetState,
+        effects: EffectLedgerState,
+        record: BoundaryCommandRecord,
+    ) -> CommandResult:
+        accepted = receipt(
+            command,
+            ordinal=1,
+            state=ReceiptState.ACCEPTED,
+            recorded_by=RUN_CONTROL_RECORDER,
+            recorded_at=command.occurred_at,
+        )
+        result = self._non_transition_result(
+            command,
+            fingerprint,
+            projection,
+            CommandStatus.ACCEPTED,
+            "accepted_pending_application",
+            f"accepted; pending delivery to the {record.target.kind} boundary "
+            f"{record.target.target_ref}",
+        )
+        return await self._repository.commit_command(
+            CommandMutation(
+                result=result,
+                request_scope=command.request_scope,
+                expected_version=projection.version,
+                expected_budget_digest=authority_state_digest(budget),
+                expected_effects_digest=authority_state_digest(effects),
+                boundary_commands=(record,),
+                boundary_receipts=(accepted,),
+            )
+        )
+
+    @staticmethod
+    def _rejected_boundary_command(
+        command: LifecycleCommand, projection: RunProjection, reason_code: str
+    ) -> tuple[BoundaryCommandRecord, ...]:
+        """A boundary command rejected at acceptance keeps a durable `rejected` receipt."""
+
+        if not is_boundary_command(command.action):
+            return ()
+        return (
+            boundary_command_record(
+                command,
+                target=boundary_target_for(projection, command.action),  # type: ignore[arg-type]
+                target_sequence=0,
+                accepted_run_version=projection.version,
+            ),
+        )
+
+    @staticmethod
+    def _rejected_boundary_receipt(
+        command: LifecycleCommand, reason_code: str, *, recorded_by: str
+    ) -> BoundaryCommandReceipt:
+        return receipt(
+            command,
+            ordinal=1,
+            state=ReceiptState.REJECTED,
+            recorded_by=recorded_by,
+            rejection_reason=rejection_reason_for(reason_code),
+            detail=reason_code,
+            recorded_at=command.occurred_at,
+        )
+
+    async def _boundary_application_target(
+        self, command: LifecycleCommand
+    ) -> tuple[BoundaryCommandStatus | None, tuple[CommandStatus, str, str] | None]:
+        """The accepted command an `apply_boundary_command` fact applies, or the refusal."""
+
+        action = command.action
+        assert isinstance(action, ApplyBoundaryCommandAction)
+        status = await self._repository.get_boundary_command(
+            command.request_scope, command.run_id, action.command_id
+        )
+        if status is None:
+            return None, (
+                CommandStatus.REJECTED,
+                "boundary_command_not_found",
+                "no accepted boundary command carries this identity",
+            )
+        if status.command.payload_digest != contract_fingerprint(action.action):
+            return None, (
+                CommandStatus.REJECTED,
+                "boundary_command_mismatch",
+                "the applied command differs from the accepted command",
+            )
+        if status.state == ReceiptState.APPLIED:
+            return None, (
+                CommandStatus.REJECTED,
+                "boundary_command_already_applied",
+                "the boundary command was already applied; duplicates never apply twice",
+            )
+        if status.state == ReceiptState.REJECTED:
+            return None, (
+                CommandStatus.REJECTED,
+                "boundary_command_rejected",
+                "the boundary command was rejected and cannot be applied",
+            )
+        return status, None
+
+    @staticmethod
+    def _applied_boundary_receipts(
+        command: LifecycleCommand, status: BoundaryCommandStatus, resulting_run_version: int
+    ) -> tuple[BoundaryCommandReceipt, ...]:
+        action = command.action
+        assert isinstance(action, ApplyBoundaryCommandAction)
+        receipts: list[BoundaryCommandReceipt] = []
+        if status.state == ReceiptState.ACCEPTED:
+            # The boundary saw the delivery although its receipt was not recorded (for example
+            # the delivery service failed after the Update returned): record it first.
+            receipts.append(
+                receipt(
+                    status.command,
+                    ordinal=1,
+                    state=ReceiptState.DELIVERED,
+                    recorded_by=action.boundary_ref,
+                    detail="delivery acknowledged by the applying boundary",
+                    transport_ref=action.boundary_ref,
+                    recorded_at=command.occurred_at,
+                )
+            )
+        receipts.append(
+            receipt(
+                status.command,
+                ordinal=1,
+                state=ReceiptState.APPLIED,
+                recorded_by=action.boundary_ref,
+                transport_ref=action.boundary_ref,
+                applied_run_version=resulting_run_version,
+                boundary_state=action.boundary_state,
+                recorded_at=command.occurred_at,
+            )
+        )
+        return tuple(receipts)
+
+    @staticmethod
+    def _rejected_boundary_application(
+        command: LifecycleCommand, status: BoundaryCommandStatus | None, reason_code: str
+    ) -> tuple[BoundaryCommandReceipt, ...]:
+        """The boundary could not apply the command: a terminal `rejected` receipt."""
+
+        if status is None or reason_code == "stale_run_version":
+            return ()
+        action = command.action
+        assert isinstance(action, ApplyBoundaryCommandAction)
+        receipts: list[BoundaryCommandReceipt] = []
+        if status.state == ReceiptState.ACCEPTED and reason_code != "stale_target":
+            # The declared boundary saw the delivery; a foreign boundary is no delivery.
+            receipts.append(
+                receipt(
+                    status.command,
+                    ordinal=1,
+                    state=ReceiptState.DELIVERED,
+                    recorded_by=action.boundary_ref,
+                    detail="delivery acknowledged by the applying boundary",
+                    transport_ref=action.boundary_ref,
+                    recorded_at=command.occurred_at,
+                )
+            )
+        receipts.append(
+            receipt(
+                status.command,
+                ordinal=1,
+                state=ReceiptState.REJECTED,
+                recorded_by=action.boundary_ref,
+                rejection_reason=rejection_reason_for(reason_code),
+                detail=reason_code,
+                transport_ref=action.boundary_ref,
+                recorded_at=command.occurred_at,
+            )
+        )
+        return tuple(receipts)
+
+    async def _cancel_applied_receipts(
+        self, command: LifecycleCommand
+    ) -> tuple[BoundaryCommandReceipt, ...]:
+        """A cancel command is `applied` when the reducer records the terminal outcome."""
+
+        receipts: list[BoundaryCommandReceipt] = []
+        for status in await self._repository.list_boundary_commands(
+            command.request_scope, command.run_id
+        ):
+            if status.command.kind != "cancel" or status.state not in {
+                ReceiptState.ACCEPTED,
+                ReceiptState.DELIVERED,
+            }:
+                continue
+            if status.state == ReceiptState.ACCEPTED:
+                receipts.append(
+                    receipt(
+                        status.command,
+                        ordinal=1,
+                        state=ReceiptState.DELIVERED,
+                        recorded_by=RUN_CONTROL_RECORDER,
+                        detail="terminal outcome recorded without a delivered receipt",
+                        recorded_at=command.occurred_at,
+                    )
+                )
+            receipts.append(
+                receipt(
+                    status.command,
+                    ordinal=1,
+                    state=ReceiptState.APPLIED,
+                    recorded_by=RUN_CONTROL_RECORDER,
+                    detail="terminal outcome cancelled",
+                    applied_run_version=command.expected_run_version + 1,
+                    recorded_at=command.occurred_at,
+                )
+            )
+        return tuple(receipts)
+
+    async def list_boundary_commands(
+        self, request_scope: str, run_id: str
+    ) -> tuple[BoundaryCommandStatus, ...]:
+        return await self._repository.list_boundary_commands(request_scope, run_id)
+
+    async def get_boundary_command(
+        self, request_scope: str, run_id: str, command_id: str
+    ) -> BoundaryCommandStatus | None:
+        return await self._repository.get_boundary_command(request_scope, run_id, command_id)
+
+    async def record_boundary_receipt(
+        self, request_scope: str, boundary_receipt: BoundaryCommandReceipt
+    ) -> BoundaryCommandStatus:
+        """Record a `delivered`, `applied` or `rejected` receipt outside a lifecycle transition
+        (delivery acknowledgements, and the operation boundary's `reconcile_unit` application)."""
+
+        return await self._repository.record_boundary_receipt(request_scope, boundary_receipt)
+
     @staticmethod
     def _validated_lifecycle_command(command: LifecycleCommand) -> LifecycleCommand:
         try:
@@ -879,6 +1176,9 @@ class RunControlService:
         status: CommandStatus,
         reason_code: str,
         reason: str,
+        *,
+        boundary_commands: tuple[BoundaryCommandRecord, ...] = (),
+        boundary_receipts: tuple[BoundaryCommandReceipt, ...] = (),
     ) -> CommandResult:
         result = CommandResult(
             command_id=command.command_id,
@@ -893,6 +1193,13 @@ class RunControlService:
             reason=reason,
             recorded_at=command.occurred_at,
         )
+        if boundary_commands and not boundary_receipts:
+            boundary_receipts = tuple(
+                self._rejected_boundary_receipt(
+                    command, reason_code, recorded_by=RUN_CONTROL_RECORDER
+                )
+                for _record in boundary_commands
+            )
         return await self._repository.commit_command(
             CommandMutation(
                 result=result,
@@ -900,6 +1207,8 @@ class RunControlService:
                 expected_version=projection.version,
                 expected_budget_digest=authority_state_digest(budget),
                 expected_effects_digest=authority_state_digest(effects),
+                boundary_commands=boundary_commands,
+                boundary_receipts=boundary_receipts,
             )
         )
 

@@ -12,11 +12,16 @@ from app.application.run_control.run_control_repository import (
     AdmissionMutation,
     CommandMutation,
     FamilyAdmissionCommit,
+    _was_accepted,
+    append_receipt,
     authority_state_digest,
 )
 from app.domain.run_control.budget import roll_up_child_budget
 from app.domain.run_control.contracts import (
     AdmissionDecision,
+    BoundaryCommandReceipt,
+    BoundaryCommandRecord,
+    BoundaryCommandStatus,
     BudgetLedgerEntry,
     BudgetState,
     CommandResult,
@@ -314,6 +319,17 @@ class PostgresRunControlRepository:
                 )
             if mutation.projection is None:
                 raced = current_version != mutation.expected_version
+                if (
+                    raced
+                    and mutation.boundary_commands
+                    and result.status == CommandStatus.ACCEPTED
+                ):
+                    # A pending boundary acceptance binds the exact version it was validated
+                    # against; the service re-decides it against the current projection.
+                    raise RunVersionConflict(
+                        f"expected version {mutation.expected_version}, "
+                        f"current version is {current_version}"
+                    )
                 result = result.model_copy(
                     update={
                         "status": (
@@ -344,6 +360,8 @@ class PostgresRunControlRepository:
                         expected_version=current_version,
                         expected_budget_digest=mutation.expected_budget_digest,
                         expected_effects_digest=mutation.expected_effects_digest,
+                        boundary_commands=mutation.boundary_commands,
+                        boundary_receipts=mutation.boundary_receipts,
                     )
                 else:
                     raise RunVersionConflict(
@@ -415,8 +433,127 @@ class PostgresRunControlRepository:
                 await self._insert_ledger(connection, mutation.ledger_entries)
                 await self._insert_effect_ledger(connection, mutation.effect_entries)
                 await self._insert_events(connection, mutation.events)
+            await self._record_boundary_commands(connection, mutation)
             await self._inject("command")
             return result
+
+    # --- Boundary commands and receipts (RRM-007) -------------------------------------------
+
+    async def get_boundary_command(
+        self, request_scope: str, run_id: str, command_id: str
+    ) -> BoundaryCommandStatus | None:
+        async with self._pool.acquire() as connection, connection.transaction():
+            await _set_scope(connection, request_scope)
+            if not await _run_exists_on(connection, request_scope, run_id):
+                raise RunControlNotFound(f"workflow run not found: {run_id}")
+            return await _boundary_command(connection, request_scope, run_id, command_id)
+
+    async def list_boundary_commands(
+        self, request_scope: str, run_id: str
+    ) -> tuple[BoundaryCommandStatus, ...]:
+        async with self._pool.acquire() as connection, connection.transaction():
+            await _set_scope(connection, request_scope)
+            if not await _run_exists_on(connection, request_scope, run_id):
+                raise RunControlNotFound(f"workflow run not found: {run_id}")
+            rows = await connection.fetch(
+                """
+                SELECT command_id
+                FROM belllabs_control.boundary_commands
+                WHERE request_scope = $1 AND run_id = $2
+                ORDER BY sequence_space, target_sequence, recorded_at, command_id
+                """,
+                request_scope,
+                run_id,
+            )
+            statuses = [
+                await _boundary_command(connection, request_scope, run_id, row["command_id"])
+                for row in rows
+            ]
+        return tuple(status for status in statuses if status is not None)
+
+    async def record_boundary_receipt(
+        self,
+        request_scope: str,
+        receipt: BoundaryCommandReceipt,
+    ) -> BoundaryCommandStatus:
+        async with self._pool.acquire() as connection, connection.transaction():
+            await _set_scope(connection, request_scope)
+            await _advisory_lock(connection, f"run:{receipt.run_id}")
+            status = await _boundary_command(
+                connection, request_scope, receipt.run_id, receipt.command_id
+            )
+            if status is None:
+                raise RunControlNotFound(f"boundary command not found: {receipt.command_id}")
+            updated = append_receipt(status, receipt)
+            if len(updated.receipts) > len(status.receipts):
+                await _insert_receipt(connection, updated.receipts[-1])
+            return updated
+
+    async def _record_boundary_commands(
+        self, connection: asyncpg.Connection, mutation: CommandMutation
+    ) -> None:
+        run_id = mutation.result.run_id
+        scope = mutation.request_scope
+        new_ids = {record.command_id for record in mutation.boundary_commands}
+        for record in mutation.boundary_commands:
+            if await _boundary_command(connection, scope, run_id, record.command_id) is not None:
+                raise IdempotencyConflict(
+                    f"boundary command already recorded: {record.command_id}"
+                )
+            own = tuple(
+                item for item in mutation.boundary_receipts if item.command_id == record.command_id
+            )
+            sequence = record.target_sequence
+            if sequence == 0 and record.target.kind != "run_control" and _was_accepted(own):
+                sequence = await connection.fetchval(
+                    """
+                    SELECT coalesce(max(target_sequence), 0) + 1
+                    FROM belllabs_control.boundary_commands
+                    WHERE request_scope = $1 AND run_id = $2 AND sequence_space = $3
+                    """,
+                    scope,
+                    run_id,
+                    record.target.sequence_space,
+                )
+            sequenced = record.model_copy(update={"target_sequence": sequence})
+            await connection.execute(
+                """
+                INSERT INTO belllabs_control.boundary_commands
+                    (request_scope, run_id, command_id, idempotency_issuer, kind,
+                     target_kind, target_ref, sequence_space, target_sequence,
+                     execution_epoch, execution_generation, accepted_run_version,
+                     payload_digest, command, recorded_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb, $15)
+                """,
+                scope,
+                run_id,
+                sequenced.command_id,
+                sequenced.idempotency_issuer,
+                sequenced.kind,
+                sequenced.target.kind,
+                sequenced.target.target_ref,
+                sequenced.target.sequence_space,
+                sequence,
+                sequenced.target.execution_epoch,
+                sequenced.target.execution_generation,
+                sequenced.accepted_run_version,
+                sequenced.payload_digest,
+                _dump(sequenced),
+                sequenced.recorded_at,
+            )
+            # Validate the chain before writing it; the contract enforces the state machine.
+            BoundaryCommandStatus(command=sequenced, receipts=own)
+            for item in own:
+                await _insert_receipt(connection, item)
+        for item in mutation.boundary_receipts:
+            if item.command_id in new_ids:
+                continue
+            status = await _boundary_command(connection, scope, run_id, item.command_id)
+            if status is None:
+                raise RunControlNotFound(f"boundary command not found: {item.command_id}")
+            updated = append_receipt(status, item)
+            if len(updated.receipts) > len(status.receipts):
+                await _insert_receipt(connection, updated.receipts[-1])
 
     async def get_family_admission_receipt(
         self,
@@ -1124,6 +1261,60 @@ class PostgresRunControlRepository:
         result = self._before_commit(boundary)
         if inspect.isawaitable(result):
             await result
+
+
+async def _boundary_command(
+    connection: asyncpg.Connection, request_scope: str, run_id: str, command_id: str
+) -> BoundaryCommandStatus | None:
+    raw = await connection.fetchval(
+        """
+        SELECT command FROM belllabs_control.boundary_commands
+        WHERE request_scope = $1 AND run_id = $2 AND command_id = $3
+        """,
+        request_scope,
+        run_id,
+        command_id,
+    )
+    if raw is None:
+        return None
+    rows = await connection.fetch(
+        """
+        SELECT receipt FROM belllabs_control.boundary_command_receipts
+        WHERE request_scope = $1 AND run_id = $2 AND command_id = $3
+        ORDER BY ordinal
+        """,
+        request_scope,
+        run_id,
+        command_id,
+    )
+    return BoundaryCommandStatus(
+        command=BoundaryCommandRecord.model_validate(_json(raw)),
+        receipts=tuple(
+            BoundaryCommandReceipt.model_validate(_json(row["receipt"])) for row in rows
+        ),
+    )
+
+
+async def _insert_receipt(connection: asyncpg.Connection, receipt: BoundaryCommandReceipt) -> None:
+    await connection.execute(
+        """
+        INSERT INTO belllabs_control.boundary_command_receipts
+            (request_scope, run_id, command_id, ordinal, state, rejection_reason,
+             recorded_by, transport_ref, applied_run_version, receipt, recorded_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11)
+        """,
+        receipt.request_scope,
+        receipt.run_id,
+        receipt.command_id,
+        receipt.ordinal,
+        receipt.state.value,
+        receipt.rejection_reason,
+        receipt.recorded_by,
+        receipt.transport_ref,
+        receipt.applied_run_version,
+        _dump(receipt),
+        receipt.recorded_at,
+    )
 
 
 async def _advisory_lock(connection: asyncpg.Connection, key: str) -> None:

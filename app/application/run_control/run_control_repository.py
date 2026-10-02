@@ -14,6 +14,9 @@ from app.domain.operation_execution.journal import OperationJournalSettlement
 from app.domain.run_control.budget import roll_up_child_budget
 from app.domain.run_control.contracts import (
     AdmissionDecision,
+    BoundaryCommandReceipt,
+    BoundaryCommandRecord,
+    BoundaryCommandStatus,
     BudgetLedgerEntry,
     BudgetState,
     CommandResult,
@@ -27,11 +30,14 @@ from app.domain.run_control.contracts import (
     LifecycleTransitionRecord,
     OutboxCursor,
     OutboxRecord,
+    ReceiptState,
     RunProjection,
     UsageRecord,
+    next_receipt_state,
 )
 from app.domain.run_control.errors import (
     IdempotencyConflict,
+    ReceiptTransitionRejected,
     RunControlNotFound,
     RunVersionConflict,
 )
@@ -121,6 +127,11 @@ class CommandMutation:
     ledger_entries: tuple[BudgetLedgerEntry, ...] = ()
     effect_entries: tuple[EffectLedgerEntry, ...] = ()
     events: tuple[DomainEventEnvelope, ...] = ()
+    # RRM-007: boundary command records and receipts committed with the command result.
+    # A record's `target_sequence` of 0 asks the repository to assign the next sequence
+    # of its target's sequence space under the run lock.
+    boundary_commands: tuple[BoundaryCommandRecord, ...] = ()
+    boundary_receipts: tuple[BoundaryCommandReceipt, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -297,6 +308,55 @@ class RunControlRepository(Protocol):
         self, request_scope: str, consumer_id: str, envelope: DomainEventEnvelope
     ) -> ConsumerApplyResult: ...
 
+    async def get_boundary_command(
+        self, request_scope: str, run_id: str, command_id: str
+    ) -> BoundaryCommandStatus | None: ...
+
+    async def list_boundary_commands(
+        self, request_scope: str, run_id: str
+    ) -> tuple[BoundaryCommandStatus, ...]: ...
+
+    async def record_boundary_receipt(
+        self,
+        request_scope: str,
+        receipt: BoundaryCommandReceipt,
+    ) -> BoundaryCommandStatus: ...
+
+
+def append_receipt(
+    status: BoundaryCommandStatus, receipt: BoundaryCommandReceipt
+) -> BoundaryCommandStatus:
+    """Append one receipt under the closed state machine; a repeated state is a no-op.
+
+    `receipt.ordinal` is assigned here (the caller passes any value). A receipt that repeats
+    the current state is returned unchanged, so re-recording a delivery or an application
+    can never transition twice (REQ-CP-EXEC-006).
+    """
+
+    current = status.receipts[-1]
+    if any(item.state == receipt.state for item in status.receipts):
+        # Already recorded (for example the boundary applied, recording `delivered` itself,
+        # before the delivery service wrote its own): the ledger never transitions twice.
+        return status
+    if not next_receipt_state(current.state, receipt.state):
+        raise ReceiptTransitionRejected(
+            f"boundary command {status.command.command_id} is {current.state.value}; "
+            f"it cannot become {receipt.state.value}"
+        )
+    ordered = receipt.model_copy(update={"ordinal": len(status.receipts) + 1})
+    return status.model_copy(update={"receipts": (*status.receipts, ordered)})
+
+
+def _was_accepted(receipts: tuple[BoundaryCommandReceipt, ...]) -> bool:
+    return bool(receipts) and receipts[0].state == ReceiptState.ACCEPTED
+
+
+def pending_delivery(status: BoundaryCommandStatus) -> bool:
+    return status.state == ReceiptState.ACCEPTED and status.command.target.kind in {
+        "root",
+        "family",
+    }
+
 
 class InMemoryRunControlRepository:
     """Behavioral test adapter with the same atomic boundaries as PostgreSQL."""
@@ -320,6 +380,7 @@ class InMemoryRunControlRepository:
         self._family_results: dict[
             tuple[str, str, str, str], FamilyAdmissionReceipt
         ] = {}
+        self._boundary_commands: dict[tuple[str, str], BoundaryCommandStatus] = {}
 
     async def get_admission_decision(
         self, request_scope: str, idempotency_issuer: str, request_id: str
@@ -453,6 +514,17 @@ class InMemoryRunControlRepository:
             )
         if mutation.projection is None:
             raced = current.version != mutation.expected_version
+            if (
+                raced
+                and mutation.boundary_commands
+                and mutation.result.status == CommandStatus.ACCEPTED
+            ):
+                # A pending boundary acceptance binds the exact version it was validated
+                # against (CON-CP-WORKFLOW-MESSAGE-V1); the service re-decides it.
+                raise RunVersionConflict(
+                    f"expected version {mutation.expected_version}, "
+                    f"current version is {current.version}"
+                )
             result = mutation.result.model_copy(
                 update={
                     "status": (
@@ -476,6 +548,7 @@ class InMemoryRunControlRepository:
                 }
             )
             self._commands[key] = deepcopy(result)
+            self._record_boundary_commands(mutation)
             return deepcopy(result)
         if current.version != mutation.expected_version:
             raise RunVersionConflict(
@@ -500,7 +573,84 @@ class InMemoryRunControlRepository:
         self._effect_ledger[mutation.result.run_id].extend(deepcopy(mutation.effect_entries))
         self._insert_events(mutation.events)
         self._commands[key] = deepcopy(mutation.result)
+        self._record_boundary_commands(mutation)
         return deepcopy(mutation.result)
+
+    def _record_boundary_commands(self, mutation: CommandMutation) -> None:
+        run_id = mutation.result.run_id
+        for record in mutation.boundary_commands:
+            key = (run_id, record.command_id)
+            if key in self._boundary_commands:
+                raise IdempotencyConflict(
+                    f"boundary command already recorded: {record.command_id}"
+                )
+            receipts = tuple(
+                item for item in mutation.boundary_receipts if item.command_id == record.command_id
+            )
+            sequence = record.target_sequence
+            if sequence == 0 and record.target.kind != "run_control" and _was_accepted(receipts):
+                # Only an accepted command takes a place in its target's sequence space; a
+                # command rejected at acceptance never reaches the target (no sequence gap).
+                sequence = 1 + max(
+                    (
+                        item.command.target_sequence
+                        for (item_run, _), item in self._boundary_commands.items()
+                        if item_run == run_id
+                        and item.command.target.sequence_space == record.target.sequence_space
+                    ),
+                    default=0,
+                )
+            self._boundary_commands[key] = BoundaryCommandStatus(
+                command=record.model_copy(update={"target_sequence": sequence}),
+                receipts=receipts,
+            )
+        for receipt in mutation.boundary_receipts:
+            key = (run_id, receipt.command_id)
+            if any(item.command_id == receipt.command_id for item in mutation.boundary_commands):
+                continue
+            status = self._boundary_commands.get(key)
+            if status is None:
+                raise RunControlNotFound(f"boundary command not found: {receipt.command_id}")
+            self._boundary_commands[key] = append_receipt(status, receipt)
+
+    async def get_boundary_command(
+        self, request_scope: str, run_id: str, command_id: str
+    ) -> BoundaryCommandStatus | None:
+        self._require_scope(request_scope, run_id)
+        return deepcopy(self._boundary_commands.get((run_id, command_id)))
+
+    async def list_boundary_commands(
+        self, request_scope: str, run_id: str
+    ) -> tuple[BoundaryCommandStatus, ...]:
+        self._require_scope(request_scope, run_id)
+        return tuple(
+            deepcopy(item)
+            for (item_run, _), item in sorted(
+                self._boundary_commands.items(),
+                key=lambda entry: (
+                    entry[1].command.target.sequence_space,
+                    entry[1].command.target_sequence,
+                    entry[1].command.recorded_at,
+                    entry[0][1],
+                ),
+            )
+            if item_run == run_id
+        )
+
+    async def record_boundary_receipt(
+        self,
+        request_scope: str,
+        receipt: BoundaryCommandReceipt,
+    ) -> BoundaryCommandStatus:
+        self._require_scope(request_scope, receipt.run_id)
+        async with self._lock:
+            key = (receipt.run_id, receipt.command_id)
+            status = self._boundary_commands.get(key)
+            if status is None:
+                raise RunControlNotFound(f"boundary command not found: {receipt.command_id}")
+            updated = append_receipt(status, receipt)
+            self._boundary_commands[key] = updated
+            return deepcopy(updated)
 
     async def get_family_admission_receipt(
         self,
@@ -602,6 +752,7 @@ class InMemoryRunControlRepository:
                 "_family_heads",
                 "_family_journal",
                 "_family_results",
+                "_boundary_commands",
             )
             working = object.__new__(type(self))
             working.__dict__ = {

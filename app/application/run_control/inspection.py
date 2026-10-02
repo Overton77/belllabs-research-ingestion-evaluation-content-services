@@ -51,6 +51,7 @@ from app.domain.operation_execution.checkpoint_lineage import (
     submission_invocation_id,
 )
 from app.domain.run_control.contracts import (
+    BoundaryCommandStatus,
     BudgetState,
     EffectDisposition,
     EffectLedgerState,
@@ -135,6 +136,8 @@ class RunSnapshot:
     effects: EffectLedgerState | None = None
     units: tuple[UnitRecord, ...] = ()
     async_children: tuple[AsyncChildInspection, ...] = ()
+    # RRM-007: the run's boundary commands and receipts, read from the same authority.
+    boundary_commands: tuple[BoundaryCommandStatus, ...] = ()
 
 
 class InspectionReadRepository(Protocol):
@@ -448,6 +451,7 @@ class RuntimeInspectionService:
             projection=projection,
             reconciliation_state=run_state,
             operator_reconciliation_waits=operator_waits,
+            boundary_commands=snapshot.boundary_commands,
             output_refs=_output_refs(projection),
             budget=_budget_summary(snapshot.budget),
             effects=effects,
@@ -514,6 +518,12 @@ class RuntimeInspectionService:
             effects=effects,
             reconciliation_decisions=decisions,
             operator_reconciliation_waits=waits,
+            boundary_commands=tuple(
+                item
+                for item in snapshot.boundary_commands
+                if item.command.kind == "reconcile_unit"
+                and item.command.target.target_ref.startswith(f"{unit_key}:gen:")
+            ),
             async_children=children,
             temporal_executions=executions,
         )
@@ -1284,6 +1294,9 @@ class InMemoryInspectionReadRepository:
             effects=effects,
             units=tuple(units),
             async_children=self._async_children.get(run_id, ()),
+            boundary_commands=await self._run_control.list_boundary_commands(
+                request_scope, run_id
+            ),
         )
 
 

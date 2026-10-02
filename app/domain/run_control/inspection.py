@@ -37,6 +37,7 @@ from app.domain.operation_execution.checkpoint_lineage import (
     UnitResultObservation,
 )
 from app.domain.run_control.contracts import (
+    BoundaryCommandStatus,
     BudgetDimensionLimit,
     EffectDisposition,
     EffectSettlementOutcome,
@@ -255,6 +256,8 @@ class RunInspection(Contract):
     projection: RunProjection
     reconciliation_state: ReconciliationState
     operator_reconciliation_waits: tuple[WaitCondition, ...] = ()
+    # RRM-007 (REQ-CP-RUN-004): every boundary command with its receipts, beside the phase.
+    boundary_commands: tuple[BoundaryCommandStatus, ...] = ()
     output_refs: tuple[str, ...] = ()
     budget: BudgetSummary | None = None
     effects: tuple[EffectStatus, ...] = ()
@@ -329,6 +332,9 @@ class UnitInspection(Contract):
     # Accepted `reconcile_unit` commands targeting this unit, and their pending waits.
     reconciliation_decisions: tuple[UnitReconciliationDecision, ...] = ()
     operator_reconciliation_waits: tuple[WaitCondition, ...] = ()
+    # RRM-007: the `reconcile_unit` commands of this unit with their receipts
+    # (`accepted -> delivered -> applied | rejected`).
+    boundary_commands: tuple[BoundaryCommandStatus, ...] = ()
     async_children: tuple[AsyncChildInspection, ...] = ()
     temporal_executions: tuple[TemporalExecution, ...] = ()
 

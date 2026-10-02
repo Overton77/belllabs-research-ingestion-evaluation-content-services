@@ -30,6 +30,9 @@ from app.domain.operation_execution.checkpoint_lineage import (
     UnitResultObservation,
 )
 from app.domain.run_control.contracts import (
+    BoundaryCommandReceipt,
+    BoundaryCommandRecord,
+    BoundaryCommandStatus,
     BudgetState,
     EffectLedgerState,
     RunPhase,
@@ -112,6 +115,7 @@ class PostgresInspectionReadRepository:
                 )
                 units = await _units(connection, request_scope, run_id, unit_key)
                 children = await _async_children(connection, request_scope, run_id)
+                commands = await _boundary_commands(connection, request_scope, run_id)
         return RunSnapshot(
             run=RunRecord(
                 projection=RunProjection.model_validate(_load(run["projection"])),
@@ -124,7 +128,37 @@ class PostgresInspectionReadRepository:
             ),
             units=units,
             async_children=children,
+            boundary_commands=commands,
         )
+
+
+async def _boundary_commands(
+    connection: asyncpg.Connection, request_scope: str, run_id: str
+) -> tuple[BoundaryCommandStatus, ...]:
+    rows = await connection.fetch(
+        """
+        SELECT c.command,
+               (SELECT array_agg(r.receipt ORDER BY r.ordinal)
+                FROM belllabs_control.boundary_command_receipts r
+                WHERE r.request_scope = c.request_scope AND r.run_id = c.run_id
+                  AND r.command_id = c.command_id) AS receipts
+        FROM belllabs_control.boundary_commands c
+        WHERE c.request_scope = $1 AND c.run_id = $2
+        ORDER BY c.sequence_space, c.target_sequence, c.recorded_at, c.command_id
+        """,
+        request_scope,
+        run_id,
+    )
+    return tuple(
+        BoundaryCommandStatus(
+            command=BoundaryCommandRecord.model_validate(_load(row["command"])),
+            receipts=tuple(
+                BoundaryCommandReceipt.model_validate(_load(item)) for item in row["receipts"]
+            ),
+        )
+        for row in rows
+        if row["receipts"]
+    )
 
 
 async def _scope(connection: asyncpg.Connection, request_scope: str) -> datetime:
