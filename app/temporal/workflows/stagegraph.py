@@ -35,6 +35,12 @@ with workflow.unsafe.imports_passed_through():
         StageResultObservation,
     )
     from app.domain.orchestration.interpreter import StageGraphInterpreter
+    from app.domain.orchestration.search_attributes import run_search_attributes
+    from app.temporal.search_attributes import (
+        child_search_attributes,
+        ensure_workflow_search_attributes,
+        operation_workflow_search_attributes,
+    )
     from app.temporal.workflows.operation import OperationWorkflow
 
 
@@ -84,6 +90,17 @@ class StageGraphWorkflow:
         interpreter = StageGraphInterpreter(
             blueprint,
             effective_max_concurrency=run_input.max_concurrency,
+        )
+        attribute_policy = run_input.search_attribute_policy
+        ensure_workflow_search_attributes(
+            attribute_policy,
+            run_search_attributes(
+                workflow_kind="family",
+                run_id=run_input.run_id,
+                request_scope=run_input.request_scope,
+                family="StageGraph",
+                execution_epoch=run_input.execution_epoch,
+            ),
         )
         projection = run_input.initial_projection or interpreter.initial_projection(
             ExecutionIdentity(
@@ -217,12 +234,25 @@ class StageGraphWorkflow:
                 if admitted.accepted and admitted.operation is not None:
                     projection = admitted.projection
                     operation = admitted.operation
+                    operation_attributes = child_search_attributes(
+                        attribute_policy,
+                        operation_workflow_search_attributes(
+                            operation,
+                            family="StageGraph",
+                            execution_epoch=run_input.execution_epoch,
+                        ),
+                    )
+                    if operation_attributes is not None:
+                        operation = operation.model_copy(
+                            update={"search_attribute_policy": attribute_policy}
+                        )
                     handle = await workflow.start_child_workflow(
                         OperationWorkflow.run,
                         operation,
                         id=operation.workflow_id,
                         task_queue=workflow.info().task_queue,
                         parent_close_policy=workflow.ParentClosePolicy.REQUEST_CANCEL,
+                        search_attributes=operation_attributes,
                     )
                     active[proposal.identity.semantic_key] = (
                         handle,

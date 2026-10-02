@@ -109,6 +109,11 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
         }
     ),
     "auditor": frozenset({"workflow_run.read"}),
+    # REQ-CP-RUN-012: redacted checkpoint state summaries are separately authorized; no
+    # other role holds the summary permission by default.
+    "state_inspector": frozenset(
+        {"workflow_run.read", "workflow_run.read_checkpoint_summary"}
+    ),
     "relay": frozenset({"workflow_run.relay"}),
 }
 
@@ -237,7 +242,7 @@ async def close_run_control_resources(application: FastAPI) -> None:
         state.run_control_family_writer_pool = None
 
 
-def _principal_permissions(principal: ControlPlanePrincipal) -> frozenset[str]:
+def principal_permissions(principal: ControlPlanePrincipal) -> frozenset[str]:
     return frozenset(
         permission for role in principal.roles for permission in ROLE_PERMISSIONS.get(role, ())
     )
@@ -251,7 +256,7 @@ def _authorize_actor(
 ) -> ActorContext:
     if principal.actor_id != actor_id:
         raise HTTPException(status_code=403, detail="actor identity mismatch")
-    granted = _principal_permissions(principal)
+    granted = principal_permissions(principal)
     if not asserted_permissions <= granted:
         raise HTTPException(status_code=403, detail="asserted permission was not granted")
     if not asserted_authority_refs <= principal.authority_refs:
@@ -269,7 +274,7 @@ def _authorize_scope(principal: ControlPlanePrincipal, request_scope: str) -> No
 
 
 def _authorize_read(principal: ControlPlanePrincipal) -> None:
-    if "workflow_run.read" not in _principal_permissions(principal):
+    if "workflow_run.read" not in principal_permissions(principal):
         raise HTTPException(status_code=403, detail="workflow run read permission required")
 
 
@@ -341,7 +346,7 @@ async def submit_generic_artifact_operation(
     if submission.run_id != run_id:
         raise HTTPException(status_code=422, detail="path and operation run ids differ")
     _authorize_scope(principal, submission.request_scope)
-    if "workflow_run.execute_operation" not in _principal_permissions(principal):
+    if "workflow_run.execute_operation" not in principal_permissions(principal):
         raise HTTPException(status_code=403, detail="operation execution permission required")
     run = await service.get_run(submission.request_scope, run_id)
     if run.phase != RunPhase.ACTIVE:
@@ -416,7 +421,7 @@ async def get_outbox(
     request_scope: str, principal: Principal, service: Service, limit: int = 100
 ) -> tuple[OutboxRecord, ...]:
     _authorize_scope(principal, request_scope)
-    if "workflow_run.relay" not in _principal_permissions(principal):
+    if "workflow_run.relay" not in principal_permissions(principal):
         raise HTTPException(status_code=403, detail="outbox relay permission required")
     return await service.pending_outbox(request_scope, limit=min(max(limit, 1), 1000))
 
