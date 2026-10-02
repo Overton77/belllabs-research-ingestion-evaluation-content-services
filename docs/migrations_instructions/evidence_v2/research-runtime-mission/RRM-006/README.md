@@ -1,6 +1,6 @@
 # RRM-006 implementation evidence
 
-Disposition: ready_for_review (implemented; independent review pending)
+Disposition: accepted 2026-10-02 (independent review approve_with_fixes, then two re-check rounds; GoalDirected governed settlement deferred to RRM-016, which blocks RRM-010; tested head `74e088d`; merged into integration at `b54e0cf`)
 Recorded date: 2026-10-02 (America/New_York)
 Qualification identity: RRM-006 admit semantic forks from safe macro snapshots. Requirements: REQ-CP-EXEC-012 (clarified: patch, reuse frontier, epoch 1, nothing implicit copied, `cognitive_seed`), REQ-CP-EXEC-016 (snapshots only at safe boundaries), REQ-CP-RUN-001/002 (independent transactional admission of the derived run), REQ-CP-RUN-006/007 (budgets and effects never copied), REQ-CP-DA-015 (sandbox snapshots are distinct; referenced only), REQ-CP-DA-016 (seed keys; seed deferred), REQ-CP-EXEC-015 (`BellLabsParentRunId` on fork roots). Contracts: `CON-CP-CONTINUATION-V1` (`RunSnapshotManifest` `belllabs.run-snapshot.v1`, `RunForkPatch` `belllabs.run-fork-patch.v1`), `CON-CP-RUNTIME-UNIT-V1` (reuse matching) (AMD-RRM-001, accepted meta `main` `a50d833`).
 Base revision and head revision: base `d46f548` (integration: RRM-001, 003, 004, 005, 015 and CR-1 merged); integration merged in without rebase after review: `ae58ba9` (RRM-013 at `15096b9`), `d5ba4cb` (RRM-007 at `6e77850`) and `4e83164` (CR-2, integration `ac7daf9`). Tested code head: `74e088d` (re-review fix) (see "Deterministic verification"; the pre-review gates ran at `2572e54`). Branch `wp/rrm-006-forks`; not merged (the coordinator owns review and merge).
@@ -232,6 +232,18 @@ All fixes are new commits (no amend): `ae58ba9` (merge RRM-013), `84db653` (revi
 
 **Re-review (verdict `approve_with_fixes`, findings 1–8 and the wiring verified).** `84db653` settled `fork_not_materialized` as a terminal failed unit, but the condition is transient (the derived root started before the fork's materialization committed). **Fixed in `74e088d`:** `OperationExecutionService` re-raises it as `ForkMaterializationPending` (a subclass of the retryable `OperationExecutionInProgress`; Activity error type `fork_not_materialized`, retryable) without settling; `incompatible_restore` and `fork_lineage_missing` still settle `failed`. Test: `test_unmaterialized_fork_is_retried_and_reuses_once_materialization_commits`.
 
+## Integration merge gates (coordinator, merge commit `b54e0cf`)
+
+Tested head `74e088d` merged `--no-ff` into `integration/research-runtime-mission` at `b54e0cf`.
+
+| Command | Result |
+|---|---|
+| `uv run --no-sync ruff check app tests scripts` | All checks passed |
+| `uv run --no-sync mypy app` | no issues, 366 files |
+| `hermetic full pytest (DSNs unset)` | 954 passed, 72 skipped, 2 xfailed, 0 failed |
+| `full pytest with Postgres/Mongo DSNs and --env-file` | 996 passed, 30 skipped, 2 xfailed, 0 failed |
+| `git diff --check` | clean |
+
 ## Final disposition
 
-ready_for_review
+accepted

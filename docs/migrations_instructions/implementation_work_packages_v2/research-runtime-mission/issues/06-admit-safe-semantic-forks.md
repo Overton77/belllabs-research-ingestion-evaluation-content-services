@@ -3,7 +3,7 @@
 **What to build:** an operator selects a qualified checkpoint and safe macro snapshot, applies a validated patch, and starts an independently admitted derived run without mutating its parent.
 
 **Blocked by:** RRM-004 and RRM-005.
-**Status:** implemented; independent review pending
+**Status:** accepted 2026-10-02 (tested head `74e088d`, integration merge `b54e0cf`; [evidence](../../../evidence_v2/research-runtime-mission/RRM-006/README.md))
 **Branch:** `wp/rrm-006-forks`
 **Authority:** EXEC-012, RUN admission/effect/budget requirements, DA-015 where sandbox cloning applies, accepted RRM-001 snapshot/patch contracts: REQ-CP-EXEC-012 (clarified), REQ-CP-EXEC-016, `CON-CP-CONTINUATION-V1` (`RunSnapshotManifest`, `RunForkPatch`), REQ-CP-DA-016 (seed keys) — AMD-RRM-001 (accepted 2026-10-01 at meta `6c89143`, merged into meta main `a50d833`; see [RRM-001 contract authority](../RRM-001-contract-authority.md) §4)
 **Evidence:** `docs/migrations_instructions/evidence_v2/research-runtime-mission/RRM-006/`
