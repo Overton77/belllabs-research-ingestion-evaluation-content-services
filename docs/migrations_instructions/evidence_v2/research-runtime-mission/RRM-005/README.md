@@ -1,6 +1,6 @@
 # RRM-005 implementation evidence
 
-Disposition: ready_for_review (implemented; independent review pending)
+Disposition: ready_for_review (independent review `approve`; review follow-ups applied in `62409d8`)
 Recorded date: 2026-10-02 (America/New_York)
 Qualification identity: RRM-005 inspect lifecycle and historical checkpoints. Requirements: REQ-CP-RUN-011 (scoped, non-mutating list/detail/unit/history reads; saver-based historical reads), REQ-CP-RUN-012 (freshness, `in_doubt`, redaction), REQ-CP-EXEC-007 (clarified: Queries are diagnostic only), REQ-CP-EXEC-015 (Search Attributes only). Contracts: `CON-CP-INSPECTION-READ-V1` (`belllabs.inspection-read.v1`), `CON-CP-TEMPORAL-IDENTITY-V1` (Search Attribute table), `CON-CP-CHECKPOINT-LINEAGE-V1` (namespace, stamps, recorded lineage) (AMD-RRM-001, accepted meta `main` `a50d833`).
 Base revision and head revision: base `bb964c5` (integration `integration/research-runtime-mission`: RRM-001, 003, 004 and CR-1 merged). Tested code head `ad961ee` on `wp/rrm-005-inspection`; the evidence/ticket commit follows it and changes documentation only. Not merged (the coordinator owns review and merge).
@@ -190,6 +190,31 @@ What RRM-008 must know: cancellation evidence (`cancelling`, `operator_required`
 - `BellLabsSearchAttributeValues` + `ensure_workflow_search_attributes` + register/verify: input-carried, replay-safe Visibility identity.
 
 None of these carries company, fixture or provider specifics.
+
+## Review disposition
+
+Independent review verdict: `approve`, with four follow-ups requested before merge. They are applied in `62409d8` (code, tests and the RRM-009 ticket) and the documentation commit that follows it; nothing was amended.
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | `_unit_lineage.chain()` had no cycle guard, and the history reader loaded up to 10,000 checkpoints per namespace. | **Fixed.** The walk keeps a visited set and is bounded by the number of listed checkpoints (the observation list is itself bounded, so `MAX_LINEAGE_WALK` from the integration layer was not imported into the application layer, which would invert the dependency direction). A revisit raises the typed `CheckpointLineageCycle` (`reason = checkpoint_lineage_cycle`): the history section is `unavailable` with that reason and the summary is 503 `inspection_source_unavailable`. `RuntimeSourceUnavailable` now carries a typed `reason`. The reader loads at most `MAX_NAMESPACE_CHECKPOINTS = 2_000` root checkpoints (constructor-overridable) and, when a namespace holds more, reports `namespace_history_exceeds_bound` instead of truncating, because a truncated list would silently break the recorded lineage. Tests: `test_cyclic_checkpoint_parents_are_reported_not_walked_forever` (a result-recorded unit whose chain `c3 → c3-parent → c3` loops, and a transition-less unit whose stamped checkpoints loop: both 200 with the typed reason and no entries; summary 503). Against the previous `chain()` both cases loop forever, since neither ever reaches `None` or the stop key. `test_namespace_history_above_the_bound_is_unavailable_not_truncated` (bound 2 → `namespace_history_exceeds_bound`, no entries; bound 5 → the full lineage `c1, c3-parent, c3`). |
+| 2 | Unit reads matched async children by `parent_operation_id ∈ {semantic_operation_id, binding IDs}`, so two units sharing a semantic operation ID could show each other's children. | **Fixed.** A child belongs to a unit generation only through that generation's exact binding (`_owned_by`). The 0016 authority row records `parent_operation_id` but no parent binding (`app/migrations/0016_async_subagent_parent_child_v1.sql`, `async_subagent_authority`); the binding is `AsyncSubagentExecution.parent_binding_id` in the immutable detail document (`app/domain/operation_execution/contracts.py`, `AsyncSubagentExecution`). With the detail, the child must name a binding of the unit at the same generation; without it, the authority's `parent_operation_id` attributes a child only when it is itself one of the unit's binding IDs. A semantic operation ID never attributes a child; such a child stays visible on the run read. `AsyncChildInspection` gains `parent_binding_id`. Test: `test_async_children_are_attributed_by_exact_binding_not_semantic_operation` (two units with the same `semantic_operation_id`, attempts 1 and 2: with the detail, unit 1 sees only its binding-matched child, unit 2 only its authority-binding child; a semantic-only child and a different-generation child are attributed to neither; the run read lists all four; without the detail only the binding-valued reference attributes). The existing fixtures now record the spawning binding as the parent reference. RRM-013 should record the parent binding in the authority row, or keep `parent_binding_id` in the detail, so unit attribution survives a detail outage. |
+| 3 | The RRM-009 ticket lacked explicit composition items. | **Done.** Two acceptance items were added to `issues/09-qualify-production-capability-composition.md`: (a) `web_research_coordinator_live.py:704` and every production root starter use `TemporalWorkflowSubmitter.for_production(..., search_attribute_policy="required")`, with the register step and the read-only verify step at readiness, plus a Visibility qualification on the persistent namespace; (b) the server attaches `temporal_visibility_reader`, `inspection_checkpoint_reader`, `inspection_async_child_details` and one shared `inspection_cursor_key` on `app.state`. |
+| 4 | Evidence README review section. | This section. |
+
+Post-review gates (tested code head `62409d8`; one pytest process at a time; every DSN or full run under the stack lock):
+
+| Command | Result |
+|---|---|
+| `uv run --no-sync ruff check app tests scripts` | All checks passed! |
+| `uv run --no-sync mypy app` | Success: no issues found in 349 source files |
+| New suite: `pytest tests/unit/run_control/test_runtime_inspection_reads.py` | 16 passed (+3 review tests) |
+| Owning suites, both DSNs (the list under Deterministic verification) | 73 passed |
+| Full pytest, hermetic (`BELLABS_RUN_*_LIVE=0 LANGSMITH_TRACING=false`, no DSNs) | 767 passed, 56 skipped, 2 xfailed, 0 failed |
+| Full pytest, both DSNs and `--env-file ../biotech-research-ingestion-evaluation-system/.env` | 799 passed, 24 skipped, 2 xfailed, 0 failed |
+| `git diff --check bb964c5` | clean |
+
+The delta against the pre-review head is +3 passed in both full runs (the three review tests); the skips are unchanged.
 
 ## Final disposition
 
