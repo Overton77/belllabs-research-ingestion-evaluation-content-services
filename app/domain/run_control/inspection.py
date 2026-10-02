@@ -21,7 +21,7 @@ from typing import Final, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
-from app.domain.control_plane.canonical import sha256_digest
+from app.domain.control_plane.canonical import sha256_digest, stable_json_dump
 from app.domain.control_plane.contracts import ExactDefinitionRef
 from app.domain.graph_runtime.identities import (
     DIGEST_PATTERN,
@@ -429,8 +429,8 @@ def checkpoint_summary_digest(
 ) -> str:
     return sha256_digest(
         {
-            "key": key.model_dump(mode="json"),
-            "facts": facts.model_dump(mode="json"),
+            "key": stable_json_dump(key),
+            "facts": stable_json_dump(facts),
             "pending_task_names": sorted(pending_task_names),
             "stamped_digests": dict(sorted(stamped_digests.items())),
         }
