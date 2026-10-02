@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -356,16 +356,20 @@ def goal_workspace_contract() -> WorkflowWorkspaceContract:
     )
 
 
-def _ceiling() -> AuthorityCeiling:
+def _ceiling(ceilings: Mapping[str, int] = TECHNICAL_CEILINGS) -> AuthorityCeiling:
     return AuthorityCeiling(
         capabilities=CAPABILITIES,
-        budgets=BudgetCeiling(dimensions=dict(TECHNICAL_CEILINGS)),
+        budgets=BudgetCeiling(dimensions=dict(ceilings)),
         max_concurrency=MAX_CONCURRENCY,
     )
 
 
 async def publish_technical_catalog(
-    control_plane: ControlPlaneService, *, family: str, now: datetime
+    control_plane: ControlPlaneService,
+    *,
+    family: str,
+    now: datetime,
+    ceilings: Mapping[str, int] = TECHNICAL_CEILINGS,
 ) -> TechnicalCatalog:
     """Publish one technical Workflow Type per family and compile its ERC through F1."""
 
@@ -393,7 +397,7 @@ async def publish_technical_catalog(
             description="Technical qualification control profile.",
             blueprint_ref=published_blueprint.ref,
             selected_variants=frozenset({"default"} if family == "StageGraph" else ()),
-            authority_ceiling=_ceiling(),
+            authority_ceiling=_ceiling(ceilings),
             overlayable_fields=frozenset(),
         )
     )
@@ -435,7 +439,7 @@ async def publish_technical_catalog(
             allowed_runtime_profiles=frozenset({runtime.ref}),
             allowed_workspace_templates=frozenset({workspace.ref}),
             allowed_evaluation_profiles=frozenset({evaluation.ref}),
-            authority_ceiling=_ceiling(),
+            authority_ceiling=_ceiling(ceilings),
             workspace_contract=contract,
         )
     )
@@ -451,7 +455,7 @@ async def publish_technical_catalog(
             input_manifest=RunInputManifestRef(
                 manifest_id=f"rrm009-{tag}-manifest", revision=1, digest=manifest_digest
             ),
-            caller_authority=_ceiling(),
+            caller_authority=_ceiling(ceilings),
             environment=EnvironmentAvailability(
                 capabilities=CAPABILITIES, runtime_bindings=frozenset({"python-3.12"})
             ),

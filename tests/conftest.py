@@ -41,6 +41,7 @@ _PSYCOPG_SELECTOR_MODULES = {
     ("control_plane", "test_rrm_006_semantic_forks.py"),
     ("control_plane", "test_rrm_016_goal_directed_demo.py"),
     ("control_plane", "test_rrm_009_production_composition.py"),
+    ("control_plane", "test_rrm_009_live_capabilities.py"),
 }
 
 

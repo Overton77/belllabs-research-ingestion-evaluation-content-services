@@ -20,7 +20,7 @@ import asyncio
 import json
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -92,7 +92,10 @@ from app.integrations.postgres import (
 )
 from app.models import WorkspaceCandidateDocument
 from app.server import api
-from app.temporal.deployment_composition import ProductionWorkerActivityCompositionFactory
+from app.temporal.deployment_composition import (
+    DeploymentCapabilityComponents,
+    ProductionWorkerActivityCompositionFactory,
+)
 from app.temporal.search_attributes import (
     BELLLABS_SEARCH_ATTRIBUTE_KEYS,
     SearchAttributeRegistrationError,
@@ -237,37 +240,67 @@ async def stack(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> AsyncIterator[ProductionStack]:
-    require_disposable_postgres(test_application_postgres_dsn)
+    technical = technical_binding()
+    model_log: list[dict[str, Any]] = []
+    async with open_production_stack(
+        dsn=test_application_postgres_dsn,
+        mongo_uri=test_mongodb_uri,
+        mongo_database=mongo_database,
+        root=tmp_path,
+        monkeypatch=monkeypatch,
+        technical=technical,
+        components=technical.components(model_log),
+        model_log=model_log,
+    ) as production:
+        yield production
+
+
+@asynccontextmanager
+async def open_production_stack(
+    *,
+    dsn: str,
+    mongo_uri: str,
+    mongo_database: str,
+    root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    technical: TechnicalBinding,
+    components: DeploymentCapabilityComponents | None,
+    model_log: list[dict[str, Any]],
+    extra_environment: dict[str, str] | None = None,
+) -> AsyncIterator[ProductionStack]:
+    """The deployment's API and workers over the disposable stores and a persistent namespace.
+
+    `components` are the exact components the deployment registers beside its pins (the
+    deterministic qualification models); `None` serves the pinned catalog only (live).
+    """
+
+    require_disposable_postgres(dsn)
     if not NODE_EXECUTABLE.exists():
         pytest.skip(f"pinned agent-browser tool requires node at {NODE_EXECUTABLE}")
-    payload_root = tmp_path / "payloads"
-    workspace_root = tmp_path / "workspaces"
-    temporal_db = tmp_path / "temporal.sqlite"
+    payload_root = root / "payloads"
+    workspace_root = root / "workspaces"
+    temporal_db = root / "temporal.sqlite"
     environment = runtime_environment(
-        owner_dsn=test_application_postgres_dsn,
-        mongo_uri=test_mongodb_uri,
+        owner_dsn=dsn,
+        mongo_uri=mongo_uri,
         mongo_database=mongo_database,
         temporal_address=f"127.0.0.1:{TEMPORAL_PORT}",
         task_queue=TASK_QUEUE,
         payload_root=payload_root,
         workspace_root=workspace_root,
     )
-    for name, value in environment.items():
+    for name, value in {**environment, **(extra_environment or {})}.items():
         monkeypatch.setenv(name, value)
     get_settings.cache_clear()
     settings = get_settings()
-    owner_pool = await asyncpg.create_pool(
-        dsn=test_application_postgres_dsn, min_size=1, max_size=3
-    )
+    owner_pool = await asyncpg.create_pool(dsn=dsn, min_size=1, max_size=3)
     await reset_application_schema(owner_pool)
-    await prepare_disposable_identities(test_application_postgres_dsn)
+    await prepare_disposable_identities(dsn)
     mongo_client, _database = await create_mongodb(settings)
     env = await _start_local(temporal_db)
     _reset_api_state()
     api.state.admission_policy_registry = technical_admission_policies()
     api.dependency_overrides[get_control_plane_principal] = lambda: PRINCIPAL
-    technical = technical_binding()
-    model_log: list[dict[str, Any]] = []
     async with AsyncExitStack() as resources:
         await initialize_run_control_resources(api)
         policies = ForkPatchPolicyRegistry()
@@ -281,8 +314,7 @@ async def stack(
             await register_belllabs_search_attributes(env.client, settings.temporal_namespace)
         ) == {key.name for key in BELLLABS_SEARCH_ATTRIBUTE_KEYS}
         assert (
-            await register_belllabs_search_attributes(env.client, settings.temporal_namespace)
-            == ()
+            await register_belllabs_search_attributes(env.client, settings.temporal_namespace) == ()
         )
         await compose_runtime_control(
             api, settings, client=env.client, stack=resources, fork_patch_policies=policies
@@ -302,7 +334,7 @@ async def stack(
         )
         factory = ProductionWorkerActivityCompositionFactory(
             env.client,
-            additional_components=technical.components(model_log),
+            additional_components=components,
             artifact_validation=StaticArtifactValidationAuthority(
                 permission_outcomes={("operation:sandbox-agent@1", "permission:rrm009"): "allowed"},
                 check_outcomes={},
