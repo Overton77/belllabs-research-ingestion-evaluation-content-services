@@ -50,7 +50,11 @@ with workflow.unsafe.imports_passed_through():
         ensure_workflow_search_attributes,
         operation_workflow_search_attributes,
     )
-    from app.temporal.workflows.operation import OperationWorkflow
+    from app.temporal.workflows.operation import (
+        OperationWorkflow,
+        settle_superseded_generation,
+        superseded_generation,
+    )
 
 
 CONTINUE_AS_NEW_ITERATIONS = 20
@@ -82,6 +86,12 @@ STALE_VERSION_RETRY_PATCH = "rrm-016-stale-version-retry"
 # result but were never accepted by a verifier, so they are not promoted. Pre-patch histories
 # promote the union of every iteration's outputs, as they did.
 VERIFIED_TERMINAL_OUTPUTS_PATCH = "rrm-019-verified-terminal-outputs"
+# RRM-008 re-review: a unit whose generation was superseded (`start_new_generation`
+# accepted before the cancel) returns `in_doubt` / `generation_superseded` with an unsettled
+# claim, and its OperationWorkflow has already ended. The saga runs `operation.cancel` for it
+# once, so the operation boundary settles the claim instead of the run waiting on its
+# liability timer with no settler. Histories recorded before the patch keep the liability.
+SETTLE_SUPERSEDED_PATCH = "rrm-008-goal-settle-superseded-generation"
 STALE_RUN_VERSION = "stale_run_version"
 CANCELLING = "cancelling"
 POLICY_PAUSE_PREFIX = "goal-policy-pause:"
@@ -1126,11 +1136,16 @@ class GoalDirectedWorkflow:
             and result is not None
             and reservation_id is not None
         ):
+            if superseded_generation(result) and workflow.patched(SETTLE_SUPERSEDED_PATCH):
+                # The generation was superseded before the cancel and no new generation is
+                # admitted while cancelling: the operation boundary settles it `cancelled`.
+                result = await settle_superseded_generation(dispatch.workflow_request, result)
             if result.disposition == "in_doubt":
                 # The unit has no settlement (a pre-saga operation boundary returned it
-                # parked, or a generation boundary superseded it). It stays a liability of
-                # the run: its reservation and effect are unsettled, so the terminalization
-                # below is rejected until the operator's `reconcile_unit` settles it (the
+                # parked, a pre-patch history kept a superseded generation, or a superseded
+                # generation still holds an unsettled consequential effect). It stays a
+                # liability of the run: its reservation and effect are unsettled, so the
+                # terminalization below is rejected until the operator settles it (the
                 # reducer rejects `start_new_generation` while the run is cancelling). The
                 # saga waits for that; it never fails in place of reconciliation.
                 pass

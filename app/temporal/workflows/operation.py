@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import timedelta
+from typing import Any
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
@@ -32,6 +33,64 @@ TERMINAL_DISPOSITIONS = frozenset({"completed", "cancelled", "failed", "in_doubt
 def _parks(result: dict[str, object]) -> bool:
     return (
         result.get("status") == "in_doubt" and result.get("failure_code") != "generation_superseded"
+    )
+
+
+def superseded_generation(result: OperationWorkflowResult) -> bool:
+    """The unit generation was fenced by an accepted `start_new_generation` (no settlement)."""
+
+    return (
+        result.disposition == "in_doubt"
+        and result.result.get("failure_code") == "generation_superseded"
+    )
+
+
+def _cancel_activity_options(request: OperationWorkflowRequest) -> dict[str, Any]:
+    # `operation.cancel` is retried until a live holder's lease is released or expires; it is
+    # bounded by its schedule-to-close (REQ-CP-EXEC-008 step 3 timeout meanings).
+    return {
+        "task_queue": request.activity_task_queue,
+        "start_to_close_timeout": timedelta(seconds=request.timeout_seconds),
+        "schedule_to_close_timeout": timedelta(
+            seconds=2 * request.timeout_seconds + request.heartbeat_timeout_seconds
+        ),
+        "heartbeat_timeout": timedelta(seconds=request.heartbeat_timeout_seconds),
+        "retry_policy": RetryPolicy(
+            initial_interval=timedelta(seconds=1),
+            maximum_interval=timedelta(seconds=15),
+            backoff_coefficient=2.0,
+            maximum_attempts=0,
+        ),
+    }
+
+
+async def settle_superseded_generation(
+    request: OperationWorkflowRequest, result: OperationWorkflowResult
+) -> OperationWorkflowResult:
+    """RRM-008 re-review (REQ-CP-EXEC-005/008): one `operation.cancel` for a superseded unit.
+
+    A `start_new_generation` accepted before the cancel ends the unit's OperationWorkflow
+    with `in_doubt` / `generation_superseded` and an unsettled claim. A cancelling run
+    admits no new generation, so the family's cancellation saga runs `operation.cancel` for
+    that unit exactly once (from the family's own history; deterministic): the operation
+    boundary settles the superseded generation `cancelled` (claim, reservation and effect),
+    or reports it still unsettled when a consequential effect awaits the operator. The
+    caller gates this behind its own `workflow.patched` marker.
+    """
+
+    settled: dict[str, object] = await workflow.execute_activity(
+        "operation.cancel",
+        request.operation.model_dump(mode="json"),
+        result_type=dict,
+        **_cancel_activity_options(request),
+    )
+    status = settled.get("status", "completed")
+    return result.model_validate(
+        {
+            **result.model_dump(mode="python"),
+            "disposition": status if status in TERMINAL_DISPOSITIONS else "failed",
+            "result": settled,
+        }
     )
 
 
@@ -246,18 +305,7 @@ class OperationWorkflow:
             "operation.cancel",
             request.operation.model_dump(mode="json"),
             result_type=dict,
-            task_queue=request.activity_task_queue,
-            start_to_close_timeout=timedelta(seconds=request.timeout_seconds),
-            schedule_to_close_timeout=timedelta(
-                seconds=2 * request.timeout_seconds + request.heartbeat_timeout_seconds
-            ),
-            heartbeat_timeout=timedelta(seconds=request.heartbeat_timeout_seconds),
-            retry_policy=RetryPolicy(
-                initial_interval=timedelta(seconds=1),
-                maximum_interval=timedelta(seconds=15),
-                backoff_coefficient=2.0,
-                maximum_attempts=0,
-            ),
+            **_cancel_activity_options(request),
         )
         while True:
             try:
@@ -297,4 +345,9 @@ class OperationWorkflow:
         return result
 
 
-__all__: tuple[str, ...] = ("CANCELLATION_SAGA_PATCH", "OperationWorkflow")
+__all__: tuple[str, ...] = (
+    "CANCELLATION_SAGA_PATCH",
+    "OperationWorkflow",
+    "settle_superseded_generation",
+    "superseded_generation",
+)

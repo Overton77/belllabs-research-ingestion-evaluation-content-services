@@ -50,7 +50,11 @@ with workflow.unsafe.imports_passed_through():
         ensure_workflow_search_attributes,
         operation_workflow_search_attributes,
     )
-    from app.temporal.workflows.operation import OperationWorkflow
+    from app.temporal.workflows.operation import (
+        OperationWorkflow,
+        settle_superseded_generation,
+        superseded_generation,
+    )
 
 # RRM-007 patches: each guards a command sequence that an older history did not emit.
 GOVERNED_WAITS_PATCH = "rrm-007-governed-waits"
@@ -61,6 +65,10 @@ QUIESCENCE_PATCH = "rrm-007-quiescence"
 # commands `superseded`, then proposes terminal `cancelled` and waits for any liability the
 # operator must reconcile. Histories recorded before the patch replay unchanged.
 CANCELLATION_SAGA_PATCH = "rrm-008-stagegraph-cancellation-saga"
+# RRM-008 re-review: an active unit whose generation was superseded before the cancel ends
+# `in_doubt` / `generation_superseded` with an unsettled claim; under the saga the family runs
+# `operation.cancel` for it once so that the operation boundary settles the claim.
+SETTLE_SUPERSEDED_PATCH = "rrm-008-stagegraph-settle-superseded-generation"
 LIABILITY_REJECTIONS = frozenset(
     {
         "budget_not_settled",
@@ -614,6 +622,18 @@ class StageGraphWorkflow:
                             message_cursor=operation_request.message_cursor,
                             effect_frontier=operation_request.effect_frontier,
                             active_async_child_ids=operation_request.active_async_child_ids,
+                        )
+                    if (
+                        self._cancel_requested
+                        and superseded_generation(operation_result)
+                        and workflow.patched(CANCELLATION_SAGA_PATCH)
+                        and workflow.patched(SETTLE_SUPERSEDED_PATCH)
+                    ):
+                        # A cancelling run admits no new generation: settle the superseded
+                        # generation through the operation boundary instead of leaving its
+                        # claim as a liability that nothing will ever settle.
+                        operation_result = await settle_superseded_generation(
+                            operation_request, operation_result
                         )
                     accepted_order += 1
                     observed_payload = dict(operation_result.result)

@@ -417,6 +417,75 @@ async def test_cancel_after_an_ambiguous_effect_keeps_the_incident_for_the_opera
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("superseded_first", [True, False])
+async def test_cancel_settles_a_generation_superseded_before_the_cancel(
+    superseded_first: bool,
+) -> None:
+    """Re-review edge case (REQ-CP-EXEC-005/008): `start_new_generation` was accepted for an
+    in_doubt unit before the run was cancelled. A cancelling run admits no new generation,
+    so nothing else would ever settle the unit; `operation.cancel` settles its claim,
+    reservation and effect `cancelled` (`generation_superseded`) exactly once, without
+    cognition and without any lineage write by the fenced generation. Both orders: the
+    superseded generation's own retry already returned `generation_superseded` (its
+    OperationWorkflow ended), or the cancel is the first attempt after the decision."""
+
+    harness = await recovery_harness()
+    unit = stage_recovery_unit(harness.run_id)
+    request = await harness.request(unit)
+    namespace = _namespace(request)
+    await _write_foreign_root_checkpoint(harness, namespace)
+    parked = await harness.run(request)
+    assert parked.status == "in_doubt" and parked.failure_code == "foreign_descendant"
+    incident = await harness.lineage.get_incident("tenant-1", unit.unit_key, 1)
+    assert incident is not None
+    decided = await harness.reconcile(
+        request,
+        "reconcile-new-generation",
+        ReconcileUnitAction(
+            unit_key=unit.unit_key,
+            execution_generation=1,
+            incident_id=incident.incident_id,
+            decision="start_new_generation",
+        ),
+    )
+    assert decided.status == CommandStatus.ACCEPTED
+    if superseded_first:
+        superseded = await harness.run(request)
+        assert (superseded.status, superseded.failure_code) == (
+            "in_doubt",
+            "generation_superseded",
+        )
+    assert _settlements(harness, request) == []
+    assert (await _liability(harness, request))["reservation_open"] is True
+
+    run = await harness.run_control.get_run("tenant-1", harness.run_id)
+    cancelling = await harness.run_control.execute(
+        command(harness.run_id, run.version, "operator-cancel", CancelAction())
+    )
+    assert cancelling.status == CommandStatus.ACCEPTED
+    settled = await _cancel(harness, request)
+    assert (settled.status, settled.failure_code) == ("cancelled", "generation_superseded")
+    assert settled.result_checkpoint is None and settled.checkpoint_transition_id is None
+    # The parking attempt entered the runtime (classification only); nothing else did.
+    assert harness.model.calls == [] and harness.runtime.invocations == 1
+    [settlement] = _settlements(harness, request)
+    assert settlement.status == "cancelled"
+    liability = await _liability(harness, request)
+    assert liability["reservation_open"] is False
+    assert liability["effect"] == "cancelled" and liability["effect_settled"]
+    assert liability["evidence"] == [settlement.settlement_id]
+    # The fenced generation wrote nothing to its lineage.
+    assert await harness.lineage.get_result("tenant-1", unit.unit_key, 1) is None
+    assert await harness.lineage.get_transition("tenant-1", unit.unit_key, 1) is None
+    assert await harness.lineage.get_namespace_in_flight("tenant-1", namespace) is None
+    # Settled once and immutable on every path.
+    assert await _cancel(harness, request) == settled
+    assert await harness.run(request) == settled
+    assert len(_settlements(harness, request)) == 1
+    assert harness.model.calls == []
+
+
+@pytest.mark.asyncio
 async def test_cancel_with_an_unsettled_consequential_tool_effect_is_in_doubt() -> None:
     """A consequential tool effect claimed during cognition whose outcome is unknown when the
     cancel lands is ambiguous: the unit parks `in_doubt` (`unsettled_effect_claims`) with a

@@ -811,12 +811,7 @@ class OperationExecutionService:
             )
             if incident is None or incident.decision != "start_new_generation":
                 raise
-            return _unsettled_result(
-                binding,
-                failure_code="generation_superseded",
-                message="an accepted generation boundary superseded this generation",
-                incident_id=incident.incident_id,
-            )
+            return await self._settle_superseded(binding, claim, attempt, incident.incident_id)
         return await self._hold_lease(
             binding,
             admitted,
@@ -1007,11 +1002,8 @@ class OperationExecutionService:
                     binding, claim, admitted, None, None, failure_code="in_doubt_abandoned"
                 )
             if decision.decision == "start_new_generation":
-                return _unsettled_result(
-                    binding,
-                    failure_code="generation_superseded",
-                    message="an accepted generation boundary superseded this generation",
-                    incident_id=admission.incident.incident_id,
+                return await self._settle_superseded(
+                    binding, claim, admitted.attempt, admission.incident.incident_id
                 )
             accepted_leaf = decision.accepted_checkpoint
         if admitted.deep_binding is None:
@@ -1131,6 +1123,68 @@ class OperationExecutionService:
             admitted=admitted,
             plan=plan if capture is not None else None,
             capture=capture,
+        )
+
+    async def _settle_superseded(
+        self,
+        binding: OperationExecutionBinding,
+        claim: OperationEffectClaim | None,
+        attempt: OperationActivityAttempt,
+        incident_id: str,
+    ) -> OperationExecutionResult:
+        """RRM-008 re-review: settle a generation superseded before the cancel (EXEC-005/008).
+
+        An accepted `start_new_generation` fenced this generation before the run was
+        cancelled, and a cancelling run admits no new generation (the reducer rejects it and
+        cancellation re-executes nothing), so no later generation will ever settle the unit.
+        Its claim, reservation and effect settle `cancelled` here, exactly once, with the
+        `generation_superseded` code. The fenced generation writes nothing to its lineage (no
+        result observation, no transition) and no cognition is observed or resumed; as with
+        `abandon_unit`, no usage is attributed to the in_doubt generation. Active async
+        children are cancelled first. An unsettled consequential effect is never settled
+        over: the unit then stays unsettled for the operator.
+        """
+
+        report_phase("settling")
+        started_at = datetime.now(UTC)
+        children = await self._cancel_children(binding, started_at)
+        if self._journal is not None and claim is not None:
+            handled = {item.effect_id for item in children}
+            unsettled = tuple(
+                effect_id
+                for effect_id in await self._journal.unsettled_effect_ids(binding, claim)
+                if effect_id not in handled
+            )
+            if unsettled:
+                return _unsettled_result(
+                    binding,
+                    failure_code="generation_superseded",
+                    message=(
+                        "the superseded generation holds unsettled effect claims; it awaits "
+                        "operator reconciliation"
+                    ),
+                    incident_id=incident_id,
+                )
+        settlement = OperationSettlement(
+            settlement_id=operation_settlement_id(binding.binding_id),
+            binding_id=binding.binding_id,
+            status="cancelled",
+            event_payloads=(
+                ({"cancelled_async_children": [item.model_dump(mode="json") for item in children]},)
+                if children
+                else ()
+            ),
+            failure_code="generation_superseded",
+            failure_message="superseded generation settled by the governed cancellation saga",
+            settled_at=datetime.now(UTC),
+        )
+        return await self._settle(
+            binding,
+            claim,
+            settlement,
+            started_at=started_at,
+            attempt=attempt,
+            admitted=None,
         )
 
     async def _cancel_journaled(

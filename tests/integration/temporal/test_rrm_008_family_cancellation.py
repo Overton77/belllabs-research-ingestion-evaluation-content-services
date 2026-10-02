@@ -74,10 +74,16 @@ from app.temporal.workflows.belllabs_run import GOVERNED_CANCEL_PATCH, BellLabsR
 from app.temporal.workflows.goal_directed import (
     CANCELLATION_SAGA_PATCH as GOAL_CANCELLATION_PATCH,
 )
+from app.temporal.workflows.goal_directed import (
+    SETTLE_SUPERSEDED_PATCH as GOAL_SETTLE_SUPERSEDED_PATCH,
+)
 from app.temporal.workflows.goal_directed import GoalDirectedWorkflow
 from app.temporal.workflows.operation import OperationWorkflow
 from app.temporal.workflows.stagegraph import (
     CANCELLATION_SAGA_PATCH as STAGEGRAPH_CANCELLATION_PATCH,
+)
+from app.temporal.workflows.stagegraph import (
+    SETTLE_SUPERSEDED_PATCH as STAGEGRAPH_SETTLE_SUPERSEDED_PATCH,
 )
 from app.temporal.workflows.stagegraph import StageGraphWorkflow, wait_condition_id
 from tests.fixtures.checkpoint_recovery import MemoryOperationJournal
@@ -135,6 +141,9 @@ class CancellableStageGraphActivities(GovernedStageGraphActivities):
         self.cancel_settlements: list[str] = []
         self.fast_release = asyncio.Event()
         self.fast_cancelled = asyncio.Event()
+        # Re-review edge case: the number of `operation.cancel` calls per stage that report the
+        # unit's generation superseded (`in_doubt`, no settlement) before it settles.
+        self.superseded_reports: dict[str, int] = {}
 
     @activity.defn(name="operation.execute")
     async def execute_operation(self, request: dict[str, Any]) -> dict[str, Any]:
@@ -163,6 +172,17 @@ class CancellableStageGraphActivities(GovernedStageGraphActivities):
     async def cancel_operation(self, request: dict[str, Any]) -> dict[str, Any]:
         operation_id = str(request["identity"]["operation_id"])
         self.cancel_settlements.append(operation_id)
+        for stage, remaining in self.superseded_reports.items():
+            if f":stage:{stage}:" in operation_id and remaining > 0:
+                self.superseded_reports[stage] = remaining - 1
+                return {
+                    "binding_id": f"binding:{operation_id}",
+                    "semantic_attempt_key": str(request["identity"]),
+                    "status": "in_doubt",
+                    "failure_code": "generation_superseded",
+                    "failure_message": "an accepted generation boundary superseded it",
+                    "reconciliation_incident_id": "incident:fixture:superseded",
+                }
         return {
             "binding_id": f"binding:{operation_id}",
             "semantic_attempt_key": str(request["identity"]),
@@ -273,8 +293,10 @@ class CancellableGoalActivities(GovernedGoalActivities):
         self.executor_cancelled = asyncio.Event()
         self.cancel_settlements: list[str] = []
         # Review note: `operation.cancel` may report a unit whose generation was superseded
-        # before the cancel (`in_doubt`, no settlement); the saga must still finish.
-        self.superseded_under_cancel = False
+        # before the cancel (`in_doubt`, no settlement); the saga must still finish. The
+        # number of such reports before the unit settles `cancelled` (re-review edge case).
+        self.superseded_reports = 0
+        self.reconciled_dispositions: list[str] = []
         self._gateway = RunControlLifecycleGateway(
             authority.run_control,
             ExactLifecycleBinding(blueprint),
@@ -303,7 +325,8 @@ class CancellableGoalActivities(GovernedGoalActivities):
     async def cancel_operation(self, request: dict[str, Any]) -> dict[str, Any]:
         operation_id = str(request["identity"]["operation_id"])
         self.cancel_settlements.append(operation_id)
-        if self.superseded_under_cancel:
+        if self.superseded_reports > 0:
+            self.superseded_reports -= 1
             return {
                 "binding_id": f"binding:{request['identity']['operation_id'].split('/')[-1]}",
                 "semantic_attempt_key": str(request["identity"]),
@@ -324,6 +347,7 @@ class CancellableGoalActivities(GovernedGoalActivities):
         self, request: GoalOperationReconciliationRequest
     ) -> GoalOperationReconciliationResult:
         observed = request.operation_result
+        self.reconciled_dispositions.append(observed.disposition)
         if observed.disposition == "cancelled":
             return GoalOperationReconciliationResult(
                 operation_role=request.operation_role,
@@ -437,6 +461,54 @@ async def test_stagegraph_cancel_reaches_the_running_sibling_and_terminalizes_ca
                 "result_decisions": activities.result_decisions,
             },
         )
+
+
+@pytest.mark.asyncio
+async def test_stagegraph_saga_settles_a_generation_superseded_before_the_cancel() -> None:
+    """Re-review edge case (REQ-CP-EXEC-005/008): the cancelled `slow` unit's
+    OperationWorkflow ends with `in_doubt` / `generation_superseded` and an unsettled claim.
+    Under the saga the family runs `operation.cancel` for it once (patch-gated); the unit
+    settles `cancelled`, so its liability is reconciled and the run terminalizes `cancelled`.
+    Both histories replay."""
+
+    async with await _environment() as environment:
+        authority = Authority(environment.client)
+        activities = CancellableStageGraphActivities(authority)
+        activities.superseded_reports = {"slow": 1}
+        run_id = await authority.admit("rrm-008-stagegraph-superseded-cancel")
+        run_input = replace(stage_input(_blueprint()), run_id=run_id)
+        async with Worker(
+            environment.client,
+            task_queue=QUEUE,
+            workflows=ROOT_WORKFLOWS,
+            workflow_runner=coordinator_workflow_runner(),
+            activities=activities.functions,
+        ):
+            submitted = await _submitter(environment.client).submit(
+                run_input, workflow_id="ignored", blueprint_family=BlueprintFamily.STAGE_GRAPH
+            )
+            root = environment.client.get_workflow_handle(submitted.workflow_id)
+            family = environment.client.get_workflow_handle(f"family/{run_id}/1")
+            await asyncio.wait_for(activities.slow_started.wait(), timeout=60)
+            await _cancel(authority, run_id)
+            await until(lambda: _state_is(authority, run_id, "cancel", "delivered"), seconds=60)
+            result = await _await_completion(root, seconds=120)
+            root_runs = await replay(root, [BellLabsRunWorkflow])
+            family_runs = await replay(family, [StageGraphWorkflow, OperationWorkflow])
+            family_history = await family.fetch_history()
+
+        slow = [item for item in activities.cancel_settlements if ":stage:slow:" in item]
+        fast = [item for item in activities.cancel_settlements if ":stage:fast:" in item]
+        assert len(slow) == 2, "one from the OperationWorkflow, exactly one from the saga"
+        assert len(fast) == 1
+        assert activities.superseded_reports == {"slow": 0}
+        assert result["completion_proposal"]["cancelled"] is True
+        assert result["completion_proposal"]["open_producer_liability_ids"] == []
+        run = await authority.run(run_id)
+        assert run.phase == RunPhase.TERMINAL and run.terminal_outcome == RunOutcome.CANCELLED
+        assert (await _ledger(authority, run_id, "cancel"))[-1] == ("applied", "run_control")
+        assert STAGEGRAPH_SETTLE_SUPERSEDED_PATCH in patch_ids(family_history)
+        assert (root_runs, family_runs) == (1, 1)
 
 
 @pytest.mark.asyncio
@@ -652,17 +724,20 @@ async def test_goal_directed_cancel_during_executor_cognition_finishes_the_saga(
 @pytest.mark.asyncio
 async def test_goal_directed_saga_finishes_when_the_cancelled_unit_is_in_doubt() -> None:
     """Review note: a unit the cancel reaches after its generation was superseded has no
-    settlement (`in_doubt`). The family no longer fails `goal_cancellation_unresolved`: it
-    consumes no settlement for it, re-executes nothing, and finishes the saga; any liability
-    the unit left keeps the run `cancelling` until the operator's `reconcile_unit` settles
-    it (the reducer rejects `start_new_generation` while cancelling)."""
+    settlement (`in_doubt`). The family no longer fails `goal_cancellation_unresolved`. Since
+    the re-review the saga runs `operation.cancel` for the superseded unit exactly once more
+    (the operation boundary settles it unless a consequential effect awaits the operator);
+    here the boundary keeps reporting it unsettled, so the family consumes no settlement,
+    re-executes nothing, and finishes the saga; any liability the unit left keeps the run
+    `cancelling` until the operator settles it (the reducer rejects `start_new_generation`
+    while cancelling)."""
 
     async with await _environment() as environment:
         authority = Authority(environment.client)
         blueprint = _goal_blueprint(max_iterations=3)
         activities = CancellableGoalActivities(authority, blueprint, complete_at_iteration=3)
         activities.release_executor.clear()
-        activities.superseded_under_cancel = True
+        activities.superseded_reports = 2
         run_id = await authority.admit(
             "rrm-008-goal-in-doubt-cancel", bounded={"goal.iterations": 10}
         )
@@ -689,7 +764,7 @@ async def test_goal_directed_saga_finishes_when_the_cancelled_unit_is_in_doubt()
             await _cancel(authority, run_id)
             await until(lambda: _state_is(authority, run_id, "cancel", "delivered"), seconds=60)
             await asyncio.wait_for(activities.executor_cancelled.wait(), timeout=60)
-            await until(lambda: _cancel_settlements(activities, 1), seconds=60)
+            await until(lambda: _cancel_settlements(activities, 2), seconds=60)
             # The fixture family holds no per-unit reservation in run control, so no
             # liability remains and the saga terminalizes at once; with a liability it
             # would wait on `liability_reconciled` or its timer, as the paused-cancel and
@@ -700,8 +775,66 @@ async def test_goal_directed_saga_finishes_when_the_cancelled_unit_is_in_doubt()
         assert result["status"] == "cancelled"
         run = await authority.run_control.get_run(SCOPE, run_id)
         assert run.terminal_outcome == RunOutcome.CANCELLED
-        assert activities.cancel_settlements == ["goal-iteration/1/executor"]
+        # One `operation.cancel` from the OperationWorkflow, exactly one from the family saga.
+        assert activities.cancel_settlements == ["goal-iteration/1/executor"] * 2
+        assert activities.superseded_reports == 0
+        assert activities.reconciled_dispositions == [], "no settlement was consumed"
         assert "terminalize" in activities.lifecycle_kinds
+        assert (await _ledger(authority, run_id, "cancel"))[-1] == ("applied", "run_control")
+        assert family_runs == 1
+
+
+@pytest.mark.asyncio
+async def test_goal_directed_saga_settles_a_generation_superseded_before_the_cancel() -> None:
+    """Re-review edge case (REQ-CP-EXEC-005/008): the unit's OperationWorkflow ended with
+    `in_doubt` / `generation_superseded` and an unsettled claim (a `start_new_generation`
+    accepted before the cancel). A cancelling run admits no new generation, so the saga runs
+    `operation.cancel` for that unit once (patch-gated); the operation boundary settles it
+    `cancelled`, the family consumes that settlement and the run terminalizes `cancelled`.
+    The history replays."""
+
+    async with await _environment() as environment:
+        authority = Authority(environment.client)
+        blueprint = _goal_blueprint(max_iterations=3)
+        activities = CancellableGoalActivities(authority, blueprint, complete_at_iteration=3)
+        activities.release_executor.clear()
+        activities.superseded_reports = 1
+        run_id = await authority.admit(
+            "rrm-008-goal-superseded-cancel", bounded={"goal.iterations": 10}
+        )
+        run_input = replace(
+            goal_input(blueprint=blueprint, run_id=run_id),
+            baseline_reservation=BASELINE,
+            cancellation_retry_seconds=1,
+        )
+        async with Worker(
+            environment.client,
+            task_queue=GOAL_QUEUE,
+            workflows=ROOT_WORKFLOWS,
+            workflow_runner=coordinator_workflow_runner(),
+            activities=activities.functions,
+        ):
+            submitted = await _submitter(environment.client).submit(
+                run_input, workflow_id="ignored", blueprint_family=BlueprintFamily.GOAL_DIRECTED
+            )
+            root = environment.client.get_workflow_handle(submitted.workflow_id)
+            family: WorkflowHandle[Any, Any] = environment.client.get_workflow_handle(
+                f"family/{run_id}/1"
+            )
+            await asyncio.wait_for(activities.executor_started.wait(), timeout=60)
+            await _cancel(authority, run_id)
+            await until(lambda: _state_is(authority, run_id, "cancel", "delivered"), seconds=60)
+            result = await _await_completion(root, seconds=120)
+            family_runs = await replay(family, [GoalDirectedWorkflow, OperationWorkflow])
+            family_history = await family.fetch_history()
+
+        assert result["status"] == "cancelled"
+        run = await authority.run_control.get_run(SCOPE, run_id)
+        assert run.terminal_outcome == RunOutcome.CANCELLED
+        assert activities.cancel_settlements == ["goal-iteration/1/executor"] * 2
+        assert activities.superseded_reports == 0
+        assert activities.reconciled_dispositions == ["cancelled"], "the settlement is consumed"
+        assert GOAL_SETTLE_SUPERSEDED_PATCH in patch_ids(family_history)
         assert (await _ledger(authority, run_id, "cancel"))[-1] == ("applied", "run_control")
         assert family_runs == 1
 
