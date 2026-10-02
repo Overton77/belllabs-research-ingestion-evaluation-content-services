@@ -265,7 +265,13 @@ class ExactDeepAgentMaterializer:
                 None if hosted else _exact(self._registry.stores, binding.store_ref.digest, "store")
             )
             state_schema = _state_type(binding.cognitive_state_schema)
-            context_schema = _context_type(binding.cognitive_context_schema)
+            # A hosted graph is invoked by the Agent Server without a runtime context, so its
+            # frozen context values become the dataclass defaults (exact: they are part of
+            # the binding digest). Local cognition passes the instance explicitly.
+            context_schema = _context_type(
+                binding.cognitive_context_schema,
+                defaults=binding.cognitive_context_values if hosted else None,
+            )
             context = _context_instance(
                 context_schema,
                 binding.cognitive_context_schema,
@@ -594,10 +600,19 @@ def _runtime_python_type(field: CognitiveRuntimeField) -> type[Any]:
     }[field.value_kind]
 
 
-def _context_type(schema: CognitiveRuntimeContextSchema) -> type[Any]:
+def _context_type(
+    schema: CognitiveRuntimeContextSchema, *, defaults: Mapping[str, object] | None = None
+) -> type[Any]:
+    fields: list[tuple[str, type[Any]] | tuple[str, type[Any], Any]] = []
+    for item in schema.fields:
+        python_type = _runtime_python_type(item)
+        if defaults is not None and item.name in defaults:
+            fields.append((item.name, python_type, dataclass_field(default=defaults[item.name])))
+        else:
+            fields.append((item.name, python_type))
     return make_dataclass(
         f"BellLabsContext_{schema.schema_digest.removeprefix('sha256:')[:12]}",
-        [(item.name, _runtime_python_type(item)) for item in schema.fields],
+        fields,
         frozen=True,
         slots=True,
     )

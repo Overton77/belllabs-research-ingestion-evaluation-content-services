@@ -14,9 +14,11 @@ Two adapters live here:
   the model's `start_async_task` reserves and links the child before any provider submission.
 
 Credentials are resolved from references only; no secret value is persisted or logged.
-"""
 
-from __future__ import annotations
+Annotations are evaluated eagerly on purpose: `StructuredTool` recognises the injected
+`ToolRuntime` parameter from the coroutine signature's runtime annotation, so this module
+must not postpone annotation evaluation.
+"""
 
 import asyncio
 import json

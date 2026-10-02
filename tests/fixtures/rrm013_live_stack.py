@@ -131,8 +131,8 @@ class ParentSpawnModel(BaseChatModel):
     """
 
     objective: str = "Reply with exactly the word PONG."
+    subagent_type: str = CHILD_NAME
     log_path: str | None = None
-    _calls: list[int] = []
 
     @property
     def _llm_type(self) -> str:
@@ -158,7 +158,10 @@ class ParentSpawnModel(BaseChatModel):
                 tool_calls=[
                     {
                         "name": "start_async_task",
-                        "args": {"description": self.objective, "subagent_type": CHILD_NAME},
+                        "args": {
+                            "description": self.objective,
+                            "subagent_type": self.subagent_type,
+                        },
                         "id": PARENT_SPAWN_TOOL_CALL_ID,
                         "type": "tool_call",
                     }
@@ -261,7 +264,11 @@ def saver_dsn(dsn: str) -> str:
 
 
 def live_contract(endpoint: str) -> AsyncSubagentContract:
-    return technical_child_definition().contract(agent_protocol_url=endpoint.rstrip("/"))
+    # The fixture parent run declares `tokens.total` with a hard cap of 100 (run-control test
+    # request); the child's reservation is carved from it, so it declares only that dimension.
+    return technical_child_definition().contract(
+        agent_protocol_url=endpoint.rstrip("/"), budget_limits={"tokens.total": 20}
+    )
 
 
 @asynccontextmanager
@@ -292,8 +299,10 @@ async def open_live_stack(
             contract = live_contract(endpoint)
             base, _profile, bundle = exact_fixture()
             binding = DeepAgentExecutionBinding.create(
-                **base.model_dump(mode="python", exclude={"binding_digest"}),
-                async_subagents=(contract,),
+                **{
+                    **base.model_dump(mode="python", exclude={"binding_digest", "async_subagents"}),
+                    "async_subagents": (contract,),
+                }
             )
             model = ParentSpawnModel(
                 objective=objective, log_path=str(model_log) if model_log else None

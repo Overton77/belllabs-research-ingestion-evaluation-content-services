@@ -152,7 +152,12 @@ async def test_hosted_graph_is_built_through_the_canonical_adapter_and_stamps_id
             for node in graph.get_graph().nodes.values()
             for name in (getattr(getattr(node, "data", None), "tools_by_name", {}) or {})
         }
+        # The Agent Server invokes the graph without a runtime context: the frozen context
+        # values of the exact binding are the hosted context's defaults.
         result = await graph.ainvoke({"messages": [{"role": "user", "content": "say PONG"}]})
+        context_type = graph.context_schema
+        assert context_type is not None
+        assert context_type().hosted_graph_id == TECHNICAL_CHILD_GRAPH_ID
     assert result["belllabs_served_graph"] == definition.served.model_dump(mode="json")
     assert result["messages"][-1].content == "PONG"
     assert model.calls == 1

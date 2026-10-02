@@ -361,3 +361,113 @@ def test_contract_freezes_the_hosted_graph_identity_in_its_digest() -> None:
         type(base).model_validate(drifted.model_dump(mode="python"))
     assert base.deployment_credential_ref == "environment:AGENT_SERVER_TOKEN"
     assert base.graph_binding_digest == GRAPH_BINDING_DIGEST
+
+
+@pytest.mark.asyncio
+async def test_parent_deep_agent_start_async_task_reserves_and_links_before_the_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The real spawn path offline: `operation.execute` cognition calls the governed tool.
+
+    The parent Deep Agent is a real `create_deep_agent` graph compiled through the adapter; its
+    `start_async_task` is the BellLabs-governed tool with the stock 0.7.5 name and schema. The
+    child is reserved, linked and claimed before the fake provider sees the submission.
+    """
+
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.store.memory import InMemoryStore
+
+    from app.application.operations.checkpoint_lineage import (
+        CheckpointLineageService,
+        InMemoryCheckpointLineageRepository,
+    )
+    from app.domain.operation_execution.contracts import DeepAgentExecutionBinding
+    from app.integrations.agents.deep_agents import (
+        DeepAgentRuntimeAdapter,
+        ExactComponentRegistry,
+        ExactDeepAgentMaterializer,
+        StateSandboxFactory,
+    )
+    from app.integrations.agents.deep_agents.async_subagents import (
+        BellLabsAsyncSubagentMiddleware,
+    )
+    from tests.acceptance.control_plane.test_wp_cp_040 import (
+        exact_fixture,
+        planned_invocation,
+        unit_bound,
+    )
+    from tests.fixtures.rrm013_live_stack import ParentSpawnModel
+
+    client = FakeAgentProtocolClient(served=SERVED)
+    install(monkeypatch, client)
+    base, _profile, bundle = exact_fixture()
+    agreement = contract()
+    binding = DeepAgentExecutionBinding.create(
+        **{
+            **base.model_dump(mode="python", exclude={"binding_digest", "async_subagents"}),
+            "async_subagents": (agreement,),
+        }
+    )
+    model = ParentSpawnModel(subagent_type=agreement.name)
+    details = InMemoryAsyncSubagentDetailRepository()
+    authority = InMemoryAsyncSubagentAuthority()
+    provider = DeepAgentsAsyncSubagentAdapter(secrets=SECRETS, request_scope="tenant-1")
+    service = AsyncSubagentService(details, authority, provider, allow_new_spawns=True)
+    events: list[str] = []
+    original_start = provider.start
+
+    async def observed_start(*args: object, **kwargs: object) -> object:
+        events.append(("provider.start", tuple(details.executions), tuple(authority.reservations)))
+        return await original_start(*args, **kwargs)
+
+    monkeypatch.setattr(provider, "start", observed_start)
+
+    class Factory:
+        def middleware(
+            self, op_binding: object, contracts: object, secrets: object
+        ) -> BellLabsAsyncSubagentMiddleware:
+            del secrets
+            return BellLabsAsyncSubagentMiddleware(
+                service=service,
+                adapter=provider,
+                binding=op_binding,  # type: ignore[arg-type]
+                contracts=contracts,  # type: ignore[arg-type]
+            )
+
+    adapter = DeepAgentRuntimeAdapter(
+        ExactDeepAgentMaterializer(
+            ExactComponentRegistry(
+                model_factories={binding.model.ref.digest: lambda _b, _s: model},
+                skill_bundles={bundle.bundle_digest: bundle},
+                sandbox_factories={binding.sandbox.ref.digest: StateSandboxFactory()},
+                checkpointers={binding.checkpointer_ref.digest: InMemorySaver()},
+                stores={binding.store_ref.digest: InMemoryStore()},
+            )
+        ),
+        async_subagents=Factory(),
+    )
+    lineage = CheckpointLineageService(InMemoryCheckpointLineageRepository())
+    invocation = await planned_invocation(unit_bound(binding), lineage)
+    result = await adapter.execute(invocation, {})
+
+    children = list(details.executions.values())
+    assert len(children) == 1
+    child = children[0]
+    assert result.structured_output is not None
+    assert str(result.structured_output["spawned"]).endswith(child.child_execution_id)
+    assert child.parent_binding_id == invocation.binding.binding_id
+    assert child.lifecycle == AsyncSubagentLifecycle.RUNNING
+    # Reservation, link and execution existed before the provider start.
+    assert len(events) == 1
+    assert child.child_execution_id in {key[1] for key in events[0][1]}
+    assert child.child_execution_id in {key[1] for key in events[0][2]}
+    assert len(client.runs_of(child.child_execution_id)) == 1
+    assert client.calls.count("sdk.runs.create") == 1
+    # The same tool call (a resumed invocation) rebuilds the same child identity.
+    middleware = Factory().middleware(invocation.binding, (agreement,), {})
+    spawn = middleware.spawn_request(
+        description=model.objective, contract=agreement, tool_call_id="rrm013-start-async-task"
+    )
+    assert spawn.idempotency_key == "rrm013-start-async-task"
+    assert (await service.spawn(spawn)).child_execution_id == child.child_execution_id
+    assert client.calls.count("sdk.runs.create") == 1
