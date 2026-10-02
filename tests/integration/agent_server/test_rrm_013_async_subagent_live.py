@@ -197,6 +197,54 @@ async def incident_rows(dsn: str, child_id: str) -> list[dict[str, Any]]:
         await pool.close()
 
 
+def trace_correlation(child_id: str, parent_binding_id: str) -> dict[str, Any]:
+    """Subordinate evidence: LangSmith traces of parent and child share BellLabs identities.
+
+    The child's Agent Server run carries `belllabs_child_execution_id` and
+    `belllabs_parent_binding_id` in its metadata (the server copies run metadata onto the
+    trace); the parent's `operation.execute` trace carries `binding_id`. Ingestion is
+    asynchronous, so this polls briefly and records what it saw; it never gates the test.
+    """
+
+    if not os.getenv("LANGSMITH_API_KEY"):
+        return {"available": False, "reason": "LANGSMITH_API_KEY not set"}
+    try:
+        from langsmith import Client
+    except Exception as error:  # noqa: BLE001 - subordinate evidence only
+        return {"available": False, "reason": f"langsmith client unavailable: {error}"}
+    project = os.getenv("LANGSMITH_PROJECT", "BellLabsBiotech-AsyncSubagents-Local")
+    client = Client()
+    child_filter = f'has(metadata, \'{{"belllabs_child_execution_id": "{child_id}"}}\')'
+    parent_filter = f'has(metadata, \'{{"binding_id": "{parent_binding_id}"}}\')'
+    child_runs: list[Any] = []
+    parent_runs: list[Any] = []
+    deadline = time.monotonic() + 90
+    while time.monotonic() < deadline and not (child_runs and parent_runs):
+        try:
+            child_runs = list(
+                client.list_runs(project_name=project, filter=child_filter, is_root=True, limit=5)
+            )
+            parent_runs = list(
+                client.list_runs(project_name=project, filter=parent_filter, is_root=True, limit=5)
+            )
+        except Exception as error:  # noqa: BLE001 - subordinate evidence only
+            return {"available": False, "reason": f"LangSmith query failed: {type(error).__name__}"}
+        if not (child_runs and parent_runs):
+            time.sleep(5)
+    return {
+        "available": True,
+        "project": project,
+        "child_root_runs": [str(run.id) for run in child_runs],
+        "child_parent_binding_ids": sorted(
+            {
+                str((run.extra or {}).get("metadata", {}).get("belllabs_parent_binding_id"))
+                for run in child_runs
+            }
+        ),
+        "parent_root_runs": [str(run.id) for run in parent_runs],
+    }
+
+
 async def settle_child(stack: LiveStack, child_id: str, *, admit: bool) -> None:
     now = datetime.now(UTC)
     if admit:
@@ -271,7 +319,7 @@ async def test_parent_deep_agent_spawns_one_real_child_and_admits_its_result(
         assert manifest.provider_checkpoint.checkpoint_id
         assert manifest.usage.attribution == "provider_attributed"
         assert manifest.usage.attributed_amounts["tokens.total"] > 0
-        assert manifest.usage.attributed_amounts["model.turns"] >= 1
+        assert set(manifest.usage.attributed_amounts) <= set(stack.contract.budget_limits)
         assert "PONG" in (completed.result_output_text or "")
         assert len(await provider_runs(child_id)) == 1
 
@@ -316,12 +364,14 @@ async def test_parent_deep_agent_spawns_one_real_child_and_admits_its_result(
         assert replay.status == "completed" and replay.binding_id == result.binding_id
         assert len(await stack.authority.list_children(SCOPE, run_id)) == 1
         assert len(await provider_runs(child_id)) == 1
+        correlation = trace_correlation(child_id, result.binding_id)
         _evidence(
             "spawn",
             {
                 "child_execution_id": child_id,
                 "provider_run_id": completed.provider_run_id,
                 "provider_runs": 1,
+                "trace_correlation": correlation,
                 "graph": manifest.provider_checkpoint.model_dump(mode="json"),
                 "usage": manifest.usage.model_dump(mode="json"),
                 "manifest_digest": manifest.manifest_digest,

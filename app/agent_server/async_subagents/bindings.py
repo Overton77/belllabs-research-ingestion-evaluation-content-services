@@ -55,6 +55,9 @@ TECHNICAL_CHILD_MODEL_SETTINGS: dict[str, object] = {
     "reasoning_effort": "low",
     "verbosity": "low",
     "use_responses_api": True,
+    # The server streams the run; streamed usage is what makes the thread's final message
+    # carry provider-attributed token counts (REQ-CP-DA-011).
+    "stream_usage": True,
 }
 TECHNICAL_CHILD_SYSTEM_PROMPT = (
     "You are a bounded BellLabs technical child agent hosted on an Agent Server. "

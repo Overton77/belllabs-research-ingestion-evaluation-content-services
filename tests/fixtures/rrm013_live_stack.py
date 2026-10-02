@@ -383,6 +383,16 @@ async def open_live_stack(
 
 
 async def admit_parent_run(stack: LiveStack, request_id: str) -> str:
+    """Admit a parent run with a unique request identity.
+
+    BellLabs child identities derive from the parent binding and the tool call, and the Agent
+    Server keeps its threads durably, so a repeated run identity would reconnect to a previous
+    drill's provider thread (correct, but not what a fresh drill wants).
+    """
+
+    from uuid import uuid4
+
+    request_id = f"{request_id}-{uuid4().hex[:8]}"
     admitted = await stack.run_control.admit(run_request(request_id=request_id))
     assert admitted.run_id is not None
     started = await stack.run_control.execute(

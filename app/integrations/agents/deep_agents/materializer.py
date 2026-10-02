@@ -144,6 +144,9 @@ class OpenAIExactModelFactory:
         "temperature",
         "service_tier",
         "use_responses_api",
+        # A hosted graph is streamed by the Agent Server; usage reaches the persisted message
+        # only when the client streams usage (REQ-CP-DA-011 provider-attributed usage).
+        "stream_usage",
     }
 
     def __init__(self, *, secret_key: str = "environment:OPENAI_API_KEY") -> None:
