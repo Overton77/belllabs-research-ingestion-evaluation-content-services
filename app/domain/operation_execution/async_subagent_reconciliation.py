@@ -161,20 +161,25 @@ class SpawnKeyClassification(Contract):
 def classify_spawn_key_observation(
     contract: AsyncSubagentContract,
     observation: AsyncSpawnKeyObservation,
+    *,
+    resolved_run_ids: frozenset[str] = frozenset(),
 ) -> SpawnKeyClassification:
     """Exactly one run whose served graph identity verifies binds; none orphans; else in_doubt.
 
     A run without a reported served identity (for example one that has not started) is treated
     as verifiable only when it is the single candidate; its identity is re-verified when its
     checkpoint is observed (REQ-CP-DA-011). A run whose reported identity differs from the
-    contract is a `graph_identity_mismatch`.
+    contract is a `graph_identity_mismatch`. `resolved_run_ids` are runs BellLabs already
+    cancelled through `adopt_provider_run` or `orphan_child`; they keep the spawn key on the
+    provider but are no longer candidates.
     """
 
-    if not observation.runs:
+    candidates = tuple(run for run in observation.runs if run.run_id not in resolved_run_ids)
+    if not candidates:
         return SpawnKeyClassification(outcome="no_provider_run")
-    if len(observation.runs) > 1:
+    if len(candidates) > 1:
         return SpawnKeyClassification(outcome="in_doubt", reason="multiple_provider_runs")
-    run = observation.runs[0]
+    run = candidates[0]
     if run.served_graph is not None and not run.served_graph.matches(contract):
         return SpawnKeyClassification(outcome="in_doubt", reason="graph_identity_mismatch")
     return SpawnKeyClassification(outcome="bound", run=run)

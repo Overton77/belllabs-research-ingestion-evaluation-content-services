@@ -77,9 +77,19 @@ class FakeAgentProtocolClient:
                 "output_tokens": 4,
                 "total_tokens": self.tokens_per_turn,
             }
+        message["id"] = f"ai-{uuid4().hex[:8]}"
         values: dict[str, Any] = {
             "messages": [{"type": "human", "content": "objective"}, message],
         }
+        if self.tokens_per_turn is not None:
+            values["belllabs_provider_usage"] = [
+                {
+                    "message_id": message["id"],
+                    "input_tokens": 3,
+                    "output_tokens": 4,
+                    "total_tokens": self.tokens_per_turn,
+                }
+            ]
         if self.stamp_identity:
             values["belllabs_served_graph"] = self.served.model_dump(mode="json")
         thread["values"] = values

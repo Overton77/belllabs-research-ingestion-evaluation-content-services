@@ -71,6 +71,7 @@ SPAWN_KEY_METADATA = "belllabs_spawn_key"
 REQUEST_SCOPE_HEADER = "x-belllabs-request-scope"
 SERVED_GRAPHS_PATH = "/belllabs/async-subagents/served-graphs"
 SERVED_GRAPH_STATE_KEY = "belllabs_served_graph"
+PROVIDER_USAGE_STATE_KEY = "belllabs_provider_usage"
 _CANCEL_ACK_POLLS = 10
 _CANCEL_ACK_INTERVAL_SECONDS = 0.5
 _TERMINAL_RUN_STATUSES = frozenset({"success", "error", "timeout", "interrupted"})
@@ -355,7 +356,12 @@ class DeepAgentsAsyncSubagentAdapter:
             run_id=task["run_id"],
             output_ref="ref:async-output:" + sha256_digest(output_text).removeprefix("sha256:"),
             output_text=output_text,
-            usage=attribute_usage(task["run_id"], values.get("messages"), contract.budget_limits),
+            usage=attribute_usage(
+                task["run_id"],
+                values.get("messages"),
+                contract.budget_limits,
+                provider_usage=values.get(PROVIDER_USAGE_STATE_KEY),
+            ),
             checkpoint=key,
             observed_at=self._now(),
         )
@@ -531,13 +537,20 @@ class DeepAgentsAsyncSubagentAdapter:
 
 
 def attribute_usage(
-    run_id: str, messages: object, budget_limits: Mapping[str, int]
+    run_id: str,
+    messages: object,
+    budget_limits: Mapping[str, int],
+    *,
+    provider_usage: object = None,
 ) -> AsyncSubagentUsage:
-    """Provider-attributed usage from the thread's AI messages, or pending when unreported.
+    """Provider-attributed usage from the hosted graph's usage stamps, or pending.
 
-    `tokens.total` sums `usage_metadata.total_tokens`; `model.turns` counts AI messages. Only
-    the contract's budget dimensions are reported. If the provider reported no usage metadata
-    for any AI message, the usage is pending with no invented amounts (REQ-CP-DA-011).
+    The hosted graph records each model call's provider-reported usage in the thread state
+    channel `belllabs_provider_usage` (the Agent Server's serialized messages omit
+    `usage_metadata`); a message-level `usage_metadata` is accepted as a fallback.
+    `tokens.total` sums `total_tokens`; `model.turns` counts AI messages. Only the contract's
+    budget dimensions are reported. If nothing was reported, the usage is pending with no
+    invented amounts (REQ-CP-DA-011).
     """
 
     if not isinstance(messages, list):
@@ -545,12 +558,20 @@ def attribute_usage(
     turns = 0
     tokens = 0
     reported = False
+    stamped = {
+        str(item.get("message_id")): int(item.get("total_tokens") or 0)
+        for item in (provider_usage if isinstance(provider_usage, list) else [])
+        if isinstance(item, dict)
+    }
     for message in messages:
         if not isinstance(message, dict) or message.get("type") != "ai":
             continue
         turns += 1
         usage = message.get("usage_metadata")
-        if isinstance(usage, dict) and usage.get("total_tokens") is not None:
+        if str(message.get("id")) in stamped:
+            reported = True
+            tokens += stamped[str(message.get("id"))]
+        elif isinstance(usage, dict) and usage.get("total_tokens") is not None:
             reported = True
             tokens += int(usage.get("total_tokens") or 0)
     amounts: dict[str, int] = {}

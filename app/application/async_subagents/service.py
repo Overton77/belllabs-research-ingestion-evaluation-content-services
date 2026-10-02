@@ -166,6 +166,12 @@ class AsyncSubagentAuthorityPort(Protocol):
         self, request_scope: str, record: AsyncProviderRunRecord
     ) -> None: ...
 
+    async def cancelled_provider_run_ids(
+        self, request_scope: str, child_execution_id: str
+    ) -> frozenset[str]:
+        """Runs BellLabs cancelled as duplicates or orphans; never candidates again."""
+        ...
+
     async def open_incident(self, incident: AsyncSubagentIncident) -> AsyncSubagentIncident: ...
     async def get_incident(
         self, request_scope: str, child_execution_id: str
@@ -454,7 +460,11 @@ class AsyncSubagentService:
                     observed_at=self._now(),
                 ),
             )
-        classified = classify_spawn_key_observation(contract, spawn_key)
+        classified = classify_spawn_key_observation(
+            contract,
+            spawn_key,
+            resolved_run_ids=await self._resolved_runs(request_scope, execution),
+        )
         if classified.outcome == "no_provider_run":
             # The submission provably did not happen: the child stays admitted and the caller's
             # retry resumes the fenced path (RRM-001 section 7 #10).
@@ -737,7 +747,11 @@ class AsyncSubagentService:
             return execution
         # Every reconnect re-verifies the spawn key: exactly one run (REQ-CP-DA-008).
         spawn_key = await self._provider.observe_spawn_key(contract, execution)
-        classified = classify_spawn_key_observation(contract, spawn_key)
+        classified = classify_spawn_key_observation(
+            contract,
+            spawn_key,
+            resolved_run_ids=await self._resolved_runs(request_scope, execution),
+        )
         if classified.outcome == "no_provider_run":
             if execution.lifecycle == AsyncSubagentLifecycle.ADMITTED:
                 return execution
@@ -778,6 +792,13 @@ class AsyncSubagentService:
                 observation=ambiguity.observation,
             )
         return await self._apply_observation(request_scope, execution, observation)
+
+    async def _resolved_runs(
+        self, request_scope: str, execution: AsyncSubagentExecution
+    ) -> frozenset[str]:
+        return await self._authority.cancelled_provider_run_ids(
+            request_scope, execution.child_execution_id
+        )
 
     async def _orphan_by_observation(
         self,
@@ -1323,6 +1344,17 @@ class InMemoryAsyncSubagentAuthority:
                     self.provider_runs[index] = (request_scope, deepcopy(record))
                 return
         self.provider_runs.append((request_scope, deepcopy(record)))
+
+    async def cancelled_provider_run_ids(
+        self, request_scope: str, child_execution_id: str
+    ) -> frozenset[str]:
+        return frozenset(
+            record.provider_run_id
+            for scope, record in self.provider_runs
+            if scope == request_scope
+            and record.child_execution_id == child_execution_id
+            and record.disposition in {"duplicate_cancelled", "orphaned_cancelled"}
+        )
 
     async def open_incident(self, incident: AsyncSubagentIncident) -> AsyncSubagentIncident:
         key = (incident.request_scope, incident.child_execution_id)

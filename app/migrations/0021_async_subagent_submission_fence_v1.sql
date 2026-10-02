@@ -29,6 +29,9 @@ ALTER TABLE belllabs_control.async_subagent_authority
     ),
     ADD COLUMN incident_id text,
     ADD COLUMN lifecycle_updated_at timestamptz,
+    -- REQ-CP-RUN-011 (RRM-005): unit attribution of a child survives a detail-store outage
+    -- because the parent's exact binding is also on the authority row.
+    ADD COLUMN parent_binding_id text,
     ADD CONSTRAINT async_subagent_authority_submission_lease_shape
         CHECK ((submission_holder IS NULL) = (submission_lease_expires_at IS NULL)),
     ADD CONSTRAINT async_subagent_authority_provider_binding_shape

@@ -30,6 +30,7 @@ import asyncpg
 import pytest
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
+from langgraph_sdk.errors import NotFoundError
 from pymongo import AsyncMongoClient
 
 from app.application.async_subagents.parent_effects import (
@@ -130,7 +131,10 @@ def sdk_client() -> LangGraphClient:
 
 
 async def provider_runs(child_id: str) -> list[dict[str, Any]]:
-    runs = await sdk_client().runs.list(child_id, limit=100)
+    try:
+        runs = await sdk_client().runs.list(child_id, limit=100)
+    except NotFoundError:
+        return []  # the thread was never created: no provider run exists
     return [run for run in runs if (run.get("metadata") or {}).get(SPAWN_KEY_METADATA) == child_id]
 
 

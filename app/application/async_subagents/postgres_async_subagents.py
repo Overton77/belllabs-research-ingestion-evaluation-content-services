@@ -54,8 +54,9 @@ class PostgresAsyncSubagentAuthority:
                 """INSERT INTO belllabs_control.async_subagent_authority
                 (request_scope, child_execution_id, parent_run_id, parent_operation_id, link_id,
                  contract_id, contract_digest, reservation_id, dependency_class,
-                 execution_generation, created_at, updated_at, lifecycle, lifecycle_updated_at)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11,'admitted',$11)
+                 execution_generation, created_at, updated_at, lifecycle, lifecycle_updated_at,
+                 parent_binding_id)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11,'admitted',$11,$12)
                 ON CONFLICT (request_scope, child_execution_id) DO NOTHING""",
                 request.request_scope,
                 child_execution_id,
@@ -68,6 +69,7 @@ class PostgresAsyncSubagentAuthority:
                 request.dependency_class.value,
                 request.execution_generation,
                 now,
+                request.parent_binding_id,
             )
             await connection.execute(
                 """INSERT INTO belllabs_control.async_subagent_commands
@@ -195,6 +197,20 @@ class PostgresAsyncSubagentAuthority:
                 json.dumps(record.model_dump(mode="json")),
                 record.observed_at,
             )
+
+    async def cancelled_provider_run_ids(
+        self, request_scope: str, child_execution_id: str
+    ) -> frozenset[str]:
+        async with self._pool.acquire() as connection, connection.transaction():
+            await _set_scope(connection, request_scope)
+            rows = await connection.fetch(
+                """SELECT provider_run_id FROM belllabs_control.async_subagent_provider_runs
+                   WHERE request_scope = $1 AND child_execution_id = $2
+                     AND disposition IN ('duplicate_cancelled', 'orphaned_cancelled')""",
+                request_scope,
+                child_execution_id,
+            )
+            return frozenset(str(row["provider_run_id"]) for row in rows)
 
     # ------------------------------------------------------------------ incidents
 
@@ -399,7 +415,8 @@ class PostgresAsyncSubagentAuthority:
                         child_execution_id=row["child_execution_id"],
                         parent_run_id=row["parent_run_id"],
                         parent_operation_id=row["parent_operation_id"],
-                        parent_binding_id=admit.get("parent_binding_id"),
+                        parent_binding_id=row["parent_binding_id"]
+                        or admit.get("parent_binding_id"),
                         contract_id=row["contract_id"],
                         contract_digest=row["contract_digest"],
                         graph_id=admit.get("graph_id"),

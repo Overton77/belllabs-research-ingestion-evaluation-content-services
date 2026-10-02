@@ -160,6 +160,15 @@ async def test_hosted_graph_is_built_through_the_canonical_adapter_and_stamps_id
         assert context_type().hosted_graph_id == TECHNICAL_CHILD_GRAPH_ID
     assert result["belllabs_served_graph"] == definition.served.model_dump(mode="json")
     assert result["messages"][-1].content == "PONG"
+    # REQ-CP-DA-011: the hosted graph stamps provider-reported usage per model call.
+    assert result["belllabs_provider_usage"] == [
+        {
+            "message_id": str(result["messages"][-1].id),
+            "input_tokens": 1,
+            "output_tokens": 1,
+            "total_tokens": 2,
+        }
+    ]
     assert model.calls == 1
     assert "wait_seconds" in tool_names or any(
         isinstance(item, BaseTool) and item.name == "wait_seconds" for item in definition.tools
