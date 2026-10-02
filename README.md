@@ -537,6 +537,69 @@ uv run python -m app.temporal.run_operation_probe
 These probes exercise the current baseline and are migration fixtures, not the final product
 experience.
 
+### Production-shaped composition (RRM-009)
+
+The deployment composition lives in code, not in test fixtures: `app.temporal.worker` builds
+`ProductionWorkerActivityCompositionFactory` (`app/temporal/deployment_composition.py`) and the API
+lifespan runs `compose_runtime_control` (`app/api/runtime_composition.py`). Both compose the real
+application PostgreSQL, Mongo definitions/bindings, the object artifact store, the persistent
+LangGraph saver/store, the canonical task queues and the digest-pinned research capabilities in
+`infra/capability-pins/research-capabilities.json` (regenerate only with
+`scripts/pin_research_capabilities.py`; the pins resolve `workspace://` locators beside this checkout:
+`../.agents/skills/agent-browser` and `../.tools`).
+
+Prerequisites, in order:
+
+1. Application PostgreSQL with the migrations applied as the owner
+   (`APPLICATION_MIGRATION_DATABASE_DIRECT`), the least-privilege runtime login
+   (`APPLICATION_DATABASE_DIRECT`, a member of `belllabs_control_runtime`; see
+   `infra/application-postgres/init/001-runtime-user.sql`) and a dedicated family-writer login
+   (`APPLICATION_FAMILY_WRITER_DATABASE_DIRECT`, a member of `belllabs_family_repository_writer`,
+   migration 0017). Atomic family admission refuses to run as the owner.
+2. The persistent LangGraph saver/store database and schema
+   (`LANGGRAPH_CHECKPOINT_DATABASE_DIRECT`, `LANGGRAPH_CHECKPOINT_SCHEMA`, default
+   `belllabs_langgraph`; set `LANGGRAPH_CHECKPOINT_SETUP=1` once to let the first worker create the
+   LangGraph tables).
+3. Mongo (`MONGODB_URI`, `MONGODB_DATABASE`) and the artifact payload store (`S3_BUCKET`, or
+   `ARTIFACT_PAYLOAD_ROOT` for the content-addressed filesystem store).
+4. A persistent Temporal namespace (`TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE`,
+   `TEMPORAL_TASK_QUEUE`) whose Search Attributes are registered by the administrative step
+   below. Workers and the API only verify them at readiness and never mutate the namespace.
+5. The RRM-013 async subagent Agent Server (`langgraph.async_subagents.json`, launch commands in
+   `docs/migrations_instructions/evidence_v2/research-runtime-mission/RRM-013/README.md`). Its
+   `BELLABS_ASYNC_SUBAGENT_SERVER_TOKEN` is now the HMAC secret for scope-bound claims
+   (`app/agent_server/async_subagents/auth.py`); the parent mints a short-lived claim per request
+   scope and the server refuses a header scope that differs from the claim. Hosted-child tracing
+   stays an explicit opt-in (`LANGSMITH_TRACING`, default off).
+6. Provider credentials referenced only as `environment:<NAME>` secret references
+   (`OPENAI_API_KEY`, `FIRECRAWL_API_KEY`, `TAVILY_API_KEY`) and Node for the pinned stdio MCP
+   servers and the `agent_browser_page` host tool (`WEB_RESEARCH_AGENT_BROWSER_NODE`).
+
+Launch, each in its own terminal, after exporting the environment above:
+
+```powershell
+uv run python scripts/register_belllabs_search_attributes.py        # idempotent admin step
+$env:COORDINATOR_LAUNCH_ENABLED="1"; uv run python -m app.temporal.worker
+$env:RUN_CONTROL_TEMPORAL_ENABLED="1"; uv run uvicorn app.server:asgi_app --host 127.0.0.1 --port 8000
+```
+
+`RUN_CONTROL_TEMPORAL_ENABLED=1` makes the API verify the Search Attributes, open the persistent
+saver, attach the inspection readers, the boundary command transport, the reconciliation nudge and
+verifier, the fork services and the governed launch (`POST /run-control/v1/runs/{run_id}/launch`,
+a `TemporalWorkflowSubmitter.for_production(..., search_attribute_policy="required")`), and run
+the boundary command relay for `BOUNDARY_RELAY_REQUEST_SCOPES` every
+`BOUNDARY_RELAY_INTERVAL_SECONDS`. `/health/ready` reports the composition. Other knobs:
+`INSPECTION_CURSOR_KEY` (shared by every API replica; derived from `RUNTIME_CHECKPOINT_SIGNING_KEY` when
+unset), `OPERATION_JOURNAL_CLAIMED_BY`, `ASYNC_SUBAGENT_SUBMITTER_IDENTITY`,
+`CAPABILITY_PINS_PATH`, `DEEP_AGENT_SANDBOX_WORKSPACE_ROOT`.
+
+The technical qualification of this composition is
+`tests/acceptance/control_plane/test_rrm_009_production_composition.py` (disposable PostgreSQL and
+Mongo, a persistent `start_local` namespace, bounded technical inputs, no company definitions).
+Live model, MCP and Agent Server calls run only behind `BELLABS_RUN_RRM_009_LIVE=1`. Cleanup: stop
+the three processes, drop the disposable schemas (`belllabs_control`, the LangGraph schema), and
+delete the Temporal dev-server database file; the Agent Server teardown is in the RRM-013 README.
+
 ## Verification
 
 Run the standard checks from this repository:

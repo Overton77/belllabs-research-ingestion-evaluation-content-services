@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from typing import Protocol
 
 import asyncpg
+from temporalio.client import Client
+from temporalio.worker import Worker
 
 from app.application.control_plane.control_plane_repository import BeanieDefinitionRepository
 from app.application.control_plane.service import ControlPlaneService
@@ -62,6 +64,7 @@ from app.temporal.artifact_activities import (
 )
 from app.temporal.coordinator_runtime import (
     CoordinatorWorkerActivities,
+    CoordinatorWorkerSet,
     coordinator_task_queues,
     create_coordinator_workers,
 )
@@ -110,6 +113,53 @@ class WorkerActivityCompositionFactory(Protocol):
         run_control: RunControlService,
         postgres_pool: asyncpg.Pool,
     ) -> WorkerActivityComposition: ...
+
+
+@dataclass(frozen=True)
+class ProductionWorkerSet:
+    """The workers a launch-enabled deployment runs for one composition (RRM-009)."""
+
+    coordinator: CoordinatorWorkerSet
+    operation: Worker
+    artifacts: Worker | None
+
+    @property
+    def workers(self) -> tuple[Worker, ...]:
+        return (
+            *self.coordinator.workers,
+            self.operation,
+            *((self.artifacts,) if self.artifacts is not None else ()),
+        )
+
+
+def create_production_workers(
+    client: Client, settings: Settings, composition: WorkerActivityComposition
+) -> ProductionWorkerSet:
+    """Both family workers, the cognitive worker and the generic artifact worker, on the
+    canonical queues derived from `TEMPORAL_TASK_QUEUE`."""
+
+    return ProductionWorkerSet(
+        coordinator=create_coordinator_workers(
+            client,
+            task_queues=coordinator_task_queues(settings.temporal_task_queue),
+            activities=composition.coordinator,
+        ),
+        operation=create_agent_cognitive_worker(
+            client,
+            task_queue=BellLabsTaskQueues.from_base(settings.temporal_task_queue).agent_cognitive,
+            activities=composition.operation,
+        ),
+        artifacts=(
+            create_generic_artifact_worker(
+                client,
+                task_queue=generic_artifact_task_queue(settings.temporal_task_queue),
+                operations=composition.operation,
+                artifacts=composition.artifacts,
+            )
+            if composition.artifacts is not None
+            else None
+        ),
+    )
 
 
 def compose_worker_run_control_service(
@@ -197,25 +247,10 @@ async def main(
                 run_control=run_control,
                 postgres_pool=postgres_pool,
             )
-            coordinator_workers = create_coordinator_workers(
-                client,
-                task_queues=coordinator_task_queues(settings.temporal_task_queue),
-                activities=composition.coordinator,
-            )
-            operation_worker = create_agent_cognitive_worker(
-                client,
-                task_queue=BellLabsTaskQueues.from_base(
-                    settings.temporal_task_queue
-                ).agent_cognitive,
-                activities=composition.operation,
-            )
-            if composition.artifacts is not None:
-                artifact_worker = create_generic_artifact_worker(
-                    client,
-                    task_queue=generic_artifact_task_queue(settings.temporal_task_queue),
-                    operations=composition.operation,
-                    artifacts=composition.artifacts,
-                )
+            production = create_production_workers(client, settings, composition)
+            coordinator_workers = production.coordinator
+            operation_worker = production.operation
+            artifact_worker = production.artifacts
         linked_service = LinkedRunService(
             control_plane,
             run_control,
