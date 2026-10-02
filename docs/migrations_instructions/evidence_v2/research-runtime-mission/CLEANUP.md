@@ -85,3 +85,48 @@ The coordinator checked the diff independently: the cursor codec was extracted u
 - Hermetic pytest: 913 passed, 65 skipped, 2 xfailed.
 - Pytest with the disposable Postgres/Mongo stack and `--env-file`: 948 passed, 30 skipped, 2 xfailed.
 
+
+
+## CR-3
+
+Scope: snapshot, fork and patch modules; command, receipt and intervention paths (RRM-006 and RRM-007). Base `2799e17`; code changed by `git diff ac7daf9..2799e17 --stat -- app tests` plus RRM-007's boundary-command modules. Branch `cleanup/rrm-cr-3`.
+
+### Findings
+- Names in scope use the snapshot / fork / unit / boundary-command / receipt vocabulary. No `v2`/`new`/`tmp`/`helper`/`manager`/`util` names were added.
+- Placement is sound: contracts in `domain/run_control` (`forks`, `boundary_commands`), saga and ports in `application/runtime` and `application/run_control`, Temporal adapter in `integrations/temporal_boundary_commands.py`, activities in `temporal/boundary_activities.py`, transport in `api`.
+- A symbol-level scan of every scope module (definitions with no reference elsewhere in app, tests, scripts) found four unreferenced items: `InMemoryForkSourceReader`, its only helper `InMemoryRunControlRepository.family_head_records`, `forks.changed_values`, and `CancellationSettlement`. Route handlers and Pydantic validators showed up as false positives.
+- Decision on the CR-1 carry-over (`SemanticOperationAttemptKey`, `LangGraphCheckpointKey`, retired graph_runtime intervention commands): RRM-006 and RRM-007 did **not** supersede these uses. RRM-006 states it deleted no owners and left `ForkRequest`/`ForkReceipt`/`ForkFromCheckpointIntervention` inert because `/v2/graph-runtime/schemas` still exports them. RRM-006 and RRM-007 forks and commands use their own contracts (`RunForkRequest`/`RunForkReceipt`, `BoundaryCommandRecord`) and do not call the legacy ones.
+
+### Changes
+1. `refactor:` deleted the four unreferenced symbols above (and the imports they orphaned).
+
+### Deliberate non-changes (grep proof)
+- The retired graph_runtime intervention contracts (`InterventionBase` and subclasses, `InterventionReceipt`, `DurableInterrupt*`, `ForkRequest`, `ForkReceipt`, `RedactedCheckpointSummary`, `ProviderNeutralAttemptMetadata`) and the two keys stay. References: `app/api/graph_runtime_schemas.py` (export; `RuntimeIntervention` TypeAdapter), `graph_runtime/governance.py` model sets, `agent_server_actions.py`, `runtime_execution_bindings.py`, `postgres_runtime_execution_repository.py`, `runtime_interventions.py`, `runtime_repairs.py`, `integrations/langgraph_agent_server.py`, `runtime_recovery.build_cancellation_plan`, and about ten unit/integration tests including `test_digest_set_order_guard.py`. Deleting them means removing them from a published schema route, which RRM-001 §3 row 23 frames as a contract decision (remove from the export or label non-authoritative), not clean-up.
+- The legacy Agent Server-shaped island (`runtime_interventions.py` service and router, `runtime_execution_bindings.py`, `graph_runtime_dispatch.py`, `agent_server_actions.py`, `runtime_decisions.py`, `integrations/langgraph_agent_server.py`) is reachable only from tests and itself. It stays: RRM-001 §3 says physical deletion is a later ticket, `postgres_runtime_execution_repository.py` has uncommitted user edits in the main checkout, and the export dependency above blocks the contract deletion.
+- `build_cancellation_plan` and `apply_terminal_runtime_observation` (RRM-001 row 32) stay: only tests reference them, but the replacing cancellation saga is RRM-008 (CR-4).
+- `postgres_run_forks._scope`/`_load` duplicate `postgres_stage3_kernel_repository._set_scope`/`_json`; `_dump` differs (stable-order dump). Left: each is a one-liner and cross-importing private names is worse.
+- Route handlers in `api/run_forks.py` and `api/run_control.py` are referenced by FastAPI decorators only.
+- No persisted or wire identity touched (Temporal names, `workflow.patched` IDs, payload fields, schema versions, migrations, API paths, receipt states, rejection reasons, sequence spaces, fork error codes). No file moved, so no path-safety sweep. GoalDirected files, `run_control/service.py` and `reducer.py` were not touched. Ticket-named test files kept.
+
+### Commands and results
+- `ruff check app tests scripts`: pass. `mypy app`: pass (366 files).
+- Hermetic pytest (DSNs unset): 954 passed, 72 skipped, 2 xfailed (equals baseline; no tests deleted or renamed).
+- Pytest with Postgres and Mongo DSNs plus `--env-file`: 996 passed, 30 skipped, 2 xfailed (equals baseline). Note: the `.env` file alone does not supply the DSNs; a run without them gave the hermetic counts, so the DSNs were exported explicitly.
+- `git diff --check`: clean. Shared-stack lock acquired and released around each full run.
+
+### Candidate generalization seams (not extracted)
+- `RunSnapshot` manifest plus `ForkPatchPolicy` and reuse-frontier decision: a family-neutral "snapshot at safe boundary, patch, reuse what is unaffected" mechanism; only `default_patch_policy` and `_FAMILY_BY_HEAD_KIND` know the two families.
+- Fork saga (`prepare`, claim, admit, materialize, record) over `ForkRepository`, `ForkAuthority` and `ForkMaterializer` ports: a generic reserve/claim/settle saga with receipts.
+- Boundary-command ledger (`BoundaryCommandRecord`, per-space sequence, requested vs applied, delivery update) with `temporal_boundary_commands.py` as the sole Temporal-specific delivery: a provider-neutral operator-command receipt ledger.
+- Shared Postgres helpers (`_set_scope`, JSON load/dump, advisory lock) repeated across the run-fork, stage3 kernel and lineage repositories: one `application` infrastructure helper.
+
+### CR-3 integration
+
+The coordinator checked the diff independently: it deletes four unreferenced symbols, with no wire or persisted identity changes. It was merged `--no-ff` at `1bdfd5c`. Merge gates:
+- ruff: clean.
+- mypy: 366 files, no issues.
+- Hermetic pytest: 954 passed, 72 skipped, 2 xfailed.
+- Pytest with the disposable Postgres/Mongo stack (DSNs exported explicitly) and `--env-file`: 996 passed, 30 skipped, 2 xfailed.
+
+The service gate needs the DSNs exported explicitly. The developer `.env` does not supply them, so `--env-file` alone runs the hermetic set.
+

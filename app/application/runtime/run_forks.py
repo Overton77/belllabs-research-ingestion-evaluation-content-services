@@ -29,10 +29,7 @@ from app.application.run_control.inspection import (
     RunSnapshot,
     UnitRecord,
 )
-from app.application.run_control.run_control_repository import (
-    InMemoryRunControlRepository,
-    RunControlRepository,
-)
+from app.application.run_control.run_control_repository import RunControlRepository
 from app.application.run_control.service import RunControlService, run_identity_for
 from app.application.runtime.runtime_lineage import (
     ExecutionLineageRepository,
@@ -301,40 +298,6 @@ class InMemoryRunSnapshotRepository:
                 return deepcopy(prior)
             self.snapshots[key] = deepcopy(snapshot)
             return deepcopy(snapshot)
-
-
-class InMemoryForkSourceReader:
-    """Reads family heads from the in-memory run-control adapter; never mutates it."""
-
-    def __init__(
-        self,
-        run_control: InMemoryRunControlRepository,
-        *,
-        linked_runs: Mapping[str, tuple[LinkedRunRecord, ...]] | None = None,
-    ) -> None:
-        self._run_control = run_control
-        self._linked_runs = dict(linked_runs or {})
-
-    async def read_fork_source(self, request_scope: str, run_id: str) -> ForkSourceFacts | None:
-        if run_id not in self._run_control.scoped_run_ids(request_scope):
-            return None
-        projection = await self._run_control.get_run(request_scope, run_id)
-        heads = tuple(
-            FamilyHeadRecord(
-                family_kind=kind,
-                family_version=version,
-                mutation_fingerprint=fingerprint,
-                mutation=stable_json_dump(mutation),
-            )
-            for kind, version, fingerprint, mutation in self._run_control.family_head_records(
-                request_scope, run_id
-            )
-        )
-        return ForkSourceFacts(
-            run_version=projection.version,
-            family_heads=heads,
-            linked_runs=self._linked_runs.get(run_id, ()),
-        )
 
 
 # --- Snapshot building (EXEC-016) -----------------------------------------------------------

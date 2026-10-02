@@ -16,7 +16,7 @@ after substituting `belllabs_run_id` and `execution_epoch`.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 from typing import Annotated, Any, Final, Literal, Self
 
 from pydantic import AwareDatetime, Field, JsonValue, model_validator
@@ -805,7 +805,3 @@ def default_patch_policy(family: ForkFamily) -> ForkPatchPolicy:
 
 def stage_objective_path(stage_id: str) -> str:
     return f"stage_objectives.{stage_id}"
-
-
-def changed_values(patch: RunForkPatch) -> Mapping[str, JsonValue]:
-    return {change.path: change.value for change in patch.changes}
