@@ -160,10 +160,6 @@ def worst_reconciliation_state(states: Sequence[ReconciliationState]) -> Reconci
 # --- Read models -------------------------------------------------------------------------
 
 
-class RunListFilter(Contract):
-    phases: frozenset[RunPhase] = Field(default_factory=frozenset)
-
-
 class RunListItem(Contract):
     run_id: str
     request_scope: str

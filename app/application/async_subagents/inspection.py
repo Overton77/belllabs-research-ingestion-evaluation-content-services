@@ -7,7 +7,7 @@ mutates lifecycle, settles, reconciles or writes observations.
 
 from __future__ import annotations
 
-from typing import Literal, Protocol
+from typing import Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
@@ -45,9 +45,3 @@ class AsyncChildLineageView(BaseModel):
     settlement_ref: str | None = None
     provider_runs: tuple[AsyncProviderRunRecord, ...] = ()
     updated_at: AwareDatetime
-
-
-class AsyncChildLineageReader(Protocol):
-    async def list_children(
-        self, request_scope: str, parent_run_id: str
-    ) -> tuple[AsyncChildLineageView, ...]: ...
