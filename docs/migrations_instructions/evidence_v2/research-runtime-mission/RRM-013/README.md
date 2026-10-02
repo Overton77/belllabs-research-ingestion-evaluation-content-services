@@ -311,7 +311,7 @@ Run 5 (on `ad2fa47`, the two rewritten drills, log `rrm013_live_run5.log`, 111 s
 
 ### Re-review disposition
 
-Re-review verdict: `approve_with_fixes` (2026-10-02; B1, N1–N9 verified). Two blocking items and one fix, all in new commits; nothing amended. Code commit: `e7b0d80`; this documentation commit follows.
+Re-review verdict: `approve_with_fixes` (2026-10-02; B1, N1–N9 verified). Two blocking items and one fix, all in new commits; nothing amended. Code commit: `e7b0d80`; documentation commit `35cd569`. The second re-review pass returned one blocking item (N-A) on the overage field introduced for G3; code commit `235ee4a`, this documentation commit follows.
 
 | # | Finding | Disposition |
 |---|---|---|
@@ -319,7 +319,14 @@ Re-review verdict: `approve_with_fixes` (2026-10-02; B1, N1–N9 verified). Two 
 | G2 (blocking) | `reconcile_in_doubt` verified the served identity before the claim for both decisions, so a child `in_doubt` for `graph_identity_mismatch` could not be orphaned. | **Fixed.** Identity is verified only for `adopt_provider_run`; `orphan_child` cancels every run and needs no identity check. Test: `test_orphan_child_is_the_exit_under_a_served_graph_mismatch` (two runs, server revision drifted: adopt raises `AsyncServedGraphMismatch`, nothing cancelled, incident still `operator_required`; orphan succeeds, both runs `interrupted`, records `orphaned_cancelled`, incident resolved `orphan_child`). |
 | G3 (fix) | `reconcile_usage` took no actor, so any caller could assert attributed usage and settle the effect; and it capped newly attributed usage at the pending ceiling (`min(newly_attributed, pending_amount)`), dropping overage. | **Fixed.** `reconcile_usage` takes an `ActorContext` and requires `workflow_run.reconcile_async_child` (the same privilege as the other reconciliation decisions). The later settlement revision now reconciles the pending amount exactly and consumes the overage in full: `SettlePendingUsageAction` gains `overage_amounts` (default empty, so existing commands are unchanged), the run-control reducer validates it, adds it to `consumed`, records it in the settlement's `settled_amounts` and emits a `consumption` ledger entry `<settlement_id>:overage`; the exact-provenance rule (`actual + release == source pending`) is untouched. Tests: `test_reconcile_usage_requires_the_privilege_and_consumes_attributed_overage` (unprivileged actor rejected with the effect still unsettled; privileged reconciliation of 13 attributed tokens against a 10-token pending ceiling: consumed 13, pending 0, settlement `settled_amounts {13}`, `released {}`, `source_pending {10}`, effect settled, revision 2) and the direct port `test_reconciled_usage_above_the_pending_ceiling_is_consumed_in_full` (pending 5, attributed 8: consumed 8, nothing released). The live cancel drill passes the privileged actor. |
 
+| N-A (blocking, second pass) | The journal batch validator (`OperationJournalMutation._validate_authority_action`) matched `SettlePendingUsageAction` on its actual, pending-release amounts and ids and never checked `overage_amounts`, so a forged or buggy journal batch could inflate `consumed`. | **Fixed.** The validator rejects any non-empty `overage_amounts` on a journal pending settlement (`ValueError: journal pending usage settlement cannot carry overage amounts`): an operation's pending settlement reconciles its pending amounts exactly; overage is an async child settlement concept. Negative test `test_journal_pending_settlement_rejects_overage_amounts` (the clean revision-2 mutation validates; the same batch with `overage_amounts={"tokens.total": 3}` is refused, and its command fingerprint differs from the clean command's, so it cannot replay under the stored command either). |
+
 Runbook line added under "Implemented contracts and seams" (`in_doubt` exits): if the claim holder crashes mid-decision, only a resend with the same `decision_id` can finish it.
+
+
+**Hard caps bound reservation, not consumption.** `_enforce_hard_caps` runs only when a reservation is admitted (`ReserveBudgetAction`): reserved + consumed + pending above the cap rejects the reservation. Recording usage (`RecordUsageAction`, including usage above the reservation) and settling pending usage (`SettlePendingUsageAction`, including `overage_amounts`) record facts the provider already produced and are never rejected for the cap, so the ledger never drops consumption; once consumption exceeds the cap, every further reservation is rejected. Documented in the reducer's `_enforce_hard_caps` docstring.
+
+**Command fingerprint and the added field (decision).** `contract_fingerprint` walks every declared field, defaults included, so a `settle_pending_usage` command stored before this change fingerprints differently from the same command rebuilt after it (`overage_amounts: {}` now participates). The effect is fail-closed: a post-upgrade redelivery of a pre-upgrade `settle_pending_usage` command id (`postgres_run_control_repository.py`, "lifecycle command identity was reused with a conflicting payload") raises `IdempotencyConflict` instead of replaying, and the same property is what rejects a forged overage batch under a stored id (N-A test). Empty defaults are deliberately not excluded from the fingerprint: excluding default-valued fields would change the fingerprint of every stored command that carries any default (for example `pending_release_amounts={}`), a far wider break. No deployment holds pre-upgrade commands (the only stores are the disposable local databases, recreated per gate), so the decision is documented here and no fingerprint migration is added; a production rollout that ever spans this change must drain outstanding `settle_pending_usage` redeliveries first (RRM-009 composition item).
 
 Gates on `e7b0d80` (lock held for the Postgres authority run and both full runs; no live re-run: the changed functions are the ones the re-review named, plus the additive reducer field they need, and none of them is on the hosted graph's path):
 
@@ -331,6 +338,18 @@ Gates on `e7b0d80` (lock held for the Postgres authority run and both full runs;
 | Postgres authority (`tests/integration/postgres/test_async_subagent_postgres_authority.py`, disposable DSN, lock) | 1 passed (the file's single test, `test_runtime_role_fences_submission_and_records_in_doubt_lineage`) |
 | Full hermetic pytest (`-u TEST_APPLICATION_POSTGRES_DSN -u TEST_MONGODB_URI`, live flags 0) | 882 passed, 63 skipped, 2 xfailed, 0 failed (106 s) |
 | Full pytest with both DSNs and `--env-file ../biotech-research-ingestion-evaluation-system/.env` (lock) | 915 passed, 30 skipped, 2 xfailed, 0 failed (182 s) |
+| `git diff --check` | clean |
+
+Gates on `235ee4a` (N-A; lock held for the Postgres authority run and both full runs):
+
+| Gate | Result |
+|---|---|
+| `ruff check app tests scripts` | All checks passed (only this ticket's hunks were formatted; `operation_journal.py` and `test_operation_journal_stage1.py` carry older unformatted hunks that were left untouched) |
+| `mypy app` | Success: no issues found in 357 source files |
+| Owning and run-control suites (`test_operation_journal_stage1.py`, `test_operation_execution.py`, `tests/unit/run_control/`, `test_async_subagent_submission_fence.py`, `test_async_child_parent_budget.py`, `test_wp_cp_045.py`, `test_async_subagent_server_offline.py`) | 155 passed, 1 skipped |
+| Postgres authority (`test_async_subagent_postgres_authority.py`, disposable DSN, lock) | 1 passed |
+| Full hermetic pytest | 883 passed, 63 skipped, 2 xfailed, 0 failed (104 s) |
+| Full pytest with both DSNs and `--env-file` (lock) | 916 passed, 30 skipped, 2 xfailed, 0 failed (178 s) |
 | `git diff --check` | clean |
 
 ## Final disposition
