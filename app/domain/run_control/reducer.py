@@ -800,6 +800,15 @@ def _validate_amounts(state: BudgetState, amounts: dict[str, int]) -> None:
 
 
 def _enforce_hard_caps(state: BudgetState) -> None:
+    """Hard caps bound reservation, not consumption.
+
+    A reservation that would take reserved + consumed + pending over the cap is rejected.
+    Recording usage and settling pending usage record facts the provider already produced
+    (including usage above the reservation, and `overage_amounts` above a pending ceiling);
+    they are never rejected for the cap, so the ledger never drops consumption. Once
+    consumption exceeds the cap, every further reservation is rejected.
+    """
+
     for limit in state.limits:
         if limit.hard_cap is None:
             continue
