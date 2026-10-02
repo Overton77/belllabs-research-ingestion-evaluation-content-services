@@ -72,7 +72,18 @@ def contract_fingerprint(value: BaseModel, *, exclude: set[str] | None = None) -
     as sets, and `_normalize` sorts them canonically.
     """
 
-    return sha256_digest(value.model_dump(mode="python", exclude=exclude, warnings=False))
+    # Walk the fields instead of calling `model_dump(mode="python")`: a Python-mode dump turns a
+    # set of models into a set of dicts and fails ("unhashable type: 'dict'"). `_normalize`
+    # walks nested models itself, so the digest equals the Python-mode dump's for every
+    # contract that dump could represent.
+    skipped = exclude or set()
+    return sha256_digest(
+        {
+            name: getattr(value, name)
+            for name, field in type(value).model_fields.items()
+            if name not in skipped and not field.exclude
+        }
+    )
 
 
 def _stabilize_sets(value: Any) -> Any:

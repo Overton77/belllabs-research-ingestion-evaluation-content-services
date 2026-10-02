@@ -122,6 +122,36 @@ def test_stable_json_dump_sorts_sets_nested_in_dicts_and_tuples() -> None:
     json.dumps(dumped)  # JSON-compatible
 
 
+def test_contract_fingerprint_handles_sets_of_models_and_keeps_python_dump_values() -> None:
+    from pydantic import BaseModel, ConfigDict
+
+    class Member(BaseModel):
+        model_config = ConfigDict(frozen=True)
+        name: str
+
+    class WithModels(BaseModel):
+        members: frozenset[Member]
+        other: int
+
+    class WithStrings(BaseModel):
+        names: frozenset[str]
+        other: int
+
+    # A Python-mode dump cannot represent a set of models ("unhashable type: 'dict'").
+    models = WithModels(members=frozenset({Member(name="b"), Member(name="a")}), other=1)
+    assert contract_fingerprint(models) == contract_fingerprint(models.model_copy())
+    assert contract_fingerprint(models, exclude={"other"}) != contract_fingerprint(models)
+    first, second = with_different_set_orders(models)
+    assert contract_fingerprint(first) == contract_fingerprint(second)
+
+    # For contracts the Python-mode dump could represent, the fingerprint value is unchanged,
+    # so fingerprints stored by RRM-004 stay valid.
+    strings = WithStrings(names=frozenset({"x", "y"}), other=2)
+    assert contract_fingerprint(strings, exclude={"other"}) == sha256_digest(
+        strings.model_dump(mode="python", exclude={"other"})
+    )
+
+
 def test_stored_payload_matches_ignores_stored_set_order() -> None:
     from pydantic import BaseModel
 
