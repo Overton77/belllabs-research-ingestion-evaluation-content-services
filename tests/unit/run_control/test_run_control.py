@@ -973,11 +973,17 @@ def test_reconcile_unit_decisions_are_typed() -> None:
 def _equal_sets_with_different_iteration_order(
     items: frozenset[str],
 ) -> tuple[frozenset[str], frozenset[str]]:
-    """Two equal frozensets whose iteration orders differ (hash-collision placement)."""
+    """Two equal frozensets whose iteration orders differ (hash-collision placement).
+
+    String hashes depend on the per-process seed, so a small set may happen to have no
+    order-changing collision under some seeds. Padding the set with 400 extra names makes
+    such collisions overwhelmingly likely under every seed (500+ entries in a 2048-slot
+    table), so the helper is seed-independent in practice.
+    """
 
     import random
 
-    ordered = sorted(items)
+    ordered = sorted(items | {f"workflow_run.fingerprint_probe_{index}" for index in range(400)})
     generator = random.Random(4)
     base = frozenset(ordered)
     for _ in range(2_000):
