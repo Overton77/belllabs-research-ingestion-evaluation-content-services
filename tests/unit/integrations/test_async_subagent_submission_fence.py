@@ -26,7 +26,9 @@ from app.application.async_subagents.service import (
     InMemoryAsyncSubagentDetailRepository,
 )
 from app.domain.operation_execution.async_subagent_reconciliation import (
+    AsyncProviderRunRecord,
     AsyncServedGraphIdentity,
+    aggregate_child_usage,
     classify_async_children_for_fork,
 )
 from app.domain.operation_execution.contracts import (
@@ -492,11 +494,14 @@ async def test_parent_deep_agent_start_async_task_reserves_and_links_before_the_
 
 
 async def governed_with_parent(
-    client: FakeAgentProtocolClient, *, cancel_ack_interval: float = 0.0
+    client: FakeAgentProtocolClient,
+    *,
+    cancel_ack_interval: float = 0.0,
+    bounded: dict[str, int] | None = None,
 ) -> tuple[AsyncSubagentService, object, str, InMemoryAsyncSubagentAuthority]:
     """A governed service whose children are effects and reservations of a real in-memory run."""
 
-    run_control, run_id = await admitted_parent()
+    run_control, run_id = await admitted_parent(bounded=bounded)
     authority = InMemoryAsyncSubagentAuthority()
     service = AsyncSubagentService(
         InMemoryAsyncSubagentDetailRepository(),
@@ -577,6 +582,7 @@ async def test_orphaned_child_settles_pending_usage_up_to_its_budget_ceiling(
     settled = await service.reconcile_usage(
         "tenant-1",
         child_id,
+        actor=reconciler(),
         run_usage={
             run_id_: AsyncSubagentUsage(
                 provider_run_id=run_id_,
@@ -849,3 +855,170 @@ def test_usage_is_attributed_only_when_every_ai_turn_is_reported() -> None:
     assert full.attributed_amounts == {"tokens.total": 11, "model.turns": 2}
     none = attribute_usage("run", [{"type": "human", "content": "x"}], limits, provider_usage=[])
     assert none.attribution == "pending" and none.attributed_amounts == {}
+
+
+@pytest.mark.asyncio
+async def test_partly_reported_completed_child_keeps_the_unstamped_dimension_pending(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RRM-013 re-review G1: a counted turn with unstamped tokens never drops `tokens.total`."""
+
+    client = FakeAgentProtocolClient(served=SERVED, tokens_per_turn=None)
+    install(monkeypatch, client)
+    service, run_control, run_id, _authority = await governed_with_parent(
+        client, bounded={"model.turns": 4}
+    )
+    limits = {"tokens.total": 10, "model.turns": 2}
+    running = await service.spawn(spawn(run_id, limits=limits))
+    child_id = running.child_execution_id
+    client.complete(child_id, "done")
+    completed = await service.reconcile("tenant-1", child_id)
+    assert completed.result_manifest is not None
+    usage = completed.result_manifest.usage
+    assert usage.attribution == "pending" and usage.pending_amounts == {"model.turns": 1}
+    # Domain: the unreported dimension is unknown, so it is pending at the child's ceiling.
+    record = AsyncProviderRunRecord(
+        child_execution_id=child_id,
+        provider_thread_id=child_id,
+        provider_run_id=running.provider_run_id,
+        disposition="bound",
+        provider_status="success",
+        usage=usage,
+        observed_at=NOW,
+    )
+    assert aggregate_child_usage((record,), limits) == (
+        {},
+        {"model.turns": 1, "tokens.total": 10},
+    )
+    await service.decide_result(
+        "tenant-1", child_id, "admit", parent_open=True, current_generation=1, decided_at=NOW
+    )
+    link = await service.settle("tenant-1", child_id, "settlement:partial", NOW)
+    assert link.settled is False and link.usage_disposition == "pending_usage"
+    view = await parent_budget_view(run_control, run_id, child_id)
+    assert view == {
+        "actual": {},
+        "pending": {"model.turns": 1, "tokens.total": 10},
+        "outstanding": True,
+        "effect_settled": False,
+        "effect_disposition": "succeeded",
+    }
+
+
+@pytest.mark.asyncio
+async def test_orphan_child_is_the_exit_under_a_served_graph_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RRM-013 re-review G2: identity is verified for adopt only; orphan cancels every run."""
+
+    client = FakeAgentProtocolClient(served=SERVED)
+    install(monkeypatch, client)
+    service, _details, authority = governed(client)
+    running = await service.spawn(request())
+    child_id = running.child_execution_id
+    foreign = client.add_foreign_run(child_id, child_id)
+    in_doubt = await service.reconcile("tenant-a", child_id)
+    assert in_doubt.lifecycle == AsyncSubagentLifecycle.IN_DOUBT
+    client.served = SERVED.model_copy(update={"graph_revision": "agent.research@9"})
+    with pytest.raises(AsyncServedGraphMismatch):
+        await service.reconcile_in_doubt(
+            "tenant-a",
+            child_id,
+            "adopt_provider_run",
+            actor=reconciler(),
+            decision_id="decision-adopt",
+            run_id=running.provider_run_id,
+            reason="operator adopts under a mismatched server",
+            decided_at=NOW,
+        )
+    assert "sdk.runs.cancel" not in client.calls
+    assert authority.incidents[("tenant-a", child_id)].status == "operator_required"
+    orphaned = await service.reconcile_in_doubt(
+        "tenant-a",
+        child_id,
+        "orphan_child",
+        actor=reconciler(),
+        decision_id="decision-orphan",
+        reason="operator orphans the child",
+        decided_at=NOW,
+    )
+    assert orphaned.lifecycle == AsyncSubagentLifecycle.ORPHANED
+    statuses = {run["run_id"]: run["status"] for run in client.runs_of(child_id)}
+    assert statuses == {running.provider_run_id: "interrupted", foreign: "interrupted"}
+    incident = authority.incidents[("tenant-a", child_id)]
+    assert incident.status == "resolved" and incident.resolution == "orphan_child"
+    assert {
+        record.disposition
+        for _scope, record in authority.provider_runs
+        if record.child_execution_id == child_id
+    } == {"orphaned_cancelled"}
+
+
+@pytest.mark.asyncio
+async def test_reconcile_usage_requires_the_privilege_and_consumes_attributed_overage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RRM-013 re-review G3."""
+
+    client = FakeAgentProtocolClient(served=SERVED)
+    install(monkeypatch, client)
+    service, run_control, run_id, _authority = await governed_with_parent(client)
+    running = await service.spawn(spawn(run_id))
+    child_id = running.child_execution_id
+    client.add_foreign_run(child_id, child_id)
+    await service.reconcile("tenant-1", child_id)
+    await service.reconcile_in_doubt(
+        "tenant-1",
+        child_id,
+        "orphan_child",
+        actor=reconciler(),
+        decision_id="decision-orphan",
+        reason="operator",
+        decided_at=NOW,
+    )
+    await service.decide_result(
+        "tenant-1", child_id, "reject", parent_open=True, current_generation=1, decided_at=NOW
+    )
+    pending = await service.settle("tenant-1", child_id, "settlement:overage", NOW)
+    assert pending.usage_disposition == "pending_usage" and pending.settlement_revision == 1
+    run_ids = [run["run_id"] for run in client.runs_of(child_id)]
+    run_usage = {
+        run_id_: AsyncSubagentUsage(
+            provider_run_id=run_id_,
+            attribution="provider_attributed",
+            attributed_amounts={"tokens.total": amount},
+        )
+        for run_id_, amount in zip(run_ids, (8, 5), strict=True)
+    }
+    # Any caller could otherwise assert attributed usage and settle the parent's effect.
+    with pytest.raises(AsyncSubagentDecisionRejected, match="reconcile_async_child"):
+        await service.reconcile_usage(
+            "tenant-1",
+            child_id,
+            actor=actor(),
+            run_usage=run_usage,
+            settlement_ref="settlement:overage",
+            reconciled_at=NOW,
+        )
+    view = await parent_budget_view(run_control, run_id, child_id)
+    assert view["effect_settled"] is False and view["pending"] == {"tokens.total": 10}
+    settled = await service.reconcile_usage(
+        "tenant-1",
+        child_id,
+        actor=reconciler(),
+        run_usage=run_usage,
+        settlement_ref="settlement:overage",
+        reconciled_at=NOW,
+    )
+    assert settled.settled is True and settled.settlement_revision == 2
+    budget = await run_control.get_budget("tenant-1", run_id)  # type: ignore[attr-defined]
+    # 13 attributed against a 10-token pending ceiling: 10 reconcile the pending amount, 3 are
+    # consumed as overage; nothing is dropped and nothing is released.
+    assert budget.consumed["tokens.total"] == 13
+    assert budget.pending_settlement["tokens.total"] == 0
+    settlement = budget.usage_settlements[f"{async_child_usage_id(child_id)}:settlement:2"]
+    assert settlement.settled_amounts == {"tokens.total": 13}
+    assert settlement.released_amounts == {}
+    assert settlement.source_pending_amounts == {"tokens.total": 10}
+    view = await parent_budget_view(run_control, run_id, child_id)
+    assert view["effect_settled"] is True and view["outstanding"] is False

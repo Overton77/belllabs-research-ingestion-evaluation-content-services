@@ -22,6 +22,8 @@ from app.application.async_subagents.service import (
     InMemoryAsyncSubagentDetailRepository,
 )
 from app.domain.run_control.contracts import (
+    BudgetApplicability,
+    BudgetDimensionLimit,
     CommandStatus,
     EffectDisposition,
     ReserveBudgetAction,
@@ -33,9 +35,27 @@ from tests.unit.run_control.test_run_control import request as run_request
 from tests.unit.run_control.test_run_control import service as run_control_service
 
 
-async def admitted_parent() -> tuple[object, str]:
+async def admitted_parent(*, bounded: dict[str, int] | None = None) -> tuple[object, str]:
+    """An admitted, started parent run; `bounded` turns the named dimensions into bounded ones."""
+
     run_control, _ = run_control_service()
-    decision = await run_control.admit(run_request(request_id="rrm-013-parent"))
+    parent = run_request(request_id="rrm-013-parent")
+    if bounded:
+        envelope = parent.budget_envelope
+        dimensions = tuple(
+            BudgetDimensionLimit(
+                dimension=limit.dimension,
+                applicability=BudgetApplicability.BOUNDED,
+                hard_cap=bounded[limit.dimension],
+            )
+            if limit.dimension in bounded
+            else limit
+            for limit in envelope.dimensions
+        )
+        parent = parent.model_copy(
+            update={"budget_envelope": envelope.model_copy(update={"dimensions": dimensions})}
+        )
+    decision = await run_control.admit(parent)
     assert decision.run_id is not None
     started = await run_control.execute(command(decision.run_id, 1, "start", StartAction()))
     assert started.status == CommandStatus.ACCEPTED
@@ -245,3 +265,66 @@ async def test_pending_usage_is_recorded_pending_and_blocks_effect_settlement() 
         settled_at=NOW + timedelta(seconds=3),
     )
     assert replay == "settled"
+
+
+@pytest.mark.asyncio
+async def test_reconciled_usage_above_the_pending_ceiling_is_consumed_in_full() -> None:
+    """RRM-013 re-review G3: the attributed fact is never capped at the pending ceiling."""
+
+    run_control, run_id = await admitted_parent()
+    effects = RunControlAsyncChildEffects(run_control, actor=actor())  # type: ignore[arg-type]
+    child_id = "child-overage"
+    await effects.reserve_and_claim(spawn(run_id), child_id)
+    await effects.observe(
+        "tenant-1",
+        run_id,
+        child_id,
+        disposition="cancelled",
+        observation_id=f"async-terminal:{child_id}",
+        provider_effect_ref="run-x",
+        evidence_refs=(),
+        observed_at=NOW,
+    )
+    first = await effects.settle_usage(
+        "tenant-1",
+        run_id,
+        child_id,
+        reservation_id="reservation-child-1",
+        budget_limits={"tokens.total": 10},
+        attributed_amounts={},
+        pending_amounts={"tokens.total": 5},
+        outcome="cancelled",
+        observation_id=f"async-terminal:{child_id}",
+        settlement_ref="settlement:overage",
+        settlement_revision=1,
+        settled_at=NOW + timedelta(seconds=1),
+    )
+    assert first == "pending_usage"
+    second = await effects.settle_usage(
+        "tenant-1",
+        run_id,
+        child_id,
+        reservation_id="reservation-child-1",
+        budget_limits={"tokens.total": 10},
+        attributed_amounts={"tokens.total": 8},
+        pending_amounts={},
+        outcome="cancelled",
+        observation_id=f"async-terminal:{child_id}",
+        settlement_ref="settlement:overage",
+        settlement_revision=2,
+        settled_at=NOW + timedelta(seconds=2),
+    )
+    assert second == "settled"
+    budget = await run_control.get_budget("tenant-1", run_id)  # type: ignore[attr-defined]
+    # 8 attributed: 5 reconcile the pending amount exactly, 3 are consumed as overage.
+    assert budget.consumed["tokens.total"] == 8
+    assert budget.pending_settlement["tokens.total"] == 0
+    assert async_child_usage_id(child_id) not in budget.outstanding_usage_ids
+    settlement = budget.usage_settlements[f"{async_child_usage_id(child_id)}:settlement:2"]
+    assert settlement.settled_amounts == {"tokens.total": 8}
+    assert settlement.released_amounts == {}
+    assert settlement.source_pending_amounts == {"tokens.total": 5}
+    ledger = await run_control.get_effects("tenant-1", run_id)  # type: ignore[attr-defined]
+    claim = ledger.claims[async_child_effect_id(child_id)]
+    assert claim.settlement is not None
+    assert claim.settlement.usage_settlement_ref == f"{async_child_usage_id(child_id)}:settlement:2"

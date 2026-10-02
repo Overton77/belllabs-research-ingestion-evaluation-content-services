@@ -259,16 +259,18 @@ def aggregate_child_usage(
 
     REQ-CP-RUN-009 / REQ-CP-DA-008 (RRM-013 review B1): a run whose usage the provider did
     not attribute (a cancelled duplicate, an orphaned or failed run, a cancel whose outcome is
-    unknown) makes the pending amounts non-empty. When its amounts are unknown, the child's
-    budget limit is the pending ceiling (one ceiling shared by every such run), so the
-    parent's effect stays unsettled until the usage is reconciled. Provider-attributed
-    amounts are facts and are never capped, even above the child's reservation. The completed
-    run's manifest usage replaces its record's usage.
+    unknown) makes the pending amounts non-empty. Every budget dimension such a run does not
+    report (neither attributed nor pending) is unknown, and the child's budget limit is its
+    pending ceiling (one ceiling per dimension shared by every such run), so the parent's
+    effect stays unsettled until the usage is reconciled (re-review G1: a partly reported
+    run, e.g. `model.turns` counted but `tokens.total` unstamped, never drops the unreported
+    dimension). Provider-attributed amounts are facts and are never capped, even above the
+    child's reservation. The completed run's manifest usage replaces its record's usage.
     """
 
     attributed: dict[str, int] = {}
     pending: dict[str, int] = {}
-    unknown = False
+    unknown_dimensions: set[str] = set()
     for record in records:
         usage = record.usage
         if manifest_usage is not None and manifest_usage.provider_run_id == record.provider_run_id:
@@ -278,14 +280,13 @@ def aggregate_child_usage(
             for dimension, amount in usage.attributed_amounts.items():
                 if dimension in budget_limits:
                     attributed[dimension] = attributed.get(dimension, 0) + amount
-        elif any(usage.pending_amounts.values()):
-            for dimension, amount in usage.pending_amounts.items():
-                if dimension in budget_limits:
-                    pending[dimension] = pending.get(dimension, 0) + amount
-        else:
-            unknown = True
-    if unknown:
+            continue
+        reported = set(usage.attributed_amounts) | set(usage.pending_amounts)
+        for dimension, amount in usage.pending_amounts.items():
+            if dimension in budget_limits:
+                pending[dimension] = pending.get(dimension, 0) + amount
+        unknown_dimensions |= set(budget_limits) - reported
+    for dimension in unknown_dimensions:
         # Runs of unknown usage share one ceiling: the child's budget limit per dimension.
-        for dimension, limit in budget_limits.items():
-            pending[dimension] = max(pending.get(dimension, 0), limit)
+        pending[dimension] = max(pending.get(dimension, 0), budget_limits[dimension])
     return attributed, {dimension: amount for dimension, amount in pending.items() if amount > 0}

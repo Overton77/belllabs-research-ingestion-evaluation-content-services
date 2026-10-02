@@ -306,7 +306,9 @@ class RunControlAsyncChildEffects:
         }
         settled_now: dict[str, int] = {}
         released_now: dict[str, int] = {}
-        for dimension, pending_amount in source_pending.items():
+        overage_now: dict[str, int] = {}
+        for dimension in source_pending.keys() | attributed_amounts.keys():
+            pending_amount = source_pending.get(dimension, 0)
             newly_attributed = max(
                 0, attributed_amounts.get(dimension, 0) - existing.actual_amounts.get(dimension, 0)
             )
@@ -315,6 +317,10 @@ class RunControlAsyncChildEffects:
                 settled_now[dimension] = consumed
             if pending_amount - consumed:
                 released_now[dimension] = pending_amount - consumed
+            if newly_attributed - consumed:
+                # Re-review G3: the attributed fact above the pending ceiling is consumed in
+                # full, the same way the first revision records usage above the reservation.
+                overage_now[dimension] = newly_attributed - consumed
         settlement_id = f"{usage_id}:settlement:{settlement_revision}"
         await self._execute(
             request_scope,
@@ -327,6 +333,7 @@ class RunControlAsyncChildEffects:
                         usage_id=usage_id,
                         actual_amounts=settled_now,
                         pending_release_amounts=released_now,
+                        overage_amounts=overage_now,
                     ),
                     SettleEffectAction(
                         effect_id=claim.effect_id,

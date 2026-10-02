@@ -586,9 +586,11 @@ class AsyncSubagentService:
         The decision requires the privileged permission `workflow_run.reconcile_async_child`
         and is exclusive: the child's single decision command is claimed in authority before
         any provider run is cancelled, so of two concurrent decisions exactly one acts. The
-        served identity is verified before anything is cancelled. Every other provider run
-        carrying the spawn key is cancelled; a run whose terminal status is not observed stays
-        `cancel_ambiguous` and a candidate until it is. Usage of cancelled runs is pending.
+        served identity is verified before a run is adopted; `orphan_child` cancels every run
+        and needs no identity check, so it remains the exit for a child that is in doubt for
+        `graph_identity_mismatch` (re-review G2). Every other provider run carrying the spawn
+        key is cancelled; a run whose terminal status is not observed stays `cancel_ambiguous`
+        and a candidate until it is. Usage of cancelled runs is pending.
         """
 
         if ASYNC_CHILD_RECONCILE_PERMISSION not in actor.permissions:
@@ -613,13 +615,14 @@ class AsyncSubagentService:
             raise AsyncSubagentError("adopt_provider_run names exactly one provider run")
         contract = await self._details.get_contract(request_scope, execution.contract_id)
         link = await self._details.get_link(request_scope, child_execution_id)
-        # REQ-CP-DA-019: the deployment's served identity is verified before a run is adopted
-        # or anything is cancelled; a mismatch leaves the child in doubt.
-        served = await self._provider.verify_served_graph(contract)
-        if not served.matches(contract):
-            raise AsyncServedGraphMismatch(
-                "served graph identity differs from the frozen async subagent contract"
-            )
+        if decision == "adopt_provider_run":
+            # REQ-CP-DA-019: the deployment's served identity is verified before a run is
+            # adopted; a mismatch leaves the child in doubt with `orphan_child` as its exit.
+            served = await self._provider.verify_served_graph(contract)
+            if not served.matches(contract):
+                raise AsyncServedGraphMismatch(
+                    "served graph identity differs from the frozen async subagent contract"
+                )
         spawn_key = await self._provider.observe_spawn_key(contract, execution)
         observed_ids = {run.run_id for run in spawn_key.runs}
         if run_id is not None and run_id not in observed_ids:
@@ -1212,6 +1215,7 @@ class AsyncSubagentService:
         request_scope: str,
         child_execution_id: str,
         *,
+        actor: ActorContext,
         run_usage: Mapping[str, AsyncSubagentUsage],
         settlement_ref: str,
         reconciled_at: datetime,
@@ -1221,9 +1225,15 @@ class AsyncSubagentService:
         REQ-CP-RUN-009: pending usage is reconciled through the parent operation's authority
         (a later settlement revision that settles the outstanding usage), never dropped. The
         caller supplies attributed usage per provider run (for example from the provider's
-        thread state once a cancelled run has a terminal checkpoint).
+        thread state once a cancelled run has a terminal checkpoint). Asserting attributed
+        usage settles the parent's effect, so it requires the same privilege as the other
+        reconciliation decisions, `workflow_run.reconcile_async_child` (re-review G3).
         """
 
+        if ASYNC_CHILD_RECONCILE_PERMISSION not in actor.permissions:
+            raise AsyncSubagentDecisionRejected(
+                f"reconciling an async child's usage requires {ASYNC_CHILD_RECONCILE_PERMISSION}"
+            )
         records = {
             record.provider_run_id: record
             for record in await self._authority.list_provider_runs(

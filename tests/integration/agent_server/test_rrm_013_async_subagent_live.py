@@ -477,6 +477,7 @@ async def test_parent_cancel_reaches_the_provider_run_and_records_the_acknowledg
             reconciled = await stack.async_subagents.reconcile_usage(
                 SCOPE,
                 child.child_execution_id,
+                actor=reconciler(),
                 run_usage={child.provider_run_id: observed},
                 settlement_ref=f"settlement:{child.child_execution_id}",
                 reconciled_at=datetime.now(UTC),
