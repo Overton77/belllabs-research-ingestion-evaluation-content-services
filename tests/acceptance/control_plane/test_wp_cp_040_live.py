@@ -35,6 +35,7 @@ from tests.fixtures.checkpoint_lineage import (
     materialized_workspace,
     stage_unit,
 )
+from tests.fixtures.operation_activities import RecordingOperationCancel
 from tests.unit.operations.test_operation_execution import operation_request
 
 
@@ -157,6 +158,7 @@ async def test_live_temporal_deep_agent_mcp_skill_and_langsmith_sandbox() -> Non
         checkpointers={deep_binding.checkpointer_ref.digest: InMemorySaver()},
         stores={deep_binding.store_ref.digest: InMemoryStore()},
     )
+    cancels = RecordingOperationCancel()
     activities = QualificationActivities(
         DeepAgentRuntimeAdapter(ExactDeepAgentMaterializer(registry)),
         secrets,
@@ -172,7 +174,7 @@ async def test_live_temporal_deep_agent_mcp_skill_and_langsmith_sandbox() -> Non
             Worker(
                 environment.client,
                 task_queue=deep_binding.task_queue,
-                activities=[activities.execute],
+                activities=[activities.execute, cancels.cancel],
             ),
         ):
             workflow_result = await environment.client.execute_workflow(

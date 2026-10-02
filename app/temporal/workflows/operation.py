@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
+from typing import Any
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
@@ -19,18 +21,106 @@ with workflow.unsafe.imports_passed_through():
     )
 
 PARK_IN_DOUBT_PATCH = "rrm-004-park-in-doubt-units"
+# RRM-008 (REQ-CP-EXEC-008): the cognitive Activity declares a heartbeat timeout, a cancel
+# reaches it through the heartbeat (TRY_CANCEL), and every reconciliation after a cancel runs
+# `operation.cancel`, which never dispatches or resumes cognition. Histories recorded before
+# the patch replay the exact earlier command sequence.
+CANCELLATION_SAGA_PATCH = "rrm-008-operation-cancellation-saga"
+NUDGE_SNAPSHOT_PATCH = "rrm-008-nudge-snapshot-before-activity"
+TERMINAL_DISPOSITIONS = frozenset({"completed", "cancelled", "failed", "in_doubt"})
 
 
 def _parks(result: dict[str, object]) -> bool:
     return (
-        result.get("status") == "in_doubt"
-        and result.get("failure_code") != "generation_superseded"
+        result.get("status") == "in_doubt" and result.get("failure_code") != "generation_superseded"
     )
+
+
+def superseded_generation(result: OperationWorkflowResult) -> bool:
+    """The unit generation was fenced by an accepted `start_new_generation` (no settlement)."""
+
+    return (
+        result.disposition == "in_doubt"
+        and result.result.get("failure_code") == "generation_superseded"
+    )
+
+
+def _cancel_activity_options(request: OperationWorkflowRequest) -> dict[str, Any]:
+    # `operation.cancel` is retried until a live holder's lease is released or expires; it is
+    # bounded by its schedule-to-close (REQ-CP-EXEC-008 step 3 timeout meanings).
+    return {
+        "task_queue": request.activity_task_queue,
+        "start_to_close_timeout": timedelta(seconds=request.timeout_seconds),
+        "schedule_to_close_timeout": timedelta(
+            seconds=2 * request.timeout_seconds + request.heartbeat_timeout_seconds
+        ),
+        "heartbeat_timeout": timedelta(seconds=request.heartbeat_timeout_seconds),
+        "retry_policy": RetryPolicy(
+            initial_interval=timedelta(seconds=1),
+            maximum_interval=timedelta(seconds=15),
+            backoff_coefficient=2.0,
+            maximum_attempts=0,
+        ),
+    }
+
+
+async def settle_superseded_generation(
+    request: OperationWorkflowRequest, result: OperationWorkflowResult
+) -> OperationWorkflowResult:
+    """RRM-008 re-review (REQ-CP-EXEC-005/008): one `operation.cancel` for a superseded unit.
+
+    A `start_new_generation` accepted before the cancel ends the unit's OperationWorkflow
+    with `in_doubt` / `generation_superseded` and an unsettled claim. A cancelling run
+    admits no new generation, so the family's cancellation saga runs `operation.cancel` for
+    that unit exactly once (from the family's own history; deterministic): the operation
+    boundary settles the superseded generation `cancelled` (claim, reservation and effect),
+    or reports it still unsettled when a consequential effect awaits the operator. The
+    caller gates this behind its own `workflow.patched` marker.
+    """
+
+    settled: dict[str, object] = await workflow.execute_activity(
+        "operation.cancel",
+        request.operation.model_dump(mode="json"),
+        result_type=dict,
+        **_cancel_activity_options(request),
+    )
+    status = settled.get("status", "completed")
+    return result.model_validate(
+        {
+            **result.model_dump(mode="python"),
+            "disposition": status if status in TERMINAL_DISPOSITIONS else "failed",
+            "result": settled,
+        }
+    )
+
+
+class _CancellationRequested(Exception):
+    """The unit's cancellation was requested while its attempt was in flight."""
+
+
+def _uncancel() -> None:
+    # The workflow's own task was cancelled once (a Temporal cancel). Clearing the counter
+    # lets the saga keep awaiting its reconciliation activities (as the SDK does itself).
+    task = asyncio.current_task()
+    if task is not None:
+        task.uncancel()
 
 
 @workflow.defn(name="belllabs.operation.v2")
 class OperationWorkflow:
-    """Durable technical wrapper for one stable semantic operation attempt."""
+    """Durable technical wrapper for one stable semantic operation attempt.
+
+    Cancellation (RRM-008, REQ-CP-EXEC-008): a cancel reaches the workflow as a Temporal
+    cancellation from its family or as the `request_cancel` signal. An in-flight
+    `operation.execute` Activity is cancelled (the cancel reaches cognition through its
+    heartbeat and the holder settles the unit `cancelled` with its latest durable
+    checkpoint); then `operation.cancel` reconciles the unit from durable facts, standing
+    down behind a live holder and taking over a lost one, so cancellation survives worker
+    loss. A unit parked `in_doubt` is reached by the cancel too: it keeps its incident and
+    is settled only by the operator's `reconcile_unit` decision, never speculatively. The
+    workflow then completes normally with the unit's disposition; it never fails in place
+    of reconciliation.
+    """
 
     def __init__(self) -> None:
         self._cancel_requested = False
@@ -58,6 +148,12 @@ class OperationWorkflow:
     @workflow.query
     def execution_generation(self) -> int:
         return self._execution_generation
+
+    @workflow.query
+    def cancellation_requested(self) -> bool:
+        """Diagnostic only (REQ-CP-EXEC-007); the settlement is the authority."""
+
+        return self._cancel_requested
 
     @workflow.signal
     def record_async_child(self, child_execution_id: str) -> None:
@@ -105,46 +201,140 @@ class OperationWorkflow:
             merged_ids.append(child_execution_id)
             seen_ids.add(child_execution_id)
         self._active_async_child_ids = tuple(merged_ids)
+        if workflow.patched(CANCELLATION_SAGA_PATCH):
+            result = await self._run_governed(request)
+        else:
+            legacy = await self._run_legacy(request)
+            if legacy is None:
+                return self._result(request, "cancelled", None)
+            result = legacy
+        status = result.get("status", "completed")
+        disposition = status if status in TERMINAL_DISPOSITIONS else "failed"
+        return self._result(request, str(disposition), result)
+
+    def _result(
+        self, request: OperationWorkflowRequest, disposition: str, result: dict[str, object] | None
+    ) -> OperationWorkflowResult:
+        return OperationWorkflowResult(
+            semantic_attempt_id=request.semantic_attempt_id,
+            execution_generation=request.execution_generation,
+            disposition=disposition,
+            result=result or {},
+            message_cursor=request.message_cursor,
+            effect_frontier=request.effect_frontier,
+            active_async_child_ids=self._active_async_child_ids,
+        )
+
+    # --- RRM-008 governed path ----------------------------------------------------------------
+
+    async def _run_governed(self, request: OperationWorkflowRequest) -> dict[str, object]:
+        cancel_mode = self._cancel_requested
+        while True:
+            # Review F2: snapshot the hint counter before the Activity, as the legacy path
+            # does, so a `reconcile_unit` hint that lands while it runs is not lost.
+            snapshot_first = workflow.patched(NUDGE_SNAPSHOT_PATCH)
+            if snapshot_first:
+                self._nudges_seen = self._reconciliation_nudges
+            try:
+                if cancel_mode:
+                    result = await self._cancel_operation(request)
+                else:
+                    result = await self._execute_cancellable(request)
+            except _CancellationRequested:
+                cancel_mode = True
+                continue
+            if not _parks(result):
+                return result
+            # REQ-CP-RUN-007 / REQ-CP-DA-018: an `in_doubt` unit keeps its claim unsettled
+            # and waits durably for operator reconciliation. A cancel reaches it here; it
+            # is never re-executed speculatively, and after a cancel every wake-up runs the
+            # cancellation settlement, which applies only an accepted decision.
+            if not snapshot_first:
+                self._nudges_seen = self._reconciliation_nudges
+
+            def woken(cancelling: bool = cancel_mode) -> bool:
+                return self._reconciliation_nudges > self._nudges_seen or (
+                    self._cancel_requested and not cancelling
+                )
+
+            try:
+                await workflow.wait_condition(woken)
+            except asyncio.CancelledError:
+                self._cancel_requested = True
+                _uncancel()
+            if self._cancel_requested:
+                cancel_mode = True
+
+    async def _execute_cancellable(self, request: OperationWorkflowRequest) -> dict[str, object]:
+        """One `operation.execute` attempt that a cancel can interrupt in flight."""
+
+        handle = workflow.start_activity(
+            "operation.execute",
+            request.operation.model_dump(mode="json"),
+            result_type=dict,
+            task_queue=request.activity_task_queue,
+            # Timeout meanings: start-to-close is the holder's maximum (and its claim lease
+            # deadline); heartbeat detects a lost worker and carries the cancel; retries
+            # recover the unit (REQ-CP-DA-018) as long as no cancel was requested.
+            start_to_close_timeout=timedelta(seconds=request.timeout_seconds),
+            heartbeat_timeout=timedelta(seconds=request.heartbeat_timeout_seconds),
+            retry_policy=RetryPolicy(maximum_attempts=3),
+            cancellation_type=workflow.ActivityCancellationType.TRY_CANCEL,
+        )
+        try:
+            await workflow.wait_condition(lambda: handle.done() or self._cancel_requested)
+        except asyncio.CancelledError:
+            self._cancel_requested = True
+            _uncancel()
+        if self._cancel_requested and not handle.done():
+            # The cancel reaches the Activity through its heartbeat; the holder settles the
+            # unit `cancelled` itself when it can. Whatever the attempt ends with,
+            # `operation.cancel` reconciles the unit from durable facts.
+            handle.cancel()
+            try:
+                await handle
+            except (Exception, asyncio.CancelledError):
+                _uncancel()
+            raise _CancellationRequested
+        return handle.result()
+
+    async def _cancel_operation(self, request: OperationWorkflowRequest) -> dict[str, object]:
+        """`operation.cancel`: retried until a live holder's lease is released or expires."""
+
+        handle = workflow.start_activity(
+            "operation.cancel",
+            request.operation.model_dump(mode="json"),
+            result_type=dict,
+            **_cancel_activity_options(request),
+        )
+        while True:
+            try:
+                return await asyncio.shield(handle)
+            except asyncio.CancelledError:
+                # A repeated cancel of this workflow must not cancel the reconciliation.
+                self._cancel_requested = True
+                _uncancel()
+                if handle.done():
+                    return handle.result()
+
+    # --- pre-RRM-008 path (replay of recorded histories only) ---------------------------------
+
+    async def _run_legacy(self, request: OperationWorkflowRequest) -> dict[str, object] | None:
         if self._cancel_requested:
-            return OperationWorkflowResult(
-                semantic_attempt_id=request.semantic_attempt_id,
-                execution_generation=request.execution_generation,
-                disposition="cancelled",
-                message_cursor=request.message_cursor,
-                effect_frontier=request.effect_frontier,
-                active_async_child_ids=self._active_async_child_ids,
-            )
+            return None
         self._nudges_seen = self._reconciliation_nudges
         result = await self._execute_operation(request)
         if _parks(result) and workflow.patched(PARK_IN_DOUBT_PATCH):
-            # REQ-CP-RUN-007 / REQ-CP-DA-018: an `in_doubt` unit keeps its claim unsettled
-            # and waits durably for operator reconciliation; it is never re-executed
-            # speculatively. Each wake-up re-runs classification, which applies only an
-            # accepted decision.
             while _parks(result):
                 await workflow.wait_condition(
                     lambda: self._reconciliation_nudges > self._nudges_seen
                 )
                 self._nudges_seen = self._reconciliation_nudges
                 result = await self._execute_operation(request)
-        status = result.get("status", "completed")
-        disposition = (
-            status
-            if status in {"completed", "cancelled", "failed", "in_doubt"}
-            else "failed"
-        )
-        return OperationWorkflowResult(
-            semantic_attempt_id=request.semantic_attempt_id,
-            execution_generation=request.execution_generation,
-            disposition=disposition,
-            result=result,
-            message_cursor=request.message_cursor,
-            effect_frontier=request.effect_frontier,
-            active_async_child_ids=self._active_async_child_ids,
-        )
+        return result
 
     async def _execute_operation(self, request: OperationWorkflowRequest) -> dict[str, object]:
-        return await workflow.execute_activity(
+        result: dict[str, object] = await workflow.execute_activity(
             "operation.execute",
             request.operation.model_dump(mode="json"),
             result_type=dict,
@@ -152,3 +342,12 @@ class OperationWorkflow:
             start_to_close_timeout=timedelta(seconds=request.timeout_seconds),
             retry_policy=RetryPolicy(maximum_attempts=3),
         )
+        return result
+
+
+__all__: tuple[str, ...] = (
+    "CANCELLATION_SAGA_PATCH",
+    "OperationWorkflow",
+    "settle_superseded_generation",
+    "superseded_generation",
+)

@@ -300,9 +300,10 @@ async def test_version_race_never_strands_a_command() -> None:
 
 
 @pytest.mark.asyncio
-async def test_cancel_is_not_delivered_by_the_family_transport_and_terminal_runs_reject() -> None:
-    """F3: `cancel` delivery is RRM-008's; it never enters the family delivery pass. F1: a
-    terminal run's pending commands are closed `terminal_run` by the delivery service."""
+async def test_cancel_is_delivered_in_its_own_space_and_terminal_runs_reject() -> None:
+    """F3 (closed by RRM-008): a `cancel` is delivered through the same ledger, in its own
+    `cancel` space, unblocked by a failing `execution` delivery. F1: a terminal run's pending
+    commands are closed `terminal_run` by the delivery service."""
 
     run_service, _ = service()
     run_id = await started(run_service, "delivery-cancel", TARGET)
@@ -313,8 +314,8 @@ async def test_cancel_is_not_delivered_by_the_family_transport_and_terminal_runs
     await facade.execute(command(run_id, 2, "pause", pause()))
     cancelled = await facade.execute(command(run_id, 2, "cancel", CancelAction()))
     assert cancelled.phase == RunPhase.CANCELLING
-    assert transport.deliveries == []
-    assert states(await _status(run_service, run_id, "cancel")) == ["accepted"]
+    assert transport.deliveries == ["cancel"]
+    assert states(await _status(run_service, run_id, "cancel")) == ["accepted", "delivered"]
     await run_service.execute(
         command(
             run_id,
@@ -354,7 +355,7 @@ async def test_cancel_is_not_delivered_by_the_family_transport_and_terminal_runs
     assert terminal.terminal_outcome == RunOutcome.CANCELLED
     transport.script.clear()
     assert await facade.redeliver("tenant-1", run_id) == ()
-    assert transport.deliveries == [], "a terminal run receives no delivery"
+    assert transport.deliveries == ["cancel"], "a terminal run receives no delivery"
     assert states(await _status(run_service, run_id, "pause")) == ["accepted", "rejected"]
     assert states(await _status(run_service, run_id, "cancel")) == [
         "accepted",

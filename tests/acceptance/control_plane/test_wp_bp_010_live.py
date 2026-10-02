@@ -78,6 +78,7 @@ from tests.fixtures.checkpoint_lineage import (
     execute_with_checkpoint_lineage,
     materialized_workspace,
 )
+from tests.fixtures.operation_activities import RecordingOperationCancel
 from tests.integration.temporal.test_wp_bp_010_temporal import _blueprint
 from tests.unit.operations.test_operation_execution import operation_request
 from tests.unit.run_control.test_run_control import request as run_request
@@ -362,6 +363,7 @@ async def test_live_api_root_stagegraph_incremental_deep_agents_vertical() -> No
         checkpointers={deep_binding.checkpointer_ref.digest: InMemorySaver()},
         stores={deep_binding.store_ref.digest: InMemoryStore()},
     )
+    cancels = RecordingOperationCancel()
     cognitive = LiveDeepAgentActivity(
         DeepAgentRuntimeAdapter(ExactDeepAgentMaterializer(registry)),
         RunControlOperationBudgetAuthority(
@@ -413,7 +415,7 @@ async def test_live_api_root_stagegraph_incremental_deep_agents_vertical() -> No
             Worker(
                 environment.client,
                 task_queue=COGNITIVE_QUEUE,
-                activities=[cognitive.execute],
+                activities=[cognitive.execute, cancels.cancel],
             ),
         ):
             root_handle = await environment.client.start_workflow(

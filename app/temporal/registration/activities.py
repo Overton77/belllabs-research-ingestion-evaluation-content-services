@@ -51,6 +51,11 @@ def coordinator_activities(family: str, activities: Any) -> Sequence[ActivityCal
 
 
 def agent_cognitive_activities(activities: Any) -> Sequence[ActivityCallable]:
-    """Select the sole family-neutral cognitive operation activity."""
+    """Select the family-neutral cognitive operation activities.
 
-    return (activities.execute,)
+    `operation.execute` runs one Activity attempt of a unit; `operation.cancel` (RRM-008,
+    REQ-CP-EXEC-008) settles a unit the cancellation saga reached, never dispatching
+    cognition. Both are served by the same `OperationExecutionActivities` instance.
+    """
+
+    return (activities.execute, activities.cancel)

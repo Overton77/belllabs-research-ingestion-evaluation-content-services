@@ -701,7 +701,9 @@ async def test_stagegraph_fork_reuses_the_settled_stage_and_reruns_the_patched_s
                     ],
                 ),
                 Worker(
-                    client, task_queue=stack.binding.task_queue, activities=[activities.execute]
+                    client,
+                    task_queue=stack.binding.task_queue,
+                    activities=[activities.execute, activities.cancel],
                 ),
             ):
                 await submitter.submit(
@@ -1092,7 +1094,9 @@ async def test_goal_directed_fork_starts_fresh_with_the_patched_goal(
                     ],
                 ),
                 Worker(
-                    client, task_queue=stack.binding.task_queue, activities=[activities.execute]
+                    client,
+                    task_queue=stack.binding.task_queue,
+                    activities=[activities.execute, activities.cancel],
                 ),
             ):
                 await submitter.submit(

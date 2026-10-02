@@ -400,6 +400,22 @@ class PostgresAsyncSubagentAuthority:
 
     # ------------------------------------------------------------------ inspection
 
+    async def list_child_ids(
+        self, request_scope: str, parent_binding_id: str
+    ) -> tuple[str, ...]:
+        """RRM-008: the children one parent operation binding spawned, in admission order."""
+
+        async with self._pool.acquire() as connection, connection.transaction():
+            await _set_scope(connection, request_scope)
+            rows = await connection.fetch(
+                """SELECT child_execution_id FROM belllabs_control.async_subagent_authority
+                   WHERE request_scope = $1 AND parent_binding_id = $2
+                   ORDER BY created_at, child_execution_id""",
+                request_scope,
+                parent_binding_id,
+            )
+        return tuple(str(row["child_execution_id"]) for row in rows)
+
     async def list_children(
         self, request_scope: str, parent_run_id: str
     ) -> tuple[AsyncChildLineageView, ...]:

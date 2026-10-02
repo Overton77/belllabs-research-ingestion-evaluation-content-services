@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from types import SimpleNamespace
@@ -70,6 +70,7 @@ from app.domain.control_plane.contracts import (
     DefinitionKind,
     ExactDefinitionRef,
     GoalDirectedBlueprint,
+    SecretRef,
     WorkflowWorkspaceContract,
     WorkspaceSlot,
 )
@@ -153,17 +154,13 @@ def goal_template_workspace(workspace: WorkspaceContract) -> WorkspaceContract:
 
     return workspace.model_copy(
         update={
-            "workflow_contract_digest": sha256_digest(
-                GOAL_WORK_CONTRACT.model_dump(mode="json")
-            ),
+            "workflow_contract_digest": sha256_digest(GOAL_WORK_CONTRACT.model_dump(mode="json")),
             "slot_bindings": (
                 WorkspaceSlotBinding(
                     slot_name="work",
                     logical_path="/work",
                     access="exclusive_write",
-                    owner=WorkspaceOwner(
-                        kind=WorkspaceOwnerKind.RUN, owner_id="goal-template"
-                    ),
+                    owner=WorkspaceOwner(kind=WorkspaceOwnerKind.RUN, owner_id="goal-template"),
                 ),
             ),
             "exclusive_write_paths": ("/work",),
@@ -198,6 +195,7 @@ def goal_templates(
     binding: DeepAgentExecutionBinding,
     *,
     workspace: Callable[[WorkspaceContract], WorkspaceContract] = goal_template_workspace,
+    secret_refs: tuple[SecretRef, ...] = (),
 ) -> dict[str, OperationExecutionRequest]:
     """Executor and verifier templates: exact Deep Agent binding, compiled workspace slots,
     the configured system prompt and an admitted objective."""
@@ -209,6 +207,7 @@ def goal_templates(
         templates[role] = OperationExecutionRequest.model_validate(
             {
                 **base.model_dump(mode="python"),
+                "secret_refs": (*base.secret_refs, *secret_refs),
                 "execution_runtime": "deep_agent",
                 "native_placement": None,
                 "deep_agent_binding": DeepAgentExecutionBinding.create(
@@ -362,6 +361,11 @@ class GoalScriptedModel(ScriptedRecoveryModel):
     # One stable output record across iterations (default); `False` gives each iteration its
     # own output ref (the RRM-019 case: only the verified final output is promoted).
     stable_output_ref: bool = True
+    # Tokens each scripted call reports (RRM-008 drives a budget violation by raising it).
+    tokens_per_call: int = 5
+    # RRM-008 review F3: like a real provider, refuse a prompt in which an AI message's
+    # `tool_calls` are not all answered by tool messages (an OpenAI 400).
+    validate_tool_pairing: bool = True
     _turns: list[dict[str, Any]] = PrivateAttr(default_factory=list)
 
     @property
@@ -369,6 +373,18 @@ class GoalScriptedModel(ScriptedRecoveryModel):
         return self._turns
 
     def _observe(self, messages: list[BaseMessage]) -> tuple[int, int]:
+        if self.validate_tool_pairing:
+            unanswered: set[str] = set()
+            for item in messages:
+                if isinstance(item, AIMessage) and item.tool_calls:
+                    unanswered |= {str(call["id"]) for call in item.tool_calls}
+                elif isinstance(item, ToolMessage):
+                    unanswered.discard(str(item.tool_call_id))
+            if unanswered:
+                raise AssertionError(
+                    f"unmatched tool_calls reached the model (a provider rejects this): "
+                    f"{sorted(unanswered)}"
+                )
         human_indexes = [index for index, item in enumerate(messages) if item.type == "human"]
         last_human = human_indexes[-1]
         content = str(messages[last_human].content)
@@ -395,7 +411,7 @@ class GoalScriptedModel(ScriptedRecoveryModel):
         return index, tools
 
     def _reply(self, tools: int) -> ChatResult:  # type: ignore[override]
-        usage = {"input_tokens": 2, "output_tokens": 3, "total_tokens": 5}
+        usage = {"input_tokens": 2, "output_tokens": 3, "total_tokens": self.tokens_per_call}
         turn = self.turns[-1]
         if tools == 0:
             message = AIMessage(
@@ -562,13 +578,25 @@ async def compose_goal_directed(
     claimed_by: str = "operation-runtime:rrm-016",
     template_provider: GoalOperationTemplateProvider | None = None,
     documents: GoalDirectedDocumentRepository | None = None,
+    binding: DeepAgentExecutionBinding | None = None,
+    async_subagents: Any = None,
+    children: Any = None,
+    secrets: Mapping[str, str] | None = None,
+    template_secret_refs: tuple[SecretRef, ...] = (),
 ) -> GoalComposition:
-    """Compose the production GoalDirected activities and operation boundary."""
+    """Compose the production GoalDirected activities and operation boundary.
+
+    RRM-008: `binding` (an exact binding that declares async subagent contracts),
+    `async_subagents` (the governed middleware factory), `children` (the async child
+    cancellation port) and `secrets`/`template_secret_refs` (the deployment credential)
+    compose an executor whose Deep Agent spawns a real async child.
+    """
 
     from tests.acceptance.control_plane.test_wp_cp_040 import exact_fixture
 
-    binding, _profile, bundle = exact_fixture()
-    templates = goal_templates(binding)
+    fixture_binding, _profile, bundle = exact_fixture()
+    binding = binding or fixture_binding
+    templates = goal_templates(binding, secret_refs=template_secret_refs)
     if template_provider is None:
         repository = InMemoryGoalOperationTemplateRepository()
         await repository.persist_templates(
@@ -580,7 +608,8 @@ async def compose_goal_directed(
         )
         template_provider = repository
     adapter = DeepAgentRuntimeAdapter(
-        ExactDeepAgentMaterializer(deep_agent_registry(binding, bundle, model, saver))
+        ExactDeepAgentMaterializer(deep_agent_registry(binding, bundle, model, saver)),
+        async_subagents=async_subagents,
     )
     assets = ConformanceAssetVerifier(
         mcp_schema_digests={"fixture-mcp": MCP_DIGEST},
@@ -594,7 +623,9 @@ async def compose_goal_directed(
         sandbox=ConformanceSandbox(),
         assets=assets,
         mcp=assets,
-        secrets=ConformanceSecretResolver({"environment:OPENAI_API_KEY": "unused"}),
+        secrets=ConformanceSecretResolver(
+            {"environment:OPENAI_API_KEY": "unused", **dict(secrets or {})}
+        ),
         events=ConformanceEventSink(),
         # The journal settles usage; this port is never reached with a journal composed.
         budget=ConformanceBudgetAuthority(),
@@ -606,6 +637,7 @@ async def compose_goal_directed(
         ),
         journal_claimed_by=claimed_by,
         lineage=lineage,
+        children=children,
     )
     documents = documents or RecordingGoalDocuments()
     family = compose_goal_directed_activities(
@@ -643,6 +675,13 @@ class FixtureGoalSettlements:
 
     def __init__(self) -> None:
         self.version = 100
+
+    async def observe_terminal(
+        self,
+        request: GoalOperationReconciliationRequest,
+        provider_result: OperationExecutionResult,
+    ) -> GoalOperationSettlement:
+        return await self.observe(request, provider_result)
 
     async def observe(
         self,

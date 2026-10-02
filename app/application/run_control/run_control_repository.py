@@ -13,6 +13,7 @@ from app.domain.control_plane.canonical import sha256_digest
 from app.domain.operation_execution.journal import OperationJournalSettlement
 from app.domain.run_control.budget import roll_up_child_budget
 from app.domain.run_control.contracts import (
+    CANCEL_SEQUENCE_SPACE,
     EXECUTION_SEQUENCE_SPACE,
     FAMILY_BOUNDARY_COMMAND_KINDS,
     AdmissionDecision,
@@ -360,13 +361,23 @@ def _was_accepted(receipts: tuple[BoundaryCommandReceipt, ...]) -> bool:
 
 
 def pending_delivery(status: BoundaryCommandStatus) -> bool:
-    """Accepted family commands awaiting delivery. `cancel` delivery is RRM-008's (F3)."""
+    """Accepted commands awaiting delivery to a running root or family execution.
 
+    Family commands (pause, resume, wait release) travel in the root's `execution` space;
+    a cancel travels in its own `cancel` space (RRM-008, REQ-CP-EXEC-008 step 2), delivered
+    root-first through the dedicated `deliver_cancel` Updates. A family-self-issued command
+    is applied by its boundary, never delivered (RRM-007 N1).
+    """
+
+    if status.state != ReceiptState.ACCEPTED or status.command.target.kind not in {
+        "root",
+        "family",
+    }:
+        return False
+    if status.command.kind == "cancel":
+        return status.command.target.sequence_space == CANCEL_SEQUENCE_SPACE
     return (
-        status.state == ReceiptState.ACCEPTED
-        and status.command.target.kind in {"root", "family"}
-        and status.command.kind in FAMILY_BOUNDARY_COMMAND_KINDS
-        # A family-self-issued command is applied by its boundary, never delivered (N1).
+        status.command.kind in FAMILY_BOUNDARY_COMMAND_KINDS
         and status.command.target.sequence_space == EXECUTION_SEQUENCE_SPACE
     )
 

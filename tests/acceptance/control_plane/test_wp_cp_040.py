@@ -994,6 +994,11 @@ async def test_operation_service_pins_records_and_links_the_result_checkpoint() 
         ) -> None:
             del request, binding
 
+        async def verify_cancellation(
+            self, request: OperationExecutionRequest, binding: Any
+        ) -> None:
+            del request, binding
+
     binding, _profile, bundle = exact_fixture()
     model = SessionProbeModel(observed_human_counts=[])
     repository = InMemoryCheckpointLineageRepository()

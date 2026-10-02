@@ -64,6 +64,7 @@ from app.domain.run_control.contracts import RunOutcome
 from app.temporal.workflow_sandbox import coordinator_workflow_runner
 from app.temporal.workflows.operation import OperationWorkflow
 from app.temporal.workflows.stagegraph import StageGraphWorkflow
+from tests.fixtures.operation_activities import cancelled_operation_result, wait_heartbeating
 
 DIGEST = "sha256:" + "a" * 64
 NOW = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
@@ -217,7 +218,9 @@ def _blueprint(
     )
 
 
-def _operation(request: StageGraphAdmissionActivityRequest) -> OperationWorkflowRequest:
+def _operation(
+    request: StageGraphAdmissionActivityRequest, heartbeat_timeout_seconds: int | None = None
+) -> OperationWorkflowRequest:
     proposal = request.proposal
     identity = OperationAttemptIdentity(
         run_id=request.run_id,
@@ -274,7 +277,16 @@ def _operation(request: StageGraphAdmissionActivityRequest) -> OperationWorkflow
         operation_kind="bound_operation",
         operation=operation,
         timeout_seconds=120,
+        **(
+            {"heartbeat_timeout_seconds": heartbeat_timeout_seconds}
+            if heartbeat_timeout_seconds is not None
+            else {}
+        ),
     )
+
+
+# A cancelled sibling's heartbeat timeout: the cancel is delivered on the next heartbeat.
+SIBLING_CANCEL_HEARTBEAT_SECONDS = 5
 
 
 class FakeStageGraphActivities:
@@ -292,6 +304,11 @@ class FakeStageGraphActivities:
         self._cycle_once = cycle_once
         self._cycle_scope = cycle_scope
         self._cycle_emitted = False
+        # RRM-008: every OperationWorkflow reconciles a cancelled unit through
+        # `operation.cancel`; a cancel reaches a running `operation.execute` only through its
+        # heartbeat. A test that cancels a running unit may shorten the heartbeat timeout.
+        self.cancel_settlements: list[str] = []
+        self.operation_heartbeat_timeout_seconds: int | None = None
 
     @activity.defn(name="stagegraph.initialize")
     async def initialize(self, request: StageGraphInitializeRequest) -> StageGraphInitializeResult:
@@ -312,7 +329,7 @@ class FakeStageGraphActivities:
             StageGraphBlueprint.model_validate(request.blueprint),
             effective_max_concurrency=request.effective_max_concurrency,
         )
-        operation = _operation(request)
+        operation = _operation(request, self.operation_heartbeat_timeout_seconds)
         projection = interpreter.apply_admission(
             request.projection,
             request.proposal,
@@ -415,7 +432,7 @@ class FakeStageGraphActivities:
         if ":stage:slow:" in operation_id:
             self.slow_started.set()
             try:
-                await self.slow_release.wait()
+                await wait_heartbeating(self.slow_release)
             except asyncio.CancelledError:
                 self.slow_cancelled.set()
                 raise
@@ -425,7 +442,7 @@ class FakeStageGraphActivities:
             self.downstream_started.set()
             stage_id = "downstream"
         else:
-            await self.slow_started.wait()
+            await wait_heartbeating(self.slow_started)
             stage_id = "fast"
         result: dict[str, Any] = {"output_refs": [f"artifact:{stage_id}"]}
         if stage_id == "downstream" and self._cycle_once and not self._cycle_emitted:
@@ -443,6 +460,13 @@ class FakeStageGraphActivities:
             )
         return result
 
+    @activity.defn(name="operation.cancel")
+    async def cancel_operation(self, request: dict[str, Any]) -> dict[str, Any]:
+        """RRM-008: the fixture settlement of a cancelled unit (the boundary's result shape)."""
+
+        self.cancel_settlements.append(str(request["identity"]["operation_id"]))
+        return cancelled_operation_result(request)
+
     @property
     def functions(self) -> list[object]:
         return [
@@ -452,6 +476,7 @@ class FakeStageGraphActivities:
             self.apply_cycle,
             self.complete,
             self.execute_operation,
+            self.cancel_operation,
         ]
 
 
@@ -639,6 +664,7 @@ async def test_incremental_any_join_runs_downstream_before_slow_sibling_and_repl
 @pytest.mark.asyncio
 async def test_slow_sibling_cancellation_is_reconciled_before_completion() -> None:
     activities = FakeStageGraphActivities()
+    activities.operation_heartbeat_timeout_seconds = SIBLING_CANCEL_HEARTBEAT_SECONDS
     try:
         environment = await WorkflowEnvironment.start_time_skipping()
     except RuntimeError as error:
@@ -658,9 +684,14 @@ async def test_slow_sibling_cancellation_is_reconciled_before_completion() -> No
                 id="family/run-wp-bp-010-slow-cancel/1",
                 task_queue=QUEUE,
             )
+            # The cancel reached the running Activity through its heartbeat while the worker
+            # is still up (not through the worker's shutdown).
+            await asyncio.wait_for(activities.slow_cancelled.wait(), timeout=60)
 
     assert activities.slow_cancelled.is_set()
     assert not activities.slow_completed.is_set()
+    [reconciled] = activities.cancel_settlements
+    assert ":stage:slow:" in reconciled, "only the cancelled sibling runs operation.cancel"
     assert result.output_refs["downstream"] == ("artifact:downstream",)
     assert result.completion_proposal.can_terminalize
 

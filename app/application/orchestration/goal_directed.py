@@ -190,6 +190,14 @@ class GoalOperationSettlementPort(Protocol):
         """The operation's accepted run-control settlement, or raise."""
         ...
 
+    async def observe_terminal(
+        self,
+        request: GoalOperationReconciliationRequest,
+        provider_result: OperationExecutionResult,
+    ) -> GoalOperationSettlement:
+        """RRM-008: the settlement of a cancelled or failed operation, or raise."""
+        ...
+
 
 class GoalOperationBindingReader(Protocol):
     async def get_binding_by_id(
@@ -226,6 +234,33 @@ class RunControlGoalOperationSettlements:
         self._bindings = bindings
 
     async def observe(
+        self,
+        request: GoalOperationReconciliationRequest,
+        provider_result: OperationExecutionResult,
+    ) -> GoalOperationSettlement:
+        return await self._observe(request, provider_result)
+
+    async def observe_terminal(
+        self,
+        request: GoalOperationReconciliationRequest,
+        provider_result: OperationExecutionResult,
+    ) -> GoalOperationSettlement:
+        """RRM-008: consume the settlement of a `cancelled` or `failed` operation.
+
+        The journaled operation boundary wrote it exactly as a completed one (usage, release,
+        effect settlement, accepted evidence); the family verifies the same facts and never
+        records usage for the unit itself. A unit whose effect is still pending (an async
+        child's unattributed usage) is consumed too: the run's terminal settlement is what
+        waits for the reconciliation, not the family's bookkeeping.
+        """
+
+        if provider_result.status not in {"cancelled", "failed"}:
+            raise GoalOperationSettlementUnavailable(
+                "terminal consumption requires a cancelled or failed operation result"
+            )
+        return await self._observe(request, provider_result)
+
+    async def _observe(
         self,
         request: GoalOperationReconciliationRequest,
         provider_result: OperationExecutionResult,
@@ -484,9 +519,31 @@ class GoalDirectedOperationResultService:
         if (
             observed.semantic_attempt_id != request.operation_request.semantic_attempt_id
             or observed.execution_generation != request.operation_request.execution_generation
-            or observed.disposition != "completed"
             or observed.result is None
         ):
+            raise ValueError("GoalDirected operation result does not match its durable request")
+        if observed.disposition in {"cancelled", "failed"}:
+            # RRM-008: a cancelled or failed unit is consumed through its own settlement path;
+            # no family document is persisted and `_consume_settlement` is never reached.
+            if self._settlements is None:
+                raise ValueError(
+                    "a cancelled or failed GoalDirected operation requires the settlement port"
+                )
+            terminal_result = OperationExecutionResult.model_validate(observed.result)
+            if (
+                terminal_result.status != observed.disposition
+                or terminal_result.binding_id != request.operation_binding_ref
+            ):
+                raise ValueError(
+                    "GoalDirected terminal operation result is not the exact bound settlement"
+                )
+            return GoalOperationReconciliationResult(
+                operation_role=request.operation_role,
+                detail_ref=f"goal-operation:{observed.disposition}:{request.operation_binding_ref}",
+                settlement=await self._settlements.observe_terminal(request, terminal_result),
+                operation_disposition=observed.disposition,
+            )
+        if observed.disposition != "completed":
             raise ValueError("GoalDirected operation result does not match its durable request")
         provider_result = OperationExecutionResult.model_validate(observed.result)
         if (

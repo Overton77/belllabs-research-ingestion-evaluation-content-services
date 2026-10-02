@@ -76,9 +76,13 @@ class RuntimeInvocationFailure(RuntimeError):
         *,
         terminal_result_observed: bool,
         candidates: tuple[object, ...] = (),
+        latest_capture: object | None = None,
     ) -> None:
         super().__init__(f"{error_type} after runtime admission")
         self.error_type = error_type
         self.terminal_result_observed = terminal_result_observed
         # Qualified keys of the terminal stamped leaf an operator may accept.
         self.candidates = candidates
+        # RRM-008: the latest durable checkpoint of the unique stamped lineage, if any, so a
+        # `failed` settlement can record the partial lineage as the namespace head.
+        self.latest_capture = latest_capture

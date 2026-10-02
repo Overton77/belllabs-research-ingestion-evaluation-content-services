@@ -149,6 +149,46 @@ class BoundaryCommandAck:
     detail: str = ""
 
 
+CancelAckStatus = Literal["delivered", "duplicate", "stale_generation", "stale_target"]
+
+
+@dataclass(frozen=True)
+class CancelDelivery:
+    """RRM-008 (REQ-CP-EXEC-008 step 2): one accepted cancel as the delivery service hands
+    it to the root and then to the family, through the dedicated `deliver_cancel` Update.
+
+    A cancel is sequenced in its own `cancel` space (RRM-007 N1): it never takes a place in
+    the root's contiguous `execution` sequence, so it can neither open a gap there nor be
+    blocked by one.
+    """
+
+    command_id: str
+    idempotency_issuer: str
+    target_sequence: int
+    execution_epoch: int
+    execution_generation: int
+    accepted_run_version: int
+    payload_digest: str
+    reason: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.command_id or not self.payload_digest or self.target_sequence < 1:
+            raise ValueError("cancel deliveries require an identity, digest and sequence")
+        if self.execution_epoch < 1 or self.execution_generation < 1:
+            raise ValueError("cancel delivery epoch and generation must be positive")
+
+
+@dataclass(frozen=True)
+class CancelAck:
+    """The root's or family's `deliver_cancel` return value: evidence that the journaled
+    cancellation intent reached that execution, never that the run is cancelled."""
+
+    command_id: str
+    status: CancelAckStatus
+    technical_segment: int
+    detail: str = ""
+
+
 @dataclass(frozen=True)
 class FamilyPause:
     """A pause the family boundary applied; scope strings follow `PauseDecision.scope`."""
@@ -579,14 +619,18 @@ class StageGraphCompletionProposal:
     pending_dependency_ids: tuple[str, ...]
     open_producer_liability_ids: tuple[str, ...]
     valid_output_refs: tuple[str, ...]
+    # RRM-008 (REQ-CP-EXEC-008 step 7): a cancellation completion. Every producer liability
+    # is closed; unresolved dependencies are cancelled, not pending; the reducer decides the
+    # `cancelled` outcome once budgets and effects are settled.
+    cancelled: bool = False
 
     @property
     def can_terminalize(self) -> bool:
-        return (
-            self.required_obligations_accepted
-            and not self.pending_dependency_ids
-            and not self.open_producer_liability_ids
-        )
+        if self.open_producer_liability_ids:
+            return False
+        if self.cancelled:
+            return True
+        return self.required_obligations_accepted and not self.pending_dependency_ids
 
 
 class StageGraphDecisionMutation(AtomicFamilyMutation):
@@ -668,6 +712,9 @@ class StageGraphInitializeResult:
     accepted: bool
     projection: StageGraphAcceptedProjection
     reason_code: str
+    # RRM-008: the run phase after the start fact; `cancelling` when the cancel was accepted
+    # before the family started, so the family runs the saga at once.
+    phase: str = ""
 
 
 @dataclass(frozen=True)
@@ -855,6 +902,9 @@ class StageGraphRunInput:
     applied_boundary_command_ids: tuple[str, ...] = ()
     quiescent: bool = False
     last_delivered_sequence: int = 0
+    # RRM-008: see `GoalDirectedRunInput`.
+    cancellation_retry_seconds: int = 30
+    cancel_requested: bool = False
 
 
 @dataclass(frozen=True)
@@ -1242,6 +1292,11 @@ class GoalDirectedRunInput:
     # Forces one continuation at the next iteration boundary (also while paused).
     force_continue_as_new: bool = False
     last_delivered_sequence: int = 0
+    # RRM-008: the first wait before the cancellation saga proposes terminalization again
+    # when a liability remains (doubles up to one hour); the hint signal wakes it earlier.
+    cancellation_retry_seconds: int = 30
+    # RRM-008 (REQ-CP-EXEC-011): a delivered cancel carried across Continue-As-New.
+    cancel_requested: bool = False
 
 
 @dataclass(frozen=True)
@@ -1284,8 +1339,10 @@ class GoalDirectedExecutionState:
 class GoalDirectedRunResult:
     run_id: str
     execution_epoch: int
-    status: Literal["stopping"]
-    convergence_proposal: GoalConvergenceProposal
+    # RRM-008: `cancelled` when the family completed the cancellation saga (no convergence
+    # proposal; the reducer recorded the `cancelled` outcome).
+    status: Literal["stopping", "cancelled"]
+    convergence_proposal: GoalConvergenceProposal | None
     terminalization_proposal: GoalTerminalizationProposal | None
     goal_iterations: int
     agent_runs: int

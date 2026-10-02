@@ -381,6 +381,11 @@ class CheckpointTransitionObservation(Contract):
     result_manifest_ref: str = Field(min_length=1)
     result_manifest_digest: str = Field(pattern=DIGEST_PATTERN)
     redacted_summary_digest: str = Field(pattern=DIGEST_PATTERN)
+    # RRM-008 (REQ-BP-GD-012): whether a later unit of a shared session namespace may be
+    # pinned to this transition's result checkpoint. A `failed` or `timed_out` settlement
+    # advances the head for bookkeeping only: its cognition was never verified, so the
+    # head is sealed and the session continues only in a new session generation.
+    seedable: bool = True
     observed_at: AwareDatetime
 
     @model_validator(mode="after")
@@ -472,9 +477,7 @@ class UnitResultObservation(Contract):
     def content_digest(self) -> str:
         """The recorded result; the writer's fence and time are not result content."""
 
-        return sha256_digest(
-            self.model_dump(mode="python", exclude={"observed_at", "claim_fence"})
-        )
+        return sha256_digest(self.model_dump(mode="python", exclude={"observed_at", "claim_fence"}))
 
 
 IncidentDecision = Literal["accept_descendant", "abandon_unit", "start_new_generation"]

@@ -49,7 +49,7 @@ async def main() -> None:
             Worker(
                 client,
                 task_queue=stack.binding.task_queue,
-                activities=[activities.execute],
+                activities=[activities.execute, activities.cancel],
             ),
         ):
             (paths.root / "worker-1-ready").write_text(str(os.getpid()), encoding="utf-8")

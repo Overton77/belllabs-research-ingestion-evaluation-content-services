@@ -288,7 +288,7 @@ async def test_worker_restart_resumes_the_interrupted_unit_and_settles_once(
                 Worker(
                     env.client,
                     task_queue=stack.binding.task_queue,
-                    activities=[activities.execute],
+                    activities=[activities.execute, activities.cancel],
                 ),
             ):
                 workflow_result = await asyncio.wait_for(handle.result(), timeout=240)

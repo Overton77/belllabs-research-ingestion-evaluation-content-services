@@ -161,9 +161,7 @@ def reduce_lifecycle(
     command_fingerprint: str,
 ) -> Reduction:
     try:
-        command = LifecycleCommand.model_validate(
-            command.model_dump(mode="python", warnings=False)
-        )
+        command = LifecycleCommand.model_validate(command.model_dump(mode="python", warnings=False))
     except (ValidationError, TypeError, ValueError) as error:
         raise ReductionRejected(
             "invalid_lifecycle_command",
@@ -212,9 +210,7 @@ def reduce_lifecycle(
     finalization_omission_reason = projection.finalization_omission_reason
     obligation_evidence = list[AcceptedObligationEvidence](projection.accepted_obligation_evidence)
     output_evidence = list[AcceptedOutputEvidence](projection.accepted_output_evidence)
-    operation_settlement_evidence = list(
-        projection.accepted_operation_settlement_evidence
-    )
+    operation_settlement_evidence = list(projection.accepted_operation_settlement_evidence)
     async_children = list[AsyncChildAuthorityState](projection.async_children)
     unit_reconciliations = list[UnitReconciliationDecision](projection.unit_reconciliations)
     execution_target: ExecutionTarget | None = projection.execution_target
@@ -226,14 +222,17 @@ def reduce_lifecycle(
     event_type = f"workflow_run.{action.kind}"
 
     if isinstance(action, StartAction):
-        if phase != RunPhase.PENDING:
+        # RRM-008 (REQ-CP-EXEC-008): a cancel accepted before the family's start fact left
+        # run control as the boundary. The family still binds its execution target so that
+        # it can complete the cancellation saga; the run stays `cancelling`.
+        if phase == RunPhase.CANCELLING and execution_target is None:
+            execution_target = action.execution_target
+        elif phase != RunPhase.PENDING:
             raise ReductionRejected("invalid_phase", "only a pending run can start")
-        phase = RunPhase.ACTIVE
-        execution_target = action.execution_target
-    elif (
-        isinstance(action, SetWaitAction)
-        and action.condition.kind == "operator_reconciliation"
-    ):
+        else:
+            phase = RunPhase.ACTIVE
+            execution_target = action.execution_target
+    elif isinstance(action, SetWaitAction) and action.condition.kind == "operator_reconciliation":
         # REQ-CP-RUN-007 (AMD-RRM-001): while a unit is in_doubt the run keeps its phase;
         # a cancelling run stays cancelling with reconciliation `operator_required`.
         if phase not in {
@@ -508,6 +507,9 @@ def reduce_lifecycle(
         )
         outcome = _terminal_outcome(terminal_projection, next_budget, next_effects, action)
         phase = RunPhase.TERMINAL
+        # RRM-008: a `cancelled` outcome cancels the run's declared waits (a non-cancelled
+        # outcome was admitted only with none active).
+        waits = []
     elif isinstance(action, ReconcileUnitAction):
         phase, waits = _reconcile_unit(phase, waits, unit_reconciliations, action, command)
     elif isinstance(action, RecordReadinessAction):
@@ -536,9 +538,7 @@ def reduce_lifecycle(
             "finalization_omission_reason": finalization_omission_reason,
             "accepted_obligation_evidence": tuple(obligation_evidence),
             "accepted_output_evidence": tuple(output_evidence),
-            "accepted_operation_settlement_evidence": tuple(
-                operation_settlement_evidence
-            ),
+            "accepted_operation_settlement_evidence": tuple(operation_settlement_evidence),
             "async_children": tuple(async_children),
             "unit_reconciliations": tuple(unit_reconciliations),
             "execution_target": execution_target,
@@ -762,6 +762,13 @@ def _reconcile_unit(
     if any(item.incident_id == action.incident_id for item in decisions):
         raise ReductionRejected(
             "unit_already_reconciled", "the incident revision already has a decision"
+        )
+    if phase == RunPhase.CANCELLING and action.decision == "start_new_generation":
+        # RRM-008 (REQ-CP-EXEC-008): a cancelling run re-executes nothing; the unit is
+        # settled by `accept_descendant` or `abandon_unit`, never by a new generation.
+        raise ReductionRejected(
+            "cancelling_run_rejects_new_generation",
+            "a cancelling run accepts no new unit generation",
         )
     decisions.append(
         UnitReconciliationDecision(
@@ -1078,8 +1085,7 @@ def _settle_pending(
             "originating usage is not outstanding for settlement",
         )
     if any(
-        settlement.usage_id == action.usage_id
-        for settlement in state.usage_settlements.values()
+        settlement.usage_id == action.usage_id for settlement in state.usage_settlements.values()
     ):
         raise ReductionRejected(
             "usage_already_settled",
@@ -1093,8 +1099,7 @@ def _settle_pending(
     settlement_amounts = {
         dimension: action.actual_amounts.get(dimension, 0)
         + action.pending_release_amounts.get(dimension, 0)
-        for dimension in action.actual_amounts.keys()
-        | action.pending_release_amounts.keys()
+        for dimension in action.actual_amounts.keys() | action.pending_release_amounts.keys()
         if action.actual_amounts.get(dimension, 0)
         + action.pending_release_amounts.get(dimension, 0)
         > 0
@@ -1143,8 +1148,7 @@ def _settle_pending(
                 **state.usage_settlements,
                 action.settlement_id: settlement,
             },
-            "outstanding_usage_ids": state.outstanding_usage_ids
-            - {action.usage_id},
+            "outstanding_usage_ids": state.outstanding_usage_ids - {action.usage_id},
         }
     )
     entries = [
@@ -1324,9 +1328,7 @@ def _settle_effect(
             "usage_settlement_authority_mismatch",
             "effect and usage settlement must bind the same operation authority",
         )
-    prior_effect_id = budget.usage_settlement_effect_refs.get(
-        action.usage_settlement_ref
-    )
+    prior_effect_id = budget.usage_settlement_effect_refs.get(action.usage_settlement_ref)
     if prior_effect_id is not None and prior_effect_id != action.effect_id:
         raise ReductionRejected(
             "usage_settlement_already_applied",
@@ -1353,16 +1355,20 @@ def _settle_effect(
             }
         }
     )
-    return updated, updated_budget, EffectLedgerEntry(
-        entry_id=_stable_id(
-            "effect-entry", state.run_id, action.effect_id, "settlement", action.settlement_id
+    return (
+        updated,
+        updated_budget,
+        EffectLedgerEntry(
+            entry_id=_stable_id(
+                "effect-entry", state.run_id, action.effect_id, "settlement", action.settlement_id
+            ),
+            run_id=state.run_id,
+            effect_id=action.effect_id,
+            kind="settlement",
+            idempotency_id=action.settlement_id,
+            record=settlement,
+            occurred_at=command.occurred_at,
         ),
-        run_id=state.run_id,
-        effect_id=action.effect_id,
-        kind="settlement",
-        idempotency_id=action.settlement_id,
-        record=settlement,
-        occurred_at=command.occurred_at,
     )
 
 
@@ -1472,7 +1478,15 @@ def _terminal_outcome(
             "obligation_acceptance_mismatch",
             "proposal obligation acceptance does not match authoritative evidence",
         )
-    if proposal.pending_wait_or_link_ids or projection.active_waits:
+    # RRM-008 (REQ-CP-EXEC-008 step 7, REQ-CP-RUN-007): a cancelled outcome cancels the run's
+    # declared waits, but an `operator_reconciliation` wait (an in_doubt unit) keeps the run
+    # cancelling with reconciliation `operator_required`.
+    blocking_waits = (
+        [item for item in projection.active_waits if item.kind == "operator_reconciliation"]
+        if projection.phase == RunPhase.CANCELLING
+        else list(projection.active_waits)
+    )
+    if proposal.pending_wait_or_link_ids or blocking_waits:
         raise ReductionRejected("unresolved_terminal_dependencies", "terminal dependencies remain")
     unresolved_children = [
         child.child_execution_id

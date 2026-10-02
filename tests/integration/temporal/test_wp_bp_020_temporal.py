@@ -8,7 +8,6 @@ from typing import Any
 
 import pytest
 from temporalio import activity
-from temporalio.client import WorkflowFailureError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
 
@@ -59,6 +58,7 @@ from app.temporal.workflow_sandbox import coordinator_workflow_runner
 from app.temporal.workflows.goal_directed import GoalDirectedWorkflow
 from app.temporal.workflows.operation import OperationWorkflow
 from tests.fixtures.goal_directed_journaled import goal_template_workspace
+from tests.fixtures.operation_activities import sleep_heartbeating
 
 DIGEST = "sha256:" + "a" * 64
 NOW = datetime(2026, 8, 10, 20, 0, tzinfo=UTC)
@@ -207,7 +207,11 @@ class FakeGoalDirectedActivities:
     ) -> None:
         self.prepared_roles: list[str] = []
         self.lifecycle_kinds: list[str] = []
+        self.cancelled_operations: list[str] = []
         self.operation_started = asyncio.Event()
+        # RRM-008: a test that cancels a running unit may shorten its heartbeat timeout (the
+        # cancel is delivered to the running `operation.execute` on its next heartbeat).
+        self.operation_heartbeat_timeout_seconds: int | None = None
         self._slow_operation = slow_operation
         self._complete_at_iteration = complete_at_iteration
         self._scope_expansion_route = scope_expansion_route
@@ -222,6 +226,11 @@ class FakeGoalDirectedActivities:
             execution_generation=request.execution_generation,
             operation_kind="bound_operation",
             operation=operation,
+            **(
+                {"heartbeat_timeout_seconds": self.operation_heartbeat_timeout_seconds}
+                if self.operation_heartbeat_timeout_seconds is not None
+                else {}
+            ),
         )
         return GoalOperationDispatch(
             workflow_request=workflow_request,
@@ -247,14 +256,34 @@ class FakeGoalDirectedActivities:
     async def execute_operation(self, request: dict[str, Any]) -> dict[str, Any]:
         self.operation_started.set()
         if self._slow_operation:
-            await asyncio.sleep(60)
+            await sleep_heartbeating(60)
         return {"operation_id": str(request["identity"])}
+
+    @activity.defn(name="operation.cancel")
+    async def cancel_operation(self, request: dict[str, Any]) -> dict[str, Any]:
+        """RRM-008: the fixture settlement of a cancelled unit."""
+
+        self.cancelled_operations.append(str(request["identity"]["operation_id"]))
+        return {
+            "binding_id": f"binding:{str(request['identity']['operation_id']).split('/')[-1]}",
+            "semantic_attempt_key": str(request["identity"]),
+            "status": "cancelled",
+            "failure_code": "cancelled",
+        }
 
     @activity.defn(name="goaldirected.reconcile_operation")
     async def reconcile(
         self, request: GoalOperationReconciliationRequest
     ) -> GoalOperationReconciliationResult:
         operation = request.operation_request.operation
+        if request.operation_result.disposition == "cancelled":
+            # RRM-008: a cancelled unit is consumed through its settlement only.
+            return GoalOperationReconciliationResult(
+                operation_role=request.operation_role,
+                detail_ref=f"goal-operation:cancelled:{request.operation_binding_ref}",
+                settlement=fake_settlement(request, {}),
+                operation_disposition="cancelled",
+            )
         if request.operation_role == "executor":
             result = GoalExecutionResult(
                 identity=request.claim.identity,
@@ -360,6 +389,7 @@ class FakeGoalDirectedActivities:
             self.prepare_executor,
             self.prepare_verifier,
             self.execute_operation,
+            self.cancel_operation,
             self.reconcile,
             self.lifecycle,
         ]
@@ -768,8 +798,7 @@ async def test_goal_workflow_cancels_active_operation_and_replays_reconciliation
             )
             await asyncio.wait_for(activities.operation_started.wait(), timeout=10)
             await handle.signal(GoalDirectedWorkflow.request_cancel)
-            with pytest.raises(WorkflowFailureError):
-                await handle.result()
+            result = await handle.result()
             history = await handle.fetch_history()
 
         await Replayer(
@@ -777,8 +806,11 @@ async def test_goal_workflow_cancels_active_operation_and_replays_reconciliation
             workflow_runner=coordinator_workflow_runner(),
         ).replay_workflow(history)
 
-    assert "cancel" in activities.lifecycle_kinds
-    # Cancellation enters the shared reconciliation saga with reservations retained;
-    # terminalization is forbidden until that saga settles budget/effects.
-    assert "terminalize" not in activities.lifecycle_kinds
-    assert activities.lifecycle_kinds.count("cancel") == 1
+    # RRM-008 (REQ-CP-EXEC-008): the family completes the cancellation saga as workflow
+    # logic. The active unit settles `cancelled` (`operation.cancel`), the family consumes
+    # that settlement and proposes terminal `cancelled`; it issues no cancel of its own and
+    # never fails in place of reconciliation.
+    assert result.status == "cancelled" and result.convergence_proposal is None
+    assert activities.cancelled_operations == ["goal-iteration/1/executor"]
+    assert "cancel" not in activities.lifecycle_kinds
+    assert activities.lifecycle_kinds.count("terminalize") == 1
