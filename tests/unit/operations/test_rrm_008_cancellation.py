@@ -888,3 +888,91 @@ async def test_shared_session_head_advances_over_a_unit_settled_without_completi
     finally:
         await lineage_service.release(admitted)
     assert len(harness.model.calls) == calls_before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("route", ["execute", "cancel"])
+@pytest.mark.parametrize("case", ["provider_failed_partial", "budget_after_terminal"])
+async def test_failed_unit_lost_before_its_journal_settlement_settles_its_recorded_result(
+    case: str, route: str
+) -> None:
+    """Re-review blocker (REQ-CP-EXEC-011/014): a `failed` settlement records its result
+    observation and its (non-seedable) transition before the journal settlement, sealing the
+    session head. A worker lost between the two must not wedge the unit: its retry is the
+    unit generation that sealed the head, so it is admitted, classifies `observed_unsettled`
+    and settles exactly the recorded manifest once, with no provider work. This holds for the
+    `operation.execute` retry and for the saga's `operation.cancel` (the run was cancelled
+    meanwhile: the recorded `failed` result stands). The next unit of the session is still
+    refused. (`timed_out` is not a separate path: the operation boundary never settles it.)"""
+
+    harness, prepare, _templates, run_id = await _goal_harness(f"lost-{case}-{route}")
+    first_claim, second_claim = await _claims(run_id)
+    run = await harness.run_control.get_run(SCOPE, run_id)
+    first = await prepare.prepare(_preparation(run_id, first_claim, "executor", run.version, 0))
+    operation = first.workflow_request.operation
+    unit = operation.runtime_unit
+    assert unit is not None
+    namespace = _namespace(operation)
+    if case == "provider_failed_partial":
+        harness.model.fail_on(2, ValueError("provider rejected the second call"))
+        expected_code = "runtime_failed"
+    else:
+        harness.model.tokens_per_call = operation.budget_limits["tokens.total"]
+        expected_code = "budget_exceeded"
+    harness.crashable.crash_before_settlement = True
+    await harness.crash(operation)
+    harness.model.tokens_per_call = 5
+
+    # The crash window: result and transition recorded, head sealed, nothing settled.
+    recorded = await harness.lineage.get_result(SCOPE, unit.unit_key, 1)
+    assert recorded is not None and recorded.status == "failed"
+    transition = await harness.lineage.get_transition(SCOPE, unit.unit_key, 1)
+    assert transition is not None and transition.seedable is False
+    head = await harness.lineage.get_namespace_head(SCOPE, namespace)
+    assert head == transition.result_key
+    assert _settlements(harness, operation) == []
+    calls_before = len(harness.model.calls)
+    invocations_before = harness.runtime.invocations
+
+    if route == "cancel":
+        run = await harness.run_control.get_run(SCOPE, run_id)
+        journaled = await harness.run_control.execute(
+            command(run_id, run.version, "operator-cancel", CancelAction())
+        )
+        assert journaled.status == CommandStatus.ACCEPTED
+        recovered = await _cancel(harness, operation)
+    else:
+        recovered = await harness.run(operation)
+
+    assert (recovered.status, recovered.failure_code) == ("failed", expected_code), recovered
+    assert recovered.result_checkpoint == transition.result_key
+    assert recovered.checkpoint_transition_id == transition.transition_id
+    assert len(harness.model.calls) == calls_before, "no provider work on recovery"
+    assert harness.runtime.invocations == invocations_before
+    [settlement] = _settlements(harness, operation)
+    assert settlement.status == "failed"
+    budget = await harness.run_control.get_budget(SCOPE, run_id)
+    assert operation.budget_reservation_id not in budget.reservations, "reservation released"
+    effects = await harness.run_control.get_effects(SCOPE, run_id)
+    claim = effects.claims[_effect_claim_id(bind_operation_execution_request(operation))]
+    assert claim.disposition.value == "failed" and claim.settlement is not None
+    assert await harness.lineage.get_namespace_in_flight(SCOPE, namespace) is None
+    assert await harness.lineage.get_namespace_head(SCOPE, namespace) == head
+    # Settled exactly once: a further retry on either route returns the same settlement.
+    assert await harness.run(operation) == recovered
+    if route == "cancel":
+        assert await _cancel(harness, operation) == recovered
+    assert len(_settlements(harness, operation)) == 1
+    assert len(harness.model.calls) == calls_before
+
+    if route == "execute":
+        # The sealed head still refuses the next unit of the session (REQ-BP-GD-012).
+        run = await harness.run_control.get_run(SCOPE, run_id)
+        second = await prepare.prepare(
+            _preparation(run_id, second_claim, "executor", run.version, 1)
+        )
+        next_operation = second.workflow_request.operation
+        with pytest.raises(CheckpointLineageConflict, match="sealed"):
+            await harness.run(next_operation)
+        assert len(harness.model.calls) == calls_before
+        assert _settlements(harness, next_operation) == []

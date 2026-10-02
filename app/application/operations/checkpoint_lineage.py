@@ -965,7 +965,7 @@ class CheckpointLineageService:
 
         unit, generation, namespace, deep_binding = self._resolve(binding)
         if namespace is not None:
-            await self._refuse_sealed_head(unit, namespace)
+            await self._refuse_sealed_head(unit, generation, namespace)
         now = self._clock()
         lease_until = attempt.lease_expires_at or (now + self._default_lease)
         admission = await self._repository.record_attempt(
@@ -992,15 +992,20 @@ class CheckpointLineageService:
         )
 
     async def _refuse_sealed_head(
-        self, unit: RuntimeUnitIdentity, namespace: NamespaceClaim
+        self, unit: RuntimeUnitIdentity, generation: int, namespace: NamespaceClaim
     ) -> None:
         """RRM-008 (REQ-BP-GD-012, REQ-CP-DA-017): never pin a unit to unverified cognition.
 
         A unit's expected source is the namespace head. When the transition that produced
         it is not seedable (a `failed` or `timed_out` settlement advanced the head for
-        bookkeeping only), the unit is refused before its attempt is recorded, so it holds
-        no lease and reserves no in-flight marker: a shared session continues only in a new
-        session generation, never by branching the sealed thread.
+        bookkeeping only), a later unit is refused before its attempt is recorded, so it
+        holds no lease and reserves no in-flight marker: a shared session continues only in
+        a new session generation, never by branching the sealed thread.
+
+        The unit generation that sealed the head is not a later unit: its retry must still
+        settle exactly its recorded result (`observed_unsettled`, REQ-CP-EXEC-011/014) when
+        the worker was lost between the result observation and the journal settlement. It is
+        admitted and classifies from its own transition and result; it never re-dispatches.
         """
 
         expected = await self._repository.get_namespace_head(
@@ -1019,6 +1024,8 @@ class CheckpointLineageService:
             None,
         )
         if head is None or head.seedable:
+            return
+        if head.unit_key == unit.unit_key and head.execution_generation == generation:
             return
         raise CheckpointLineageConflict(
             "the session namespace head is sealed: the previous unit settled "
