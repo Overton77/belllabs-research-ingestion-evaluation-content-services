@@ -14,6 +14,7 @@ from app.application.orchestration.goal_directed import (
     GoalDirectedOperationPreparationService,
     GoalDirectedOperationResultService,
     GoalOperationTemplateProvider,
+    RunControlGoalOperationSettlements,
 )
 from app.application.orchestration.service import RunControlLifecycleGateway
 from app.application.run_control.boundary_interventions import (
@@ -153,7 +154,10 @@ def compose_goal_directed_activities(
             documents=documents,
             actor=actor,
         ),
-        results=GoalDirectedOperationResultService(documents),
+        # RRM-016: the family consumes each operation's journaled run-control settlement.
+        results=GoalDirectedOperationResultService(
+            documents, RunControlGoalOperationSettlements(run_control)
+        ),
         lifecycle=lifecycle,
         completion=completion,
         boundary=boundary,

@@ -568,11 +568,17 @@ class RecoveryHarness:
 
 
 async def recovery_harness(
-    *, model: ScriptedRecoveryModel | None = None, real_authority: bool = False
+    *,
+    model: ScriptedRecoveryModel | None = None,
+    real_authority: bool = False,
+    run_control: RunControlService | None = None,
 ) -> RecoveryHarness:
+    """`run_control` (RRM-016) lets a family's admissions be registered on the harness."""
+
     from tests.acceptance.control_plane.test_wp_cp_040 import exact_fixture
 
-    run_control, _repository = run_control_service()
+    if run_control is None:
+        run_control, _repository = run_control_service()
     admitted = await run_control.admit(run_request(request_id="rrm-004-recovery"))
     assert admitted.run_id is not None
     started = await run_control.execute(

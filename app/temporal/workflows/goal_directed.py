@@ -56,6 +56,11 @@ CONTINUE_AS_NEW_ITERATIONS = 20
 # failure unchanged.
 DURABLE_PAUSE_PATCH = "rrm-007-durable-goal-pause"
 CLOSING_DRAIN_PATCH = "rrm-007-closing-drain"
+# RRM-016: each executor and verifier operation is claimed, observed and settled exactly once
+# in run control by the journaled operation boundary; the family consumes that settlement
+# and continues from its run version instead of recording the usage itself. Histories
+# recorded before the patch replay their own `record_usage` command unchanged.
+JOURNALED_SETTLEMENT_PATCH = "rrm-016-journaled-goal-settlement"
 POLICY_PAUSE_PREFIX = "goal-policy-pause:"
 
 
@@ -295,13 +300,13 @@ class GoalDirectedWorkflow:
                 )
             except GoalDirectedExecutionError as error:
                 raise ApplicationError(str(error), non_retryable=True) from error
-            run_version = await self._settle_operation(
+            run_version = await self._consume_settlement(
                 run_input,
                 run_version,
+                executor_accepted,
                 claim.reservation_id,
                 claim.reservation,
                 executor_accepted.execution_result.actual_usage,
-                executor_accepted.detail_ref,
                 timeout,
             )
             await self._stop_for_cancellation(run_input, run_version, timeout)
@@ -351,13 +356,13 @@ class GoalDirectedWorkflow:
                 )
             except GoalDirectedExecutionError as error:
                 raise ApplicationError(str(error), non_retryable=True) from error
-            run_version = await self._settle_operation(
+            run_version = await self._consume_settlement(
                 run_input,
                 run_version,
+                verifier_accepted,
                 verifier_reservation_id,
                 claim.reservation,
                 verifier_accepted.verification_result.actual_usage,
-                verifier_accepted.detail_ref,
                 timeout,
             )
             await self._stop_for_cancellation(run_input, run_version, timeout)
@@ -1040,6 +1045,54 @@ class GoalDirectedWorkflow:
             # original boundary failure.
             retry_policy=RetryPolicy(maximum_attempts=1),
         )
+
+    async def _consume_settlement(
+        self,
+        run_input: GoalDirectedRunInput,
+        run_version: int,
+        reconciled: GoalOperationReconciliationResult,
+        reservation_id: str,
+        reservation: dict[str, int],
+        usage: dict[str, int],
+        activity_timeout: timedelta,
+    ) -> int:
+        """Continue from the operation's accepted run-control settlement (RRM-016).
+
+        REQ-CP-RUN-006/009: the operation's usage settles once, through its journaled
+        settlement; REQ-CP-RUN-007: the effect was claimed, observed and settled by the
+        operation boundary. The family records nothing here: it verifies that the
+        settlement it consumes is the operation's own and continues from its run version.
+        Pre-patch histories replay the family's own usage command.
+        """
+
+        if not workflow.patched(JOURNALED_SETTLEMENT_PATCH):
+            return await self._settle_operation(
+                run_input,
+                run_version,
+                reservation_id,
+                reservation,
+                usage,
+                reconciled.detail_ref,
+                activity_timeout,
+            )
+        settlement = reconciled.settlement
+        if settlement is None:
+            raise ApplicationError(
+                "GoalDirected operation has no accepted run-control settlement",
+                type="goal_operation_settlement_missing",
+                non_retryable=True,
+            )
+        if (
+            settlement.reservation_id != reservation_id
+            or settlement.usage != usage
+            or settlement.settled_run_version < run_version
+        ):
+            raise ApplicationError(
+                "GoalDirected settlement does not match the admitted operation",
+                type="goal_operation_settlement_mismatch",
+                non_retryable=True,
+            )
+        return settlement.settled_run_version
 
     async def _settle_operation(
         self,

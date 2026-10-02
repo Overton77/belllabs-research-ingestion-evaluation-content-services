@@ -61,3 +61,21 @@ def goal_runtime_unit(
             session_generation=session_generation,
         ),
     )
+
+
+def goal_unit_workspace_root(unit: RuntimeUnitIdentity | None) -> str | None:
+    """The role-scoped root under which a GoalDirected unit binds its compiled slots.
+
+    REQ-CP-DA-013 requires exact exclusive writable slots; the GoalDirected interpreter also
+    requires executor and verifier writable paths to be disjoint (REQ-BP-GD-004: an
+    independently bound verifier with its own workspace). So a
+    GoalDirected operation binds every compiled workspace slot under
+    `/goal/{goal_iteration}/{operation_role}`. The root is derived from the digest-bound unit
+    identity only, never chosen by the operation, so the run-control authority can recompute
+    and verify it. StageGraph units (and requests without a unit) have no root.
+    """
+
+    if unit is None or not isinstance(unit.location, GoalDirectedUnitLocation):
+        return None
+    location = unit.location
+    return f"/goal/{location.goal_iteration}/{location.operation_role}"

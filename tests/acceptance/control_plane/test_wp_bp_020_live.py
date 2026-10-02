@@ -24,13 +24,16 @@ from app.application.operations.checkpoint_lineage import (
     CheckpointLineageService,
     InMemoryCheckpointLineageRepository,
 )
+from app.application.operations.journaled_operation_execution import (
+    JournaledOperationExecutionCoordinator,
+)
 from app.application.operations.operation_execution import (
     InMemoryOperationBindingRepository,
-    bind_operation_execution_request,
+    OperationExecutionService,
 )
+from app.application.operations.operation_journal import OperationJournalService
 from app.application.orchestration.goal_directed import (
     GoalDirectedOperationPreparationService,
-    GoalDirectedOperationResultService,
     configure_goal_directed_family_admissions,
 )
 from app.application.orchestration.service import (
@@ -48,8 +51,9 @@ from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import GoalDirectedBlueprint, SecretRef
 from app.domain.operation_execution.checkpoint_lineage import OperationActivityAttempt
 from app.domain.operation_execution.contracts import (
+    DeepAgentExecutionBinding,
+    MaterializedWorkspace,
     OperationExecutionRequest,
-    OperationExecutionResult,
     StructuredOutputBinding,
 )
 from app.domain.orchestration.contracts import (
@@ -79,6 +83,13 @@ from app.integrations.agents.deep_agents import (
     ExactDeepAgentMaterializer,
     OpenAIExactModelFactory,
 )
+from app.integrations.artifact_payloads import InMemoryArtifactPayloadStore
+from app.integrations.conformance_operation_runtime import (
+    ConformanceAssetVerifier,
+    ConformanceBudgetAuthority,
+    ConformanceEventSink,
+    ConformanceSecretResolver,
+)
 from app.temporal.workflow_sandbox import coordinator_workflow_runner
 from app.temporal.workflows.belllabs_run import BellLabsRunWorkflow
 from app.temporal.workflows.goal_directed import GoalDirectedWorkflow
@@ -89,11 +100,18 @@ from tests.acceptance.control_plane.test_wp_bp_020_sandbox_rollover import (
     Templates,
 )
 from tests.acceptance.control_plane.test_wp_cp_040 import exact_fixture
-from tests.fixtures.checkpoint_lineage import (
-    execute_with_checkpoint_lineage,
-    materialized_workspace,
+from tests.fixtures.checkpoint_recovery import MemoryOperationJournal
+from tests.fixtures.goal_directed_journaled import (
+    goal_authority,
+    goal_template_workspace,
+    governed_result_service,
 )
-from tests.unit.operations.test_operation_execution import operation_request
+from tests.unit.operations.test_operation_execution import (
+    MCP_DIGEST,
+    SKILL_DIGEST,
+    operation_request,
+)
+from tests.unit.run_control.test_run_control import actor as journal_actor
 from tests.unit.run_control.test_run_control import request as run_request
 
 QUEUE = "wp-bp-020-live-family"
@@ -219,6 +237,38 @@ def _live_revision() -> GoalRevision:
     return GoalRevision(canonical_digest=sha256_digest(values), **values)  # type: ignore[arg-type]
 
 
+class _ProviderRunRecorder:
+    """The runtime adapter, recording provider run IDs for the live evidence."""
+
+    def __init__(self, adapter: DeepAgentRuntimeAdapter, provider_run_ids: list[str]) -> None:
+        self._adapter = adapter
+        self._provider_run_ids = provider_run_ids
+
+    async def execute(self, invocation: Any, secrets: Any) -> Any:
+        result = await self._adapter.execute(invocation, secrets)
+        if result.provider_run_id:
+            self._provider_run_ids.append(result.provider_run_id)
+        return result
+
+
+class _NamespacedSandbox:
+    """The bound workspace as materialized for the Docker sandbox factory."""
+
+    def __init__(self, seed: str) -> None:
+        self._seed = seed
+
+    async def materialize(self, binding: Any) -> MaterializedWorkspace:
+        workspace = binding.workspace
+        return MaterializedWorkspace(
+            workspace_id=workspace.workspace_id,
+            namespace_id=workspace.namespace_id,
+            provider=workspace.provider,
+            runtime_digest=workspace.runtime_digest,
+            image_digest=workspace.image_digest,
+            mount_manifest_digest=sha256_digest(self._seed),
+        )
+
+
 class LiveGoalActivities(SandboxRolloverActivities):
     def __init__(
         self,
@@ -280,12 +330,21 @@ class LiveGoalActivities(SandboxRolloverActivities):
                 "submit the required structured response; never finish with plain text."
             )
             base = operation_request(prompt=instruction)
+            # RRM-016: the compiled `/work` slot, bound by each role under
+            # `/goal/{iteration}/{role}` (the paths the instructions above name).
+            template_workspace = goal_template_workspace(base.workspace)
             template_values[role] = OperationExecutionRequest.model_validate(
                 {
                     **base.model_dump(mode="python"),
                     "execution_runtime": "deep_agent",
                     "native_placement": None,
-                    "deep_agent_binding": deep_binding,
+                    "deep_agent_binding": DeepAgentExecutionBinding.create(
+                        **{
+                            **deep_binding.model_dump(mode="python", exclude={"binding_digest"}),
+                            "workspace": template_workspace,
+                        }
+                    ),
+                    "workspace": template_workspace,
                     "secret_refs": (SecretRef(provider="environment", key="OPENAI_API_KEY"),),
                     "output_schema": StructuredOutputBinding(
                         schema_id=f"goal-{role}-observation",
@@ -311,7 +370,8 @@ class LiveGoalActivities(SandboxRolloverActivities):
                 authority_refs=frozenset({"authority:goal-directed-live-worker"}),
             ),
         )
-        self.reconciler = GoalDirectedOperationResultService(self.documents)
+        # RRM-016: the family consumes each operation's journaled run-control settlement.
+        self.reconciler = governed_result_service(self.documents, run_control)
         self._lifecycle = RunControlLifecycleGateway(
             run_control,
             ExactBindingVerifier(configuration_digest, sha256_digest(blueprint)),
@@ -331,39 +391,48 @@ class LiveGoalActivities(SandboxRolloverActivities):
         )
         self.adapter = DeepAgentRuntimeAdapter(ExactDeepAgentMaterializer(registry))
         self.lineage = CheckpointLineageService(InMemoryCheckpointLineageRepository())
+        # RRM-016: every operation runs through the governed operation boundary: the real
+        # run-control authority, the journaled coordinator and checkpoint lineage.
+        assets = ConformanceAssetVerifier(
+            mcp_schema_digests={"fixture-mcp": MCP_DIGEST},
+            asset_manifest_digests={"skill:fixture.skill:1": SKILL_DIGEST},
+        )
+        self.service = OperationExecutionService(
+            authority=goal_authority(run_control, template_values["executor"]),
+            bindings=bindings,
+            runtime=_ProviderRunRecorder(self.adapter, self.provider_run_ids),
+            sandbox=_NamespacedSandbox("goal-directed-live-mounts"),
+            assets=assets,
+            mcp=assets,
+            secrets=ConformanceSecretResolver(self._secrets),
+            events=ConformanceEventSink(),
+            budget=ConformanceBudgetAuthority(),
+            journal=JournaledOperationExecutionCoordinator(
+                journal=OperationJournalService(MemoryOperationJournal()),
+                run_control=run_control,
+                results=InMemoryArtifactPayloadStore(),
+                actor=journal_actor(),
+            ),
+            journal_claimed_by="operation-runtime:wp-bp-020-live",
+            lineage=self.lineage,
+        )
 
     @activity.defn(name="operation.execute")
     async def execute(self, payload: dict[str, Any]) -> dict[str, Any]:
         request = OperationExecutionRequest.model_validate(payload)
-        binding = bind_operation_execution_request(request)
         info = activity.info()
-        result = await execute_with_checkpoint_lineage(
-            self.adapter,
-            self.lineage,
+        result = await self.service.execute(
             request,
-            workspace=materialized_workspace(request, "goal-directed-live-mounts"),
-            secrets=self._secrets,
-            attempt=OperationActivityAttempt(
+            OperationActivityAttempt(
                 workflow_id=info.workflow_id,
                 workflow_run_id=info.workflow_run_id,
                 activity_id=info.activity_id,
                 attempt=info.attempt,
                 worker_identity="wp-bp-020-live-worker",
             ),
-            resolved_secret_names=("environment:OPENAI_API_KEY",),
         )
         self.operation_ids.append(request.identity.semantic_key)
-        if result.provider_run_id:
-            self.provider_run_ids.append(result.provider_run_id)
-        return OperationExecutionResult(
-            binding_id=binding.binding_id,
-            semantic_attempt_key=binding.semantic_attempt_key,
-            status="completed",
-            output_text=result.output_text,
-            structured_output=result.structured_output,
-            output_refs=result.output_refs,
-            usage=result.usage,
-        ).model_dump(mode="json")
+        return result.model_dump(mode="json")
 
     @activity.defn(name="goaldirected.apply_lifecycle_command")
     async def lifecycle(

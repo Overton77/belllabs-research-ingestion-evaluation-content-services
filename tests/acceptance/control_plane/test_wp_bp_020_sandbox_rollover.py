@@ -69,6 +69,7 @@ from tests.fixtures.checkpoint_lineage import (
     execute_with_checkpoint_lineage,
     materialized_workspace,
 )
+from tests.fixtures.goal_directed_journaled import FixtureGoalSettlements
 from tests.unit.operations.test_operation_execution import operation_request
 
 DIGEST = "sha256:" + "a" * 64
@@ -382,7 +383,13 @@ class SandboxRolloverActivities:
                 permissions=frozenset({"workflow_run.goal_directed"}),
             ),
         )
-        self.reconciler = GoalDirectedOperationResultService(self.documents)  # type: ignore[arg-type]
+        # RRM-016: this fixture's operation child and run control are fakes, so the family
+        # consumes the fixture settlement shape (the governed path is proved in the RRM-016
+        # suites with `RunControlGoalOperationSettlements`).
+        self.reconciler = GoalDirectedOperationResultService(
+            self.documents,  # type: ignore[arg-type]
+            FixtureGoalSettlements(),
+        )
         sandbox_factory = DockerSandboxFactory(workspace_root=workspace_root)
 
         def model_factory(binding: object, _secrets: object) -> BaseChatModel:

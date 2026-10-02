@@ -52,6 +52,7 @@ from app.domain.operation_execution.errors import (
     UnsupportedRuntimePolicy,
 )
 from app.domain.operation_execution.journal import OperationClaimResult, OperationEffectClaim
+from app.domain.orchestration.runtime_units import goal_unit_workspace_root
 from app.domain.run_control.contracts import (
     ActorContext,
     CommandStatus,
@@ -178,8 +179,12 @@ class RunControlOperationAuthority:
         )
         if workspace_ref != request.workspace.template_ref:
             raise ValueError("operation workspace does not match the frozen template")
+        # RRM-016: a GoalDirected unit binds the exact compiled slots under its role-scoped
+        # root, which is recomputed here from the digest-bound unit identity (REQ-CP-DA-013;
+        # executor and verifier writable paths stay disjoint, REQ-BP-GD-004).
+        slot_root = goal_unit_workspace_root(request.runtime_unit) or ""
         configured_slots = {
-            (slot.name, slot.path, slot.access)
+            (slot.name, f"{slot_root}{slot.path}", slot.access)
             for slot in configuration.workflow_workspace_contract.slots
         }
         bound_slots = {
@@ -733,7 +738,7 @@ class OperationExecutionService:
                 )
             _validate_bound_usage(binding, runtime_result.usage)
             settlement = OperationSettlement(
-                settlement_id=_stable_id("operation-settlement", binding.binding_id),
+                settlement_id=operation_settlement_id(binding.binding_id),
                 binding_id=binding.binding_id,
                 status="completed",
                 output_text=runtime_result.output_text,
@@ -774,7 +779,7 @@ class OperationExecutionService:
                         unsettled_effect_ids=unsettled,
                     )
             settlement = OperationSettlement(
-                settlement_id=_stable_id("operation-settlement", binding.binding_id),
+                settlement_id=operation_settlement_id(binding.binding_id),
                 binding_id=binding.binding_id,
                 status="failed",
                 usage=observed_usage,
@@ -1274,7 +1279,7 @@ def _failed_settlement(
     binding: OperationExecutionBinding, *, failure_code: str, message: str
 ) -> OperationSettlement:
     return OperationSettlement(
-        settlement_id=_stable_id("operation-settlement", binding.binding_id),
+        settlement_id=operation_settlement_id(binding.binding_id),
         binding_id=binding.binding_id,
         status="failed",
         failure_code=failure_code,
@@ -1338,3 +1343,13 @@ def _validate_bound_usage(binding: OperationExecutionBinding, usage: RuntimeUsag
 
 def _stable_id(*parts: str) -> str:
     return str(uuid5(NAMESPACE_URL, ":".join(parts)))
+
+
+def operation_settlement_id(binding_id: str) -> str:
+    """The one settlement identity of a bound operation attempt (any status).
+
+    Run control records the operation's usage and settlement evidence under this identity,
+    so a family that consumes the settlement (RRM-016) can find exactly that record.
+    """
+
+    return _stable_id("operation-settlement", binding_id)
