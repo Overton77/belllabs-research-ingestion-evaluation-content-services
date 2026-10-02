@@ -5,6 +5,7 @@ import hashlib
 import json
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
+from contextvars import ContextVar
 from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Protocol
@@ -16,6 +17,7 @@ from app.application.operations.checkpoint_lineage import (
     UnitAttempt,
     transition_id_for,
 )
+from app.application.operations.operation_progress import cancel_requested, report_phase
 from app.application.run_control.service import RunControlService
 from app.domain.control_plane.canonical import contract_fingerprint, sha256_digest
 from app.domain.control_plane.contracts import DefinitionKind, SecretRef
@@ -34,6 +36,7 @@ from app.domain.operation_execution.checkpoint_lineage import (
 )
 from app.domain.operation_execution.contracts import (
     ArtifactPromotionRequest,
+    AsyncChildCancellationRecord,
     MaterializedWorkspace,
     OperationExecutionBinding,
     OperationExecutionRequest,
@@ -68,6 +71,25 @@ from app.domain.run_control.contracts import (
 )
 from app.domain.run_control.errors import IdempotencyConflict
 from app.domain.run_control.forks import ForkRejected
+
+# The lease deadline of the attempt holding the claim lease, so that a cancellation raised
+# by the deadline is told apart from a Temporal cancel delivered through the heartbeat.
+_LEASE_DEADLINE: ContextVar[asyncio.Timeout | None] = ContextVar(
+    "belllabs_operation_lease_deadline", default=None
+)
+
+
+def _uncancel_current_task() -> None:
+    """Clear the swallowed cancellation so the settlement's own awaits are not cancelled."""
+
+    task = asyncio.current_task()
+    if task is not None:
+        task.uncancel()
+
+
+def _lease_deadline_expired() -> bool:
+    deadline = _LEASE_DEADLINE.get()
+    return deadline is not None and deadline.expired()
 
 
 class OperationExecutionInProgress(RuntimeError):
@@ -106,6 +128,39 @@ class OperationAuthorityPort(Protocol):
     ) -> None:
         """Admit a retry, takeover or recovery of an already bound attempt."""
         ...
+
+    async def verify_cancellation(
+        self, request: OperationExecutionRequest, binding: OperationExecutionBinding
+    ) -> None:
+        """RRM-008: admit the cancellation saga's settlement of a bound attempt.
+
+        The accepted cancel command is the authority; the run is `cancelling` (or still
+        running when the family's cancel reached the unit first) and never terminal.
+        """
+        ...
+
+
+class AsyncChildCancellationPort(Protocol):
+    """REQ-CP-EXEC-008 step 4: cancel every active async child of a unit per its link
+    policy and record the provider's acknowledgement or its absence."""
+
+    async def cancel_children(
+        self,
+        binding: OperationExecutionBinding,
+        *,
+        reason: str,
+        requested_at: datetime,
+    ) -> tuple[AsyncChildCancellationRecord, ...]: ...
+
+
+class CancellableRuntimePort(Protocol):
+    """A runtime that can report the latest durable checkpoint of a unit being cancelled."""
+
+    async def observe_latest(
+        self,
+        invocation: RuntimeInvocation,
+        resolved_secrets: Mapping[str, str],
+    ) -> RuntimeResult: ...
 
 
 class RunControlOperationAuthority:
@@ -151,6 +206,31 @@ class RunControlOperationAuthority:
         if run.phase not in {RunPhase.ACTIVE, RunPhase.WAITING}:
             raise ValueError(
                 f"a bound operation cannot continue in a {run.phase.value} Workflow Run"
+            )
+        await self._verify_bound_authority(request, run)
+
+    async def verify_cancellation(
+        self, request: OperationExecutionRequest, binding: OperationExecutionBinding
+    ) -> None:
+        """RRM-008 (REQ-CP-EXEC-008): the accepted cancel is the authority for settling the
+        bound attempt `cancelled`. The intent is journaled first: the run is `cancelling`
+        (the accepted `cancel` command moved it there before any delivery), never pending,
+        active or terminal. A Temporal cancellation without that journal entry is not a
+        cancel of the unit (review F1). The binding stays the authentic one
+        (configuration, prompts, workspace and reservation are the bound ones)."""
+
+        run = await self._run_control.get_run(request.request_scope, request.identity.run_id)
+        if (
+            binding.run_id != request.identity.run_id
+            or binding.request_scope != request.request_scope
+            or binding.run_control_revision != request.run_control_revision
+        ):
+            raise ValueError("cancellation does not target the bound operation attempt")
+        if run.version < binding.run_control_revision:
+            raise ValueError("run authority is older than the operation binding")
+        if run.phase != RunPhase.CANCELLING:
+            raise ValueError(
+                f"run control journaled no cancel for a {run.phase.value} Workflow Run"
             )
         await self._verify_bound_authority(request, run)
 
@@ -382,6 +462,7 @@ class OperationExecutionJournalPort(Protocol):
         binding: OperationExecutionBinding,
         *,
         claimed_by: str,
+        at_current_version: bool = False,
     ) -> OperationClaimResult: ...
 
     async def get_settlement(
@@ -533,6 +614,7 @@ class OperationExecutionService:
         journal_claimed_by: str = "operation-runtime",
         lineage: CheckpointLineageService | None = None,
         fork_reuse: ForkReusePort | None = None,
+        children: AsyncChildCancellationPort | None = None,
     ) -> None:
         self._authority = authority
         self._bindings = bindings
@@ -547,6 +629,7 @@ class OperationExecutionService:
         self._journal_claimed_by = journal_claimed_by
         self._lineage = lineage
         self._fork_reuse = fork_reuse
+        self._children = children
 
     async def execute(
         self,
@@ -652,6 +735,97 @@ class OperationExecutionService:
                 message="an accepted generation boundary superseded this generation",
                 incident_id=incident.incident_id,
             )
+        return await self._hold_lease(
+            binding,
+            admitted,
+            lineage,
+            lambda: self._recover_or_dispatch(request, binding, claim, admitted, lineage),
+        )
+
+    async def cancel(
+        self,
+        request: OperationExecutionRequest,
+        attempt: OperationActivityAttempt,
+    ) -> OperationExecutionResult:
+        """RRM-008 (REQ-CP-EXEC-008 steps 3-6): settle a unit that is being cancelled.
+
+        Cognition is never dispatched or resumed here. The attempt holds the claim lease
+        (standing down behind a live holder, which settles the unit `cancelled` itself when
+        the cancel reached it through its heartbeat), classifies the unit from durable
+        facts and acts once: a settled unit returns unchanged; a fenced result settles as
+        recorded; an `in_doubt` unit stays with its incident unless an accepted
+        `reconcile_unit` decision resolves it; otherwise the unit settles `cancelled` with
+        its latest durable checkpoint as the result checkpoint (its partial evidence), after
+        every active async child was cancelled under its link policy.
+        """
+
+        if self._lineage is None:
+            raise ValueError("cancellation requires checkpoint lineage composition (EXEC-008)")
+        lineage = self._lineage
+        report_phase("cancelling")
+        fingerprint = contract_fingerprint(request, exclude={"requested_at"})
+        prior = await self._bindings.get_binding(
+            request.identity.semantic_key,
+            request_scope=request.request_scope,
+        )
+        if prior is not None:
+            if prior.request_fingerprint != fingerprint:
+                raise IdempotencyConflict(
+                    "semantic operation attempt was reused with conflicting execution intent"
+                )
+            settlement = await self._get_settlement(prior)
+            if settlement is not None:
+                await self._complete_post_effects(prior, settlement)
+                return _public_result(prior, settlement)
+            binding = prior
+        else:
+            # Never bound (cancelled before dispatch): the binding exists so that the unit
+            # has exactly one settlement, which releases its reservation.
+            binding = await self._bindings.create_binding(
+                _binding_for(request, fingerprint),
+                request_scope=request.request_scope,
+            )
+        await self._authority.verify_cancellation(request, binding)
+        claim: OperationEffectClaim | None = None
+        if self._journal is not None:
+            # The claim is made at the run's current version: an accepted cancel moved the
+            # version past the bound revision, which must not strand the unit (RRM-016 risk).
+            claim_result = await self._journal.acquire(
+                binding, claimed_by=self._journal_claimed_by, at_current_version=True
+            )
+            claim = claim_result.claim
+            if claim is None:
+                settlement = await self._get_settlement(binding)
+                if settlement is not None:
+                    await self._complete_post_effects(binding, settlement)
+                    return _public_result(binding, settlement)
+                raise OperationExecutionInProgress(
+                    f"cancellation claim was not acquired ({claim_result.reason}); retry"
+                )
+        try:
+            admitted = await lineage.admit_attempt(binding, attempt)
+        except StaleClaimFence:
+            unit, generation = lineage.unit_generation(binding)
+            incident = await lineage.repository.get_incident(
+                binding.request_scope, unit.unit_key, generation
+            )
+            if incident is None or incident.decision != "start_new_generation":
+                raise
+            return await self._settle_superseded(binding, claim, attempt, incident.incident_id)
+        return await self._hold_lease(
+            binding,
+            admitted,
+            lineage,
+            lambda: self._cancel_or_settle(request, binding, claim, admitted, lineage),
+        )
+
+    async def _hold_lease(
+        self,
+        binding: OperationExecutionBinding,
+        admitted: UnitAttempt,
+        lineage: CheckpointLineageService,
+        body: Callable[[], Awaitable[OperationExecutionResult]],
+    ) -> OperationExecutionResult:
         if not admitted.admission.lease_granted:
             settlement = await self._get_settlement(binding)
             if settlement is not None:
@@ -673,7 +847,11 @@ class OperationExecutionService:
             # in-flight cognition) before a later attempt may take the lease over, so a
             # superseded holder cannot keep calling the model or tools.
             async with asyncio.timeout(budget) as deadline:
-                result = await self._recover_or_dispatch(request, binding, claim, admitted, lineage)
+                token = _LEASE_DEADLINE.set(deadline)
+                try:
+                    result = await body()
+                finally:
+                    _LEASE_DEADLINE.reset(token)
         except TimeoutError as error:
             with suppress(Exception):
                 await lineage.release(admitted)
@@ -787,6 +965,250 @@ class OperationExecutionService:
             plan=lineage.plan(admitted, accepted_leaf=accepted_leaf),
         )
 
+    async def _cancel_or_settle(
+        self,
+        request: OperationExecutionRequest,
+        binding: OperationExecutionBinding,
+        claim: OperationEffectClaim | None,
+        admitted: UnitAttempt,
+        lineage: CheckpointLineageService,
+    ) -> OperationExecutionResult:
+        """Classify a unit being cancelled from durable facts and act once (EXEC-008)."""
+
+        admission = admitted.admission
+        settlement = await self._get_settlement(binding)
+        if settlement is not None:
+            await self._complete_post_effects(binding, settlement)
+            return _public_result(binding, settlement)
+        if admission.existing_result is not None:
+            return await self._settle_recorded(binding, claim, admitted, admission.existing_result)
+        if admission.existing_transition is not None:
+            return await self._in_doubt(
+                binding, claim, admitted, reason="unrecoverable_result_manifest"
+            )
+        accepted_leaf: QualifiedCheckpointKey | None = None
+        if admission.incident is not None:
+            # Step 5: an ambiguous effect is reconciled by the operator, never speculatively.
+            decision = await self._reconciliation(binding, admitted, admission.incident)
+            if decision is None:
+                return await self._in_doubt(
+                    binding, claim, admitted, reason=admission.incident.reason
+                )
+            await lineage.repository.apply_reconciliation(binding.request_scope, decision)
+            if self._journal is not None:
+                await self._journal.record_reconciliation_applied(binding, decision)
+            if decision.decision == "abandon_unit":
+                return await self._settle_cancelled(
+                    binding, claim, admitted, None, None, failure_code="in_doubt_abandoned"
+                )
+            if decision.decision == "start_new_generation":
+                return await self._settle_superseded(
+                    binding, claim, admitted.attempt, admission.incident.incident_id
+                )
+            accepted_leaf = decision.accepted_checkpoint
+        if admitted.deep_binding is None:
+            if admission.prior_dispatch:
+                return await self._in_doubt(
+                    binding, claim, admitted, reason="ambiguous_native_effect"
+                )
+            return await self._settle_cancelled(binding, claim, admitted, None, None)
+        plan = lineage.plan(admitted, accepted_leaf=accepted_leaf)
+        invocation = await self._invocation(request, binding, plan)
+        resolved_secrets = await self._secrets.resolve(binding.secret_refs)
+        try:
+            latest = await self._observe_latest(invocation, resolved_secrets)
+        except CheckpointLineageInDoubt as error:
+            return await self._in_doubt(
+                binding, claim, admitted, reason=error.reason, candidates=error.candidates
+            )
+        return await self._settle_cancelled(binding, claim, admitted, plan, latest)
+
+    async def _observe_latest(
+        self, invocation: RuntimeInvocation, resolved_secrets: Mapping[str, str]
+    ) -> RuntimeResult:
+        observe = getattr(self._runtime, "observe_latest", None)
+        if observe is None:
+            raise CheckpointLineageInDoubt(
+                "the runtime cannot report the latest durable checkpoint of a cancelled unit",
+                reason="unclassifiable",
+            )
+        result: RuntimeResult = await observe(invocation, resolved_secrets)
+        return result
+
+    async def _invocation(
+        self,
+        request: OperationExecutionRequest,
+        binding: OperationExecutionBinding,
+        plan: CheckpointInvocationPlan | None,
+    ) -> RuntimeInvocation:
+        workspace = await self._sandbox.materialize(binding)
+        return RuntimeInvocation(
+            binding=binding,
+            prompt_segments=request.prompt_segments,
+            workspace=workspace,
+            resolved_secret_names=tuple(
+                sorted(f"{ref.provider}:{ref.key}" for ref in binding.secret_refs)
+            ),
+            checkpoint_plan=plan,
+        )
+
+    async def _settle_cancelled(
+        self,
+        binding: OperationExecutionBinding,
+        claim: OperationEffectClaim | None,
+        admitted: UnitAttempt,
+        plan: CheckpointInvocationPlan | None,
+        latest: RuntimeResult | None,
+        *,
+        failure_code: str = "cancelled",
+    ) -> OperationExecutionResult:
+        """Steps 4-5: cancel the active async children, then settle `cancelled` once.
+
+        The settlement records the usage the unit's completed calls incurred (a call in
+        flight is unobservable and recorded by nothing; a child's unattributed usage stays
+        pending on the child's own effect), releases the rest of the reservation, settles the
+        unit's effect claim `cancelled`, and names the latest durable checkpoint as the
+        result checkpoint so the namespace head advances over the partial lineage.
+        """
+
+        report_phase("settling")
+        started_at = datetime.now(UTC)
+        children = await self._cancel_children(binding, started_at)
+        if self._journal is not None and claim is not None:
+            # Step 5 (REQ-CP-RUN-007 narrowed): a consequential effect the unit claimed and
+            # could not settle is ambiguous; the unit parks `in_doubt` for the operator. The
+            # children just reached are not ambiguous: their outcome is recorded on their
+            # own effect, whose pending usage blocks the run's terminal settlement instead.
+            handled = {item.effect_id for item in children}
+            unsettled = tuple(
+                effect_id
+                for effect_id in await self._journal.unsettled_effect_ids(binding, claim)
+                if effect_id not in handled
+            )
+            if unsettled:
+                return await self._in_doubt(
+                    binding,
+                    claim,
+                    admitted,
+                    reason="unsettled_effect_claims",
+                    unsettled_effect_ids=unsettled,
+                )
+        capture = latest.checkpoint if latest is not None else None
+        settlement = OperationSettlement(
+            settlement_id=operation_settlement_id(binding.binding_id),
+            binding_id=binding.binding_id,
+            status="cancelled",
+            output_text=latest.output_text if latest is not None else "",
+            usage=latest.usage if latest is not None else RuntimeUsage(),
+            provider_run_id=latest.provider_run_id if latest is not None else None,
+            event_payloads=(
+                ({"cancelled_async_children": [item.model_dump(mode="json") for item in children]},)
+                if children
+                else ()
+            ),
+            failure_code=failure_code,
+            failure_message="operation cancelled by the governed cancellation saga",
+            settled_at=datetime.now(UTC),
+            checkpoint_transition_id=(
+                transition_id_for(plan) if plan is not None and capture is not None else None
+            ),
+            result_checkpoint=capture.result_key if capture is not None else None,
+        )
+        return await self._settle(
+            binding,
+            claim,
+            settlement,
+            started_at=started_at,
+            attempt=admitted.attempt,
+            admitted=admitted,
+            plan=plan if capture is not None else None,
+            capture=capture,
+        )
+
+    async def _settle_superseded(
+        self,
+        binding: OperationExecutionBinding,
+        claim: OperationEffectClaim | None,
+        attempt: OperationActivityAttempt,
+        incident_id: str,
+    ) -> OperationExecutionResult:
+        """RRM-008 re-review: settle a generation superseded before the cancel (EXEC-005/008).
+
+        An accepted `start_new_generation` fenced this generation before the run was
+        cancelled, and a cancelling run admits no new generation (the reducer rejects it and
+        cancellation re-executes nothing), so no later generation will ever settle the unit.
+        Its claim, reservation and effect settle `cancelled` here, exactly once, with the
+        `generation_superseded` code. The fenced generation writes nothing to its lineage (no
+        result observation, no transition) and no cognition is observed or resumed; as with
+        `abandon_unit`, no usage is attributed to the in_doubt generation. Active async
+        children are cancelled first. An unsettled consequential effect is never settled
+        over: the unit then stays unsettled for the operator.
+        """
+
+        report_phase("settling")
+        started_at = datetime.now(UTC)
+        children = await self._cancel_children(binding, started_at)
+        if self._journal is not None and claim is not None:
+            handled = {item.effect_id for item in children}
+            unsettled = tuple(
+                effect_id
+                for effect_id in await self._journal.unsettled_effect_ids(binding, claim)
+                if effect_id not in handled
+            )
+            if unsettled:
+                return _unsettled_result(
+                    binding,
+                    failure_code="generation_superseded",
+                    message=(
+                        "the superseded generation holds unsettled effect claims; it awaits "
+                        "operator reconciliation"
+                    ),
+                    incident_id=incident_id,
+                )
+        settlement = OperationSettlement(
+            settlement_id=operation_settlement_id(binding.binding_id),
+            binding_id=binding.binding_id,
+            status="cancelled",
+            event_payloads=(
+                ({"cancelled_async_children": [item.model_dump(mode="json") for item in children]},)
+                if children
+                else ()
+            ),
+            failure_code="generation_superseded",
+            failure_message="superseded generation settled by the governed cancellation saga",
+            settled_at=datetime.now(UTC),
+        )
+        return await self._settle(
+            binding,
+            claim,
+            settlement,
+            started_at=started_at,
+            attempt=attempt,
+            admitted=None,
+        )
+
+    async def _cancel_journaled(
+        self, request: OperationExecutionRequest, binding: OperationExecutionBinding
+    ) -> bool:
+        """Whether run control journaled the cancel this attempt is being asked to apply."""
+
+        try:
+            await self._authority.verify_cancellation(request, binding)
+        except ValueError:
+            return False
+        return True
+
+    async def _cancel_children(
+        self, binding: OperationExecutionBinding, requested_at: datetime
+    ) -> tuple[AsyncChildCancellationRecord, ...]:
+        if self._children is None:
+            return ()
+        return await self._children.cancel_children(
+            binding,
+            reason="parent operation cancelled by the governed cancellation saga",
+            requested_at=requested_at,
+        )
+
     async def _dispatch_and_settle(
         self,
         request: OperationExecutionRequest,
@@ -801,23 +1223,42 @@ class OperationExecutionService:
         started_at = datetime.now(UTC)
         observed_usage = RuntimeUsage()
         capture: CheckpointCapture | None = None
+        report_phase("dispatching")
         try:
             self._validate_policy_support(request)
             await self._assets.verify(binding)
             await self._mcp.verify_servers(binding)
-            workspace = await self._sandbox.materialize(binding)
             resolved_secrets = await self._secrets.resolve(binding.secret_refs)
-            invocation = RuntimeInvocation(
-                binding=binding,
-                prompt_segments=request.prompt_segments,
-                workspace=workspace,
-                resolved_secret_names=tuple(
-                    sorted(f"{ref.provider}:{ref.key}" for ref in binding.secret_refs)
-                ),
-                checkpoint_plan=plan,
-            )
+            invocation = await self._invocation(request, binding, plan)
             runtime_invoked = True
-            runtime_result = await self._runtime.execute(invocation, resolved_secrets)
+            report_phase("cognition")
+            try:
+                runtime_result = await self._runtime.execute(invocation, resolved_secrets)
+            except asyncio.CancelledError:
+                # REQ-CP-EXEC-008 step 3: a requested Temporal cancel reached this Activity
+                # through its heartbeat and interrupted the in-flight step. The holder
+                # records the latest durable checkpoint and settles `cancelled` itself;
+                # nothing resumes. Every other cancellation of the task is not a cancel of
+                # the unit (REQ-CP-EXEC-011): the lease deadline (REQ-CP-EXEC-014), a worker
+                # shutdown, a heartbeat or start-to-close timeout, a pause or a reset. The
+                # holder then stands down and the next attempt classifies and recovers. The
+                # journal is the authority: run control must hold the accepted cancel.
+                if (
+                    admitted is None
+                    or plan is None
+                    or _lease_deadline_expired()
+                    or not cancel_requested()
+                    or not await self._cancel_journaled(request, binding)
+                ):
+                    raise
+                _uncancel_current_task()
+                try:
+                    latest = await self._observe_latest(invocation, resolved_secrets)
+                except CheckpointLineageInDoubt as error:
+                    return await self._in_doubt(
+                        binding, claim, admitted, reason=error.reason, candidates=error.candidates
+                    )
+                return await self._settle_cancelled(binding, claim, admitted, plan, latest)
             observed_usage = runtime_result.usage
             capture = runtime_result.checkpoint
             if plan is not None and capture is None:
@@ -865,6 +1306,14 @@ class OperationExecutionService:
                         candidates=_failure_candidates(error),
                         unsettled_effect_ids=unsettled,
                     )
+            # RRM-008 (RRM-004 review finding 4): a failed unit with a unique stamped lineage
+            # records its latest durable checkpoint as the result checkpoint, so a shared
+            # session namespace advances over the partial lineage instead of wedging the
+            # next unit as `foreign_descendant`.
+            if capture is None and isinstance(error, RuntimeInvocationFailure):
+                latest_capture = error.latest_capture
+                if isinstance(latest_capture, CheckpointCapture):
+                    capture = latest_capture
             settlement = OperationSettlement(
                 settlement_id=operation_settlement_id(binding.binding_id),
                 binding_id=binding.binding_id,
@@ -882,7 +1331,12 @@ class OperationExecutionService:
                 # Provider and secret exception text is deliberately not persisted.
                 failure_message=f"{_error_type(error)} at governed operation boundary",
                 settled_at=datetime.now(UTC),
+                checkpoint_transition_id=(
+                    transition_id_for(plan) if plan is not None and capture is not None else None
+                ),
+                result_checkpoint=capture.result_key if capture is not None else None,
             )
+        report_phase("settling")
         return await self._settle(
             binding,
             claim,
@@ -890,8 +1344,8 @@ class OperationExecutionService:
             started_at=started_at,
             attempt=attempt,
             admitted=admitted,
-            plan=plan if settlement.status == "completed" else None,
-            capture=capture if settlement.status == "completed" else None,
+            plan=plan if capture is not None else None,
+            capture=capture,
         )
 
     async def _post_failure_ambiguity(
@@ -986,6 +1440,7 @@ class OperationExecutionService:
                 request_scope=binding.request_scope,
             )
         await self._complete_post_effects(binding, settlement)
+        report_phase("settled")
         return _public_result(binding, settlement)
 
     async def _settle_recorded(

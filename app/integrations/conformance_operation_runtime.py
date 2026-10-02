@@ -48,6 +48,13 @@ class ConformanceAuthority:
             raise ValueError("continuation does not target the bound operation attempt")
         await self.verify(request)
 
+    async def verify_cancellation(
+        self, request: OperationExecutionRequest, binding: OperationExecutionBinding
+    ) -> None:
+        if binding.run_control_revision != request.run_control_revision:
+            raise ValueError("cancellation does not target the bound operation attempt")
+        await self.verify(request)
+
 
 class ConformanceSandbox:
     def __init__(self) -> None:

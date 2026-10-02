@@ -18,13 +18,33 @@ from app.domain.control_plane.canonical import stable_json_dump
 from app.domain.orchestration.contracts import (
     BoundaryCommandAck,
     BoundaryCommandDelivery,
+    CancelAck,
+    CancelDelivery,
     WorkflowMessage,
     WorkflowMessageReceipt,
 )
-from app.domain.run_control.contracts import BoundaryCommandStatus
+from app.domain.run_control.contracts import BoundaryCommandStatus, CancelAction
 
 ROOT_DELIVERY_UPDATE = "deliver_message"
 FAMILY_DELIVERY_UPDATE = "deliver_boundary_command"
+# RRM-008 (REQ-CP-EXEC-008 step 2): the root and the family each expose `deliver_cancel`;
+# a cancel never travels through `deliver_message`, whose sequence is the `execution` space.
+CANCEL_DELIVERY_UPDATE = "deliver_cancel"
+
+
+def cancel_delivery(status: BoundaryCommandStatus) -> CancelDelivery:
+    command = status.command
+    if not isinstance(command.action, CancelAction):
+        raise ValueError(f"{command.kind} is not a cancel delivery")
+    return CancelDelivery(
+        command_id=command.command_id,
+        idempotency_issuer=command.idempotency_issuer,
+        target_sequence=command.target_sequence,
+        execution_epoch=command.target.execution_epoch,
+        execution_generation=command.target.execution_generation,
+        accepted_run_version=command.accepted_run_version,
+        payload_digest=command.payload_digest,
+    )
 
 
 class BoundaryDeliveryGap(RuntimeError):
@@ -63,6 +83,8 @@ class TemporalBoundaryCommandTransport:
             return BoundaryDeliveryResult(
                 "stale_target", family_ref, "the family execution is not running"
             )
+        if isinstance(command.action, CancelAction):
+            return await self._deliver_cancel(status)
         if target.root_workflow_id is not None:
             if not await self._running(target.root_workflow_id):
                 return BoundaryDeliveryResult(
@@ -108,6 +130,40 @@ class TemporalBoundaryCommandTransport:
                 f"family {target.family_workflow_id} has not received the command before "
                 f"sequence {command.target_sequence}"
             )
+        return BoundaryDeliveryResult(
+            ack.status,
+            f"{target.family_workflow_id}@segment:{ack.technical_segment}",
+            ack.detail,
+        )
+
+    async def _deliver_cancel(self, status: BoundaryCommandStatus) -> BoundaryDeliveryResult:
+        """REQ-CP-EXEC-008 step 2: root first, then the family, each through `deliver_cancel`.
+
+        The root records the journaled intent in its own `cancel` receipt cache (never in the
+        `execution` sequence). Only the family's acknowledgement is evidence of `delivered`;
+        the family propagates the cancel to its active `OperationWorkflow` children itself.
+        """
+
+        target = status.command.target
+        delivery = cancel_delivery(status)
+        if target.root_workflow_id is not None:
+            if not await self._running(target.root_workflow_id):
+                return BoundaryDeliveryResult(
+                    "stale_target", target.root_workflow_id, "the root execution is not running"
+                )
+            root_ack: CancelAck = await self._client.get_workflow_handle(
+                target.root_workflow_id
+            ).execute_update(CANCEL_DELIVERY_UPDATE, delivery, result_type=CancelAck)
+            if root_ack.status in {"stale_generation", "stale_target"}:
+                return BoundaryDeliveryResult(
+                    root_ack.status,
+                    f"{target.root_workflow_id}@segment:{root_ack.technical_segment}",
+                    root_ack.detail or "root execution moved past the cancel",
+                )
+        assert target.family_workflow_id is not None
+        ack: CancelAck = await self._client.get_workflow_handle(
+            target.family_workflow_id
+        ).execute_update(CANCEL_DELIVERY_UPDATE, delivery, result_type=CancelAck)
         return BoundaryDeliveryResult(
             ack.status,
             f"{target.family_workflow_id}@segment:{ack.technical_segment}",

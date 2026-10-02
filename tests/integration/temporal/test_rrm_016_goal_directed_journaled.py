@@ -25,7 +25,6 @@ import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 from temporalio import activity
 from temporalio.client import WorkflowFailureError, WorkflowHistory
-from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
 
@@ -59,6 +58,7 @@ from app.temporal.registration.activities import (
 )
 from app.temporal.workflow_sandbox import coordinator_workflow_runner
 from app.temporal.workflows.goal_directed import (
+    CANCELLATION_SAGA_PATCH,
     JOURNALED_SETTLEMENT_PATCH,
     STALE_VERSION_RETRY_PATCH,
     VERIFIED_TERMINAL_OUTPUTS_PATCH,
@@ -629,11 +629,13 @@ async def test_outside_cancel_enters_the_cancellation_boundary_not_a_lifecycle_f
     run_control, _unused, run_id, history, failure = await _run_with_outside_commands(
         cancel, "rrm-016-outside-cancel"
     )
-    assert isinstance(failure, WorkflowFailureError)
-    assert isinstance(failure.cause, ApplicationError)
-    assert failure.cause.type == "goal_cancelling", failure.cause
-    assert (await run_control.get_run(SCOPE, run_id)).phase == RunPhase.CANCELLING
-    assert STALE_VERSION_RETRY_PATCH in patch_ids(history)
+    # RRM-008: the family completes the cancellation saga instead of failing `goal_cancelling`.
+    assert failure is None, failure
+    run = await run_control.get_run(SCOPE, run_id)
+    assert run.phase == RunPhase.TERMINAL and run.terminal_outcome == RunOutcome.CANCELLED
+    budget = await run_control.get_budget(SCOPE, run_id)
+    assert budget.reservations == {} and not any(budget.pending_settlement.values())
+    assert {STALE_VERSION_RETRY_PATCH, CANCELLATION_SAGA_PATCH} <= patch_ids(history)
     # No re-admission, and no second cancel from the family.
     assert _admission_attempts(history) == [("executor", 1, 1), ("verifier", 1, 1)]
     assert not [item for item in lifecycle_command_ids(history) if item.endswith(":cancel")]

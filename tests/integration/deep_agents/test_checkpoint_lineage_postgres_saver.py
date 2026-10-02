@@ -93,6 +93,9 @@ class AcceptingAuthority:
     async def verify_continuation(self, request: OperationExecutionRequest, binding: Any) -> None:
         del request, binding
 
+    async def verify_cancellation(self, request: OperationExecutionRequest, binding: Any) -> None:
+        del request, binding
+
 
 @dataclass
 class Stack:

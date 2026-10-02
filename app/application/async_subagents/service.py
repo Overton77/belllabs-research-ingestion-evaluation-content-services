@@ -17,6 +17,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal, Protocol
 from uuid import NAMESPACE_URL, uuid5
 
+import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.domain.operation_execution.async_subagent_reconciliation import (
@@ -36,6 +37,7 @@ from app.domain.operation_execution.async_subagent_reconciliation import (
 )
 from app.domain.operation_execution.contracts import (
     ACTIVE_ASYNC_SUBAGENT_LIFECYCLES,
+    AsyncChildCancellationRecord,
     AsyncProviderCheckpointKey,
     AsyncSubagentContract,
     AsyncSubagentDependencyClass,
@@ -45,6 +47,7 @@ from app.domain.operation_execution.contracts import (
     AsyncSubagentMessage,
     AsyncSubagentResultManifest,
     AsyncSubagentUsage,
+    OperationExecutionBinding,
     ParentAsyncSubagentLink,
 )
 from app.domain.run_control.contracts import ActorContext
@@ -53,6 +56,15 @@ DEFAULT_SUBMISSION_LEASE = timedelta(seconds=120)
 # The fenced work (identity check, submission, first observation) is bounded below the lease
 # so a holder never outlives it, whatever the SDK's own timeouts (RRM-013 review N4).
 SUBMISSION_LEASE_MARGIN_SECONDS = 10.0
+
+
+# Errors a provider request or its transport raises (RRM-008 review note): the service
+# records the ambiguity for these and lets any other exception surface.
+PROVIDER_CANCEL_ERRORS: tuple[type[BaseException], ...] = (
+    httpx.HTTPError,
+    OSError,
+    TimeoutError,
+)
 
 
 class AsyncSubagentError(RuntimeError):
@@ -215,6 +227,10 @@ class AsyncSubagentAuthorityPort(Protocol):
     async def request_cancellation(
         self, request_scope: str, child_execution_id: str, reason: str
     ) -> None: ...
+    async def list_child_ids(self, request_scope: str, parent_binding_id: str) -> tuple[str, ...]:
+        """RRM-008: every child the parent operation binding spawned, in admission order."""
+        ...
+
     async def decide_result(
         self,
         request_scope: str,
@@ -269,6 +285,19 @@ class AsyncSubagentParentEffectsPort(Protocol):
         settlement_revision: int,
         settled_at: datetime,
     ) -> Literal["settled", "pending_usage"]: ...
+
+    async def decide_result(
+        self,
+        request_scope: str,
+        parent_run_id: str,
+        child_execution_id: str,
+        *,
+        decision: Literal["admit", "conditionally_admit", "reject", "defer"],
+        decision_ref: str,
+        decided_at: datetime,
+    ) -> None:
+        """RRM-008: record the parent's decision on the child's terminal fact in run control."""
+        ...
 
 
 class AsyncSubagentProviderPort(Protocol):
@@ -1087,6 +1116,83 @@ class AsyncSubagentService:
         )
         return await self._apply_observation(request_scope, execution, observation)
 
+    async def cancel_children(
+        self,
+        binding: OperationExecutionBinding,
+        *,
+        reason: str,
+        requested_at: datetime,
+    ) -> tuple[AsyncChildCancellationRecord, ...]:
+        """RRM-008 (REQ-CP-EXEC-008 step 4): cancel every active child of a parent unit.
+
+        Each active child is cancelled through `cancel` (journaled intent, provider request,
+        acknowledgement or ambiguity recorded). A child that reached a terminal lifecycle is
+        then settled against the parent budget: a blocking child without a result decision is
+        rejected first (its late result can never mutate the cancelled parent). Usage the
+        provider could not attribute stays pending on the child's effect, which keeps the
+        parent run from terminalizing until a privileged `reconcile_usage` settles it
+        (REQ-CP-RUN-009). Nothing is re-spawned and no outcome is assumed.
+        """
+
+        records: list[AsyncChildCancellationRecord] = []
+        for child_id in await self._authority.list_child_ids(
+            binding.request_scope, binding.binding_id
+        ):
+            execution = await self._details.get_execution(binding.request_scope, child_id)
+            receipt: Literal["provider_acknowledged", "ambiguous", "not_requested"] = (
+                "not_requested"
+            )
+            if execution.lifecycle in ACTIVE_ASYNC_SUBAGENT_LIFECYCLES:
+                try:
+                    execution = await self.cancel(
+                        binding.request_scope, child_id, reason, requested_at
+                    )
+                except PROVIDER_CANCEL_ERRORS:
+                    # The provider or transport failed: `cancel` recorded the ambiguity.
+                    # A programming error surfaces instead of becoming an ambiguous child.
+                    execution = await self._details.get_execution(binding.request_scope, child_id)
+                link = await self._details.get_link(binding.request_scope, child_id)
+                receipt = link.cancellation_receipt or "ambiguous"
+            link = await self._details.get_link(binding.request_scope, child_id)
+            disposition: Literal["settled", "pending_usage", "unsettled"] = "unsettled"
+            if execution.lifecycle in {
+                AsyncSubagentLifecycle.COMPLETED,
+                AsyncSubagentLifecycle.FAILED,
+                AsyncSubagentLifecycle.CANCELLED,
+                AsyncSubagentLifecycle.ORPHANED,
+            }:
+                if link.result_decision is None and link.dependency_class in {
+                    AsyncSubagentDependencyClass.REQUIRED_BLOCKING,
+                    AsyncSubagentDependencyClass.DEGRADABLE_BLOCKING,
+                }:
+                    link = await self.decide_result(
+                        binding.request_scope,
+                        child_id,
+                        "reject",
+                        parent_open=True,
+                        current_generation=execution.execution_generation,
+                        decided_at=requested_at,
+                    )
+                settled = await self.settle(
+                    binding.request_scope,
+                    child_id,
+                    f"settlement:{child_id}:cancelled-parent",
+                    requested_at,
+                )
+                disposition = "settled" if settled.settled else "pending_usage"
+                link = settled
+            records.append(
+                AsyncChildCancellationRecord(
+                    child_execution_id=child_id,
+                    effect_id=f"async-child-effect:{child_id}",
+                    lifecycle=execution.lifecycle,
+                    cancellation_receipt=receipt,
+                    usage_disposition=disposition,
+                    result_decision=link.result_decision,
+                )
+            )
+        return tuple(records)
+
     async def decide_result(
         self,
         request_scope: str,
@@ -1118,6 +1224,20 @@ class AsyncSubagentService:
                 request_scope, child_execution_id, "result", f"late_rejected:{decision_ref}"
             )
             raise AsyncSubagentError("late or superseded child result cannot mutate the parent")
+        if self._parent_effects is not None:
+            # RRM-008 (review F4): run control first. It refuses a decision without the
+            # child's terminal lifecycle fact and is idempotent by command identity, so a
+            # crash between the two writes leaves the authority and the link undecided and
+            # a retry completes the same decision; the run cannot terminalize while a
+            # required or degradable child has no final decision.
+            await self._parent_effects.decide_result(
+                request_scope,
+                execution.parent_run_id,
+                child_execution_id,
+                decision=decision,
+                decision_ref=decision_ref,
+                decided_at=decided_at,
+            )
         await self._authority.decide_result(
             request_scope, child_execution_id, decision, decision_ref
         )
@@ -1608,6 +1728,13 @@ class InMemoryAsyncSubagentAuthority:
         self, request_scope: str, child_execution_id: str, reason: str
     ) -> None:
         self.cancellations.setdefault((request_scope, child_execution_id), reason)
+
+    async def list_child_ids(self, request_scope: str, parent_binding_id: str) -> tuple[str, ...]:
+        return tuple(
+            child_id
+            for (scope, child_id), execution in self.states.items()
+            if scope == request_scope and execution.parent_binding_id == parent_binding_id
+        )
 
     async def decide_result(
         self,

@@ -93,6 +93,7 @@ from app.temporal.operation_activities import (
 )
 from app.temporal.workflow_sandbox import coordinator_workflow_runner
 from app.temporal.workflows.operation import OperationWorkflow
+from tests.fixtures.operation_activities import RecordingOperationCancel, wait_heartbeating
 from tests.unit.run_control.test_run_control import actor, command, request, service
 
 NOW = datetime(2026, 7, 19, 20, 0, tzinfo=UTC)
@@ -435,7 +436,7 @@ def test_agent_cognitive_worker_registers_operation_activity_only(
     )
 
     assert captured["task_queue"] == "agent-cognitive"
-    assert captured["activities"] == (activities.execute,)
+    assert captured["activities"] == (activities.execute, activities.cancel)
     assert "workflows" not in captured
 
 
@@ -450,7 +451,8 @@ class FakeJournal:
         """RRM-007 receipt seam: the in-memory journal keeps no receipt ledger."""
         return None
 
-    async def acquire(self, binding, *, claimed_by):  # type: ignore[no-untyped-def]
+    async def acquire(self, binding, *, claimed_by, at_current_version=False):  # type: ignore[no-untyped-def]
+        del at_current_version
         self.claim = OperationEffectClaim(
             effect_claim_id="journal-claim-1",
             request_scope=binding.request_scope,
@@ -1253,7 +1255,7 @@ async def test_operation_workflow_routes_bound_execution_to_exact_cross_queue_ac
             Worker(
                 environment.client,
                 task_queue="operation-execution-conformance",
-                activities=[activities.execute],
+                activities=[activities.execute, activities.cancel],
             ),
         ):
             workflow_result = await environment.client.execute_workflow(
@@ -1301,8 +1303,10 @@ async def test_operation_signal_with_start_merges_children_into_query_and_result
         @activity.defn(name="operation.execute")
         async def execute(self, _payload: dict[str, Any]) -> dict[str, Any]:
             self.started.set()
-            await self.release.wait()
+            await wait_heartbeating(self.release)
             return {"status": "completed"}
+
+    blocking_cancel = RecordingOperationCancel()
 
     blocking = BlockingOperationActivity()
     operation = operation_request()
@@ -1324,7 +1328,7 @@ async def test_operation_signal_with_start_merges_children_into_query_and_result
             Worker(
                 environment.client,
                 task_queue=request.activity_task_queue,
-                activities=[blocking.execute],
+                activities=[blocking.execute, blocking_cancel.cancel],
             ),
         ):
             handle = await environment.client.start_workflow(
@@ -1411,7 +1415,8 @@ class TransientAuthority(ConformanceAuthority):
 class LoseWorkerBeforeSettlement(FakeJournal):
     """The first holder dispatches, then is lost; later deliveries find its claim."""
 
-    async def acquire(self, binding, *, claimed_by):  # type: ignore[no-untyped-def]
+    async def acquire(self, binding, *, claimed_by, at_current_version=False):  # type: ignore[no-untyped-def]
+        del at_current_version
         if self.claim is not None:
             return OperationClaimResult(
                 status="existing", claim=self.claim, reason="prior worker holds the claim"
@@ -1437,7 +1442,7 @@ async def _run_operation_workflow(
             Worker(
                 environment.client,
                 task_queue="operation-execution-conformance",
-                activities=[activities.execute],
+                activities=[activities.execute, activities.cancel],
             ),
         ):
             try:
@@ -1526,7 +1531,7 @@ async def test_lost_native_holder_is_taken_over_by_fence_and_parked_in_doubt() -
             Worker(
                 environment.client,
                 task_queue="operation-execution-conformance",
-                activities=[activities.execute],
+                activities=[activities.execute, activities.cancel],
             ),
         ):
             handle = await environment.client.start_workflow(

@@ -19,6 +19,7 @@ from langgraph.runtime import Runtime
 from langgraph.types import StateSnapshot
 from typing_extensions import TypedDict
 
+from app.application.operations.operation_progress import register_checkpoint_reader
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.graph_runtime.identities import QualifiedCheckpointKey
 from app.domain.operation_execution.async_subagent_reconciliation import (
@@ -178,6 +179,9 @@ class DeepAgentRuntimeAdapter:
                 }
             }
             prior_messages: list[BaseMessage] = []
+            # RRM-008: the Activity heartbeat reads the latest durable root checkpoint of the
+            # namespace while cognition runs (keys only; REQ-CP-EXEC-008 step 3).
+            register_checkpoint_reader(_latest_checkpoint_reader(checkpointer, plan))
             try:
                 if source_key is not None:
                     prior_snapshot = await agent.aget_state(
@@ -269,13 +273,91 @@ class DeepAgentRuntimeAdapter:
                 raise
             except Exception as error:
                 # REQ-CP-RUN-007 (narrowed): report whether a terminal result exists after the
-                # failure, so the boundary settles `failed` only when none does.
-                terminal, candidates = await _terminal_result_may_exist(checkpointer, agent, plan)
+                # failure, so the boundary settles `failed` only when none does. RRM-008: the
+                # latest durable checkpoint of a unique stamped lineage travels with the
+                # failure, so the settlement advances the namespace head over the partial
+                # lineage instead of stranding it.
+                terminal, candidates, latest = await _terminal_result_may_exist(
+                    checkpointer, agent, plan
+                )
                 raise RuntimeInvocationFailure(
                     type(error).__name__,
                     terminal_result_observed=terminal,
                     candidates=candidates,
+                    latest_capture=latest,
                 ) from error
+            finally:
+                register_checkpoint_reader(None)
+
+    async def observe_latest(
+        self,
+        invocation: RuntimeInvocation,
+        resolved_secrets: Mapping[str, str],
+    ) -> RuntimeResult:
+        """RRM-008 (REQ-CP-EXEC-008 step 3): the latest durable checkpoint of a unit generation
+        that is being cancelled, with the usage its completed model calls already incurred.
+
+        No cognition is invoked and nothing is resumed. A unit classified `interrupted` or
+        `terminal_unobserved` yields its stamped leaf as the result checkpoint (the partial
+        evidence); a `not_submitted` unit yields no checkpoint. Anything ambiguous raises
+        `CheckpointLineageInDoubt` exactly as a dispatch would.
+        """
+
+        binding = invocation.binding.deep_agent_binding
+        if invocation.binding.execution_runtime != "deep_agent" or binding is None:
+            raise DeepAgentMaterializationError(
+                "Deep Agent adapter requires the exact canonical execution binding"
+            )
+        plan = _validated_plan(invocation, binding)
+        async with self._materializer.prepare(binding, resolved_secrets) as materialized:
+            if materialized.checkpointer is None or materialized.store is None:
+                raise DeepAgentMaterializationError(
+                    "local-in-worker cognition requires the registered checkpointer and store"
+                )
+            system_prompt, _user_prompt = _prompts(invocation)
+            agent = _compile(
+                materialized,
+                binding,
+                system_prompt=system_prompt,
+                extra_middleware=[],
+                name=f"belllabs-{binding.operation_id}",
+            )
+            checkpointer = cast(BaseCheckpointSaver[Any], materialized.checkpointer)
+            classified = await _classify(checkpointer, agent, plan)
+            if classified.kind == CheckpointClassification.NOT_SUBMITTED:
+                return RuntimeResult(output_text="", checkpoint=None)
+            assert classified.leaf_snapshot is not None
+            snapshot = classified.leaf_snapshot
+            messages = cast(list[BaseMessage], dict(snapshot.values).get("messages", []))
+            prior: list[BaseMessage] = []
+            if classified.source_key is not None:
+                prior_snapshot = await agent.aget_state(
+                    root_checkpoint_config(plan.namespace, classified.source_key.checkpoint_id)
+                )
+                prior = cast(list[BaseMessage], prior_snapshot.values.get("messages", []))
+            capture = await _capture_result(
+                checkpointer,
+                plan,
+                classified.source_key,
+                snapshot_config=snapshot.config,
+                pending=bool(snapshot.next or snapshot.interrupts),
+                classification=classified.kind,
+                summary={
+                    "state_keys": sorted(dict(snapshot.values)),
+                    "message_count": len(messages),
+                    "step": (snapshot.metadata or {}).get("step"),
+                },
+                allow_pending=True,
+            )
+            final = next(
+                (item for item in reversed(messages) if isinstance(item, AIMessage)), None
+            )
+            return RuntimeResult(
+                output_text=_message_text(final) if final is not None else "",
+                usage=_usage(invocation, messages[len(prior) :]),
+                provider_run_id=(str(final.id) if final is not None and final.id else None),
+                checkpoint=capture,
+            )
 
 
 def _effective_permissions(
@@ -534,20 +616,65 @@ async def _own_result_config(
 
 async def _terminal_result_may_exist(
     checkpointer: BaseCheckpointSaver[Any], agent: Any, plan: CheckpointInvocationPlan
-) -> tuple[bool, tuple[QualifiedCheckpointKey, ...]]:
-    """After a failure: whether a terminal stamped result may exist, with its candidates."""
+) -> tuple[bool, tuple[QualifiedCheckpointKey, ...], CheckpointCapture | None]:
+    """After a failure: whether a terminal stamped result may exist, with its candidates, and
+    the latest durable checkpoint of a unique stamped lineage (RRM-008) if there is one."""
 
     try:
         classified = await _classify(checkpointer, agent, plan)
     except CheckpointLineageInDoubt as error:
-        return True, error.candidates
+        return True, error.candidates, None
     except Exception:  # noqa: BLE001 - an unclassifiable lineage is not provably non-terminal
-        return True, ()
+        return True, (), None
+    if classified.kind == CheckpointClassification.NOT_SUBMITTED:
+        return False, (), None
+    assert classified.leaf_id is not None and classified.leaf_snapshot is not None
+    snapshot = classified.leaf_snapshot
+    try:
+        latest: CheckpointCapture | None = await _capture_result(
+            checkpointer,
+            plan,
+            classified.source_key,
+            snapshot_config=snapshot.config,
+            pending=bool(snapshot.next or snapshot.interrupts),
+            classification=classified.kind,
+            summary={
+                "state_keys": sorted(dict(snapshot.values)),
+                "message_count": len(dict(snapshot.values).get("messages", [])),
+                "step": (snapshot.metadata or {}).get("step"),
+            },
+            allow_pending=True,
+        )
+    except CheckpointLineageError:
+        latest = None
     if classified.kind != CheckpointClassification.TERMINAL_UNOBSERVED:
-        return False, ()
-    assert classified.leaf_id is not None
+        return False, (), latest
     leaf = await checkpointer.aget_tuple(root_checkpoint_config(plan.namespace, classified.leaf_id))
-    return True, ((_qualified(plan, leaf),) if leaf is not None else ())
+    return True, ((_qualified(plan, leaf),) if leaf is not None else ()), latest
+
+
+def _latest_checkpoint_reader(
+    checkpointer: BaseCheckpointSaver[Any], plan: CheckpointInvocationPlan
+) -> Any:
+    """A reader of the namespace's latest durable root checkpoint, keys only (heartbeat)."""
+
+    thread_config: RunnableConfig = {
+        "configurable": {"thread_id": plan.namespace, "checkpoint_ns": ROOT_CHECKPOINT_NS}
+    }
+
+    async def read() -> dict[str, str | None] | None:
+        latest = await checkpointer.aget_tuple(thread_config)
+        if latest is None:
+            return None
+        return {
+            "checkpointer_ref_digest": plan.checkpointer_ref_digest,
+            "thread_id": plan.namespace,
+            "checkpoint_ns": ROOT_CHECKPOINT_NS,
+            "checkpoint_id": str(latest.config["configurable"]["checkpoint_id"]),
+            "parent_checkpoint_id": checkpoint_parent_id(latest),
+        }
+
+    return read
 
 
 async def _capture_result(
@@ -559,10 +686,16 @@ async def _capture_result(
     pending: bool,
     summary: dict[str, object],
     classification: CheckpointClassification = CheckpointClassification.NOT_SUBMITTED,
+    allow_pending: bool = False,
 ) -> CheckpointCapture:
-    """Capture the result config and verify a fully stamped root lineage to the source."""
+    """Capture the result config and verify a fully stamped root lineage to the source.
 
-    if pending:
+    `allow_pending` (RRM-008) captures the latest durable checkpoint of an interrupted unit
+    as the result checkpoint of a `cancelled` or `failed` settlement: partial evidence is
+    preserved and the namespace head advances, but nothing is resumed or promoted.
+    """
+
+    if pending and not allow_pending:
         raise CheckpointLineageInDoubt(
             "the invocation ended with pending tasks or interrupts; it is not terminal"
         )

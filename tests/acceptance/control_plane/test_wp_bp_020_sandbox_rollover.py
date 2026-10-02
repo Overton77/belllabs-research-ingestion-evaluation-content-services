@@ -73,6 +73,7 @@ from tests.fixtures.goal_directed_journaled import (
     FixtureGoalSettlements,
     goal_template_workspace,
 )
+from tests.fixtures.operation_activities import cancelled_operation_result
 from tests.unit.operations.test_operation_execution import operation_request
 
 DIGEST = "sha256:" + "a" * 64
@@ -358,6 +359,7 @@ class SandboxRolloverActivities:
         self.documents = Documents()
         self.models: list[GoalSandboxModel] = []
         self.checkpoints: list[CheckpointCapture | None] = []
+        self.cancelled_operations: list[str] = []
         deep_binding, _profile, bundle = exact_fixture(sandbox_backend="docker")
         template_values: dict[str, OperationExecutionRequest] = {}
         for role in ("executor", "verifier"):
@@ -470,6 +472,14 @@ class SandboxRolloverActivities:
             usage=result.usage,
         ).model_dump(mode="json")
 
+    @activity.defn(name="operation.cancel")
+    async def cancel(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """RRM-008: every cognitive worker serves `operation.cancel`; a completed rollover run
+        never calls it."""
+
+        self.cancelled_operations.append(str(payload["identity"]["operation_id"]))
+        return cancelled_operation_result(payload)
+
     @activity.defn(name="goaldirected.reconcile_operation")
     async def reconcile(
         self, request: GoalOperationReconciliationRequest
@@ -539,7 +549,7 @@ async def test_temporal_goal_rollover_uses_fresh_deep_agent_typed_handoff_and_sa
             Worker(
                 environment.client,
                 task_queue="agent-cognitive",
-                activities=[activities.execute],
+                activities=[activities.execute, activities.cancel],
             ),
         ):
             result = await environment.client.execute_workflow(
@@ -550,6 +560,7 @@ async def test_temporal_goal_rollover_uses_fresh_deep_agent_typed_handoff_and_sa
             )
 
     assert result["rollover_count"] == 1
+    assert activities.cancelled_operations == [], "nothing was cancelled"
     assert result["goal_iterations"] == 2
     assert len(result["handoffs"]) == 1
     assert result["convergence_proposal"]["action"] == "complete"

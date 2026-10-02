@@ -18,6 +18,8 @@ with workflow.unsafe.imports_passed_through():
         BoundaryCommandDelivery,
         BoundaryLifecycleOutcome,
         BoundaryLifecycleRequest,
+        CancelAck,
+        CancelDelivery,
         GoalContinuationState,
         GoalDirectedExecutionState,
         GoalDirectedRunInput,
@@ -48,7 +50,11 @@ with workflow.unsafe.imports_passed_through():
         ensure_workflow_search_attributes,
         operation_workflow_search_attributes,
     )
-    from app.temporal.workflows.operation import OperationWorkflow
+    from app.temporal.workflows.operation import (
+        OperationWorkflow,
+        settle_superseded_generation,
+        superseded_generation,
+    )
 
 
 CONTINUE_AS_NEW_ITERATIONS = 20
@@ -62,6 +68,11 @@ CLOSING_DRAIN_PATCH = "rrm-007-closing-drain"
 # and continues from its run version instead of recording the usage itself. Histories
 # recorded before the patch replay their own `record_usage` command unchanged.
 JOURNALED_SETTLEMENT_PATCH = "rrm-016-journaled-goal-settlement"
+# RRM-008 (REQ-CP-EXEC-008; RRM-001 section 7 #5): cancellation completes the saga as workflow
+# logic (consume the cancelled unit's settlement, release the baseline, propose terminal
+# `cancelled`, wait for liabilities the operator must reconcile) instead of failing the
+# family with `goal_cancelling`. Histories recorded before the patch replay the failure.
+CANCELLATION_SAGA_PATCH = "rrm-008-goal-cancellation-saga"
 # RRM-016 review fix 2: the family's run version comes from the last authority fact it saw;
 # an outside command (an API cancel, a late child effect) can move the run before the next
 # family command. A stale result is re-read (the activity reports the current version and
@@ -75,9 +86,48 @@ STALE_VERSION_RETRY_PATCH = "rrm-016-stale-version-retry"
 # result but were never accepted by a verifier, so they are not promoted. Pre-patch histories
 # promote the union of every iteration's outputs, as they did.
 VERIFIED_TERMINAL_OUTPUTS_PATCH = "rrm-019-verified-terminal-outputs"
+# RRM-008 re-review: a unit whose generation was superseded (`start_new_generation`
+# accepted before the cancel) returns `in_doubt` / `generation_superseded` with an unsettled
+# claim, and its OperationWorkflow has already ended. The saga runs `operation.cancel` for it
+# once, so the operation boundary settles the claim instead of the run waiting on its
+# liability timer with no settler. Histories recorded before the patch keep the liability.
+SETTLE_SUPERSEDED_PATCH = "rrm-008-goal-settle-superseded-generation"
 STALE_RUN_VERSION = "stale_run_version"
 CANCELLING = "cancelling"
 POLICY_PAUSE_PREFIX = "goal-policy-pause:"
+
+
+class _CancellationEntered(Exception):
+    """An authority result showed the run already `cancelling`: the saga takes over."""
+
+    def __init__(self, run_version: int) -> None:
+        super().__init__("GoalDirected run is cancelling")
+        self.run_version = run_version
+
+
+# Terminalization rejections that name a liability the saga waits for (an async child's
+# pending usage, an unsettled effect, an operator reconciliation), never a defect.
+LIABILITY_REJECTIONS = frozenset(
+    {
+        "budget_not_settled",
+        "effects_not_settled",
+        "unresolved_async_children",
+        "unresolved_terminal_dependencies",
+        "cancellation_not_settled",
+    }
+)
+# Rejections the saga repairs by re-reading the authoritative digests and version.
+STALE_REJECTIONS = frozenset(
+    {
+        "stale_run_version",
+        "stale_control_revision",
+        "stale_workflow_type_revision",
+        "stale_obligation_revision",
+        "stale_evidence_frontier",
+        "obligation_evidence_mismatch",
+        "obligation_acceptance_mismatch",
+    }
+)
 
 
 @workflow.defn(name="belllabs.goal-directed")
@@ -103,12 +153,54 @@ class GoalDirectedWorkflow:
         self._execution_epoch = 1
         self._technical_segment = 1
         self._last_delivered_sequence = 0
+        self._cancel_acks: dict[str, CancelAck] = {}
+        self._cancel_command: tuple[str, str] | None = None
+        self._liability_hints = 0
 
     @workflow.signal
     def request_cancel(self) -> None:
+        # The root-internal propagation channel of pre-RRM-008 histories; the governed path
+        # is run control -> ledger -> `deliver_cancel` (REQ-CP-EXEC-008 steps 1-2).
         self._cancel_requested = True
         if self._operation_handle is not None:
             self._operation_handle.cancel()
+
+    @workflow.signal
+    def liability_reconciled(self, reference: str) -> None:
+        """A compact wake-up hint: a liability the cancellation saga waits for (pending child
+        usage, an in_doubt unit) was reconciled. It releases nothing by itself; the saga
+        proposes terminalization again and the reducer decides (REQ-CP-EXEC-007)."""
+
+        del reference
+        self._liability_hints += 1
+
+    @workflow.update
+    def deliver_cancel(self, delivery: CancelDelivery) -> CancelAck:
+        """Acknowledge the journaled cancel: evidence of `delivered`; the saga applies it."""
+
+        prior = self._cancel_acks.get(delivery.command_id)
+        if prior is not None:
+            return replace(prior, status="duplicate")
+        status: str
+        if delivery.execution_generation != FAMILY_EXECUTION_GENERATION:
+            status = "stale_generation"
+        elif delivery.execution_epoch != self._execution_epoch:
+            status = "stale_target"
+        else:
+            status = "delivered"
+            self._cancel_requested = True
+            self._cancel_command = (delivery.idempotency_issuer, delivery.command_id)
+            if self._operation_handle is not None:
+                # Step 2: the cancel reaches the active OperationWorkflow at once; the unit
+                # settles through its own saga and returns its disposition.
+                self._operation_handle.cancel()
+        ack = CancelAck(
+            command_id=delivery.command_id,
+            status=status,  # type: ignore[arg-type]
+            technical_segment=self._technical_segment,
+        )
+        self._cancel_acks[delivery.command_id] = ack
+        return ack
 
     @workflow.update
     def deliver_boundary_command(self, delivery: BoundaryCommandDelivery) -> BoundaryCommandAck:
@@ -179,6 +271,8 @@ class GoalDirectedWorkflow:
             for item in run_input.pending_boundary_commands
             if _command_key(item) not in carried
         )
+        # RRM-008 (REQ-CP-EXEC-011): a cancel delivered before Continue-As-New stays delivered.
+        self._cancel_requested = self._cancel_requested or run_input.cancel_requested
         interpreter = GoalDirectedInterpreter(blueprint)
         ensure_workflow_search_attributes(
             run_input.search_attribute_policy,
@@ -226,6 +320,13 @@ class GoalDirectedWorkflow:
                 timeout,
             )
             run_version = lifecycle.resulting_run_version
+            if lifecycle.phase == "cancelling" and workflow.patched(CANCELLATION_SAGA_PATCH):
+                # The cancel was accepted before this family's start fact (run control was
+                # the boundary): the family binds its target and runs the saga at once.
+                self._cancel_requested = True
+            digests: LifecycleCommandOutcome | None = lifecycle
+        else:
+            digests = None
         family_version = run_input.family_version
         continuation = run_input.continuation_state
         if continuation is not None and continuation.paused is not None:
@@ -233,322 +334,377 @@ class GoalDirectedWorkflow:
             self._paused = continuation.paused
             state = replace(state, status="paused")
 
-        while state.status in {"ready", "paused"}:
-            await self._stop_for_cancellation(run_input, run_version, timeout)
+        try:
+            while state.status in {"ready", "paused"}:
+                cancelled = await self._stop_for_cancellation(
+                    run_input, run_version, timeout, state=state, digests=digests
+                )
+                if cancelled is not None:
+                    return cancelled
 
-            # RRM-007: an iteration boundary. No unit is active here: apply what was delivered
-            # (only histories with deliveries reach this code).
-            run_version = await self._apply_pending(
-                run_input, state, run_version, boundary_ref, timeout, blueprint
-            )
-            if self._paused is not None:
-                if state.status != "paused":
-                    state = replace(state, status="paused")
-                if run_input.force_continue_as_new:
+                # RRM-007: an iteration boundary. No unit is active here: apply what was delivered
+                # (only histories with deliveries reach this code).
+                run_version = await self._apply_pending(
+                    run_input, state, run_version, boundary_ref, timeout, blueprint
+                )
+                if self._paused is not None:
+                    if state.status != "paused":
+                        state = replace(state, status="paused")
+                    if run_input.force_continue_as_new:
+                        await workflow.wait_condition(workflow.all_handlers_finished)
+                        workflow.continue_as_new(
+                            self._continuation_input(run_input, state, run_version, family_version)
+                        )
+                    await self._wait_while_paused()
+                    continue
+                if state.status == "paused":
+                    # Resumed: the interpreter frontier is unchanged; continue from it.
+                    state = replace(state, status="ready")
+
+                if run_input.force_continue_as_new and (
+                    state.verification_results or self._paused is not None
+                ):
+                    # REQ-CP-EXEC-011 / REQ-BP-GD-011: a forced continuation at an iteration
+                    # boundary carries the paused state and the pending commands unchanged.
                     await workflow.wait_condition(workflow.all_handlers_finished)
                     workflow.continue_as_new(
                         self._continuation_input(run_input, state, run_version, family_version)
                     )
-                await self._wait_while_paused()
-                continue
-            if state.status == "paused":
-                # Resumed: the interpreter frontier is unchanged; continue from it.
-                state = replace(state, status="ready")
 
-            if run_input.force_continue_as_new and (
-                state.verification_results or self._paused is not None
-            ):
-                # REQ-CP-EXEC-011 / REQ-BP-GD-011: a forced continuation at an iteration
-                # boundary carries the paused state and the pending commands unchanged.
-                await workflow.wait_condition(workflow.all_handlers_finished)
-                workflow.continue_as_new(
-                    self._continuation_input(run_input, state, run_version, family_version)
+                try:
+                    claimed_state, claim = interpreter.claim_execution(state)
+                except GoalDirectedExecutionError as error:
+                    raise ApplicationError(str(error), non_retryable=True) from error
+
+                executor_dispatch = await self._prepare_operation(
+                    run_input,
+                    claimed_state.active_revision,
+                    claim.identity.iteration.goal_iteration,
+                    "executor",
+                    run_version,
+                    family_version,
+                    claim.reservation_id,
+                    claim.reservation,
+                    claim.session_id,
+                    claim.workspace_namespace,
+                    None,
+                    claim.prior_handoff_ref or None,
+                    (
+                        claimed_state.handoffs[-1]
+                        if claim.prior_handoff_ref and claimed_state.handoffs
+                        else None
+                    ),
+                    (),
+                    timeout,
+                    claim,
                 )
-
-            try:
-                claimed_state, claim = interpreter.claim_execution(state)
-            except GoalDirectedExecutionError as error:
-                raise ApplicationError(str(error), non_retryable=True) from error
-
-            executor_dispatch = await self._prepare_operation(
-                run_input,
-                claimed_state.active_revision,
-                claim.identity.iteration.goal_iteration,
-                "executor",
-                run_version,
-                family_version,
-                claim.reservation_id,
-                claim.reservation,
-                claim.session_id,
-                claim.workspace_namespace,
-                None,
-                claim.prior_handoff_ref or None,
-                (
-                    claimed_state.handoffs[-1]
-                    if claim.prior_handoff_ref and claimed_state.handoffs
-                    else None
-                ),
-                (),
-                timeout,
-                claim,
-            )
-            run_version = executor_dispatch.resulting_run_version
-            family_version = executor_dispatch.resulting_family_version
-            executor_result = await self._execute_operation(
-                run_input,
-                executor_dispatch,
-                run_version,
-                timeout,
-            )
-            executor_accepted = await self._reconcile_operation(
-                run_input,
-                blueprint,
-                claim,
-                "executor",
-                executor_dispatch,
-                executor_result,
-                None,
-                timeout,
-            )
-            if executor_accepted.execution_result is None:
-                raise ApplicationError("executor reconciliation omitted its typed result")
-            try:
-                projected = interpreter.apply_execution_result(
-                    claimed_state, executor_accepted.execution_result
+                run_version = executor_dispatch.resulting_run_version
+                family_version = executor_dispatch.resulting_family_version
+                executor_result = await self._execute_operation(
+                    run_input,
+                    executor_dispatch,
+                    run_version,
+                    timeout,
                 )
-            except GoalDirectedExecutionError as error:
-                raise ApplicationError(str(error), non_retryable=True) from error
-            run_version = await self._consume_settlement(
-                run_input,
-                run_version,
-                executor_accepted,
-                claim.reservation_id,
-                claim.reservation,
-                executor_accepted.execution_result.actual_usage,
-                timeout,
-            )
-            await self._stop_for_cancellation(run_input, run_version, timeout)
-
-            verifier_reservation_id = f"{claim.reservation_id}:verifier"
-            verifier_dispatch = await self._prepare_operation(
-                run_input,
-                claimed_state.active_revision,
-                claim.identity.iteration.goal_iteration,
-                "verifier",
-                run_version,
-                family_version,
-                verifier_reservation_id,
-                claim.reservation,
-                f"{claim.session_id}:verifier",
-                f"{claim.workspace_namespace}:verifier",
-                executor_accepted.execution_result.workspace_id,
-                None,
-                None,
-                executor_accepted.execution_result.output_refs,
-                timeout,
-                claim,
-            )
-            run_version = verifier_dispatch.resulting_run_version
-            family_version = verifier_dispatch.resulting_family_version
-            verifier_result = await self._execute_operation(
-                run_input,
-                verifier_dispatch,
-                run_version,
-                timeout,
-            )
-            verifier_accepted = await self._reconcile_operation(
-                run_input,
-                blueprint,
-                claim,
-                "verifier",
-                verifier_dispatch,
-                verifier_result,
-                executor_accepted.execution_result,
-                timeout,
-            )
-            if verifier_accepted.verification_result is None:
-                raise ApplicationError("verifier reconciliation omitted its typed result")
-            try:
-                state = interpreter.apply_verification(
-                    projected, verifier_accepted.verification_result
-                )
-            except GoalDirectedExecutionError as error:
-                raise ApplicationError(str(error), non_retryable=True) from error
-            run_version = await self._consume_settlement(
-                run_input,
-                run_version,
-                verifier_accepted,
-                verifier_reservation_id,
-                claim.reservation,
-                verifier_accepted.verification_result.actual_usage,
-                timeout,
-            )
-            await self._stop_for_cancellation(run_input, run_version, timeout)
-
-            if state.status == "paused":
-                if not workflow.patched(DURABLE_PAUSE_PATCH):
-                    raise ApplicationError(
-                        "GoalDirected paused by deterministic convergence policy",
-                        type="goal_paused",
-                        non_retryable=True,
+                if self._cancel_requested and workflow.patched(CANCELLATION_SAGA_PATCH):
+                    return await self._cancellation_saga(
+                        run_input,
+                        blueprint,
+                        claimed_state,
+                        run_version,
+                        timeout,
+                        digests,
+                        claim=claim,
+                        role="executor",
+                        dispatch=executor_dispatch,
+                        result=executor_result,
+                        executor_result=None,
+                        reservation_id=claim.reservation_id,
                     )
-                # REQ-BP-GD-011: a policy-selected pause enters run control as a pause bound
-                # to the convergence decision, which this boundary then applies.
-                run_version = await self._pause_by_policy(
-                    run_input, state, run_version, boundary_ref, timeout, blueprint
+                executor_accepted = await self._reconcile_operation(
+                    run_input,
+                    blueprint,
+                    claim,
+                    "executor",
+                    executor_dispatch,
+                    executor_result,
+                    None,
+                    timeout,
                 )
-                continue
+                if executor_accepted.execution_result is None:
+                    raise ApplicationError("executor reconciliation omitted its typed result")
+                try:
+                    projected = interpreter.apply_execution_result(
+                        claimed_state, executor_accepted.execution_result
+                    )
+                except GoalDirectedExecutionError as error:
+                    raise ApplicationError(str(error), non_retryable=True) from error
+                run_version = await self._consume_settlement(
+                    run_input,
+                    run_version,
+                    executor_accepted,
+                    claim.reservation_id,
+                    claim.reservation,
+                    executor_accepted.execution_result.actual_usage,
+                    timeout,
+                )
+                cancelled = await self._stop_for_cancellation(
+                    run_input, run_version, timeout, state=projected, digests=digests
+                )
+                if cancelled is not None:
+                    return cancelled
 
-            if (
-                state.status == "ready"
-                and state.next_goal_iteration % run_input.continue_as_new_iterations == 0
-            ):
-                workflow.continue_as_new(
-                    self._continuation_input(run_input, state, run_version, family_version)
+                verifier_reservation_id = f"{claim.reservation_id}:verifier"
+                verifier_dispatch = await self._prepare_operation(
+                    run_input,
+                    claimed_state.active_revision,
+                    claim.identity.iteration.goal_iteration,
+                    "verifier",
+                    run_version,
+                    family_version,
+                    verifier_reservation_id,
+                    claim.reservation,
+                    f"{claim.session_id}:verifier",
+                    f"{claim.workspace_namespace}:verifier",
+                    executor_accepted.execution_result.workspace_id,
+                    None,
+                    None,
+                    executor_accepted.execution_result.output_refs,
+                    timeout,
+                    claim,
+                )
+                run_version = verifier_dispatch.resulting_run_version
+                family_version = verifier_dispatch.resulting_family_version
+                verifier_result = await self._execute_operation(
+                    run_input,
+                    verifier_dispatch,
+                    run_version,
+                    timeout,
+                )
+                if self._cancel_requested and workflow.patched(CANCELLATION_SAGA_PATCH):
+                    return await self._cancellation_saga(
+                        run_input,
+                        blueprint,
+                        projected,
+                        run_version,
+                        timeout,
+                        digests,
+                        claim=claim,
+                        role="verifier",
+                        dispatch=verifier_dispatch,
+                        result=verifier_result,
+                        executor_result=executor_accepted.execution_result,
+                        reservation_id=verifier_reservation_id,
+                    )
+                verifier_accepted = await self._reconcile_operation(
+                    run_input,
+                    blueprint,
+                    claim,
+                    "verifier",
+                    verifier_dispatch,
+                    verifier_result,
+                    executor_accepted.execution_result,
+                    timeout,
+                )
+                if verifier_accepted.verification_result is None:
+                    raise ApplicationError("verifier reconciliation omitted its typed result")
+                try:
+                    state = interpreter.apply_verification(
+                        projected, verifier_accepted.verification_result
+                    )
+                except GoalDirectedExecutionError as error:
+                    raise ApplicationError(str(error), non_retryable=True) from error
+                run_version = await self._consume_settlement(
+                    run_input,
+                    run_version,
+                    verifier_accepted,
+                    verifier_reservation_id,
+                    claim.reservation,
+                    verifier_accepted.verification_result.actual_usage,
+                    timeout,
+                )
+                cancelled = await self._stop_for_cancellation(
+                    run_input, run_version, timeout, state=state, digests=digests
+                )
+                if cancelled is not None:
+                    return cancelled
+
+                if state.status == "paused":
+                    if not workflow.patched(DURABLE_PAUSE_PATCH):
+                        raise ApplicationError(
+                            "GoalDirected paused by deterministic convergence policy",
+                            type="goal_paused",
+                            non_retryable=True,
+                        )
+                    # REQ-BP-GD-011: a policy-selected pause enters run control as a pause bound
+                    # to the convergence decision, which this boundary then applies.
+                    run_version = await self._pause_by_policy(
+                        run_input, state, run_version, boundary_ref, timeout, blueprint
+                    )
+                    continue
+
+                if (
+                    state.status == "ready"
+                    and state.next_goal_iteration % run_input.continue_as_new_iterations == 0
+                ):
+                    workflow.continue_as_new(
+                        self._continuation_input(run_input, state, run_version, family_version)
+                    )
+
+            cancelled = await self._stop_for_cancellation(
+                run_input, run_version, timeout, state=state, digests=digests
+            )
+            if cancelled is not None:
+                return cancelled
+            # F1: drain what was delivered during the final iteration before closing; at this
+            # point no pause is active, so every pending command is `not_applicable` here.
+            if self._pending_commands and workflow.patched(CLOSING_DRAIN_PATCH):
+                run_version = await self._apply_pending(
+                    run_input, state, run_version, boundary_ref, timeout, blueprint, closing=True
+                )
+            terminalization_proposal = state.terminalization_proposal
+            if terminalization_proposal is None:
+                return interpreter.result(state)
+            result = interpreter.result(state)
+
+            final_verification = result.verification_results[-1]
+            accepted_output_refs = (
+                terminalization_proposal.output_refs
+                if workflow.patched(VERIFIED_TERMINAL_OUTPUTS_PATCH)
+                else result.output_refs
+            )
+            evidence_digest = sha256_digest(
+                {
+                    "verification": final_verification.verification_ref,
+                    "outputs": accepted_output_refs,
+                    "obligations": final_verification.accepted_obligation_refs,
+                }
+            )
+            for obligation_ref in final_verification.accepted_obligation_refs:
+                lifecycle = await self._lifecycle(
+                    run_input,
+                    LifecycleCommandRequest(
+                        command_id=f"goal:obligation:{obligation_ref}:{evidence_digest}",
+                        expected_run_version=run_version,
+                        action={
+                            "kind": "record_obligation_evidence",
+                            "evidence": {
+                                "obligation_ref": obligation_ref,
+                                "evidence_digest": evidence_digest,
+                                "accepted_by_authority_ref": run_input.orchestration_authority_ref,
+                            },
+                        },
+                        reason="Accept independently verified GoalDirected obligation evidence",
+                        evidence_refs=(final_verification.verification_ref,),
+                        occurred_at=workflow.now(),
+                    ),
+                    timeout,
+                )
+                run_version = lifecycle.resulting_run_version
+            # Failed/partial convergence may retain produced artifact references for
+            # diagnosis, but those artifacts are not authoritatively valid outputs.
+            # Promoting them and then proposing an empty terminal output set would
+            # contradict the run-control terminalization contract.
+            promotable_output_refs = (
+                accepted_output_refs
+                if terminalization_proposal.proposed_outcome == "complete"
+                else ()
+            )
+            for output_ref in promotable_output_refs:
+                lifecycle = await self._lifecycle(
+                    run_input,
+                    LifecycleCommandRequest(
+                        command_id=f"goal:output:{output_ref}:{evidence_digest}",
+                        expected_run_version=run_version,
+                        action={
+                            "kind": "record_output_evidence",
+                            "evidence": {
+                                "output_ref": output_ref,
+                                "evidence_digest": evidence_digest,
+                                "accepted_by_authority_ref": run_input.orchestration_authority_ref,
+                            },
+                        },
+                        reason="Accept independently verified GoalDirected output evidence",
+                        evidence_refs=(final_verification.verification_ref,),
+                        occurred_at=workflow.now(),
+                    ),
+                    timeout,
+                )
+                run_version = lifecycle.resulting_run_version
+            if run_input.baseline_reservation:
+                run_version = await self._settle_operation(
+                    run_input,
+                    run_version,
+                    "baseline",
+                    run_input.baseline_reservation,
+                    {},
+                    final_verification.verification_ref,
+                    timeout,
                 )
 
-        await self._stop_for_cancellation(run_input, run_version, timeout)
-        # F1: drain what was delivered during the final iteration before closing; at this
-        # point no pause is active, so every pending command is `not_applicable` here.
-        if self._pending_commands and workflow.patched(CLOSING_DRAIN_PATCH):
-            run_version = await self._apply_pending(
-                run_input, state, run_version, boundary_ref, timeout, blueprint, closing=True
-            )
-        terminalization_proposal = state.terminalization_proposal
-        if terminalization_proposal is None:
-            return interpreter.result(state)
-        result = interpreter.result(state)
-
-        final_verification = result.verification_results[-1]
-        accepted_output_refs = (
-            terminalization_proposal.output_refs
-            if workflow.patched(VERIFIED_TERMINAL_OUTPUTS_PATCH)
-            else result.output_refs
-        )
-        evidence_digest = sha256_digest(
-            {
-                "verification": final_verification.verification_ref,
-                "outputs": accepted_output_refs,
-                "obligations": final_verification.accepted_obligation_refs,
-            }
-        )
-        for obligation_ref in final_verification.accepted_obligation_refs:
-            lifecycle = await self._lifecycle(
-                run_input,
-                LifecycleCommandRequest(
-                    command_id=f"goal:obligation:{obligation_ref}:{evidence_digest}",
-                    expected_run_version=run_version,
-                    action={
-                        "kind": "record_obligation_evidence",
-                        "evidence": {
-                            "obligation_ref": obligation_ref,
-                            "evidence_digest": evidence_digest,
-                            "accepted_by_authority_ref": run_input.orchestration_authority_ref,
-                        },
-                    },
-                    reason="Accept independently verified GoalDirected obligation evidence",
-                    evidence_refs=(final_verification.verification_ref,),
-                    occurred_at=workflow.now(),
-                ),
-                timeout,
-            )
-            run_version = lifecycle.resulting_run_version
-        # Failed/partial convergence may retain produced artifact references for
-        # diagnosis, but those artifacts are not authoritatively valid outputs.
-        # Promoting them and then proposing an empty terminal output set would
-        # contradict the run-control terminalization contract.
-        promotable_output_refs = (
-            accepted_output_refs if terminalization_proposal.proposed_outcome == "complete" else ()
-        )
-        for output_ref in promotable_output_refs:
-            lifecycle = await self._lifecycle(
-                run_input,
-                LifecycleCommandRequest(
-                    command_id=f"goal:output:{output_ref}:{evidence_digest}",
-                    expected_run_version=run_version,
-                    action={
-                        "kind": "record_output_evidence",
-                        "evidence": {
-                            "output_ref": output_ref,
-                            "evidence_digest": evidence_digest,
-                            "accepted_by_authority_ref": run_input.orchestration_authority_ref,
-                        },
-                    },
-                    reason="Accept independently verified GoalDirected output evidence",
-                    evidence_refs=(final_verification.verification_ref,),
-                    occurred_at=workflow.now(),
-                ),
-                timeout,
-            )
-            run_version = lifecycle.resulting_run_version
-        if run_input.baseline_reservation:
-            run_version = await self._settle_operation(
-                run_input,
-                run_version,
-                "baseline",
-                run_input.baseline_reservation,
-                {},
-                final_verification.verification_ref,
-                timeout,
-            )
-
-        proposal = replace(
-            terminalization_proposal,
-            expected_run_version=run_version,
-        )
-        result = replace(result, terminalization_proposal=proposal)
-        terminal = await self._lifecycle(
-            run_input,
-            LifecycleCommandRequest(
-                command_id=f"goal:terminalization:{proposal.proposal_id}",
+            proposal = replace(
+                terminalization_proposal,
                 expected_run_version=run_version,
-                action={
-                    "kind": "terminalize",
-                    "proposal": {
-                        "proposal_id": proposal.proposal_id,
-                        "expected_run_version": run_version,
-                        "workflow_type_digest": lifecycle.workflow_type_digest,
-                        "obligation_revision": lifecycle.obligation_revision,
-                        "evidence_frontier_digest": lifecycle.evidence_frontier_digest,
-                        "accepted_obligation_evidence_digest": (
-                            lifecycle.accepted_obligation_evidence_digest
-                        ),
-                        "proposing_execution_binding_ref": (
-                            f"goal-revision:{proposal.goal_revision_id}"
-                        ),
-                        "required_obligations_accepted": (
-                            lifecycle.required_obligations_accepted
-                        ),
-                        "execution_failure_refs": (
-                            ()
-                            if proposal.proposed_outcome == "complete"
-                            else (proposal.verifier_decision_ref,)
-                        ),
-                        "degradable_failures": proposal.degradation_refs,
-                        "valid_output_refs": (
-                            proposal.output_refs
-                            if proposal.proposed_outcome == "complete"
-                            else ()
-                        ),
-                        "cancellation_settled": True,
-                        "budget_settled": True,
-                        "effects_settled": proposal.effects_settled,
-                        "pending_wait_or_link_ids": (),
-                        "proposed_at": workflow.now(),
-                    },
-                },
-                reason="Submit GoalDirected stopping proposal to the lifecycle reducer",
-                evidence_refs=(proposal.verifier_decision_ref,),
-                occurred_at=workflow.now(),
-            ),
-            timeout,
-        )
-        if not terminal.accepted or terminal.terminal_outcome is None:
-            raise ApplicationError(
-                "run-control reducer did not authorize GoalDirected terminalization",
-                non_retryable=True,
             )
-        return result
+            result = replace(result, terminalization_proposal=proposal)
+            terminal = await self._lifecycle(
+                run_input,
+                LifecycleCommandRequest(
+                    command_id=f"goal:terminalization:{proposal.proposal_id}",
+                    expected_run_version=run_version,
+                    action={
+                        "kind": "terminalize",
+                        "proposal": {
+                            "proposal_id": proposal.proposal_id,
+                            "expected_run_version": run_version,
+                            "workflow_type_digest": lifecycle.workflow_type_digest,
+                            "obligation_revision": lifecycle.obligation_revision,
+                            "evidence_frontier_digest": lifecycle.evidence_frontier_digest,
+                            "accepted_obligation_evidence_digest": (
+                                lifecycle.accepted_obligation_evidence_digest
+                            ),
+                            "proposing_execution_binding_ref": (
+                                f"goal-revision:{proposal.goal_revision_id}"
+                            ),
+                            "required_obligations_accepted": (
+                                lifecycle.required_obligations_accepted
+                            ),
+                            "execution_failure_refs": (
+                                ()
+                                if proposal.proposed_outcome == "complete"
+                                else (proposal.verifier_decision_ref,)
+                            ),
+                            "degradable_failures": proposal.degradation_refs,
+                            "valid_output_refs": (
+                                proposal.output_refs
+                                if proposal.proposed_outcome == "complete"
+                                else ()
+                            ),
+                            "cancellation_settled": True,
+                            "budget_settled": True,
+                            "effects_settled": proposal.effects_settled,
+                            "pending_wait_or_link_ids": (),
+                            "proposed_at": workflow.now(),
+                        },
+                    },
+                    reason="Submit GoalDirected stopping proposal to the lifecycle reducer",
+                    evidence_refs=(proposal.verifier_decision_ref,),
+                    occurred_at=workflow.now(),
+                ),
+                timeout,
+            )
+            if not terminal.accepted or terminal.terminal_outcome is None:
+                raise ApplicationError(
+                    "run-control reducer did not authorize GoalDirected terminalization",
+                    non_retryable=True,
+                )
+            return result
+        except _CancellationEntered as entered:
+            # RRM-016 review fix 2 meets RRM-008: an authority result reported the run
+            # `cancelling`; the saga completes from the family's current state.
+            return await self._cancellation_saga(
+                run_input, None, state, entered.run_version, timeout, digests
+            )
 
     # --- RRM-007 boundary mechanics ---------------------------------------------------------
 
@@ -601,8 +757,12 @@ class GoalDirectedWorkflow:
             if delivery.kind == "pause":
                 decision = delivery.payload.get("decision") or {}
                 paused = self._paused_state(
-                    state, str(decision.get("decision_id", "")), delivery.command_id, run_version,
-                    run_input, blueprint,
+                    state,
+                    str(decision.get("decision_id", "")),
+                    delivery.command_id,
+                    run_version,
+                    run_input,
+                    blueprint,
                 )
                 outcome = await self._boundary_fact(
                     run_input,
@@ -842,6 +1002,7 @@ class GoalDirectedWorkflow:
     ) -> GoalDirectedRunInput:
         return replace(
             run_input,
+            cancel_requested=self._cancel_requested,
             initial_revision=state.active_revision,
             initial_run_version=run_version,
             family_version=family_version,
@@ -888,14 +1049,12 @@ class GoalDirectedWorkflow:
         try:
             return await handle
         except ChildWorkflowError as error:
-            if not self._cancel_requested:
+            if not self._cancel_requested or workflow.patched(CANCELLATION_SAGA_PATCH):
+                # Under the saga a cancelled unit completes normally with its disposition;
+                # a failed child is the family's failure as before.
                 raise
             try:
-                await self._stop_for_cancellation(
-                    run_input,
-                    run_version,
-                    activity_timeout,
-                )
+                await self._stop_for_cancellation(run_input, run_version, activity_timeout)
             except ApplicationError as cancellation:
                 raise cancellation from error
             raise
@@ -907,9 +1066,16 @@ class GoalDirectedWorkflow:
         run_input: GoalDirectedRunInput,
         run_version: int,
         activity_timeout: timedelta,
-    ) -> None:
+        *,
+        state: GoalDirectedExecutionState | None = None,
+        digests: LifecycleCommandOutcome | None = None,
+    ) -> GoalDirectedRunResult | None:
         if not self._cancel_requested:
-            return
+            return None
+        if state is not None and workflow.patched(CANCELLATION_SAGA_PATCH):
+            return await self._cancellation_saga(
+                run_input, None, state, run_version, activity_timeout, digests
+            )
         if not self._run_cancelling:
             await self._lifecycle(
                 run_input,
@@ -929,6 +1095,305 @@ class GoalDirectedWorkflow:
             type="goal_cancelling",
             non_retryable=True,
         )
+
+    # --- RRM-008 cancellation saga (REQ-CP-EXEC-008 steps 5-7) ------------------------------
+
+    async def _cancellation_saga(
+        self,
+        run_input: GoalDirectedRunInput,
+        blueprint: GoalDirectedBlueprint | None,
+        state: GoalDirectedExecutionState,
+        run_version: int,
+        activity_timeout: timedelta,
+        digests: LifecycleCommandOutcome | None,
+        *,
+        claim: GoalExecutionClaim | None = None,
+        role: GoalOperationRole | None = None,
+        dispatch: GoalOperationDispatch | None = None,
+        result: OperationWorkflowResult | None = None,
+        executor_result: GoalExecutionResult | None = None,
+        reservation_id: str | None = None,
+    ) -> GoalDirectedRunResult:
+        """Complete the cancellation as workflow logic and return the cancelled result.
+
+        1. The unit that was active when the cancel landed is consumed through its own
+           journaled settlement (cancelled, failed, or completed if it finished first); the
+           family never records usage for it.
+        2. Commands delivered but not applied are rejected `superseded`.
+        3. The run-level baseline reservation is released.
+        4. Terminal `cancelled` is proposed; the reducer decides it only once every
+           reservation and effect is settled (REQ-CP-RUN-005). A liability the operator must
+           reconcile (an async child's pending usage, an in_doubt unit) keeps the run
+           `cancelling`; the saga waits for the hint signal or its timer and proposes again.
+        """
+
+        boundary_ref = workflow.info().workflow_id
+        if (
+            blueprint is not None
+            and claim is not None
+            and role is not None
+            and dispatch is not None
+            and result is not None
+            and reservation_id is not None
+        ):
+            if superseded_generation(result) and workflow.patched(SETTLE_SUPERSEDED_PATCH):
+                # The generation was superseded before the cancel and no new generation is
+                # admitted while cancelling: the operation boundary settles it `cancelled`.
+                result = await settle_superseded_generation(dispatch.workflow_request, result)
+            if result.disposition == "in_doubt":
+                # The unit has no settlement (a pre-saga operation boundary returned it
+                # parked, a pre-patch history kept a superseded generation, or a superseded
+                # generation still holds an unsettled consequential effect). It stays a
+                # liability of the run: its reservation and effect are unsettled, so the
+                # terminalization below is rejected until the operator settles it (the
+                # reducer rejects `start_new_generation` while the run is cancelling). The
+                # saga waits for that; it never fails in place of reconciliation.
+                pass
+            else:
+                accepted = await self._reconcile_operation(
+                    run_input,
+                    blueprint,
+                    claim,
+                    role,
+                    dispatch,
+                    result,
+                    executor_result,
+                    activity_timeout,
+                )
+                settlement = accepted.settlement
+                if settlement is None:
+                    raise ApplicationError(
+                        "GoalDirected cancelled operation has no accepted run-control settlement",
+                        type="goal_operation_settlement_missing",
+                        non_retryable=True,
+                    )
+                if settlement.reservation_id != reservation_id:
+                    raise ApplicationError(
+                        "GoalDirected cancelled settlement does not match the admitted operation",
+                        type="goal_operation_settlement_mismatch",
+                        non_retryable=True,
+                    )
+                run_version = max(run_version, settlement.settled_run_version)
+        # Delivered-but-unapplied commands are superseded by the cancellation.
+        while self._pending_commands:
+            delivery = min(self._pending_commands, key=lambda item: item.target_sequence)
+            self._pending_commands.remove(delivery)
+            outcome = await self._boundary_fact(
+                run_input,
+                BoundaryLifecycleRequest(
+                    command_id=(
+                        f"boundary-reject:{delivery.idempotency_issuer}:{delivery.command_id}"
+                    ),
+                    action={},
+                    reason="GoalDirected cancellation superseded the delivered command",
+                    boundary_ref=boundary_ref,
+                    boundary_command_id=delivery.command_id,
+                    boundary_command_issuer=delivery.idempotency_issuer,
+                    rejection_reason="superseded",
+                ),
+                activity_timeout,
+            )
+            self._mark_handled(delivery, outcome)
+        if run_input.baseline_reservation:
+            for attempt in range(4):
+                baseline = await self._lifecycle_outcome(
+                    run_input,
+                    LifecycleCommandRequest(
+                        # A stale result is stored under its command identity: a retry at
+                        # the reported version is a new command (RRM-016 `_at_version`).
+                        command_id=(
+                            "goal:usage:baseline"
+                            if attempt == 0
+                            else f"goal:usage:baseline:at-version:{run_version}"
+                        ),
+                        expected_run_version=run_version,
+                        action={
+                            "kind": "record_usage",
+                            "usage_id": "goal-usage:baseline",
+                            "actual_amounts": {},
+                            "reservation_id": "baseline",
+                            "release_amounts": dict(run_input.baseline_reservation),
+                            "pending_external_amounts": {},
+                        },
+                        reason="Release the GoalDirected baseline reservation under cancellation",
+                        evidence_refs=("goal-cancellation",),
+                        occurred_at=workflow.now(),
+                    ),
+                    activity_timeout,
+                )
+                run_version = baseline.resulting_run_version
+                digests = baseline
+                if baseline.accepted or baseline.reason_code in {
+                    "usage_exists",
+                    "reservation_missing",
+                    "reservation_required",
+                }:
+                    break  # released now, earlier, or never held
+                if baseline.reason_code not in STALE_REJECTIONS:
+                    raise ApplicationError(
+                        f"baseline release rejected under cancellation: {baseline.reason_code}",
+                        type="goal_cancellation_rejected",
+                        non_retryable=True,
+                    )
+        await self._terminalize_cancelled(run_input, run_version, activity_timeout, digests)
+        return self._cancelled_result(state)
+
+    async def _terminalize_cancelled(
+        self,
+        run_input: GoalDirectedRunInput,
+        run_version: int,
+        activity_timeout: timedelta,
+        digests: LifecycleCommandOutcome | None,
+    ) -> None:
+        seen = self._liability_hints
+        backoff = run_input.cancellation_retry_seconds
+        attempt = 0
+        while True:
+            attempt += 1
+            if digests is None or digests.workflow_type_digest == "":
+                # Probe the authoritative digests: a rejected proposal reports them.
+                digests = await self._lifecycle_outcome(
+                    run_input,
+                    self._cancellation_proposal(run_input, run_version, None, f"probe:{attempt}"),
+                    activity_timeout,
+                )
+                run_version = digests.resulting_run_version
+                if digests.accepted and digests.terminal_outcome is not None:
+                    return
+            outcome = await self._lifecycle_outcome(
+                run_input,
+                self._cancellation_proposal(run_input, run_version, digests, str(attempt)),
+                activity_timeout,
+            )
+            if outcome.accepted and outcome.terminal_outcome is not None:
+                return
+            run_version = outcome.resulting_run_version
+            digests = outcome
+            if outcome.reason_code in STALE_REJECTIONS:
+                continue
+            if outcome.reason_code not in LIABILITY_REJECTIONS:
+                raise ApplicationError(
+                    f"run control rejected the cancellation terminal proposal: "
+                    f"{outcome.reason_code}",
+                    type="goal_cancellation_rejected",
+                    non_retryable=True,
+                )
+
+            # A liability remains (step 5): wait for its reconciliation hint or the timer.
+            def reconciled(waited: int = seen) -> bool:
+                return self._liability_hints > waited
+
+            try:
+                await workflow.wait_condition(reconciled, timeout=timedelta(seconds=backoff))
+            except TimeoutError:
+                pass
+            seen = self._liability_hints
+            backoff = min(backoff * 2, 3_600)
+
+    def _cancellation_proposal(
+        self,
+        run_input: GoalDirectedRunInput,
+        run_version: int,
+        digests: LifecycleCommandOutcome | None,
+        attempt: str,
+    ) -> LifecycleCommandRequest:
+        placeholder = sha256_digest({"rrm-008": "digest probe"})
+        proposal_id = (
+            f"goal-cancellation:{run_input.run_id}:epoch:{run_input.execution_epoch}:"
+            f"v{run_version}:{attempt}"
+        )
+        return LifecycleCommandRequest(
+            command_id=f"goal:terminalization:{proposal_id}",
+            expected_run_version=run_version,
+            action={
+                "kind": "terminalize",
+                "proposal": {
+                    "proposal_id": proposal_id,
+                    "expected_run_version": run_version,
+                    "workflow_type_digest": (
+                        digests.workflow_type_digest if digests is not None else placeholder
+                    ),
+                    "obligation_revision": (
+                        digests.obligation_revision if digests is not None else "unknown"
+                    ),
+                    "evidence_frontier_digest": (
+                        digests.evidence_frontier_digest if digests is not None else placeholder
+                    ),
+                    "accepted_obligation_evidence_digest": (
+                        digests.accepted_obligation_evidence_digest
+                        if digests is not None
+                        else placeholder
+                    ),
+                    "proposing_execution_binding_ref": (
+                        f"goal-cancellation:{run_input.run_id}:epoch:{run_input.execution_epoch}"
+                    ),
+                    "required_obligations_accepted": (
+                        digests.required_obligations_accepted if digests is not None else False
+                    ),
+                    "execution_failure_refs": (),
+                    "degradable_failures": (),
+                    "valid_output_refs": (),
+                    "cancellation_settled": True,
+                    "budget_settled": True,
+                    "effects_settled": True,
+                    "pending_wait_or_link_ids": (),
+                    "proposed_at": workflow.now(),
+                },
+            },
+            reason="Propose terminal cancelled after the GoalDirected cancellation saga",
+            evidence_refs=("goal-cancellation",),
+            occurred_at=workflow.now(),
+        )
+
+    @staticmethod
+    def _cancelled_result(state: GoalDirectedExecutionState) -> GoalDirectedRunResult:
+        return GoalDirectedRunResult(
+            run_id=state.run_id,
+            execution_epoch=state.execution_epoch,
+            status="cancelled",
+            convergence_proposal=None,
+            terminalization_proposal=None,
+            goal_iterations=state.completed_goal_iterations + len(state.verification_results),
+            agent_runs=state.completed_agent_runs + len(state.execution_results),
+            rollover_count=state.rollover_count,
+            active_revision_id=state.active_revision.revision_id,
+            accepted_revision_ids=tuple(
+                revision.revision_id for revision in state.accepted_revisions
+            ),
+            output_refs=state.output_refs,
+            handoffs=state.handoffs,
+            execution_results=state.execution_results,
+            verification_results=state.verification_results,
+            lineage_digest=_continuation(state).lineage_digest,
+        )
+
+    async def _lifecycle_outcome(
+        self,
+        run_input: GoalDirectedRunInput,
+        request: LifecycleCommandRequest,
+        activity_timeout: timedelta,
+    ) -> LifecycleCommandOutcome:
+        """A lifecycle command whose rejection is decided by the caller (the saga)."""
+
+        outcome: LifecycleCommandOutcome = await workflow.execute_activity(
+            "goaldirected.apply_lifecycle_command",
+            replace(
+                request,
+                run_id=run_input.run_id,
+                request_scope=run_input.request_scope,
+                effective_configuration_digest=run_input.effective_configuration_digest,
+                idempotency_issuer=run_input.lifecycle_idempotency_issuer,
+                correlation_id=(
+                    run_input.correlation_id
+                    or f"goal:{run_input.run_id}:epoch:{run_input.execution_epoch}"
+                ),
+                blueprint_digest=run_input.blueprint_digest,
+            ),
+            result_type=LifecycleCommandOutcome,
+            start_to_close_timeout=activity_timeout,
+            retry_policy=RetryPolicy(maximum_attempts=1),
+        )
+        return outcome
 
     async def _prepare_operation(
         self,
@@ -1080,16 +1545,13 @@ class GoalDirectedWorkflow:
                 goal_revision_id=claim.identity.iteration.goal_revision_id,
                 operation_role=role,
                 operation_binding_ref=dispatch.operation_binding_ref,
-                required_output_contract_refs=tuple(
-                    sorted(blueprint.required_output_contracts)
-                ),
+                required_output_contract_refs=tuple(sorted(blueprint.required_output_contracts)),
                 operation_request=dispatch.workflow_request,
                 claim=claim,
                 executor_result=executor_result,
                 operation_result=result,
                 remaining_iterations=max(
-                    blueprint.max_iterations
-                    - claim.identity.iteration.goal_iteration,
+                    blueprint.max_iterations - claim.identity.iteration.goal_iteration,
                     0,
                 ),
                 protected_fact_classes=(
@@ -1130,9 +1592,7 @@ class GoalDirectedWorkflow:
                     blueprint.acceptance_contract if role == "verifier" else None
                 ),
                 acceptance_version=(
-                    blueprint.verifier_policy.acceptance_version
-                    if role == "verifier"
-                    else None
+                    blueprint.verifier_policy.acceptance_version if role == "verifier" else None
                 ),
                 recorded_at=workflow.now(),
             ),
@@ -1245,9 +1705,7 @@ class GoalDirectedWorkflow:
             # The run is already cancelling (an earlier or outside cancel was applied).
             self._run_cancelling = True
             return outcome
-        if outcome.reason_code == STALE_RUN_VERSION and workflow.patched(
-            STALE_VERSION_RETRY_PATCH
-        ):
+        if outcome.reason_code == STALE_RUN_VERSION and workflow.patched(STALE_VERSION_RETRY_PATCH):
             if outcome.phase == CANCELLING:
                 await self._enter_cancellation(
                     run_input, outcome.resulting_run_version, activity_timeout
@@ -1278,6 +1736,9 @@ class GoalDirectedWorkflow:
 
         self._cancel_requested = True
         self._run_cancelling = True
+        if workflow.patched(CANCELLATION_SAGA_PATCH):
+            # RRM-008: the saga runs at the iteration level, where the family state is.
+            raise _CancellationEntered(run_version)
         await self._stop_for_cancellation(run_input, run_version, activity_timeout)
 
     async def _lifecycle_activity(

@@ -283,6 +283,7 @@ class LiveGoalActivities(SandboxRolloverActivities):
         self.documents = Documents()
         self.models = []
         self.operation_ids: list[str] = []
+        self.cancelled_operations: list[str] = []
         self.provider_run_ids: list[str] = []
         self._secrets = {"environment:OPENAI_API_KEY": openai_key}
         deep_binding, _profile, bundle = exact_fixture(
@@ -434,6 +435,25 @@ class LiveGoalActivities(SandboxRolloverActivities):
         self.operation_ids.append(request.identity.semantic_key)
         return result.model_dump(mode="json")
 
+    @activity.defn(name="operation.cancel")
+    async def cancel(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """RRM-008: the real operation boundary's cancellation settlement."""
+
+        request = OperationExecutionRequest.model_validate(payload)
+        info = activity.info()
+        self.cancelled_operations.append(str(payload["identity"]["operation_id"]))
+        result = await self.service.cancel(
+            request,
+            OperationActivityAttempt(
+                workflow_id=info.workflow_id,
+                workflow_run_id=info.workflow_run_id,
+                activity_id=info.activity_id,
+                attempt=info.attempt,
+                worker_identity="wp-bp-020-live-worker",
+            ),
+        )
+        return result.model_dump(mode="json")
+
     @activity.defn(name="goaldirected.apply_lifecycle_command")
     async def lifecycle(
         self, request: LifecycleCommandRequest
@@ -543,7 +563,7 @@ async def test_live_api_root_goal_directed_rollover_deep_agents_docker_vertical(
             Worker(
                 environment.client,
                 task_queue=COGNITIVE_QUEUE,
-                activities=[activities.execute],
+                activities=[activities.execute, activities.cancel],
             ),
         ):
             root_handle = await environment.client.start_workflow(

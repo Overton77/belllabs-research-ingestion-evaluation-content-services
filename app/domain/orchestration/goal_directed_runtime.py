@@ -318,9 +318,18 @@ class GoalOperationReconciliationResult(Contract):
     # RRM-016 (additive): the run-control settlement the family consumes. Absent in
     # histories recorded before the journaled composition, which recorded usage themselves.
     settlement: GoalOperationSettlement | None = None
+    # RRM-008 (additive): the operation's disposition. A `cancelled` or `failed` operation
+    # has no typed role result; the family consumes its settlement and runs the saga.
+    operation_disposition: Literal["completed", "cancelled", "failed"] = "completed"
 
     @model_validator(mode="after")
     def exact_role_result(self) -> GoalOperationReconciliationResult:
+        if self.operation_disposition != "completed":
+            if self.execution_result is not None or self.verification_result is not None:
+                raise ValueError("a cancelled or failed operation has no typed role result")
+            if self.settlement is None:
+                raise ValueError("a cancelled or failed operation carries its settlement")
+            return self
         if self.operation_role == "executor":
             if self.execution_result is None or self.verification_result is not None:
                 raise ValueError("executor reconciliation requires only an execution result")

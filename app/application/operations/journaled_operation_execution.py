@@ -113,15 +113,28 @@ class JournaledOperationExecutionCoordinator:
         binding: OperationExecutionBinding,
         *,
         claimed_by: str,
+        at_current_version: bool = False,
     ) -> OperationClaimResult:
+        """Claim the unit's consequential effect in run control, then in the journal.
+
+        The claim binds the operation's accepted run-control revision. `at_current_version`
+        (RRM-008) claims at the run's current version instead: the cancellation saga settles
+        a unit whose run moved past the bound revision through the accepted cancel itself,
+        and the claim exists only to be settled `cancelled` without provider work.
+        """
+
         claim = _claim_for(binding, claimed_by=claimed_by)
+        expected_run_version = binding.run_control_revision
+        if at_current_version:
+            current = await self._run_control.get_run(binding.request_scope, binding.run_id)
+            expected_run_version = current.version
         authority_command, claimed = await self._execute_replayable(
             LifecycleCommand(
                 command_id=_claim_authority_command_id(claim),
                 idempotency_issuer="operation-journal",
                 request_scope=binding.request_scope,
                 run_id=binding.run_id,
-                expected_run_version=binding.run_control_revision,
+                expected_run_version=expected_run_version,
                 actor=self._actor,
                 action=ClaimEffectAction(
                     effect_id=claim.effect_claim_id,
