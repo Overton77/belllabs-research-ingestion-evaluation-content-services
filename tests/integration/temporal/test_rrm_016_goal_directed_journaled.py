@@ -61,6 +61,7 @@ from app.temporal.workflow_sandbox import coordinator_workflow_runner
 from app.temporal.workflows.goal_directed import (
     JOURNALED_SETTLEMENT_PATCH,
     STALE_VERSION_RETRY_PATCH,
+    VERIFIED_TERMINAL_OUTPUTS_PATCH,
     GoalDirectedWorkflow,
 )
 from app.temporal.workflows.operation import OperationWorkflow
@@ -102,6 +103,12 @@ POST_CHANGE_HISTORY = "goal_directed_journaled_pause_resume.run1.json"
 # with `RRM016_CAPTURE_HISTORY_DIR` set: two re-admissions and one lifecycle retry.
 STALE_RETRY_HISTORY = "goal_directed_stale_version_retry.run1.json"
 PRE_CHANGE = Path(__file__).resolve().parents[2] / "fixtures" / "histories" / "rrm007_pre_change"
+# Captured from `test_iterations_with_distinct_output_refs_terminalize` with
+# `RRM019_CAPTURE_HISTORY_DIR` set: distinct output refs, the verified final output promoted.
+RRM019_POST_CHANGE = (
+    Path(__file__).resolve().parents[2] / "fixtures" / "histories" / "rrm019_post_change"
+)
+RRM019_HISTORY = "goal_directed_distinct_output_refs.run1.json"
 BASELINE = {"tokens.total": 20}
 
 
@@ -365,16 +372,12 @@ async def test_post_change_goal_directed_history_replays_on_the_journaled_path()
     ).replay_workflow(history)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=WorkflowFailureError,
-    reason=(
-        "RRM-019: the family promotes every iteration's output refs, the terminal proposal "
-        "names only the last executor's, so the reducer rejects terminal_output_mismatch"
-    ),
-)
 @pytest.mark.asyncio
 async def test_iterations_with_distinct_output_refs_terminalize() -> None:
+    """RRM-019: iterations produce different output refs. The run completes and promotes
+    exactly the outputs its terminalization proposal names: the final executor's outputs that
+    the accepting verifier admitted, not iteration 1's (rejected) output."""
+
     try:
         environment = await WorkflowEnvironment.start_time_skipping()
     except RuntimeError as error:
@@ -386,18 +389,60 @@ async def test_iterations_with_distinct_output_refs_terminalize() -> None:
         run_id = await admit_goal_run(run_control, "rrm-019-distinct-output-refs")
         family_worker, cognitive_worker = _workers(environment, composition)
         async with family_worker, cognitive_worker:
-            try:
-                result = await environment.client.execute_workflow(
-                    GoalDirectedWorkflow.run,
-                    goal_run_input(run_id, goal_blueprint(), baseline=BASELINE),
-                    id=f"family/{run_id}/1",
-                    task_queue=QUEUE,
-                )
-            except WorkflowFailureError as failure:
-                # Only the RRM-019 rejection is the expected failure; anything else fails.
-                assert "terminal_output_mismatch" in str(failure.cause), failure.cause
-                raise
+            handle = await environment.client.start_workflow(
+                GoalDirectedWorkflow.run,
+                goal_run_input(run_id, goal_blueprint(), baseline=BASELINE),
+                id=f"family/{run_id}/1",
+                task_queue=QUEUE,
+            )
+            result = await handle.result()
+            history = await handle.fetch_history()
         assert result.goal_iterations == 2
+        # Every iteration's immutable outputs remain in the family result (lineage) ...
+        assert result.output_refs == ("artifact:rrm016:1", "artifact:rrm016:2")
+        [first_verification, final_verification] = result.verification_results
+        assert first_verification.decision != "accepted"
+        assert final_verification.decision == "accepted"
+        assert final_verification.admitted_executor_output_refs == ("artifact:rrm016:2",)
+        # ... but the proposal and the promoted evidence name the verified final outputs only.
+        assert result.terminalization_proposal is not None
+        assert result.terminalization_proposal.output_refs == ("artifact:rrm016:2",)
+        run = await run_control.get_run(SCOPE, run_id)
+        assert run.terminal_outcome == RunOutcome.COMPLETED
+        assert [item.output_ref for item in run.accepted_output_evidence] == [
+            "artifact:rrm016:2"
+        ]
+        assert [item for item in lifecycle_command_ids(history) if item.startswith("goal:output:")]
+        assert all(
+            item.startswith("goal:output:artifact:rrm016:2:")
+            for item in lifecycle_command_ids(history)
+            if item.startswith("goal:output:")
+        )
+        assert VERIFIED_TERMINAL_OUTPUTS_PATCH in patch_ids(history)
+        assert await replay(handle, [GoalDirectedWorkflow, OperationWorkflow]) == 1
+        capture = os.getenv("RRM019_CAPTURE_HISTORY_DIR")
+        if capture:  # re-capture the committed post-change fixture (see RRM019_POST_CHANGE)
+            _write_history(Path(capture) / RRM019_HISTORY, history.to_json())
+
+
+@pytest.mark.asyncio
+async def test_rrm_019_distinct_outputs_history_replays() -> None:
+    """The captured RRM-019 history (two iterations, distinct output refs, the verified final
+    output promoted) replays; later tickets that change the family must keep it replaying."""
+
+    history = WorkflowHistory.from_json(
+        "family/rrm-019-post-change/1", _read_history(RRM019_POST_CHANGE / RRM019_HISTORY)
+    )
+    assert VERIFIED_TERMINAL_OUTPUTS_PATCH in patch_ids(history)
+    assert [
+        item.split(":")[2:5]
+        for item in lifecycle_command_ids(history)
+        if item.startswith("goal:output:")
+    ] == [["artifact", "rrm016", "2"]]
+    await Replayer(
+        workflows=[GoalDirectedWorkflow, OperationWorkflow],
+        workflow_runner=coordinator_workflow_runner(),
+    ).replay_workflow(history)
 
 
 # --- Review fix 2: an outside command between a settlement read and the next command ------

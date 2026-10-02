@@ -6,7 +6,7 @@ from beanie import Document
 from pymongo.errors import DuplicateKeyError
 
 from app.application.orchestration.goal_directed import document_payload
-from app.domain.control_plane.canonical import sha256_digest, stable_json_dump
+from app.domain.control_plane.canonical import canonical_json, sha256_digest, stable_json_dump
 from app.domain.operation_execution.contracts import OperationExecutionRequest
 from app.domain.orchestration.contracts import (
     GoalExecutionResult,
@@ -195,6 +195,21 @@ class MongoGoalDirectedDocumentRepository:
         return template
 
 
+# RRM-018: an unchanged Goal Revision is persisted again before every executor operation (and
+# on a re-admission), each time with that iteration's decision time. Two things are not part
+# of an immutable document's identity:
+# - the observation time (`recorded_at`): the first record, and its time, is kept;
+# - the container types of the stored payload: a dataclass payload holds tuples, MongoDB
+#   returns arrays as lists. Both sides are compared in the canonical form `document_digest`
+#   is computed over (`canonical_json`).
+# Any other difference (payload content, digest, keys) still conflicts.
+_OBSERVATION_FIELDS = {"id", "recorded_at"}
+
+
+def _immutable_identity(document: Document) -> bytes:
+    return canonical_json(document.model_dump(mode="python", exclude=_OBSERVATION_FIELDS))
+
+
 async def _insert_exact(
     document: Document,
     model: type[Document],
@@ -205,9 +220,7 @@ async def _insert_exact(
         return
     except DuplicateKeyError:
         prior = await model.find_one(identity)
-    if prior is None or prior.model_dump(mode="python", exclude={"id"}) != document.model_dump(
-        mode="python", exclude={"id"}
-    ):
+    if prior is None or _immutable_identity(prior) != _immutable_identity(document):
         raise IdempotencyConflict("GoalDirected immutable document identity conflict")
 
 
