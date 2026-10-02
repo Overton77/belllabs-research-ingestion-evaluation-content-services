@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from app.application.runtime.runtime_recovery import (
     ForkAdmission,
     ForkAdmissionObservation,
-    ForkRuntimeObservation,
+    ForkMaterialization,
+    ForkMaterializationObservation,
     InMemoryForkRepository,
     RecoveryMode,
     RuntimeForkService,
@@ -21,17 +22,23 @@ from app.domain.graph_runtime.contracts import (
     ActorRef,
     CancelRunIntervention,
     Correlation,
-    ForkRequest,
     RuntimeExecutionBinding,
     RuntimeExecutionStatus,
 )
 from app.domain.graph_runtime.identities import (
     AgentThreadKey,
-    BellLabsRunKey,
     DeploymentIdentity,
     ExecutionEpochKey,
-    LangGraphCheckpointKey,
 )
+from app.domain.run_control.errors import IdempotencyConflict
+from app.domain.run_control.forks import (
+    ForkRejected,
+    RunForkPatch,
+    RunForkRequest,
+    admission_request_ref,
+    lineage_for,
+)
+from tests.unit.run_control.test_run_control import request as run_request
 
 DIGEST = "sha256:" + "a" * 64
 NOW = datetime(2026, 8, 6, 20, 0, tzinfo=UTC)
@@ -92,33 +99,6 @@ def cancellation(current: RuntimeExecutionBinding) -> CancelRunIntervention:
     return CancelRunIntervention(**values, request_digest=sha256_digest(values))
 
 
-def fork_request(current: RuntimeExecutionBinding) -> ForkRequest:
-    assert current.deployment is not None
-    assert current.agent_thread is not None
-    return ForkRequest(
-        request_id="fork-1",
-        idempotency_key="fork-1",
-        source_epoch=current.epoch,
-        source_checkpoint=LangGraphCheckpointKey(
-            deployment_endpoint_id=current.deployment.deployment_endpoint_id,
-            agent_server_thread_id=current.agent_thread.agent_server_thread_id,
-            langgraph_checkpoint_id="checkpoint-1",
-        ),
-        target_run=BellLabsRunKey(
-            request_scope=current.epoch.request_scope,
-            belllabs_run_id="run-2",
-        ),
-        run_plan_digest=current.run_plan_digest,
-        actor=ActorRef(
-            actor_id="operator-1",
-            actor_type="operator",
-            authority_ref="authority:operator@1",
-        ),
-        reason="branch accepted recovery",
-        requested_at=NOW,
-    )
-
-
 def test_cancellation_cascades_runtime_resources_but_not_linked_run_authority() -> None:
     current = binding()
     plan = build_cancellation_plan(
@@ -166,105 +146,208 @@ def test_recovery_modes_distinguish_retry_fork_replay_epoch_and_rollback() -> No
     assert not decide_recovery_mode(RecoveryMode.ROLLBACK).allowed
 
 
+SOURCE_RUN = "run-1"
+DERIVED_RUN = "run-2"
+SNAPSHOT_ID = "run-snapshot:" + "1" * 64
+SNAPSHOT_DIGEST = "sha256:" + "2" * 64
+PATCHED_ERC = "sha256:" + "e" * 64
+
+
+def fork_request(
+    *,
+    effective_configuration_digest: str = DIGEST,
+    requested_at: datetime = NOW,
+    reason: str = "branch from a settled boundary",
+) -> RunForkRequest:
+    target = run_request(request_id="fork-1").model_copy(
+        update={
+            "effective_configuration_digest": effective_configuration_digest,
+            "requested_at": requested_at,
+        }
+    )
+    patch = RunForkPatch.create(
+        source_snapshot_id=SNAPSHOT_ID,
+        source_snapshot_digest=SNAPSHOT_DIGEST,
+        target_admission_request_ref=admission_request_ref(target),
+    )
+    return RunForkRequest(
+        request_id="fork-1",
+        idempotency_key="fork-1",
+        request_scope="tenant-1",
+        source_run_id=SOURCE_RUN,
+        source_execution_epoch=1,
+        snapshot_id=SNAPSHOT_ID,
+        snapshot_digest=SNAPSHOT_DIGEST,
+        patch=patch,
+        target=target,
+        derived_run_id=DERIVED_RUN,
+        actor_id="operator",
+        reason=reason,
+        requested_at=requested_at,
+    )
+
+
 class ForkAuthority:
-    def __init__(self) -> None:
+    def __init__(self, *, epoch: int = 1) -> None:
         self.calls = 0
+        self._epoch = epoch
 
     async def admit_fork(self, request):  # type: ignore[no-untyped-def]
         self.calls += 1
         return ForkAdmission(
             request_id=request.request_id,
             target_epoch=ExecutionEpochKey(
-                request_scope=request.target_run.request_scope,
-                belllabs_run_id=request.target_run.belllabs_run_id,
-                execution_epoch=1,
+                request_scope=request.request_scope,
+                belllabs_run_id=request.derived_run_id,
+                execution_epoch=self._epoch,
             ),
+            admission_ref=f"admission:{request.request_id}",
             budget_reservation_ref="budget:fork-1",
-            admitted_run_plan_digest=request.run_plan_digest,
+            admitted_effective_configuration_digest=request.target.effective_configuration_digest,
         )
 
     async def reconcile_fork_admission(self, _request):  # type: ignore[no-untyped-def]
         return ForkAdmissionObservation(status="ambiguous")
 
 
-class ForkRuntime:
+class ForkMaterializer:
     def __init__(self) -> None:
         self.calls = 0
 
-    async def copy_checkpoint(self, request, _source, admission):  # type: ignore[no-untyped-def]
+    async def materialize(self, request, admission):  # type: ignore[no-untyped-def]
         self.calls += 1
-        return AgentThreadKey(
-            **admission.target_epoch.model_dump(),
-            agent_server_thread_id="thread-child",
-            relationship="fork",
-            parent_belllabs_run_id=request.source_epoch.belllabs_run_id,
+        return ForkMaterialization(
+            request_id=request.request_id,
+            target_run_id=admission.target_epoch.belllabs_run_id,
+            lineage=lineage_for(request, admission_ref=admission.admission_ref),
         )
 
-    async def reconcile_checkpoint_copy(self, _request, _source, _admission):  # type: ignore[no-untyped-def]
-        return ForkRuntimeObservation(status="ambiguous")
+    async def reconcile_materialization(self, _request, _admission):  # type: ignore[no-untyped-def]
+        return ForkMaterializationObservation(status="ambiguous")
+
+
+def _service(
+    authority: ForkAuthority | None = None, materializer: ForkMaterializer | None = None
+) -> tuple[RuntimeForkService, InMemoryForkRepository, ForkAuthority, ForkMaterializer]:
+    repository = InMemoryForkRepository()
+    authority = authority or ForkAuthority()
+    materializer = materializer or ForkMaterializer()
+    return (
+        RuntimeForkService(repository=repository, authority=authority, materializer=materializer),
+        repository,
+        authority,
+        materializer,
+    )
 
 
 @pytest.mark.asyncio
-async def test_fork_admits_new_run_budget_and_thread_once_and_keeps_parent_immutable() -> None:
-    repository = InMemoryForkRepository()
-    authority = ForkAuthority()
-    runtime = ForkRuntime()
-    service = RuntimeForkService(
-        repository=repository,
-        authority=authority,
-        runtime=runtime,
-    )
-    parent = binding()
-    request = fork_request(parent)
+async def test_fork_admits_new_run_at_epoch_one_once_with_one_durable_receipt() -> None:
+    service, repository, authority, materializer = _service()
+    request = fork_request()
 
-    first = await service.fork(request, parent)
-    replay = await service.fork(request, parent)
+    first = await service.fork(request)
+    replay = await service.fork(request)
+    later = await service.fork(fork_request(requested_at=NOW + timedelta(hours=2)))
 
-    assert first == replay
-    assert first.target_epoch.belllabs_run_id == "run-2"
-    assert first.target_thread.agent_server_thread_id == "thread-child"
-    assert first.target_thread.parent_belllabs_run_id == "run-1"
-    assert authority.calls == runtime.calls == 1
-    assert parent == binding()
+    assert first == replay == later
+    assert first.target_run_id == DERIVED_RUN
+    assert first.target_execution_epoch == 1
+    assert first.lineage.derived_run_id == DERIVED_RUN
+    assert first.lineage.source_run_id == SOURCE_RUN
+    assert first.lineage.snapshot_digest == SNAPSHOT_DIGEST
+    assert first.recorded_at == NOW
+    assert authority.calls == materializer.calls == 1
+    assert await repository.get("tenant-1", "fork-1") == first
 
 
-class TimeoutAfterForkRuntime(ForkRuntime):
+@pytest.mark.asyncio
+async def test_patched_configuration_is_admitted_and_epoch_must_be_one() -> None:
+    # RRM-001 §7 #12: a fork never requires the source run plan or ERC to be unchanged...
+    service, _repository, _authority, _materializer = _service()
+    patched = await service.fork(fork_request(effective_configuration_digest=PATCHED_ERC))
+    assert patched.admitted_effective_configuration_digest == PATCHED_ERC
+
+    # ...and an admission that does not target epoch 1 is refused (no receipt).
+    epoch_two, repository, _authority, materializer = _service(ForkAuthority(epoch=2))
+    with pytest.raises(ValueError, match="execution epoch 1"):
+        await epoch_two.fork(fork_request())
+    assert await repository.get("tenant-1", "fork-1") is None
+    assert materializer.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_conflicting_fork_intent_is_rejected() -> None:
+    service, _repository, _authority, _materializer = _service()
+    await service.fork(fork_request())
+
+    with pytest.raises(IdempotencyConflict, match="conflicting intent"):
+        await service.fork(fork_request(reason="a different intent"))
+
+
+class TimeoutAfterMaterializer(ForkMaterializer):
     def __init__(self) -> None:
         super().__init__()
-        self.created_thread = None
+        self.recorded = None
 
-    async def copy_checkpoint(self, request, source, admission):  # type: ignore[no-untyped-def]
-        self.created_thread = await super().copy_checkpoint(request, source, admission)
-        raise TimeoutError("copy result was lost")
+    async def materialize(self, request, admission):  # type: ignore[no-untyped-def]
+        self.recorded = await super().materialize(request, admission)
+        raise TimeoutError("materialization result was lost")
 
-    async def reconcile_checkpoint_copy(self, _request, _source, _admission):  # type: ignore[no-untyped-def]
-        assert self.created_thread is not None
-        return ForkRuntimeObservation(
-            status="copied",
-            target_thread=self.created_thread,
-        )
+    async def reconcile_materialization(self, _request, _admission):  # type: ignore[no-untyped-def]
+        assert self.recorded is not None
+        return ForkMaterializationObservation(status="materialized", materialization=self.recorded)
 
 
 @pytest.mark.asyncio
-async def test_fork_recovers_persisted_admission_after_copy_timeout() -> None:
-    repository = InMemoryForkRepository()
-    authority = ForkAuthority()
-    runtime = TimeoutAfterForkRuntime()
-    service = RuntimeForkService(
-        repository=repository,
-        authority=authority,
-        runtime=runtime,
-    )
-    parent = binding()
-    request = fork_request(parent)
+async def test_fork_recovers_persisted_admission_after_materialization_timeout() -> None:
+    materializer = TimeoutAfterMaterializer()
+    service, _repository, authority, _ = _service(materializer=materializer)
 
     with pytest.raises(TimeoutError, match="result was lost"):
-        await service.fork(request, parent)
-    recovered = await service.fork(request, parent)
+        await service.fork(fork_request())
+    recovered = await service.fork(fork_request())
 
-    assert recovered.target_thread.agent_server_thread_id == "thread-child"
+    assert recovered.target_run_id == DERIVED_RUN
     assert authority.calls == 1
-    assert runtime.calls == 1
+    assert materializer.calls == 1
+
+
+class AmbiguousMaterializer(ForkMaterializer):
+    def __init__(self) -> None:
+        super().__init__()
+        self.resolved = False
+
+    async def materialize(self, request, admission):  # type: ignore[no-untyped-def]
+        if not self.resolved:
+            self.calls += 1
+            raise ConnectionError("materialization outcome unknown")
+        return await super().materialize(request, admission)
+
+    async def reconcile_materialization(self, request, admission):  # type: ignore[no-untyped-def]
+        if not self.resolved:
+            return ForkMaterializationObservation(status="ambiguous")
+        return ForkMaterializationObservation(status="definitively_missing")
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_materialization_fails_closed_without_a_receipt() -> None:
+    materializer = AmbiguousMaterializer()
+    service, repository, authority, _ = _service(materializer=materializer)
+
+    with pytest.raises(ConnectionError, match="outcome unknown"):
+        await service.fork(fork_request())
+    for _attempt in range(2):
+        with pytest.raises(ForkRejected) as caught:
+            await service.fork(fork_request())
+        assert caught.value.code == "fork_materialization_ambiguous"
+    assert await repository.get("tenant-1", "fork-1") is None
+
+    # Once the outcome is known (definitively absent), the saga re-materializes once.
+    materializer.resolved = True
+    receipt = await service.fork(fork_request())
+    assert receipt.target_run_id == DERIVED_RUN
+    assert authority.calls == 1
+    assert materializer.calls == 2
 
 
 class SlowForkAuthority(ForkAuthority):
@@ -280,28 +363,21 @@ class SlowForkAuthority(ForkAuthority):
 
 
 @pytest.mark.asyncio
-async def test_concurrent_fork_retries_serialize_admission_and_copy() -> None:
-    repository = InMemoryForkRepository()
+async def test_concurrent_fork_retries_serialize_admission_and_materialization() -> None:
     authority = SlowForkAuthority()
-    runtime = ForkRuntime()
-    service = RuntimeForkService(
-        repository=repository,
-        authority=authority,
-        runtime=runtime,
-    )
-    parent = binding()
-    request = fork_request(parent)
+    service, _repository, _, materializer = _service(authority)
+    request = fork_request()
 
-    first_task = asyncio.create_task(service.fork(request, parent))
+    first_task = asyncio.create_task(service.fork(request))
     await authority.entered.wait()
-    second_task = asyncio.create_task(service.fork(request, parent))
+    second_task = asyncio.create_task(service.fork(request))
     await asyncio.sleep(0)
     authority.release.set()
     first, second = await asyncio.gather(first_task, second_task)
 
     assert first == second
     assert authority.calls == 1
-    assert runtime.calls == 1
+    assert materializer.calls == 1
 
 
 class TimeoutAfterAdmissionAuthority(ForkAuthority):
@@ -323,24 +399,16 @@ class TimeoutAfterAdmissionAuthority(ForkAuthority):
 
 @pytest.mark.asyncio
 async def test_fork_recovers_admission_claim_after_timeout() -> None:
-    repository = InMemoryForkRepository()
     authority = TimeoutAfterAdmissionAuthority()
-    runtime = ForkRuntime()
-    service = RuntimeForkService(
-        repository=repository,
-        authority=authority,
-        runtime=runtime,
-    )
-    parent = binding()
-    request = fork_request(parent)
+    service, _repository, _, materializer = _service(authority)
 
     with pytest.raises(TimeoutError, match="result was lost"):
-        await service.fork(request, parent)
-    recovered = await service.fork(request, parent)
+        await service.fork(fork_request())
+    recovered = await service.fork(fork_request())
 
-    assert recovered.target_epoch.belllabs_run_id == "run-2"
+    assert recovered.target_run_id == DERIVED_RUN
     assert authority.calls == 1
-    assert runtime.calls == 1
+    assert materializer.calls == 1
 
 
 class DefinitivelyMissingAdmissionAuthority(ForkAuthority):
@@ -356,21 +424,13 @@ class DefinitivelyMissingAdmissionAuthority(ForkAuthority):
 
 @pytest.mark.asyncio
 async def test_fork_reclaims_admission_only_after_definitive_absence() -> None:
-    repository = InMemoryForkRepository()
     authority = DefinitivelyMissingAdmissionAuthority()
-    runtime = ForkRuntime()
-    service = RuntimeForkService(
-        repository=repository,
-        authority=authority,
-        runtime=runtime,
-    )
-    parent = binding()
-    request = fork_request(parent)
+    service, _repository, _, materializer = _service(authority)
 
     with pytest.raises(ConnectionError, match="before commit"):
-        await service.fork(request, parent)
-    recovered = await service.fork(request, parent)
+        await service.fork(fork_request())
+    recovered = await service.fork(fork_request())
 
-    assert recovered.target_epoch.belllabs_run_id == "run-2"
+    assert recovered.target_run_id == DERIVED_RUN
     assert authority.calls == 2
-    assert runtime.calls == 1
+    assert materializer.calls == 1

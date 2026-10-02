@@ -167,20 +167,6 @@ _AUDIT: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...], str], ...] = (
         THIRD_PARTY,
     ),
     (
-        "app/application/runtime/postgres_stage3_kernel_repository.py",
-        "PostgresExecutionLineageRepository.append",
-        ("parent_edge.model_dump(mode='json')",),
-        (f"{GR}.kernel.LineageParentEdge",),
-        NO_SET,
-    ),
-    (
-        "app/application/runtime/postgres_stage3_kernel_repository.py",
-        "PostgresForkRepository.reserve",
-        ("request.model_dump(mode='json')",),
-        (f"{GR}.contracts.ForkRequest",),
-        NO_SET,
-    ),
-    (
         "app/application/runtime/runtime_decisions.py",
         "DurableDecisionService.create_request",
         ("request.model_dump(mode='json', exclude={'request_digest'})",),

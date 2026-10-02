@@ -471,6 +471,10 @@ class RecoveryHarness:
     binding: DeepAgentExecutionBinding
     real_authority: bool = False
     _attempts: dict[str, int] = field(default_factory=dict)
+    # RRM-006: the stores a fork-reuse resolver reads (same instances as the service's).
+    repository: Any = None
+    results: InMemoryArtifactPayloadStore | None = None
+    bindings: InMemoryOperationBindingRepository | None = None
 
     async def request(self, unit: RuntimeUnitIdentity) -> OperationExecutionRequest:
         """Reserve a budget slice, then bind one Deep Agent unit at the current version."""
@@ -571,14 +575,17 @@ async def recovery_harness(
     *,
     model: ScriptedRecoveryModel | None = None,
     real_authority: bool = False,
+    fork_reuse: Any = None,
     run_control: RunControlService | None = None,
 ) -> RecoveryHarness:
-    """`run_control` (RRM-016) lets a family's admissions be registered on the harness."""
+    """`run_control` (RRM-016) lets a family's admissions be registered on the harness; its
+    repository is then not exposed (`RecoveryHarness.repository` stays `None`)."""
 
     from tests.acceptance.control_plane.test_wp_cp_040 import exact_fixture
 
+    repository: Any = None
     if run_control is None:
-        run_control, _repository = run_control_service()
+        run_control, repository = run_control_service()
     admitted = await run_control.admit(run_request(request_id="rrm-004-recovery"))
     assert admitted.run_id is not None
     started = await run_control.execute(
@@ -595,10 +602,11 @@ async def recovery_harness(
     )
     crashable = CrashableRunControl(run_control)
     journal = MemoryOperationJournal()
+    results = InMemoryArtifactPayloadStore()
     coordinator = JournaledOperationExecutionCoordinator(
         journal=OperationJournalService(journal),
         run_control=crashable,  # type: ignore[arg-type]
-        results=InMemoryArtifactPayloadStore(),
+        results=results,
         actor=actor(),
     )
     clock = MutableClock()
@@ -607,11 +615,12 @@ async def recovery_harness(
         mcp_schema_digests={"fixture-mcp": MCP_DIGEST},
         asset_manifest_digests={"skill:fixture.skill:1": SKILL_DIGEST},
     )
+    bindings = InMemoryOperationBindingRepository()
     service = OperationExecutionService(
         authority=(
             run_control_authority(run_control) if real_authority else AcceptingAuthority()
         ),
-        bindings=InMemoryOperationBindingRepository(),
+        bindings=bindings,
         runtime=runtime,
         sandbox=ConformanceSandbox(),
         assets=assets,
@@ -622,6 +631,7 @@ async def recovery_harness(
         journal=coordinator,
         journal_claimed_by="worker:rrm-004",
         lineage=CheckpointLineageService(lineage, clock=clock),
+        fork_reuse=fork_reuse,
     )
     return RecoveryHarness(
         run_control=run_control,
@@ -644,6 +654,9 @@ async def recovery_harness(
         ),
         binding=binding,
         real_authority=real_authority,
+        repository=repository,
+        results=results,
+        bindings=bindings,
     )
 
 
