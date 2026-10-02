@@ -14,6 +14,14 @@ with workflow.unsafe.imports_passed_through():
         WorkflowMessage,
         WorkflowMessageReceipt,
     )
+    from app.domain.orchestration.search_attributes import (
+        BellLabsSearchAttributeValues,
+        run_search_attributes,
+    )
+    from app.temporal.search_attributes import (
+        child_search_attributes,
+        ensure_workflow_search_attributes,
+    )
     from app.temporal.workflows.goal_directed import GoalDirectedWorkflow
     from app.temporal.workflows.stagegraph import StageGraphWorkflow
 
@@ -93,19 +101,32 @@ class BellLabsRunWorkflow:
                 )
             )
 
+        # REQ-CP-EXEC-015: under `required` the root carries its attributes (upserting
+        # only those it was not started with) and starts the family with its own.
+        policy = run_input.search_attribute_policy
+        ensure_workflow_search_attributes(policy, self._attributes(run_input, "root"))
+        family_attributes = child_search_attributes(
+            policy, self._attributes(run_input, "family")
+        )
+        family_input = (
+            {**run_input.family_input, "search_attribute_policy": policy}
+            if family_attributes is not None
+            else run_input.family_input
+        )
         family_id = run_input.family_workflow_id
         handle: Any
         if run_input.family == "StageGraph":
-            stage_input = StageGraphRunInput(**run_input.family_input)
+            stage_input = StageGraphRunInput(**family_input)
             handle = await workflow.start_child_workflow(
                 StageGraphWorkflow.run,
                 stage_input,
                 id=family_id,
                 task_queue=run_input.family_task_queue,
                 parent_close_policy=workflow.ParentClosePolicy.REQUEST_CANCEL,
+                search_attributes=family_attributes,
             )
         else:
-            goal_input = GoalDirectedRunInput(**run_input.family_input)
+            goal_input = GoalDirectedRunInput(**family_input)
             handle = cast(
                 Any,
                 await workflow.start_child_workflow(
@@ -114,9 +135,22 @@ class BellLabsRunWorkflow:
                     id=family_id,
                     task_queue=run_input.family_task_queue,
                     parent_close_policy=workflow.ParentClosePolicy.REQUEST_CANCEL,
+                    search_attributes=family_attributes,
                 ),
             )
         self._family_handle = handle
         if self._cancel_requested:
             handle.cancel()
         return await handle
+
+    @staticmethod
+    def _attributes(
+        run_input: BellLabsRunInput, kind: Literal["root", "family"]
+    ) -> BellLabsSearchAttributeValues:
+        return run_search_attributes(
+            workflow_kind=kind,
+            run_id=run_input.run_id,
+            request_scope=run_input.request_scope,
+            family=run_input.family,
+            execution_epoch=run_input.continuity.execution_epoch,
+        )

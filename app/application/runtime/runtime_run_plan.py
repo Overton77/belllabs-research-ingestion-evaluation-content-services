@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.domain.control_plane.canonical import sha256_digest
+from app.domain.control_plane.canonical import sha256_digest, stable_json_digest
 from app.domain.control_plane.contracts import (
     DefinitionKind,
     EffectiveRunConfiguration,
@@ -155,7 +155,7 @@ def compile_structural_graph_assembly(
     for key in sorted(expected):
         requirement = requirement_by_key[key]
         binding = binding_by_key[key]
-        requirement_digest = sha256_digest(requirement.model_dump(mode="json"))
+        requirement_digest = stable_json_digest(requirement)
         if binding.stage_requirement_ref.digest != requirement_digest:
             raise ValueError("stage requirement reference digest drift")
         assembly = assemblies.get(binding.operation_assembly_ref.logical_id)
@@ -425,7 +425,7 @@ def compile_structural_graph_assembly_v3(
         if (
             binding.stage_requirement_ref.logical_id != expected_requirement_id
             or binding.stage_requirement_ref.digest
-            != sha256_digest(requirement.model_dump(mode="json"))
+            != stable_json_digest(requirement)
         ):
             raise ValueError("stage requirement reference digest drift")
         assembly = assemblies.get(binding.operation_assembly_ref.logical_id)

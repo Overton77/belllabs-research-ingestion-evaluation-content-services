@@ -51,6 +51,7 @@ from app.domain.run_control.contracts import (
     operator_reconciliation_condition_id,
 )
 from app.domain.run_control.errors import CommandRejected, IdempotencyConflict
+from tests.fixtures.set_order import equal_sets_with_different_iteration_order
 
 NOW = datetime(2026, 7, 19, 18, 0, tzinfo=UTC)
 DIGEST = "sha256:" + "a" * 64
@@ -970,31 +971,6 @@ def test_reconcile_unit_decisions_are_typed() -> None:
         )
 
 
-def _equal_sets_with_different_iteration_order(
-    items: frozenset[str],
-) -> tuple[frozenset[str], frozenset[str]]:
-    """Two equal frozensets whose iteration orders differ (hash-collision placement).
-
-    String hashes depend on the per-process seed, so a small set may happen to have no
-    order-changing collision under some seeds. Padding the set with 400 extra names makes
-    such collisions overwhelmingly likely under every seed (500+ entries in a 2048-slot
-    table), so the helper is seed-independent in practice.
-    """
-
-    import random
-
-    ordered = sorted(items | {f"workflow_run.fingerprint_probe_{index}" for index in range(400)})
-    generator = random.Random(4)
-    base = frozenset(ordered)
-    for _ in range(2_000):
-        shuffled = list(ordered)
-        generator.shuffle(shuffled)
-        candidate = frozenset(shuffled)
-        if list(candidate) != list(base):
-            return base, candidate
-    raise AssertionError("no insertion order changed the iteration order")
-
-
 @pytest.mark.asyncio
 async def test_command_fingerprint_is_independent_of_set_iteration_order() -> None:
     """RRM-004 root cause of the intermittent RRM-003 merge-gate failure.
@@ -1008,7 +984,9 @@ async def test_command_fingerprint_is_independent_of_set_iteration_order() -> No
 
     from app.domain.control_plane.canonical import contract_fingerprint
 
-    first_order, second_order = _equal_sets_with_different_iteration_order(ALL_PERMISSIONS)
+    first_order, second_order = equal_sets_with_different_iteration_order(
+        ALL_PERMISSIONS, probe_prefix="workflow_run.fingerprint_probe"
+    )
     first = command("run-x", 1, "fingerprint", StartAction()).model_copy(
         update={
             "actor": ActorContext.model_construct(

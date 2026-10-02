@@ -28,6 +28,7 @@ from app.application.schema.schema_grounding_repository import (
     schema_grounding_record,
 )
 from app.domain.control_plane.canonical import sha256_digest as canonical_digest
+from app.domain.control_plane.canonical import stable_json_dump
 from app.domain.control_plane.contracts import (
     EffectiveRunConfiguration,
     StageGraphBlueprint,
@@ -589,7 +590,7 @@ class SchemaContextSemanticBindingProvider:
             *((self._inputs.report_seed.uri,) if self._inputs.report_seed is not None else ()),
             *(
                 "operation-execution-request-template:"
-                f"{operation_id}@{canonical_digest(request.model_dump(mode='json'))}"
+                f"{operation_id}@{canonical_digest(stable_json_dump(request))}"
                 for operation_id, request in sorted(
                     self._inputs.operation_bindings.operations.items()
                 )

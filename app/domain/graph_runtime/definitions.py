@@ -5,7 +5,7 @@ from typing import Annotated, Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.domain.control_plane.canonical import sha256_digest
+from app.domain.control_plane.canonical import sha256_digest, stable_json_digest
 from app.domain.control_plane.contracts import ExactDefinitionRef, SecretRef
 from app.domain.graph_runtime.identities import DIGEST_PATTERN, GraphIdentity, SubagentProfileKey
 
@@ -87,7 +87,7 @@ class RuntimeDefinition(Contract):
 
     @property
     def digest(self) -> str:
-        return sha256_digest(self.model_dump(mode="json"))
+        return stable_json_digest(self)
 
 
 class MiddlewareBinding(Contract):

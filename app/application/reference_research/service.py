@@ -26,7 +26,7 @@ from app.application.runtime.runtime_run_plan import (
     compile_run_plan_v4,
     compile_structural_graph_assembly_v3,
 )
-from app.domain.control_plane.canonical import sha256_digest
+from app.domain.control_plane.canonical import sha256_digest, stable_json_digest
 from app.domain.control_plane.contracts import (
     AuthorityCeiling,
     BudgetCeiling,
@@ -484,7 +484,7 @@ async def prepare_reference_implementation(
         )
         requirement_ref = StageCapabilityRequirementRef(
             logical_id=f"stage-requirement:{stage.stage_id}:default",
-            digest=sha256_digest(requirement.model_dump(mode="json")),
+            digest=stable_json_digest(requirement),
         )
         assembly_ref = OperationAssemblyRef(
             logical_id=operation_id,

@@ -7,7 +7,7 @@ from app.application.schema.schema_grounding_repository import (
     SchemaGroundingRecordRepository,
     schema_grounding_record,
 )
-from app.domain.control_plane.canonical import sha256_digest
+from app.domain.control_plane.canonical import stable_json_digest
 from app.domain.schema_grounding.contracts import (
     GraphAdmissionDecision,
     GraphAdmissionRequest,
@@ -38,7 +38,7 @@ class SchemaGraphAdmissionService:
             uuid5(
                 NAMESPACE_URL,
                 "schema-graph-admission:"
-                + sha256_digest(request.model_dump(mode="json", exclude={"requested_at"})),
+                + stable_json_digest(request, exclude={"requested_at"}),
             )
         )
         decision = GraphAdmissionDecision(

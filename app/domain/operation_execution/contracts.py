@@ -21,6 +21,7 @@ from app.domain.operation_execution.checkpoint_lineage import (
     CheckpointInvocationPlan,
     cognitive_session_namespace,
 )
+from app.domain.orchestration.search_attributes import SearchAttributePolicy
 
 DIGEST_PATTERN = r"^sha256:[0-9a-f]{64}$"
 PLACEHOLDER_DIGEST = "sha256:" + "0" * 64
@@ -1512,6 +1513,9 @@ class OperationWorkflowRequest(Contract):
         default=(),
         max_length=MAX_ACTIVE_ASYNC_CHILDREN,
     )
+    # REQ-CP-EXEC-015: the family passes its Search Attribute policy to the operation
+    # child; absent means `disabled` (time-skipping tests and captured-history replay).
+    search_attribute_policy: SearchAttributePolicy = "disabled"
 
     @model_validator(mode="after")
     def exact_bound_operation(self) -> OperationWorkflowRequest:

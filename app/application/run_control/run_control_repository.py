@@ -380,6 +380,13 @@ class InMemoryRunControlRepository:
             )
         return deepcopy(self._commands.get((run_id, idempotency_issuer, command_id)))
 
+    def scoped_run_ids(self, request_scope: str) -> tuple[str, ...]:
+        """Read-only listing for the in-memory inspection adapter (RRM-005)."""
+
+        return tuple(
+            run_id for run_id, run in self._runs.items() if run.request_scope == request_scope
+        )
+
     async def get_run(self, request_scope: str, run_id: str) -> RunProjection:
         self._require_scope(request_scope, run_id)
         try:

@@ -15,7 +15,7 @@ from app.application.web_research.web_research_repository import (
     WebResearchRecordRepository,
     web_research_record_ref,
 )
-from app.domain.control_plane.canonical import sha256_digest
+from app.domain.control_plane.canonical import sha256_digest, stable_json_dump
 from app.domain.control_plane.contracts import (
     ControlProfileDefinition,
     DefinitionKind,
@@ -788,7 +788,7 @@ async def _append(
     kind: WebResearchRecordKind,
     payload: BaseModel,
 ) -> WebResearchRecordEnvelope:
-    payload_value = payload.model_dump(mode="json")
+    payload_value = stable_json_dump(payload)
     content_digest = sha256_digest(payload_value)
     record_id = sha256_digest(
         {

@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
-from app.domain.control_plane.canonical import sha256_digest
+from app.domain.control_plane.canonical import sha256_digest, stable_json_digest
 from app.domain.control_plane.contracts import (
     CompileInvocation,
     ExactDefinitionRef,
@@ -114,7 +114,7 @@ class WorkflowLaunchProposal(Contract):
 
     @property
     def digest(self) -> str:
-        return sha256_digest(self.model_dump(mode="json"))
+        return stable_json_digest(self)
 
 
 class LaunchRequestContext(Contract):

@@ -9,6 +9,7 @@ from pydantic import Field, model_validator
 
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.operation_execution.contracts import OperationWorkflowRequest
+from app.domain.orchestration.search_attributes import SearchAttributePolicy
 from app.domain.run_control.contracts import RunOutcome
 from app.domain.run_control.family_admission import AtomicFamilyMutation
 
@@ -111,6 +112,9 @@ class BellLabsRunInput:
     continuity: RunContinuityState = field(default_factory=RunContinuityState)
     continue_as_new_event_threshold: int = 10_000
     force_continue_as_new: bool = False
+    # REQ-CP-EXEC-015: carried in the input (and through Continue-As-New); absent means
+    # `disabled`, so every captured history replays unchanged.
+    search_attribute_policy: SearchAttributePolicy = "disabled"
 
     def __post_init__(self) -> None:
         if not all(
@@ -716,6 +720,7 @@ class StageGraphRunInput:
     initial_projection: StageGraphAcceptedProjection | None = None
     continue_as_new_event_threshold: int = 10_000
     force_continue_as_new: bool = False
+    search_attribute_policy: SearchAttributePolicy = "disabled"
 
 
 @dataclass(frozen=True)
@@ -1092,6 +1097,7 @@ class GoalDirectedRunInput:
     tenant_scope: str = ""
     materialize_typed_result: bool = False
     durable_operation_children: bool = False
+    search_attribute_policy: SearchAttributePolicy = "disabled"
 
 
 @dataclass(frozen=True)
