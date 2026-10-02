@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any
 
+from app.application.async_subagents.service import InMemoryAsyncSubagentDetailRepository
 from app.application.operations.checkpoint_lineage import InMemoryCheckpointLineageRepository
 from app.application.run_control.inspection import InMemoryInspectionReadRepository
 from app.application.run_control.run_control_repository import InMemoryRunControlRepository
@@ -21,6 +22,7 @@ from app.application.runtime.run_forks import (
     ForkSourceFacts,
     InMemoryForkMaterializationStore,
     InMemoryRunSnapshotRepository,
+    LineageAsyncChildForkClassifier,
     LinkedRunRecord,
     RecordingForkMaterializer,
     RunControlForkAuthority,
@@ -30,6 +32,7 @@ from app.application.runtime.run_forks import (
 from app.application.runtime.runtime_lineage import InMemoryExecutionLineageRepository
 from app.application.runtime.runtime_recovery import InMemoryForkRepository, RuntimeForkService
 from app.domain.control_plane.canonical import sha256_digest
+from app.domain.operation_execution.contracts import AsyncSubagentExecution
 from app.domain.run_control.contracts import ActorContext
 from app.domain.run_control.errors import RunControlNotFound
 from app.domain.run_control.forks import (
@@ -221,6 +224,34 @@ def journal_view(
     return {key: tuple(items) for key, items in view.items()}
 
 
+class DetailChildLineage:
+    """RRM-013 lifecycle data for the in-memory stack: the async-child detail repository's
+    executions (`AsyncSubagentExecution`), filtered by parent run."""
+
+    def __init__(self, details: InMemoryAsyncSubagentDetailRepository | None = None) -> None:
+        self.details = details or InMemoryAsyncSubagentDetailRepository()
+
+    async def list_children(
+        self, request_scope: str, parent_run_id: str
+    ) -> tuple[AsyncSubagentExecution, ...]:
+        return tuple(
+            execution
+            for (scope, _child), execution in sorted(self.details.executions.items())
+            if scope == request_scope and execution.parent_run_id == parent_run_id
+        )
+
+
+@dataclass
+class StaticPendingCommands:
+    """Stands in for RRM-007's command ledger: receipts not yet applied, per run."""
+
+    pending: dict[str, tuple[str, ...]] = field(default_factory=dict)
+
+    async def unapplied_command_receipts(self, request_scope: str, run_id: str) -> tuple[str, ...]:
+        del request_scope
+        return self.pending.get(run_id, ())
+
+
 @dataclass
 class InMemoryForks:
     snapshots: RunSnapshotService
@@ -230,6 +261,7 @@ class InMemoryForks:
     lineage: InMemoryExecutionLineageRepository
     snapshot_store: InMemoryRunSnapshotRepository
     sources: FakeForkSourceReader
+    children: DetailChildLineage
 
 
 def compose_in_memory_forks(
@@ -240,10 +272,13 @@ def compose_in_memory_forks(
     *,
     policies: ForkPatchPolicyRegistry | None = None,
     async_children: Any = None,
+    children: DetailChildLineage | None = None,
+    commands: Any = None,
 ) -> InMemoryForks:
     snapshot_store = InMemoryRunSnapshotRepository()
     lineage = InMemoryExecutionLineageRepository()
-    store = InMemoryForkMaterializationStore(lineage)
+    store = InMemoryForkMaterializationStore(lineage, transitions=run_control)
+    child_lineage = children or DetailChildLineage()
     fork_repository = InMemoryForkRepository()
     saga = RuntimeForkService(
         repository=fork_repository,
@@ -255,7 +290,8 @@ def compose_in_memory_forks(
             reads=reads,
             sources=sources,
             snapshots=snapshot_store,
-            async_children=async_children,
+            async_children=async_children or LineageAsyncChildForkClassifier(child_lineage),
+            commands=commands,
             clock=lambda: NOW,
         ),
         forks=SemanticForkService(snapshots=snapshot_store, saga=saga, policies=policies),
@@ -264,6 +300,7 @@ def compose_in_memory_forks(
         lineage=lineage,
         snapshot_store=snapshot_store,
         sources=sources,
+        children=child_lineage,
     )
 
 

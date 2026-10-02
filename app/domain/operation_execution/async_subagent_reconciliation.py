@@ -8,8 +8,8 @@ Protocol SDK, PostgreSQL or any company fixture.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Final, Literal
+from collections.abc import Mapping, Sequence
+from typing import Final, Literal, Protocol
 from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import AwareDatetime, Field, model_validator
@@ -19,7 +19,6 @@ from app.domain.operation_execution.contracts import (
     ACTIVE_ASYNC_SUBAGENT_LIFECYCLES,
     DIGEST_PATTERN,
     AsyncSubagentContract,
-    AsyncSubagentExecution,
     AsyncSubagentInDoubtReason,
     AsyncSubagentLifecycle,
     AsyncSubagentUsage,
@@ -224,8 +223,18 @@ class AsyncChildForkClassification(Contract):
         return self
 
 
+class AsyncChildLifecycleSubject(Protocol):
+    """Any record of one child's identity and lifecycle (detail document or authority view)."""
+
+    @property
+    def child_execution_id(self) -> str: ...
+
+    @property
+    def lifecycle(self) -> AsyncSubagentLifecycle: ...
+
+
 def classify_async_children_for_fork(
-    children: tuple[AsyncSubagentExecution, ...],
+    children: Sequence[AsyncChildLifecycleSubject],
 ) -> AsyncChildForkClassification:
     """A fork is admissible only when no child is admitted, submitted, running, waiting or in doubt.
 

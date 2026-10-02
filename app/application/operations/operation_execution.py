@@ -63,6 +63,7 @@ from app.domain.run_control.contracts import (
     UnitReconciliationDecision,
 )
 from app.domain.run_control.errors import IdempotencyConflict
+from app.domain.run_control.forks import ForkRejected
 
 
 class OperationExecutionInProgress(RuntimeError):
@@ -545,8 +546,10 @@ class OperationExecutionService:
             else None
         )
         claim = claim_result.claim if claim_result is not None else None
-        if self._lineage is not None and attempt is not None and (
-            claim_result is None or claim is not None
+        if (
+            self._lineage is not None
+            and attempt is not None
+            and (claim_result is None or claim is not None)
         ):
             return await self._execute_unit(request, binding, claim, attempt, self._lineage)
         claimed = (
@@ -620,9 +623,7 @@ class OperationExecutionService:
             # in-flight cognition) before a later attempt may take the lease over, so a
             # superseded holder cannot keep calling the model or tools.
             async with asyncio.timeout(budget) as deadline:
-                result = await self._recover_or_dispatch(
-                    request, binding, claim, admitted, lineage
-                )
+                result = await self._recover_or_dispatch(request, binding, claim, admitted, lineage)
         except TimeoutError as error:
             with suppress(Exception):
                 await lineage.release(admitted)
@@ -699,7 +700,20 @@ class OperationExecutionService:
         if self._fork_reuse is not None and not reconciled:
             # REQ-CP-EXEC-012: a fork-derived unit inside the reuse frontier settles by the
             # immutable source result; cognition is never re-run and nothing is copied.
-            reused = await self._fork_reuse.reused_result(binding)
+            try:
+                reused = await self._fork_reuse.reused_result(binding)
+            except ForkRejected as error:
+                # Fail closed and terminate cleanly: the unit settles `failed` with the typed
+                # reason (claim, reservation and lease released); cognition never runs and
+                # nothing is reused.
+                return await self._settle(
+                    binding,
+                    claim,
+                    _failed_settlement(binding, failure_code=error.code, message=error.message),
+                    started_at=datetime.now(UTC),
+                    attempt=admitted.attempt,
+                    admitted=admitted,
+                )
             if reused is not None:
                 return await self._settle_reused(binding, claim, admitted, reused)
         if admitted.deep_binding is None and admission.prior_dispatch and not reconciled:
@@ -765,9 +779,7 @@ class OperationExecutionService:
                 provider_run_id=runtime_result.provider_run_id,
                 event_payloads=runtime_result.event_payloads,
                 settled_at=datetime.now(UTC),
-                checkpoint_transition_id=(
-                    transition_id_for(plan) if plan is not None else None
-                ),
+                checkpoint_transition_id=(transition_id_for(plan) if plan is not None else None),
                 result_checkpoint=capture.result_key if capture is not None else None,
             )
         except CheckpointLineageInDoubt as error:

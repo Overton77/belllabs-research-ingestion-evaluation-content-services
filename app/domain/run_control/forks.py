@@ -45,6 +45,8 @@ FORK_PATCH_POLICY_SCHEMA_VERSION: Final = "belllabs.fork-patch-policy.v1"
 DERIVED_EXECUTION_EPOCH: Final = 1
 #: Invalidation-frontier member that invalidates every unit of the source run.
 INVALIDATE_ALL: Final = "*"
+#: Patchable fields that change every unit's binding or inputs; they always invalidate all.
+WHOLE_RUN_PATCH_PATHS: Final = frozenset({"effective_configuration_digest", "input_manifest"})
 SNAPSHOT_ID_PREFIX: Final = "run-snapshot:"
 SAFE_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$"
 PATCH_PATH_PATTERN = r"^[a-z][a-z0-9_]*(\.[A-Za-z0-9_-]+)*$"
@@ -68,6 +70,8 @@ ForkRejectionCode = Literal[
     "fork_materialization_ambiguous",
     "fork_not_materialized",
     "unauthorized",
+    "snapshot_digest_conflict",
+    "fork_lineage_missing",
 ]
 
 #: REQ-CP-EXEC-012: identity, scope, authority and capability grants, budget ceilings,
@@ -393,6 +397,22 @@ class ForkPatchPolicy(Contract):
     family: ForkFamily
     patchable: tuple[PatchablePath, ...] = ()
 
+    @model_validator(mode="after")
+    def whole_run_fields_invalidate_everything(self) -> Self:
+        # A new ERC or input manifest changes every unit's binding and inputs, so reuse would
+        # be decided before compatibility could hold; such a change must invalidate all units.
+        partial = sorted(
+            item.path
+            for item in self.patchable
+            if item.path in WHOLE_RUN_PATCH_PATHS and tuple(item.invalidates) != (INVALIDATE_ALL,)
+        )
+        if partial:
+            raise ValueError(
+                "configuration and input-manifest patches must invalidate every unit ('*'): "
+                + ", ".join(partial)
+            )
+        return self
+
     def declared(self, path: str) -> PatchablePath | None:
         return next((item for item in self.patchable if item.path == path), None)
 
@@ -434,6 +454,15 @@ def required_invalidation_frontier(patch: RunForkPatch, policy: ForkPatchPolicy)
             reasons=sorted(undeclared),
         )
     frontier = set(patch.invalidation_frontier)
+    whole_run = sorted(
+        change.path for change in patch.changes if change.path in WHOLE_RUN_PATCH_PATHS
+    )
+    if whole_run and INVALIDATE_ALL not in frontier:
+        raise ForkRejected(
+            "invalid_patch",
+            "a configuration or input-manifest patch must invalidate every unit ('*')",
+            reasons=whole_run,
+        )
     if INVALIDATE_ALL not in frontier and not required <= frontier:
         raise ForkRejected(
             "invalid_patch",

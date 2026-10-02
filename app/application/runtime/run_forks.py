@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -56,6 +56,10 @@ from app.domain.graph_runtime.kernel import (
     LineageKind,
     LineageParentEdge,
     ProviderQualifiedLineageRecord,
+)
+from app.domain.operation_execution.async_subagent_reconciliation import (
+    AsyncChildLifecycleSubject,
+    classify_async_children_for_fork,
 )
 from app.domain.operation_execution.contracts import (
     OperationExecutionBinding,
@@ -103,9 +107,14 @@ from app.domain.run_control.inspection import AsyncChildInspection
 
 FORK_PERMISSION = "workflow_run.fork"
 SNAPSHOT_PERMISSION = "workflow_run.snapshot"
+ADMIT_PERMISSION = "workflow_run.admit"
 FORK_LINEAGE_PROVIDER = "belllabs"
 FORK_WORKFLOW_IMPLEMENTATION_REF = "belllabs.semantic-fork.v1"
-TERMINAL_ASYNC_LIFECYCLES = frozenset({"completed", "failed", "cancelled", "orphaned"})
+# StageGraph instances holding admitted, in-flight work: budget `reserved`, an operation
+# `running`, or admitted work `waiting`/`paused` for a resume (not a settled boundary). A
+# `blocked` stage held back by a declared wait has no admitted work and is not active.
+ACTIVE_STAGE_STATUSES = frozenset({"reserved", "running", "waiting", "paused"})
+FORK_REQUEST_MARKER_PREFIX = "fork-request:"
 SETTLED_STATUSES = frozenset({"completed", "failed", "cancelled", "timed_out"})
 MAX_SNAPSHOT_READ_ATTEMPTS = 3
 
@@ -150,12 +159,12 @@ class ForkSourceReader(Protocol):
 
 
 class AsyncChildForkClassifier(Protocol):
-    """RRM-013 seam: classify a run's parent-owned async children at a fork boundary.
+    """Port: classify a run's parent-owned async children at a fork boundary.
 
     An `active` child makes the snapshot unsafe (`snapshot_not_quiescent`, EXEC-016); the
-    child stays parent-owned either way and is never copied. The default classifier reads the
-    0016 authority rows the inspection snapshot already carries; RRM-013's
-    `classify_async_children_for_fork()` replaces it at composition.
+    child stays parent-owned either way and is never copied. The production classifier is
+    `LineageAsyncChildForkClassifier` (RRM-013's `classify_async_children_for_fork` over the
+    authority lineage).
     """
 
     async def classify_async_children_for_fork(
@@ -166,8 +175,24 @@ class AsyncChildForkClassifier(Protocol):
     ) -> tuple[AsyncChildDisposition, ...]: ...
 
 
-class AuthorityAsyncChildForkClassifier:
-    """Default classifier over the recorded lifecycle facts (0016 authority)."""
+class AsyncChildLineageSource(Protocol):
+    """A parent run's children with their authoritative lifecycle (RRM-013 read side)."""
+
+    async def list_children(
+        self, request_scope: str, parent_run_id: str
+    ) -> Sequence[AsyncChildLifecycleSubject]: ...
+
+
+class LineageAsyncChildForkClassifier:
+    """RRM-013's classifier (`classify_async_children_for_fork`) over the child lineage.
+
+    The lineage is the 0016 authority row with its 0021 lifecycle mirror
+    (`PostgresAsyncSubagentAuthority.list_children`). A child that the run's inspection snapshot
+    lists but the lineage does not is classified active (fail closed).
+    """
+
+    def __init__(self, lineage: AsyncChildLineageSource) -> None:
+        self._lineage = lineage
 
     async def classify_async_children_for_fork(
         self,
@@ -175,18 +200,54 @@ class AuthorityAsyncChildForkClassifier:
         run_id: str,
         children: tuple[AsyncChildInspection, ...],
     ) -> tuple[AsyncChildDisposition, ...]:
-        del request_scope, run_id
-        return tuple(
+        lineage = tuple(await self._lineage.list_children(request_scope, run_id))
+        classification = classify_async_children_for_fork(lineage)
+        active = set(classification.active_child_execution_ids)
+        known = {child.child_execution_id for child in lineage}
+        results = {child.child_execution_id: child for child in children}
+        dispositions = [
+            AsyncChildDisposition(
+                child_execution_id=child.child_execution_id,
+                lifecycle=str(child.lifecycle),
+                disposition="active" if child.child_execution_id in active else "terminal",
+                result_decision=(
+                    results[child.child_execution_id].result_decision
+                    if child.child_execution_id in results
+                    else None
+                ),
+            )
+            for child in lineage
+        ]
+        dispositions.extend(
             AsyncChildDisposition(
                 child_execution_id=child.child_execution_id,
                 lifecycle=child.lifecycle,
-                disposition=(
-                    "terminal" if child.lifecycle in TERMINAL_ASYNC_LIFECYCLES else "active"
-                ),
+                disposition="active",
                 result_decision=child.result_decision,
             )
             for child in children
+            if child.child_execution_id not in known
         )
+        return tuple(sorted(dispositions, key=lambda item: item.child_execution_id))
+
+
+class PendingCommandReader(Protocol):
+    """Port: command receipts targeting the run that are not yet `applied` or `rejected`.
+
+    REQ-CP-EXEC-016: an `accepted` or `delivered` command makes the snapshot unsafe. RRM-007's
+    durable command ledger (`boundary_commands` and receipts) implements it; until it is
+    wired, `NoPendingCommands` (no ledger, so nothing is pending) is the default.
+    """
+
+    async def unapplied_command_receipts(
+        self, request_scope: str, run_id: str
+    ) -> tuple[str, ...]: ...
+
+
+class NoPendingCommands:
+    async def unapplied_command_receipts(self, request_scope: str, run_id: str) -> tuple[str, ...]:
+        del request_scope, run_id
+        return ()
 
 
 class RunSnapshotRepository(Protocol):
@@ -210,7 +271,9 @@ class InMemoryRunSnapshotRepository:
             if prior is not None:
                 if prior.snapshot_digest != snapshot.snapshot_digest:
                     raise ForkRejected(
-                        "stale_snapshot", "a different snapshot is recorded for this boundary"
+                        "snapshot_digest_conflict",
+                        "the same run version and boundary produced a different snapshot",
+                        reasons=(prior.snapshot_digest, snapshot.snapshot_digest),
                     )
                 return deepcopy(prior)
             self.snapshots[key] = deepcopy(snapshot)
@@ -266,6 +329,7 @@ def build_run_snapshot(
     async_children: tuple[AsyncChildDisposition, ...],
     *,
     taken_at: datetime,
+    unapplied_commands: tuple[str, ...] = (),
 ) -> RunSnapshotManifest:
     """Build the manifest at a declared safe boundary, or reject `snapshot_not_quiescent`.
 
@@ -308,6 +372,7 @@ def build_run_snapshot(
         for wait in projection.active_waits
         if wait.kind == "operator_reconciliation"
     )
+    reasons.extend(f"command_unapplied:{item}" for item in unapplied_commands)
     reasons.extend(
         f"continuation_pending:{item.proposal_id}"
         for item in projection.pending_continuation_proposals
@@ -596,7 +661,7 @@ def _family_boundary(
         reasons.extend(
             f"stage_active:{prefix}"
             for prefix, instance in sorted(stages.items())
-            if isinstance(instance, dict) and instance.get("status") in {"admitted", "running"}
+            if isinstance(instance, dict) and instance.get("status") in ACTIVE_STAGE_STATUSES
         )
         if not projection.get("accepted_results"):
             raise ForkRejected("unsupported_boundary", "no stage settlement has been accepted yet")
@@ -649,13 +714,15 @@ class RunSnapshotService:
         reads: InspectionReadRepository,
         sources: ForkSourceReader,
         snapshots: RunSnapshotRepository,
-        async_children: AsyncChildForkClassifier | None = None,
+        async_children: AsyncChildForkClassifier,
+        commands: PendingCommandReader | None = None,
         clock: Clock | None = None,
     ) -> None:
         self._reads = reads
         self._sources = sources
         self._snapshots = snapshots
-        self._async_children = async_children or AuthorityAsyncChildForkClassifier()
+        self._async_children = async_children
+        self._commands = commands or NoPendingCommands()
         self._clock = clock or (lambda: datetime.now(UTC))
 
     async def take(
@@ -683,7 +750,14 @@ class RunSnapshotService:
             dispositions = await self._async_children.classify_async_children_for_fork(
                 request_scope, run_id, read.async_children
             )
-            manifest = build_run_snapshot(read, facts, dispositions, taken_at=self._clock())
+            unapplied = await self._commands.unapplied_command_receipts(request_scope, run_id)
+            manifest = build_run_snapshot(
+                read,
+                facts,
+                dispositions,
+                taken_at=self._clock(),
+                unapplied_commands=tuple(unapplied),
+            )
             return await self._snapshots.put(manifest)
         raise ForkRejected("snapshot_source_moving", "run authority kept moving while it was read")
 
@@ -768,7 +842,12 @@ def compile_fork_admission(
         causation_id=snapshot.snapshot_id,
         sponsorship_ref=command.sponsorship_ref,
         approval_refs=command.approval_refs,
-        admission_evidence_refs=(snapshot.snapshot_ref, f"fork-patch:{patch_digest}"),
+        # The fork marker travels in the derived run's immutable admission transition.
+        admission_evidence_refs=(
+            f"{FORK_REQUEST_MARKER_PREFIX}{command.request_id}",
+            snapshot.snapshot_ref,
+            f"fork-patch:{patch_digest}",
+        ),
     )
 
 
@@ -787,8 +866,13 @@ class SemanticForkService:
         self._policies = policies or ForkPatchPolicyRegistry()
 
     async def prepare(self, command: ForkCommand) -> RunForkRequest:
-        if FORK_PERMISSION not in command.actor.permissions:
-            raise ForkRejected("unauthorized", "the actor lacks workflow_run.fork")
+        missing = sorted({FORK_PERMISSION, ADMIT_PERMISSION} - command.actor.permissions)
+        if missing:
+            # Checked before anything is reserved, so an under-privileged caller never leaves
+            # a fork reservation stuck in `admitting`.
+            raise ForkRejected(
+                "unauthorized", "the actor lacks the fork permissions", reasons=missing
+            )
         snapshot = await self._snapshots.get(command.request_scope, command.snapshot_id)
         if snapshot is None or snapshot.source_run_id != command.source_run_id:
             raise ForkSnapshotNotFound("run snapshot not found")
@@ -907,18 +991,44 @@ class RunControlForkAuthority:
                 f"the derived run was not admitted: {decision.reason}",
                 reasons=(decision.reason_code,),
             )
-        projection = await self._run_control.get_run(target.request_scope, decision.run_id)
+        scope = target.request_scope
+        projection = await self._run_control.get_run(scope, decision.run_id)
+        budget = await self._run_control.get_budget(scope, decision.run_id)
+        transitions = await self._run_control.list_transitions(scope, decision.run_id)
+        admitted = transitions[0] if transitions else None
+        marker = f"{FORK_REQUEST_MARKER_PREFIX}{request.request_id}"
+        # The derived run's epoch is read from its admission transition: a run admitted at
+        # version 1 by this fork's admission request starts at epoch 1, and run control
+        # records no epoch rollover (rollover is not published; `decide_recovery_mode`).
+        if (
+            admitted is None
+            or admitted.resulting_version != 1
+            or admitted.prior_version != 0
+            or admitted.command_id != f"admission:{target.request_id}"
+            or marker not in admitted.evidence_refs
+        ):
+            raise ForkRejected(
+                "fork_admission_rejected",
+                "the admitted run is not this fork's fresh admission",
+                reasons=("admission_transition_mismatch",),
+            )
+        if budget.parent_account_id is not None or budget.limits != tuple(
+            target.budget_envelope.dimensions
+        ):
+            raise ForkRejected(
+                "fork_admission_rejected",
+                "the derived run's budget account is not the fork's own",
+                reasons=("budget_account_mismatch",),
+            )
         return ForkAdmission(
             request_id=request.request_id,
             target_epoch=ExecutionEpochKey(
-                request_scope=target.request_scope,
+                request_scope=scope,
                 belllabs_run_id=decision.run_id,
                 execution_epoch=DERIVED_EXECUTION_EPOCH,
             ),
-            admission_ref=(
-                f"admission:{target.request_scope}:{target.idempotency_issuer}:{target.request_id}"
-            ),
-            budget_reservation_ref=f"budget:{decision.run_id}:baseline",
+            admission_ref=f"admission:{scope}:{target.idempotency_issuer}:{target.request_id}",
+            budget_reservation_ref=f"budget-account:{budget.account_id}",
             admitted_effective_configuration_digest=projection.effective_configuration_digest,
         )
 
@@ -946,6 +1056,10 @@ class ForkMaterializationStore(Protocol):
 
     async def fork_of_run(self, request_scope: str, derived_run_id: str) -> ForkOfRun | None: ...
 
+    async def fork_marker(self, request_scope: str, run_id: str) -> str | None:
+        """The fork request id a run's immutable admission transition names, if any."""
+        ...
+
     async def get_reuse_decision(
         self, request_scope: str, derived_run_id: str, derived_unit_key: str
     ) -> ForkReuseDecision | None: ...
@@ -955,10 +1069,31 @@ class ForkMaterializationStore(Protocol):
     ) -> tuple[ForkReuseDecision, ...]: ...
 
 
+class TransitionReader(Protocol):
+    async def list_transitions(self, request_scope: str, run_id: str) -> Sequence[Any]: ...
+
+
+def fork_marker_of(evidence_refs: Sequence[str]) -> str | None:
+    return next(
+        (
+            ref.removeprefix(FORK_REQUEST_MARKER_PREFIX)
+            for ref in evidence_refs
+            if ref.startswith(FORK_REQUEST_MARKER_PREFIX)
+        ),
+        None,
+    )
+
+
 class InMemoryForkMaterializationStore:
-    def __init__(self, lineage: ExecutionLineageRepository | None = None) -> None:
+    def __init__(
+        self,
+        lineage: ExecutionLineageRepository | None = None,
+        *,
+        transitions: TransitionReader | None = None,
+    ) -> None:
         self._lock = asyncio.Lock()
         self._lineage = lineage
+        self._transitions = transitions
         self.requests: dict[tuple[str, str], RunForkRequest] = {}
         self.materializations: dict[tuple[str, str], ForkLineageManifest] = {}
         self.decisions: dict[tuple[str, str, str], ForkReuseDecision] = {}
@@ -1022,6 +1157,12 @@ class InMemoryForkMaterializationStore:
         self, request_scope: str, derived_run_id: str, derived_unit_key: str
     ) -> ForkReuseDecision | None:
         return deepcopy(self.decisions.get((request_scope, derived_run_id, derived_unit_key)))
+
+    async def fork_marker(self, request_scope: str, run_id: str) -> str | None:
+        if self._transitions is None:
+            return None
+        transitions = await self._transitions.list_transitions(request_scope, run_id)
+        return fork_marker_of(transitions[0].evidence_refs) if transitions else None
 
     async def list_reuse_decisions(
         self, request_scope: str, request_id: str
@@ -1277,6 +1418,15 @@ class ForkReuseResolver:
             return None
         fork = await self._store.fork_of_run(binding.request_scope, unit.belllabs_run_id)
         if fork is None:
+            # A fork-derived run whose fork row (and with it its reuse decisions) is missing,
+            # for example purged, fails closed instead of silently re-executing everything.
+            marker = await self._store.fork_marker(binding.request_scope, unit.belllabs_run_id)
+            if marker is not None:
+                raise ForkRejected(
+                    "fork_lineage_missing",
+                    "the run was admitted by a fork whose lineage and decisions are missing",
+                    reasons=(marker,),
+                )
             return None
         if not fork.materialized:
             raise ForkRejected(

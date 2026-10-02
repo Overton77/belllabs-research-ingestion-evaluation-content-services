@@ -27,6 +27,9 @@ from app.api.run_control import (
     initialize_run_control_resources,
     principal_permissions,
 )
+from app.application.async_subagents.postgres_async_subagents import (
+    PostgresAsyncSubagentAuthority,
+)
 from app.application.run_control.postgres_inspection_repository import (
     PostgresInspectionReadRepository,
 )
@@ -49,6 +52,8 @@ from app.application.runtime.run_forks import (
     ForkMaterializationStore,
     ForkPatchPolicyRegistry,
     ForkSnapshotNotFound,
+    LineageAsyncChildForkClassifier,
+    PendingCommandReader,
     RecordingForkMaterializer,
     RunControlForkAuthority,
     RunSnapshotService,
@@ -86,6 +91,8 @@ _STATUS: dict[ForkRejectionCode, int] = {
     "fork_materialization_ambiguous": 503,
     "fork_not_materialized": 409,
     "unauthorized": 403,
+    "snapshot_digest_conflict": 409,
+    "fork_lineage_missing": 409,
 }
 
 
@@ -103,8 +110,14 @@ def compose_run_fork_services(
     *,
     policies: ForkPatchPolicyRegistry | None = None,
     async_children: AsyncChildForkClassifier | None = None,
+    commands: PendingCommandReader | None = None,
 ) -> RunForkServices:
-    """Production composition over application PostgreSQL authority."""
+    """Production composition over application PostgreSQL authority.
+
+    Async children are classified by RRM-013's classifier over the authority lineage
+    (`PostgresAsyncSubagentAuthority.list_children`) unless another classifier is supplied.
+    Unapplied command receipts come from `commands` (RRM-007's ledger once wired).
+    """
 
     snapshots = PostgresRunSnapshotRepository(pool)
     store = PostgresForkMaterializationStore(pool)
@@ -121,7 +134,9 @@ def compose_run_fork_services(
             reads=PostgresInspectionReadRepository(pool),
             sources=PostgresForkSourceReader(pool),
             snapshots=snapshots,
-            async_children=async_children,
+            async_children=async_children
+            or LineageAsyncChildForkClassifier(PostgresAsyncSubagentAuthority(pool)),
+            commands=commands,
         ),
         forks=SemanticForkService(snapshots=snapshots, saga=saga, policies=policies),
         receipts=repository,
@@ -131,7 +146,8 @@ def compose_run_fork_services(
 
 async def get_run_fork_services(request: Request) -> RunForkServices:
     """Compose once per application. Deployments may attach `fork_patch_policies` (a
-    `ForkPatchPolicyRegistry`) and `async_child_fork_classifier` on `app.state` first."""
+    `ForkPatchPolicyRegistry`), `async_child_fork_classifier` and `pending_command_reader`
+    (RRM-007's command ledger) on `app.state` first."""
 
     state = request.app.state
     services = getattr(state, "run_fork_services", None)
@@ -152,6 +168,7 @@ async def get_run_fork_services(request: Request) -> RunForkServices:
                 run_control,
                 policies=getattr(state, "fork_patch_policies", None),
                 async_children=getattr(state, "async_child_fork_classifier", None),
+                commands=getattr(state, "pending_command_reader", None),
             )
             state.run_fork_services = services
         return services
@@ -206,9 +223,7 @@ def _rejected(error: ForkRejected) -> HTTPException:
     )
 
 
-@router.post(
-    "/runs/{run_id}/snapshots", response_model=RunSnapshotManifest, status_code=201
-)
+@router.post("/runs/{run_id}/snapshots", response_model=RunSnapshotManifest, status_code=201)
 async def take_run_snapshot(
     run_id: str, body: SnapshotRequestBody, principal: Principal, services: Services
 ) -> RunSnapshotManifest:

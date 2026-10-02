@@ -16,9 +16,9 @@ import pytest
 from pydantic import ValidationError
 
 from app.application.runtime.run_forks import (
-    AuthorityAsyncChildForkClassifier,
     ForkPatchPolicyRegistry,
     ForkSnapshotNotFound,
+    LineageAsyncChildForkClassifier,
     LinkedRunRecord,
 )
 from app.domain.control_plane.canonical import sha256_digest
@@ -35,7 +35,9 @@ from app.domain.run_control.errors import IdempotencyConflict
 from app.domain.run_control.forks import (
     INVALIDATE_ALL,
     ForkPatchChange,
+    ForkPatchPolicy,
     ForkRejected,
+    PatchablePath,
     RunForkPatch,
     RunForkRequest,
     RunSnapshotManifest,
@@ -56,6 +58,7 @@ from tests.fixtures.checkpoint_recovery import (
 from tests.fixtures.run_forks import (
     FakeForkSourceReader,
     InMemoryForks,
+    StaticPendingCommands,
     compose_in_memory_forks,
     fork_actor,
     fork_command,
@@ -261,22 +264,51 @@ async def test_unsettled_or_in_doubt_units_are_not_quiescent_and_never_reusable(
     assert "budget_reservation_open:reservation:" + review.unit_key in rejected.reasons
 
 
+def _child_service(details: Any) -> Any:
+    from datetime import timedelta as delta
+
+    from app.application.async_subagents.service import (
+        AsyncSubagentService,
+        InMemoryAsyncSubagentAuthority,
+    )
+    from app.integrations.agents.deep_agents.async_subagents import (
+        DeepAgentsAsyncSubagentAdapter,
+    )
+    from tests.acceptance.control_plane.test_wp_cp_045 import NOW as CHILD_NOW
+
+    return AsyncSubagentService(
+        details,
+        InMemoryAsyncSubagentAuthority(),
+        DeepAgentsAsyncSubagentAdapter(
+            now=lambda: CHILD_NOW,
+            secrets={"environment:AGENT_SERVER_TOKEN": "offline-token"},
+            request_scope=SCOPE,
+        ),
+        allow_new_spawns=True,
+        submitter_identity="rrm006-worker",
+        submission_lease=delta(seconds=30),
+        now=lambda: CHILD_NOW,
+    )
+
+
 @pytest.mark.asyncio
-async def test_active_async_child_or_linked_run_prohibits_the_snapshot() -> None:
-    child = AsyncChildInspection(
-        child_execution_id="async-child-1",
-        parent_operation_id="binding:draft",
-        link_id="link-1",
-        contract_id="contract-1",
-        binding_digest="sha256:" + "d" * 64,
-        execution_generation=1,
-        dependency_class="nonblocking",
-        lifecycle="running",
+async def test_active_async_child_from_rrm013_lifecycle_data_prohibits_the_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RRM-001 §8 #6 / EXEC-016 with RRM-013's real service, lifecycle data and classifier."""
+
+    from tests.acceptance.control_plane.test_wp_cp_045 import SERVED
+    from tests.acceptance.control_plane.test_wp_cp_045 import request as spawn_request
+    from tests.fixtures.fake_agent_protocol import FakeAgentProtocolClient, install
+
+    client = FakeAgentProtocolClient(served=SERVED)
+    install(monkeypatch, client)
+    harness, forks, _units = await _world()
+    service = _child_service(forks.children.details)
+    running = await service.spawn(
+        spawn_request().model_copy(update={"request_scope": SCOPE, "parent_run_id": harness.run_id})
     )
-    finished = child.model_copy(
-        update={"child_execution_id": "async-child-2", "lifecycle": "completed"}
-    )
-    harness, forks, _units = await _world(async_children=(child, finished))
+    assert running.lifecycle == "running"
     forks.sources.linked[harness.run_id] = (
         LinkedRunRecord(link_id="link-a", child_run_id="child-a", terminal_status=None),
         LinkedRunRecord(link_id="link-b", child_run_id="child-b", terminal_status="completed"),
@@ -284,20 +316,101 @@ async def test_active_async_child_or_linked_run_prohibits_the_snapshot() -> None
 
     rejected = await _reject(forks, harness.run_id)
 
-    # REQ-CP-EXEC-016 / RRM-001 §8 #6: an active parent-owned child prohibits the fork.
     assert rejected.code == "snapshot_not_quiescent"
-    assert "async_child_active:async-child-1" in rejected.reasons
-    assert "async_child_active:async-child-2" not in rejected.reasons
+    assert f"async_child_active:{running.child_execution_id}" in rejected.reasons
     assert "linked_run_active:child-a" in rejected.reasons
     assert "linked_run_active:child-b" not in rejected.reasons
 
-    dispositions = await AuthorityAsyncChildForkClassifier().classify_async_children_for_fork(
-        SCOPE, harness.run_id, (child, finished)
-    )
-    assert [(item.child_execution_id, item.disposition) for item in dispositions] == [
-        ("async-child-1", "active"),
-        ("async-child-2", "terminal"),
+    # Once the child completes and the parent reconciles it, it no longer blocks.
+    forks.sources.linked[harness.run_id] = ()
+    client.complete(running.child_execution_id, "done")
+    completed = await service.reconcile(SCOPE, running.child_execution_id)
+    assert completed.lifecycle == "completed"
+    snapshot = await forks.snapshots.take(SCOPE, harness.run_id)
+    assert [(item.child_execution_id, item.disposition) for item in snapshot.async_children] == [
+        (running.child_execution_id, "terminal")
     ]
+
+
+@pytest.mark.asyncio
+async def test_child_missing_from_the_lineage_is_classified_active() -> None:
+    harness, forks, _units = await _world()
+    authority_only = AsyncChildInspection(
+        child_execution_id="async-child-unknown",
+        parent_operation_id="binding:draft",
+        link_id="link-1",
+        contract_id="contract-1",
+        binding_digest="sha256:" + "d" * 64,
+        execution_generation=1,
+        dependency_class="nonblocking",
+        lifecycle="completed",
+    )
+    dispositions = await LineageAsyncChildForkClassifier(
+        forks.children
+    ).classify_async_children_for_fork(SCOPE, harness.run_id, (authority_only,))
+    assert [(item.child_execution_id, item.disposition) for item in dispositions] == [
+        ("async-child-unknown", "active")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_unapplied_command_receipt_makes_the_snapshot_not_quiescent() -> None:
+    harness, forks, _units = await _world()
+    commands = StaticPendingCommands({harness.run_id: ("receipt:pause-1",)})
+    gated = compose_in_memory_forks(
+        harness.run_control,
+        harness.repository,
+        inspection_reads(harness.repository, harness.lineage, harness.journal),
+        forks.sources,
+        commands=commands,
+    )
+
+    rejected = await _reject(gated, harness.run_id)
+    assert rejected.code == "snapshot_not_quiescent"
+    assert rejected.reasons == ("command_unapplied:receipt:pause-1",)
+
+    commands.pending[harness.run_id] = ()
+    assert (await gated.snapshots.take(SCOPE, harness.run_id)).pending_commands == ()
+
+
+@pytest.mark.asyncio
+async def test_reserved_stage_alone_is_active_work() -> None:
+    harness, forks, _units = await _world()
+    forks.sources.heads[harness.run_id] = (
+        stagegraph_head(stages={"draft": "completed", "review": "reserved"}),
+    )
+    rejected = await _reject(forks, harness.run_id)
+    assert rejected.code == "snapshot_not_quiescent"
+    assert rejected.reasons == (
+        "stage_active:stage:review:mapped:none:workflow-cycle:0:stage-cycle:0:slot:default",
+    )
+    for status in ("waiting", "paused"):
+        forks.sources.heads[harness.run_id] = (
+            stagegraph_head(stages={"draft": "completed", "review": status}),
+        )
+        assert (await _reject(forks, harness.run_id)).reasons[0].startswith("stage_active:")
+    # A stage held back by a declared wait has no admitted work: it is not active.
+    forks.sources.heads[harness.run_id] = (
+        stagegraph_head(stages={"draft": "completed", "review": "blocked"}),
+    )
+    assert (await forks.snapshots.take(SCOPE, harness.run_id)).boundary_kind == "stage_settled"
+
+
+@pytest.mark.asyncio
+async def test_same_version_and_boundary_with_another_digest_is_a_digest_conflict() -> None:
+    harness, forks, _units = await _world()
+    snapshot = await forks.snapshots.take(SCOPE, harness.run_id)
+    different = RunSnapshotManifest.create(
+        **{
+            **snapshot.model_dump(mode="python", exclude={"snapshot_digest"}),
+            "obligation_revision": "obligations:other",
+        }
+    )
+    assert different.snapshot_id == snapshot.snapshot_id
+    with pytest.raises(ForkRejected) as caught:
+        await forks.snapshot_store.put(different)
+    assert caught.value.code == "snapshot_digest_conflict"
+    assert caught.value.reasons == (snapshot.snapshot_digest, different.snapshot_digest)
 
 
 @pytest.mark.asyncio
@@ -512,6 +625,39 @@ async def test_undeclared_values_frontier_and_seed_are_validated() -> None:
         required_invalidation_frontier(seeded, policy)
     assert caught.value.code == "cognitive_seed_not_supported"
 
+    erc = "sha256:" + "e" * 64
+    with pytest.raises(ValidationError, match="must invalidate every unit"):
+        ForkPatchPolicy(
+            policy_id="fork-patch-policy:partial-erc",
+            family="stage_graph",
+            patchable=(
+                PatchablePath(
+                    path="effective_configuration_digest",
+                    invalidates=("review",),
+                    value_kind="digest",
+                ),
+            ),
+        )
+    partial_erc = _patch(
+        snapshot,
+        changes=(ForkPatchChange(path="effective_configuration_digest", value=erc),),
+        invalidation_frontier=("review",),
+    )
+    with pytest.raises(ForkRejected) as caught:
+        required_invalidation_frontier(partial_erc, default_patch_policy("stage_graph"))
+    assert (caught.value.code, caught.value.reasons) == (
+        "invalid_patch",
+        ("effective_configuration_digest",),
+    )
+    whole_erc = _patch(
+        snapshot,
+        changes=(ForkPatchChange(path="effective_configuration_digest", value=erc),),
+        invalidation_frontier=(INVALIDATE_ALL,),
+    )
+    assert required_invalidation_frontier(
+        whole_erc, default_patch_policy("stage_graph")
+    ) == frozenset({INVALIDATE_ALL})
+
     covered = _patch(
         snapshot, changes=(review_objective_patch(),), invalidation_frontier=("review",)
     )
@@ -667,6 +813,19 @@ async def test_unauthorized_stale_unknown_and_rejected_forks_fail_safely() -> No
             fork_command(snapshot, actor=fork_actor(permissions=frozenset({"workflow_run.admit"})))
         )
     assert unauthorized.value.code == "unauthorized"
+    assert unauthorized.value.reasons == ("workflow_run.fork",)
+    # A `fork_operator`-only caller (no `workflow_run.admit`) is refused up front, so no
+    # reservation is left in `admitting`.
+    fork_only = fork_actor(
+        permissions=frozenset({"workflow_run.read", "workflow_run.snapshot", "workflow_run.fork"})
+    )
+    with pytest.raises(ForkRejected) as no_admit:
+        await forks.forks.fork(fork_command(snapshot, request_id="fork-no-admit", actor=fork_only))
+    assert (no_admit.value.code, no_admit.value.reasons) == (
+        "unauthorized",
+        ("workflow_run.admit",),
+    )
+    assert forks.repository._requests == {}
 
     with pytest.raises(ForkRejected) as stale:
         await forks.forks.fork(fork_command(snapshot, snapshot_digest="sha256:" + "0" * 64))

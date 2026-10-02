@@ -179,6 +179,9 @@ class Store:
     async def get_reuse_decision(self, _scope: str, _run: str, _unit: str) -> Any:
         return self._decision
 
+    async def fork_marker(self, _scope: str, _run: str) -> str | None:
+        return None
+
 
 @pytest.mark.asyncio
 async def test_reuse_resolver_fails_closed_on_every_inconsistency() -> None:
@@ -271,3 +274,82 @@ async def test_reuse_resolver_fails_closed_on_every_inconsistency() -> None:
     assert isinstance(reused.source_settlement, OperationSettlement)
     assert reused.ref.source_unit_key == source_draft.unit_key
     assert isinstance(forks.store, InMemoryForkMaterializationStore)
+
+
+async def _forked_harness() -> tuple[Any, Any, Any, Any]:
+    resolver = LateResolver()
+    harness = await recovery_harness(fork_reuse=resolver)
+    source_draft = stage_recovery_unit(harness.run_id, "draft")
+    assert (await harness.run(await harness.request(source_draft))).status == "completed"
+    sources = FakeForkSourceReader(
+        harness.run_control,
+        heads={harness.run_id: (stagegraph_head(stages={"draft": "completed"}),)},
+    )
+    forks = compose_in_memory_forks(
+        harness.run_control,
+        harness.repository,
+        inspection_reads(harness.repository, harness.lineage, harness.journal),
+        sources,
+    )
+    assert harness.results is not None and harness.bindings is not None
+    resolver.inner = ForkReuseResolver(
+        forks.store, results=harness.results, bindings=harness.bindings
+    )
+    snapshot = await forks.snapshots.take(SCOPE, harness.run_id)
+    receipt = await forks.forks.fork(fork_command(snapshot))
+    started = await harness.run_control.execute(
+        command(receipt.target_run_id, 1, "derived-start", StartAction())
+    )
+    assert started.status == CommandStatus.ACCEPTED
+    harness.run_id = receipt.target_run_id
+    return harness, forks, receipt, derived_unit_identity(source_draft, receipt.target_run_id)
+
+
+async def _assert_terminated_cleanly(harness: Any, unit: Any, failure_code: str) -> None:
+    calls = len(harness.model.calls)
+    request = await harness.request(unit)
+    refused = await harness.run(request)
+    # Fail closed: the unit settles `failed` with the typed reason; no cognition runs.
+    assert (refused.status, refused.failure_code) == ("failed", failure_code)
+    assert len(harness.model.calls) == calls
+    assert harness.lineage.results[(SCOPE, unit.unit_key, 1)].status == "failed"
+    # Nothing is wedged: the claim and its effect are settled, the reservation released, the
+    # lease released, and a retry returns the same settled failure without new work.
+    effects = await harness.run_control.get_effects(SCOPE, harness.run_id)
+    assert effects.claims and all(item.settlement is not None for item in effects.claims.values())
+    budget = await harness.run_control.get_budget(SCOPE, harness.run_id)
+    assert f"reservation:{unit.unit_key}" not in budget.reservations
+    generation = harness.lineage.generations[(SCOPE, unit.unit_key, 1)]
+    assert generation.lease_expires_at is not None
+    assert generation.lease_expires_at <= harness.clock()  # released, not held
+    retry = await harness.service.execute(request, harness.attempt(request))
+    assert (retry.status, retry.failure_code) == ("failed", failure_code)
+    assert len(harness.model.calls) == calls
+
+
+@pytest.mark.asyncio
+async def test_incompatible_restore_settles_failed_and_does_not_wedge_the_run() -> None:
+    harness, forks, receipt, derived_draft = await _forked_harness()
+    key = (SCOPE, receipt.target_run_id, derived_draft.unit_key)
+    decision = forks.store.decisions[key]
+    assert decision.candidate is not None
+    forks.store.decisions[key] = decision.model_copy(
+        update={
+            "candidate": decision.candidate.model_copy(
+                update={"state_schema_digest": "sha256:" + "9" * 64}
+            )
+        }
+    )
+    await _assert_terminated_cleanly(harness, derived_draft, "incompatible_restore")
+
+
+@pytest.mark.asyncio
+async def test_missing_fork_lineage_of_a_fork_derived_run_fails_closed() -> None:
+    harness, forks, receipt, derived_draft = await _forked_harness()
+    # The fork row and its decisions are gone (for example purged); the derived run's
+    # admission transition still names the fork, so execution must not fall back to fresh.
+    assert await forks.store.fork_marker(SCOPE, receipt.target_run_id) == receipt.request_id
+    forks.store.requests.clear()
+    forks.store.decisions.clear()
+    assert await forks.store.fork_of_run(SCOPE, receipt.target_run_id) is None
+    await _assert_terminated_cleanly(harness, derived_draft, "fork_lineage_missing")

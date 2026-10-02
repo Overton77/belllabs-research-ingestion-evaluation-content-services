@@ -21,6 +21,7 @@ from app.application.runtime.run_forks import (
     ForkOfRun,
     ForkSourceFacts,
     LinkedRunRecord,
+    fork_marker_of,
 )
 from app.application.runtime.runtime_lineage import PersistedExecutionLineage
 from app.domain.control_plane.canonical import stable_json_digest, stable_json_dump
@@ -84,8 +85,9 @@ class PostgresRunSnapshotRepository:
             if prior is not None:
                 if prior["snapshot_digest"] != snapshot.snapshot_digest:
                     raise ForkRejected(
-                        "stale_snapshot",
-                        "a different snapshot is recorded for this run version and boundary",
+                        "snapshot_digest_conflict",
+                        "the same run version and boundary produced a different snapshot",
+                        reasons=(prior["snapshot_digest"], snapshot.snapshot_digest),
                     )
                 return RunSnapshotManifest.model_validate(_load(prior["manifest"]))
             await connection.execute(
@@ -297,6 +299,25 @@ class PostgresForkMaterializationStore:
         if row is None:
             return None
         return ForkOfRun(fork_request_id=row["request_id"], materialized=row["materialized"])
+
+    async def fork_marker(self, request_scope: str, run_id: str) -> str | None:
+        """The fork request id named by the run's admission transition (version 1), if any."""
+
+        async with self._pool.acquire() as connection, connection.transaction():
+            await _scope(connection, request_scope)
+            payload = await connection.fetchval(
+                """
+                SELECT t.transition
+                FROM belllabs_control.lifecycle_transitions t
+                JOIN belllabs_control.workflow_runs r ON r.run_id = t.run_id
+                WHERE r.request_scope = $1 AND t.run_id = $2 AND t.resulting_version = 1
+                """,
+                request_scope,
+                run_id,
+            )
+        if payload is None:
+            return None
+        return fork_marker_of(tuple(_load(payload).get("evidence_refs", ())))
 
     async def get_reuse_decision(
         self, request_scope: str, derived_run_id: str, derived_unit_key: str
