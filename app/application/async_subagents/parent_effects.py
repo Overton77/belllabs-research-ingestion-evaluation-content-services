@@ -8,7 +8,9 @@ Every child is, in the parent run's ledger:
   (`effect_kind = async_subagent.child`), so the parent's narrowed post-dispatch rule
   (`unsettled_effect_ids`, RRM-004) sees an unsettled or ambiguous child and settles
   `in_doubt` instead of `failed`;
-- a registered async child, so the run cannot terminalize before a result decision.
+- a registered async child, so the run cannot terminalize before a result decision; the
+  parent's result decision is recorded against the child's terminal lifecycle fact
+  (`DecideAsyncChildFactAction`), which is what releases the run's terminalization (RRM-008).
 
 Usage settles exactly once: attributed amounts are consumed, unused reservation is released,
 and amounts the provider could not attribute stay `pending_external` and leave the effect
@@ -28,10 +30,12 @@ from app.domain.control_plane.canonical import sha256_digest
 from app.domain.run_control.contracts import (
     ActorContext,
     ApplyAuthorityBatchAction,
+    AsyncChildDecisionOutcome,
     AsyncChildDependencyClass,
     ClaimEffectAction,
     CommandResult,
     CommandStatus,
+    DecideAsyncChildFactAction,
     EffectDisposition,
     EffectSettlementOutcome,
     LifecycleAction,
@@ -47,6 +51,13 @@ from app.domain.run_control.contracts import (
 
 ASYNC_CHILD_EFFECT_KIND = "async_subagent.child"
 ISSUER = "async-subagent-service"
+TERMINAL_LIFECYCLE_FACTS = frozenset({"succeeded", "failed", "cancelled"})
+DECISION_OUTCOMES: dict[str, AsyncChildDecisionOutcome] = {
+    "admit": AsyncChildDecisionOutcome.ACCEPTED,
+    "conditionally_admit": AsyncChildDecisionOutcome.ACCEPTED,
+    "reject": AsyncChildDecisionOutcome.REJECTED,
+    "defer": AsyncChildDecisionOutcome.DEFERRED,
+}
 
 
 def async_child_effect_id(child_execution_id: str) -> str:
@@ -66,10 +77,12 @@ class RunControlAsyncChildEffects:
         *,
         actor: ActorContext,
         now: Callable[[], datetime] | None = None,
+        decision_authority_ref: str | None = None,
     ) -> None:
         self._run_control = run_control
         self._actor = actor
         self._now = now
+        self._decision_authority_ref = decision_authority_ref
 
     async def reserve_and_claim(
         self, request: AsyncSubagentSpawnRequest, child_execution_id: str
@@ -181,6 +194,72 @@ class RunControlAsyncChildEffects:
             correlation_id=f"async-child:{child_execution_id}",
             causation_id=async_child_effect_id(child_execution_id),
             tolerated={"async_child_fact_exists"},
+        )
+
+    async def decide_result(
+        self,
+        request_scope: str,
+        parent_run_id: str,
+        child_execution_id: str,
+        *,
+        decision: Literal["admit", "conditionally_admit", "reject", "defer"],
+        decision_ref: str,
+        decided_at: datetime,
+    ) -> None:
+        """Record the parent's result decision against the child's terminal lifecycle fact.
+
+        RRM-008: a required or degradable child blocks the run's terminalization until a
+        final (accepted/rejected) decision is recorded in run control, so the decision the
+        async service journals on the link is also the run's authoritative decision. It needs
+        the child's terminal lifecycle fact (`observe` records it); deciding a child whose
+        terminal state run control never observed is refused, never assumed.
+        """
+
+        run = await self._run_control.get_run(request_scope, parent_run_id)
+        child = next(
+            (item for item in run.async_children if item.child_execution_id == child_execution_id),
+            None,
+        )
+        if child is None:
+            raise AsyncSubagentError(
+                f"async child {child_execution_id} is not registered with run {parent_run_id}"
+            )
+        terminal = [
+            fact
+            for fact in child.facts
+            if fact.fact_kind == "lifecycle" and fact.lifecycle_status in TERMINAL_LIFECYCLE_FACTS
+        ]
+        if not terminal:
+            raise AsyncSubagentError(
+                f"async child {child_execution_id} has no terminal lifecycle fact to decide"
+            )
+        fact = max(terminal, key=lambda item: (item.observed_at, item.fact_id))
+        authority_ref = self._decision_authority_ref
+        if authority_ref is None:
+            if len(self._actor.authority_refs) != 1:
+                raise AsyncSubagentError(
+                    "async child decisions need one decision authority ref (actor has "
+                    f"{len(self._actor.authority_refs)})"
+                )
+            [authority_ref] = self._actor.authority_refs
+        outcome = DECISION_OUTCOMES[decision]
+        await self._execute(
+            request_scope,
+            parent_run_id,
+            command_id=f"async-child-decision:{child_execution_id}:{fact.fact_id}:{outcome.value}",
+            action=DecideAsyncChildFactAction(
+                decision_id=f"async-child-decision:{child_execution_id}:{outcome.value}",
+                fact_id=fact.fact_id,
+                outcome=outcome,
+                authority_ref=authority_ref,
+                reason=f"parent decided {decision} on {decision_ref}",
+            ),
+            reason=f"Record the parent's {decision} decision on the async child result",
+            evidence_refs=(decision_ref,),
+            occurred_at=decided_at,
+            correlation_id=f"async-child:{child_execution_id}",
+            causation_id=async_child_effect_id(child_execution_id),
+            tolerated={"async_child_decision_exists", "async_child_fact_decided"},
         )
 
     async def settle_usage(

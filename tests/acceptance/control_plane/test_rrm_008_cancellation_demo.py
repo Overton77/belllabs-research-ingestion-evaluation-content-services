@@ -489,8 +489,15 @@ async def _goal_cancellation(
             )
             async with Facade(authority) as facade:
                 async with _goal_worker(
-                    env, pool, family_pool, dsn, tmp_path / "results", "rrm008-worker", documents,
-                    model, live=live,
+                    env,
+                    pool,
+                    family_pool,
+                    dsn,
+                    tmp_path / "results",
+                    "rrm008-worker",
+                    documents,
+                    model,
+                    live=live,
                 ) as (composition, async_service):
                     entered, _gate = model.gate_on(2 if live else 1)
                     submitted = await _submitter(env.client).submit(
@@ -608,15 +615,27 @@ async def _goal_cancellation(
 
 
 async def _await_child(service: AsyncSubagentService, child_id: str) -> Any:
+    """Wait for the child's terminal lifecycle and the parent's settlement of it.
+
+    The parent's `cancel_children` settles the child (`usage_disposition`) after the
+    provider's terminal state is observed; reading the budget before that settlement would
+    observe the still-open child effect, not the pending usage it leaves behind.
+    """
+
     async with asyncio.timeout(240):
         while True:
             execution = await service.execution(SCOPE, child_id)
-            if execution.lifecycle in {
-                AsyncSubagentLifecycle.CANCELLED,
-                AsyncSubagentLifecycle.COMPLETED,
-                AsyncSubagentLifecycle.FAILED,
-                AsyncSubagentLifecycle.ORPHANED,
-            }:
+            link = await service.link(SCOPE, child_id)
+            if (
+                execution.lifecycle
+                in {
+                    AsyncSubagentLifecycle.CANCELLED,
+                    AsyncSubagentLifecycle.COMPLETED,
+                    AsyncSubagentLifecycle.FAILED,
+                    AsyncSubagentLifecycle.ORPHANED,
+                }
+                and link.usage_disposition is not None
+            ):
                 return execution
             await asyncio.sleep(2)
 

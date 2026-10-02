@@ -217,11 +217,10 @@ class AsyncSubagentAuthorityPort(Protocol):
     async def request_cancellation(
         self, request_scope: str, child_execution_id: str, reason: str
     ) -> None: ...
-    async def list_child_ids(
-        self, request_scope: str, parent_binding_id: str
-    ) -> tuple[str, ...]:
+    async def list_child_ids(self, request_scope: str, parent_binding_id: str) -> tuple[str, ...]:
         """RRM-008: every child the parent operation binding spawned, in admission order."""
         ...
+
     async def decide_result(
         self,
         request_scope: str,
@@ -276,6 +275,19 @@ class AsyncSubagentParentEffectsPort(Protocol):
         settlement_revision: int,
         settled_at: datetime,
     ) -> Literal["settled", "pending_usage"]: ...
+
+    async def decide_result(
+        self,
+        request_scope: str,
+        parent_run_id: str,
+        child_execution_id: str,
+        *,
+        decision: Literal["admit", "conditionally_admit", "reject", "defer"],
+        decision_ref: str,
+        decided_at: datetime,
+    ) -> None:
+        """RRM-008: record the parent's decision on the child's terminal fact in run control."""
+        ...
 
 
 class AsyncSubagentProviderPort(Protocol):
@@ -1203,6 +1215,17 @@ class AsyncSubagentService:
         await self._authority.decide_result(
             request_scope, child_execution_id, decision, decision_ref
         )
+        if self._parent_effects is not None:
+            # RRM-008: the run cannot terminalize while a required or degradable child has
+            # no final decision; the link's decision is recorded on the run's child fact.
+            await self._parent_effects.decide_result(
+                request_scope,
+                execution.parent_run_id,
+                child_execution_id,
+                decision=decision,
+                decision_ref=decision_ref,
+                decided_at=decided_at,
+            )
         updated = link.model_copy(
             update={
                 "result_decision": decision,
@@ -1691,9 +1714,7 @@ class InMemoryAsyncSubagentAuthority:
     ) -> None:
         self.cancellations.setdefault((request_scope, child_execution_id), reason)
 
-    async def list_child_ids(
-        self, request_scope: str, parent_binding_id: str
-    ) -> tuple[str, ...]:
+    async def list_child_ids(self, request_scope: str, parent_binding_id: str) -> tuple[str, ...]:
         return tuple(
             child_id
             for (scope, child_id), execution in self.states.items()

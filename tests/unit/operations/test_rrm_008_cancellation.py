@@ -507,6 +507,15 @@ async def test_cancel_during_async_work_cancels_the_child_and_leaves_its_usage_p
     effects = await harness.run_control.get_effects("tenant-1", harness.run_id)
     child_claim = effects.claims[async_child_effect_id(child.child_execution_id)]
     assert child_claim.settlement is None, "pending usage keeps the child effect unsettled"
+    # The rejection is the run's authoritative decision on the child's terminal fact, so the
+    # cancelled run is not held by `unresolved_async_children` once its usage settles.
+    run = await harness.run_control.get_run("tenant-1", harness.run_id)
+    [child_state] = [
+        item for item in run.async_children if item.child_execution_id == child.child_execution_id
+    ]
+    assert [(item.fact_id, item.outcome.value) for item in child_state.decisions] == [
+        (f"async-child-fact:async-terminal:{child.child_execution_id}", "rejected")
+    ]
     budget = await harness.run_control.get_budget("tenant-1", harness.run_id)
     child_usage = budget.usage_records[async_child_usage_id(child.child_execution_id)]
     assert child_usage.pending_external_amounts == {"tokens.total": 5}
