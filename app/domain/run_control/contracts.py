@@ -427,6 +427,9 @@ class SettlePendingUsageAction(Contract):
     usage_id: str = Field(min_length=1)
     actual_amounts: dict[str, int]
     pending_release_amounts: dict[str, int] = Field(default_factory=dict)
+    # Attributed usage above the originating pending amounts (REQ-CP-RUN-009: a provider fact
+    # is recorded in full). It is consumed on top of the exact pending reconciliation.
+    overage_amounts: dict[str, int] = Field(default_factory=dict)
 
 
 class ClaimEffectAction(Contract):

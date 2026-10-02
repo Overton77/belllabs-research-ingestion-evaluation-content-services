@@ -884,6 +884,15 @@ def _validate_amounts(state: BudgetState, amounts: dict[str, int]) -> None:
 
 
 def _enforce_hard_caps(state: BudgetState) -> None:
+    """Hard caps bound reservation, not consumption.
+
+    A reservation that would take reserved + consumed + pending over the cap is rejected.
+    Recording usage and settling pending usage record facts the provider already produced
+    (including usage above the reservation, and `overage_amounts` above a pending ceiling);
+    they are never rejected for the cap, so the ledger never drops consumption. Once
+    consumption exceeds the cap, every further reservation is rejected.
+    """
+
     for limit in state.limits:
         if limit.hard_cap is None:
             continue
@@ -1049,6 +1058,7 @@ def _settle_pending(
 ) -> tuple[BudgetState, tuple[BudgetLedgerEntry, ...]]:
     _validate_amounts(state, action.actual_amounts)
     _validate_amounts(state, action.pending_release_amounts)
+    _validate_amounts(state, action.overage_amounts)
     if action.settlement_id in state.usage_ids:
         raise ReductionRejected(
             "settlement_identity_collision",
@@ -1110,10 +1120,17 @@ def _settle_pending(
             )
         pending[dimension] = pending.get(dimension, 0) - actual - release
         consumed[dimension] = consumed.get(dimension, 0) + actual
+    overage = {dimension: amount for dimension, amount in action.overage_amounts.items() if amount}
+    for dimension, amount in overage.items():
+        # Attributed usage above the pending ceiling is a fact: consumed, never dropped.
+        consumed[dimension] = consumed.get(dimension, 0) + amount
+    settled_amounts = dict(action.actual_amounts)
+    for dimension, amount in overage.items():
+        settled_amounts[dimension] = settled_amounts.get(dimension, 0) + amount
     settlement = _usage_settlement_record(
         settlement_id=action.settlement_id,
         usage=usage,
-        settled_amounts=action.actual_amounts,
+        settled_amounts=settled_amounts,
         released_amounts=action.pending_release_amounts,
         source_pending_amounts=source_pending,
     )
@@ -1135,6 +1152,16 @@ def _settle_pending(
             state, BudgetLedgerKind.SETTLEMENT, action.settlement_id, action.actual_amounts, command
         )
     ]
+    if overage:
+        entries.append(
+            _ledger_entry(
+                state,
+                BudgetLedgerKind.CONSUMPTION,
+                f"{action.settlement_id}:overage",
+                overage,
+                command,
+            )
+        )
     if action.pending_release_amounts:
         entries.append(
             _ledger_entry(

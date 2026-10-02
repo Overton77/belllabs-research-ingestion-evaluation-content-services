@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-from deepagents.middleware import async_subagents as deepagents_async
 
 from app.application.async_subagents.service import (
     AsyncSubagentError,
@@ -14,12 +13,20 @@ from app.application.async_subagents.service import (
     ProviderAsyncObservation,
 )
 from app.domain.control_plane.canonical import sha256_digest
+from app.domain.operation_execution.async_subagent_reconciliation import (
+    AsyncProviderRunObservation,
+    AsyncProviderRunRecord,
+    AsyncServedGraphIdentity,
+    AsyncSpawnKeyObservation,
+)
 from app.domain.operation_execution.contracts import (
+    AsyncProviderCheckpointKey,
     AsyncSubagentContract,
     AsyncSubagentDependencyClass,
     AsyncSubagentExecution,
     AsyncSubagentLifecycle,
     AsyncSubagentMessage,
+    AsyncSubagentUsage,
     CapabilityGrant,
 )
 from app.domain.operation_execution.delegation import (
@@ -29,8 +36,16 @@ from app.domain.operation_execution.delegation import (
 from app.integrations.agents.deep_agents.async_subagents import (
     DeepAgentsAsyncSubagentAdapter,
 )
+from tests.fixtures.fake_agent_protocol import FakeAgentProtocolClient, install
 
 NOW = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
+GRAPH_BINDING_DIGEST = sha256_digest("research-graph-binding")
+SERVED = AsyncServedGraphIdentity(
+    graph_id="research-graph",
+    graph_revision="agent.research@1",
+    graph_binding_digest=GRAPH_BINDING_DIGEST,
+    deepagents_version="0.7.5",
+)
 
 
 def contract() -> AsyncSubagentContract:
@@ -39,14 +54,17 @@ def contract() -> AsyncSubagentContract:
         name="researcher",
         description="Bounded background research",
         graph_id="research-graph",
+        graph_revision="agent.research@1",
+        graph_binding_digest=GRAPH_BINDING_DIGEST,
         agent_protocol_url="https://agent.example.test",
+        deployment_credential_ref="environment:AGENT_SERVER_TOKEN",
         objective_schema_ref="schema:objective:v1",
         result_schema_ref="schema:result:v1",
         context_slice_id="context:child",
         state_slice_id="state:child",
         capability_ceiling=CapabilityGrant(capabilities=frozenset({"search"})),
         authority_refs=("authority:parent-operation",),
-        budget_limits={"subagent.spawns": 1, "tokens.total": 1_000},
+        budget_limits={"model.turns": 1, "tokens.total": 1_000},
         dependency_classes=frozenset(AsyncSubagentDependencyClass),
         timeout_seconds=300,
         cancellation_propagation="required",
@@ -76,11 +94,28 @@ def request(
     )
 
 
+def checkpoint() -> AsyncProviderCheckpointKey:
+    return AsyncProviderCheckpointKey(
+        agent_protocol_url="https://agent.example.test",
+        thread_id="provider-thread-1",
+        checkpoint_id="checkpoint-1",
+        graph_id="research-graph",
+        graph_revision="agent.research@1",
+        graph_binding_digest=GRAPH_BINDING_DIGEST,
+    )
+
+
 class DeterministicProvider:
     def __init__(self, events: list[str]) -> None:
         self.events = events
         self.starts = 0
         self.next_status = "running"
+
+    async def verify_served_graph(
+        self, _contract: AsyncSubagentContract
+    ) -> AsyncServedGraphIdentity:
+        self.events.append("provider.verify")
+        return SERVED
 
     async def start(
         self,
@@ -91,6 +126,20 @@ class DeterministicProvider:
         self.events.append("provider.start")
         self.starts += 1
         return self._observation("running")
+
+    async def observe_spawn_key(
+        self, _contract: AsyncSubagentContract, execution: AsyncSubagentExecution
+    ) -> AsyncSpawnKeyObservation:
+        self.events.append("provider.observe")
+        return AsyncSpawnKeyObservation(
+            thread_id=execution.child_execution_id,
+            runs=(
+                (AsyncProviderRunObservation(run_id="provider-run-1", status="running"),)
+                if self.starts
+                else ()
+            ),
+            observed_at=NOW,
+        )
 
     async def check(
         self, _contract: AsyncSubagentContract, _execution: AsyncSubagentExecution
@@ -111,7 +160,24 @@ class DeterministicProvider:
         self, _contract: AsyncSubagentContract, _execution: AsyncSubagentExecution
     ) -> ProviderAsyncObservation:
         self.events.append("provider.cancel")
-        return self._observation("cancelled")
+        return self._observation("cancelled", receipt="provider_acknowledged")
+
+    async def cancel_run(
+        self,
+        _contract: AsyncSubagentContract,
+        execution: AsyncSubagentExecution,
+        run_id: str,
+    ) -> AsyncProviderRunRecord:
+        self.events.append("provider.cancel_run")
+        return AsyncProviderRunRecord(
+            child_execution_id=execution.child_execution_id,
+            provider_thread_id=execution.child_execution_id,
+            provider_run_id=run_id,
+            disposition="duplicate_cancelled",
+            provider_status="interrupted",
+            usage=AsyncSubagentUsage(provider_run_id=run_id, attribution="pending"),
+            observed_at=NOW,
+        )
 
     async def list(
         self, executions: tuple[tuple[AsyncSubagentContract, AsyncSubagentExecution], ...]
@@ -119,16 +185,28 @@ class DeterministicProvider:
         return tuple(self._observation("running") for _ in executions)
 
     @staticmethod
-    def _observation(status: str, run_id: str = "provider-run-1") -> ProviderAsyncObservation:
+    def _observation(
+        status: str, run_id: str = "provider-run-1", receipt: str | None = None
+    ) -> ProviderAsyncObservation:
         terminal = status == "success"
         return ProviderAsyncObservation(
             status=status,  # type: ignore[arg-type]
             thread_id="provider-thread-1",
             run_id=run_id,
             output_ref="ref:output:1" if terminal else None,
+            output_text="canonical child result" if terminal else None,
             evidence_refs=("ref:evidence:1",) if terminal else (),
-            usage_ref="ref:usage:1" if terminal else None,
-            checkpoint_ref="ref:checkpoint:1" if terminal else None,
+            usage=(
+                AsyncSubagentUsage(
+                    provider_run_id=run_id,
+                    attribution="provider_attributed",
+                    attributed_amounts={"model.turns": 1, "tokens.total": 7},
+                )
+                if terminal
+                else None
+            ),
+            checkpoint=checkpoint() if terminal else None,
+            cancellation_receipt=receipt,  # type: ignore[arg-type]
             observed_at=NOW,
         )
 
@@ -182,15 +260,18 @@ async def test_spawn_persists_contract_link_and_reservation_before_provider_subm
     service, details, authority, provider, spawn = fixture_service()
     execution = await service.spawn(spawn)
 
-    assert provider.events[:3] == [
+    assert provider.events[:4] == [
         "mongo.contract-link-execution",
         "postgres.reservation-link-admission",
+        "provider.verify",
         "provider.start",
     ]
     assert execution.lifecycle == AsyncSubagentLifecycle.RUNNING
     assert execution.provider_thread_id == "provider-thread-1"
     assert (spawn.request_scope, execution.child_execution_id) in details.executions
     assert (spawn.request_scope, execution.child_execution_id) in authority.reservations
+    fence = authority.fences[(spawn.request_scope, execution.child_execution_id)]
+    assert fence["fence"] == 1 and fence["holder"] is None
 
 
 @pytest.mark.asyncio
@@ -318,6 +399,13 @@ async def test_completed_output_cannot_change_parent_before_explicit_admission_o
     completed = await service.reconcile(spawn.request_scope, execution.child_execution_id)
 
     assert completed.result_manifest is not None
+    assert completed.result_manifest.provider_checkpoint == checkpoint()
+    assert completed.result_manifest.checkpoint_ref == checkpoint().ref
+    assert completed.result_manifest.usage.attributed_amounts == {
+        "model.turns": 1,
+        "tokens.total": 7,
+    }
+    assert completed.result_output_text == "canonical child result"
     link = await details.get_link(spawn.request_scope, execution.child_execution_id)
     assert link.result_decision is None
     assert not authority.decisions
@@ -330,6 +418,10 @@ async def test_completed_output_cannot_change_parent_before_explicit_admission_o
             current_generation=1,
             decided_at=NOW,
         )
+    assert any(
+        kind == "result" and ref.startswith("late_rejected:")
+        for _scope, _child, kind, ref in authority.facts
+    )
     admitted = await service.decide_result(
         spawn.request_scope,
         execution.child_execution_id,
@@ -358,7 +450,7 @@ async def test_completed_output_cannot_change_parent_before_explicit_admission_o
 
 
 @pytest.mark.asyncio
-async def test_cancellation_is_authorized_before_provider_and_reconciled() -> None:
+async def test_cancellation_is_authorized_before_provider_and_acknowledgement_recorded() -> None:
     service, details, authority, provider, spawn = fixture_service()
     execution = await service.spawn(spawn)
     cancelled = await service.cancel(
@@ -369,6 +461,13 @@ async def test_cancellation_is_authorized_before_provider_and_reconciled() -> No
     assert provider.events[-1] == "provider.cancel"
     link = await details.get_link(spawn.request_scope, execution.child_execution_id)
     assert link.cancellation_requested
+    assert link.cancellation_receipt == "provider_acknowledged"
+    assert (
+        spawn.request_scope,
+        execution.child_execution_id,
+        "cancellation",
+        "provider_acknowledged",
+    ) in authority.facts
 
 
 @pytest.mark.parametrize(
@@ -388,7 +487,9 @@ def test_governance_classifier_never_launches_hidden_work(
 
 
 def test_actual_deep_agents_075_middleware_surface_is_wrapped_exactly() -> None:
-    adapter = DeepAgentsAsyncSubagentAdapter(now=lambda: NOW)
+    adapter = DeepAgentsAsyncSubagentAdapter(
+        now=lambda: NOW, secrets={"environment:AGENT_SERVER_TOKEN": "offline"}
+    )
     tools = adapter._tools(contract())  # qualification inspects the actual installed mechanism
     assert tuple(tools) == adapter.tool_names
     assert sha256_digest(tuple(tools)) == sha256_digest(adapter.tool_names)
@@ -398,60 +499,44 @@ def test_actual_deep_agents_075_middleware_surface_is_wrapped_exactly() -> None:
 async def test_actual_middleware_start_and_check_are_governed_before_sdk_submission(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls: list[str] = []
+    """Offline regression against the fake Agent Protocol client (never a live gate)."""
 
-    class Threads:
-        async def create(self, **kwargs: object) -> dict[str, str]:
-            calls.append("sdk.threads.create")
-            return {"thread_id": str(kwargs["thread_id"])}
-
-        async def get(self, *, thread_id: str) -> dict[str, object]:
-            assert thread_id
-            return {"values": {"messages": [{"content": "canonical child result"}]}}
-
-    class Runs:
-        created: dict[str, object] | None = None
-
-        async def list(self, **_kwargs: object) -> list[dict[str, object]]:
-            return [self.created] if self.created is not None else []
-
-        async def create(self, **kwargs: object) -> dict[str, object]:
-            calls.append("sdk.runs.create")
-            self.created = {
-                "run_id": "provider-run-1",
-                "status": "running",
-                "metadata": {"belllabs_spawn_key": kwargs["thread_id"]},
-            }
-            return self.created
-
-        async def get(self, **_kwargs: object) -> dict[str, str]:
-            calls.append("sdk.runs.get")
-            return {"run_id": "provider-run-1", "status": "success"}
-
-        async def cancel(self, **_kwargs: object) -> None:
-            calls.append("sdk.runs.cancel")
-
-    class Client:
-        threads = Threads()
-        runs = Runs()
-
-    monkeypatch.setattr(deepagents_async, "get_client", lambda **_kwargs: Client())
+    client = FakeAgentProtocolClient(served=SERVED)
+    install(monkeypatch, client)
     details = InMemoryAsyncSubagentDetailRepository()
     authority = InMemoryAsyncSubagentAuthority()
-    provider = DeepAgentsAsyncSubagentAdapter(now=lambda: NOW)
+    secrets = {"environment:AGENT_SERVER_TOKEN": "offline-token"}
+    provider = DeepAgentsAsyncSubagentAdapter(now=lambda: NOW, secrets=secrets)
     service = AsyncSubagentService(details, authority, provider, allow_new_spawns=True)
 
     execution = await service.spawn(request())
     assert authority.reservations
-    assert calls[:2] == ["sdk.threads.create", "sdk.runs.create"]
+    assert client.calls[:3] == [
+        "http.get:/belllabs/async-subagents/served-graphs",
+        "sdk.threads.create",
+        "sdk.runs.list",
+    ]
+    assert client.calls.count("sdk.runs.create") == 1
+    created = client.runs_of(execution.child_execution_id)[0]
+    assert created["metadata"]["belllabs_spawn_key"] == execution.child_execution_id
+    assert created["multitask_strategy"] == "reject"
     await provider.start(contract(), execution, "retry after ambiguous provider response")
-    assert calls.count("sdk.runs.create") == 1
+    assert client.calls.count("sdk.runs.create") == 1
+    client.complete(execution.child_execution_id, "canonical child result")
     recovered_service = AsyncSubagentService(
         details,
         authority,
-        DeepAgentsAsyncSubagentAdapter(now=lambda: NOW),
+        DeepAgentsAsyncSubagentAdapter(now=lambda: NOW, secrets=secrets),
     )
     completed = await recovered_service.reconcile("tenant-a", execution.child_execution_id)
     assert completed.lifecycle == AsyncSubagentLifecycle.COMPLETED
     assert completed.result_manifest is not None
     assert completed.result_manifest.output_refs[0].startswith("ref:async-output:")
+    assert completed.result_manifest.provider_checkpoint.graph_binding_digest == (
+        GRAPH_BINDING_DIGEST
+    )
+    assert completed.result_manifest.usage.attribution == "provider_attributed"
+    assert completed.result_manifest.usage.attributed_amounts == {
+        "model.turns": 1,
+        "tokens.total": 7,
+    }

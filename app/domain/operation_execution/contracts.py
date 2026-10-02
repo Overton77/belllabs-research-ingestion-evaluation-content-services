@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Final, Literal
 
 from pydantic import (
     AwareDatetime,
@@ -612,10 +612,39 @@ class AsyncSubagentLifecycle(StrEnum):
     FAILED = "failed"
     CANCELLED = "cancelled"
     ORPHANED = "orphaned"
+    # AMD-RRM-001 (REQ-CP-DA-008): an ambiguous submission or observation. It exits only by
+    # observation (exactly one verified provider run, or none) or by the typed operator
+    # decisions `adopt_provider_run` / `orphan_child`; never by a second spawn.
+    IN_DOUBT = "in_doubt"
+
+
+ACTIVE_ASYNC_SUBAGENT_LIFECYCLES: Final = frozenset(
+    {
+        AsyncSubagentLifecycle.ADMITTED,
+        AsyncSubagentLifecycle.SUBMITTED,
+        AsyncSubagentLifecycle.RUNNING,
+        AsyncSubagentLifecycle.WAITING,
+        AsyncSubagentLifecycle.IN_DOUBT,
+    }
+)
+"""Lifecycles under which a child may still hold or produce provider work (REQ-CP-EXEC-016)."""
+
+AsyncSubagentInDoubtReason = Literal[
+    "submission_unobservable",
+    "multiple_provider_runs",
+    "graph_identity_mismatch",
+    "provider_binding_lost",
+]
 
 
 class AsyncSubagentContract(Contract):
-    """Immutable BellLabs ceiling for one permitted background subordinate."""
+    """Immutable BellLabs ceiling for one permitted background subordinate.
+
+    AMD-RRM-001 (REQ-CP-DA-019): the hosted graph is identified exactly by `graph_id`,
+    `graph_revision` and `graph_binding_digest` (the digest of the exact BellLabs binding the
+    Agent Server materializes it from). `deployment_credential_ref` names the credential the
+    parent presents to the deployment; it is a reference only and never a secret value.
+    """
 
     schema_version: Literal["belllabs.async-subagent-contract.v1"] = (
         "belllabs.async-subagent-contract.v1"
@@ -624,7 +653,12 @@ class AsyncSubagentContract(Contract):
     name: str = Field(pattern=r"^[a-z][a-z0-9_-]*$")
     description: str = Field(min_length=1)
     graph_id: str = Field(min_length=1)
+    graph_revision: str = Field(min_length=1, max_length=256)
+    graph_binding_digest: str = Field(pattern=DIGEST_PATTERN)
     agent_protocol_url: str = Field(min_length=1)
+    deployment_credential_ref: str | None = Field(
+        default=None, pattern=r"^(environment|vault|aws-secrets-manager):[A-Za-z0-9_./:-]+$"
+    )
     objective_schema_ref: str = Field(min_length=1)
     result_schema_ref: str = Field(min_length=1)
     context_slice_id: str = Field(min_length=1)
@@ -663,6 +697,61 @@ class AsyncSubagentContract(Contract):
         return cls(**complete, contract_digest=sha256_digest(complete))
 
 
+class AsyncProviderCheckpointKey(Contract):
+    """The provider's qualified checkpoint key of an async child (REQ-CP-DA-011, AMD-RRM-001).
+
+    Thread, namespace as reported, checkpoint ID, and the served graph identity verified under
+    REQ-CP-DA-019. A thread-only reference is insufficient.
+    """
+
+    schema_version: Literal["belllabs.async-provider-checkpoint-key.v1"] = (
+        "belllabs.async-provider-checkpoint-key.v1"
+    )
+    agent_protocol_url: str = Field(min_length=1)
+    thread_id: str = Field(min_length=1, max_length=1024)
+    checkpoint_ns: str = Field(default="", max_length=1024)
+    checkpoint_id: str = Field(min_length=1, max_length=256)
+    graph_id: str = Field(min_length=1)
+    graph_revision: str = Field(min_length=1, max_length=256)
+    graph_binding_digest: str = Field(pattern=DIGEST_PATTERN)
+
+    @property
+    def ref(self) -> str:
+        return (
+            f"agent-protocol-checkpoint:{self.graph_id}@{self.graph_revision}:"
+            f"{self.thread_id}:{self.checkpoint_ns}:{self.checkpoint_id}"
+        )
+
+
+class AsyncSubagentUsage(Contract):
+    """Provider-attributed child usage, or the pending amounts the provider could not attribute.
+
+    REQ-CP-DA-011 / REQ-CP-RUN-009 (AMD-RRM-001): attributed amounts settle exactly once against
+    the parent run's budget; pending or ambiguous amounts stay pending and are never dropped.
+    """
+
+    schema_version: Literal["belllabs.async-subagent-usage.v1"] = "belllabs.async-subagent-usage.v1"
+    provider_run_id: str = Field(min_length=1)
+    attribution: Literal["provider_attributed", "pending", "ambiguous"]
+    attributed_amounts: dict[str, int] = Field(default_factory=dict)
+    pending_amounts: dict[str, int] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def amounts_follow_attribution(self) -> AsyncSubagentUsage:
+        amounts = (*self.attributed_amounts.values(), *self.pending_amounts.values())
+        if any(amount < 0 for amount in amounts):
+            raise ValueError("async child usage amounts cannot be negative")
+        if self.attribution != "provider_attributed" and self.attributed_amounts:
+            raise ValueError("only provider-attributed usage carries attributed amounts")
+        return self
+
+    @property
+    def usage_ref(self) -> str:
+        return "ref:async-usage:" + sha256_digest(
+            self.model_dump(mode="python", exclude={"schema_version"})
+        ).removeprefix("sha256:")
+
+
 class AsyncSubagentResultManifest(Contract):
     schema_version: Literal["belllabs.async-subagent-result.v1"] = (
         "belllabs.async-subagent-result.v1"
@@ -674,12 +763,21 @@ class AsyncSubagentResultManifest(Contract):
     evidence_refs: tuple[str, ...] = ()
     usage_ref: str = Field(min_length=1)
     checkpoint_ref: str = Field(min_length=1)
+    # AMD-RRM-001 (REQ-CP-DA-011): the typed provider checkpoint key and attributed usage the
+    # flat refs above are derived from. `checkpoint_ref` is the key's canonical ref and
+    # `usage_ref` is the usage's content address.
+    provider_checkpoint: AsyncProviderCheckpointKey
+    usage: AsyncSubagentUsage
     effect_refs: tuple[str, ...] = ()
     completed_at: AwareDatetime
     manifest_digest: str = Field(pattern=DIGEST_PATTERN)
 
     @model_validator(mode="after")
     def validate_digest(self, info: ValidationInfo) -> AsyncSubagentResultManifest:
+        if self.checkpoint_ref != self.provider_checkpoint.ref:
+            raise ValueError("checkpoint_ref must be the provider checkpoint key's canonical ref")
+        if self.usage_ref != self.usage.usage_ref:
+            raise ValueError("usage_ref must be the typed usage's content address")
         if (
             not (info.context or {}).get("allow_placeholder_digest")
             and sha256_digest(self.model_dump(mode="python", exclude={"manifest_digest"}))
@@ -719,6 +817,13 @@ class AsyncSubagentExecution(Contract):
     provider_thread_id: str | None = Field(default=None, min_length=1)
     provider_run_id: str | None = Field(default=None, min_length=1)
     result_manifest: AsyncSubagentResultManifest | None = None
+    # Provider evidence of the completed child's final message, addressed by the manifest's
+    # output ref. It reaches the parent's cognition only after result admission (DA-011).
+    result_output_text: str | None = Field(default=None, max_length=200_000)
+    # AMD-RRM-001 (REQ-CP-DA-008): why the child is `in_doubt` and the governed incident that
+    # awaits observation or an operator decision. Both are set exactly while in doubt.
+    in_doubt_reason: AsyncSubagentInDoubtReason | None = None
+    incident_id: str | None = Field(default=None, min_length=1, max_length=256)
     created_at: AwareDatetime
     updated_at: AwareDatetime
 
@@ -734,6 +839,11 @@ class AsyncSubagentExecution(Contract):
             raise ValueError("provider identity cannot precede BellLabs admission")
         if self.lifecycle == AsyncSubagentLifecycle.COMPLETED and self.result_manifest is None:
             raise ValueError("completed async child requires a typed result manifest")
+        in_doubt = self.lifecycle == AsyncSubagentLifecycle.IN_DOUBT
+        if in_doubt != (self.in_doubt_reason is not None) or in_doubt != (
+            self.incident_id is not None
+        ):
+            raise ValueError("exactly an in_doubt child carries its reason and incident")
         return self
 
 
@@ -774,9 +884,19 @@ class ParentAsyncSubagentLink(Contract):
     messages: tuple[AsyncSubagentMessage, ...] = ()
     cancellation_requested: bool = False
     cancellation_reason: str | None = None
+    # AMD-RRM-001 (REQ-CP-DA-011 / REQ-CP-EXEC-008): whether the provider acknowledged the
+    # cancel request or its outcome stayed ambiguous; recorded, never inferred.
+    cancellation_receipt: Literal["provider_acknowledged", "ambiguous"] | None = None
+    # AMD-RRM-001 (REQ-CP-DA-008): the typed operator decision that resolved `in_doubt`.
+    reconciliation_decision: Literal["adopt_provider_run", "orphan_child"] | None = None
+    adopted_provider_run_id: str | None = Field(default=None, min_length=1)
     result_decision: Literal["admit", "conditionally_admit", "reject", "defer"] | None = None
     admitted_manifest_digest: str | None = Field(default=None, pattern=DIGEST_PATTERN)
+    # REQ-CP-RUN-009 (RRM-013 review): a settlement attempt is numbered; `settled` is true only
+    # once the parent ledger holds the child's usage with nothing pending.
     settled: bool = False
+    settlement_revision: int = Field(default=0, ge=0)
+    usage_disposition: Literal["settled", "pending_usage"] | None = None
     created_at: AwareDatetime
     updated_at: AwareDatetime
 
