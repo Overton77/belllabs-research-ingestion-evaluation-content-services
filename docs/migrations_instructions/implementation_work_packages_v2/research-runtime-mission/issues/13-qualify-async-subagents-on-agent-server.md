@@ -4,7 +4,7 @@
 
 **Blocked by:** RRM-001 and RRM-004.
 **Blocks:** RRM-008 (async-child cancellation against the real server), RRM-009 (production composition) and RRM-010.
-**Status:** implemented; independent review pending (tested head `9c1d344` on `wp/rrm-013-async-subagent-agent-server`; evidence `docs/migrations_instructions/evidence_v2/research-runtime-mission/RRM-013/README.md`)
+**Status:** accepted 2026-10-02 (tested head `235ee4a`, integration merge `d7d2f01`; [evidence](../../../evidence_v2/research-runtime-mission/RRM-013/README.md))
 **Branch:** `wp/rrm-013-async-subagent-agent-server`
 **Authority:** accepted CP-045 (`QUAL-CP-ASYNC-SUBAGENT-LIFECYCLE`, `CON-CP-ASYNC-SUBAGENT-V1`); DA async-subordinate requirements; ADR-0003 (the Agent Server is not a competing macro scheduler); REQ-CP-DA-008/011 and REQ-CP-RUN-009 (clarified), REQ-CP-DA-019 (exact non-scheduling hosting), REQ-CP-EXEC-016 (active children block snapshots), REQ-CP-RUN-011 (child lineage) — AMD-RRM-001 (accepted 2026-10-01 at meta `6c89143`, merged into meta main `a50d833`; see [RRM-001 contract authority](../RRM-001-contract-authority.md) §4)
 **Evidence:** `docs/migrations_instructions/evidence_v2/research-runtime-mission/RRM-013/`

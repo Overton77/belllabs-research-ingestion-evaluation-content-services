@@ -1,6 +1,6 @@
 # RRM-013 implementation evidence
 
-Disposition: implemented; independent review pending (see Final disposition)
+Disposition: accepted 2026-10-02 (independent review approve after three fix rounds (B1, N1-N9, G1-G3, N-A); tested head `235ee4a`; merged into integration at `d7d2f01`)
 Recorded date: 2026-10-02 (America/New_York)
 Qualification identity: RRM-013 real async subagents on a persistent local Agent Server, spawned from a Deep Agent inside `operation.execute` under BellLabs authority. Requirements: REQ-CP-DA-008 (reservation and link before submission; one provider run per child; `in_doubt` and its exits), REQ-CP-DA-011 (qualified provider checkpoint, attributed or pending usage, admission, late results, cancel acknowledgement), REQ-CP-DA-019 (exact, non-scheduling hosting; served identity), REQ-CP-RUN-009 (child usage settles to the parent budget), REQ-CP-EXEC-016 (active children block snapshots), REQ-CP-RUN-011 (child lineage read). Contracts: `CON-CP-ASYNC-SUBAGENT-V1` (AMD-RRM-001, accepted meta `main` `a50d833`); `QUAL-CP-ASYNC-SUBAGENT-LIFECYCLE` (CP-045 regression). ADR-0003 and `.cursor/rules/agent-framework-coexistence.mdc`: the Agent Server hosts only async subagent graphs.
 Base revision and head revision: base integration `a9c3f1d` (RRM-001, RRM-003, RRM-004 accepted). Integration `bb964c5` (CR-1) merged at `44495e9`; integration `d46f548` (RRM-005, RRM-015) merged at `5e4a0da` (one conflict, `tests/conftest.py`, both selector-loop entries kept). Tested code head: `9c1d344` on `wp/rrm-013-async-subagent-agent-server` (the evidence/ticket commit follows it and changes documentation only). Not merged (the coordinator owns review and merge).
@@ -352,6 +352,18 @@ Gates on `235ee4a` (N-A; lock held for the Postgres authority run and both full 
 | Full pytest with both DSNs and `--env-file` (lock) | 916 passed, 30 skipped, 2 xfailed, 0 failed (178 s) |
 | `git diff --check` | clean |
 
+## Integration merge gates (coordinator, merge commit `d7d2f01`)
+
+Tested head `235ee4a` merged `--no-ff` into `integration/research-runtime-mission` at `d7d2f01`.
+
+| Command | Result |
+|---|---|
+| `uv run --no-sync ruff check app tests scripts` | All checks passed |
+| `uv run --no-sync mypy app` | no issues, 357 files |
+| `hermetic full pytest` | 883 passed, 63 skipped, 2 xfailed, 0 failed |
+| `full pytest with Postgres/Mongo DSNs and --env-file` | 916 passed, 30 skipped, 2 xfailed, 0 failed |
+| `git diff --check` | clean |
+
 ## Final disposition
 
-implemented; independent review pending
+accepted
