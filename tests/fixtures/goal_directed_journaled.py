@@ -304,6 +304,19 @@ def goal_run_input(
     )
 
 
+def goal_start_action(run_id: str) -> Any:
+    """The family's `start` fact: it binds the run to its GoalDirected execution target,
+    which the run-control authority requires of a GoalDirected unit (review fix 1)."""
+
+    from app.domain.run_control.contracts import ExecutionTarget, StartAction
+
+    return StartAction(
+        execution_target=ExecutionTarget(
+            family="GoalDirected", family_workflow_id=f"family/{run_id}/1"
+        )
+    )
+
+
 async def admit_goal_run(run_control: RunControlService, request_id: str) -> str:
     """Admit a run whose budget bounds `goal.iterations` (the iteration reservation)."""
 
@@ -693,6 +706,7 @@ __all__: Sequence[str] = (
     "goal_blueprint",
     "goal_run_control",
     "goal_run_input",
+    "goal_start_action",
     "goal_templates",
     "goal_template_workspace",
     "governed_result_service",

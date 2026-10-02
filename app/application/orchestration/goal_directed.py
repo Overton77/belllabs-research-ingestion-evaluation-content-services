@@ -26,6 +26,7 @@ from app.domain.operation_execution.checkpoint_lineage import cognitive_session_
 from app.domain.operation_execution.contracts import (
     DeepAgentExecutionBinding,
     OperationAttemptIdentity,
+    OperationExecutionBinding,
     OperationExecutionRequest,
     OperationExecutionResult,
     OperationWorkflowRequest,
@@ -55,10 +56,15 @@ from app.domain.orchestration.goal_directed_runtime import (
     GoalOperationSettlement,
     GoalVerifierObservation,
 )
-from app.domain.orchestration.runtime_units import goal_runtime_unit, goal_unit_workspace_root
+from app.domain.orchestration.runtime_units import (
+    goal_operation_id,
+    goal_runtime_unit,
+    goal_unit_workspace_root,
+)
 from app.domain.run_control.contracts import (
     ActorContext,
     BudgetState,
+    CommandStatus,
     EffectLedgerState,
     LifecycleCommand,
     ReserveBudgetAction,
@@ -163,6 +169,18 @@ class GoalOperationSettlementUnavailable(ValueError):
     """The operation has no accepted run-control settlement the family may consume."""
 
 
+class GoalAdmissionStale(RuntimeError):
+    """An operation admission was stale: the run moved past the family's expected version."""
+
+    def __init__(self, *, current_run_version: int, phase: str) -> None:
+        super().__init__(
+            f"GoalDirected operation admission is stale: run is at version "
+            f"{current_run_version} ({phase})"
+        )
+        self.current_run_version = current_run_version
+        self.phase = phase
+
+
 class GoalOperationSettlementPort(Protocol):
     async def observe(
         self,
@@ -171,6 +189,12 @@ class GoalOperationSettlementPort(Protocol):
     ) -> GoalOperationSettlement:
         """The operation's accepted run-control settlement, or raise."""
         ...
+
+
+class GoalOperationBindingReader(Protocol):
+    async def get_binding_by_id(
+        self, binding_id: str, *, request_scope: str
+    ) -> OperationExecutionBinding | None: ...
 
 
 class GoalOperationSettlementReader(Protocol):
@@ -193,8 +217,13 @@ class RunControlGoalOperationSettlements:
     operation's usage itself (REQ-CP-RUN-006/009: a budget settles once).
     """
 
-    def __init__(self, run_control: GoalOperationSettlementReader) -> None:
+    def __init__(
+        self,
+        run_control: GoalOperationSettlementReader,
+        bindings: GoalOperationBindingReader | None = None,
+    ) -> None:
         self._run_control = run_control
+        self._bindings = bindings
 
     async def observe(
         self,
@@ -212,6 +241,18 @@ class RunControlGoalOperationSettlements:
         settlement_id = operation_settlement_id(binding_id)
         effect_claim_id = operation_effect_claim_id(scope, binding_id)
         reservation_id = operation.budget_reservation_id
+        if self._bindings is not None:
+            # Review fix 4: the binding and reservation the settlement is read under are the
+            # stored binding's, which is the exact admitted operation intent.
+            stored = await self._bindings.get_binding_by_id(binding_id, request_scope=scope)
+            if (
+                stored is None
+                or stored != bind_operation_execution_request(operation)
+                or stored.budget_reservation_id != reservation_id
+            ):
+                raise GoalOperationSettlementUnavailable(
+                    "operation binding is not the stored binding of the admitted operation"
+                )
         # Settlement facts are monotonic: read them first and the run version last, so the
         # version the family continues from is at or after the settlement.
         budget = await self._run_control.get_budget(scope, run_id)
@@ -332,12 +373,6 @@ class GoalDirectedOperationPreparationService:
         bound_revision = request.expected_run_version + 1
         operation = _instantiate_operation_request(template, request, bound_revision)
         binding = bind_operation_execution_request(operation)
-        persisted = await self._operation_bindings.create_binding(
-            binding,
-            request_scope=request.request_scope,
-        )
-        if persisted != binding:
-            raise ValueError("persisted GoalDirected operation binding differs from exact intent")
 
         operation_request_digest = sha256_digest(operation)
         operation_ref = f"goal-operation:{operation_request_digest.removeprefix('sha256:')}"
@@ -361,7 +396,13 @@ class GoalDirectedOperationPreparationService:
             convergence_action="continue",
         )
         command = LifecycleCommand(
-            command_id=f"goal-admission:{mutation.mutation_id}",
+            # RRM-016 review fix 2: a re-admission after a stale result is a new command (a
+            # stale result is stored under its command identity).
+            command_id=(
+                f"goal-admission:{mutation.mutation_id}"
+                if request.admission_attempt == 1
+                else f"goal-admission:{mutation.mutation_id}:attempt:{request.admission_attempt}"
+            ),
             idempotency_issuer="goal-directed-worker",
             request_scope=request.request_scope,
             run_id=request.run_id,
@@ -372,7 +413,7 @@ class GoalDirectedOperationPreparationService:
                 amounts=request.reservation,
             ),
             reason=f"Atomically admit GoalDirected {request.operation_role} operation",
-            evidence_refs=(operation_ref, persisted.binding_id),
+            evidence_refs=(operation_ref, binding.binding_id),
             occurred_at=request.decided_at,
             correlation_id=(
                 f"goal:{request.run_id}:iteration:{request.goal_iteration}:"
@@ -382,11 +423,28 @@ class GoalDirectedOperationPreparationService:
         )
         receipt = await self._run_control.execute_family_admission(command, mutation)
         if receipt.family_receipt is None:
+            if receipt.command_result.status == CommandStatus.STALE:
+                # A command outside the family moved the run between the family's read of
+                # its version and this admission. Nothing was admitted or bound; the family
+                # decides (re-admit once at the current version, or enter cancellation).
+                raise GoalAdmissionStale(
+                    current_run_version=receipt.command_result.resulting_run_version,
+                    phase=receipt.command_result.phase.value,
+                )
             raise ValueError("GoalDirected operation admission was not accepted")
         if receipt.command_result.resulting_run_version != bound_revision:
             raise ValueError(
                 "GoalDirected operation admission did not produce the bound run revision"
             )
+        # The binding is persisted only once its admission is accepted (review fix 2): a
+        # stale admission leaves no binding behind, so the re-admission binds the same
+        # semantic attempt at the new revision without an identity conflict.
+        persisted = await self._operation_bindings.create_binding(
+            binding,
+            request_scope=request.request_scope,
+        )
+        if persisted != binding:
+            raise ValueError("persisted GoalDirected operation binding differs from exact intent")
         workflow_request = OperationWorkflowRequest(
             semantic_attempt_id=operation.identity.semantic_key,
             execution_generation=request.execution_generation,
@@ -672,9 +730,7 @@ def _instantiate_operation_request(
     request: GoalOperationPreparationRequest,
     bound_revision: int,
 ) -> OperationExecutionRequest:
-    operation_id = (
-        f"goal-iteration/{request.goal_iteration}/{request.operation_role}"
-    )
+    operation_id = goal_operation_id(request.goal_iteration, request.operation_role)
     identity = OperationAttemptIdentity(
         run_id=request.run_id,
         operation_id=operation_id,
@@ -849,6 +905,11 @@ def _workspace_for(
     role_root = goal_unit_workspace_root(runtime_unit)
     if role_root is None:  # pragma: no cover - `_runtime_unit_for` always builds a goal unit
         raise ValueError("GoalDirected workspace requires a GoalDirected runtime unit")
+    if not template.slot_bindings:
+        # RRM-016 review fix 3: REQ-CP-DA-013 requires exact exclusive writable slots, and
+        # the run-control authority admits a GoalDirected unit only with the compiled slots
+        # rebased under its role root. A template without them fails closed here.
+        raise ValueError("GoalDirected operation template requires compiled workspace slots")
     payload = template.model_dump(mode="python")
     namespace_id = f"run/{request.run_id}"
     read_mounts: tuple[WorkspaceMount, ...] = ()
@@ -867,32 +928,24 @@ def _workspace_for(
                 ),
             ),
         )
-    if template.slot_bindings:
-        # RRM-016 / REQ-CP-DA-013: bind the exact compiled slots under the role-scoped root,
-        # owned by this iteration's executor or verifier. The run-control authority
-        # recomputes the root from the unit identity and verifies the exact slot set.
-        owner = WorkspaceOwner(
-            kind=(
-                WorkspaceOwnerKind.ITERATION
-                if request.operation_role == "executor"
-                else WorkspaceOwnerKind.EVALUATOR
-            ),
-            owner_id=f"goal-iteration/{request.goal_iteration}/{request.operation_role}",
-        )
-        slot_bindings = tuple(
-            slot.model_copy(
-                update={"logical_path": f"{role_root}{slot.logical_path}", "owner": owner}
-            )
-            for slot in template.slot_bindings
-        )
-        writable: tuple[str, ...] = tuple(
-            slot.logical_path for slot in slot_bindings if slot.access == "exclusive_write"
-        )
-    else:
-        # A template without compiled slots keeps the legacy projection; the run-control
-        # authority admits it only where the compiled contract has no slots either.
-        slot_bindings = ()
-        writable = (f"{role_root}/work",)
+    # RRM-016 / REQ-CP-DA-013: bind the exact compiled slots under the role-scoped root,
+    # owned by this iteration's executor or verifier. The run-control authority recomputes
+    # the root from the unit identity and verifies the exact slot set.
+    owner = WorkspaceOwner(
+        kind=(
+            WorkspaceOwnerKind.ITERATION
+            if request.operation_role == "executor"
+            else WorkspaceOwnerKind.EVALUATOR
+        ),
+        owner_id=goal_operation_id(request.goal_iteration, request.operation_role),
+    )
+    slot_bindings = tuple(
+        slot.model_copy(update={"logical_path": f"{role_root}{slot.logical_path}", "owner": owner})
+        for slot in template.slot_bindings
+    )
+    writable = tuple(
+        slot.logical_path for slot in slot_bindings if slot.access == "exclusive_write"
+    )
     payload.update(
         {
             "namespace_id": namespace_id,
@@ -991,7 +1044,9 @@ def document_payload(
 __all__ = [
     "GoalDirectedDocumentRepository",
     "GoalDirectedOperationPreparationService",
+    "GoalAdmissionStale",
     "GoalDirectedOperationResultService",
+    "GoalOperationBindingReader",
     "GoalOperationSettlementPort",
     "GoalOperationSettlementReader",
     "GoalOperationSettlementUnavailable",

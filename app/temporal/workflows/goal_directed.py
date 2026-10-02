@@ -6,7 +6,7 @@ from typing import Any
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
-from temporalio.exceptions import ApplicationError, ChildWorkflowError
+from temporalio.exceptions import ActivityError, ApplicationError, ChildWorkflowError
 
 with workflow.unsafe.imports_passed_through():
     from app.domain.control_plane.canonical import sha256_digest
@@ -36,6 +36,7 @@ with workflow.unsafe.imports_passed_through():
         GoalDirectedInterpreter,
     )
     from app.domain.orchestration.goal_directed_runtime import (
+        GOAL_ADMISSION_STALE,
         GoalOperationDispatch,
         GoalOperationPreparationRequest,
         GoalOperationReconciliationRequest,
@@ -61,6 +62,15 @@ CLOSING_DRAIN_PATCH = "rrm-007-closing-drain"
 # and continues from its run version instead of recording the usage itself. Histories
 # recorded before the patch replay their own `record_usage` command unchanged.
 JOURNALED_SETTLEMENT_PATCH = "rrm-016-journaled-goal-settlement"
+# RRM-016 review fix 2: the family's run version comes from the last authority fact it saw;
+# an outside command (an API cancel, a late child effect) can move the run before the next
+# family command. A stale result is re-read (the activity reports the current version and
+# phase) and the command is retried once under a new identity at that version. A run that is
+# already `cancelling` is not retried: the family enters its cancellation boundary (the seam
+# RRM-008's saga owns). Pre-patch histories fail on a stale result, as they did.
+STALE_VERSION_RETRY_PATCH = "rrm-016-stale-version-retry"
+STALE_RUN_VERSION = "stale_run_version"
+CANCELLING = "cancelling"
 POLICY_PAUSE_PREFIX = "goal-policy-pause:"
 
 
@@ -77,6 +87,8 @@ class GoalDirectedWorkflow:
 
     def __init__(self) -> None:
         self._cancel_requested = False
+        # Set when an authority result showed the run already `cancelling` (review fix 2).
+        self._run_cancelling = False
         self._operation_handle: Any | None = None
         self._pending_commands: list[BoundaryCommandDelivery] = []
         self._command_acks: dict[tuple[str, str], BoundaryCommandAck] = {}
@@ -889,17 +901,20 @@ class GoalDirectedWorkflow:
     ) -> None:
         if not self._cancel_requested:
             return
-        await self._lifecycle(
-            run_input,
-            LifecycleCommandRequest(
-                command_id=f"goal:{run_input.run_id}:epoch:{run_input.execution_epoch}:cancel",
-                expected_run_version=run_version,
-                action={"kind": "cancel"},
-                reason="Reconcile accepted GoalDirected cancellation request",
-                occurred_at=workflow.now(),
-            ),
-            activity_timeout,
-        )
+        if not self._run_cancelling:
+            await self._lifecycle(
+                run_input,
+                LifecycleCommandRequest(
+                    command_id=(
+                        f"goal:{run_input.run_id}:epoch:{run_input.execution_epoch}:cancel"
+                    ),
+                    expected_run_version=run_version,
+                    action={"kind": "cancel"},
+                    reason="Reconcile accepted GoalDirected cancellation request",
+                    occurred_at=workflow.now(),
+                ),
+                activity_timeout,
+            )
         raise ApplicationError(
             "GoalDirected cancellation entered the shared reconciliation saga",
             type="goal_cancelling",
@@ -924,12 +939,85 @@ class GoalDirectedWorkflow:
         verifier_input_refs: tuple[str, ...],
         activity_timeout: timedelta,
         claim: GoalExecutionClaim,
+        admission_attempt: int = 1,
     ) -> GoalOperationDispatch:
         activity_name = (
             "goaldirected.prepare_executor"
             if role == "executor"
             else "goaldirected.prepare_verifier"
         )
+        try:
+            return await self._prepare_activity(
+                activity_name,
+                run_input,
+                revision,
+                iteration,
+                role,
+                run_version,
+                family_version,
+                reservation_id,
+                reservation,
+                session_id,
+                workspace_id,
+                read_workspace_id,
+                handoff_ref,
+                handoff,
+                verifier_input_refs,
+                activity_timeout,
+                claim,
+                admission_attempt,
+            )
+        except ActivityError as error:
+            stale = _admission_stale(error)
+            if stale is None or not workflow.patched(STALE_VERSION_RETRY_PATCH):
+                raise
+            current_version, phase = stale
+            if phase == CANCELLING:
+                await self._enter_cancellation(run_input, current_version, activity_timeout)
+            if admission_attempt != 1:
+                raise
+            # Nothing was admitted or bound: re-admit once at the run's current version.
+            return await self._prepare_operation(
+                run_input,
+                revision,
+                iteration,
+                role,
+                current_version,
+                family_version,
+                reservation_id,
+                reservation,
+                session_id,
+                workspace_id,
+                read_workspace_id,
+                handoff_ref,
+                handoff,
+                verifier_input_refs,
+                activity_timeout,
+                claim,
+                admission_attempt=2,
+            )
+
+    async def _prepare_activity(
+        self,
+        activity_name: str,
+        run_input: GoalDirectedRunInput,
+        revision: GoalRevision,
+        iteration: int,
+        role: GoalOperationRole,
+        run_version: int,
+        family_version: int,
+        reservation_id: str,
+        reservation: dict[str, int],
+        session_id: str,
+        workspace_id: str,
+        read_workspace_id: str | None,
+        handoff_ref: str | None,
+        handoff: GoalHandoff | None,
+        verifier_input_refs: tuple[str, ...],
+        activity_timeout: timedelta,
+        claim: GoalExecutionClaim,
+        admission_attempt: int,
+    ) -> GoalOperationDispatch:
         return await workflow.execute_activity(
             activity_name,
             GoalOperationPreparationRequest(
@@ -958,6 +1046,7 @@ class GoalDirectedWorkflow:
                 execution_epoch=claim.identity.iteration.execution_epoch,
                 agent_run=claim.identity.agent_run,
                 session_generation=claim.identity.session_generation,
+                admission_attempt=admission_attempt,
             ),
             result_type=GoalOperationDispatch,
             start_to_close_timeout=activity_timeout,
@@ -1135,7 +1224,60 @@ class GoalDirectedWorkflow:
         request: LifecycleCommandRequest,
         activity_timeout: timedelta,
     ) -> LifecycleCommandOutcome:
-        outcome = await workflow.execute_activity(
+        outcome = await self._lifecycle_activity(run_input, request, activity_timeout)
+        if outcome.accepted:
+            return outcome
+        is_cancel = request.action.get("kind") == "cancel"
+        if (
+            is_cancel
+            and outcome.phase == CANCELLING
+            and workflow.patched(STALE_VERSION_RETRY_PATCH)
+        ):
+            # The run is already cancelling (an earlier or outside cancel was applied).
+            self._run_cancelling = True
+            return outcome
+        if outcome.reason_code == STALE_RUN_VERSION and workflow.patched(
+            STALE_VERSION_RETRY_PATCH
+        ):
+            if outcome.phase == CANCELLING:
+                await self._enter_cancellation(
+                    run_input, outcome.resulting_run_version, activity_timeout
+                )
+            # The activity read the run's current version: retry once, as a new command.
+            outcome = await self._lifecycle_activity(
+                run_input, _at_version(request, outcome.resulting_run_version), activity_timeout
+            )
+            if outcome.accepted:
+                return outcome
+            if outcome.reason_code == STALE_RUN_VERSION and outcome.phase == CANCELLING:
+                await self._enter_cancellation(
+                    run_input, outcome.resulting_run_version, activity_timeout
+                )
+        raise ApplicationError(
+            f"authoritative lifecycle command rejected: {outcome.reason_code}",
+            non_retryable=True,
+        )
+
+    async def _enter_cancellation(
+        self,
+        run_input: GoalDirectedRunInput,
+        run_version: int,
+        activity_timeout: timedelta,
+    ) -> None:
+        """The run is already `cancelling` in run control: enter the family's cancellation
+        boundary (`_stop_for_cancellation`, RRM-008's saga) without issuing another cancel."""
+
+        self._cancel_requested = True
+        self._run_cancelling = True
+        await self._stop_for_cancellation(run_input, run_version, activity_timeout)
+
+    async def _lifecycle_activity(
+        self,
+        run_input: GoalDirectedRunInput,
+        request: LifecycleCommandRequest,
+        activity_timeout: timedelta,
+    ) -> LifecycleCommandOutcome:
+        return await workflow.execute_activity(
             "goaldirected.apply_lifecycle_command",
             replace(
                 request,
@@ -1155,12 +1297,34 @@ class GoalDirectedWorkflow:
             # idempotent but authority/schema defects must fail visibly, not hot-loop.
             retry_policy=RetryPolicy(maximum_attempts=1),
         )
-        if not outcome.accepted:
-            raise ApplicationError(
-                f"authoritative lifecycle command rejected: {outcome.reason_code}",
-                non_retryable=True,
-            )
-        return outcome
+
+
+def _at_version(request: LifecycleCommandRequest, version: int) -> LifecycleCommandRequest:
+    """The same lifecycle fact at the run's current version, under a new command identity
+    (a stale result is stored under the original one)."""
+
+    action = dict(request.action)
+    if action.get("kind") == "terminalize":
+        action["proposal"] = {**dict(action["proposal"]), "expected_run_version": version}
+    return replace(
+        request,
+        command_id=f"{request.command_id}:at-version:{version}",
+        expected_run_version=version,
+        action=action,
+    )
+
+
+def _admission_stale(error: ActivityError) -> tuple[int, str] | None:
+    """(current run version, phase) of a stale operation admission, if that is the cause."""
+
+    cause = error.cause
+    if (
+        isinstance(cause, ApplicationError)
+        and cause.type == GOAL_ADMISSION_STALE
+        and len(cause.details) >= 2
+    ):
+        return int(cause.details[0]), str(cause.details[1])
+    return None
 
 
 def _command_key(delivery: BoundaryCommandDelivery) -> tuple[str, str]:

@@ -53,7 +53,10 @@ from app.domain.operation_execution.errors import (
     UnsupportedRuntimePolicy,
 )
 from app.domain.operation_execution.journal import OperationClaimResult, OperationEffectClaim
-from app.domain.orchestration.runtime_units import goal_unit_workspace_root
+from app.domain.orchestration.runtime_units import (
+    goal_unit_operation_id,
+    goal_unit_workspace_root,
+)
 from app.domain.run_control.contracts import (
     ActorContext,
     CommandStatus,
@@ -191,9 +194,11 @@ class RunControlOperationAuthority:
         )
         if workspace_ref != request.workspace.template_ref:
             raise ValueError("operation workspace does not match the frozen template")
+        _verify_family_unit(request, run)
         # RRM-016: a GoalDirected unit binds the exact compiled slots under its role-scoped
         # root, which is recomputed here from the digest-bound unit identity (REQ-CP-DA-013;
-        # executor and verifier writable paths stay disjoint, REQ-BP-GD-004).
+        # executor and verifier writable paths stay disjoint, REQ-BP-GD-004). The unit itself
+        # was cross-checked against the run's family and the operation above.
         slot_root = goal_unit_workspace_root(request.runtime_unit) or ""
         configured_slots = {
             (slot.name, f"{slot_root}{slot.path}", slot.access)
@@ -226,6 +231,24 @@ class RunControlOperationAuthority:
             for dimension, amount in reservation.items()
         ):
             raise ValueError("operation budget limits exceed the authoritative reservation")
+
+
+def _verify_family_unit(request: OperationExecutionRequest, run: RunProjection) -> None:
+    """RRM-016 review fix 1: a GoalDirected unit is admitted only on a GoalDirected run and
+    only for the operation its location names, so the workspace root derived from it cannot
+    be borrowed by another family's or another iteration's operation."""
+
+    unit = request.runtime_unit
+    if unit is None or unit.family != "goal_directed":
+        return
+    target = run.execution_target
+    if target is None or target.family != "GoalDirected":
+        raise ValueError("a GoalDirected runtime unit requires a GoalDirected Workflow Run")
+    if (
+        unit.belllabs_run_id != request.identity.run_id
+        or goal_unit_operation_id(unit) != request.identity.operation_id
+    ):
+        raise ValueError("GoalDirected runtime unit location does not match its operation")
 
 
 class RunControlOperationBudgetAuthority:

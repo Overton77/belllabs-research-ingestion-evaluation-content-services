@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 
 from app.application.operations.operation_execution import operation_settlement_id
-from app.domain.run_control.contracts import CommandStatus, EffectDisposition, StartAction
+from app.domain.run_control.contracts import CommandStatus, EffectDisposition
 from tests.fixtures.checkpoint_recovery import (
     SimulatedWorkerCrash,
     governed_workspace,
@@ -29,6 +29,7 @@ from tests.fixtures.goal_directed_journaled import (
     RecordingGoalDocuments,
     admit_goal_run,
     goal_run_control,
+    goal_start_action,
     goal_templates,
     governed_result_service,
     preparer,
@@ -58,7 +59,9 @@ async def _goal_unit(window: str) -> tuple[Any, Any, Any, str]:
     # The harness admitted and started its own run; the GoalDirected unit uses a run whose
     # budget bounds the iteration reservation.
     run_id = await admit_goal_run(run_control, f"rrm-016-recovery-{window}")
-    started = await run_control.execute(command(run_id, 1, f"start-{window}", StartAction()))
+    started = await run_control.execute(
+        command(run_id, 1, f"start-{window}", goal_start_action(run_id))
+    )
     assert started.status == CommandStatus.ACCEPTED
     documents = RecordingGoalDocuments()
     claim = await _claim(run_id)

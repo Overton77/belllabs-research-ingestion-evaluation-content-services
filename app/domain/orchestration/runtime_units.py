@@ -79,3 +79,17 @@ def goal_unit_workspace_root(unit: RuntimeUnitIdentity | None) -> str | None:
         return None
     location = unit.location
     return f"/goal/{location.goal_iteration}/{location.operation_role}"
+
+
+def goal_operation_id(goal_iteration: int, operation_role: str) -> str:
+    """The semantic operation ID of a GoalDirected executor or verifier operation."""
+
+    return f"goal-iteration/{goal_iteration}/{operation_role}"
+
+
+def goal_unit_operation_id(unit: RuntimeUnitIdentity) -> str | None:
+    """The operation ID a GoalDirected unit's location implies (`None` for other units)."""
+
+    if not isinstance(unit.location, GoalDirectedUnitLocation):
+        return None
+    return goal_operation_id(unit.location.goal_iteration, unit.location.operation_role)

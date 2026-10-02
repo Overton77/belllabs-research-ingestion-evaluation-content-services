@@ -16,14 +16,16 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 from temporalio import activity
 from temporalio.client import WorkflowFailureError, WorkflowHistory
+from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
 
@@ -40,7 +42,15 @@ from app.domain.orchestration.goal_directed_runtime import (
     GoalOperationReconciliationRequest,
     GoalOperationReconciliationResult,
 )
-from app.domain.run_control.contracts import EffectDisposition, RunOutcome, RunPhase
+from app.domain.run_control.contracts import (
+    CancelAction,
+    CommandStatus,
+    EffectDisposition,
+    RecordUsageAction,
+    ReserveBudgetAction,
+    RunOutcome,
+    RunPhase,
+)
 from app.integrations.artifact_payloads import InMemoryArtifactPayloadStore
 from app.temporal.operation_activities import OperationExecutionActivities
 from app.temporal.registration.activities import (
@@ -50,6 +60,7 @@ from app.temporal.registration.activities import (
 from app.temporal.workflow_sandbox import coordinator_workflow_runner
 from app.temporal.workflows.goal_directed import (
     JOURNALED_SETTLEMENT_PATCH,
+    STALE_VERSION_RETRY_PATCH,
     GoalDirectedWorkflow,
 )
 from app.temporal.workflows.operation import OperationWorkflow
@@ -80,12 +91,16 @@ from tests.integration.temporal.test_wp_bp_020_temporal import (
     FakeGoalDirectedActivities,
 )
 from tests.integration.temporal.test_wp_bp_020_temporal import _run_input as fake_goal_input
+from tests.unit.run_control.test_run_control import command
 
 QUEUE = "rrm016-goal-directed"
 # Captured from `test_journaled_goal_directed_run_settles_each_operation_once_through_a_pause`
 # with `RRM016_CAPTURE_HISTORY_DIR` set: the journaled family through a pause and resume.
 POST_CHANGE = Path(__file__).resolve().parents[2] / "fixtures" / "histories" / "rrm016_post_change"
 POST_CHANGE_HISTORY = "goal_directed_journaled_pause_resume.run1.json"
+# Captured from `test_outside_commands_between_settlement_and_next_command_do_not_fail_the_run`
+# with `RRM016_CAPTURE_HISTORY_DIR` set: two re-admissions and one lifecycle retry.
+STALE_RETRY_HISTORY = "goal_directed_stale_version_retry.run1.json"
 PRE_CHANGE = Path(__file__).resolve().parents[2] / "fixtures" / "histories" / "rrm007_pre_change"
 BASELINE = {"tokens.total": 20}
 
@@ -383,3 +398,213 @@ async def test_iterations_with_distinct_output_refs_terminalize() -> None:
                 assert "terminal_output_mismatch" in str(failure.cause), failure.cause
                 raise
         assert result.goal_iterations == 2
+
+
+# --- Review fix 2: an outside command between a settlement read and the next command ------
+
+
+class _OutsideCommandAfterReconciliation:
+    """The production family activities, with an outside run-control command issued right
+    after each reconciliation: the version the family read is stale for its next command."""
+
+    def __init__(
+        self,
+        family: Any,
+        act: Callable[[GoalOperationReconciliationRequest], Awaitable[None]],
+    ) -> None:
+        self._family = family
+        self._act = act
+
+    @activity.defn(name="goaldirected.reconcile_operation")
+    async def prepare_handoff(
+        self, request: GoalOperationReconciliationRequest
+    ) -> GoalOperationReconciliationResult:
+        result = await self._family.prepare_handoff(request)
+        await self._act(request)
+        return cast(GoalOperationReconciliationResult, result)
+
+    @property
+    def functions(self) -> list[Any]:
+        family = self._family
+        return [
+            family.execute_iteration,
+            family.verify_iteration,
+            self.prepare_handoff,
+            family.apply_lifecycle_command,
+            family.materialize_workflow_result,
+            family.apply_boundary_command,
+        ]
+
+
+async def _bump(run_control: Any, run_id: str, tag: str) -> None:
+    """Two harmless outside facts: reserve one token, then release it (no usage)."""
+
+    run = await run_control.get_run(SCOPE, run_id)
+    reserved = await run_control.execute(
+        command(
+            run_id,
+            run.version,
+            f"outside-reserve:{tag}",
+            ReserveBudgetAction(reservation_id=f"outside:{tag}", amounts={"tokens.total": 1}),
+        )
+    )
+    assert reserved.status == CommandStatus.ACCEPTED, reserved.reason_code
+    released = await run_control.execute(
+        command(
+            run_id,
+            reserved.resulting_run_version,
+            f"outside-release:{tag}",
+            RecordUsageAction(
+                usage_id=f"outside:{tag}",
+                actual_amounts={},
+                reservation_id=f"outside:{tag}",
+                release_amounts={"tokens.total": 1},
+            ),
+        )
+    )
+    assert released.status == CommandStatus.ACCEPTED, released.reason_code
+
+
+async def _run_with_outside_commands(
+    act: Callable[[Any, str, GoalOperationReconciliationRequest], Awaitable[None]],
+    request_id: str,
+) -> tuple[Any, Any, str, WorkflowHistory, BaseException | None]:
+    environment = await WorkflowEnvironment.start_time_skipping()
+    async with environment:
+        run_control = goal_run_control()
+        composition = await _composition(run_control)
+        run_id = await admit_goal_run(run_control, request_id)
+
+        async def outside(request: GoalOperationReconciliationRequest) -> None:
+            await act(run_control, run_id, request)
+
+        family = _OutsideCommandAfterReconciliation(composition.family, outside)
+        failure: BaseException | None = None
+        async with (
+            Worker(
+                environment.client,
+                task_queue=QUEUE,
+                workflows=[GoalDirectedWorkflow, OperationWorkflow],
+                workflow_runner=coordinator_workflow_runner(),
+                activities=family.functions,
+            ),
+            Worker(
+                environment.client,
+                task_queue=composition.binding.task_queue,
+                activities=agent_cognitive_activities(
+                    OperationExecutionActivities(composition.service, worker_identity="rrm016")
+                ),
+            ),
+        ):
+            handle = await environment.client.start_workflow(
+                GoalDirectedWorkflow.run,
+                goal_run_input(run_id, goal_blueprint(), baseline=BASELINE),
+                id=f"family/{run_id}/1",
+                task_queue=QUEUE,
+            )
+            try:
+                await handle.result()
+            except WorkflowFailureError as error:
+                failure = error
+            history = await handle.fetch_history()
+        await Replayer(
+            workflows=[GoalDirectedWorkflow, OperationWorkflow],
+            workflow_runner=coordinator_workflow_runner(),
+        ).replay_workflow(history)
+        return run_control, composition, run_id, history, failure
+
+
+def _admission_attempts(history: WorkflowHistory) -> list[tuple[str, int, int]]:
+    return sorted(
+        (str(item["operation_role"]), int(item["goal_iteration"]), int(item["admission_attempt"]))
+        for name in ("goaldirected.prepare_executor", "goaldirected.prepare_verifier")
+        for item in scheduled_activity_inputs(history, name)
+    )
+
+
+@pytest.mark.asyncio
+async def test_outside_commands_between_settlement_and_next_command_do_not_fail_the_run() -> None:
+    """Every settlement read but one is followed by an outside command, so each next family
+    command is stale once: two operation admissions and the first terminal lifecycle fact.
+    Each is retried once at the version the stale result reported; the run completes."""
+
+    async def bump(run_control: Any, run_id: str, request: Any) -> None:
+        iteration = request.claim.identity.iteration.goal_iteration
+        if (iteration, request.operation_role) != (2, "executor"):
+            await _bump(run_control, run_id, f"{iteration}:{request.operation_role}")
+
+    run_control, composition, run_id, history, failure = await _run_with_outside_commands(
+        bump, "rrm-016-outside-commands"
+    )
+    assert failure is None, failure
+    capture = os.getenv("RRM016_CAPTURE_HISTORY_DIR")
+    if capture:  # re-capture the committed stale-retry fixture (see STALE_RETRY_HISTORY)
+        _write_history(Path(capture) / STALE_RETRY_HISTORY, history.to_json())
+    run = await run_control.get_run(SCOPE, run_id)
+    budget = await run_control.get_budget(SCOPE, run_id)
+    assert run.terminal_outcome == RunOutcome.COMPLETED
+    assert STALE_VERSION_RETRY_PATCH in patch_ids(history)
+    # The iteration-1 verifier and the iteration-2 executor were re-admitted (attempt 2).
+    assert _admission_attempts(history) == sorted(
+        [
+            ("executor", 1, 1),
+            ("executor", 2, 1),
+            ("executor", 2, 2),
+            ("verifier", 1, 1),
+            ("verifier", 1, 2),
+            ("verifier", 2, 1),
+        ]
+    )
+    # The first terminal fact after the iteration-2 verifier was retried at the new version.
+    retried = [item for item in lifecycle_command_ids(history) if ":at-version:" in item]
+    assert len(retried) == 1 and retried[0].startswith("goal:obligation:"), retried
+    # Each operation still settled once; the outside facts consumed nothing.
+    operation_usage = [item for item in budget.usage_records.values() if item.authority_ref]
+    assert len(operation_usage) == 4
+    assert budget.consumed.get("tokens.total") == 4 * TOKENS_PER_OPERATION
+    assert not any(budget.reserved.values())
+    assert len(composition.model.turns) == 8
+
+
+@pytest.mark.asyncio
+async def test_outside_cancel_enters_the_cancellation_boundary_not_a_lifecycle_failure() -> None:
+    """An API cancel accepted between the executor's settlement and the verifier admission:
+    the stale admission reports `cancelling`; the family does not retry, does not issue a
+    second cancel, and stops at its cancellation boundary (`goal_cancelling`, RRM-008's seam)."""
+
+    async def cancel(run_control: Any, run_id: str, request: Any) -> None:
+        if request.operation_role != "executor":
+            return
+        run = await run_control.get_run(SCOPE, run_id)
+        cancelled = await run_control.execute(
+            command(run_id, run.version, "operator-cancel", CancelAction())
+        )
+        assert cancelled.status == CommandStatus.ACCEPTED, cancelled.reason_code
+
+    run_control, _unused, run_id, history, failure = await _run_with_outside_commands(
+        cancel, "rrm-016-outside-cancel"
+    )
+    assert isinstance(failure, WorkflowFailureError)
+    assert isinstance(failure.cause, ApplicationError)
+    assert failure.cause.type == "goal_cancelling", failure.cause
+    assert (await run_control.get_run(SCOPE, run_id)).phase == RunPhase.CANCELLING
+    assert STALE_VERSION_RETRY_PATCH in patch_ids(history)
+    # No re-admission, and no second cancel from the family.
+    assert _admission_attempts(history) == [("executor", 1, 1), ("verifier", 1, 1)]
+    assert not [item for item in lifecycle_command_ids(history) if item.endswith(":cancel")]
+
+
+@pytest.mark.asyncio
+async def test_stale_version_retry_history_replays() -> None:
+    """The captured stale-retry history replays; RRM-008 changes this path and must keep it
+    replaying."""
+
+    history = WorkflowHistory.from_json(
+        "family/rrm-016-stale-retry/1", _read_history(POST_CHANGE / STALE_RETRY_HISTORY)
+    )
+    assert {JOURNALED_SETTLEMENT_PATCH, STALE_VERSION_RETRY_PATCH} <= patch_ids(history)
+    assert [item[2] for item in _admission_attempts(history)].count(2) == 2
+    await Replayer(
+        workflows=[GoalDirectedWorkflow, OperationWorkflow],
+        workflow_runner=coordinator_workflow_runner(),
+    ).replay_workflow(history)

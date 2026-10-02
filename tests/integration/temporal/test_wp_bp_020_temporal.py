@@ -58,6 +58,7 @@ from app.domain.run_control.contracts import ActorContext, RunOutcome
 from app.temporal.workflow_sandbox import coordinator_workflow_runner
 from app.temporal.workflows.goal_directed import GoalDirectedWorkflow
 from app.temporal.workflows.operation import OperationWorkflow
+from tests.fixtures.goal_directed_journaled import goal_template_workspace
 
 DIGEST = "sha256:" + "a" * 64
 NOW = datetime(2026, 8, 10, 20, 0, tzinfo=UTC)
@@ -452,7 +453,12 @@ async def test_real_preparer_persists_revision_before_atomic_operation_admission
     bindings = RecordingOperationBindings()
     run_control = AcceptingFamilyRunControl()
     service = GoalDirectedOperationPreparationService(
-        templates=FixedGoalTemplateProvider(_operation(request)),
+        # RRM-016: a GoalDirected template carries the compiled workspace slots.
+        templates=FixedGoalTemplateProvider(
+            _operation(request).model_copy(
+                update={"workspace": goal_template_workspace(_operation(request).workspace)}
+            )
+        ),
         operation_bindings=bindings,  # type: ignore[arg-type]
         run_control=run_control,  # type: ignore[arg-type]
         documents=documents,  # type: ignore[arg-type]
