@@ -1,6 +1,6 @@
 # RRM-008 implementation evidence
 
-Disposition: ready_for_review (implemented; independent review returned `request_changes`, fixes applied as new commits at `ac648c5`; the re-review's blocker and edge case are fixed in `d16aa90` and `15e63b0`, and its fixture fix in `4f8543b`; tested head `4f8543b` on `wp/rrm-008-cancellation`; see Review disposition and Re-review)
+Disposition: accepted 2026-10-02 (independent review request_changes, then two re-check rounds (F1-F4, sealed-head regression, superseded generation, fixture debt); completed by Opus after the Fable implementer session ended; tested head `4f8543b`; merged into integration at `027cc42`)
 Recorded date: 2026-10-02 (America/New_York)
 Qualification identity: RRM-008 reconcile cancellation of active cognition and children. Requirements: REQ-CP-EXEC-008 (seven-step cancellation saga, AMD-RRM-001), REQ-CP-EXEC-011 (cancellation and recovery survive worker loss), REQ-CP-RUN-005/006/007/009/010 (phase authority, budgets, effects, async child liabilities, terminal immutability), REQ-CP-DA-008/011 (async child cancel hooks, late-result refusal), RRM-001 §7 #5 (GoalDirected finishes the saga instead of failing `goal_cancelling`), RRM-004 finding 4 (shared session namespace after a settlement without a transition) and the RRM-004/RRM-007 follow-ups listed on the ticket (parked `in_doubt` units, `cancel` sequence space, F3 cancel delivery).
 Base revision and head revision: branch base `2c43b43` (integration at kickoff). Integration `c8221f5` (RRM-016 hardening, RRM-018, RRM-019) merged at `8006832` (no rebase; one textual conflict in `app/temporal/workflows/goal_directed.py` resolved by keeping both the RRM-019 verified-terminal-outputs patch and the cancellation saga). Code commits: `e84f8c6` (journaled cancel delivery, operation boundary cancellation path), `fcf4704` (cancellation saga in the operation workflow and both families, injection matrix, session-namespace decision), `dd06e26` (persistent demonstration), `64585a5` (async child result decision recorded in run control; found by the live Agent Server proof), `242fc45` (test harness: no duplicate `operation.cancel` registration), `ac648c5` (independent-review fixes F1–F4 and notes; the post-review gates ran on this tree), `d16aa90` (re-review blocker: the unit generation that sealed its session head is admitted), `15e63b0` (re-review edge case: a generation superseded before the cancel is settled; the re-review gates ran on this tree). Docs commits add this README and the review disposition; they change no code.
@@ -259,6 +259,18 @@ No test was skipped, deselected, xfailed or weakened. The only changed assertion
 - **Flaky (outside the window).** The second run (about 15:58–16:05) failed once in `tests/acceptance/control_plane/test_rrm_007_interventions.py::test_interventions_on_real_temporal_with_postgres_authority`: `boundary_state["paused"]` was `None` on worker 2. The test stops worker 1 as soon as run control shows `paused`, before the family's workflow task that records the pause may have completed. Worker 2's query can then replay a history without it. This is a race in the test, not in the saga. It passed 3/3 alone and in the third full run.
 - **The full DSN gate above is the third run.** Nothing was retried selectively to produce it.
 
+## Integration merge gates (coordinator, merge commit `027cc42`)
+
+Tested head `4f8543b` merged `--no-ff` into `integration/research-runtime-mission` at `027cc42`.
+
+| Command | Result |
+|---|---|
+| `uv run --no-sync ruff check app tests scripts` | All checks passed |
+| `uv run --no-sync mypy app` | no issues, 367 files |
+| `hermetic full pytest, one process (DSNs unset)` | 1020 passed, 78 skipped, 2 xfailed, 0 failed (198 s) |
+| `full pytest with Postgres/Mongo DSNs exported and --env-file, one process` | 1067 passed, 31 skipped, 2 xfailed, 0 failed (342 s) |
+| `git diff --check` | clean |
+
 ## Final disposition
 
-ready_for_review (post-re-review)
+accepted
