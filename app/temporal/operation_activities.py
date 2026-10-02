@@ -10,6 +10,7 @@ from temporalio.exceptions import ApplicationError
 from temporalio.worker import Worker
 
 from app.application.operations.operation_execution import (
+    ForkMaterializationPending,
     OperationExecutionInProgress,
     OperationExecutionService,
 )
@@ -62,6 +63,9 @@ class OperationExecutionActivities:
         try:
             request = OperationExecutionRequest.model_validate(payload)
             result = await self._service.execute(request, attempt)
+        except ForkMaterializationPending as error:
+            # RRM-006: transient; retried until the fork's materialization is visible.
+            raise ApplicationError(str(error), type="fork_not_materialized") from error
         except OperationExecutionInProgress as error:
             raise ApplicationError(str(error), type="operation_execution_in_progress") from error
         except CheckpointNamespaceBusy as error:

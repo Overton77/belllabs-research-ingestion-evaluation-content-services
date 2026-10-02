@@ -62,6 +62,10 @@ class LineageKind(StrEnum):
     ARTIFACT = "artifact"
     RESULT_MANIFEST = "result_manifest"
     TRACE = "trace"
+    # AMD-RRM-001 (RRM-001 disposition row 30): additive kinds for semantic forks.
+    RUN_SNAPSHOT = "run_snapshot"
+    RUNTIME_UNIT = "runtime_unit"
+    LANGGRAPH_CHECKPOINT = "langgraph_checkpoint"
 
 
 class ProviderQualifiedLineageRecord(KernelContract):
@@ -93,6 +97,10 @@ class LineageParentEdge(KernelContract):
         "produces",
         "traces",
         "claims",
+        # AMD-RRM-001: fork lineage relationships (REQ-CP-EXEC-012).
+        "derived_from",
+        "seeded_from",
+        "reuses",
     ]
 
     @model_validator(mode="after")

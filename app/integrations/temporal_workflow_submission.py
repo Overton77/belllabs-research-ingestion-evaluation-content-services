@@ -71,7 +71,10 @@ class TemporalWorkflowSubmitter:
         *,
         workflow_id: str,
         blueprint_family: BlueprintFamily,
+        parent_run_id: str | None = None,
     ) -> WorkflowSubmission:
+        """Start the admitted run's root; `parent_run_id` marks a fork's source run."""
+
         del workflow_id  # Callers cannot override the admitted BellLabs root identity.
         if blueprint_family == BlueprintFamily.STAGE_GRAPH:
             if not isinstance(workflow_input, StageGraphRunInput):
@@ -96,6 +99,7 @@ class TemporalWorkflowSubmitter:
             family_input=asdict(replace(workflow_input, durable_operation_children=True)),
             family_task_queue=family_queue,
             search_attribute_policy=self._search_attribute_policy,
+            parent_run_id=parent_run_id,
         )
         root_attributes = child_search_attributes(
             self._search_attribute_policy,
@@ -105,6 +109,7 @@ class TemporalWorkflowSubmitter:
                 request_scope=root_input.request_scope,
                 family=root_input.family,
                 execution_epoch=root_input.continuity.execution_epoch,
+                parent_run_id=parent_run_id,
             ),
         )
         root_queue = self._root_task_queue or family_queue

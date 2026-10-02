@@ -38,6 +38,7 @@ _PSYCOPG_SELECTOR_MODULES = {
     ("temporal", "test_rrm_004_worker_restart_recovery.py"),
     ("agent_server", "test_rrm_013_async_subagent_live.py"),
     ("control_plane", "test_rrm_005_inspection.py"),
+    ("control_plane", "test_rrm_006_semantic_forks.py"),
 }
 
 

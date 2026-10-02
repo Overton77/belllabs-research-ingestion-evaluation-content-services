@@ -679,6 +679,28 @@ class InMemoryRunControlRepository:
             )
         )
 
+    def family_head_records(
+        self, request_scope: str, run_id: str
+    ) -> tuple[tuple[str, int, str, AtomicFamilyMutation], ...]:
+        """Read-only helper (RRM-006 snapshots): every family head with version and fingerprint."""
+
+        records: list[tuple[str, int, str, AtomicFamilyMutation]] = []
+        for (scope, head_run_id, family_kind), mutation in sorted(self._family_heads.items()):
+            if scope != request_scope or head_run_id != run_id:
+                continue
+            fingerprint, _journaled = self._family_journal[
+                (scope, head_run_id, family_kind, mutation.mutation_id)
+            ]
+            records.append(
+                (
+                    family_kind,
+                    mutation.expected_family_version + 1,
+                    fingerprint,
+                    deepcopy(mutation),
+                )
+            )
+        return tuple(records)
+
     async def get_family_head(
         self,
         request_scope: str,

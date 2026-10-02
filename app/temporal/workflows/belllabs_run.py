@@ -157,4 +157,6 @@ class BellLabsRunWorkflow:
             request_scope=run_input.request_scope,
             family=run_input.family,
             execution_epoch=run_input.continuity.execution_epoch,
+            # `BellLabsParentRunId` is set on fork and linked roots only (EXEC-015).
+            parent_run_id=run_input.parent_run_id if kind == "root" else None,
         )

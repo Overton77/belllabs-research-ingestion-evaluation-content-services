@@ -1439,6 +1439,20 @@ class RuntimeApprovalDecision(Contract):
     decided_at: AwareDatetime
 
 
+class ReusedResultRef(Contract):
+    """REQ-CP-EXEC-012: a fork-derived unit settled by an immutable source result.
+
+    The derived run references the reused result; it never re-settles it in the source run.
+    """
+
+    fork_request_id: str = Field(min_length=1, max_length=512)
+    source_run_id: str = Field(min_length=1, max_length=512)
+    source_unit_key: str = Field(pattern=r"^bl-unit-v1:[0-9a-f]{64}$")
+    source_settlement_id: str = Field(min_length=1, max_length=512)
+    source_result_manifest_ref: str = Field(min_length=1, max_length=1024)
+    source_result_manifest_digest: str = Field(pattern=DIGEST_PATTERN)
+
+
 class OperationSettlement(Contract):
     settlement_id: str
     binding_id: str
@@ -1462,6 +1476,8 @@ class OperationSettlement(Contract):
     output_payload_ref: str | None = None
     output_payload_digest: str | None = Field(default=None, pattern=DIGEST_PATTERN)
     output_payload_size_bytes: int | None = Field(default=None, ge=1)
+    # RRM-006: present only on a fork-derived unit settled by a reused source result.
+    reused_result: ReusedResultRef | None = None
 
     @model_validator(mode="after")
     def output_payload_address_is_exact(self) -> OperationSettlement:
@@ -1474,6 +1490,19 @@ class OperationSettlement(Contract):
             value is not None for value in fields
         ):
             raise ValueError("output payload ref, digest, and size form one exact address")
+        if self.reused_result is not None and (
+            self.status != "completed"
+            or self.checkpoint_transition_id is not None
+            or self.result_checkpoint is not None
+            or self.provider_run_id is not None
+            or self.event_payloads
+            or any(self.usage.amounts.values())
+            or any(self.usage.pending_external_amounts.values())
+        ):
+            raise ValueError(
+                "a reused result settles completed, with no cognition, provider run, "
+                "events, or usage of its own"
+            )
         return self
 
 
