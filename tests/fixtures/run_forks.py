@@ -88,6 +88,7 @@ def stagegraph_head(
     *,
     stages: Mapping[str, str],
     liabilities: tuple[str, ...] = (),
+    closed_liabilities: tuple[str, ...] = (),
     accepted_results: int = 1,
     mutation_id: str = "result-head",
     family_version: int = 4,
@@ -101,7 +102,20 @@ def stagegraph_head(
             }
             for stage, status in stages.items()
         },
-        "producer_liabilities": {key: {"semantic_attempt_id": key} for key in liabilities},
+        "producer_liabilities": {
+            **{key: {"semantic_attempt_id": key} for key in liabilities},
+            **{
+                key: {
+                    "semantic_attempt_id": key,
+                    "child_closed_or_quiesced": True,
+                    "reservations_and_usage_settled": True,
+                    "effects_settled": True,
+                    "cancellation_reconciled": True,
+                    "result_decision": "admit",
+                }
+                for key in closed_liabilities
+            },
+        },
         "accepted_results": [{"accepted_at_order": index} for index in range(accepted_results)],
     }
     mutation = {

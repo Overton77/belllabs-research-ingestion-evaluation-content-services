@@ -310,6 +310,16 @@ async def test_open_stage_liability_cancelling_run_and_unsupported_boundaries() 
     )
     rejected = await _reject(forks, harness.run_id)
     assert "stage_liability_open:review-attempt" in rejected.reasons
+    # A decided liability stays in the projection, closed; it does not block the boundary.
+    forks.sources.heads[harness.run_id] = (
+        stagegraph_head(stages={"draft": "completed"}, closed_liabilities=("draft-attempt",)),
+    )
+    assert (await forks.snapshots.take(SCOPE, harness.run_id)).boundary_kind == "stage_settled"
+    forks.sources.heads[harness.run_id] = (
+        stagegraph_head(
+            stages={"draft": "completed", "review": "running"}, liabilities=("review-attempt",)
+        ),
+    )
     assert any(reason.startswith("stage_active:stage:review") for reason in rejected.reasons)
 
     forks.sources.heads[harness.run_id] = ()
@@ -759,3 +769,35 @@ def test_fork_request_binds_scope_snapshot_patch_and_admission() -> None:
         RunForkRequest(**{**values, "target": run_request(request_id="fork-2")})
     assert isinstance(target, RunRequest)
     assert sha256_digest(patch.patch_digest)
+
+
+def test_fork_root_parent_run_is_carried_on_the_root_only() -> None:
+    from dataclasses import asdict
+
+    from app.domain.orchestration.contracts import BellLabsRunInput
+    from app.temporal.workflows.belllabs_run import BellLabsRunWorkflow
+
+    values: dict[str, Any] = {
+        "schema_version": "belllabs.temporal-root.v1",
+        "run_id": "derived",
+        "request_scope": SCOPE,
+        "effective_configuration_digest": "sha256:" + "a" * 64,
+        "workflow_type_digest": "sha256:" + "b" * 64,
+        "family": "StageGraph",
+        "family_input": {},
+        "family_task_queue": "queue",
+    }
+    ordinary = BellLabsRunInput(**values)
+    assert ordinary.parent_run_id is None
+    # Captured histories have no parent field; decoding them keeps the default.
+    assert BellLabsRunInput(**{**asdict(ordinary), "continuity": ordinary.continuity}) == ordinary
+    fork_root = BellLabsRunInput(**values, parent_run_id="source")
+    root = BellLabsRunWorkflow._attributes(fork_root, "root").as_mapping()
+    family = BellLabsRunWorkflow._attributes(fork_root, "family").as_mapping()
+    assert root["BellLabsParentRunId"] == "source"
+    assert "BellLabsParentRunId" not in family
+    assert (
+        "BellLabsParentRunId" not in BellLabsRunWorkflow._attributes(ordinary, "root").as_mapping()
+    )
+    with pytest.raises(ValueError, match="another BellLabs run"):
+        BellLabsRunInput(**values, parent_run_id="derived")

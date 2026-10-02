@@ -524,6 +524,36 @@ def _unit_candidate(
     )
 
 
+def _liability_closed(liability: object) -> bool:
+    return isinstance(liability, dict) and (
+        all(
+            liability.get(flag) is True
+            for flag in (
+                "child_closed_or_quiesced",
+                "reservations_and_usage_settled",
+                "effects_settled",
+                "cancellation_reconciled",
+            )
+        )
+        and liability.get("result_decision") is not None
+    )
+
+
+def _completed(unit: UnitRecord) -> bool:
+    generation = _current_generation(unit)
+    return (
+        generation is not None
+        and any(
+            item.execution_generation == generation and item.status == "completed"
+            for item in unit.results
+        )
+        and not any(
+            item.execution_generation == generation and item.status != "resolved"
+            for item in _latest_incidents(unit)
+        )
+    )
+
+
 def _family_boundary(
     family: ForkFamily,
     head: FamilyHeadRecord,
@@ -546,7 +576,13 @@ def _family_boundary(
         if not isinstance(projection, dict):
             raise ForkRejected("unsupported_boundary", "the StageGraph head has no projection")
         liabilities = projection.get("producer_liabilities") or {}
-        reasons.extend(f"stage_liability_open:{key}" for key in sorted(liabilities))
+        # A decided producer liability stays in the projection, closed; only an open one
+        # (admitted work not yet settled and decided) blocks the boundary.
+        reasons.extend(
+            f"stage_liability_open:{key}"
+            for key, liability in sorted(liabilities.items())
+            if not _liability_closed(liability)
+        )
         stages = projection.get("stages") or {}
         accepted = sorted(
             {
@@ -577,16 +613,20 @@ def _family_boundary(
     revision_id = mutation.get("goal_revision_id")
     if role != "verifier":
         reasons.append("goal_iteration_in_progress")
+    # The verifier decision is settled when the head iteration's verifier unit has a
+    # completed, fenced result observation and no open incident. GoalDirected records its
+    # own usage and acceptance, so this does not require the run-control journal.
     verifier_settled = any(
-        isinstance(item.unit.location, GoalDirectedUnitLocation)
-        and item.unit.location.operation_role == "verifier"
-        and item.unit.location.goal_iteration == iteration
-        and item.unit.location.goal_revision_id == revision_id
-        for item in candidates
+        isinstance(unit.identity.location, GoalDirectedUnitLocation)
+        and unit.identity.location.operation_role == "verifier"
+        and unit.identity.location.goal_iteration == iteration
+        and unit.identity.location.goal_revision_id == revision_id
+        and _completed(unit)
+        for unit in units
     )
     if role == "verifier" and not verifier_settled:
         reasons.append("goal_verifier_unsettled")
-    del units
+    del candidates
     position = FamilyPosition(
         **common,
         goal_revision_id=str(revision_id) if revision_id else None,

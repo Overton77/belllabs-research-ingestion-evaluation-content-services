@@ -37,6 +37,7 @@ _PSYCOPG_SELECTOR_MODULES = {
     ("deep_agents", "test_checkpoint_lineage_postgres_saver.py"),
     ("temporal", "test_rrm_004_worker_restart_recovery.py"),
     ("control_plane", "test_rrm_005_inspection.py"),
+    ("control_plane", "test_rrm_006_semantic_forks.py"),
 }
 
 
