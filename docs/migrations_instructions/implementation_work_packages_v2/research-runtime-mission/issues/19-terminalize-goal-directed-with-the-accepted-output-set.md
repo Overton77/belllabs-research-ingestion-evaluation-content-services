@@ -4,8 +4,8 @@
 
 **Blocked by:** None.
 **Blocks:** Any completing GoalDirected run whose iterations produce distinct output refs, including the GoalDirected company fixture (RRM-011). Whether it blocks RRM-010 is the coordinator's decision.
-**Status:** ready-for-agent (found by RRM-016, 2026-10-02)
-**Branch:** `wp/rrm-019-goal-directed-terminal-outputs`
+**Status:** implemented; independent review pending (found by RRM-016, 2026-10-02; implemented 2026-10-02 together with RRM-018; evidence `docs/migrations_instructions/evidence_v2/research-runtime-mission/RRM-018/README.md`)
+**Branch:** `wp/rrm-018-019-goal-directed-multi-iteration` (shared with RRM-018)
 **Authority:** REQ-BP-GD-010 (stopping produces a proposal, not terminality), REQ-CP-RUN-005 (terminality follows accepted evidence; the reducer rejects `terminal_output_mismatch` when terminal outputs differ from the accepted outputs)
 
 ## Diagnosis (RRM-016, 2026-10-02)
@@ -17,8 +17,13 @@
 - Every earlier fixture reused one output ref across iterations (the WP-BP-020 live instructions even tell iteration 2 to "preserve" iteration 1's ref), which hid it.
 - Reproduction: `tests/integration/temporal/test_rrm_016_goal_directed_journaled.py::test_iterations_with_distinct_output_refs_terminalize`, marked `xfail(strict=True, raises=WorkflowFailureError)` citing this ticket; it re-raises only when the cause is `terminal_output_mismatch`. Remove the marker when fixed.
 
+## Resolution (2026-10-02)
+
+- **Rule.** A completed GoalDirected run promotes, and its terminalization proposal names, exactly the **verified final outputs**: the final executor's outputs, which the accepting verifier admitted (`admitted_executor_output_refs`). Earlier iterations' outputs stay immutable lineage refs in the family result (`GoalDirectedRunResult.output_refs`), but they are not promoted, because no accepted verifier decision covers them. Spec basis: REQ-BP-GD-004, invariant 2, REQ-BP-GD-010 and REQ-CP-RUN-005 (see the evidence README).
+- **Fix.** `GoalDirectedWorkflow.run` promotes `terminalization_proposal.output_refs` behind `workflow.patched("rrm-019-verified-terminal-outputs")`. Pre-patch histories promote the union, as they did. The interpreter, the contracts and the reducer are unchanged.
+
 ## Acceptance
 
-- [ ] A decided rule (spec-cited) for which outputs a completed GoalDirected run promotes: the verified final outputs, or every iteration's outputs named by the proposal.
-- [ ] Promotion and the terminalization proposal use the same set; replay-safe for existing histories (`workflow.patched` if commands change).
-- [ ] The RRM-019 reproduction passes without its marker.
+- [x] A decided rule (spec-cited) for which outputs a completed GoalDirected run promotes: the verified final outputs, or every iteration's outputs named by the proposal.
+- [x] Promotion and the terminalization proposal use the same set; replay-safe for existing histories (`workflow.patched` if commands change).
+- [x] The RRM-019 reproduction passes without its marker.
