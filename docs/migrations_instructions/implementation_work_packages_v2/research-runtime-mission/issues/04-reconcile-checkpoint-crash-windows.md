@@ -23,4 +23,11 @@ Integrate checkpoint observations with durable operation claims, attempt leases,
 
 Out of scope: arbitrary checkpoint editing, company missions, model/tool fallback that changes exact placement.
 
+**Continuation semantics (RRM-004 review).** `RunControlOperationAuthority.verify_continuation` admits a retry, takeover or recovery of a unit that already holds a claim when the run is `active` or `waiting`, with any wait kind. A declared wait (dependency, approval, operator reconciliation and so on) does not supersede already-claimed work. Terminal, pending, paused and cancelling runs, and foreign bindings, are refused (fail-closed).
+
+**Residual limits of the lease deadline.**
+- A blocking synchronous tool running in an executor thread cannot be cancelled by the lease timeout, because Python cannot cancel a thread. The asyncio side stops, but the thread finishes. This is owned by RRM-008's heartbeat and cancellation item.
+- Each lease cut ends the Temporal Activity attempt with a retryable error, so it consumes one of the three attempts in `OperationWorkflow`'s retry policy.
+- The safety margin (20% of the lease, 1–30 s) covers clock skew between the Temporal server and the worker only up to the margin. Larger skew is not covered: a worker clock running ahead ends the holder early (safe), and one running behind can let it overrun.
+
 Implementation evidence: [RRM-004 README](../../../evidence_v2/research-runtime-mission/RRM-004/README.md). Follow-ups split out: RRM-014 (re-admit a unit at a new execution generation) and RRM-015 (set-order-stable contract digests outside the replay path).

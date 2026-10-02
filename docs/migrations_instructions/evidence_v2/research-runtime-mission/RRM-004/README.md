@@ -1,6 +1,6 @@
 # RRM-004 implementation evidence
 
-Disposition: ready_for_review (independent review `approve_with_fixes`; all findings addressed in `284ed20` and the following documentation commit; re-review pending)
+Disposition: ready_for_review (independent review `approve_with_fixes`; findings 1-7 addressed in `284ed20` and `b8f0d97`; the re-review regression is fixed in `89bbdf7`, and a seed-dependent test fixture in `d296481`; final re-review pending)
 Recorded date: 2026-10-01 (America/New_York)
 Qualification identity: RRM-004 recover checkpoint and settlement crash windows. Requirements: REQ-CP-DA-018 (classification and crash windows); REQ-CP-EXEC-003/004/005/008(narrow)/014 (claim lease, takeover and fence); REQ-CP-RUN-007 (narrowed post-dispatch rule, `in_doubt`, run phase, `operator_reconciliation`); REQ-CP-DA-017 (transition linked to the fenced result). Contracts: `CON-CP-CHECKPOINT-LINEAGE-V1` (classification table, crash windows, operator decisions) and `CON-CP-LIFECYCLE-V1` `reconcile_unit` (AMD-RRM-001, accepted meta `main` `a50d833`).
 Base revision and head revision: base `8762d3e` (integration `integration/research-runtime-mission`, RRM-001 and RRM-003 merged). Tested code head: ``a90022cddbd39348e8a3179a89685e2ceb0ac02b`` on `wp/rrm-004-checkpoint-recovery`. The evidence/ticket commit `404d253` follows it and changes documentation only. Review-fix code commit: `284ed20`; its documentation commit follows. Not merged (the coordinator owns review and merge).
@@ -256,6 +256,13 @@ What RRM-008 must know:
 - A holder releases its lease when it stops on its own: on an exception, on `asyncio.CancelledError`, and at its lease deadline (`OperationLeaseExpired`, review fix 3). There is **no Activity heartbeat and no heartbeat timeout yet**, so a Temporal cancel does not reach a running cognitive attempt today; heartbeat-driven cancellation is RRM-008's. The lease-deadline timeout does not contradict it: a heartbeat cancel arrives as `CancelledError`, and the same release path hands over at once.
 - Orphan lineages after a settlement without a transition (budget violation after a terminal leaf, provider `failed`, `abandon_unit`, cancellation of an `interrupted` unit) wedge a shared GoalDirected session namespace: the next unit classifies `foreign_descendant`. Review finding 4 was recorded as an RRM-008 acceptance item (see Review disposition).
 
+**Continuation semantics (RRM-004 review).** `RunControlOperationAuthority.verify_continuation` admits a retry, takeover or recovery of a unit that already holds a claim when the run is `active` or `waiting`, with any wait kind. A declared wait (dependency, approval, operator reconciliation and so on) does not supersede already-claimed work. Terminal, pending, paused and cancelling runs, and foreign bindings, are refused (fail-closed).
+
+**Residual limits of the lease deadline.**
+- A blocking synchronous tool running in an executor thread cannot be cancelled by the lease timeout, because Python cannot cancel a thread. The asyncio side stops, but the thread finishes. This is owned by RRM-008's heartbeat and cancellation item.
+- Each lease cut ends the Temporal Activity attempt with a retryable error, so it consumes one of the three attempts in `OperationWorkflow`'s retry policy.
+- The safety margin (20% of the lease, 1–30 s) covers clock skew between the Temporal server and the worker only up to the margin. Larger skew is not covered: a worker clock running ahead ends the holder early (safe), and one running behind can let it overrun.
+
 Other:
 - **Deviation (lease placement).** The lease and fence live on `runtime_unit_generations`, not on `operation_effect_claims`; see Changed paths.
 - **Deviation (settlement fencing).** The authority settlement itself is not fence-checked in the run-control transaction. Instead, the fenced `UnitResultObservation` fixes the only manifest that can settle, so a superseded holder can neither record a different result nor settle one. The identical manifest is idempotent.
@@ -308,6 +315,27 @@ Post-review gates (tested code head `284ed20`):
 | `git diff --check 8762d3e HEAD` | clean |
 
 The delta against the pre-review head is +10 passed in both full runs: the 10 new review-fix tests in `test_checkpoint_recovery_classification.py`. The skips are unchanged. No test was skipped, xfailed or deselected. Two existing assertions were adjusted to the new protocol: the role test's incident count is 3 (revision 2 added to the contract), and the terminal test asserts the recorded candidate.
+
+### Re-review (findings 1-3 approved; one regression from the fix)
+
+| Finding | Disposition |
+|---|---|
+| The fix for finding 1 rejected every non-`operator_required` incident. An exact resend of an accepted `reconcile_unit`, the documented recovery when the wake-up hint is lost (for example Temporal down), was therefore refused before run control could replay it, and the parked `OperationWorkflow` never woke. | **Fixed in `89bbdf7`.** For a resolved incident revision, the service accepts the resend only if run control holds a decision with the same `command_id`, `incident_id`, decision and accepted key, and the lineage incident records the same command. Validation is skipped; run control replays the stored result idempotently; `apply_reconciliation` is idempotent; and the hint is sent again. Any other decision for a resolved revision is rejected ("resolved by another decision"). Test: `test_checkpoint_recovery_classification.py::test_lost_wake_up_hint_is_recovered_by_resending_the_same_decision`. It runs a real parked `OperationWorkflow` (time-skipping) whose first hint fails ("Temporal unavailable"): the incident is resolved, the workflow stays `RUNNING`, and a different decision is rejected. The resend of the same command is `ACCEPTED`, the workflow wakes and completes `failed` / `in_doubt_abandoned`, with 2 hint attempts, 0 new model calls and one decision in the projection. |
+| Docs: continuation semantics and residual lease limits. | Recorded in the RRM-004 ticket and in Unresolved risks above. |
+
+Re-review gates (tested code heads `89bbdf7` and `d296481`):
+
+| Command | Result |
+|---|---|
+| `uv run --no-sync ruff check app tests scripts` / `uv run --no-sync mypy app` | All checks passed / no issues in 340 source files |
+| Owning suites with both service DSNs (`89bbdf7`) | 306 passed, 1 skipped (WSL-only) |
+| Worker-restart proof with both DSNs (`89bbdf7`) | 1 passed in 39 s; worker 1 → worker 2, fences `[1, 2]`, `interrupted`, one settlement |
+| Full pytest, hermetic, on `89bbdf7` | 747 passed, **1 failed**, 54 skipped, 2 xfailed. The failure was in this ticket's own regression test, `test_command_fingerprint_is_independent_of_set_iteration_order`: its helper needs two equal frozensets that iterate differently, and with only 23 permission names some hash seeds produce no such collision. This is a test-fixture seed dependence, not a product defect. It is fixed in `d296481` by padding the probe set to 400+ names, and verified passing for `PYTHONHASHSEED` 1-30. |
+| Full pytest, hermetic, on `d296481` | 748 passed, 54 skipped, 2 xfailed, 0 failed |
+| Full pytest with `TEST_APPLICATION_POSTGRES_DSN` and `TEST_MONGODB_URI`, on `d296481` | 778 passed, 24 skipped, 2 xfailed, 0 failed |
+| `git diff --check 8762d3e HEAD` | clean |
+
+The delta against the post-review head is +1 passed: the resend regression test. The skips are unchanged.
 
 ## Final disposition
 
