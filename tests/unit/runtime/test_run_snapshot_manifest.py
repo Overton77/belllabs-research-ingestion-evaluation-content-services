@@ -30,6 +30,7 @@ from app.domain.run_control.contracts import (
     ReserveBudgetAction,
     RunPhase,
     RunRequest,
+    StartAction,
 )
 from app.domain.run_control.errors import IdempotencyConflict
 from app.domain.run_control.forks import (
@@ -69,6 +70,7 @@ from tests.fixtures.run_forks import (
     stagegraph_head,
 )
 from tests.unit.run_control.test_run_control import WORKFLOW_DIGEST, command
+from tests.unit.run_control.test_run_control import request as run_request
 from tests.unit.run_control.test_run_control import service as run_control_service
 
 SCOPE = "tenant-1"
@@ -371,6 +373,51 @@ async def test_unapplied_command_receipt_makes_the_snapshot_not_quiescent() -> N
 
     commands.pending[harness.run_id] = ()
     assert (await gated.snapshots.take(SCOPE, harness.run_id)).pending_commands == ()
+
+
+@pytest.mark.asyncio
+async def test_rrm007_ledger_pending_command_blocks_the_snapshot_and_is_never_copied() -> None:
+    """RRM-007's durable ledger: an accepted, unapplied pause (family execution target bound)
+    makes the snapshot not quiescent; once the boundary applies it, the snapshot is taken,
+    and the fork copies neither the command nor its receipts."""
+
+    from tests.unit.run_control.test_boundary_commands import (
+        TARGET,
+        apply,
+        boundary_command,
+        pause,
+    )
+
+    harness, forks, _units = await _world()
+    run_control = harness.run_control
+    admitted = await run_control.admit(run_request(request_id="rrm006-ledger"))
+    assert admitted.run_id is not None
+    run_id = admitted.run_id
+    started = await run_control.execute(
+        command(run_id, 1, "ledger-start", StartAction(execution_target=TARGET))
+    )
+    assert started.status == CommandStatus.ACCEPTED
+    forks.sources.heads[run_id] = (stagegraph_head(stages={"draft": "completed"}),)
+    accepted = await run_control.execute(command(run_id, 2, "pause", pause()))
+    assert accepted.reason_code == "accepted_pending_application"
+
+    rejected = await _reject(forks, run_id)
+    assert rejected.code == "snapshot_not_quiescent"
+    assert "command_unapplied:operator:pause:accepted" in rejected.reasons
+
+    applied = await run_control.execute(
+        boundary_command(run_id, 2, "apply:pause", apply("pause", pause()))
+    )
+    assert applied.status == CommandStatus.ACCEPTED
+    snapshot = await forks.snapshots.take(SCOPE, run_id)
+    assert snapshot.pending_commands == ()
+    receipt = await forks.forks.fork(fork_command(snapshot, request_id="fork-ledger"))
+    derived = await run_control.get_run(SCOPE, receipt.target_run_id)
+    assert await run_control.list_boundary_commands(SCOPE, receipt.target_run_id) == ()
+    assert derived.execution_target is None and derived.active_pauses == ()
+    assert [
+        item.command.command_id for item in await run_control.list_boundary_commands(SCOPE, run_id)
+    ] == ["pause"]
 
 
 @pytest.mark.asyncio

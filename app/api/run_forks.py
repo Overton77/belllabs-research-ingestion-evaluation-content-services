@@ -52,6 +52,7 @@ from app.application.runtime.run_forks import (
     ForkMaterializationStore,
     ForkPatchPolicyRegistry,
     ForkSnapshotNotFound,
+    LedgerPendingCommands,
     LineageAsyncChildForkClassifier,
     PendingCommandReader,
     RecordingForkMaterializer,
@@ -116,7 +117,8 @@ def compose_run_fork_services(
 
     Async children are classified by RRM-013's classifier over the authority lineage
     (`PostgresAsyncSubagentAuthority.list_children`) unless another classifier is supplied.
-    Unapplied command receipts come from `commands` (RRM-007's ledger once wired).
+    Unapplied command receipts come from RRM-007's ledger (`LedgerPendingCommands` over
+    `RunControlService.list_boundary_commands`) unless another reader is supplied.
     """
 
     snapshots = PostgresRunSnapshotRepository(pool)
@@ -136,7 +138,7 @@ def compose_run_fork_services(
             snapshots=snapshots,
             async_children=async_children
             or LineageAsyncChildForkClassifier(PostgresAsyncSubagentAuthority(pool)),
-            commands=commands,
+            commands=commands or LedgerPendingCommands(run_control),
         ),
         forks=SemanticForkService(snapshots=snapshots, saga=saga, policies=policies),
         receipts=repository,
@@ -146,8 +148,8 @@ def compose_run_fork_services(
 
 async def get_run_fork_services(request: Request) -> RunForkServices:
     """Compose once per application. Deployments may attach `fork_patch_policies` (a
-    `ForkPatchPolicyRegistry`), `async_child_fork_classifier` and `pending_command_reader`
-    (RRM-007's command ledger) on `app.state` first."""
+    `ForkPatchPolicyRegistry`), and may override `async_child_fork_classifier` and
+    `pending_command_reader` on `app.state` first."""
 
     state = request.app.state
     services = getattr(state, "run_fork_services", None)

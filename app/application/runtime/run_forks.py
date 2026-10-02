@@ -68,8 +68,10 @@ from app.domain.operation_execution.contracts import (
 )
 from app.domain.run_control.contracts import (
     ActorContext,
+    BoundaryCommandStatus,
     BudgetEnvelope,
     DecisionStatus,
+    ReceiptState,
     RunPhase,
     RunRequest,
 )
@@ -115,6 +117,7 @@ FORK_WORKFLOW_IMPLEMENTATION_REF = "belllabs.semantic-fork.v1"
 # `blocked` stage held back by a declared wait has no admitted work and is not active.
 ACTIVE_STAGE_STATUSES = frozenset({"reserved", "running", "waiting", "paused"})
 FORK_REQUEST_MARKER_PREFIX = "fork-request:"
+SETTLED_RECEIPT_STATES = frozenset({ReceiptState.APPLIED, ReceiptState.REJECTED})
 SETTLED_STATUSES = frozenset({"completed", "failed", "cancelled", "timed_out"})
 MAX_SNAPSHOT_READ_ATTEMPTS = 3
 
@@ -234,9 +237,8 @@ class LineageAsyncChildForkClassifier:
 class PendingCommandReader(Protocol):
     """Port: command receipts targeting the run that are not yet `applied` or `rejected`.
 
-    REQ-CP-EXEC-016: an `accepted` or `delivered` command makes the snapshot unsafe. RRM-007's
-    durable command ledger (`boundary_commands` and receipts) implements it; until it is
-    wired, `NoPendingCommands` (no ledger, so nothing is pending) is the default.
+    REQ-CP-EXEC-016: an `accepted` or `delivered` command makes the snapshot unsafe. The
+    production reader is `LedgerPendingCommands` over RRM-007's durable ledger.
     """
 
     async def unapplied_command_receipts(
@@ -244,10 +246,31 @@ class PendingCommandReader(Protocol):
     ) -> tuple[str, ...]: ...
 
 
-class NoPendingCommands:
+class BoundaryCommandLedger(Protocol):
+    async def list_boundary_commands(
+        self, request_scope: str, run_id: str
+    ) -> tuple[BoundaryCommandStatus, ...]: ...
+
+
+class LedgerPendingCommands:
+    """RRM-007's `boundary_commands` / `boundary_command_receipts`, read through run control.
+
+    Every command whose latest receipt is neither `applied` nor `rejected` is unapplied and is
+    reported as `<issuer>:<command_id>:<state>`. Commands and receipts are audit facts of the
+    source run; a fork never copies them.
+    """
+
+    def __init__(self, ledger: BoundaryCommandLedger) -> None:
+        self._ledger = ledger
+
     async def unapplied_command_receipts(self, request_scope: str, run_id: str) -> tuple[str, ...]:
-        del request_scope, run_id
-        return ()
+        return tuple(
+            sorted(
+                f"{item.command.idempotency_issuer}:{item.command.command_id}:{item.state.value}"
+                for item in await self._ledger.list_boundary_commands(request_scope, run_id)
+                if item.state not in SETTLED_RECEIPT_STATES
+            )
+        )
 
 
 class RunSnapshotRepository(Protocol):
@@ -715,14 +738,14 @@ class RunSnapshotService:
         sources: ForkSourceReader,
         snapshots: RunSnapshotRepository,
         async_children: AsyncChildForkClassifier,
-        commands: PendingCommandReader | None = None,
+        commands: PendingCommandReader,
         clock: Clock | None = None,
     ) -> None:
         self._reads = reads
         self._sources = sources
         self._snapshots = snapshots
         self._async_children = async_children
-        self._commands = commands or NoPendingCommands()
+        self._commands = commands
         self._clock = clock or (lambda: datetime.now(UTC))
 
     async def take(

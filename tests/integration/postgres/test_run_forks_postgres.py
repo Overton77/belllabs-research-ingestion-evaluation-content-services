@@ -556,6 +556,7 @@ async def test_active_async_child_in_rrm013_authority_blocks_the_snapshot(
         PostgresInspectionReadRepository,
     )
     from app.application.runtime.run_forks import (
+        LedgerPendingCommands,
         LineageAsyncChildForkClassifier,
         RunSnapshotService,
     )
@@ -602,6 +603,7 @@ async def test_active_async_child_in_rrm013_authority_blocks_the_snapshot(
             sources=PostgresForkSourceReader(owner),
             snapshots=PostgresRunSnapshotRepository(owner),
             async_children=LineageAsyncChildForkClassifier(authority),
+            commands=LedgerPendingCommands(run_control),
         )
         await authority.reserve_and_admit(
             spawn_request().model_copy(
@@ -626,5 +628,44 @@ async def test_active_async_child_in_rrm013_authority_blocks_the_snapshot(
             for item in snapshot.async_children
         ]
         assert observed == [("async-child-admitted", "completed", "terminal")]
+
+        # RRM-007's durable ledger (0023): an accepted, unapplied pause on a run with a family
+        # execution target is a pending command; once applied the snapshot is taken.
+        from tests.unit.run_control.test_boundary_commands import (
+            TARGET,
+            apply,
+            boundary_command,
+            pause,
+        )
+
+        targeted = await run_control.admit(run_request(request_id="rrm006-ledger"))
+        assert targeted.run_id is not None
+        ledger_run = targeted.run_id
+        await run_control.execute(
+            command(ledger_run, 1, "ledger-start", StartAction(execution_target=TARGET))
+        )
+        async with owner.acquire() as connection:
+            await connection.execute(
+                """
+                INSERT INTO belllabs_control.family_admission_heads (
+                    request_scope, run_id, family_kind, family_version,
+                    mutation_fingerprint, mutation, updated_at
+                ) VALUES ('tenant-1', $1, 'stagegraph', $2, $3, $4::jsonb, $5)
+                """,
+                ledger_run,
+                head.family_version,
+                head.mutation_fingerprint,
+                json.dumps(dict(head.mutation)),
+                NOW,
+            )
+        accepted = await run_control.execute(command(ledger_run, 2, "pause", pause()))
+        assert accepted.reason_code == "accepted_pending_application"
+        with pytest.raises(ForkRejected) as pending:
+            await service.take("tenant-1", ledger_run)
+        assert "command_unapplied:operator:pause:accepted" in pending.value.reasons
+        await run_control.execute(
+            boundary_command(ledger_run, 2, "apply:pause", apply("pause", pause()))
+        )
+        assert (await service.take("tenant-1", ledger_run)).pending_commands == ()
     finally:
         await owner.close()
