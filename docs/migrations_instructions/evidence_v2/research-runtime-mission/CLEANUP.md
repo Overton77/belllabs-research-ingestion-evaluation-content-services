@@ -76,3 +76,12 @@ Scope: async-subagent deployment and graph files (RRM-013), runtime inspection A
 - `inspection_cursor.py`: a signed, scoped, expiring cursor codec usable for any paged read API.
 - `RuntimeInspectionService` source ports (`TemporalVisibilityReader`, `CheckpointHistoryReader`, `AsyncChildDetailReader`): provider-neutral multi-source read composition with per-section freshness.
 - Async-child submission fence and reconciliation decisions: a generic "provider-run adoption with in-doubt incident" pattern independent of Agent Server.
+
+### CR-2 integration
+
+The coordinator checked the diff independently: the cursor codec was extracted unchanged and three unreferenced symbols were deleted, with no wire or persisted identity changes. It was merged `--no-ff` at `c850526`. Merge gates:
+- ruff: clean.
+- mypy: 362 files, no issues.
+- Hermetic pytest: 913 passed, 65 skipped, 2 xfailed.
+- Pytest with the disposable Postgres/Mongo stack and `--env-file`: 948 passed, 30 skipped, 2 xfailed.
+
