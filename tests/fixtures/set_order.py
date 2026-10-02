@@ -15,6 +15,7 @@ import typing
 from typing import Any
 
 from pydantic import BaseModel
+from pydantic_core import to_jsonable_python
 
 _PROBE_COUNT = 400
 
@@ -158,3 +159,27 @@ def model_holds_set(
             if _holds_set(field.annotation, seen):
                 return True
     return False
+
+
+def _reversed_sets(value: Any) -> Any:
+    if isinstance(value, BaseModel):
+        return {name: _reversed_sets(getattr(value, name)) for name in type(value).model_fields}
+    if isinstance(value, frozenset | set):
+        members = [to_jsonable_python(_reversed_sets(item)) for item in value]
+        return sorted(members, key=lambda item: json.dumps(item, sort_keys=True), reverse=True)
+    if isinstance(value, dict):
+        return {key: _reversed_sets(item) for key, item in value.items()}
+    if isinstance(value, tuple | list):
+        return [_reversed_sets(item) for item in value]
+    return value
+
+
+def json_with_reversed_sets(model: BaseModel) -> Any:
+    """The contract's JSON with every set listed in reverse canonical order.
+
+    A valid payload (no probe padding) that a differently seeded process could have stored:
+    equal contract, different list order. Unlike `with_different_set_orders` it never leaves
+    the model's validity domain, so it can be fed back through `model_validate`.
+    """
+
+    return to_jsonable_python(_reversed_sets(model))

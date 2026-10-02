@@ -4,9 +4,9 @@ import hashlib
 import json
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any
+from typing import Any, get_args
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 from pydantic_core import to_jsonable_python
 
 CANONICAL_SCHEMA_VERSION = "canonical-json/1"
@@ -86,26 +86,53 @@ def contract_fingerprint(value: BaseModel, *, exclude: set[str] | None = None) -
     )
 
 
-def _stabilize_sets(value: Any) -> Any:
+def _declared_model(annotation: Any) -> type[BaseModel] | None:
+    """The single model class a field annotation declares (also as a container item), if any."""
+
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return annotation
+    found = {
+        model
+        for argument in get_args(annotation)
+        if argument is not type(None) and argument is not Ellipsis
+        if (model := _declared_model(argument)) is not None
+    }
+    return next(iter(found)) if len(found) == 1 else None
+
+
+def _stabilize_sets(
+    value: Any, *, in_set: bool = False, declared: type[BaseModel] | None = None
+) -> Any:
     """Walk a contract into plain containers, with every set as a canonically sorted list.
 
     Models are walked field by field instead of dumped in Python mode because a Python-mode
-    dump cannot represent a set of models (the dumped members are unhashable dicts).
+    dump cannot represent a set of models (the dumped members are unhashable dicts). Like
+    pydantic, a model in a field declared as a base model is walked by the declared fields.
+    Aware datetimes inside a set are converted to UTC so that equal instants in different
+    offsets, which a set treats as one member, dump identically whichever representative it kept.
     """
 
     if isinstance(value, BaseModel):
-        model = type(value)
+        owner = declared if declared is not None and isinstance(value, declared) else type(value)
         content = {
-            name: _stabilize_sets(getattr(value, name))
-            for name, field in model.model_fields.items()
+            name: _stabilize_sets(
+                getattr(value, name), in_set=in_set, declared=_declared_model(field.annotation)
+            )
+            for name, field in owner.model_fields.items()
             if not field.exclude
         }
         content.update(
-            {name: _stabilize_sets(getattr(value, name)) for name in model.model_computed_fields}
+            {
+                name: _stabilize_sets(getattr(value, name), in_set=in_set)
+                for name in owner.model_computed_fields
+            }
         )
         return content
     if isinstance(value, frozenset | set):
-        items = [to_jsonable_python(_stabilize_sets(item)) for item in value]
+        items = [
+            to_jsonable_python(_stabilize_sets(item, in_set=True, declared=declared))
+            for item in value
+        ]
         return sorted(
             items,
             key=lambda item: json.dumps(
@@ -113,9 +140,14 @@ def _stabilize_sets(value: Any) -> Any:
             ),
         )
     if isinstance(value, dict):
-        return {key: _stabilize_sets(item) for key, item in value.items()}
+        return {
+            key: _stabilize_sets(item, in_set=in_set, declared=declared)
+            for key, item in value.items()
+        }
     if isinstance(value, tuple | list):
-        return [_stabilize_sets(item) for item in value]
+        return [_stabilize_sets(item, in_set=in_set, declared=declared) for item in value]
+    if in_set and isinstance(value, datetime) and value.utcoffset() is not None:
+        return value.astimezone(UTC)
     return value
 
 
@@ -127,6 +159,13 @@ def stable_json_dump(value: BaseModel, *, exclude: set[str] | None = None) -> An
     contract with no set-valued field the result, and therefore any digest of it, is
     identical to the plain JSON-mode dump, so existing persisted digests stay valid.
     Use this wherever a JSON-shaped dump of a contract feeds a digest or an equality proof.
+
+    The walk follows pydantic's declared-type rule (a subclass in a base-typed field dumps by the
+    base fields), so for a set-free contract it equals `model_dump(mode="json")`. By contrast
+    `_normalize` (and so `sha256_digest(model)` and `contract_fingerprint`) walks each value's
+    runtime type and includes subclass fields; that is the established persisted format and is
+    deliberately left unchanged. `test_digest_set_order_guard.py` pins every contract field that
+    declares a base model with extending subclasses, so a new one is reviewed.
     """
 
     content = _stabilize_sets(value)
@@ -141,19 +180,47 @@ def stable_json_digest(value: BaseModel, *, exclude: set[str] | None = None) -> 
     return sha256_digest(stable_json_dump(value, exclude=exclude))
 
 
+def _sorted_lists(value: Any) -> Any:
+    """Sort every list canonically so set order cannot matter (tuple order is checked apart)."""
+
+    if isinstance(value, dict):
+        return {key: _sorted_lists(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return sorted(
+            (_sorted_lists(item) for item in value),
+            key=lambda item: json.dumps(
+                item, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            ),
+        )
+    return value
+
+
 def stored_payload_matches(stored: Any, expected: BaseModel) -> bool:
     """Whether a stored JSON payload is exactly `expected`, independent of set order.
 
     Comparing stored JSON with `expected.model_dump(mode="json")` is order-sensitive for
-    set-valued fields: the stored list reflects the writer process's iteration order. Equal
-    contracts compare equal as models, whatever order their sets were built in.
+    set-valued fields: the stored list reflects the writer process's iteration order. The match
+    is as strict as that comparison apart from list order:
+
+    - the stored payload must validate as the expected type (a corrupt payload is a mismatch,
+      never an exception);
+    - the restored contract equals `expected` and has the same stable dump;
+    - the stored payload itself equals the restored contract's JSON dump once lists are
+      sorted, so a payload that omits a defaulted field or relies on lax coercion (`"5"` for
+      an int) is rejected.
+
+    Only the validation step is guarded; a programming error in the comparison propagates.
     """
 
     try:
         restored = type(expected).model_validate(stored)
-    except ValidationError:
+    except Exception:
         return False
-    return bool(restored == expected)
+    return (
+        bool(restored == expected)
+        and stable_json_dump(restored) == stable_json_dump(expected)
+        and _sorted_lists(stored) == _sorted_lists(stable_json_dump(restored))
+    )
 
 
 def verify_digest(value: Any, expected: str) -> None:

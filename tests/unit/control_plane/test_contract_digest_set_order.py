@@ -564,3 +564,203 @@ async def test_effective_run_configuration_persistence_is_independent_of_set_ord
         assert (record["payload"] is None) == (record["payload_ref"] is not None)
         if externalize_above_bytes == 0:
             assert record["payload_ref"] is not None
+
+
+# --- review fixes: strict stored-payload match, declared types, datetimes, replay sites ------
+
+
+def test_stored_payload_matches_is_as_strict_as_json_equality_except_list_order() -> None:
+    from pydantic import BaseModel
+
+    class Stored(BaseModel):
+        name: str
+        count: int = 3
+        members: frozenset[str]
+        steps: tuple[str, ...]
+
+    expected = Stored(name="x", members=frozenset({"a", "b"}), steps=("one", "two"))
+    exact = expected.model_dump(mode="json")
+    assert stored_payload_matches({**exact, "members": ["b", "a"]}, expected)
+    # Omitting a defaulted field, or relying on lax coercion, is not the stored contract.
+    assert not stored_payload_matches({k: v for k, v in exact.items() if k != "count"}, expected)
+    assert not stored_payload_matches({**exact, "count": "3"}, expected)
+    # Tuple order is semantic.
+    assert not stored_payload_matches({**exact, "steps": ["two", "one"]}, expected)
+    assert not stored_payload_matches({**exact, "name": "y"}, expected)
+    # A corrupt payload is a mismatch, never an exception.
+    assert not stored_payload_matches(None, expected)
+    assert not stored_payload_matches("not json", expected)
+    assert not stored_payload_matches({"members": 5, "steps": {}}, expected)
+
+
+def test_stable_json_dump_follows_the_declared_type_like_model_dump() -> None:
+    from pydantic import BaseModel
+
+    class Base(BaseModel):
+        name: str
+
+    class Extended(Base):
+        extra: frozenset[str]
+
+    class Holder(BaseModel):
+        item: Base
+        items: tuple[Base, ...]
+
+    extended = Extended(name="n", extra=frozenset({"x"}))
+    holder = Holder(item=extended, items=(extended,))
+    # Pydantic dumps by the declared field type, dropping the subclass-only field.
+    assert holder.model_dump(mode="json") == {"item": {"name": "n"}, "items": [{"name": "n"}]}
+    assert stable_json_dump(holder) == holder.model_dump(mode="json")
+    # A top-level subclass instance dumps with all of its own fields, as model_dump does.
+    assert stable_json_dump(extended) == extended.model_dump(mode="json")
+
+
+def test_stable_json_dump_normalizes_aware_datetimes_inside_sets() -> None:
+    from datetime import UTC, datetime, timedelta, timezone
+
+    from pydantic import BaseModel
+
+    class Moments(BaseModel):
+        at: frozenset[datetime]
+        single: datetime
+
+    instant = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+    east = instant.astimezone(timezone(timedelta(hours=5)))
+    assert east == instant and east.utcoffset() != instant.utcoffset()
+    first = Moments(at=frozenset({instant, east}), single=east)
+    assert len(first.at) == 1
+    # Whichever representative the set kept, the dump is the same.
+    kept_east = Moments(at=frozenset({east}), single=east)
+    kept_utc = Moments(at=frozenset({instant}), single=east)
+    assert stable_json_dump(kept_east)["at"] == stable_json_dump(kept_utc)["at"]
+    assert stable_json_dump(first)["at"] == stable_json_dump(kept_utc)["at"]
+    # Outside sets the instant is dumped as written, exactly like `model_dump(mode="json")`.
+    assert stable_json_dump(first)["single"] == first.model_dump(mode="json")["single"]
+
+
+async def _run_control_replay_material():  # type: ignore[no-untyped-def]
+    """A real accepted start transition, command result, outbox event and budget."""
+
+    from tests.unit.run_control.test_run_control import StartAction, command, request, service
+
+    run_service, repository = service()
+    admitted = await run_service.admit(request(request_id="replay-sites"))
+    assert admitted.run_id is not None
+    result = await run_service.execute(command(admitted.run_id, 1, "start", StartAction()))
+    run = await repository.get_run("tenant-1", admitted.run_id)
+    budget = await repository.get_budget("tenant-1", admitted.run_id)
+    transition = repository._transitions[admitted.run_id][-1]
+    event = list(repository._outbox.values())[-1].envelope
+    return run, budget, transition, result, event
+
+
+@pytest.mark.asyncio
+async def test_journal_replay_proofs_accept_reordered_sets_and_reject_changed_fields() -> None:
+    """The transition and outbox proofs in `_commit_run_control` (postgres_operation_journal)."""
+
+    from types import SimpleNamespace
+
+    from app.application.operations.postgres_operation_journal import (
+        PostgresAtomicOperationJournalRepository,
+    )
+    from app.domain.run_control.errors import IdempotencyConflict
+    from tests.fixtures.set_order import json_with_reversed_sets
+
+    run, budget, transition, result, event = await _run_control_replay_material()
+    reordered_transition = json_with_reversed_sets(transition)
+    reordered_event = json_with_reversed_sets(event)
+    assert reordered_transition != stable_json_dump(transition)
+    assert reordered_event != stable_json_dump(event)
+
+    class Connection:
+        def __init__(self, stored_transition: object, stored_event: object) -> None:
+            self.stored_transition = stored_transition
+            self.stored_event = stored_event
+
+        async def fetchval(self, sql: str, *_args: object) -> object:
+            if "budget_accounts" in sql:
+                return budget.model_dump(mode="json")
+            if "lifecycle_transitions" in sql:
+                return self.stored_transition
+            if "outbox" in sql:
+                return self.stored_event
+            raise AssertionError(sql)
+
+        async def fetchrow(self, *_args: object) -> None:
+            return None
+
+        async def execute(self, *_args: object) -> None:
+            return None
+
+    mutation = SimpleNamespace(
+        resulting_run=run,
+        resulting_budget=budget,
+        transition=transition,
+        command_result=result,
+        expected_run_version=run.version - 1,
+        belllabs_run_id=run.run_id,
+        claim=SimpleNamespace(effect_claim_id="claim-1", claimed_at=run.updated_at),
+        ledger_entries=(),
+        outbox_events=(event,),
+    )
+    current = run.model_copy(update={"version": run.version - 1})
+    journal = object.__new__(PostgresAtomicOperationJournalRepository)
+
+    async def commit(stored_transition: object, stored_event: object) -> None:
+        await journal._commit_run_control(  # type: ignore[arg-type]
+            Connection(stored_transition, stored_event), mutation, current_run=current
+        )
+
+    # Equal contracts stored with differently ordered sets are an exact replay.
+    await commit(reordered_transition, reordered_event)
+    with pytest.raises(IdempotencyConflict, match="lifecycle transition collision"):
+        await commit({**reordered_transition, "command_id": "other"}, reordered_event)
+    with pytest.raises(IdempotencyConflict, match="outbox event collision"):
+        await commit(reordered_transition, {**reordered_event, "event_type": "other"})
+
+
+@pytest.mark.asyncio
+async def test_mongo_binding_replay_proof_accepts_reordered_sets_and_rejects_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The duplicate-key proof in `MongoOperationBindingAuthorityMigrationRepository`."""
+
+    from types import SimpleNamespace
+
+    from pymongo.errors import DuplicateKeyError
+
+    from app.application.operations import mongo_operation_authority_migration as migration
+    from app.application.operations.operation_execution import _binding_for
+    from tests.fixtures.set_order import json_with_reversed_sets
+    from tests.unit.operations.test_operation_execution import operation_request
+
+    binding = _binding_for(operation_request(), DIGEST)
+    reordered = json_with_reversed_sets(binding)
+    assert reordered != stable_json_dump(binding)
+    digest = sha256_digest(binding)
+
+    async def create_with(prior_payload: object, prior_digest: str = digest) -> object:
+        class Document:
+            binding_id = "binding_id"
+            request_scope = "request_scope"
+
+            def __init__(self, **values: object) -> None:
+                self.values = values
+
+            async def insert(self) -> None:
+                raise DuplicateKeyError("duplicate")
+
+            @classmethod
+            async def find_one(cls, *_criteria: object) -> object:
+                return SimpleNamespace(canonical_digest=prior_digest, payload=prior_payload)
+
+        monkeypatch.setattr(migration, "OperationExecutionBindingAuthorityV2Document", Document)
+        repository = object.__new__(migration.MongoOperationBindingAuthorityMigrationRepository)
+        return await repository.create_binding(binding.request_scope, binding)
+
+    record = await create_with(reordered)
+    assert record.binding == binding  # type: ignore[attr-defined]
+    with pytest.raises(ValueError, match="authority conflict"):
+        await create_with({**reordered, "binding_id": "other"})
+    with pytest.raises(ValueError, match="authority conflict"):
+        await create_with(reordered, prior_digest=DIGEST)

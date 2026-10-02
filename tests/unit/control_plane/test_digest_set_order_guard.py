@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
-from tests.fixtures.digest_sites import scan_digest_sites
+from tests.fixtures.digest_sites import scan_digest_sites, scan_unverifiable_dumps
 from tests.fixtures.set_order import model_holds_set
 
 CD = "app.domain.control_plane.contracts"
@@ -46,75 +46,78 @@ ANY_PAYLOAD = (
     f"{NO_SET}; `Any`/`dict[str, Any]` members are JSON payloads validated from JSON documents"
 )
 
-# (path, enclosing function, receivers dumped, model classes, reason)
+
 _AUDIT: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...], str], ...] = (
     (
         "app/application/coordinator/postgres_workflow_result_repository.py",
         "PostgresWorkflowResultRepository.save",
-        ("result",),
+        ("result.model_dump(mode='json')",),
         ("app.domain.coordinator.launch.WorkflowResultRecord",),
         ANY_PAYLOAD,
     ),
     (
         "app/application/operations/journaled_operation_execution.py",
         "JournaledOperationExecutionCoordinator.acquire",
-        ("claim",),
+        ("claim.model_dump(mode='json')",),
         (f"{OE}.journal.OperationEffectClaim",),
         NO_SET,
     ),
     (
         "app/application/operations/operation_journal.py",
         "OperationJournalMutation.validate",
-        ("self.claim",),
+        ("self.claim.model_dump(mode='json')",),
         (f"{OE}.journal.OperationEffectClaim",),
         NO_SET,
     ),
     (
         "app/application/operations/operation_execution.py",
         "RunControlOperationAuthority._verify_bound_authority",
-        ("configuration.workflow_workspace_contract",),
+        ("configuration.workflow_workspace_contract.model_dump(mode='json')",),
         (f"{CD}.WorkflowWorkspaceContract",),
         NO_SET,
     ),
     (
         "app/application/orchestration/goal_directed.py",
         "GoalDirectedOperationResultService.reconcile",
-        ("observed",),
+        ("observed.model_dump(mode='json')",),
         (f"{OE}.contracts.OperationWorkflowResult",),
         ANY_PAYLOAD,
     ),
     (
         "app/application/orchestration/service.py",
         "RunControlLifecycleGateway.execute",
-        ("item",),
+        ("item.model_dump(mode='json')",),
         (f"{RC}.contracts.AcceptedObligationEvidence",),
         NO_SET,
     ),
     (
         "app/application/orchestration/service.py",
         "StageGraphDecisionService.complete",
-        ("item",),
+        ("item.model_dump(mode='json')",),
         (f"{RC}.contracts.AcceptedObligationEvidence",),
         NO_SET,
     ),
     (
         "app/domain/run_control/reducer.py",
         "_evidence_frontier",
-        ("item",),
-        (f"{RC}.contracts.AcceptedObligationEvidence", f"{RC}.contracts.AcceptedOutputEvidence"),
+        ("item.model_dump(mode='json')",),
+        (
+            f"{RC}.contracts.AcceptedObligationEvidence",
+            f"{RC}.contracts.AcceptedOutputEvidence",
+        ),
         NO_SET,
     ),
     (
         "app/domain/run_control/reducer.py",
         "_terminal_outcome",
-        ("item",),
+        ("item.model_dump(mode='json')",),
         (f"{RC}.contracts.AcceptedObligationEvidence",),
         NO_SET,
     ),
     (
         "app/application/reference_research/service.py",
         "execute_reference_fixture",
-        ("fixture",),
+        ("fixture.model_dump(mode='json')",),
         (
             "app.domain.reference_research.contracts.QualiaFixtureInput",
             "app.domain.reference_research.contracts.DaveFixtureInput",
@@ -124,252 +127,279 @@ _AUDIT: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...], str], ...] = (
     (
         "app/application/reference_research/service.py",
         "execute_reference_fixture",
-        ("lease_request",),
+        ("lease_request.model_dump(mode='json')",),
         (f"{GR}.kernel.ResourceLeaseRequest",),
         NO_SET,
     ),
     (
         "app/application/reference_research/service.py",
         "prepare_reference_implementation",
-        ("resources",),
+        ("resources.model_dump(mode='json')",),
         (f"{GR}.definitions.ExecutionResourceEnvelopeV2",),
         NO_SET,
     ),
     (
         "app/application/run_control/run_control_repository.py",
         "FamilyAdmissionCommit.__post_init__",
-        ("mutation",),
+        ("mutation.model_dump(mode='json', exclude={'decided_at'})",),
         (f"{RC}.family_admission.AtomicFamilyMutation",),
         NO_SET,
     ),
     (
         "app/application/runners/web_research_coordinator_live.py",
         "_launch_proposal",
-        ("ref",),
+        ("ref.model_dump(mode='json')",),
         (f"{CD}.ExactDefinitionRef",),
         NO_SET,
     ),
     (
         "app/application/runners/web_research_coordinator_live.py",
         "_run_mounted_mcp_planning",
-        ("tool",),
+        ("tool.model_dump(mode='json', exclude_none=True)",),
         (),
         THIRD_PARTY,
     ),
     (
         "app/integrations/web_research_runtime.py",
         "_tools_snapshot_digest",
-        ("tool",),
+        ("tool.model_dump(mode='json', exclude_none=True)",),
         (),
         THIRD_PARTY,
     ),
     (
         "app/application/runtime/postgres_stage3_kernel_repository.py",
         "PostgresExecutionLineageRepository.append",
-        ("parent_edge",),
+        ("parent_edge.model_dump(mode='json')",),
         (f"{GR}.kernel.LineageParentEdge",),
         NO_SET,
     ),
     (
         "app/application/runtime/postgres_stage3_kernel_repository.py",
         "PostgresForkRepository.reserve",
-        ("request",),
+        ("request.model_dump(mode='json')",),
         (f"{GR}.contracts.ForkRequest",),
         NO_SET,
     ),
     (
         "app/application/runtime/runtime_decisions.py",
         "DurableDecisionService.create_request",
-        ("request",),
+        ("request.model_dump(mode='json', exclude={'request_digest'})",),
         (f"{GR}.kernel.DecisionRequest",),
         NO_SET,
     ),
     (
         "app/application/runtime/runtime_lineage.py",
         "PersistedExecutionLineage.lineage_is_canonical_and_scope_bound",
-        ("self",),
+        (
+            "self.model_dump(mode='json', exclude={'lineage_digest', 'recorded_at', 'retain_until'})",
+        ),
         ("app.application.runtime.runtime_lineage.PersistedExecutionLineage",),
         NO_SET,
     ),
     (
         "app/application/runtime/runtime_run_plan.py",
         "compile_run_plan",
-        ("item",),
+        ("item.model_dump(mode='json')",),
         (f"{CD}.AliasBinding",),
         NO_SET,
     ),
     (
         "app/application/runtime/runtime_run_plan.py",
         "compile_run_plan_v3",
-        ("item",),
+        ("item.model_dump(mode='json')",),
         (f"{CD}.AliasBinding",),
         NO_SET,
     ),
     (
         "app/application/runtime/runtime_run_plan.py",
         "compile_run_plan_v4",
-        ("item",),
+        ("item.model_dump(mode='json')",),
         (f"{CD}.AliasBinding",),
         NO_SET,
     ),
     (
         "app/application/schema/graph_query.py",
         "intent_digest",
-        ("intent",),
+        ("intent.model_dump(mode='json')",),
         (f"{SC}.QueryExecutionIntent",),
         ANY_PAYLOAD,
     ),
     (
         "app/application/schema/schema_grounding_semantic_handlers.py",
         "SupportingGraphSemanticBindingProvider.prepare",
-        ("intent",),
+        ("intent.model_dump(mode='json')",),
         (f"{SC}.QueryExecutionIntent",),
         ANY_PAYLOAD,
     ),
     (
         "app/application/schema/supporting_graph_reconciliation.py",
         "SupportingGraphReconciliationWorkflow.run",
-        ("intent",),
+        ("intent.model_dump(mode='json')",),
         (f"{SC}.QueryExecutionIntent",),
         ANY_PAYLOAD,
     ),
     (
         "app/application/schema/supporting_graph_reconciliation.py",
         "_terminal_result",
-        ("intent",),
+        ("intent.model_dump(mode='json')",),
         (f"{SC}.QueryExecutionIntent",),
         ANY_PAYLOAD,
     ),
     (
         "app/application/schema/supporting_graph_reconciliation.py",
         "_reconciliation_request_digest",
-        ("evidence",),
+        ("evidence.model_dump(mode='json')",),
         (f"{SC}.GraphReconciliationEvidence",),
         NO_SET,
     ),
     (
         "app/application/schema/schema_catalog_build.py",
         "_request_fingerprint",
-        ("request",),
+        ("request.model_dump(mode='json', exclude={'requested_at'})",),
         (f"{SG}.SchemaCatalogBuildRequest",),
         NO_SET,
     ),
     (
         "app/application/web_research/web_research_semantic_binding.py",
         "verify_web_research_operation_binding",
-        ("profile_ref", "runtime_profile_ref", "workspace_template_ref"),
+        (
+            "profile_ref.model_dump(mode='json')",
+            "runtime_profile_ref.model_dump(mode='json')",
+            "workspace_template_ref.model_dump(mode='json')",
+        ),
         (f"{CD}.ExactDefinitionRef",),
         NO_SET,
     ),
     (
         "app/application/workspaces/mongo_workspace_repository.py",
         "MongoWorkspaceManifestRepository.reserve_writable_slots",
-        ("request",),
+        ("request.model_dump(mode='json')",),
         (f"{OE}.contracts.WorkspaceMaterializationRequest",),
         NO_SET,
     ),
     (
         "app/application/workspaces/workspace_materialization.py",
         "InMemoryWorkspaceManifestRepository.reserve_writable_slots",
-        ("request",),
+        ("request.model_dump(mode='json')",),
         (f"{OE}.contracts.WorkspaceMaterializationRequest",),
         NO_SET,
     ),
     (
         "app/application/workspaces/workspace_materialization.py",
         "WorkspaceMaterializationService._append_revision",
-        ("current.template_ref", "entry", "slot"),
+        (
+            "current.template_ref.model_dump(mode='json')",
+            "entry.model_dump(mode='json')",
+            "slot.model_dump(mode='json')",
+        ),
         (f"{OE}.contracts.WorkspaceMaterializationManifest",),
         NO_SET,
     ),
     (
         "app/application/workspaces/workspace_materialization.py",
         "WorkspaceMaterializationService._initial_manifest",
-        ("request.template_ref", "entry", "slot"),
+        (
+            "entry.model_dump(mode='json')",
+            "request.template_ref.model_dump(mode='json')",
+            "slot.model_dump(mode='json')",
+        ),
         (f"{OE}.contracts.WorkspaceMaterializationManifest",),
         NO_SET,
     ),
     (
         "app/domain/operation_execution/materialization.py",
         "workspace_manifest_digest",
-        ("manifest.template_ref", "entry", "slot"),
+        (
+            "entry.model_dump(mode='json')",
+            "manifest.template_ref.model_dump(mode='json')",
+            "slot.model_dump(mode='json')",
+        ),
         (f"{OE}.contracts.WorkspaceMaterializationManifest",),
         NO_SET,
     ),
     (
         "app/domain/coordinator/launch.py",
         "SemanticBindingPlan.plan_content_matches_digest",
-        ("self",),
+        ("self.model_dump(mode='json', exclude={'plan_digest'})",),
         ("app.domain.coordinator.launch.SemanticBindingPlan",),
         ANY_PAYLOAD,
     ),
     (
         "app/domain/graph_runtime/contracts.py",
         "GraphExecutionSubmission.submission_digest_matches_intent",
-        ("self",),
+        ("self.model_dump(mode='json', exclude={'request_digest'})",),
         (f"{GR}.contracts.GraphExecutionSubmission",),
         NO_SET,
     ),
     (
         "app/domain/graph_runtime/contracts.py",
         "InterventionBase.intervention_digest_matches_intent",
-        ("self",),
+        ("self.model_dump(mode='json', exclude={'request_digest'})",),
         (f"{GR}.contracts.InterventionBase",),
         NO_SET,
     ),
     (
         "app/domain/operation_execution/checkpoint_lineage.py",
         "CheckpointTransitionObservation.content_digest",
-        ("self",),
+        ("self.model_dump(mode='json', exclude={'observed_at'})",),
         (f"{OE}.checkpoint_lineage.CheckpointTransitionObservation",),
         NO_SET,
     ),
     (
         "app/domain/operation_execution/journal.py",
         "OperationJournalSettlement.create",
-        ("draft",),
+        ("draft.model_dump(mode='json', exclude={'settlement_digest'})",),
         (f"{OE}.journal.OperationJournalSettlement",),
         ANY_PAYLOAD,
     ),
     (
         "app/domain/operation_execution/journal.py",
         "OperationJournalSettlement.terminal_shape_is_consistent",
-        ("self",),
+        (
+            "self.model_dump(mode='json', exclude={'settlement_digest', 'digest_version', 'released_usage'})",
+            "self.model_dump(mode='json', exclude={'settlement_digest'})",
+        ),
         (f"{OE}.journal.OperationJournalSettlement",),
         ANY_PAYLOAD,
     ),
     (
         "app/domain/schema_catalog/parser.py",
         "parse_physical_schema",
-        ("value",),
+        ("value.model_dump(mode='json')",),
         ("app.domain.schema_catalog.models.PhysicalSchemaCatalog",),
         NO_SET,
     ),
     (
         "app/domain/schema_context/validation.py",
         "accept_selection",
-        ("review", "selection"),
-        (f"{SC}.SchemaSelectionReview", f"{SC}.SchemaContextSelection"),
+        (
+            "review.model_dump(mode='json')",
+            "selection.model_dump(mode='json')",
+        ),
+        (
+            f"{SC}.SchemaSelectionReview",
+            f"{SC}.SchemaContextSelection",
+        ),
         NO_SET,
     ),
     (
         "app/experiments/dynamic_research_swarm/evaluators.py",
         "evaluate_claim",
-        ("gate",),
+        ("gate.model_dump(mode='json')",),
         (f"{SW}.GateResult",),
         NO_SET,
     ),
     (
         "app/experiments/dynamic_research_swarm/repository.py",
         "SwarmEvidenceRepository.save_plan",
-        ("plan",),
+        ("plan.model_dump_json()",),
         (f"{SW}.MissionPlan",),
         NO_SET,
     ),
     (
         "app/experiments/dynamic_research_swarm/temporal_activities.py",
         "execute_swarm_stage",
-        ("output",),
+        ("output.model_dump_json()",),
         (
             f"{SW}.SourceBundle",
             f"{SW}.MissionPlan",
@@ -381,16 +411,16 @@ _AUDIT: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...], str], ...] = (
     (
         "app/integrations/conformance_operation_runtime.py",
         "ConformanceSandbox.materialize",
-        ("mount",),
+        ("mount.model_dump(mode='json')",),
         (f"{OE}.contracts.WorkspaceMount",),
         NO_SET,
     ),
 )
 
 AUDITED_NOT_AFFECTED: dict[tuple[str, str, str], Audited] = {
-    (path, function, receiver): Audited(models, reason)
-    for path, function, receivers, models, reason in _AUDIT
-    for receiver in receivers
+    (path, function, call): Audited(models, reason)
+    for path, function, calls, models, reason in _AUDIT
+    for call in calls
 }
 
 
@@ -407,7 +437,7 @@ def test_no_unaudited_json_dump_digest_sites() -> None:
     in_scope, _excluded = scan_digest_sites()
     unaudited = sorted(
         {
-            f"{site.path}:{site.line} {site.function}: {site.receiver}"
+            f"{site.path}:{site.line} {site.function}: {site.call}"
             for site in in_scope
             if site.key not in AUDITED_NOT_AFFECTED
         }
@@ -485,6 +515,18 @@ def test_scanner_detects_the_banned_patterns(tmp_path: Path) -> None:
 
             def persisted_only(x):
                 return store(x.model_dump(mode="json"))
+
+            def type_adapter(x):
+                return sha256_digest(ADAPTER.dump_python(x, mode="json"))
+
+            def jsonable(x):
+                return sha256_digest(to_jsonable_python(x))
+
+            def dynamic_mode(x, mode):
+                return sha256_digest(x.model_dump(mode=mode))
+
+            def kwargs_dump(x, **options):
+                return sha256_digest(x.model_dump(**options))
             """
         ),
         encoding="utf-8",
@@ -493,7 +535,93 @@ def test_scanner_detects_the_banned_patterns(tmp_path: Path) -> None:
     assert sorted(site.function for site in found) == [
         "direct",
         "fingerprint_named",
+        "jsonable",
         "multiline",
         "nested",
+        "type_adapter",
         "via_variable",
     ]
+    # Non-literal modes and **kwargs cannot be classified, so they are reported separately.
+    assert sorted(site.function for site in scan_unverifiable_dumps(root)) == [
+        "dynamic_mode",
+        "kwargs_dump",
+    ]
+
+
+def test_no_unverifiable_json_dumps_in_app() -> None:
+    """A dump with a computed `mode=` or `**kwargs` could hide a JSON-mode digest input."""
+
+    unverifiable = [f"{site.path}:{site.line} {site.call}" for site in scan_unverifiable_dumps()]
+    assert not unverifiable, "use a literal mode= and explicit keywords:\n" + "\n".join(
+        unverifiable
+    )
+
+
+def _all_app_models() -> list[type[BaseModel]]:
+    import pkgutil
+
+    import app
+
+    for module in pkgutil.walk_packages(app.__path__, "app."):
+        try:
+            importlib.import_module(module.name)
+        except Exception:  # noqa: S112 - modules needing live settings are not contracts
+            continue
+    found: list[type[BaseModel]] = []
+
+    def collect(model: type[BaseModel]) -> None:
+        for subclass in model.__subclasses__():
+            found.append(subclass)
+            collect(subclass)
+
+    collect(BaseModel)
+    return [model for model in found if model.__module__.startswith("app")]
+
+
+def _declared_models(annotation: object) -> list[type[BaseModel]]:
+    import typing
+
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return [annotation]
+    return [model for arg in typing.get_args(annotation) for model in _declared_models(arg)]
+
+
+# Runtime-key hierarchy (`app.domain.graph_runtime.identities`): fields declared as a base key whose
+# subclasses add fields. `stable_json_dump` follows pydantic's declared-type rule for them; the
+# runtime-type walk of `_normalize`/`contract_fingerprint` would include the subclass fields. None
+# of these contracts is an input of `contract_fingerprint` or `stable_json_dump` today.
+KNOWN_EXTENDED_DECLARED_MODELS = {
+    ("BellLabsRunKey", "AgentThreadKey"),
+    ("BellLabsRunKey", "ExecutionEpochKey"),
+    ("BellLabsRunKey", "GoalHandoffCheckpointKey"),
+    ("BellLabsRunKey", "RuntimeTransportAttemptKey"),
+    ("BellLabsRunKey", "SemanticOperationAttemptKey"),
+    ("ExecutionEpochKey", "AgentThreadKey"),
+    ("ExecutionEpochKey", "RuntimeTransportAttemptKey"),
+}
+
+
+def test_contract_fields_declaring_extended_base_models_are_pinned() -> None:
+    """`_normalize` walks runtime types while pydantic dumps by the declared type.
+
+    They differ only when a subclass that adds fields sits in a field declared as its base model.
+    Every such (declared model, subclass) pair is pinned; a new one fails here and must be
+    reviewed against `contract_fingerprint` and `stable_json_dump` before it is accepted.
+    """
+
+    pairs: set[tuple[str, str]] = set()
+    for model in _all_app_models():
+        for field in model.model_fields.values():
+            for declared in _declared_models(field.annotation):
+                for subclass in _subclasses(declared):
+                    if set(subclass.model_fields) - set(declared.model_fields):
+                        pairs.add((declared.__name__, subclass.__name__))
+    assert pairs == KNOWN_EXTENDED_DECLARED_MODELS
+
+
+def _subclasses(model: type[BaseModel]) -> list[type[BaseModel]]:
+    found: list[type[BaseModel]] = []
+    for subclass in model.__subclasses__():
+        found.append(subclass)
+        found.extend(_subclasses(subclass))
+    return found

@@ -31,25 +31,47 @@ class DigestSite:
     function: str
     receiver: str
     line: int
+    call: str
 
     @property
     def key(self) -> tuple[str, str, str]:
-        return (self.path, self.function, self.receiver)
+        """Audit identity: the exact dump expression, so changing it forces a re-audit."""
+
+        return (self.path, self.function, self.call)
 
 
-def _is_json_dump(node: ast.AST) -> ast.Call | None:
-    if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+def _classify_dump(node: ast.AST) -> tuple[ast.Call, str, str] | None:
+    """Return (call, receiver text, kind) for a JSON-shaped dump; kind is json or dynamic.
+
+    Detected: `x.model_dump_json()`, `x.model_dump(mode="json")`, `adapter.dump_python(x,
+    mode="json")` and `to_jsonable_python(x)`. A `mode=` that is not a literal, or any `**kwargs`,
+    is `dynamic`: the scan cannot tell which mode runs, so it is reported as unverifiable.
+    """
+
+    if not isinstance(node, ast.Call):
         return None
-    if node.func.attr == "model_dump_json":
-        return node
-    if node.func.attr == "model_dump":
-        for keyword in node.keywords:
-            if (
-                keyword.arg == "mode"
-                and isinstance(keyword.value, ast.Constant)
-                and keyword.value.value == "json"
-            ):
-                return node
+    func = node.func
+    if isinstance(func, ast.Name | ast.Attribute) and (
+        (func.id if isinstance(func, ast.Name) else func.attr) == "to_jsonable_python"
+    ):
+        return node, ast.unparse(node.args[0]) if node.args else "", "json"
+    if not isinstance(func, ast.Attribute):
+        return None
+    if func.attr == "model_dump_json":
+        return node, ast.unparse(func.value), "json"
+    if func.attr not in {"model_dump", "dump_python"}:
+        return None
+    receiver = ast.unparse(func.value)
+    if func.attr == "dump_python" and node.args:
+        receiver = ast.unparse(node.args[0])
+    if any(keyword.arg is None for keyword in node.keywords):
+        return node, receiver, "dynamic"
+    for keyword in node.keywords:
+        if keyword.arg == "mode":
+            if not isinstance(keyword.value, ast.Constant):
+                return node, receiver, "dynamic"
+            if keyword.value.value == "json":
+                return node, receiver, "json"
     return None
 
 
@@ -71,6 +93,7 @@ class _Visitor(ast.NodeVisitor):
         self.path = path
         self.scopes: list[str] = []
         self.sites: list[DigestSite] = []
+        self.unverifiable: list[DigestSite] = []
 
     def _visit_scope(self, node: ast.AST, name: str) -> None:
         self.scopes.append(name)
@@ -103,8 +126,19 @@ class _Visitor(ast.NodeVisitor):
                             sink_arg_names.add(inner.id)
         qualname = ".".join(self.scopes)
         for node in ast.walk(function):
-            dump = _is_json_dump(node)
-            if dump is None:
+            classified = _classify_dump(node)
+            if classified is None:
+                continue
+            dump, receiver, kind = classified
+            site = DigestSite(
+                path=self.path,
+                function=qualname,
+                receiver=receiver,
+                line=dump.lineno,
+                call=ast.unparse(dump),
+            )
+            if kind == "dynamic":
+                self.unverifiable.append(site)
                 continue
             flows = False
             cursor: ast.AST | None = dump
@@ -132,15 +166,22 @@ class _Visitor(ast.NodeVisitor):
                     break
                 cursor = parent
             if flows:
-                assert isinstance(dump.func, ast.Attribute)
-                self.sites.append(
-                    DigestSite(
-                        path=self.path,
-                        function=qualname,
-                        receiver=ast.unparse(dump.func.value),
-                        line=dump.lineno,
-                    )
-                )
+                self.sites.append(site)
+
+
+def _scan(root: Path) -> list[tuple[str, _Visitor]]:
+    results: list[tuple[str, _Visitor]] = []
+    repo = root.parent
+    for file in sorted(root.rglob("*.py")):
+        relative = file.relative_to(repo).as_posix()
+        visitor = _Visitor(relative)
+        visitor.visit(ast.parse(file.read_text(encoding="utf-8"), filename=str(file)))
+        results.append((relative, visitor))
+    return results
+
+
+def _excluded(relative: str) -> bool:
+    return relative in EXCLUDED_FILES or any(part in relative for part in EXCLUDED_PARTS)
 
 
 def scan_digest_sites(root: Path = APP_ROOT) -> tuple[list[DigestSite], list[DigestSite]]:
@@ -148,11 +189,12 @@ def scan_digest_sites(root: Path = APP_ROOT) -> tuple[list[DigestSite], list[Dig
 
     in_scope: list[DigestSite] = []
     excluded: list[DigestSite] = []
-    repo = root.parent
-    for file in sorted(root.rglob("*.py")):
-        relative = file.relative_to(repo).as_posix()
-        visitor = _Visitor(relative)
-        visitor.visit(ast.parse(file.read_text(encoding="utf-8"), filename=str(file)))
-        skipped = relative in EXCLUDED_FILES or any(part in relative for part in EXCLUDED_PARTS)
-        (excluded if skipped else in_scope).extend(visitor.sites)
+    for relative, visitor in _scan(root):
+        (excluded if _excluded(relative) else in_scope).extend(visitor.sites)
     return in_scope, excluded
+
+
+def scan_unverifiable_dumps(root: Path = APP_ROOT) -> list[DigestSite]:
+    """JSON-capable dumps whose mode is not a literal or that pass `**kwargs` (any function)."""
+
+    return [site for _relative, visitor in _scan(root) for site in visitor.unverifiable]
