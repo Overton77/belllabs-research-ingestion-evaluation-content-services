@@ -176,7 +176,7 @@ async def test_sync_subagent_runs_and_its_usage_is_charged_to_the_parent() -> No
     assert lineage["credential_refs"] == ["environment:OPENAI_API_KEY"]
     assert lineage["mounted"]["sync_subagents"][0]["writable_paths"] == ["/workspace/child"]
     assert lineage["placement"]["checkpointer_ref"]["digest"] == binding.checkpointer_ref.digest
-    # Sanitized: argument values never enter the record, only their names and digest.
+    # Sanitized: argument values never enter the record, only their names.
     assert SECRET_ARGUMENT not in json.dumps(lineage)
 
 
@@ -188,3 +188,41 @@ def test_credential_references_are_names_only_and_cover_every_mount() -> None:
     assert credential_references(
         binding, (SecretRef(provider="environment", key="OPENAI_API_KEY"),)
     ) == ["environment:OPENAI_API_KEY", "environment:SANDBOX_TOKEN"]
+
+
+def test_invocation_records_keep_no_argument_value_and_bound_model_chosen_strings() -> None:
+    """RRM-009 review: a browser call keeps scheme, host and path only; no argument digest is
+    kept; an unknown sync subagent name and an over-long Skill path are not echoed."""
+
+    from app.integrations.agents.deep_agents.capability_lineage import (
+        MAX_RECORDED_PATH_CHARS,
+        UNKNOWN_SUBAGENT,
+        invocations,
+    )
+
+    binding, _profile, _bundle = exact_fixture()
+    secret = "q=" + "s3cr3t-token"
+    long_name = "x" * 500
+    calls = [
+        {
+            "name": "agent_browser_page",
+            "args": {"url": f"https://user:pw@Example.com/a/b?{secret}#frag"},
+            "id": "call-1",
+            "type": "tool_call",
+        },
+        {
+            "name": "task",
+            "args": {"description": secret, "subagent_type": long_name},
+            "id": "call-2",
+            "type": "tool_call",
+        },
+    ]
+    records = invocations(binding, [AIMessage(content="", tool_calls=calls)])
+    browser, task = records
+    assert browser["requested_url"] == "https://example.com/a/b"
+    assert task["subagent_type"] == UNKNOWN_SUBAGENT
+    assert all("arguments_digest" not in record for record in records)
+    serialized = json.dumps(records)
+    assert secret not in serialized and "frag" not in serialized and "pw@" not in serialized
+    assert long_name not in serialized
+    assert MAX_RECORDED_PATH_CHARS == 256

@@ -322,7 +322,6 @@ async def test_pinned_capabilities_and_both_subagents_run_in_the_production_comp
                                 "status",
                                 "requested_url",
                                 "mcp_server",
-                                "arguments_digest",
                                 "result_digest",
                             )
                         }

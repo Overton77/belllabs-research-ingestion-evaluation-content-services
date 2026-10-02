@@ -5,8 +5,16 @@ tool argument value: which exact capabilities were mounted (credential reference
 the MCP tool filter with every tool's input-schema digest, Skill bundle digests, host tool
 schema digests, sync and async subagent slices), where the cognition ran (placement, task
 queue, sandbox, checkpointer and store definition digests, package versions), which
-capabilities the agent actually invoked (each call's tool, kind, argument and result digests
-and outcome; the requested URL of a governed browser call) and the model usage observed.
+capabilities the agent actually invoked (each call's tool, kind, argument names, result digest
+and outcome; for a governed browser call only the scheme, host and path it requested, never
+its query or fragment) and the model usage observed. Model-chosen strings that are recorded
+(a Skill path, a sync subagent name) are bounded; an unknown subagent name is not echoed.
+No digest of argument values is kept: an unkeyed digest of a short, guessable argument (a
+search query, a URL) would let anyone holding the record confirm a guess (RRM-009 review).
+
+Scope of the "no prompt text" property: this record only. Other runtime event payloads that
+are persisted beside it (the adapter's inspection payload) carry the pinned, reviewed Skill
+instruction text and bundle manifests the agent was given, never operator input.
 
 It is built from the exact binding and the invocation's own messages only, so the record is
 reproducible from the checkpointed state, and it is persisted with the settlement's
@@ -17,6 +25,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
+from urllib.parse import urlsplit
 
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 
@@ -36,6 +45,18 @@ ASYNC_SUBAGENT_TOOLS = frozenset(
     }
 )
 BROWSER_TOOL_NAMES = frozenset({"agent_browser_page"})
+MAX_RECORDED_PATH_CHARS = 256
+UNKNOWN_SUBAGENT = "<not a bound sync subagent>"
+
+
+def requested_location(url: str) -> str:
+    """Scheme, host and path of a requested URL; query, fragment and user info dropped."""
+
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower()
+    if not parts.scheme or not host:
+        return "<unparseable>"
+    return f"{parts.scheme}://{host}{parts.path[:MAX_RECORDED_PATH_CHARS]}"
 
 
 def _ref(ref: ExactDefinitionRef) -> dict[str, object]:
@@ -206,6 +227,7 @@ def invocations(
         for server in binding.mcp_servers
         for tool in server.tools
     }
+    sync_children = {child.name for child in binding.sync_subagents}
     records: list[dict[str, object]] = []
     for message in messages:
         if not isinstance(message, AIMessage):
@@ -220,17 +242,17 @@ def invocations(
                 "tool_call_id": call_id,
                 "tool_name": name,
                 "kind": kind,
-                "argument_names": sorted(str(key) for key in arguments),
-                "arguments_digest": sha256_digest(arguments),
+                "argument_names": sorted(str(key)[:64] for key in arguments),
             }
             if kind == "mcp":
                 record["mcp_server"] = mcp_servers[name]
             if name in BROWSER_TOOL_NAMES and isinstance(arguments.get("url"), str):
-                record["requested_url"] = arguments["url"]
+                record["requested_url"] = requested_location(arguments["url"])
             if kind == "sync_subagent":
-                record["subagent_type"] = str(arguments.get("subagent_type", ""))
+                child = str(arguments.get("subagent_type", ""))
+                record["subagent_type"] = child if child in sync_children else UNKNOWN_SUBAGENT
             if kind == "skill_read":
-                record["path"] = str(arguments.get("file_path", ""))
+                record["path"] = str(arguments.get("file_path", ""))[:MAX_RECORDED_PATH_CHARS]
             result = results.get(call_id)
             if result is None:
                 record["status"] = "no_result"
@@ -283,4 +305,5 @@ __all__ = [
     "invocations",
     "mounted_capabilities",
     "placement",
+    "requested_location",
 ]
