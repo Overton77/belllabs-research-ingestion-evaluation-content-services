@@ -34,3 +34,12 @@ Scope: checkpoint lineage and recovery (RRM-003 and RRM-004). Base `a9c3f1d`; th
 - `checkpoint_reads.py` and the classifier in `adapter.py`: a provider-neutral checkpoint-classification step behind a small port; only the LangGraph reads are provider-specific.
 - `UnitReconciliationNudge` and the park-in-doubt workflow loop: a reusable operator-decision wake-up pattern.
 - Shared `_stable_id` and JSON dump helpers: one `domain/control_plane` identity helper.
+
+### CR-1 integration
+
+The coordinator checked the diff independently: it extracts shared checkpoint-read helpers and deletes one unreferenced function, with no wire or persisted identity changes. It was merged `--no-ff` into integration at `08def14`. Merge gates:
+- ruff: clean.
+- mypy: 341 files, no issues.
+- Hermetic pytest: 748 passed, 54 skipped, 2 xfailed.
+- Pytest with the disposable Postgres/Mongo stack and `--env-file`: 778 passed, 24 skipped, 2 xfailed.
+
