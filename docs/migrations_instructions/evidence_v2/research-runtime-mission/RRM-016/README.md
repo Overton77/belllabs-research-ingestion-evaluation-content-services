@@ -232,12 +232,13 @@ In-run replays also pass in the RRM-016 Temporal test, the RRM-007 GoalDirected 
   - It is the same for StageGraph with concurrent admissions. It was not changed here.
 - **Re-admission and RRM-018.** A re-admitted executor (review fix 2) persists its Goal Revision again; on the MongoDB document repository that is the RRM-018 conflict, so RRM-018 matters for this path too.
 
+- **Merge-commit content.** RRM-006's GoalDirected fork demonstration was updated inside merge commit `ddec4fa`, so that merge stays green.
+
 **Deploy note (review finding 2).** Drain every in-flight GoalDirected run started before RRM-016 (let it finish or cancel it) before deploying this change. Replay of their histories stays deterministic, but once such a run executes past its recorded history on RRM-016 workers, `workflow.patched` returns true there, so the run mixes compositions:
 - an operation the old preparer already admitted is bound to the pre-admission run version, so the journaled boundary's claim at that revision is stale and the operation never dispatches (`OperationExecutionInProgress`);
 - an operation the old composition settled without the journal has no run-control settlement, so the patched family fails closed (`goal_operation_settlement_missing`).
 
 Runs started after the deploy take the patched paths throughout.
-- **Merge-commit content.** RRM-006's GoalDirected fork demonstration was updated inside merge commit `ddec4fa`, so that merge stays green.
 
 **What RRM-008 must know (the new GoalDirected settlement path)**
 - **The cancellation seam (review fix 2).** When an authority result shows the run already `cancelling` (a stale family admission or lifecycle fact, or a family `cancel` rejected because the run is cancelling), the family does not retry and does not issue another cancel: `_enter_cancellation` marks the run cancelling and calls `_stop_for_cancellation`, which today raises the existing `goal_cancelling` hand-off. Replace `_stop_for_cancellation`'s body with the saga; `_enter_cancellation` is the single entry for authority-observed cancellation. Proven by `test_outside_cancel_enters_the_cancellation_boundary_not_a_lifecycle_failure`.
