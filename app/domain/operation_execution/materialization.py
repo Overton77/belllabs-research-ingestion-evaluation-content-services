@@ -124,8 +124,15 @@ def compile_deep_agent_execution_binding(
 
     if placement.logical_id not in profile.compatible_placement_ids:
         raise ValueError("Deep Agent profile is not compatible with the selected placement")
-    if placement.placement != "local_in_worker":
-        raise ValueError("WP-CP-040 supports only local-in-worker Deep Agent placement")
+    if placement.placement != "local_in_worker" and (
+        placement.checkpoint_behavior != "remote_managed"
+        or placement.reconnect_behavior != "remote_run_reconnect"
+    ):
+        # AMD-RRM-001 (REQ-CP-DA-019): a remote placement is admitted only for a graph an Agent
+        # Server hosts from this exact binding, whose checkpoints and reconnects it manages.
+        raise ValueError(
+            "remote Deep Agent placement requires remote-managed checkpoints and reconnects"
+        )
     if profile.async_subagent_policy_refs and not profile.async_subagents:
         raise ValueError("async subagent policy refs require exact compiled contracts")
     if profile.sandbox.backend not in placement.sandbox_backends:

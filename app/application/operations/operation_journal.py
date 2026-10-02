@@ -331,6 +331,11 @@ class OperationJournalMutation:
         effect = effect_actions[0]
         usage = usage_actions[0]
         evidence = evidence_actions[0].evidence
+        if isinstance(usage, SettlePendingUsageAction) and usage.overage_amounts:
+            # RRM-013 re-review N-A: an operation's pending settlement reconciles its pending
+            # amounts exactly; overage is an async child settlement concept and a journal
+            # batch carrying it could inflate `consumed` beyond the journaled settlement.
+            raise ValueError("journal pending usage settlement cannot carry overage amounts")
         usage_ref = (
             usage.usage_id
             if isinstance(usage, RecordUsageAction)

@@ -1141,3 +1141,47 @@ async def test_postgres_journal_crash_rolls_back_claim_attempt_and_settlement(
         async with pool.acquire() as connection:
             await connection.execute("DROP SCHEMA IF EXISTS belllabs_control CASCADE")
         await pool.close()
+
+
+def test_journal_pending_settlement_rejects_overage_amounts() -> None:
+    """RRM-013 re-review N-A: a journal batch cannot inflate `consumed` through overage."""
+
+    from app.domain.control_plane.canonical import contract_fingerprint
+
+    command_value = pending_authority_command(run_id="run-1", revision=2)
+    result_value = result_for_command(command_value)
+    OperationJournalMutation(
+        request_scope="tenant-1",
+        belllabs_run_id="run-1",
+        expected_run_version=3,
+        claim=claim(),
+        settlement=pending_settlement(2),
+        prior_settlement=pending_settlement(1),
+        authority_command=command_value,
+        authority_result=result_value,
+    ).validate()
+
+    batch = command_value.action
+    assert isinstance(batch, ApplyAuthorityBatchAction)
+    pending_action = batch.actions[0]
+    assert isinstance(pending_action, SettlePendingUsageAction)
+    forged_action = pending_action.model_copy(update={"overage_amounts": {"tokens.total": 3}})
+    forged_command = command_value.model_copy(
+        update={"action": batch.model_copy(update={"actions": (forged_action, *batch.actions[1:])})}
+    )
+    # The command fingerprint covers the field, so the forged batch cannot replay under the
+    # stored command either.
+    assert contract_fingerprint(forged_command, exclude={"occurred_at"}) != contract_fingerprint(
+        command_value, exclude={"occurred_at"}
+    )
+    with pytest.raises(ValueError, match="overage"):
+        OperationJournalMutation(
+            request_scope="tenant-1",
+            belllabs_run_id="run-1",
+            expected_run_version=3,
+            claim=claim(),
+            settlement=pending_settlement(2),
+            prior_settlement=pending_settlement(1),
+            authority_command=forged_command,
+            authority_result=result_for_command(forged_command),
+        ).validate()
