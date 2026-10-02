@@ -31,7 +31,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 from uuid import uuid4
@@ -45,7 +46,10 @@ from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
 
 from app.api.control_plane import ControlPlanePrincipal, get_control_plane_principal
-from app.api.run_control import get_run_control_service
+from app.api.run_control import (
+    get_boundary_intervention_service,
+    get_run_control_service,
+)
 from app.api.run_forks import get_run_fork_services
 from app.application.orchestration.goal_directed import (
     GoalDirectedOperationPreparationService,
@@ -58,6 +62,11 @@ from app.application.orchestration.service import (
     StageGraphOperationPreparationService,
     orchestration_lifecycle_actor,
     register_stagegraph_family_mutations,
+)
+from app.application.run_control.boundary_interventions import (
+    BoundaryCommandApplicationService,
+    BoundaryCommandDeliveryService,
+    BoundaryInterventionService,
 )
 from app.application.run_control.service import FamilyAdmissionRegistry
 from app.application.runtime.run_forks import ForkPatchPolicyRegistry
@@ -98,15 +107,18 @@ from app.domain.run_control.contracts import (
     BudgetApplicability,
     BudgetDimensionLimit,
     BudgetEnvelope,
+    LifecycleCommand,
     RunOutcome,
     RunPhase,
     RunRequest,
+    SatisfyWaitAction,
 )
 from app.domain.run_control.forks import (
     ForkPatchPolicy,
     PatchablePath,
     stage_objective_path,
 )
+from app.integrations.temporal_boundary_commands import TemporalBoundaryCommandTransport
 from app.integrations.temporal_workflow_submission import TemporalWorkflowSubmitter
 from app.server import api
 from app.temporal.activities.goal_directed import GoalDirectedActivities
@@ -117,7 +129,7 @@ from app.temporal.workflow_sandbox import coordinator_workflow_runner
 from app.temporal.workflows.belllabs_run import BellLabsRunWorkflow
 from app.temporal.workflows.goal_directed import GoalDirectedWorkflow
 from app.temporal.workflows.operation import OperationWorkflow
-from app.temporal.workflows.stagegraph import StageGraphWorkflow
+from app.temporal.workflows.stagegraph import StageGraphWorkflow, wait_condition_id
 from tests.acceptance.control_plane.test_wp_bp_020_sandbox_rollover import Documents, Templates
 from tests.fixtures.checkpoint_recovery import governed_workspace
 from tests.fixtures.rrm006_fork_stack import (
@@ -219,8 +231,58 @@ class Facade:
             get_control_plane_principal,
             get_run_control_service,
             get_run_fork_services,
+            get_boundary_intervention_service,
         ):
             api.dependency_overrides.pop(dependency, None)
+
+    def deliver_through(self, temporal: Client) -> None:
+        """RRM-007: accepted boundary commands reach Temporal only as recorded deliveries."""
+
+        run_control = self._stack.run_control
+        interventions = BoundaryInterventionService(
+            run_control,
+            BoundaryCommandDeliveryService(run_control, TemporalBoundaryCommandTransport(temporal)),
+        )
+        api.dependency_overrides[get_boundary_intervention_service] = lambda: interventions
+
+    async def release_wait(self, run_id: str, wait_id: str) -> None:
+        """Release a declared StageGraph wait through the governed command route and
+        await its `applied` receipt (a raw signal is no release path)."""
+
+        condition_id = wait_condition_id(wait_id)
+        await _until(lambda: _holds_wait(self._stack, run_id, condition_id))
+        run = await self._stack.run_control.get_run(SCOPE, run_id)
+        command_id = f"release:{run_id[:8]}:{wait_id}"
+        command = LifecycleCommand(
+            command_id=command_id,
+            idempotency_issuer=PRINCIPAL.actor_id,
+            request_scope=SCOPE,
+            run_id=run_id,
+            expected_run_version=run.version,
+            actor=ActorContext(
+                actor_id=PRINCIPAL.actor_id,
+                permissions=frozenset({"workflow_run.observe_wait"}),
+            ),
+            action=SatisfyWaitAction(
+                condition_id=condition_id, verification_evidence_ref="evidence:rrm006-review"
+            ),
+            reason="RRM-006 demonstration releases the review wait",
+            occurred_at=datetime.now(UTC),
+            correlation_id=f"rrm006:{run_id}",
+        )
+        response = await self.client.post(
+            f"/run-control/v1/runs/{run_id}/commands", json=command.model_dump(mode="json")
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["reason_code"] == "accepted_pending_application", response.text
+
+        async def applied() -> bool:
+            status = await self._stack.run_control.get_boundary_command(
+                SCOPE, run_id, PRINCIPAL.actor_id, command_id
+            )
+            return status is not None and status.state.value == "applied"
+
+        await _until(applied)
 
     async def admit(self, request: RunRequest) -> str:
         response = await self.client.post(
@@ -284,6 +346,20 @@ class Facade:
         )
         assert view.status_code == 200
         return cast(dict[str, Any], view.json())
+
+
+async def _until(predicate: Callable[[], Awaitable[bool]], seconds: float = 120) -> None:
+    async with asyncio.timeout(seconds):
+        for _ in range(int(seconds * 4)):
+            if await predicate():
+                return
+            await asyncio.sleep(0.25)
+    raise AssertionError("condition not reached")
+
+
+async def _holds_wait(stack: ForkStack, run_id: str, condition_id: str) -> bool:
+    run = await stack.run_control.get_run(SCOPE, run_id)
+    return any(item.condition_id == condition_id for item in run.active_waits)
 
 
 async def _visible(client: Client, query: str, expected: int) -> None:
@@ -592,6 +668,9 @@ async def test_stagegraph_fork_reuses_the_settled_stage_and_reruns_the_patched_s
                 templates=templates, operation_bindings=stack.bindings
             ),
             lifecycle_gateway=cast(Any, None),
+            boundary=BoundaryCommandApplicationService(
+                stack.run_control, orchestration_lifecycle_actor()
+            ),
         )
         env = await _start_local()
         async with env:
@@ -617,6 +696,7 @@ async def test_stagegraph_fork_reuses_the_settled_stage_and_reruns_the_patched_s
                         stage_activities.decide_result,
                         stage_activities.apply_cycle,
                         stage_activities.complete_stagegraph,
+                        stage_activities.apply_boundary_command,
                     ],
                 ),
                 Worker(
@@ -628,7 +708,11 @@ async def test_stagegraph_fork_reuses_the_settled_stage_and_reruns_the_patched_s
                     workflow_id="ignored",
                     blueprint_family=BlueprintFamily.STAGE_GRAPH,
                 )
+                facade.deliver_through(client)
                 # The source waits on `release-review` after `draft` settles: a safe boundary.
+                # The wait is declared to run control (RRM-007) before the snapshot is taken,
+                # so the snapshot's run version is the one the fork admits against.
+                await _until(lambda: _holds_wait(stack, source_run, wait_condition_id(WAIT_ID)))
                 try:
                     snapshot = await facade.snapshot(source_run, until_safe=True)
                 except AssertionError as error:
@@ -636,7 +720,8 @@ async def test_stagegraph_fork_reuses_the_settled_stage_and_reruns_the_patched_s
                         f"{error}; {await _diagnose(client, source_run)}"
                     ) from error
                 assert snapshot["boundary_kind"] == "stage_settled"
-                assert snapshot["run_phase"] == "active"
+                assert snapshot["run_phase"] == "waiting"
+                assert snapshot["pending_commands"] == []
                 assert snapshot["family_position"]["accepted_stage_ids"] == ["draft"]
                 [candidate] = snapshot["reuse_candidates"]
                 assert candidate["unit"]["location"]["stage_id"] == "draft"
@@ -675,16 +760,13 @@ async def test_stagegraph_fork_reuses_the_settled_stage_and_reruns_the_patched_s
                     parent_run_id=source_run,
                 )
                 await _visible(client, f"BellLabsParentRunId = '{source_run}'", 1)
-                derived_family = client.get_workflow_handle(f"family/{derived_run}/1")
                 await _await_wait(stack, derived_run)
-                await derived_family.signal("satisfy_wait", WAIT_ID)
+                await facade.release_wait(derived_run, WAIT_ID)
                 await asyncio.wait_for(
                     client.get_workflow_handle(f"belllabs-run/{derived_run}").result(), 240
                 )
                 # Only now does the source continue past its wait.
-                await client.get_workflow_handle(f"family/{source_run}/1").signal(
-                    "satisfy_wait", WAIT_ID
-                )
+                await facade.release_wait(source_run, WAIT_ID)
                 await asyncio.wait_for(
                     client.get_workflow_handle(f"belllabs-run/{source_run}").result(), 240
                 )
@@ -955,7 +1037,7 @@ async def test_goal_directed_fork_starts_fresh_with_the_patched_goal(
                 templates=_goal_templates(stack),
                 operation_bindings=stack.bindings,
                 run_control=stack.run_control,
-                documents=documents,  # type: ignore[arg-type]
+                documents=documents,
                 actor=ActorContext(
                     actor_id="rrm006-goal-worker",
                     permissions=frozenset(
@@ -964,7 +1046,7 @@ async def test_goal_directed_fork_starts_fresh_with_the_patched_goal(
                     authority_refs=frozenset({"authority:rrm006-goal-worker"}),
                 ),
             ),
-            results=GoalDirectedOperationResultService(documents),  # type: ignore[arg-type]
+            results=GoalDirectedOperationResultService(documents),
             lifecycle=RunControlLifecycleGateway(
                 stack.run_control, ExactBindingVerifier(), orchestration_lifecycle_actor()
             ),
