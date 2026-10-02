@@ -199,9 +199,20 @@ async def test_pinned_capabilities_and_both_subagents_run_in_the_production_comp
                 output_contract_ref=operation.operation_contract_ref,
             ),
         )
-        response = await stack.http.post(
-            f"/run-control/v1/runs/{run_id}/operations", json=submission.model_dump(mode="json")
-        )
+        try:
+            response = await stack.http.post(
+                f"/run-control/v1/runs/{run_id}/operations",
+                json=submission.model_dump(mode="json"),
+            )
+        except Exception:
+            # Diagnostics only: the settlement row's typed failure (never provider text).
+            async with stack.owner_pool.acquire() as connection:
+                rows = await connection.fetch(
+                    "SELECT status, failure_code, settlement_payload "
+                    "FROM belllabs_control.operation_settlements"
+                )
+            print("RRM-009 LIVE FAILURE:", [dict(row) for row in rows])
+            raise
         assert response.status_code == 201, response.text
         result = response.json()
         payloads = await _operation_payloads(stack, run_id)

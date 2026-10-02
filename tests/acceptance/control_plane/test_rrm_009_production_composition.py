@@ -301,90 +301,100 @@ async def open_production_stack(
     _reset_api_state()
     api.state.admission_policy_registry = technical_admission_policies()
     api.dependency_overrides[get_control_plane_principal] = lambda: PRINCIPAL
-    async with AsyncExitStack() as resources:
-        await initialize_run_control_resources(api)
-        policies = ForkPatchPolicyRegistry()
-        # Readiness only verifies: before the administrative registration the API refuses to
-        # compose, and registration is idempotent.
-        with pytest.raises(SearchAttributeRegistrationError):
+    production: ProductionStack | None = None
+    try:
+        async with AsyncExitStack() as resources:
+            await initialize_run_control_resources(api)
+            policies = ForkPatchPolicyRegistry()
+            # Readiness only verifies: before the administrative registration the API refuses to
+            # compose, and registration is idempotent.
+            with pytest.raises(SearchAttributeRegistrationError):
+                await compose_runtime_control(
+                    api, settings, client=env.client, stack=resources, fork_patch_policies=policies
+                )
+            assert set(
+                await register_belllabs_search_attributes(env.client, settings.temporal_namespace)
+            ) == {key.name for key in BELLLABS_SEARCH_ATTRIBUTE_KEYS}
+            assert (
+                await register_belllabs_search_attributes(env.client, settings.temporal_namespace)
+                == ()
+            )
             await compose_runtime_control(
                 api, settings, client=env.client, stack=resources, fork_patch_policies=policies
             )
-        assert set(
-            await register_belllabs_search_attributes(env.client, settings.temporal_namespace)
-        ) == {key.name for key in BELLLABS_SEARCH_ATTRIBUTE_KEYS}
-        assert (
-            await register_belllabs_search_attributes(env.client, settings.temporal_namespace) == ()
-        )
-        await compose_runtime_control(
-            api, settings, client=env.client, stack=resources, fork_patch_policies=policies
-        )
-        worker_pool = await create_application_postgres_pool(settings)
-        writer_pool = await create_application_family_writer_pool(settings)
-        control_plane = ControlPlaneService(
-            BeanieDefinitionRepository(),
-            ExtensionRegistry(),
-            UnavailablePayloadStore(),
-            externalize_above_bytes=15_000_000,
-        )
-        run_control = compose_worker_run_control_service(
-            PostgresRunControlRepository(worker_pool, family_writer_pool=writer_pool),
-            F1RunConfigurationVerifier(control_plane),
-            technical_admission_policies(),
-        )
-        factory = ProductionWorkerActivityCompositionFactory(
-            env.client,
-            additional_components=components,
-            artifact_validation=StaticArtifactValidationAuthority(
-                permission_outcomes={("operation:sandbox-agent@1", "permission:rrm009"): "allowed"},
-                check_outcomes={},
-                required_check_ids={},
-            ),
-            worker_identity=f"rrm009-worker:{os.getpid()}",
-            claim_lease=timedelta(seconds=90),
-        )
-        composition = await factory.build(
-            settings=settings,
-            control_plane=control_plane,
-            run_control=run_control,
-            postgres_pool=worker_pool,
-        )
-        assert composition.resources is not None
-        resources.push_async_callback(composition.resources.aclose)
-        workers = create_production_workers(env.client, settings, composition)
-        http = httpx.AsyncClient(transport=httpx.ASGITransport(app=api), base_url="http://belllabs")
-        production = ProductionStack(
-            settings=settings,
-            env=env,
-            client=env.client,
-            owner_pool=owner_pool,
-            worker_pool=worker_pool,
-            control_plane=control_plane,
-            technical=technical,
-            composition=composition,
-            factory=factory,
-            http=http,
-            payload_root=payload_root,
-            temporal_db=temporal_db,
-            model_log=model_log,
-            worker_queues=tuple(worker.task_queue for worker in workers.workers),
-        )
-        try:
-            async with production.worker_stack:
-                for worker in workers.workers:
-                    await production.worker_stack.enter_async_context(worker)
-                yield production
-        finally:
-            await http.aclose()
-            await writer_pool.close()
-            await worker_pool.close()
-    await close_run_control_resources(api)
-    api.dependency_overrides.pop(get_control_plane_principal, None)
-    _reset_api_state()
-    await mongo_client.close()
-    await owner_pool.close()
-    await production.env.shutdown()
-    get_settings.cache_clear()
+            worker_pool = await create_application_postgres_pool(settings)
+            writer_pool = await create_application_family_writer_pool(settings)
+            control_plane = ControlPlaneService(
+                BeanieDefinitionRepository(),
+                ExtensionRegistry(),
+                UnavailablePayloadStore(),
+                externalize_above_bytes=15_000_000,
+            )
+            run_control = compose_worker_run_control_service(
+                PostgresRunControlRepository(worker_pool, family_writer_pool=writer_pool),
+                F1RunConfigurationVerifier(control_plane),
+                technical_admission_policies(),
+            )
+            factory = ProductionWorkerActivityCompositionFactory(
+                env.client,
+                additional_components=components,
+                artifact_validation=StaticArtifactValidationAuthority(
+                    permission_outcomes={
+                        ("operation:sandbox-agent@1", "permission:rrm009"): "allowed"
+                    },
+                    check_outcomes={},
+                    required_check_ids={},
+                ),
+                worker_identity=f"rrm009-worker:{os.getpid()}",
+                claim_lease=timedelta(seconds=90),
+            )
+            composition = await factory.build(
+                settings=settings,
+                control_plane=control_plane,
+                run_control=run_control,
+                postgres_pool=worker_pool,
+            )
+            assert composition.resources is not None
+            resources.push_async_callback(composition.resources.aclose)
+            workers = create_production_workers(env.client, settings, composition)
+            http = httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=api), base_url="http://belllabs"
+            )
+            production = ProductionStack(
+                settings=settings,
+                env=env,
+                client=env.client,
+                owner_pool=owner_pool,
+                worker_pool=worker_pool,
+                control_plane=control_plane,
+                technical=technical,
+                composition=composition,
+                factory=factory,
+                http=http,
+                payload_root=payload_root,
+                temporal_db=temporal_db,
+                model_log=model_log,
+                worker_queues=tuple(worker.task_queue for worker in workers.workers),
+            )
+            try:
+                async with production.worker_stack:
+                    for worker in workers.workers:
+                        await production.worker_stack.enter_async_context(worker)
+                    yield production
+            finally:
+                await http.aclose()
+                await writer_pool.close()
+                await worker_pool.close()
+    finally:
+        # Always torn down, also when the qualification fails: the dev server, the API
+        # state and the pools never leak into the next run.
+        await close_run_control_resources(api)
+        api.dependency_overrides.pop(get_control_plane_principal, None)
+        _reset_api_state()
+        await mongo_client.close()
+        await owner_pool.close()
+        await (production.env if production is not None else env).shutdown()
+        get_settings.cache_clear()
 
 
 # --- Facade helpers --------------------------------------------------------------------------
