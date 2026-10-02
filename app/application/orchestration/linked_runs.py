@@ -22,7 +22,7 @@ from app.domain.composition.contracts import (
     RunDependencyClass,
     RunDependencyRevision,
 )
-from app.domain.control_plane.canonical import sha256_digest
+from app.domain.control_plane.canonical import stable_json_digest
 from app.domain.control_plane.contracts import DefinitionKind, DefinitionSelector
 from app.domain.run_control.contracts import ActorContext, DecisionStatus, RunPhase, RunRequest
 from app.domain.run_control.errors import AdmissionRejected, IdempotencyConflict
@@ -203,7 +203,7 @@ class LinkedRunService:
 
     async def request_child(self, request: LinkedRunRequest) -> RunCompositionLink:
         identity = self._request_identity(request)
-        fingerprint = sha256_digest(request.model_dump(mode="json", exclude={"requested_at"}))
+        fingerprint = stable_json_digest(request, exclude={"requested_at"})
         prior = await self._repository.get_link(request.request_scope, identity)
         if prior is not None:
             if prior.request_fingerprint != fingerprint:

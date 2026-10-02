@@ -10,7 +10,7 @@ from app.application.operations.semantic_operation_bindings import (
 )
 from app.application.orchestration.goal_directed import GoalOperationTemplateRepository
 from app.application.orchestration.orchestration_routing import SemanticRoutingError
-from app.domain.control_plane.canonical import sha256_digest
+from app.domain.control_plane.canonical import sha256_digest, stable_json_digest
 from app.domain.control_plane.contracts import (
     EffectiveRunConfiguration,
     GoalDirectedBlueprint,
@@ -130,7 +130,7 @@ class SupportingGraphSemanticBindingProvider:
             ),
             *(
                 "operation-execution-request-template:"
-                f"{operation_id}@{sha256_digest(template.model_dump(mode='json'))}"
+                f"{operation_id}@{stable_json_digest(template)}"
                 for operation_id, template in sorted(
                     self._inputs.operation_bindings.operations.items()
                 )

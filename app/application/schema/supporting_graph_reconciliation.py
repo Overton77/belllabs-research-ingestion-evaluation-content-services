@@ -10,6 +10,7 @@ from app.application.schema.schema_grounding_repository import (
     schema_grounding_record,
 )
 from app.application.schema.schema_workspace_binding import SchemaGraphAdmissionService
+from app.domain.control_plane.canonical import stable_json_dump
 from app.domain.schema_context.canonicalization import sha256_digest
 from app.domain.schema_context.contracts import (
     GraphReconciliationEvidence,
@@ -441,7 +442,7 @@ def _reconciliation_request_digest(
 ) -> str:
     return sha256_digest(
         {
-            "request": request.model_dump(mode="json"),
+            "request": stable_json_dump(request),
             "evidence": (evidence.model_dump(mode="json") if evidence is not None else None),
         }
     )

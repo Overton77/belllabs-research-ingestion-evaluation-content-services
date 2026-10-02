@@ -13,7 +13,7 @@ from app.application.runtime.runtime_bootstrap import (
     AuthoritativeRuntimeProjection,
     BootstrapRequest,
 )
-from app.domain.control_plane.canonical import sha256_digest
+from app.domain.control_plane.canonical import sha256_digest, stable_json_digest
 from app.domain.graph_runtime.identities import ExecutionEpochKey
 from app.domain.graph_runtime.kernel import DecisionRequest
 from app.domain.run_control.contracts import RunPhase
@@ -32,8 +32,8 @@ class PostgresBootstrapAuthority:
             raise LookupError("authoritative runtime binding is unavailable")
         run = await self._runs.get_run(epoch.request_scope, epoch.belllabs_run_id)
         budget = await self._runs.get_budget(epoch.request_scope, epoch.belllabs_run_id)
-        lifecycle_digest = sha256_digest(run.model_dump(mode="json"))
-        budget_digest = sha256_digest(budget.model_dump(mode="json"))
+        lifecycle_digest = stable_json_digest(run)
+        budget_digest = stable_json_digest(budget)
         decision_digest = sha256_digest(
             {
                 "active_waits": run.active_waits,

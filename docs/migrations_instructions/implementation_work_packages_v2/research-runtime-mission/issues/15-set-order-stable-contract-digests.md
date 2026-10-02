@@ -4,7 +4,7 @@
 
 **Blocked by:** None. Discovered by RRM-004 while diagnosing the intermittent RRM-003 merge-gate failure.
 **Blocks:** **RRM-010 (required before the readiness gate).** `app/application/runtime/postgres_runtime_authority.py` hashes the run projection, including `WaitCondition.scope` (a frozenset), into `lifecycle_digest` with a JSON-mode dump. That digest is therefore seed-dependent across processes. RRM-004 fixed the sites on the crash-recovery path; the remaining sites are latent until composed.
-**Status:** ready-for-agent (required before RRM-010)
+**Status:** implemented; independent review pending (code `8960c53`, `1dd8013`; evidence `evidence_v2/research-runtime-mission/RRM-015/README.md`)
 **Branch:** `wp/rrm-015-set-order-stable-digests`
 **Authority:** idempotency and replay requirements already accepted: REQ-CP-RUN-003/008, REQ-CP-EXEC-004/005, and the CP-020 operation-journal invariants
 
@@ -39,7 +39,14 @@ Where a digest is already persisted, record a forward-compatibility decision: du
 
 ## Acceptance
 
-- [ ] Audit table: site → model → whether it holds a set (transitively) → fixed / not affected.
-- [ ] A shared regression helper builds two equal sets with different iteration orders, as `tests/unit/run_control/test_run_control.py::test_command_fingerprint_is_independent_of_set_iteration_order` does, and every fixed site asserts digest equality with it.
-- [ ] A static guard (a lint test or ruff rule) rejects new `sha256_digest(<model>.model_dump(mode="json"...))` calls on contracts.
-- [ ] Full offline suite green. Evidence under `evidence_v2/research-runtime-mission/RRM-015/`.
+- [x] Audit table: site → model → whether it holds a set (transitively) → fixed / not affected.
+- [x] A shared regression helper builds two equal sets with different iteration orders, as `tests/unit/run_control/test_run_control.py::test_command_fingerprint_is_independent_of_set_iteration_order` does, and every fixed site asserts digest equality with it.
+- [x] A static guard (a lint test or ruff rule) rejects new `sha256_digest(<model>.model_dump(mode="json"...))` calls on contracts.
+- [x] Full offline suite green. Evidence under `evidence_v2/research-runtime-mission/RRM-015/`.
+
+## Implementation notes (2026-10-02)
+
+- Audit table, compatibility decisions, commands and seed sweep: `evidence_v2/research-runtime-mission/RRM-015/README.md`.
+- Canonical forms: `stable_json_dump`, `stable_json_digest` and `stored_payload_matches` in `app/domain/control_plane/canonical.py`. `contract_fingerprint` now also fingerprints a set of models (a Python-mode dump raised `unhashable type: 'dict'`).
+- Sites in RRM-013 areas (`async_subagents.py`, `app/application/async_subagents/`, `app/agent_server/`): none feeds a digest from a contract dump, so nothing is deferred. The guard fails if one appears.
+- Adjacent, out of scope and not fixed: `model_dump(mode="json")` equality proofs against stored JSON in `postgres_operation_journal.py` (`authority_result`, `command_result`, `entry`: no set today), `postgres_runtime_execution_repository.py` (`intervention`, `binding`: no set today) and the `_dump` writers in the Postgres repositories (they persist sets in iteration order; correct on read, only unsafe if compared as raw JSON).
