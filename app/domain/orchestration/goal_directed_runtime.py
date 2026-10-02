@@ -82,6 +82,10 @@ class GoalOperationPreparationRequest(Contract):
     handoff: GoalHandoff | None = None
     verifier_input_refs: tuple[str, ...] = ()
     decided_at: AwareDatetime
+    # REQ-CP-EXEC-013 location fields (additive; absent in histories recorded before RRM-003).
+    execution_epoch: int = Field(default=1, ge=1)
+    agent_run: int | None = Field(default=None, ge=1)
+    session_generation: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def exact_revision(self) -> GoalOperationPreparationRequest:

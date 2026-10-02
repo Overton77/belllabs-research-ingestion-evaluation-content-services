@@ -18,6 +18,10 @@ from temporalio.worker import Worker
 
 from app.api.control_plane import ControlPlanePrincipal, get_control_plane_principal
 from app.api.run_control import get_run_control_service, router
+from app.application.operations.checkpoint_lineage import (
+    CheckpointLineageService,
+    InMemoryCheckpointLineageRepository,
+)
 from app.application.operations.operation_execution import (
     InMemoryOperationBindingRepository,
     RunControlOperationBudgetAuthority,
@@ -44,10 +48,9 @@ from app.domain.control_plane.contracts import (
     StageGraphBlueprint,
     WorkflowObligationSlot,
 )
+from app.domain.operation_execution.checkpoint_lineage import OperationActivityAttempt
 from app.domain.operation_execution.contracts import (
-    MaterializedWorkspace,
     OperationExecutionRequest,
-    RuntimeInvocation,
 )
 from app.domain.orchestration.contracts import BellLabsRunInput, StageGraphRunInput
 from app.domain.run_control.contracts import (
@@ -71,6 +74,10 @@ from app.temporal.workflows.belllabs_run import BellLabsRunWorkflow
 from app.temporal.workflows.operation import OperationWorkflow
 from app.temporal.workflows.stagegraph import StageGraphWorkflow
 from tests.acceptance.control_plane.test_wp_cp_040 import exact_fixture
+from tests.fixtures.checkpoint_lineage import (
+    execute_with_checkpoint_lineage,
+    materialized_workspace,
+)
 from tests.integration.temporal.test_wp_bp_010_temporal import _blueprint
 from tests.unit.operations.test_operation_execution import operation_request
 from tests.unit.run_control.test_run_control import request as run_request
@@ -107,6 +114,7 @@ class LiveDeepAgentActivity:
         openai_key: str,
     ) -> None:
         self._adapter = adapter
+        self._lineage = CheckpointLineageService(InMemoryCheckpointLineageRepository())
         self._budget = budget
         self._secrets = {"environment:OPENAI_API_KEY": openai_key}
         self.slow_release = asyncio.Event()
@@ -127,23 +135,21 @@ class LiveDeepAgentActivity:
         if stage_id == "downstream":
             self.downstream_started.set()
         binding = bind_operation_execution_request(request)
-        result = await self._adapter.execute(
-            RuntimeInvocation(
-                binding=binding,
-                prompt_segments=request.prompt_segments,
-                workspace=MaterializedWorkspace(
-                    workspace_id=request.workspace.workspace_id,
-                    namespace_id=request.workspace.namespace_id,
-                    provider=request.workspace.provider,
-                    runtime_digest=request.workspace.runtime_digest,
-                    image_digest=request.workspace.image_digest,
-                    mount_manifest_digest=sha256_digest(
-                        f"wp-bp-010-live:{stage_id}:mounts"
-                    ),
-                ),
-                resolved_secret_names=("environment:OPENAI_API_KEY",),
+        info = activity.info()
+        result = await execute_with_checkpoint_lineage(
+            self._adapter,
+            self._lineage,
+            request,
+            workspace=materialized_workspace(request, f"wp-bp-010-live:{stage_id}:mounts"),
+            secrets=self._secrets,
+            attempt=OperationActivityAttempt(
+                workflow_id=info.workflow_id,
+                workflow_run_id=info.workflow_run_id,
+                activity_id=info.activity_id,
+                attempt=info.attempt,
+                worker_identity="wp-bp-010-live-worker",
             ),
-            self._secrets,
+            resolved_secret_names=("environment:OPENAI_API_KEY",),
         )
         self.real_model_stages.append(stage_id)
         if stage_id == "slow":

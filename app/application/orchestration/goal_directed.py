@@ -15,6 +15,8 @@ from app.application.run_control.service import (
     RunControlService,
 )
 from app.domain.control_plane.canonical import sha256_digest
+from app.domain.graph_runtime.identities import RuntimeUnitIdentity
+from app.domain.operation_execution.checkpoint_lineage import cognitive_session_namespace
 from app.domain.operation_execution.contracts import (
     DeepAgentExecutionBinding,
     OperationAttemptIdentity,
@@ -43,6 +45,7 @@ from app.domain.orchestration.goal_directed_runtime import (
     GoalOperationReconciliationResult,
     GoalVerifierObservation,
 )
+from app.domain.orchestration.runtime_units import goal_runtime_unit
 from app.domain.run_control.contracts import (
     ActorContext,
     LifecycleCommand,
@@ -523,11 +526,13 @@ def _instantiate_operation_request(
     )
     workspace = _workspace_for(template.workspace, request, operation_id)
     prompt_segments = _prompt_segments(template.prompt_segments, request)
+    runtime_unit = _runtime_unit_for(request, identity)
     deep_binding = _deep_binding_for(
         template.deep_agent_binding,
         request=request,
         identity=identity,
         workspace=workspace,
+        runtime_unit=runtime_unit,
     )
     payload = template.model_dump(mode="python")
     payload.update(
@@ -547,9 +552,34 @@ def _instantiate_operation_request(
             "idempotency_key": (
                 f"goal:{identity.semantic_key}:generation:{request.execution_generation}"
             ),
+            "runtime_unit": runtime_unit,
         }
     )
     return OperationExecutionRequest.model_validate(payload)
+
+
+def _runtime_unit_for(
+    request: GoalOperationPreparationRequest,
+    identity: OperationAttemptIdentity,
+) -> RuntimeUnitIdentity:
+    """REQ-CP-EXEC-013: iteration, revision, role, agent run, and session generation."""
+
+    if request.agent_run is None or request.session_generation is None:
+        raise ValueError(
+            "GoalDirected operation preparation requires its agent run and session generation"
+        )
+    return goal_runtime_unit(
+        request_scope=request.request_scope,
+        run_id=request.run_id,
+        execution_epoch=request.execution_epoch,
+        operation_id=identity.operation_id,
+        operation_attempt=identity.operation_attempt,
+        goal_iteration=request.goal_iteration,
+        goal_revision_id=request.goal_revision_id,
+        operation_role=request.operation_role,
+        agent_run=request.agent_run,
+        session_generation=request.session_generation,
+    )
 
 
 def _bind_handoff(
@@ -724,6 +754,7 @@ def _deep_binding_for(
     request: GoalOperationPreparationRequest,
     identity: OperationAttemptIdentity,
     workspace: WorkspaceContract,
+    runtime_unit: RuntimeUnitIdentity,
 ) -> DeepAgentExecutionBinding | None:
     if template is None:
         return None
@@ -745,6 +776,10 @@ def _deep_binding_for(
             "control_revision": request.expected_run_version,
             "workspace": workspace,
             "reservation_id": request.reservation_id,
+            "runtime_unit": runtime_unit,
+            "cognitive_session_namespace": cognitive_session_namespace(
+                runtime_unit, request.execution_generation
+            ),
         }
     )
     return DeepAgentExecutionBinding.create(**values)

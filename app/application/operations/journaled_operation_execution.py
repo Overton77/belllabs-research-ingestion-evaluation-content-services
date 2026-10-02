@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from datetime import datetime
 from typing import Protocol
 from uuid import NAMESPACE_URL, uuid5
 
+from app.application.operations.operation_execution import (
+    ResultManifestObserver,
+    settlement_result_manifest,
+)
 from app.application.operations.operation_journal import (
     OperationJournalMutation,
     OperationJournalService,
@@ -168,6 +171,8 @@ class JournaledOperationExecutionCoordinator:
         settlement: OperationSettlement,
         *,
         started_at: datetime,
+        technical_attempt: int = 1,
+        before_authority: ResultManifestObserver | None = None,
     ) -> OperationSettlement:
         expected_claim_id = _effect_claim_id(binding)
         if (
@@ -178,15 +183,7 @@ class JournaledOperationExecutionCoordinator:
             or settlement.binding_id != binding.binding_id
         ):
             raise ValueError("claim, binding, and settlement authority do not match")
-        replay_manifest = settlement.model_dump(
-            mode="json",
-            exclude={"output_text", "structured_output", "event_payloads"},
-        )
-        content = json.dumps(
-            replay_manifest,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode()
+        content = settlement_result_manifest(settlement)
         content_digest = f"sha256:{hashlib.sha256(content).hexdigest()}"
         address = await self._results.stage(
             artifact_id=settlement.settlement_id,
@@ -194,6 +191,10 @@ class JournaledOperationExecutionCoordinator:
             content_digest=content_digest,
             media_type="application/vnd.belllabs.operation-settlement+json",
         )
+        if before_authority is not None:
+            # REQ-CP-DA-017: the checkpoint transition links this exact immutable manifest
+            # and is accepted by compare-and-set before authority settlement.
+            await before_authority(address.object_ref, address.content_digest)
         current_run = await self._run_control.get_run(binding.request_scope, binding.run_id)
         release_amounts = {
             dimension: limit
@@ -318,13 +319,13 @@ class JournaledOperationExecutionCoordinator:
             )
         )
         _require_accepted(usage_result, "operation authority settlement")
-        technical_attempt = OperationTechnicalAttempt(
+        technical_attempt_record = OperationTechnicalAttempt(
             operation_attempt_id=str(
                 uuid5(NAMESPACE_URL, f"operation-technical:{settlement.settlement_id}")
             ),
             request_scope=binding.request_scope,
             effect_claim_id=claim.effect_claim_id,
-            technical_attempt=1,
+            technical_attempt=technical_attempt,
             provider="runtime_adapter",
             provider_attempt_id=settlement.provider_run_id,
             disposition=(
@@ -347,7 +348,7 @@ class JournaledOperationExecutionCoordinator:
                 belllabs_run_id=binding.run_id,
                 expected_run_version=usage_result.resulting_run_version,
                 claim=claim,
-                attempt=technical_attempt,
+                attempt=technical_attempt_record,
                 settlement=journal_settlement,
                 authority_command=authority_command,
                 authority_result=usage_result,
@@ -549,6 +550,7 @@ def _claim_for(
         semantic_binding_id=binding.binding_id,
         semantic_binding_digest=sha256_digest(binding),
         semantic_attempt_key=binding.semantic_attempt_key,
+        unit_key=binding.runtime_unit.unit_key if binding.runtime_unit is not None else None,
         claimed_by=claimed_by,
         claimed_at=binding.bound_at,
     )

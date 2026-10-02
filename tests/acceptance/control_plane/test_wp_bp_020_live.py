@@ -20,6 +20,10 @@ from temporalio.worker import Worker
 
 from app.api.control_plane import ControlPlanePrincipal, get_control_plane_principal
 from app.api.run_control import get_run_control_service, router
+from app.application.operations.checkpoint_lineage import (
+    CheckpointLineageService,
+    InMemoryCheckpointLineageRepository,
+)
 from app.application.operations.operation_execution import (
     InMemoryOperationBindingRepository,
     bind_operation_execution_request,
@@ -42,11 +46,10 @@ from app.application.run_control.service import (
 from app.config import Settings
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import GoalDirectedBlueprint, SecretRef
+from app.domain.operation_execution.checkpoint_lineage import OperationActivityAttempt
 from app.domain.operation_execution.contracts import (
-    MaterializedWorkspace,
     OperationExecutionRequest,
     OperationExecutionResult,
-    RuntimeInvocation,
     StructuredOutputBinding,
 )
 from app.domain.orchestration.contracts import (
@@ -86,6 +89,10 @@ from tests.acceptance.control_plane.test_wp_bp_020_sandbox_rollover import (
     Templates,
 )
 from tests.acceptance.control_plane.test_wp_cp_040 import exact_fixture
+from tests.fixtures.checkpoint_lineage import (
+    execute_with_checkpoint_lineage,
+    materialized_workspace,
+)
 from tests.unit.operations.test_operation_execution import operation_request
 from tests.unit.run_control.test_run_control import request as run_request
 
@@ -323,26 +330,27 @@ class LiveGoalActivities(SandboxRolloverActivities):
             structured_output_schemas=schema_registry,
         )
         self.adapter = DeepAgentRuntimeAdapter(ExactDeepAgentMaterializer(registry))
+        self.lineage = CheckpointLineageService(InMemoryCheckpointLineageRepository())
 
     @activity.defn(name="operation.execute")
     async def execute(self, payload: dict[str, Any]) -> dict[str, Any]:
         request = OperationExecutionRequest.model_validate(payload)
         binding = bind_operation_execution_request(request)
-        result = await self.adapter.execute(
-            RuntimeInvocation(
-                binding=binding,
-                prompt_segments=request.prompt_segments,
-                workspace=MaterializedWorkspace(
-                    workspace_id=request.workspace.workspace_id,
-                    namespace_id=request.workspace.namespace_id,
-                    provider=request.workspace.provider,
-                    runtime_digest=request.workspace.runtime_digest,
-                    image_digest=request.workspace.image_digest,
-                    mount_manifest_digest=sha256_digest("goal-directed-live-mounts"),
-                ),
-                resolved_secret_names=("environment:OPENAI_API_KEY",),
+        info = activity.info()
+        result = await execute_with_checkpoint_lineage(
+            self.adapter,
+            self.lineage,
+            request,
+            workspace=materialized_workspace(request, "goal-directed-live-mounts"),
+            secrets=self._secrets,
+            attempt=OperationActivityAttempt(
+                workflow_id=info.workflow_id,
+                workflow_run_id=info.workflow_run_id,
+                activity_id=info.activity_id,
+                attempt=info.attempt,
+                worker_identity="wp-bp-020-live-worker",
             ),
-            self._secrets,
+            resolved_secret_names=("environment:OPENAI_API_KEY",),
         )
         self.operation_ids.append(request.identity.semantic_key)
         if result.provider_run_id:

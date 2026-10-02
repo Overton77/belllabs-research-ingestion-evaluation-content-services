@@ -32,14 +32,19 @@ if not (PROJECT_ROOT / ".env").exists():
         os.environ.setdefault(_name, _value)
 
 
+_PSYCOPG_SELECTOR_MODULES = {
+    ("experiments", "test_langgraph_temporal_stagegraph.py"),
+    ("deep_agents", "test_checkpoint_lineage_postgres_saver.py"),
+}
+
+
 def pytest_asyncio_loop_factories(config, item):  # type: ignore[no-untyped-def]
-    """Keep Psycopg's Windows selector requirement local to its experiment module."""
+    """Keep Psycopg's Windows selector requirement local to the modules that need it."""
 
     del config
     if (
         sys.platform == "win32"
-        and item.path.name == "test_langgraph_temporal_stagegraph.py"
-        and item.path.parent.name == "experiments"
+        and (item.path.parent.name, item.path.name) in _PSYCOPG_SELECTOR_MODULES
     ):
         return {"windows-selector": asyncio.SelectorEventLoop}
     return {"default": asyncio.new_event_loop}

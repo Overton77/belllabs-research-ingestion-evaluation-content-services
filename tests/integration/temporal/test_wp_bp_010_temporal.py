@@ -522,6 +522,77 @@ async def test_real_materializer_persists_exact_operation_child_intent() -> None
     assert prepared.operation.budget_reservation_id == proposal.reservation_id
     assert prepared.operation.prompt_segments[-1].content == proposal.objective_override
     assert len(repository.bindings) == 1
+    # REQ-CP-EXEC-013: mapped instance, cycles, and slot become the structured unit.
+    unit = prepared.operation.runtime_unit
+    candidate = proposal.identity.candidate
+    assert unit is not None
+    assert (unit.family, unit.unit_kind, unit.semantic_operation_id) == (
+        "stage_graph",
+        "stage_operation",
+        proposal.identity.operation_id,
+    )
+    assert unit.location.model_dump() == {
+        "stage_id": candidate.stage_id,
+        "mapped_instance_id": candidate.mapped_instance_id,
+        "workflow_cycle_ordinal": candidate.workflow_cycle_ordinal,
+        "stage_cycle_ordinal": candidate.stage_cycle_ordinal,
+        "operation_slot_id": candidate.operation_slot_id,
+    }
+    assert repository.bindings[0].runtime_unit == unit
+
+
+@pytest.mark.asyncio
+async def test_real_materializer_freezes_the_stage_unit_cognitive_namespace() -> None:
+    """REQ-CP-DA-016: a StageGraph Deep Agent unit owns one namespace per unit generation."""
+
+    from tests.acceptance.control_plane.test_wp_cp_040 import exact_fixture
+    from tests.unit.operations.test_operation_execution import operation_request
+
+    graph = _blueprint()
+    interpreter = StageGraphInterpreter(graph, effective_max_concurrency=3)
+    projection = interpreter.initial_projection(
+        identity=ExecutionIdentity("run-wp-bp-010-temporal"),
+        run_version=2,
+    )
+    proposal = interpreter.frontier(projection, available_concurrency=3)[0]
+    request = StageGraphAdmissionActivityRequest(
+        run_id="run-wp-bp-010-temporal",
+        request_scope="tenant-1",
+        projection=projection,
+        proposal=proposal,
+        operation=None,
+        blueprint=graph.model_dump(mode="json"),
+        effective_max_concurrency=3,
+        occurred_at=NOW,
+        idempotency_issuer="stagegraph-worker",
+        correlation_id="stagegraph:namespace-test",
+        semantic_input_binding_ref="semantic-input:test",
+        effective_configuration_digest=DIGEST,
+    )
+    deep_binding, _profile, _bundle = exact_fixture()
+    template = OperationExecutionRequest.model_validate(
+        {
+            **operation_request().model_dump(mode="python"),
+            "execution_runtime": "deep_agent",
+            "native_placement": None,
+            "deep_agent_binding": deep_binding,
+        }
+    )
+    service = StageGraphOperationPreparationService(
+        templates=StaticStageGraphOperationTemplateProvider(
+            {proposal.operation_request_key: template}
+        ),
+        operation_bindings=RecordingOperationBindings(),  # type: ignore[arg-type]
+    )
+
+    prepared = await service.materialize(request)
+
+    bound = prepared.operation.deep_agent_binding
+    unit = prepared.operation.runtime_unit
+    assert bound is not None and unit is not None
+    assert bound.runtime_unit == unit
+    assert bound.cognitive_session_namespace == f"belllabs/stage/{unit.unit_key}/gen/1"
+    assert bound.binding_digest == bound.content_digest()
 
 
 @pytest.mark.asyncio

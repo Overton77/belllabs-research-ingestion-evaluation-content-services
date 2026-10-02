@@ -14,9 +14,22 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.store.memory import InMemoryStore
 from pydantic import ValidationError
 
+from app.application.operations.checkpoint_lineage import (
+    CheckpointLineageService,
+    InMemoryCheckpointLineageRepository,
+)
 from app.application.operations.operation_execution import bind_operation_execution_request
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import DefinitionKind, ExactDefinitionRef, SecretRef
+from app.domain.operation_execution.checkpoint_lineage import (
+    STAMP_BINDING_DIGEST,
+    STAMP_EXECUTION_GENERATION,
+    STAMP_INVOCATION_ID,
+    STAMP_STATE_SCHEMA_DIGEST,
+    STAMP_UNIT_KEY,
+    CheckpointLineageInDoubt,
+    IncompatibleCheckpointSchema,
+)
 from app.domain.operation_execution.contracts import (
     CapabilityGrant,
     CognitiveChannelDefinition,
@@ -33,6 +46,7 @@ from app.domain.operation_execution.contracts import (
     DeepAgentSandboxComponent,
     DeepAgentSkillComponent,
     MaterializedWorkspace,
+    OperationAttemptIdentity,
     OperationExecutionRequest,
     OperationWorkflowRequest,
     RuntimeInvocation,
@@ -40,7 +54,10 @@ from app.domain.operation_execution.contracts import (
     SubagentStateSlice,
     SyncSubagentProfile,
 )
-from app.domain.operation_execution.errors import DeepAgentRuntimeDrift
+from app.domain.operation_execution.errors import (
+    DeepAgentMaterializationError,
+    DeepAgentRuntimeDrift,
+)
 from app.domain.operation_execution.materialization import (
     compile_deep_agent_execution_binding,
     compose_cognitive_context_schema,
@@ -52,6 +69,12 @@ from app.integrations.agents.deep_agents import (
     ExactDeepAgentMaterializer,
     ResolvedSkillBundle,
     StateSandboxFactory,
+)
+from tests.fixtures.checkpoint_lineage import (
+    activity_attempt,
+    bind_unit,
+    goal_unit,
+    stage_unit,
 )
 from tests.unit.operations.test_operation_execution import operation_request
 
@@ -422,13 +445,36 @@ class SessionProbeModel(BaseChatModel):
         )
 
 
+def unit_request(binding: DeepAgentExecutionBinding) -> OperationExecutionRequest:
+    payload = operation_request().model_dump(mode="python")
+    payload.update(
+        identity=OperationAttemptIdentity(
+            run_id=binding.run_id,
+            operation_id=binding.operation_id,
+            operation_attempt=binding.operation_attempt,
+        ),
+        execution_runtime="deep_agent",
+        native_placement=None,
+        deep_agent_binding=binding,
+        runtime_unit=binding.runtime_unit,
+        idempotency_key=f"side-effect:{binding.operation_id}",
+    )
+    return OperationExecutionRequest.model_validate(payload)
+
+
 def runtime_invocation(binding: DeepAgentExecutionBinding) -> RuntimeInvocation:
     base = operation_request()
     payload = base.model_dump(mode="python")
     payload.update(
+        identity=OperationAttemptIdentity(
+            run_id=binding.run_id,
+            operation_id=binding.operation_id,
+            operation_attempt=binding.operation_attempt,
+        ),
         execution_runtime="deep_agent",
         native_placement=None,
         deep_agent_binding=binding,
+        runtime_unit=binding.runtime_unit,
     )
     request = OperationExecutionRequest.model_validate(payload)
     operation_binding = bind_operation_execution_request(request)
@@ -444,6 +490,61 @@ def runtime_invocation(binding: DeepAgentExecutionBinding) -> RuntimeInvocation:
             mount_manifest_digest=sha256_digest("mounts"),
         ),
     )
+
+
+def unit_bound(
+    binding: DeepAgentExecutionBinding,
+    *,
+    iteration: int | None = None,
+    session_generation: int = 1,
+) -> DeepAgentExecutionBinding:
+    """Freeze a fixture binding to a StageGraph unit, or to a GoalDirected executor unit."""
+
+    if iteration is None:
+        unit = stage_unit(
+            request_scope="tenant-1",
+            run_id=binding.run_id,
+            operation_id=binding.operation_id,
+        )
+    else:
+        unit = goal_unit(
+            request_scope="tenant-1",
+            run_id=binding.run_id,
+            operation_id=f"goal-iteration/{iteration}/executor",
+            goal_iteration=iteration,
+            session_generation=session_generation,
+        )
+    return bind_unit(binding, unit)
+
+
+async def planned_invocation(
+    binding: DeepAgentExecutionBinding,
+    lineage: CheckpointLineageService,
+    *,
+    attempt: int = 1,
+) -> RuntimeInvocation:
+    invocation = runtime_invocation(binding)
+    plan = await lineage.observe_attempt(
+        invocation.binding, activity_attempt(attempt), dispatching=True
+    )
+    return invocation.model_copy(update={"checkpoint_plan": plan})
+
+
+async def execute_and_observe(
+    adapter: DeepAgentRuntimeAdapter,
+    lineage: CheckpointLineageService,
+    binding: DeepAgentExecutionBinding,
+):  # type: ignore[no-untyped-def]
+    invocation = await planned_invocation(binding, lineage)
+    result = await adapter.execute(invocation, {})
+    assert invocation.checkpoint_plan is not None and result.checkpoint is not None
+    transition = await lineage.record_transition(
+        invocation.checkpoint_plan,
+        result.checkpoint,
+        result_manifest_ref=f"manifest:{binding.binding_id}",
+        result_manifest_digest=sha256_digest(result.output_text),
+    )
+    return invocation, result, transition
 
 
 def test_operation_workflow_derives_queue_and_rejects_binding_generation_drift() -> None:
@@ -557,7 +658,8 @@ async def test_actual_deep_agent_progressively_loads_skill_md_into_messages() ->
     adapter = DeepAgentRuntimeAdapter(
         ExactDeepAgentMaterializer(registry(binding, bundle, model))
     )
-    result = await adapter.execute(runtime_invocation(binding), {})
+    lineage = CheckpointLineageService(InMemoryCheckpointLineageRepository())
+    result = await adapter.execute(await planned_invocation(unit_bound(binding), lineage), {})
 
     assert result.output_text == "SKILL-MD-IN-MESSAGES-040 observed and followed."
     inspection = result.event_payloads[0]
@@ -571,35 +673,176 @@ async def test_actual_deep_agent_progressively_loads_skill_md_into_messages() ->
 
 
 @pytest.mark.asyncio
-async def test_governed_session_id_reuses_checkpoint_and_fresh_id_starts_empty() -> None:
+async def test_shared_session_reuse_is_ordered_and_same_unit_never_reappends_prompt() -> None:
+    """REQ-CP-DA-018 / REQ-BP-GD-012 / RRM-001 section 7 #3.
+
+    The WP-CP-040 test asserted `[1, 2, 1]` by executing the *same* invocation twice, which
+    re-appended its prompt on the same thread. Under the accepted checkpoint protocol a
+    checkpoint written by the current submission never authorizes appending that input
+    again: the same-unit re-execution now fails closed before the model is called. The
+    intentional cross-iteration session reuse (next unit, pinned to the namespace head) and
+    the empty rollover session keep their accepted human-message counts.
+    """
+
     binding, _profile, bundle = exact_fixture()
-    model = SessionProbeModel()
+    model = SessionProbeModel(observed_human_counts=[])
     adapter = DeepAgentRuntimeAdapter(
         ExactDeepAgentMaterializer(registry(binding, bundle, model))
     )
-    base_invocation = runtime_invocation(binding)
-    first = base_invocation.model_copy(
-        update={
-            "binding": base_invocation.binding.model_copy(
-                update={"session_id": "goal-session:1"}
-            )
-        }
+    lineage = CheckpointLineageService(InMemoryCheckpointLineageRepository())
+    first_unit = unit_bound(binding, iteration=1)
+    first_invocation, first_result, first_transition = await execute_and_observe(
+        adapter, lineage, first_unit
     )
-    first_result = await adapter.execute(first, {})
-    second_result = await adapter.execute(first, {})
-    fresh = first.model_copy(
-        update={
-            "binding": first.binding.model_copy(
-                update={"session_id": f"{first.binding.session_id}:rollover"}
-            )
-        }
+
+    with pytest.raises(CheckpointLineageInDoubt, match="no namespace head"):
+        await adapter.execute(first_invocation, {})
+    with pytest.raises(CheckpointLineageInDoubt, match="unsettled transition"):
+        await planned_invocation(first_unit, lineage, attempt=2)
+
+    _second_invocation, second_result, second_transition = await execute_and_observe(
+        adapter, lineage, unit_bound(binding, iteration=2)
     )
-    fresh_result = await adapter.execute(fresh, {})
+    _fresh_invocation, fresh_result, fresh_transition = await execute_and_observe(
+        adapter, lineage, unit_bound(binding, iteration=3, session_generation=2)
+    )
 
     assert model.observed_human_counts == [1, 2, 1]
+    assert second_transition.namespace == first_transition.namespace
+    assert second_transition.source_key == first_transition.result_key
+    assert fresh_transition.namespace != first_transition.namespace
+    assert fresh_transition.source_key is None
     assert first_result.usage.amounts["tokens.total"] == 5
     assert second_result.usage.amounts["tokens.total"] == 5
     assert fresh_result.usage.amounts["tokens.total"] == 5
+
+
+@pytest.mark.asyncio
+async def test_invocation_is_root_namespaced_pinned_sync_durable_and_fully_stamped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """REQ-CP-DA-016/017: exact thread, root `checkpoint_ns`, source pin, stamps, sync."""
+
+    import app.integrations.agents.deep_agents.adapter as adapter_module
+
+    invoke_kwargs: list[dict[str, Any]] = []
+    real_create = adapter_module.create_deep_agent
+
+    def recording_create(*args: Any, **kwargs: Any) -> Any:
+        agent = real_create(*args, **kwargs)
+        real_ainvoke = agent.ainvoke
+
+        async def ainvoke(state: Any, **invoke: Any) -> Any:
+            invoke_kwargs.append(invoke)
+            return await real_ainvoke(state, **invoke)
+
+        object.__setattr__(agent, "ainvoke", ainvoke)
+        return agent
+
+    monkeypatch.setattr(adapter_module, "create_deep_agent", recording_create)
+    binding, _profile, bundle = exact_fixture()
+    saver = InMemorySaver()
+    exact_registry = registry(binding, bundle, SessionProbeModel(observed_human_counts=[]))
+    exact_registry = ExactComponentRegistry(
+        model_factories=exact_registry.model_factories,
+        skill_bundles=exact_registry.skill_bundles,
+        sandbox_factories=exact_registry.sandbox_factories,
+        checkpointers={binding.checkpointer_ref.digest: saver},
+        stores=exact_registry.stores,
+    )
+    adapter = DeepAgentRuntimeAdapter(ExactDeepAgentMaterializer(exact_registry))
+    lineage = CheckpointLineageService(InMemoryCheckpointLineageRepository())
+    first_binding = unit_bound(binding, iteration=1)
+    second_binding = unit_bound(binding, iteration=2)
+    first, first_result, first_transition = await execute_and_observe(
+        adapter, lineage, first_binding
+    )
+    second, second_result, second_transition = await execute_and_observe(
+        adapter, lineage, second_binding
+    )
+    assert first.checkpoint_plan is not None and second.checkpoint_plan is not None
+    assert first_result.checkpoint is not None and second_result.checkpoint is not None
+
+    namespace = first_transition.namespace
+    assert namespace == "belllabs/goal/run-operation/epoch/1/session/1/role/executor"
+    assert [call["config"]["configurable"] for call in invoke_kwargs] == [
+        {"thread_id": namespace, "checkpoint_ns": ""},
+        {
+            "thread_id": namespace,
+            "checkpoint_ns": "",
+            "checkpoint_id": first_transition.result_key.checkpoint_id,
+        },
+    ]
+    assert [call["durability"] for call in invoke_kwargs] == ["sync", "sync"]
+    thread = {"configurable": {"thread_id": namespace, "checkpoint_ns": ""}}
+    root = [item async for item in saver.alist(thread)]
+    plans = {plan.invocation_id: plan for plan in (first.checkpoint_plan, second.checkpoint_plan)}
+    stamped_per_invocation: dict[str, int] = {}
+    for item in root:
+        plan = plans[item.metadata[STAMP_INVOCATION_ID]]
+        assert item.metadata[STAMP_UNIT_KEY] == plan.unit_key
+        assert item.metadata[STAMP_EXECUTION_GENERATION] == 1
+        assert item.metadata[STAMP_BINDING_DIGEST] == plan.binding_digest
+        assert item.metadata[STAMP_STATE_SCHEMA_DIGEST] == (
+            binding.cognitive_state_schema.schema_digest
+        )
+        assert "Return BINDING-OK" not in str(item.metadata)
+        stamped_per_invocation[plan.invocation_id] = (
+            stamped_per_invocation.get(plan.invocation_id, 0) + 1
+        )
+    assert stamped_per_invocation == {
+        first_transition.invocation_id: first_result.checkpoint.stamped_checkpoint_count,
+        second_transition.invocation_id: second_result.checkpoint.stamped_checkpoint_count,
+    }
+    assert second_transition.result_key.parent_checkpoint_id is not None
+    assert await lineage.repository.get_namespace_head("tenant-1", namespace) == (
+        second_transition.result_key
+    )
+
+
+@pytest.mark.asyncio
+async def test_source_state_schema_mismatch_fails_closed_before_model_invocation() -> None:
+    """REQ-CP-CS-007 (amended): the stamped source schema digest gates every resume."""
+
+    binding, _profile, bundle = exact_fixture()
+    drifted, _drifted_profile, _drifted_bundle = exact_fixture(with_child_slices=True)
+    assert drifted.cognitive_state_schema.schema_digest != (
+        binding.cognitive_state_schema.schema_digest
+    )
+    model = SessionProbeModel(observed_human_counts=[])
+    adapter = DeepAgentRuntimeAdapter(
+        ExactDeepAgentMaterializer(registry(binding, bundle, model))
+    )
+    lineage = CheckpointLineageService(InMemoryCheckpointLineageRepository())
+    await execute_and_observe(adapter, lineage, unit_bound(binding, iteration=1))
+    second = await planned_invocation(unit_bound(drifted, iteration=2), lineage)
+
+    with pytest.raises(IncompatibleCheckpointSchema, match="REQ-CP-CS-007"):
+        await adapter.execute(second, {})
+    assert model.observed_human_counts == [1]
+
+
+@pytest.mark.asyncio
+async def test_unplanned_or_drifted_invocation_is_refused_before_materialization() -> None:
+    binding, _profile, bundle = exact_fixture()
+    model = SessionProbeModel(observed_human_counts=[])
+    adapter = DeepAgentRuntimeAdapter(
+        ExactDeepAgentMaterializer(registry(binding, bundle, model))
+    )
+    lineage = CheckpointLineageService(InMemoryCheckpointLineageRepository())
+    planned = await planned_invocation(unit_bound(binding), lineage)
+    assert planned.checkpoint_plan is not None
+
+    with pytest.raises(DeepAgentMaterializationError, match="lineage plan"):
+        await adapter.execute(planned.model_copy(update={"checkpoint_plan": None}), {})
+    with pytest.raises(DeepAgentMaterializationError, match="lineage plan"):
+        await adapter.execute(runtime_invocation(binding), {})
+    drifted_plan = planned.checkpoint_plan.model_copy(
+        update={"checkpointer_ref_digest": DIGEST_A}
+    )
+    with pytest.raises(DeepAgentMaterializationError, match="does not match"):
+        await adapter.execute(planned.model_copy(update={"checkpoint_plan": drifted_plan}), {})
+    assert model.observed_human_counts == []
 
 
 @pytest.mark.asyncio
@@ -713,3 +956,71 @@ def test_create_deep_agent_has_one_non_experiment_production_call_site() -> None
 
     source = inspect.getsource(adapter_module)
     assert source.count("create_deep_agent(") == 1
+
+
+@pytest.mark.asyncio
+async def test_operation_service_pins_records_and_links_the_result_checkpoint() -> None:
+    """Production seam: `OperationExecutionService` → adapter → transition → settlement."""
+
+    from app.application.operations.operation_execution import (
+        InMemoryOperationBindingRepository,
+        OperationExecutionService,
+    )
+    from app.integrations.conformance_operation_runtime import (
+        ConformanceAssetVerifier,
+        ConformanceBudgetAuthority,
+        ConformanceEventSink,
+        ConformanceSandbox,
+        ConformanceSecretResolver,
+    )
+    from tests.unit.operations.test_operation_execution import MCP_DIGEST, SKILL_DIGEST
+
+    class AcceptingAuthority:
+        async def verify(self, request: OperationExecutionRequest) -> None:
+            del request
+
+    binding, _profile, bundle = exact_fixture()
+    model = SessionProbeModel(observed_human_counts=[])
+    repository = InMemoryCheckpointLineageRepository()
+    assets = ConformanceAssetVerifier(
+        mcp_schema_digests={"fixture-mcp": MCP_DIGEST},
+        asset_manifest_digests={"skill:fixture.skill:1": SKILL_DIGEST},
+    )
+
+    def compose(lineage: CheckpointLineageService | None) -> OperationExecutionService:
+        return OperationExecutionService(
+            authority=AcceptingAuthority(),
+            bindings=InMemoryOperationBindingRepository(),
+            runtime=DeepAgentRuntimeAdapter(
+                ExactDeepAgentMaterializer(registry(binding, bundle, model))
+            ),
+            sandbox=ConformanceSandbox(),
+            assets=assets,
+            mcp=assets,
+            secrets=ConformanceSecretResolver({"environment:OPENAI_API_KEY": "unused"}),
+            events=ConformanceEventSink(),
+            budget=ConformanceBudgetAuthority(),
+            lineage=lineage,
+        )
+
+    request = unit_request(unit_bound(binding))
+    with pytest.raises(ValueError, match="checkpoint lineage composition"):
+        await compose(None).execute(request, activity_attempt())
+    service = compose(CheckpointLineageService(repository))
+
+    result = await service.execute(request, activity_attempt(attempt=1))
+    replay = await service.execute(request, activity_attempt(attempt=2))
+
+    assert request.runtime_unit is not None
+    transition = await repository.get_transition(
+        "tenant-1", request.runtime_unit.unit_key, 1
+    )
+    assert transition is not None
+    assert result.status == "completed"
+    assert result.result_checkpoint == transition.result_key
+    assert result.checkpoint_transition_id == transition.transition_id
+    assert transition.result_manifest_ref.startswith("operation-settlement:")
+    assert replay == result
+    assert model.observed_human_counts == [1]
+    attempts = await repository.list_attempts("tenant-1", request.runtime_unit.unit_key)
+    assert [(item.attempt.attempt, item.dispatching) for item in attempts] == [(1, True)]
