@@ -3,7 +3,7 @@
 Disposition: ready_for_review (implemented; independent review pending)
 Recorded date: 2026-10-02 (America/New_York)
 Qualification identity: RRM-006 admit semantic forks from safe macro snapshots. Requirements: REQ-CP-EXEC-012 (clarified: patch, reuse frontier, epoch 1, nothing implicit copied, `cognitive_seed`), REQ-CP-EXEC-016 (snapshots only at safe boundaries), REQ-CP-RUN-001/002 (independent transactional admission of the derived run), REQ-CP-RUN-006/007 (budgets and effects never copied), REQ-CP-DA-015 (sandbox snapshots are distinct; referenced only), REQ-CP-DA-016 (seed keys; seed deferred), REQ-CP-EXEC-015 (`BellLabsParentRunId` on fork roots). Contracts: `CON-CP-CONTINUATION-V1` (`RunSnapshotManifest` `belllabs.run-snapshot.v1`, `RunForkPatch` `belllabs.run-fork-patch.v1`), `CON-CP-RUNTIME-UNIT-V1` (reuse matching) (AMD-RRM-001, accepted meta `main` `a50d833`).
-Base revision and head revision: base `d46f548` (integration: RRM-001, 003, 004, 005, 015 and CR-1 merged); integration merged in without rebase after review: `ae58ba9` (RRM-013 at `15096b9`) and `d5ba4cb` (RRM-007 at `6e77850`). Tested code head: `7bfd093` (see "Deterministic verification"; the pre-review gates ran at `2572e54`). Branch `wp/rrm-006-forks`; not merged (the coordinator owns review and merge).
+Base revision and head revision: base `d46f548` (integration: RRM-001, 003, 004, 005, 015 and CR-1 merged); integration merged in without rebase after review: `ae58ba9` (RRM-013 at `15096b9`), `d5ba4cb` (RRM-007 at `6e77850`) and `4e83164` (CR-2, integration `ac7daf9`). Tested code head: `4e83164` (see "Deterministic verification"; the pre-review gates ran at `2572e54`). Branch `wp/rrm-006-forks`; not merged (the coordinator owns review and merge).
 Framework/package baseline: `uv sync --frozen` from the committed `uv.lock` (no dependency change); CPython 3.12 (Codex runtime), pytest 8.4.2, ruff 0.15.22, mypy 1.20.2, pydantic 2.13.4, langgraph 1.2.10, langgraph-checkpoint 4.1.1, langgraph-checkpoint-postgres 3.1.1, deepagents 0.7.5, temporalio 1.30.0 (`start_local`: Temporal CLI 1.9.1, Server 1.32.0), asyncpg 0.31.0, psycopg 3.3.4.
 
 ## Worktree provenance
@@ -109,27 +109,28 @@ Deleted owners: none. The graph_runtime `ForkRequest`/`ForkReceipt`/`ForkFromChe
 
 ## Deterministic verification
 
-All commands ran from the worktree with `unset VIRTUAL_ENV`, one pytest process at a time; every run with the service DSNs and every full run held the stack lock. Tested code head `2572e54` (code commits `6543b7e`, `2572e54`); the evidence/ticket commit follows it and changes documentation only.
+All commands ran from the worktree with `unset VIRTUAL_ENV`, one pytest process at a time; every run with the service DSNs and every full run held the stack lock. Final gates on tested head `4e83164` (after the CR-2 merge; the evidence commit that follows changes documentation only). Common flags: `BELLABS_RUN_WP_BP_010_LIVE=0 BELLABS_RUN_WP_BP_020_LIVE=0 BELLABS_RUN_WP_CP_040_LIVE=0 LANGSMITH_TRACING=false`.
 
 | Command | Result |
 |---|---|
-| Owning suites, both DSNs: `pytest tests/unit/runtime tests/unit/operations/test_fork_reuse_execution.py tests/unit/run_control/test_run_forks_api.py tests/unit/control_plane/test_digest_set_order_guard.py tests/integration/postgres/test_run_forks_postgres.py tests/integration/postgres/test_stage3_kernel_postgres_integration.py tests/acceptance/control_plane/test_rrm_006_semantic_forks.py` | 167 passed |
-| `uv run --no-sync ruff check app tests scripts` | All checks passed! |
-| `uv run --no-sync mypy app` | Success: no issues found in 353 source files |
-| `BELLABS_RUN_WP_BP_010_LIVE=0 BELLABS_RUN_WP_BP_020_LIVE=0 BELLABS_RUN_WP_CP_040_LIVE=0 LANGSMITH_TRACING=false uv run --no-sync pytest -q -rs` (hermetic, no DSNs) | 883 passed, 61 skipped, 2 xfailed, 0 failed |
-| The same flags with `TEST_APPLICATION_POSTGRES_DSN`, `TEST_MONGODB_URI` and `uv run --no-sync --env-file ../biotech-research-ingestion-evaluation-system/.env pytest -q -rs` | 920 passed, 24 skipped, 2 xfailed, 0 failed |
+| Owning suites, both DSNs: `pytest tests/unit/runtime tests/unit/operations/test_fork_reuse_execution.py tests/unit/run_control/test_run_forks_api.py tests/unit/control_plane/test_digest_set_order_guard.py tests/integration/postgres/test_run_forks_postgres.py tests/integration/postgres/test_stage3_kernel_postgres_integration.py tests/acceptance/control_plane/test_rrm_006_semantic_forks.py` | 176 passed |
+| `uv run --no-sync ruff check app tests` | All checks passed! (the fork-owned files are `ruff format`-clean; the shared files left unformatted were already unformatted at base) |
+| `uv run --no-sync mypy app` | Success: no issues found in 366 source files |
+| `uv run --no-sync pytest -q -rs` (hermetic, no DSNs) | 953 passed, 72 skipped, 2 xfailed, 0 failed |
+| The same with `TEST_APPLICATION_POSTGRES_DSN`, `TEST_MONGODB_URI` and `uv run --no-sync --env-file ../biotech-research-ingestion-evaluation-system/.env pytest -q -rs` | 995 passed, 30 skipped, 2 xfailed, 0 failed |
 | `git diff --check d46f548` | clean |
 
-Delta against the baseline (hermetic 850 passed, 56 skipped, 2 xfailed; services 882 passed, 24 skipped, 2 xfailed):
-- **Hermetic +33 passed** (new unit, API and saga tests); **+5 skipped**: the three `test_run_forks_postgres.py` tests and the two demonstrations, all DSN-gated; they run in the services gate.
-- **Services +38 passed** (33 + those 5) with the same 24 skips (19 Agent Server endpoint, 3 live-provider flags, 1 WSL, 1 pre-existing retirement).
+Delta against the integration baseline `ac7daf9` (CR-2 merge gates: hermetic 913 passed, 65 skipped, 2 xfailed; services 948 passed, 30 skipped, 2 xfailed):
+- **Hermetic +40 passed** (new unit, API and saga tests, including the review tests); **+7 skipped**: the five `test_run_forks_postgres.py` tests and the two demonstrations, all DSN-gated; they run in the services gate.
+- **Services +47 passed** (40 + those 7) with the same 30 skips (19 Agent Server block C endpoint, 6 RRM-013 live Agent Server drills, 3 live-provider flags, 1 WSL-only BP-010 recovery, 1 schema-grounding service; none is an RRM-006 test).
 - Versioned (not weakened): the fork tests of `test_runtime_recovery_stage3.py` and the fork slice of `test_stage3_kernel_postgres_integration.py` now exercise the v2 saga contracts; two audit entries left `test_digest_set_order_guard.py` because both sites now digest with `stable_json_digest`. Nothing was skipped, xfailed or deselected.
+- Pre-review gates (head `2572e54`, base `d46f548`): owning 167 passed; hermetic 883 passed, 61 skipped, 2 xfailed; services 920 passed, 24 skipped, 2 xfailed.
 
 ## Live runtime qualification
 
 No live LLM call. **Spend: USD 0.**
 
-`TEST_APPLICATION_POSTGRES_DSN`, `TEST_MONGODB_URI`, `LANGSMITH_TRACING=false`, under the stack lock: `uv run --no-sync pytest -q -s tests/acceptance/control_plane/test_rrm_006_semantic_forks.py` → 2 passed (StageGraph about 17 s, GoalDirected about 18 s). Each test: admission through `POST /run-control/v1/run-requests` (FastAPI `api`, `httpx.ASGITransport`, principal `operator` + `fork_operator`), root started by `TemporalWorkflowSubmitter.for_production(..., "required")` on a `start_local` dev server with the attributes registered; family activities are the production `StageGraphActivities` / `GoalDirectedActivities` over application PostgreSQL run control (with the family writer pool); `operation.execute` is the production `OperationExecutionActivities` → `OperationExecutionService` → `DeepAgentRuntimeAdapter` (real `create_deep_agent`, deterministic `TechnicalModel`: one `write_todos` call, then a JSON answer) over the real `AsyncPostgresSaver`, PostgreSQL lineage, MongoDB operation bindings and file payloads. Snapshot and fork go through `/run-control/v1/runs/{run}/snapshots` and `/forks` (the fork is replayed once: identical receipt). The derived root is started with `parent_run_id`; Visibility lists exactly one execution by `BellLabsParentRunId`.
+`TEST_APPLICATION_POSTGRES_DSN`, `TEST_MONGODB_URI`, `LANGSMITH_TRACING=false`, under the stack lock: `uv run --no-sync pytest -q -s tests/acceptance/control_plane/test_rrm_006_semantic_forks.py` → 2 passed (about 34 s for both; re-run inside the owning-suite gate on `4e83164` with the same evidence shape and replay counts). Each test: admission through `POST /run-control/v1/run-requests` (FastAPI `api`, `httpx.ASGITransport`, principal `operator` + `fork_operator`), root started by `TemporalWorkflowSubmitter.for_production(..., "required")` on a `start_local` dev server with the attributes registered; family activities are the production `StageGraphActivities` / `GoalDirectedActivities` over application PostgreSQL run control (with the family writer pool); `operation.execute` is the production `OperationExecutionActivities` → `OperationExecutionService` → `DeepAgentRuntimeAdapter` (real `create_deep_agent`, deterministic `TechnicalModel`: one `write_todos` call, then a JSON answer) over the real `AsyncPostgresSaver`, PostgreSQL lineage, MongoDB operation bindings and file payloads. Snapshot and fork go through `/run-control/v1/runs/{run}/snapshots` and `/forks` (the fork is replayed once: identical receipt). The derived root is started with `parent_run_id`; Visibility lists exactly one execution by `BellLabsParentRunId`.
 
 **StageGraph** (`draft` → stage wait `release-review` → `review`; journaled operations, real `RunControlOperationAuthority`; after the RRM-007 merge the wait is declared to run control through `stagegraph.apply_boundary_command` and released through `POST /run-control/v1/runs/{run}/commands` `satisfy_wait`, delivered by `TemporalBoundaryCommandTransport` and awaited to `applied`). Sanitized record of the post-review run (IDs vary per run):
 
@@ -170,7 +171,7 @@ Asserted: source authority unchanged by the fork; the derived run started fresh 
 
 | Command | Result |
 |---|---|
-| `uv run --no-sync pytest -q tests/unit tests/integration/temporal` (hermetic; every pre-existing captured-history replay, the RRM-005 `start_local` Search Attribute tests) | 804 passed, 22 skipped (DSN-gated and the WSL-only BP-010 recovery), 2 xfailed |
+| `uv run --no-sync pytest -q tests/unit tests/integration/temporal` (hermetic; every pre-existing captured-history replay, the RRM-005 `start_local` Search Attribute tests) | pre-review: 804 passed, 22 skipped (DSN-gated and the WSL-only BP-010 recovery), 2 xfailed; on `4e83164` these replays (including RRM-007's captured histories) are inside the full hermetic gate: 0 failed |
 | Demonstrations (post-review head) | StageGraph: derived root, derived family and source family replay (175 events, including RRM-007's boundary activities); GoalDirected: both roots and families replay (194 events) |
 
 Replay compatibility: `BellLabsRunInput.parent_run_id` and `OperationSettlement.reused_result` are defaulted fields; under `disabled` (the default and every existing history) the root emits nothing new; no workflow, activity, signal, query or payload field was renamed; RRM-006 changes no family workflow, so no `workflow.patched` was needed (the RRM-007 patches came with its merge).
@@ -213,7 +214,7 @@ None of these carries company, fixture or provider specifics.
 
 ## Independent review disposition (verdict `approve_with_fixes`)
 
-All fixes are new commits (no amend): `ae58ba9` (merge RRM-013), `84db653` (review fixes), `c912f2a` (docs caveat), `d5ba4cb` (merge RRM-007), `a9829e0` (ledger), `6de1591` (demonstration on RRM-007's governed waits), `7bfd093` (format).
+All fixes are new commits (no amend): `ae58ba9` (merge RRM-013), `84db653` (review fixes), `c912f2a` (docs caveat), `d5ba4cb` (merge RRM-007), `a9829e0` (ledger), `6de1591` (demonstration on RRM-007's governed waits), `7bfd093` (format), `4e83164` (merge CR-2; no conflict, no RRM-006 code used the deleted or moved symbols).
 
 | # | Finding | Disposition |
 |---|---|---|
