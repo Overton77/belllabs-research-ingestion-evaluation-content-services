@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import importlib.metadata
 import types
 from collections.abc import AsyncIterator, Callable, Mapping
@@ -109,8 +110,9 @@ class MaterializedDeepAgentArguments:
     state_schema: type[DeepAgentState]
     context_schema: type[Any]
     context: object
-    checkpointer: BaseCheckpointSaver[Any]
-    store: BaseStore
+    # None only for a hosted graph, whose checkpointer and store the Agent Server manages.
+    checkpointer: BaseCheckpointSaver[Any] | None
+    store: BaseStore | None
     initial_state: dict[str, object]
     resolved_attachments: tuple[dict[str, str], ...]
     response_format: type[Any] | dict[str, Any] | None
@@ -143,6 +145,9 @@ class OpenAIExactModelFactory:
         "temperature",
         "service_tier",
         "use_responses_api",
+        # A hosted graph is streamed by the Agent Server; usage reaches the persisted message
+        # only when the client streams usage (REQ-CP-DA-011 provider-attributed usage).
+        "stream_usage",
     }
 
     def __init__(self, *, secret_key: str = "environment:OPENAI_API_KEY") -> None:
@@ -214,8 +219,17 @@ class ExactDeepAgentMaterializer:
         secrets: ResolvedSecrets,
         *,
         output_schema_digest: str | None = None,
+        hosted: bool = False,
     ) -> AsyncIterator[MaterializedDeepAgentArguments]:
-        self._verify_runtime(binding)
+        """Resolve the exact binding; `hosted` materializes a graph an Agent Server serves.
+
+        REQ-CP-DA-019: a hosted binding has a remote placement whose checkpointer and store the
+        Agent Server manages, so no local checkpointer or store is resolved for it. Everything
+        else (model, tools, Skills, MCP, middleware, schemas) is resolved exactly as for a
+        local-in-worker invocation.
+        """
+
+        self._verify_runtime(binding, hosted=hosted)
         async with AsyncExitStack() as stack:
             model_factory = _exact(
                 self._registry.model_factories,
@@ -241,14 +255,27 @@ class ExactDeepAgentMaterializer:
                 for item in binding.middleware
             )
             subagents = self._materialize_subagents(binding, secrets, skill_sources)
-            checkpointer = _exact(
-                self._registry.checkpointers,
-                binding.checkpointer_ref.digest,
-                "checkpointer",
+            # A hosted graph's checkpointer and store are the Agent Server's (REQ-CP-DA-019).
+            checkpointer: BaseCheckpointSaver[Any] | None = (
+                None
+                if hosted
+                else _exact(
+                    self._registry.checkpointers,
+                    binding.checkpointer_ref.digest,
+                    "checkpointer",
+                )
             )
-            store = _exact(self._registry.stores, binding.store_ref.digest, "store")
+            store: BaseStore | None = (
+                None if hosted else _exact(self._registry.stores, binding.store_ref.digest, "store")
+            )
             state_schema = _state_type(binding.cognitive_state_schema)
-            context_schema = _context_type(binding.cognitive_context_schema)
+            # A hosted graph is invoked by the Agent Server without a runtime context, so its
+            # frozen context values become the dataclass defaults (exact: they are part of
+            # the binding digest). Local cognition passes the instance explicitly.
+            context_schema = _context_type(
+                binding.cognitive_context_schema,
+                defaults=binding.cognitive_context_values if hosted else None,
+            )
             context = _context_instance(
                 context_schema,
                 binding.cognitive_context_schema,
@@ -350,10 +377,18 @@ class ExactDeepAgentMaterializer:
         return tuple(result)
 
     @staticmethod
-    def _verify_runtime(binding: DeepAgentExecutionBinding) -> None:
+    def _verify_runtime(binding: DeepAgentExecutionBinding, *, hosted: bool = False) -> None:
         if binding.silent_fallback:
             raise DeepAgentUnsupportedPlacement("silent Deep Agent fallback is forbidden")
-        if binding.placement != "local_in_worker":
+        if hosted:
+            if (
+                binding.placement != "remote_langsmith_deployment"
+                or binding.checkpoint_behavior != "remote_managed"
+            ):
+                raise DeepAgentUnsupportedPlacement(
+                    "a hosted async subagent graph requires a remote-managed placement"
+                )
+        elif binding.placement != "local_in_worker":
             raise DeepAgentUnsupportedPlacement(
                 "this adapter materializes only local-in-worker Deep Agent placement"
             )
@@ -569,13 +604,33 @@ def _runtime_python_type(field: CognitiveRuntimeField) -> type[Any]:
     }[field.value_kind]
 
 
-def _context_type(schema: CognitiveRuntimeContextSchema) -> type[Any]:
+def _context_type(
+    schema: CognitiveRuntimeContextSchema, *, defaults: Mapping[str, object] | None = None
+) -> type[Any]:
+    required: list[tuple[str, type[Any]]] = []
+    defaulted: list[tuple[str, type[Any], Any]] = []
+    for item in schema.fields:
+        python_type = _runtime_python_type(item)
+        if defaults is not None and item.name in defaults:
+            value = defaults[item.name]
+            # A factory copies the frozen value per instance, so a mutable default (a
+            # string map) is never shared; defaulted fields follow the required ones, as a
+            # dataclass requires, and instances are built by keyword only.
+            defaulted.append(
+                (item.name, python_type, dataclass_field(default_factory=_copy_of(value)))
+            )
+        else:
+            required.append((item.name, python_type))
     return make_dataclass(
         f"BellLabsContext_{schema.schema_digest.removeprefix('sha256:')[:12]}",
-        [(item.name, _runtime_python_type(item)) for item in schema.fields],
+        [*required, *defaulted],
         frozen=True,
         slots=True,
     )
+
+
+def _copy_of(value: object) -> Callable[[], object]:
+    return lambda: copy.deepcopy(value)
 
 
 def _context_instance(
