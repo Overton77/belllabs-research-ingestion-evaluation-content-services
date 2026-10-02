@@ -8,22 +8,23 @@ generation's expected source. This reads the registered checkpointer by qualifie
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, cast
+from typing import Any
 
-from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from app.domain.graph_runtime.identities import QualifiedCheckpointKey
 from app.domain.operation_execution.checkpoint_lineage import (
-    ROOT_CHECKPOINT_NS,
     STAMP_EXECUTION_GENERATION,
     STAMP_INVOCATION_ID,
     STAMP_UNIT_KEY,
     UnitReconciliationIncident,
     submission_invocation_id,
 )
-
-_MAX_WALK = 100_000
+from app.integrations.agents.deep_agents.checkpoint_reads import (
+    MAX_LINEAGE_WALK,
+    checkpoint_parent_id,
+    root_checkpoint_config,
+)
 
 
 class LangGraphCheckpointDescendantVerifier:
@@ -52,33 +53,19 @@ class LangGraphCheckpointDescendantVerifier:
         stop_at = source.checkpoint_id if source is not None else None
         cursor: str | None = key.checkpoint_id
         first = True
-        for _ in range(_MAX_WALK):
+        for _ in range(MAX_LINEAGE_WALK):
             if cursor == stop_at:
                 return not first  # the source itself is not a descendant
             if cursor is None:
                 return False
-            item = await checkpointer.aget_tuple(_root(key.thread_id, cursor))
+            item = await checkpointer.aget_tuple(root_checkpoint_config(key.thread_id, cursor))
             if item is None or any(
                 item.metadata.get(name) != value for name, value in stamps.items()
             ):
                 return False
-            parent = (
-                cast(str | None, item.parent_config["configurable"].get("checkpoint_id"))
-                if item.parent_config is not None
-                else None
-            )
+            parent = checkpoint_parent_id(item)
             if first and parent != key.parent_checkpoint_id:
                 return False
             first = False
             cursor = parent
         return False
-
-
-def _root(thread_id: str, checkpoint_id: str) -> RunnableConfig:
-    return {
-        "configurable": {
-            "thread_id": thread_id,
-            "checkpoint_ns": ROOT_CHECKPOINT_NS,
-            "checkpoint_id": checkpoint_id,
-        }
-    }
