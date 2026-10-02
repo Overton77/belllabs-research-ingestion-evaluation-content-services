@@ -1163,6 +1163,10 @@ async def test_goal_directed_fork_starts_fresh_with_the_patched_goal(
             item["reason"] == "not_accepted" for item in snapshot["excluded_units"]
         ), snapshot["excluded_units"]
         assert receipt["lineage"]["reused_unit_keys"] == []
+        assert len(snapshot["reuse_candidates"]) == 2
+        assert {(item["decision"], item["reason"]) for item in fork["reuse_decisions"]} == {
+            ("not_reusable", "goal_revision_identity_is_run_bound")
+        }
         accepted = {
             item.settlement_id for item in source.accepted_operation_settlement_evidence
         }

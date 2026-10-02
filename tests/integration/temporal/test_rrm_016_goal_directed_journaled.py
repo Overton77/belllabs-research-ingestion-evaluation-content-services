@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -81,11 +82,23 @@ from tests.integration.temporal.test_wp_bp_020_temporal import (
 from tests.integration.temporal.test_wp_bp_020_temporal import _run_input as fake_goal_input
 
 QUEUE = "rrm016-goal-directed"
+# Captured from `test_journaled_goal_directed_run_settles_each_operation_once_through_a_pause`
+# with `RRM016_CAPTURE_HISTORY_DIR` set: the journaled family through a pause and resume.
+POST_CHANGE = Path(__file__).resolve().parents[2] / "fixtures" / "histories" / "rrm016_post_change"
+POST_CHANGE_HISTORY = "goal_directed_journaled_pause_resume.run1.json"
 PRE_CHANGE = Path(__file__).resolve().parents[2] / "fixtures" / "histories" / "rrm007_pre_change"
 BASELINE = {"tokens.total": 20}
 
 
 # --- History inspection ----------------------------------------------------------------------
+
+
+def _write_history(path: Path, text: str) -> None:
+    path.write_text(text, encoding="utf-8")
+
+
+def _read_history(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
 
 
 def lifecycle_command_ids(history: WorkflowHistory) -> list[str]:
@@ -230,6 +243,9 @@ async def test_journaled_goal_directed_run_settles_each_operation_once_through_a
         ] == ["goal:usage:baseline"]
         assert JOURNALED_SETTLEMENT_PATCH in patch_ids(history)
         assert await replay(handle, [GoalDirectedWorkflow, OperationWorkflow]) == 1
+        capture = os.getenv("RRM016_CAPTURE_HISTORY_DIR")
+        if capture:  # re-capture the committed post-change fixture (see POST_CHANGE)
+            _write_history(Path(capture) / POST_CHANGE_HISTORY, history.to_json())
         print(
             "RRM-016 EVIDENCE temporal "
             + json.dumps(
@@ -309,3 +325,26 @@ def test_operation_result_contract_is_unchanged() -> None:
     (a Temporal payload in every captured history) gains no field."""
 
     assert "settlement" not in OperationExecutionResult.model_fields
+
+
+@pytest.mark.asyncio
+async def test_post_change_goal_directed_history_replays_on_the_journaled_path() -> None:
+    """The captured RRM-016 history (pause, resume, four journaled settlements) replays; later
+    tickets that change the family must keep it replaying."""
+
+    history = WorkflowHistory.from_json(
+        "family/rrm-016-post-change/1", _read_history(POST_CHANGE / POST_CHANGE_HISTORY)
+    )
+    assert JOURNALED_SETTLEMENT_PATCH in patch_ids(history)
+    assert [
+        item for item in lifecycle_command_ids(history) if item.startswith("goal:usage:")
+    ] == ["goal:usage:baseline"]
+    assert [
+        item["operation_role"]
+        for name in ("goaldirected.prepare_executor", "goaldirected.prepare_verifier")
+        for item in scheduled_activity_inputs(history, name)
+    ] == ["executor", "executor", "verifier", "verifier"]
+    await Replayer(
+        workflows=[GoalDirectedWorkflow, OperationWorkflow],
+        workflow_runner=coordinator_workflow_runner(),
+    ).replay_workflow(history)
