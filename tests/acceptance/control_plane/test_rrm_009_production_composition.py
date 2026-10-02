@@ -1013,6 +1013,11 @@ async def test_stagegraph_runs_through_the_production_composition_with_fork_rela
         ],
     )
     ready = await stack.http.get("/health/ready")
+    # RRM-009 review: the unauthenticated probe discloses status and mode only.
+    assert ready.status_code == 200 and ready.json() == {
+        "status": "ready",
+        "mode": "runtime-control",
+    }, ready.text
     print(
         "RRM-009 EVIDENCE stagegraph:",
         json.dumps(
@@ -1028,7 +1033,7 @@ async def test_stagegraph_runs_through_the_production_composition_with_fork_rela
                 "saver_checkpoints": await _saver_checkpoints(stack.owner_pool),
                 "inspection": {name: item["freshness"] for name, item in sections.items()},
                 "replayed_events": replayed,
-                "readiness": ready.json(),
+                "readiness": api.state.runtime_control.readiness,
                 "capabilities": _pinned_summary(stack),
                 "lineage": lineages[0],
             },

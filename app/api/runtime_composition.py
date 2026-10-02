@@ -21,6 +21,7 @@ the separate administrative step (`scripts/register_belllabs_search_attributes.p
 from __future__ import annotations
 
 import asyncio
+import logging
 from contextlib import AsyncExitStack, suppress
 from dataclasses import dataclass
 
@@ -77,10 +78,13 @@ from app.temporal.search_attributes import (
     verify_belllabs_search_attributes,
 )
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class RuntimeControlComposition:
-    """What the API composed; `readiness` is reported by `/health/ready`."""
+    """What the API composed. `readiness` stays in process and in the log; `/health/ready`
+    reports status and mode only (RRM-009 review)."""
 
     submitter: TemporalWorkflowSubmitter
     launch: RunLaunchService
@@ -202,6 +206,7 @@ async def compose_runtime_control(
         readiness=readiness,
     )
     state.runtime_control = composition
+    logger.info("runtime control composed", extra={"readiness": readiness})
     return composition
 
 

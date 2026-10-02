@@ -833,10 +833,12 @@ class RunControlService:
                 # StageGraph cancel stayed `delivered` after the run was terminal.
                 terminal_receipts: tuple[BoundaryCommandReceipt, ...] = ()
                 if isinstance(command.action, TerminalizeAction):
-                    assert reduction.projection.terminal_outcome is not None
-                    terminal_receipts = await self._terminal_receipts(
-                        command, reduction.projection.terminal_outcome
-                    )
+                    outcome = reduction.projection.terminal_outcome
+                    if outcome is None:
+                        raise CommandRejected(
+                            "an accepted terminalization must record a terminal outcome"
+                        )
+                    terminal_receipts = await self._terminal_receipts(command, outcome)
                 mutation = CommandMutation(
                     result=reduction.result,
                     request_scope=command.request_scope,

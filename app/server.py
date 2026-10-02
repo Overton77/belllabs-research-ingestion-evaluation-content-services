@@ -299,11 +299,13 @@ async def liveness() -> dict[str, str]:
 @api.get("/health/ready")
 async def readiness() -> dict[str, object]:
     # External checks live in app.preflight so readiness stays cheap and non-destructive.
+    # RRM-009 review: the probe is unauthenticated, so it reports status and mode only. The
+    # composition's details (namespace, relay scopes, checkpointer digests) are logged once
+    # by `compose_runtime_control` and stay on `app.state.runtime_control` in process.
     runtime = getattr(api.state, "runtime_control", None)
     return {
         "status": "ready",
         "mode": "runtime-control" if runtime is not None else "pre-emptive-bootstrap",
-        "runtime_control": runtime.readiness if runtime is not None else None,
     }
 
 
