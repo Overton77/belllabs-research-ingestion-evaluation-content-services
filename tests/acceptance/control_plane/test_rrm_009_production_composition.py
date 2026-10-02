@@ -1107,10 +1107,11 @@ async def test_goal_directed_runs_two_iterations_through_the_production_composit
 # --- Durable outputs through the generic artifact path --------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_generic_artifact_operation_promotes_the_captured_report_durably(
-    stack: ProductionStack,
-) -> None:
+async def promote_generic_artifact(stack: ProductionStack) -> tuple[str, dict[str, Any]]:
+    """One governed operation through `POST /runs/{run_id}/operations` (GenericArtifactWorkflow:
+    `operation.execute`, candidate capture, `artifact.promote`); returns the run and result.
+    Shared by the filesystem and the S3 object-store qualifications."""
+
     catalog = await publish_technical_catalog(
         stack.control_plane, family="StageGraph", now=datetime.now(UTC)
     )
@@ -1210,11 +1211,20 @@ async def test_generic_artifact_operation_promotes_the_captured_report_durably(
                     print("DEBUGEVENT", execution.id, str(event)[:6000])
         raise
     assert response.status_code == 201, response.text
-    result = response.json()
+    result = cast(dict[str, Any], response.json())
     assert result["operation"]["status"] == "completed"
     artifact = result["artifact"]
     assert artifact["status"] == "admitted"
     assert artifact["durable_reference"].startswith(f"artifact://{SCOPE}/{run_id}/")
+    return run_id, result
+
+
+@pytest.mark.asyncio
+async def test_generic_artifact_operation_promotes_the_captured_report_durably(
+    stack: ProductionStack,
+) -> None:
+    run_id, result = await promote_generic_artifact(stack)
+    artifact = result["artifact"]
     object_path = stack.payload_root / artifact["object_ref"].split("://")[1]
     assert object_path.exists()
     assert b"RRM-009 report" in object_path.read_bytes()
