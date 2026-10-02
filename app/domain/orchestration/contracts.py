@@ -1292,6 +1292,8 @@ class GoalDirectedRunResult:
     rollover_count: int
     active_revision_id: str
     accepted_revision_ids: tuple[str, ...]
+    # Lineage: every iteration's executor outputs. The promoted run outputs are
+    # `terminalization_proposal.output_refs` (REQ-BP-GD-004, RRM-019).
     output_refs: tuple[str, ...]
     handoffs: tuple[GoalHandoff, ...]
     execution_results: tuple[GoalExecutionResult, ...]

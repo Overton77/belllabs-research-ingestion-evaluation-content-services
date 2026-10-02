@@ -46,7 +46,7 @@ Framework/package baseline: the synced venv from the committed `uv.lock` (no dep
 
 **Fix** (`app/temporal/workflows/goal_directed.py`): `accepted_output_refs = terminalization_proposal.output_refs if workflow.patched("rrm-019-verified-terminal-outputs") else result.output_refs`. It feeds the evidence digest and the `record_output_evidence` promotions, and `terminalize` already sends `proposal.output_refs` as `valid_output_refs`. Promotion and proposal are therefore the same set. Partial or failed outcomes still promote nothing. The interpreter, the contracts and the reducer are unchanged.
 
-**Replay.** Pre-patch histories (no marker) promote the union, as before. When every iteration reuses one output ref, the union equals the final outputs, so the command identities (`goal:output:{ref}:{digest}`, `goal:obligation:{ref}:{digest}`) are identical on both paths; only the marker is new.
+**Replay.** Pre-patch histories (no marker) promote the union, as before. When every iteration produces an equal output-ref tuple, the union equals the final outputs, so the command identities (`goal:output:{ref}:{digest}`, `goal:obligation:{ref}:{digest}`) are identical on both paths; only the marker is new.
 
 ## Requirement-to-evidence map
 
@@ -136,7 +136,7 @@ Covered:
 
 **Patching.** One new patch, `rrm-019-verified-terminal-outputs`, evaluated once at the terminal-output block, only when a terminalization proposal exists. No activity, signal, query, update or workflow type changed; no input or result contract changed. RRM-018 changed no workflow command.
 
-**Deploy note.** No drain is needed for this change. An in-flight run that reaches terminalization after the deploy takes the patched path. With one stable output ref its commands are identical; with distinct refs it would have failed `terminal_output_mismatch` before, and now completes.
+**Deploy note.** No drain is needed for this change. An in-flight run that reaches terminalization after the deploy takes the patched path. With an equal output-ref tuple in every iteration its commands are identical (a reordered tuple changes the command order, which is safe because the patch marker selects the path); with distinct refs it would have failed `terminal_output_mismatch` before, and now completes.
 
 ## Replacement and deletion checks
 
