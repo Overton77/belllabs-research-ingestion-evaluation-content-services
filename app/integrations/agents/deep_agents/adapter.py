@@ -38,6 +38,11 @@ from app.domain.operation_execution.errors import (
     DeepAgentMaterializationError,
     RuntimeInvocationFailure,
 )
+from app.integrations.agents.deep_agents.checkpoint_reads import (
+    MAX_LINEAGE_WALK,
+    checkpoint_parent_id,
+    root_checkpoint_config,
+)
 from app.integrations.agents.deep_agents.materializer import ExactDeepAgentMaterializer
 from app.integrations.langsmith_tracing import trace_deep_agent_execute
 
@@ -112,7 +117,7 @@ class DeepAgentRuntimeAdapter:
             try:
                 if source_key is not None:
                     prior_snapshot = await agent.aget_state(
-                        _checkpoint_config(plan.namespace, source_key.checkpoint_id)
+                        root_checkpoint_config(plan.namespace, source_key.checkpoint_id)
                     )
                     prior_messages = cast(
                         list[BaseMessage], prior_snapshot.values.get("messages", [])
@@ -142,9 +147,7 @@ class DeepAgentRuntimeAdapter:
                     # A resume never re-appends the submitted input: it continues the
                     # pending tasks of the pinned checkpoint with no input.
                     invoke_input = (
-                        None
-                        if classified.kind == CheckpointClassification.INTERRUPTED
-                        else state
+                        None if classified.kind == CheckpointClassification.INTERRUPTED else state
                     )
                     result = cast(
                         dict[str, Any],
@@ -203,17 +206,12 @@ class DeepAgentRuntimeAdapter:
             except Exception as error:
                 # REQ-CP-RUN-007 (narrowed): report whether a terminal result exists after the
                 # failure, so the boundary settles `failed` only when none does.
-                terminal, candidates = await _terminal_result_may_exist(
-                    checkpointer, agent, plan
-                )
+                terminal, candidates = await _terminal_result_may_exist(checkpointer, agent, plan)
                 raise RuntimeInvocationFailure(
                     type(error).__name__,
                     terminal_result_observed=terminal,
                     candidates=candidates,
                 ) from error
-
-
-_MAX_LINEAGE_WALK = 100_000
 
 
 def _validated_plan(
@@ -240,22 +238,6 @@ def _validated_plan(
     return plan
 
 
-def _checkpoint_config(namespace: str, checkpoint_id: str) -> RunnableConfig:
-    return {
-        "configurable": {
-            "thread_id": namespace,
-            "checkpoint_ns": ROOT_CHECKPOINT_NS,
-            "checkpoint_id": checkpoint_id,
-        }
-    }
-
-
-def _parent_id(item: CheckpointTuple) -> str | None:
-    if item.parent_config is None:
-        return None
-    return cast(str | None, item.parent_config["configurable"].get("checkpoint_id"))
-
-
 @dataclass(frozen=True)
 class _Classified:
     kind: CheckpointClassification
@@ -270,7 +252,7 @@ def _qualified(plan: CheckpointInvocationPlan, item: CheckpointTuple) -> Qualifi
         thread_id=plan.namespace,
         checkpoint_ns=ROOT_CHECKPOINT_NS,
         checkpoint_id=str(item.config["configurable"]["checkpoint_id"]),
-        parent_checkpoint_id=_parent_id(item),
+        parent_checkpoint_id=checkpoint_parent_id(item),
     )
 
 
@@ -301,7 +283,7 @@ async def _classify(
     source_key: QualifiedCheckpointKey | None = None
     if source is not None:
         recorded = await checkpointer.aget_tuple(
-            _checkpoint_config(plan.namespace, source.checkpoint_id)
+            root_checkpoint_config(plan.namespace, source.checkpoint_id)
         )
         if recorded is None:
             raise CheckpointLineageInDoubt(
@@ -311,7 +293,7 @@ async def _classify(
             raise IncompatibleCheckpointSchema(
                 "source checkpoint state-schema stamp differs from the binding (REQ-CP-CS-007)"
             )
-        if _parent_id(recorded) != source.parent_checkpoint_id:
+        if checkpoint_parent_id(recorded) != source.parent_checkpoint_id:
             raise CheckpointLineageInDoubt(
                 "the source checkpoint's ancestry differs from its record",
                 reason="ancestry_mismatch",
@@ -319,12 +301,12 @@ async def _classify(
         source_key = _qualified(plan, recorded)
     items: dict[str, CheckpointTuple] = {}
     async for item in checkpointer.alist(thread_config):
-        if len(items) >= _MAX_LINEAGE_WALK:
+        if len(items) >= MAX_LINEAGE_WALK:
             raise CheckpointLineageInDoubt(
                 "the checkpointer lineage cannot be classified", reason="unclassifiable"
             )
         items[str(item.config["configurable"]["checkpoint_id"])] = item
-    parents = {checkpoint_id: _parent_id(item) for checkpoint_id, item in items.items()}
+    parents = {checkpoint_id: checkpoint_parent_id(item) for checkpoint_id, item in items.items()}
 
     def descends(checkpoint_id: str, ancestor: str | None) -> bool:
         cursor = parents.get(checkpoint_id)
@@ -359,8 +341,7 @@ async def _classify(
             cursor = parents.get(cursor)
         if not path_ok:
             raise CheckpointLineageInDoubt(
-                "the accepted descendant is not a stamped root-namespace descendant of the "
-                "source",
+                "the accepted descendant is not a stamped root-namespace descendant of the source",
                 reason="accepted_descendant_invalid",
             )
         scope = {accepted} | {
@@ -389,7 +370,7 @@ async def _classify(
             candidates=candidates,
         )
     leaf_id = leaves[0]
-    snapshot = await agent.aget_state(_checkpoint_config(plan.namespace, leaf_id))
+    snapshot = await agent.aget_state(root_checkpoint_config(plan.namespace, leaf_id))
     if snapshot.interrupts or any(task.interrupts for task in snapshot.tasks):
         raise CheckpointLineageInDoubt(
             "the stamped leaf holds a pending LangGraph interrupt",
@@ -423,7 +404,7 @@ async def _own_result_config(
     own: dict[str, str | None] = {}
     async for item in checkpointer.alist(thread_config):
         if item.metadata.get(STAMP_ATTEMPT_REF) == plan.attempt_ref:
-            own[str(item.config["configurable"]["checkpoint_id"])] = _parent_id(item)
+            own[str(item.config["configurable"]["checkpoint_id"])] = checkpoint_parent_id(item)
     tips = [checkpoint_id for checkpoint_id in own if checkpoint_id not in own.values()]
     if len(tips) != 1:
         raise CheckpointLineageInDoubt(
@@ -442,7 +423,7 @@ async def _own_result_config(
             "the captured result does not descend from the checkpoint this attempt pinned",
             reason="ancestry_mismatch",
         )
-    return _checkpoint_config(plan.namespace, tips[0])
+    return root_checkpoint_config(plan.namespace, tips[0])
 
 
 async def _terminal_result_may_exist(
@@ -459,7 +440,7 @@ async def _terminal_result_may_exist(
     if classified.kind != CheckpointClassification.TERMINAL_UNOBSERVED:
         return False, ()
     assert classified.leaf_id is not None
-    leaf = await checkpointer.aget_tuple(_checkpoint_config(plan.namespace, classified.leaf_id))
+    leaf = await checkpointer.aget_tuple(root_checkpoint_config(plan.namespace, classified.leaf_id))
     return True, ((_qualified(plan, leaf),) if leaf is not None else ())
 
 
@@ -489,9 +470,9 @@ async def _capture_result(
     result_parent: str | None = None
     stamped = 0
     while cursor != stop_at:
-        if cursor is None or stamped >= _MAX_LINEAGE_WALK:
+        if cursor is None or stamped >= MAX_LINEAGE_WALK:
             raise CheckpointLineageInDoubt("result checkpoint does not descend from the source")
-        item = await checkpointer.aget_tuple(_checkpoint_config(plan.namespace, cursor))
+        item = await checkpointer.aget_tuple(root_checkpoint_config(plan.namespace, cursor))
         if item is None:
             raise CheckpointLineageInDoubt("a checkpoint in the result lineage is missing")
         if any(item.metadata.get(key) != value for key, value in stamps.items()):
@@ -499,9 +480,9 @@ async def _capture_result(
                 "a checkpoint between source and result lacks this invocation's stamps"
             )
         if stamped == 0:
-            result_parent = _parent_id(item)
+            result_parent = checkpoint_parent_id(item)
         stamped += 1
-        cursor = _parent_id(item)
+        cursor = checkpoint_parent_id(item)
     if result_parent is None:
         raise CheckpointLineageInDoubt("the result checkpoint has no parent")
     result_key = QualifiedCheckpointKey(
