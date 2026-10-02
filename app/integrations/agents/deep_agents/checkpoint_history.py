@@ -36,15 +36,28 @@ from app.integrations.agents.deep_agents.checkpoint_reads import (
 
 STAMP_PREFIX = "belllabs_"
 _EXPOSED_METADATA = frozenset({"step", "source"})
-MAX_NAMESPACE_CHECKPOINTS = 10_000
+# One namespace's root checkpoints are loaded per history read. A unit generation writes
+# a handful of root checkpoints per model/tool step, and a GoalDirected session namespace
+# accumulates its ordered units until a rollover; this bound is far above both. A
+# namespace above it is reported unavailable (`namespace_history_exceeds_bound`) instead of
+# being truncated, because a truncated list would silently break the recorded lineage.
+MAX_NAMESPACE_CHECKPOINTS = 2_000
 _TRIGGER_PREFIX = "branch:to:"
 _TASKS_CHANNEL = "__pregel_tasks"
 _REMOVE_ALL_MESSAGES = "__remove_all__"
 
 
 class LangGraphCheckpointHistoryReader:
-    def __init__(self, checkpointers: Mapping[str, BaseCheckpointSaver[Any]]) -> None:
+    def __init__(
+        self,
+        checkpointers: Mapping[str, BaseCheckpointSaver[Any]],
+        *,
+        max_checkpoints: int = MAX_NAMESPACE_CHECKPOINTS,
+    ) -> None:
+        if max_checkpoints < 1:
+            raise ValueError("the namespace checkpoint bound must be positive")
         self._checkpointers = checkpointers
+        self._max_checkpoints = max_checkpoints
 
     def supports(self, checkpointer_ref_digest: str) -> bool:
         return checkpointer_ref_digest in self._checkpointers
@@ -58,12 +71,17 @@ class LangGraphCheckpointHistoryReader:
         }
         observations: list[CheckpointObservation] = []
         try:
-            async for item in saver.alist(config, limit=MAX_NAMESPACE_CHECKPOINTS):
+            async for item in saver.alist(config, limit=self._max_checkpoints + 1):
                 if item.config["configurable"].get("checkpoint_ns", "") != ROOT_CHECKPOINT_NS:
                     continue  # nested namespaces are evidence only, never root lineage
                 observations.append(_observation(checkpointer_ref_digest, namespace, item))
         except Exception as error:  # noqa: BLE001 - a saver outage degrades the section
             raise RuntimeSourceUnavailable("the registered checkpointer is unavailable") from error
+        if len(observations) > self._max_checkpoints:
+            raise RuntimeSourceUnavailable(
+                "the namespace holds more root checkpoints than the inspection bound",
+                reason="namespace_history_exceeds_bound",
+            )
         return tuple(observations)
 
     async def read_redacted_state(

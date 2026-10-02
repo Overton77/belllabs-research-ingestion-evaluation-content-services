@@ -156,7 +156,21 @@ class InspectionReadRepository(Protocol):
 
 
 class RuntimeSourceUnavailable(RuntimeError):
-    """A qualified runtime source could not be read; reads degrade, they never fail."""
+    """A qualified runtime source could not be read; reads degrade, they never fail.
+
+    `reason` is the typed section reason reported to the caller (never a provider message).
+    """
+
+    def __init__(self, message: str, *, reason: str = "source_unavailable") -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
+class CheckpointLineageCycle(RuntimeSourceUnavailable):
+    """The checkpointer's parent links do not form a finite chain; never walked forever."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, reason="checkpoint_lineage_cycle")
 
 
 class TemporalVisibilityReader(Protocol):
@@ -480,12 +494,10 @@ class RuntimeInspectionService:
             reconciliation_state="in_doubt" if any(item.ambiguous for item in effects) else "none",
         )
         sections.authority("reconciliation", reconciliation_state=state)
-        children = tuple(
-            child
-            for child in snapshot.async_children
-            if child.parent_operation_id in {unit.identity.semantic_operation_id, *binding_ids}
-        )
-        children = await self._async_children(children, request_scope, sections)
+        # Attribute children by the unit's own exact bindings, never by the semantic
+        # operation ID that other units of the run may share (see `_owned_by`).
+        run_children = await self._async_children(snapshot.async_children, request_scope, sections)
+        children = tuple(child for child in run_children if _owned_by(child, unit.generations))
         executions = tuple(
             execution
             for execution in await self._temporal(request_scope, snapshot, sections)
@@ -867,13 +879,18 @@ class RuntimeInspectionService:
             return None
         try:
             observations = await self._checkpoints.list_root_checkpoints(digest, namespace)
-        except RuntimeSourceUnavailable:
-            sections.runtime(
-                "checkpoints", "checkpointer", "unavailable", reason="checkpointer_unavailable"
+        except RuntimeSourceUnavailable as error:
+            reason = (
+                error.reason if error.reason != "source_unavailable" else "checkpointer_unavailable"
             )
+            sections.runtime("checkpoints", "checkpointer", "unavailable", reason=reason)
+            return None
+        try:
+            entries = _unit_lineage(unit, generation, recorded, observations)
+        except CheckpointLineageCycle as error:
+            sections.runtime("checkpoints", "checkpointer", "unavailable", reason=error.reason)
             return None
         observed_at = self._clock()
-        entries = _unit_lineage(unit, generation, recorded, observations)
         sections.runtime(
             "checkpoints",
             "checkpointer",
@@ -1056,11 +1073,19 @@ def _unit_lineage(
         )
 
     def chain(leaf: str) -> list[CheckpointObservation] | None:
+        # Each listed checkpoint can be visited at most once, so the walk is bounded by the
+        # (already bounded) observation count; a revisit means the parent links are cyclic.
         found: list[CheckpointObservation] = []
+        visited: set[str] = set()
         cursor: str | None = leaf
         while cursor != stop:
             if cursor is None:
                 return found if stop is None else None
+            if cursor in visited or len(visited) > len(by_id):
+                raise CheckpointLineageCycle(
+                    "the checkpointer's parent links form a cycle in this namespace"
+                )
+            visited.add(cursor)
             item = by_id.get(cursor)
             if item is None:
                 return None
@@ -1106,6 +1131,31 @@ def _unit_lineage(
     ]
 
 
+def _owned_by(child: AsyncChildInspection, generations: Sequence[UnitGenerationRecord]) -> bool:
+    """A child belongs to a unit generation only through that generation's exact binding.
+
+    The 0016 parent authority row records `parent_operation_id` but no parent binding
+    (`app/migrations/0016_async_subagent_parent_child_v1.sql`, `async_subagent_authority`);
+    the binding is `AsyncSubagentExecution.parent_binding_id` in the immutable detail
+    document (`app/domain/operation_execution/contracts.py`, `AsyncSubagentExecution`).
+    With the detail, the child must name a binding of this unit at the same generation.
+    Without it, the authority's `parent_operation_id` is attributed only when it is itself
+    one of the unit's binding IDs. A semantic operation ID, which units of one run may
+    share, never attributes a child; such a child stays visible on the run read.
+    """
+
+    for record in generations:
+        if child.parent_binding_id is not None:
+            if (
+                child.parent_binding_id == record.binding_id
+                and child.execution_generation == record.execution_generation
+            ):
+                return True
+        elif child.parent_operation_id == record.binding_id:
+            return True
+    return False
+
+
 def _with_detail(child: AsyncChildInspection, detail: Any) -> AsyncChildInspection:
     """Thin, tolerant mapping of the immutable detail document (unknown fields ignored)."""
 
@@ -1114,6 +1164,7 @@ def _with_detail(child: AsyncChildInspection, detail: Any) -> AsyncChildInspecti
     lifecycle = getattr(detail, "lifecycle", None)
     return child.model_copy(
         update={
+            "parent_binding_id": getattr(detail, "parent_binding_id", None),
             "provider_thread_id": getattr(detail, "provider_thread_id", None),
             "provider_run_id": getattr(detail, "provider_run_id", None),
             "detail_lifecycle": (

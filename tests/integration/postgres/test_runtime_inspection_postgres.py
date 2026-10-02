@@ -135,7 +135,7 @@ async def test_scoped_reads_under_runtime_and_readonly_roles_never_write(
         seeded = await seed_inspection_world(
             run_service, PostgresCheckpointLineageRepository(owner), saver
         )
-        await _seed_async_child(owner, seeded.active_run, seeded.in_doubt.semantic_operation_id)
+        await _seed_async_child(owner, seeded.active_run, f"binding:{seeded.in_doubt.unit_key}:1")
         for role in (RUNTIME_ROLE, READONLY_ROLE):
             pools[role] = await asyncpg.create_pool(
                 dsn=test_application_postgres_dsn, min_size=1, max_size=2, setup=_assume(role)

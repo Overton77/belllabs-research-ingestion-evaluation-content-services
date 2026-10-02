@@ -233,6 +233,8 @@ class AsyncChildInspection(Contract):
     result_manifest_digest: str | None = None
     settlement_ref: str | None = None
     cancellation_requested: bool = False
+    # From the immutable detail document: the exact parent binding that spawned the child.
+    parent_binding_id: str | None = None
     provider_thread_id: str | None = None
     provider_run_id: str | None = None
     detail_lifecycle: str | None = None

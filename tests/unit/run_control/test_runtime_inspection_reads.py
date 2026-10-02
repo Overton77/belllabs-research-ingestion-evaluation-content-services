@@ -51,6 +51,7 @@ from app.domain.orchestration.search_attributes import (
 )
 from app.domain.run_control.inspection import (
     AsyncChildInspection,
+    CheckpointObservation,
     TemporalExecution,
     summarize_channel_values,
 )
@@ -108,7 +109,8 @@ class World:
                 self.active_run: (
                     AsyncChildInspection(
                         child_execution_id="async-child:1",
-                        parent_operation_id=self.in_doubt.semantic_operation_id,
+                        # The authority row names the spawning binding (no detail needed).
+                        parent_operation_id=f"binding:{self.in_doubt.unit_key}:1",
                         link_id="link:1",
                         contract_id="contract:research-helper",
                         binding_digest=BINDING,
@@ -900,3 +902,190 @@ async def test_delta_channel_counts_are_folded_from_the_saver_history_without_co
     serialized = facts.model_dump_json()
     for sensitive in (SECRET_TEXT, PROMPT_TEXT, TOOL_ARGUMENT, "/workspace/a.md"):
         assert sensitive not in serialized
+
+
+# --- Review follow-ups: bounded lineage walks and exact child attribution ----------------
+
+
+class CyclicCheckpoints:
+    """A checkpointer whose parent links loop (corrupt or adversarial data)."""
+
+    def __init__(self, cycles: dict[str, tuple[RuntimeUnitIdentity, tuple[str, str]]]) -> None:
+        self._cycles = cycles
+
+    def supports(self, checkpointer_ref_digest: str) -> bool:
+        return checkpointer_ref_digest == CHECKPOINTER
+
+    async def list_root_checkpoints(self, digest: str, namespace: str) -> Any:
+        unit, (first, second) = self._cycles[namespace]
+        return tuple(
+            CheckpointObservation(
+                key=QualifiedCheckpointKey(
+                    checkpointer_ref_digest=digest,
+                    thread_id=namespace,
+                    checkpoint_id=checkpoint_id,
+                    parent_checkpoint_id=parent,
+                ),
+                step=step,
+                stamps=stamps_for(unit),
+            )
+            for step, (checkpoint_id, parent) in enumerate(((first, second), (second, first)))
+        )
+
+    async def read_redacted_state(self, key: QualifiedCheckpointKey) -> Any:
+        raise AssertionError("a cyclic lineage is never summarized")
+
+
+@pytest.mark.asyncio
+async def test_cyclic_checkpoint_parents_are_reported_not_walked_forever(
+    world: World, client_for: Any
+) -> None:
+    settled_ns = cognitive_session_namespace(world.settled, 1)
+    doubt_ns = cognitive_session_namespace(world.in_doubt, 1)
+    inspection = world.service(
+        checkpoints=CyclicCheckpoints(
+            {
+                # With a recorded result: the chain from `c3` loops back to itself.
+                settled_ns: (world.settled, ("c3", "c3-parent")),
+                # Without a transition: every stamped checkpoint's chain loops.
+                doubt_ns: (world.in_doubt, ("loop-a", "loop-b")),
+            }
+        )
+    )
+    base = f"/run-control/v1/inspection/runs/{world.active_run}/units"
+    params = {"request_scope": "tenant-1"}
+    with client_for(inspection, principal("state_inspector")) as client:
+        for unit in (world.settled, world.in_doubt):
+            history = client.get(f"{base}/{unit.unit_key}/checkpoints", params=params)
+            assert history.status_code == 200
+            section = history.json()["sections"]["checkpoints"]
+            assert (section["freshness"], section["reason"]) == (
+                "unavailable",
+                "checkpoint_lineage_cycle",
+            )
+            assert history.json()["data"]["entries"] == []
+        summary = client.get(
+            f"{base}/{world.settled.unit_key}/checkpoints/c3/summary", params=params
+        )
+    assert summary.status_code == 503
+    assert summary.json()["code"] == "inspection_source_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_namespace_history_above_the_bound_is_unavailable_not_truncated(
+    world: World,
+) -> None:
+    bounded = world.service(
+        checkpoints=LangGraphCheckpointHistoryReader({CHECKPOINTER: world.saver}, max_checkpoints=2)
+    )
+    page = await bounded.get_checkpoint_history(
+        "tenant-1", world.active_run, world.settled.unit_key
+    )
+    assert page.sections["checkpoints"].freshness == "unavailable"
+    assert page.sections["checkpoints"].reason == "namespace_history_exceeds_bound"
+    assert page.data.entries == ()
+    within = world.service(
+        checkpoints=LangGraphCheckpointHistoryReader({CHECKPOINTER: world.saver}, max_checkpoints=5)
+    )
+    full = await within.get_checkpoint_history("tenant-1", world.active_run, world.settled.unit_key)
+    assert [entry.key.checkpoint_id for entry in full.data.entries] == ["c1", "c3-parent", "c3"]
+
+
+@dataclass(frozen=True)
+class ChildDetail:
+    parent_binding_id: str | None
+
+
+class ChildDetails:
+    def __init__(self, details: dict[str, ChildDetail]) -> None:
+        self._details = details
+
+    async def get_execution(self, request_scope: str, child_execution_id: str) -> Any:
+        return self._details[child_execution_id]
+
+
+def _child(child_id: str, parent_operation_id: str, generation: int = 1) -> AsyncChildInspection:
+    return AsyncChildInspection(
+        child_execution_id=child_id,
+        parent_operation_id=parent_operation_id,
+        link_id=f"link:{child_id}",
+        contract_id="contract:helper",
+        binding_digest=BINDING,
+        execution_generation=generation,
+        dependency_class="nonblocking",
+    )
+
+
+@pytest.mark.asyncio
+async def test_async_children_are_attributed_by_exact_binding_not_semantic_operation(
+    world: World,
+) -> None:
+    """Two units of one run share a semantic operation ID; each sees only its own child."""
+
+    first = stage_unit(request_scope="tenant-1", run_id=world.active_run, operation_id="op-shared")
+    second = stage_unit(
+        request_scope="tenant-1",
+        run_id=world.active_run,
+        operation_id="op-shared",
+        semantic_attempt=2,
+    )
+    assert first.unit_key != second.unit_key
+    for unit in (first, second):
+        await world.lineage.record_attempt(
+            unit=unit,
+            execution_generation=1,
+            attempt=activity_attempt(1, workflow_id=f"operation/{unit.unit_key}"),
+            binding_id=f"binding:{unit.unit_key}:1",
+            binding_digest=BINDING,
+            namespace=namespace_claim(unit),
+            dispatching=False,
+            observed_at=LINEAGE_NOW,
+        )
+    children = (
+        _child("by-detail-binding", "op-shared"),
+        _child("by-semantic-operation-only", "op-shared"),
+        _child("by-authority-binding", f"binding:{second.unit_key}:1"),
+        _child("other-generation", "op-shared", generation=2),
+    )
+    details = ChildDetails(
+        {
+            "by-detail-binding": ChildDetail(f"binding:{first.unit_key}:1"),
+            "by-semantic-operation-only": ChildDetail(None),
+            "by-authority-binding": ChildDetail(None),
+            "other-generation": ChildDetail(f"binding:{first.unit_key}:1"),
+        }
+    )
+
+    def inspection(**sources: Any) -> RuntimeInspectionService:
+        return RuntimeInspectionService(
+            InMemoryInspectionReadRepository(
+                world.runs,
+                world.lineage,
+                async_children={world.active_run: children},
+                clock=world.clock,
+            ),
+            clock=world.clock,
+            **sources,
+        )
+
+    with_detail = inspection(async_details=details)
+    run = await with_detail.get_run("tenant-1", world.active_run)
+    assert [item.child_execution_id for item in run.data.async_children] == [
+        "by-detail-binding",
+        "by-semantic-operation-only",
+        "by-authority-binding",
+        "other-generation",
+    ]
+    owned: dict[str, list[str]] = {}
+    for unit in (first, second):
+        read = await with_detail.get_unit("tenant-1", world.active_run, unit.unit_key)
+        owned[unit.unit_key] = [item.child_execution_id for item in read.data.async_children]
+    assert owned == {
+        first.unit_key: ["by-detail-binding"],
+        second.unit_key: ["by-authority-binding"],
+    }
+    # Without the detail document only a binding-valued parent reference attributes a child.
+    without_detail = inspection()
+    for unit, expected in ((first, []), (second, ["by-authority-binding"])):
+        read = await without_detail.get_unit("tenant-1", world.active_run, unit.unit_key)
+        assert [item.child_execution_id for item in read.data.async_children] == expected
