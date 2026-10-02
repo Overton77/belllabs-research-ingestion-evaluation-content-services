@@ -3,7 +3,7 @@
 **What to build:** each production operation execution records a stable semantic unit and qualified checkpoint transition, queryable through existing repository/service seams for technical verification.
 
 **Blocked by:** RRM-001 accepted contract coverage; RRM-002 baseline repair (both accepted).
-**Status:** implemented; independent review pending
+**Status:** accepted 2026-10-01 (tested head `07ac167`, integration merge `5b5cb55`; [evidence](../../../evidence_v2/research-runtime-mission/RRM-003/README.md))
 **Branch:** `wp/rrm-003-checkpoint-lineage`
 **Authority:** EXEC-003–005, DA exact binding/placement requirements, accepted RRM-001 amendments: REQ-CP-EXEC-013/014, REQ-CP-DA-016/017, REQ-BP-GD-012, REQ-CP-CS-007 (amended) — AMD-RRM-001 (accepted, meta `main` `a50d833`; see [RRM-001 contract authority](../RRM-001-contract-authority.md) §4)
 **Evidence:** `docs/migrations_instructions/evidence_v2/research-runtime-mission/RRM-003/`

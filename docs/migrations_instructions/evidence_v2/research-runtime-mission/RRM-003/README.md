@@ -1,6 +1,6 @@
 # RRM-003 implementation evidence
 
-Disposition: ready_for_review (independent review `approve_with_fixes`; blocking finding fixed, see Review disposition)
+Disposition: accepted 2026-10-01 (independent review `approve_with_fixes`; blocking finding fixed in `07ac167`; merged into integration at `5b5cb55`)
 Recorded date: 2026-10-01 (America/New_York)
 Qualification identity: RRM-003 persist exact production checkpoint lineage — REQ-CP-EXEC-013/014 (observation part), REQ-CP-EXEC-005 (generation fence), REQ-CP-DA-016/017, REQ-CP-DA-018 (`not_submitted` only), REQ-BP-GD-012, REQ-CP-CS-007 (amended); `CON-CP-RUNTIME-UNIT-V1`, `CON-CP-CHECKPOINT-LINEAGE-V1` (AMD-RRM-001, accepted meta `main` `a50d833`)
 Base revision and head revision: base `57c99bd3d47085cf29eb033a5411efcf74efd8ba` (integration `integration/research-runtime-mission`, RRM-001 merged). Tested code head `a3b27c5ed0cb4fd8ecf484fcc300700a4edc589d` on `wp/rrm-003-checkpoint-lineage`; the evidence/ticket commit follows it and changes documentation only. Review-fix commit follows `e294d48` (see Review disposition). Not merged (the coordinator owns review and merge).
@@ -229,6 +229,21 @@ Post-fix gates:
 | Full offline pytest, hermetic | 716 passed, 52 skipped, 2 xfailed, 0 failed (+1 skip: the new DSN-gated runtime-role test) |
 | `git diff --check` | clean |
 
+## Integration merge gates (coordinator, merge commit `5b5cb55`)
+
+Run in the integrator worktree on `integration/research-runtime-mission` at `5b5cb55` (`git merge --no-ff wp/rrm-003-checkpoint-lineage`, tested head `07ac167`):
+
+| Command | Result |
+|---|---|
+| `uv run --no-sync ruff check app tests scripts` | All checks passed |
+| `uv run --no-sync mypy app` | no issues, 336 files |
+| Hermetic full pytest (`BELLABS_RUN_*_LIVE=0 LANGSMITH_TRACING=false uv run --no-sync pytest -q`) | 716 passed, 52 skipped, 2 xfailed, 0 failed |
+| Full pytest with `TEST_APPLICATION_POSTGRES_DSN` and `TEST_MONGODB_URI` (disposable stack) | first run 6 failed / 738 passed; five later runs 744 passed, 24 skipped, 2 xfailed, 0 failed (one plain service run plus four with `--env-file`) |
+| Full pytest with `--env-file ../biotech-research-ingestion-evaluation-system/.env` | first run 3 failed / 713 passed; rerun 716 passed, 52 skipped, 2 xfailed, 0 failed |
+| `git diff --check` on the merge | clean |
+
+**Intermittent failure (unresolved, recorded honestly).** In the first post-merge batch, the service and `--env-file` runs failed. The visible failure was `tests/unit/operations/test_operation_execution.py::test_journaled_operation_settles_usage_effect_and_terminalizes[True-True]`, an in-memory unit test of the crash-after-authority path. Only the summary lines were captured, so the traceback was lost. The machine was under memory pressure at the time (about 1 GB of 15.3 GB free; a later background run was killed by the host for low memory). Six subsequent full runs were all green, along with six repeats of the module. Nothing in `operation_execution.py` or `journaled_operation_execution.py` reads a wall clock or timeout, so the root cause is not yet known. **Owner: RRM-004**, which reworks this exact crash-after-authority settlement path. It must reproduce the failure under load (repeated or stressed runs), capture the traceback, and fix the root cause instead of retrying.
+
 ## Final disposition
 
-ready_for_review
+accepted
