@@ -4,7 +4,7 @@
 
 **Blocked by:** None.
 **Blocks:** Any GoalDirected run of more than one iteration on the MongoDB document repository: RRM-009 production composition and the GoalDirected company fixture (RRM-011). Whether it blocks RRM-010 is the coordinator's decision.
-**Status:** implemented; independent review pending (found by RRM-016, 2026-10-02; implemented 2026-10-02 together with RRM-019; evidence `docs/migrations_instructions/evidence_v2/research-runtime-mission/RRM-018/README.md`)
+**Status:** accepted 2026-10-02 (tested head `d552278`, integration merge `468df99`; [evidence](../../../evidence_v2/research-runtime-mission/RRM-018/README.md))
 **Branch:** `wp/rrm-018-019-goal-directed-multi-iteration` (shared with RRM-019)
 **Authority:** REQ-BP-GD-002 (immutable Goal Revisions), REQ-BP-GD-003 (iterations are independently durable); `workflow-blueprints/goal-directed.md` (MongoDB/Beanie owns immutable goal revisions)
 

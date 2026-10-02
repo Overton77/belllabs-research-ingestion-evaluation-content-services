@@ -1,6 +1,6 @@
 # RRM-018 implementation evidence
 
-Disposition: ready_for_review (RRM-018 and RRM-019, implemented together; independent review pending)
+Disposition: accepted 2026-10-02 (independent review approve (covers RRM-018 and RRM-019); doc follow-ups in 34063c5; tested head `d552278`; merged into integration at `468df99`)
 Recorded date: 2026-10-02 (America/New_York)
 Qualification identity: RRM-018 persist an unchanged Goal Revision idempotently in MongoDB, and RRM-019 terminalize GoalDirected with the accepted output set. Requirements: REQ-BP-GD-002 (immutable Goal Revisions), REQ-BP-GD-003 (iterations independently durable), REQ-BP-GD-004 (independent verification is mandatory), REQ-BP-GD-010 (stopping produces a proposal), REQ-CP-RUN-005 (terminality follows accepted evidence).
 Base revision and head revision: base integration `8778632` (includes RRM-016 at `f99ac1d`). Code commit: `d552278`. Documentation commit: the one that adds this README (it changes no code). **Tested code head: `d552278`.** Not merged (the coordinator owns review and merge).
@@ -169,6 +169,18 @@ Covered:
 - `_immutable_identity` (canonical identity without observation time): the comparison any immutable Mongo document repository can use when its payloads round-trip containers.
 - `RRM019_CAPTURE_HISTORY_DIR` capture plus a replay test: the same capture-and-pin pattern as RRM-016.
 
+## Integration merge gates (coordinator, merge commit `468df99`)
+
+Tested head `d552278` merged `--no-ff` into `integration/research-runtime-mission` at `468df99`.
+
+| Command | Result |
+|---|---|
+| `uv run --no-sync ruff check app tests scripts` | All checks passed |
+| `uv run --no-sync mypy app` | no issues, 366 files |
+| `hermetic full pytest (DSNs unset)` | 981 passed, 75 skipped, 2 xfailed, 0 failed |
+| `full pytest with Postgres/Mongo DSNs exported and --env-file` | 1026 passed, 30 skipped, 2 xfailed, 0 failed |
+| `git diff --check` | clean |
+
 ## Final disposition
 
-ready_for_review
+accepted
