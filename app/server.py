@@ -26,6 +26,7 @@ from app.api.run_control import (
     initialize_run_control_resources,
 )
 from app.api.run_control import router as run_control_router
+from app.api.runtime_inspection import router as runtime_inspection_router
 from app.api.schema_grounding import router as schema_grounding_router
 from app.application.coordinator.coordinator_composition import (
     CoordinatorProductionDependencies,
@@ -239,6 +240,7 @@ api.add_middleware(
 )
 api.include_router(control_plane_router)
 api.include_router(run_control_router)
+api.include_router(runtime_inspection_router)
 api.include_router(schema_grounding_router)
 api.include_router(
     graph_runtime_contract_router,

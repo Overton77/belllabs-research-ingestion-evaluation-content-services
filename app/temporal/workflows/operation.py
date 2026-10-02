@@ -13,6 +13,10 @@ with workflow.unsafe.imports_passed_through():
         OperationWorkflowRequest,
         OperationWorkflowResult,
     )
+    from app.temporal.search_attributes import (
+        ensure_workflow_search_attributes,
+        operation_workflow_search_attributes,
+    )
 
 PARK_IN_DOUBT_PATCH = "rrm-004-park-in-doubt-units"
 
@@ -80,6 +84,12 @@ class OperationWorkflow:
     @workflow.run
     async def run(self, request: OperationWorkflowRequest) -> OperationWorkflowResult:
         self._execution_generation = request.execution_generation
+        # REQ-CP-EXEC-015: a `required` operation carries its run, unit and generation
+        # attributes (the family normally starts it with them; nothing is upserted then).
+        ensure_workflow_search_attributes(
+            request.search_attribute_policy,
+            operation_workflow_search_attributes(request),
+        )
         pre_start_signal_ids = self._active_async_child_ids
         merged_ids = list(request.active_async_child_ids)
         seen_ids = set(merged_ids)

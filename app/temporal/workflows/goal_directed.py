@@ -35,6 +35,12 @@ with workflow.unsafe.imports_passed_through():
         GoalOperationReconciliationRequest,
         GoalOperationReconciliationResult,
     )
+    from app.domain.orchestration.search_attributes import run_search_attributes
+    from app.temporal.search_attributes import (
+        child_search_attributes,
+        ensure_workflow_search_attributes,
+        operation_workflow_search_attributes,
+    )
     from app.temporal.workflows.operation import OperationWorkflow
 
 
@@ -64,6 +70,16 @@ class GoalDirectedWorkflow:
                 non_retryable=True,
             )
         interpreter = GoalDirectedInterpreter(blueprint)
+        ensure_workflow_search_attributes(
+            run_input.search_attribute_policy,
+            run_search_attributes(
+                workflow_kind="family",
+                run_id=run_input.run_id,
+                request_scope=run_input.request_scope,
+                family="GoalDirected",
+                execution_epoch=run_input.execution_epoch,
+            ),
+        )
         try:
             state = interpreter.initial_state(run_input)
         except GoalDirectedExecutionError as error:
@@ -375,11 +391,22 @@ class GoalDirectedWorkflow:
         run_version: int,
         activity_timeout: timedelta,
     ) -> OperationWorkflowResult:
+        request = dispatch.workflow_request
+        policy = run_input.search_attribute_policy
+        operation_attributes = child_search_attributes(
+            policy,
+            operation_workflow_search_attributes(
+                request, family="GoalDirected", execution_epoch=run_input.execution_epoch
+            ),
+        )
+        if operation_attributes is not None:
+            request = request.model_copy(update={"search_attribute_policy": policy})
         handle = await workflow.start_child_workflow(
             OperationWorkflow.run,
-            dispatch.workflow_request,
-            id=f"operation/{dispatch.workflow_request.semantic_attempt_id}",
+            request,
+            id=f"operation/{request.semantic_attempt_id}",
             parent_close_policy=workflow.ParentClosePolicy.REQUEST_CANCEL,
+            search_attributes=operation_attributes,
         )
         self._operation_handle = handle
         if self._cancel_requested:
