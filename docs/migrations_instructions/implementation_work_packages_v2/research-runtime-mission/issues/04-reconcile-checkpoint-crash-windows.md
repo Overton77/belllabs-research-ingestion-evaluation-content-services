@@ -3,9 +3,9 @@
 **What to build:** interrupted production operations converge to one accepted result/settlement without appending a completed prompt or repeating an already applied provider effect.
 
 **Blocked by:** RRM-003.
-**Status:** implemented; independent review pending
+**Status:** accepted 2026-10-01 (tested head `d296481`, integration merge `fcefd54`; [evidence](../../../evidence_v2/research-runtime-mission/RRM-004/README.md))
 **Branch:** `wp/rrm-004-checkpoint-recovery`
-**Authority:** EXEC-004/005/008, RUN effect/settlement requirements, accepted checkpoint protocol from RRM-001: REQ-CP-DA-018 and `CON-CP-CHECKPOINT-LINEAGE-V1` crash windows, REQ-CP-EXEC-014 (claim fence), REQ-CP-EXEC-005 and REQ-CP-RUN-007 (clarified) — AMD-RRM-001 (meta `spec/research-runtime-lifecycle`, proposed; see [RRM-001 contract authority](../RRM-001-contract-authority.md) §4)
+**Authority:** EXEC-004/005/008, RUN effect/settlement requirements, accepted checkpoint protocol from RRM-001: REQ-CP-DA-018 and `CON-CP-CHECKPOINT-LINEAGE-V1` crash windows, REQ-CP-EXEC-014 (claim fence), REQ-CP-EXEC-005 and REQ-CP-RUN-007 (clarified) — AMD-RRM-001 (accepted 2026-10-01 at meta `6c89143`, merged into meta main `a50d833`; see [RRM-001 contract authority](../RRM-001-contract-authority.md) §4)
 **Evidence:** `docs/migrations_instructions/evidence_v2/research-runtime-mission/RRM-004/`
 
 Integrate checkpoint observations with durable operation claims, attempt leases, result manifests and authoritative settlement. Reconcile claimed-but-unsettled work before provider invocation. Separate intermediate-checkpoint resume from terminal-result reconstruction. Recognize that durability of graph state does not make arbitrary tool side effects transactional.

@@ -5,7 +5,7 @@
 **Blocked by:** RRM-001, RRM-002, RRM-004 and RRM-013.
 **Status:** blocked
 **Branch:** `wp/rrm-009-capability-composition`
-**Authority:** accepted CP-010/040/045 and CP-050 authorized slice; DA-001–015 and capability-binding requirements; REQ-CP-DA-004 (persistent saver, clarified), REQ-CP-DA-016 (`durability="sync"`), REQ-CP-DA-019, REQ-CP-EXEC-015 (Search Attribute registration) — AMD-RRM-001 (meta `spec/research-runtime-lifecycle`, proposed; see [RRM-001 contract authority](../RRM-001-contract-authority.md) §4)
+**Authority:** accepted CP-010/040/045 and CP-050 authorized slice; DA-001–015 and capability-binding requirements; REQ-CP-DA-004 (persistent saver, clarified), REQ-CP-DA-016 (`durability="sync"`), REQ-CP-DA-019, REQ-CP-EXEC-015 (Search Attribute registration) — AMD-RRM-001 (accepted 2026-10-01 at meta `6c89143`, merged into meta main `a50d833`; see [RRM-001 contract authority](../RRM-001-contract-authority.md) §4)
 **Evidence:** `docs/migrations_instructions/evidence_v2/research-runtime-mission/RRM-009/`; reference later CP-050 aggregate evidence, do not mark CP-050 accepted here
 
 Provide the deployment-supplied worker activity composition rather than relying on test injection. Resolve exact skills/tools/CLI/MCP/checkpointer/storage/workspace dependencies and qualify their actual availability. The uncommitted component harness may only be used after a reviewed ownership/dependency commit; aiengineer integration is optional, not an invented prerequisite.

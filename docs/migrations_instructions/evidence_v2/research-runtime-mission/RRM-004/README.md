@@ -1,6 +1,6 @@
 # RRM-004 implementation evidence
 
-Disposition: ready_for_review (independent review `approve_with_fixes`; findings 1-7 addressed in `284ed20` and `b8f0d97`; the re-review regression is fixed in `89bbdf7`, and a seed-dependent test fixture in `d296481`; final re-review pending)
+Disposition: accepted 2026-10-01 (independent review `approve_with_fixes`, then re-reviews; findings fixed in `284ed20`, `89bbdf7` and `d296481`; docs in `b8f0d97` and `79ec2ee`; merged into integration at `fcefd54`)
 Recorded date: 2026-10-01 (America/New_York)
 Qualification identity: RRM-004 recover checkpoint and settlement crash windows. Requirements: REQ-CP-DA-018 (classification and crash windows); REQ-CP-EXEC-003/004/005/008(narrow)/014 (claim lease, takeover and fence); REQ-CP-RUN-007 (narrowed post-dispatch rule, `in_doubt`, run phase, `operator_reconciliation`); REQ-CP-DA-017 (transition linked to the fenced result). Contracts: `CON-CP-CHECKPOINT-LINEAGE-V1` (classification table, crash windows, operator decisions) and `CON-CP-LIFECYCLE-V1` `reconcile_unit` (AMD-RRM-001, accepted meta `main` `a50d833`).
 Base revision and head revision: base `8762d3e` (integration `integration/research-runtime-mission`, RRM-001 and RRM-003 merged). Tested code head: ``a90022cddbd39348e8a3179a89685e2ceb0ac02b`` on `wp/rrm-004-checkpoint-recovery`. The evidence/ticket commit `404d253` follows it and changes documentation only. Review-fix code commit: `284ed20`; its documentation commit follows. Not merged (the coordinator owns review and merge).
@@ -337,6 +337,18 @@ Re-review gates (tested code heads `89bbdf7` and `d296481`):
 
 The delta against the post-review head is +1 passed: the resend regression test. The skips are unchanged.
 
+## Integration merge gates (coordinator, merge commit `fcefd54`)
+
+| Command | Result |
+|---|---|
+| `uv run --no-sync ruff check app tests scripts` | All checks passed |
+| `uv run --no-sync mypy app` | no issues, 340 files |
+| Hermetic full pytest (`BELLABS_RUN_*_LIVE=0 LANGSMITH_TRACING=false uv run --no-sync pytest -q`) | 748 passed, 54 skipped, 2 xfailed, 0 failed |
+| Full pytest, `--env-file ../biotech-research-ingestion-evaluation-system/.env`, with `TEST_APPLICATION_POSTGRES_DSN` and `TEST_MONGODB_URI` (disposable stack) | 778 passed, 24 skipped, 2 xfailed, 0 failed |
+| `git diff --check` on the merge | clean |
+
+An earlier attempt to run these gates was stopped by the host for low memory before any suite finished. No result was recorded from it. The runs above were made after memory was freed.
+
 ## Final disposition
 
-ready_for_review
+accepted

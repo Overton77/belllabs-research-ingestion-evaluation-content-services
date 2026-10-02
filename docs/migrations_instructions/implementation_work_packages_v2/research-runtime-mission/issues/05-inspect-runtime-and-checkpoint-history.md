@@ -5,7 +5,7 @@
 **Blocked by:** RRM-004.
 **Status:** blocked
 **Branch:** `wp/rrm-005-inspection`
-**Authority:** diagnostic EXEC-007, run-control authority, accepted inspection/projection contracts from RRM-001: REQ-CP-RUN-011/012 and `CON-CP-INSPECTION-READ-V1`, REQ-CP-EXEC-015 (Search Attributes), REQ-CP-EXEC-007 (clarified) — AMD-RRM-001 (meta `spec/research-runtime-lifecycle`, proposed; see [RRM-001 contract authority](../RRM-001-contract-authority.md) §4)
+**Authority:** diagnostic EXEC-007, run-control authority, accepted inspection/projection contracts from RRM-001: REQ-CP-RUN-011/012 and `CON-CP-INSPECTION-READ-V1`, REQ-CP-EXEC-015 (Search Attributes), REQ-CP-EXEC-007 (clarified) — AMD-RRM-001 (accepted 2026-10-01 at meta `6c89143`, merged into meta main `a50d833`; see [RRM-001 contract authority](../RRM-001-contract-authority.md) §4)
 **Evidence:** `docs/migrations_instructions/evidence_v2/research-runtime-mission/RRM-005/`
 
 Deliver public scoped list/detail/unit/history reads through the application facade, including real Temporal Visibility/Search Attribute mapping where specified. PostgreSQL observations are primary; immutable family detail and live runtime/checkpointer reads are explicitly qualified sources. A schema-export route is not an inspection endpoint.

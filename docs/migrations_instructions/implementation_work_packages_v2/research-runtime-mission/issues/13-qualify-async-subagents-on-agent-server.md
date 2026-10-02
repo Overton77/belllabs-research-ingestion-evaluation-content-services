@@ -6,7 +6,7 @@
 **Blocks:** RRM-008 (async-child cancellation against the real server), RRM-009 (production composition) and RRM-010.
 **Status:** blocked
 **Branch:** `wp/rrm-013-async-subagent-agent-server`
-**Authority:** accepted CP-045 (`QUAL-CP-ASYNC-SUBAGENT-LIFECYCLE`, `CON-CP-ASYNC-SUBAGENT-V1`); DA async-subordinate requirements; ADR-0003 (the Agent Server is not a competing macro scheduler); REQ-CP-DA-008/011 and REQ-CP-RUN-009 (clarified), REQ-CP-DA-019 (exact non-scheduling hosting), REQ-CP-EXEC-016 (active children block snapshots), REQ-CP-RUN-011 (child lineage) — AMD-RRM-001 (meta `spec/research-runtime-lifecycle`, proposed; see [RRM-001 contract authority](../RRM-001-contract-authority.md) §4)
+**Authority:** accepted CP-045 (`QUAL-CP-ASYNC-SUBAGENT-LIFECYCLE`, `CON-CP-ASYNC-SUBAGENT-V1`); DA async-subordinate requirements; ADR-0003 (the Agent Server is not a competing macro scheduler); REQ-CP-DA-008/011 and REQ-CP-RUN-009 (clarified), REQ-CP-DA-019 (exact non-scheduling hosting), REQ-CP-EXEC-016 (active children block snapshots), REQ-CP-RUN-011 (child lineage) — AMD-RRM-001 (accepted 2026-10-01 at meta `6c89143`, merged into meta main `a50d833`; see [RRM-001 contract authority](../RRM-001-contract-authority.md) §4)
 **Evidence:** `docs/migrations_instructions/evidence_v2/research-runtime-mission/RRM-013/`
 **Added:** 2026-10-01 at the user's request. Real async subagents on an Agent Server are a mission requirement, not an optional deferral.
 
