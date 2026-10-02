@@ -238,6 +238,9 @@ BEGIN
 END
 $$;
 
+-- Least privilege: the runtime updates only fences and namespace heads. Unit identity,
+-- attempt observations, transitions and rejections are insert-only; per-unit writes are
+-- serialized with pg_advisory_xact_lock, which needs no table privilege.
 GRANT SELECT, INSERT, UPDATE
     ON belllabs_control.runtime_unit_generations,
        belllabs_control.runtime_cognitive_namespaces
@@ -253,5 +256,6 @@ GRANT SELECT
        belllabs_control.runtime_unit_generations,
        belllabs_control.runtime_activity_attempt_observations,
        belllabs_control.runtime_cognitive_namespaces,
-       belllabs_control.runtime_checkpoint_transitions
+       belllabs_control.runtime_checkpoint_transitions,
+       belllabs_control.runtime_lineage_write_rejections
     TO belllabs_operations_readonly;

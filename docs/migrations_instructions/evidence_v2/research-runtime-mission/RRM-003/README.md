@@ -1,9 +1,9 @@
 # RRM-003 implementation evidence
 
-Disposition: ready_for_review (implemented; independent review pending)
+Disposition: ready_for_review (independent review `approve_with_fixes`; blocking finding fixed, see Review disposition)
 Recorded date: 2026-10-01 (America/New_York)
 Qualification identity: RRM-003 persist exact production checkpoint lineage — REQ-CP-EXEC-013/014 (observation part), REQ-CP-EXEC-005 (generation fence), REQ-CP-DA-016/017, REQ-CP-DA-018 (`not_submitted` only), REQ-BP-GD-012, REQ-CP-CS-007 (amended); `CON-CP-RUNTIME-UNIT-V1`, `CON-CP-CHECKPOINT-LINEAGE-V1` (AMD-RRM-001, accepted meta `main` `a50d833`)
-Base revision and head revision: base `57c99bd3d47085cf29eb033a5411efcf74efd8ba` (integration `integration/research-runtime-mission`, RRM-001 merged). Tested code head `a3b27c5ed0cb4fd8ecf484fcc300700a4edc589d` on `wp/rrm-003-checkpoint-lineage`; the evidence/ticket commit follows it and changes documentation only. Not merged (the coordinator owns review and merge).
+Base revision and head revision: base `57c99bd3d47085cf29eb033a5411efcf74efd8ba` (integration `integration/research-runtime-mission`, RRM-001 merged). Tested code head `a3b27c5ed0cb4fd8ecf484fcc300700a4edc589d` on `wp/rrm-003-checkpoint-lineage`; the evidence/ticket commit follows it and changes documentation only. Review-fix commit follows `e294d48` (see Review disposition). Not merged (the coordinator owns review and merge).
 Framework/package baseline: `uv sync --frozen` from the committed `uv.lock` (no dependency change); CPython 3.12.14 (Codex runtime), pytest 8.4.2, ruff 0.15.22, mypy 1.20.2, langgraph 1.2.10, langgraph-checkpoint 4.1.1, langgraph-checkpoint-postgres 3.1.1, deepagents 0.7.5, temporalio 1.30.0, asyncpg 0.31.0, psycopg 3.3.4
 
 ## Worktree provenance
@@ -55,6 +55,7 @@ Framework/package baseline: `uv sync --frozen` from the committed `uv.lock` (no 
 | DA-018 / RRM-001 §7 #3: same unit never re-appends its prompt | `test_wp_cp_040.py::test_shared_session_reuse_is_ordered_and_same_unit_never_reappends_prompt` (rewritten from `…_governed_session_id_reuses_checkpoint_and_fresh_id_starts_empty`) → replaying the unit's own invocation raises `CheckpointLineageInDoubt` ("no namespace head") with no model call; a new attempt of the observed unit is refused (observed-unsettled); human counts stay `[1, 2, 1]` for next-iteration reuse and rollover |
 | GD-012 reuse, rollover, verifier isolation | `tests/unit/orchestration/test_wp_bp_020_goal_directed.py::test_session_reuse_shares_and_rollover_isolates_cognitive_namespaces` → reused claim maps to the same namespace, verifier differs, rollover maps to `/session/2/role/executor`. `tests/acceptance/control_plane/test_wp_bp_020_sandbox_rollover.py` (Temporal, Docker sandbox) → 4 captures: session 1 executor/verifier, session 2 executor with `source_key is None`, session 2 verifier |
 | GD-012 linear stamped lineage on the persistent saver | `…postgres_saver.py::test_goal_session_lineage_is_linear_rollover_is_empty_and_schema_gated` → iteration 2 source = iteration 1 result; `list_transitions == (one, two)`; the root chain is owned by unit 1, then unit 2; counts `[1, 2, 1, 1]` |
+| Production role grants and RLS (review finding 1) | `test_checkpoint_lineage_postgres.py::test_runtime_role_grants_and_rls_admit_the_full_lineage_contract` → the repository pool runs `SET ROLE belllabs_control_runtime` (`current_user` is that role; not superuser, no `BYPASSRLS`). `SELECT … FOR UPDATE` on `runtime_units` raises `InsufficientPrivilegeError`. The full contract scenario then passes under the role: attempt, accepted transition, idempotent duplicate, conflict, compare-and-set, stale fence with recorded rejection, ownership, frozen binding, schema gate, rollover and generation fence. Another request scope sees zero transitions. Against the pre-fix repository the same test fails with `permission denied for table runtime_units` |
 | GD-012 concurrent second session invocation rejected | `tests/integration/postgres/test_checkpoint_lineage_postgres.py::test_concurrent_session_invocations_serialize_on_the_namespace_row` → `asyncio.gather` of two dispatches gives exactly one admitted and one `CheckpointNamespaceBusy`; the contract scenario asserts the same sequentially |
 | DA-017 capture and manifest link | persistent before/after test → head == transition result key == the saver's latest root checkpoint; journal settlement `result_manifest_ref`/`digest` == transition's; manifest `result_checkpoint`/`checkpoint_transition_id` == transition's; public result carries both. Offline: `test_wp_cp_040.py::test_operation_service_pins_records_and_links_the_result_checkpoint` |
 | DA-017 CAS, idempotent duplicate, conflict, out-of-order, stale fence | `tests/fixtures/checkpoint_lineage.py::assert_checkpoint_lineage_repository_contract`, run by `tests/unit/operations/test_checkpoint_lineage.py` (memory) and `test_checkpoint_lineage_postgres.py::test_postgres_repository_satisfies_the_checkpoint_lineage_contract` → exact replay of attempt and transition is idempotent; different content conflicts; wrong source fails compare-and-set; after `advance_claim_fence` the fence-1 write raises `StaleClaimFence` and one `stale_claim_fence` rejection is recorded; the fence-2 write is accepted |
@@ -101,7 +102,13 @@ New tables:
 - `runtime_checkpoint_transitions`, unique per unit generation and per (namespace, result), with a single-successor index on (namespace, source) as the CAS backstop;
 - `runtime_lineage_write_rejections`.
 
-All new tables use RLS by `belllabs.request_scope`, with runtime and read-only grants.
+All new tables use forced RLS by `belllabs.request_scope`. Grants are least privilege:
+- `belllabs_control_runtime` has `SELECT, INSERT, UPDATE` only on `runtime_unit_generations` (claim fence) and `runtime_cognitive_namespaces` (head and in-flight holder).
+- It has `SELECT, INSERT` only on the insert-only `runtime_units`, `runtime_activity_attempt_observations`, `runtime_checkpoint_transitions` and `runtime_lineage_write_rejections`.
+- `belllabs_operations_readonly` has `SELECT` on all six tables.
+- No role has `DELETE`.
+
+Per-unit writes (`record_attempt`, `record_transition`, `advance_claim_fence`) serialize on `pg_advisory_xact_lock(hashtextextended('belllabs-runtime-unit:{scope}:{unit_key}', 0))`, following the journal and run-control convention. They do not take a row lock on `runtime_units`, so the runtime role needs no `UPDATE` there. Namespaces lock with `SELECT … FOR UPDATE`, which the `UPDATE` grant covers. `test_runtime_role_grants_and_rls_admit_the_full_lineage_contract` proves this under `SET ROLE belllabs_control_runtime` (see below).
 
 Versioned tables:
 - `operation_effect_claims.unit_key` (disposition row 48);
@@ -139,7 +146,7 @@ Persistent technical integration against the disposable stack (`rrm-app-postgres
 | Command | Result |
 |---|---|
 | `TEST_APPLICATION_POSTGRES_DSN=<disposable> TEST_MONGODB_URI=<disposable> BELLABS_RUN_*_LIVE=0 LANGSMITH_TRACING=false uv run --no-sync pytest -q -rs` (full suite with both services) | 743 passed, 24 skipped, 2 xfailed, 0 failed. Remaining skips: 19 Agent Server endpoint, 3 live-provider flags, 1 WSL, 1 pre-existing retirement. Every Postgres- and Mongo-gated suite ran, including all pre-existing ones against migration `0019` |
-| `TEST_APPLICATION_POSTGRES_DSN=<disposable> uv run --no-sync pytest -q -s tests/integration/deep_agents/test_checkpoint_lineage_postgres_saver.py tests/integration/postgres/test_checkpoint_lineage_postgres.py` | 5 passed (3 persistent saver, 2 PostgreSQL repository) |
+| `TEST_APPLICATION_POSTGRES_DSN=<disposable> uv run --no-sync pytest -q -s tests/integration/deep_agents/test_checkpoint_lineage_postgres_saver.py tests/integration/postgres/test_checkpoint_lineage_postgres.py` | 6 passed after the review fix (3 persistent saver, 3 PostgreSQL repository) |
 
 Sanitized before/after record printed by the persistent test (one StageGraph operation, delivered as Activity attempt 2, then duplicate-delivered as attempt 3):
 
@@ -201,6 +208,26 @@ Other notes:
 - `assert_checkpoint_lineage_repository_contract`: a reusable conformance scenario for any repository implementation.
 
 None of these carries company, fixture or provider specifics.
+
+## Review disposition
+
+Independent review verdict: `approve_with_fixes`.
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 (blocking) | Migration 0019 granted `belllabs_control_runtime` only `SELECT, INSERT` on `runtime_units`, but `_lock_unit` used `SELECT … FOR UPDATE` on it. Under the production non-owner role this fails with `permission denied for table runtime_units`, and every Postgres test connected as the owner. | **Fixed** in the review-fix commit. `_lock_unit` now takes the per-unit advisory transaction lock (journal and run-control convention), so `runtime_units` stays insert-only. `advance_claim_fence` takes the same lock, closing a fence/transition race the audit found. `0019` was edited in place (unmerged): rationale comment, plus read-only `SELECT` on `runtime_lineage_write_rejections`. Audit of every `UPDATE` and `FOR UPDATE`: both target tables the runtime role may update; there are no `DELETE` statements. The new runtime-role test proves the grants and RLS and was shown red against the pre-fix code. |
+| 2 | The new repositories are not wired into a production composition. | **Acknowledged** for RRM-004 and RRM-009: no deployment `WorkerActivityCompositionFactory` exists yet. The service refuses Deep Agent execution without lineage composition, so the factory must pass `lineage=CheckpointLineageService(PostgresCheckpointLineageRepository(pool))` with the persistent saver. |
+| 3 | A namespace stays reserved after failure or `in_doubt`. | **Handed to RRM-004** (Unresolved risks, item 4). Reservation is released only by an accepted transition; `reconcile_unit` must release or advance it. |
+
+Post-fix gates:
+
+| Command | Result |
+|---|---|
+| `uv run --no-sync ruff check app tests scripts` | All checks passed |
+| `uv run --no-sync mypy app` | Success: no issues found in 336 source files |
+| Owning suites plus the Postgres lineage, journal and Stage 3 kernel suites, both service DSNs set | 141 passed, 1 skipped (WSL-only BP-010 recovery) |
+| Full offline pytest, hermetic | 716 passed, 52 skipped, 2 xfailed, 0 failed (+1 skip: the new DSN-gated runtime-role test) |
+| `git diff --check` | clean |
 
 ## Final disposition
 

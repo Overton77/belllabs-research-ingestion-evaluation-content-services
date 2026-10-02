@@ -68,6 +68,68 @@ async def test_postgres_repository_satisfies_the_checkpoint_lineage_contract(
         await pool.close()
 
 
+RUNTIME_ROLE = "belllabs_control_runtime"
+
+
+async def _assume_runtime_role(connection: asyncpg.Connection) -> None:
+    await connection.execute(f"SET ROLE {RUNTIME_ROLE}")
+
+
+@pytest.mark.asyncio
+async def test_runtime_role_grants_and_rls_admit_the_full_lineage_contract(
+    test_application_postgres_dsn: str,
+) -> None:
+    """Migration 0019 grants are sufficient for the production role, and no broader.
+
+    Production pools connect as a non-owner member of `belllabs_control_runtime`
+    (`app/integrations/postgres.py`). Every repository call here runs under that role, so
+    forced RLS and the table grants are exercised instead of the owner's privileges.
+    """
+
+    require_disposable_postgres(test_application_postgres_dsn)
+    owner = await asyncpg.create_pool(dsn=test_application_postgres_dsn, min_size=1, max_size=2)
+    runtime = await asyncpg.create_pool(
+        dsn=test_application_postgres_dsn,
+        min_size=1,
+        max_size=4,
+        setup=_assume_runtime_role,
+    )
+    try:
+        await reset_application_schema(owner)
+        run_id = await admit_run(owner)
+        async with runtime.acquire() as connection:
+            assert await connection.fetchval("SELECT current_user") == RUNTIME_ROLE
+            assert not await connection.fetchval(
+                "SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user"
+            )
+            async with connection.transaction():
+                await connection.execute(
+                    "SELECT set_config('belllabs.request_scope', 'tenant-1', true)"
+                )
+                with pytest.raises(asyncpg.InsufficientPrivilegeError):
+                    await connection.execute(
+                        "SELECT 1 FROM belllabs_control.runtime_units FOR UPDATE"
+                    )
+        await assert_checkpoint_lineage_repository_contract(
+            PostgresCheckpointLineageRepository(runtime),
+            request_scope="tenant-1",
+            run_id=run_id,
+        )
+        async with runtime.acquire() as connection, connection.transaction():
+            await connection.execute(
+                "SELECT set_config('belllabs.request_scope', 'tenant-2', true)"
+            )
+            assert (
+                await connection.fetchval(
+                    "SELECT count(*) FROM belllabs_control.runtime_checkpoint_transitions"
+                )
+                == 0
+            ), "forced RLS hides another request scope's lineage"
+    finally:
+        await runtime.close()
+        await owner.close()
+
+
 @pytest.mark.asyncio
 async def test_concurrent_session_invocations_serialize_on_the_namespace_row(
     test_application_postgres_dsn: str,

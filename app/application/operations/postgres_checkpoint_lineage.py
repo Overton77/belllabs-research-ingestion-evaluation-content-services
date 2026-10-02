@@ -425,6 +425,7 @@ class PostgresCheckpointLineageRepository:
 
         async with self._pool.acquire() as connection, connection.transaction():
             await _set_scope(connection, request_scope)
+            await _lock_unit(connection, request_scope, unit_key)
             advanced = await connection.fetchval(
                 """
                 UPDATE belllabs_control.runtime_unit_generations
@@ -448,14 +449,15 @@ async def _set_scope(connection: asyncpg.Connection, request_scope: str) -> None
 
 
 async def _lock_unit(connection: asyncpg.Connection, scope: str, unit_key: str) -> None:
+    """Serialize every write of one unit with a transaction-scoped advisory lock.
+
+    `runtime_units` stays insert-only (immutable identity), so the runtime role needs no
+    UPDATE privilege on it; the advisory lock follows the journal and run-control convention.
+    """
+
     await connection.execute(
-        """
-        SELECT 1 FROM belllabs_control.runtime_units
-        WHERE request_scope = $1 AND unit_key = $2
-        FOR UPDATE
-        """,
-        scope,
-        unit_key,
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        f"belllabs-runtime-unit:{scope}:{unit_key}",
     )
 
 
