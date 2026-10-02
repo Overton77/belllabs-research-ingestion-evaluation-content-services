@@ -142,20 +142,32 @@ class Authority:
             action = StartAction.model_validate(lifecycle.action)
             command_id = lifecycle.command_id
             correlation_id = lifecycle.correlation_id
-        return await self.run_control.execute(
-            LifecycleCommand(
-                command_id=command_id,
-                idempotency_issuer=lifecycle.idempotency_issuer,
-                request_scope=lifecycle.request_scope,
-                run_id=lifecycle.run_id,
-                expected_run_version=lifecycle.expected_run_version,
-                actor=orchestration_lifecycle_actor(),
-                action=action,
-                reason="family started",
-                occurred_at=lifecycle.occurred_at,  # type: ignore[arg-type]
-                correlation_id=correlation_id,
+        expected_run_version = lifecycle.expected_run_version
+        for attempt in range(2):
+            result = await self.run_control.execute(
+                LifecycleCommand(
+                    # RRM-008: like the production start, retried once at the reported
+                    # version when an outside command (a cancel) moved the run first.
+                    command_id=(
+                        command_id
+                        if attempt == 0
+                        else f"{command_id}:at-version:{expected_run_version}"
+                    ),
+                    idempotency_issuer=lifecycle.idempotency_issuer,
+                    request_scope=lifecycle.request_scope,
+                    run_id=lifecycle.run_id,
+                    expected_run_version=expected_run_version,
+                    actor=orchestration_lifecycle_actor(),
+                    action=action,
+                    reason="family started",
+                    occurred_at=lifecycle.occurred_at,  # type: ignore[arg-type]
+                    correlation_id=correlation_id,
+                )
             )
-        )
+            if result.status != CommandStatus.STALE:
+                return result
+            expected_run_version = result.resulting_run_version
+        return result
 
     async def intervene(self, run_id: str, command_id: str, action: object) -> Any:
         run = await self.run_control.get_run(SCOPE, run_id)
@@ -252,6 +264,7 @@ class GovernedStageGraphActivities(FakeStageGraphActivities):
                 request.initial_projection, run_version=result.resulting_run_version
             ),
             reason_code=result.reason_code,
+            phase=result.phase.value,
         )
 
     @activity.defn(name="stagegraph.apply_boundary_command")

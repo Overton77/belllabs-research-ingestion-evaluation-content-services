@@ -201,20 +201,32 @@ class StageGraphDecisionService:
     async def initialize(
         self, request: StageGraphInitializeRequest
     ) -> StageGraphInitializeResult:
-        result = await self._run_control.execute(
-            LifecycleCommand(
-                command_id=f"stagegraph:{request.run_id}:start",
-                idempotency_issuer=request.idempotency_issuer,
-                request_scope=request.request_scope,
-                run_id=request.run_id,
-                expected_run_version=request.expected_run_version,
-                actor=orchestration_lifecycle_actor(),
-                action=StartAction(execution_target=request.execution_target),
-                reason="Canonical StageGraph execution started",
-                occurred_at=request.occurred_at,
-                correlation_id=request.correlation_id,
+        expected_run_version = request.expected_run_version
+        for attempt in range(2):
+            result = await self._run_control.execute(
+                LifecycleCommand(
+                    # RRM-008: an outside command accepted between admission and the start
+                    # fact (a cancel) moved the version; the start is retried once at the
+                    # version the stale result reports, under a new command identity.
+                    command_id=(
+                        f"stagegraph:{request.run_id}:start"
+                        if attempt == 0
+                        else f"stagegraph:{request.run_id}:start:at-version:{expected_run_version}"
+                    ),
+                    idempotency_issuer=request.idempotency_issuer,
+                    request_scope=request.request_scope,
+                    run_id=request.run_id,
+                    expected_run_version=expected_run_version,
+                    actor=orchestration_lifecycle_actor(),
+                    action=StartAction(execution_target=request.execution_target),
+                    reason="Canonical StageGraph execution started",
+                    occurred_at=request.occurred_at,
+                    correlation_id=request.correlation_id,
+                )
             )
-        )
+            if result.status != CommandStatus.STALE:
+                break
+            expected_run_version = result.resulting_run_version
         projection = replace(
             request.initial_projection,
             run_version=result.resulting_run_version,
@@ -223,6 +235,7 @@ class StageGraphDecisionService:
             accepted=result.status == CommandStatus.ACCEPTED,
             projection=projection,
             reason_code=result.reason_code,
+            phase=result.phase.value,
         )
 
     async def admit_operation(
@@ -651,7 +664,14 @@ class StageGraphDecisionService:
                 if item.status == "failed"
             ),
             valid_output_refs=request.proposal.valid_output_refs,
-            cancellation_settled=run.phase.value != "cancelling",
+            # RRM-008 (REQ-CP-EXEC-008 step 7): the family asserts that every producer
+            # liability was reconciled under cancellation; the reducer still requires every
+            # reservation and effect settled before it records `cancelled`.
+            cancellation_settled=(
+                request.proposal.cancelled
+                if run.phase.value == "cancelling"
+                else run.phase.value != "cancelling"
+            ),
             budget_settled=(
                 not any(budget.reserved.values())
                 and not any(budget.pending_settlement.values())
@@ -659,7 +679,9 @@ class StageGraphDecisionService:
             effects_settled=all(
                 claim.settlement is not None for claim in effects.claims.values()
             ),
-            pending_wait_or_link_ids=request.proposal.pending_dependency_ids,
+            pending_wait_or_link_ids=(
+                () if request.proposal.cancelled else request.proposal.pending_dependency_ids
+            ),
             proposed_at=request.occurred_at,
             finalization_plan=run.finalization_plan,
             output_omission_reason=run.finalization_omission_reason,

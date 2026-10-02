@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from types import SimpleNamespace
@@ -69,6 +69,7 @@ from app.domain.control_plane.contracts import (
     DefinitionKind,
     ExactDefinitionRef,
     GoalDirectedBlueprint,
+    SecretRef,
     WorkflowWorkspaceContract,
     WorkspaceSlot,
 )
@@ -197,6 +198,7 @@ def goal_templates(
     binding: DeepAgentExecutionBinding,
     *,
     workspace: Callable[[WorkspaceContract], WorkspaceContract] = goal_template_workspace,
+    secret_refs: tuple[SecretRef, ...] = (),
 ) -> dict[str, OperationExecutionRequest]:
     """Executor and verifier templates: exact Deep Agent binding, compiled workspace slots,
     the configured system prompt and an admitted objective."""
@@ -208,6 +210,7 @@ def goal_templates(
         templates[role] = OperationExecutionRequest.model_validate(
             {
                 **base.model_dump(mode="python"),
+                "secret_refs": (*base.secret_refs, *secret_refs),
                 "execution_runtime": "deep_agent",
                 "native_placement": None,
                 "deep_agent_binding": DeepAgentExecutionBinding.create(
@@ -548,13 +551,25 @@ async def compose_goal_directed(
     claimed_by: str = "operation-runtime:rrm-016",
     template_provider: GoalOperationTemplateProvider | None = None,
     documents: RecordingGoalDocuments | None = None,
+    binding: DeepAgentExecutionBinding | None = None,
+    async_subagents: Any = None,
+    children: Any = None,
+    secrets: Mapping[str, str] | None = None,
+    template_secret_refs: tuple[SecretRef, ...] = (),
 ) -> GoalComposition:
-    """Compose the production GoalDirected activities and operation boundary."""
+    """Compose the production GoalDirected activities and operation boundary.
+
+    RRM-008: `binding` (an exact binding that declares async subagent contracts),
+    `async_subagents` (the governed middleware factory), `children` (the async child
+    cancellation port) and `secrets`/`template_secret_refs` (the deployment credential)
+    compose an executor whose Deep Agent spawns a real async child.
+    """
 
     from tests.acceptance.control_plane.test_wp_cp_040 import exact_fixture
 
-    binding, _profile, bundle = exact_fixture()
-    templates = goal_templates(binding)
+    fixture_binding, _profile, bundle = exact_fixture()
+    binding = binding or fixture_binding
+    templates = goal_templates(binding, secret_refs=template_secret_refs)
     if template_provider is None:
         repository = InMemoryGoalOperationTemplateRepository()
         await repository.persist_templates(
@@ -566,7 +581,8 @@ async def compose_goal_directed(
         )
         template_provider = repository
     adapter = DeepAgentRuntimeAdapter(
-        ExactDeepAgentMaterializer(deep_agent_registry(binding, bundle, model, saver))
+        ExactDeepAgentMaterializer(deep_agent_registry(binding, bundle, model, saver)),
+        async_subagents=async_subagents,
     )
     assets = ConformanceAssetVerifier(
         mcp_schema_digests={"fixture-mcp": MCP_DIGEST},
@@ -580,7 +596,9 @@ async def compose_goal_directed(
         sandbox=ConformanceSandbox(),
         assets=assets,
         mcp=assets,
-        secrets=ConformanceSecretResolver({"environment:OPENAI_API_KEY": "unused"}),
+        secrets=ConformanceSecretResolver(
+            {"environment:OPENAI_API_KEY": "unused", **dict(secrets or {})}
+        ),
         events=ConformanceEventSink(),
         # The journal settles usage; this port is never reached with a journal composed.
         budget=ConformanceBudgetAuthority(),
@@ -592,6 +610,7 @@ async def compose_goal_directed(
         ),
         journal_claimed_by=claimed_by,
         lineage=lineage,
+        children=children,
     )
     documents = documents or RecordingGoalDocuments()
     family = compose_goal_directed_activities(
@@ -629,6 +648,13 @@ class FixtureGoalSettlements:
 
     def __init__(self) -> None:
         self.version = 100
+
+    async def observe_terminal(
+        self,
+        request: GoalOperationReconciliationRequest,
+        provider_result: OperationExecutionResult,
+    ) -> GoalOperationSettlement:
+        return await self.observe(request, provider_result)
 
     async def observe(
         self,

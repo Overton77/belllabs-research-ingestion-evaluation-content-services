@@ -8,6 +8,8 @@ from temporalio import workflow
 with workflow.unsafe.imports_passed_through():
     from app.domain.orchestration.contracts import (
         BellLabsRunInput,
+        CancelAck,
+        CancelDelivery,
         GoalDirectedRunInput,
         RunContinuityState,
         StageGraphRunInput,
@@ -26,6 +28,13 @@ with workflow.unsafe.imports_passed_through():
     from app.temporal.workflows.stagegraph import StageGraphWorkflow
 
 
+# RRM-008 (REQ-CP-EXEC-008 steps 1-2, RRM-001 section 7 #7): a cancel reaches the root only
+# as the delivery of a journaled, accepted command (`deliver_cancel`); the raw
+# `request_cancel` signal is a hint that cancels nothing. Histories recorded before the
+# patch keep the earlier behaviour of the signal.
+GOVERNED_CANCEL_PATCH = "rrm-008-governed-root-cancel"
+
+
 @workflow.defn(name="belllabs.run.v1")
 class BellLabsRunWorkflow:
     """Stable root for one admitted BellLabs run across all family implementations."""
@@ -35,6 +44,7 @@ class BellLabsRunWorkflow:
         self._receipts: list[WorkflowMessageReceipt] = []
         self._cancel_requested = False
         self._family_handle: Any | None = None
+        self._cancel_acks: dict[str, CancelAck] = {}
 
     def _accept_message(self, message: WorkflowMessage) -> WorkflowMessageReceipt:
         duplicate = next(
@@ -79,10 +89,43 @@ class BellLabsRunWorkflow:
 
     @workflow.signal
     def request_cancel(self) -> None:
+        if workflow.patched(GOVERNED_CANCEL_PATCH):
+            # REQ-CP-EXEC-007: a raw signal is not a governed command path; it is recorded
+            # as a hint only. Cancellation enters through run control and `deliver_cancel`.
+            return
         self._cancel_requested = True
         handle = self._family_handle
         if handle is not None:
             handle.cancel()
+
+    @workflow.update
+    def deliver_cancel(self, delivery: CancelDelivery) -> CancelAck:
+        """Record the journaled cancellation intent at the root (sequenced in the `cancel`
+        space, never in the `execution` message sequence). Evidence of delivery to the root
+        only; the family acknowledges its own delivery and runs the saga."""
+
+        prior = self._cancel_acks.get(delivery.command_id)
+        if prior is not None:
+            return replace(prior, status="duplicate")
+        status: Literal["delivered", "stale_generation"]
+        if delivery.execution_generation != self._continuity.execution_generation:
+            status = "stale_generation"
+        else:
+            status = "delivered"
+            self._cancel_requested = True
+        ack = CancelAck(
+            command_id=delivery.command_id,
+            status=status,
+            technical_segment=self._continuity.technical_segment,
+        )
+        self._cancel_acks[delivery.command_id] = ack
+        return ack
+
+    @workflow.query
+    def cancel_receipts(self) -> tuple[CancelAck, ...]:
+        """Diagnostic only (REQ-CP-EXEC-007); the receipt ledger is the authority."""
+
+        return tuple(self._cancel_acks.values())
 
     @workflow.query
     def continuity(self) -> RunContinuityState:
@@ -143,7 +186,7 @@ class BellLabsRunWorkflow:
                 ),
             )
         self._family_handle = handle
-        if self._cancel_requested:
+        if self._cancel_requested and not workflow.patched(GOVERNED_CANCEL_PATCH):
             handle.cancel()
         return await handle
 

@@ -514,6 +514,9 @@ def reduce_lifecycle(
         )
         outcome = _terminal_outcome(terminal_projection, next_budget, next_effects, action)
         phase = RunPhase.TERMINAL
+        # RRM-008: a `cancelled` outcome cancels the run's declared waits (a non-cancelled
+        # outcome was admitted only with none active).
+        waits = []
     elif isinstance(action, ReconcileUnitAction):
         phase, waits = _reconcile_unit(phase, waits, unit_reconciliations, action, command)
     elif isinstance(action, RecordReadinessAction):

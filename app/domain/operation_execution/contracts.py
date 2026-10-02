@@ -1556,6 +1556,10 @@ class OperationWorkflowRequest(Contract):
     operation_kind: Literal["bound_operation"]
     operation: OperationExecutionRequest
     timeout_seconds: int = Field(default=300, ge=1, le=86_400)
+    # RRM-008 (REQ-CP-EXEC-008 step 3): the cognitive Activity's heartbeat timeout. A lost
+    # worker is detected after it (not after `timeout_seconds`) and a cancel reaches the
+    # running Activity through its heartbeat. Absent in recorded histories: the default.
+    heartbeat_timeout_seconds: int = Field(default=30, ge=1, le=3_600)
     message_cursor: int = Field(default=0, ge=0)
     effect_frontier: tuple[EffectFrontierItem, ...] = Field(
         default=(),

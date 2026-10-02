@@ -22,6 +22,8 @@ with workflow.unsafe.imports_passed_through():
         BoundaryCommandDelivery,
         BoundaryLifecycleOutcome,
         BoundaryLifecycleRequest,
+        CancelAck,
+        CancelDelivery,
         CandidateOrderingKey,
         ExecutionIdentity,
         FamilyPause,
@@ -54,6 +56,20 @@ with workflow.unsafe.imports_passed_through():
 GOVERNED_WAITS_PATCH = "rrm-007-governed-waits"
 DECLARED_WAITS_PATCH = "rrm-007-declared-waits"
 QUIESCENCE_PATCH = "rrm-007-quiescence"
+# RRM-008 (REQ-CP-EXEC-008 step 7): under a delivered cancel the family admits nothing new,
+# lets every active operation settle through its own saga, rejects delivered-but-unapplied
+# commands `superseded`, then proposes terminal `cancelled` and waits for any liability the
+# operator must reconcile. Histories recorded before the patch replay unchanged.
+CANCELLATION_SAGA_PATCH = "rrm-008-stagegraph-cancellation-saga"
+LIABILITY_REJECTIONS = frozenset(
+    {
+        "budget_not_settled",
+        "effects_not_settled",
+        "unresolved_async_children",
+        "unresolved_terminal_dependencies",
+        "cancellation_not_settled",
+    }
+)
 WAIT_CONDITION_PREFIX = "stagegraph-wait:"
 WORKFLOW_PAUSE_SCOPES = frozenset({"run", "workflow"})
 
@@ -89,10 +105,47 @@ class StageGraphWorkflow:
         self._technical_segment = 1
         self._last_delivered_sequence = 0
         self._runtime_state: dict[str, Any] = {}
+        self._cancel_acks: dict[str, CancelAck] = {}
+        self._cancel_command: tuple[str, str] | None = None
+        self._liability_hints = 0
 
     @workflow.signal
     def request_cancel(self) -> None:
+        # The root-internal propagation channel of pre-RRM-008 histories; the governed path
+        # is run control -> ledger -> `deliver_cancel` (REQ-CP-EXEC-008 steps 1-2).
         self._cancel_requested = True
+
+    @workflow.signal
+    def liability_reconciled(self, reference: str) -> None:
+        """A compact wake-up hint: a liability the cancellation saga waits for was
+        reconciled. It releases nothing; the saga proposes terminalization again."""
+
+        del reference
+        self._liability_hints += 1
+
+    @workflow.update
+    def deliver_cancel(self, delivery: CancelDelivery) -> CancelAck:
+        """Acknowledge the journaled cancel: evidence of `delivered`; the saga applies it."""
+
+        prior = self._cancel_acks.get(delivery.command_id)
+        if prior is not None:
+            return replace(prior, status="duplicate")
+        status: str
+        if delivery.execution_generation != FAMILY_EXECUTION_GENERATION:
+            status = "stale_generation"
+        elif delivery.execution_epoch != self._execution_epoch:
+            status = "stale_target"
+        else:
+            status = "delivered"
+            self._cancel_requested = True
+            self._cancel_command = (delivery.idempotency_issuer, delivery.command_id)
+        ack = CancelAck(
+            command_id=delivery.command_id,
+            status=status,  # type: ignore[arg-type]
+            technical_segment=self._technical_segment,
+        )
+        self._cancel_acks[delivery.command_id] = ack
+        return ack
 
     @workflow.signal
     def satisfy_wait(self, condition_id: str) -> None:
@@ -199,6 +252,8 @@ class StageGraphWorkflow:
             for item in run_input.pending_boundary_commands
             if _command_key(item) not in carried
         )
+        # RRM-008 (REQ-CP-EXEC-011): a cancel delivered before Continue-As-New stays delivered.
+        self._cancel_requested = self._cancel_requested or run_input.cancel_requested
         interpreter = StageGraphInterpreter(
             blueprint,
             effective_max_concurrency=run_input.max_concurrency,
@@ -254,6 +309,9 @@ class StageGraphWorkflow:
                     non_retryable=True,
                 )
             projection = initialized.projection
+            if initialized.phase == "cancelling" and workflow.patched(CANCELLATION_SAGA_PATCH):
+                # The cancel was accepted before the start fact: run the saga at once.
+                self._cancel_requested = True
 
         active: dict[
             str,
@@ -269,6 +327,8 @@ class StageGraphWorkflow:
         accepted_order = len(projection.accepted_results)
         cancellation_requested_children: set[str] = set()
         pending_cycle: dict[str, Any] | None = None
+        liability_hints_seen = self._liability_hints
+        cancellation_backoff = run_input.cancellation_retry_seconds
 
         def blocked_candidates(
             projection_now: Any,
@@ -342,15 +402,31 @@ class StageGraphWorkflow:
         while True:
             if self._cancel_requested:
                 for identity, (handle, _task, _request, _stage_identity) in active.items():
+                    if identity in cancellation_requested_children:
+                        continue  # one cancel request per child (the server refuses a second)
                     cancellation_requested_children.add(identity)
                     handle.cancel()
 
             # RRM-007: apply delivered commands at the admission boundary, in target order.
             # This path exists only in histories that carry deliveries, so it needs no patch.
             applied_any = False
-            while self._pending_commands and not self._cancel_requested:
+            while self._pending_commands:
+                if self._cancel_requested and not workflow.patched(CANCELLATION_SAGA_PATCH):
+                    break
                 delivery = min(self._pending_commands, key=lambda item: item.target_sequence)
                 self._pending_commands.remove(delivery)
+                if self._cancel_requested:
+                    # RRM-008: a command delivered but not applied is superseded by the cancel.
+                    outcome = await self._apply(
+                        run_input,
+                        delivery,
+                        boundary_ref,
+                        rejection="superseded",
+                        runnable=False,
+                        activity_timeout=timeout,
+                    )
+                    self._mark_handled(delivery, outcome)
+                    continue
                 # F4: decide purely; the family state changes only when authority applied.
                 satisfied, pauses, rejection = self._decide(delivery, blueprint)
                 outcome = await self._apply(
@@ -486,13 +562,21 @@ class StageGraphWorkflow:
 
                 def child_done_or_command_delivered(
                     bound: tuple[asyncio.Future[OperationWorkflowResult], ...] = tasks,
+                    identities: tuple[str, ...] = tuple(task_by_identity),
                 ) -> bool:
-                    # Wake on the first completed child, or on a delivered command so that a
-                    # pause or release applies at this admission boundary (new histories only).
+                    # Wake on the first completed child, on a delivered command so that a
+                    # pause or release applies at this admission boundary (new histories
+                    # only), or on a cancel that an active child has not received yet.
                     return (
                         any(task.done() for task in bound)
                         or bool(self._pending_commands)
-                        or self._cancel_requested
+                        or (
+                            self._cancel_requested
+                            and any(
+                                identity not in cancellation_requested_children
+                                for identity in identities
+                            )
+                        )
                     )
 
                 await workflow.wait_condition(child_done_or_command_delivered)
@@ -542,9 +626,12 @@ class StageGraphWorkflow:
                         child_closed_or_quiesced=True,
                         reservations_and_usage_settled=True,
                         effects_settled=True,
+                        # RRM-008: under cancellation a unit that settled (cancelled, or
+                        # completed/failed before the cancel reached it) is reconciled; only
+                        # an in_doubt unit keeps its liability open for the operator.
                         cancellation_reconciled=(
                             not self._cancel_requested
-                            or operation_result.disposition == "cancelled"
+                            or operation_result.disposition != "in_doubt"
                         ),
                         accepted_order=accepted_order,
                         operation_disposition=operation_result.disposition,
@@ -755,11 +842,23 @@ class StageGraphWorkflow:
                 workflow.continue_as_new(self._continuation(run_input, projection))
 
             completion = interpreter.completion(projection)
+            cancelling = self._cancel_requested and workflow.patched(CANCELLATION_SAGA_PATCH)
+            if cancelling:
+                # REQ-CP-EXEC-008 step 7: every producer liability is closed (each active unit
+                # settled through its own saga); unresolved dependencies are cancelled.
+                completion = replace(completion, cancelled=True)
+                if not completion.can_terminalize:
+                    raise ApplicationError(
+                        "StageGraph cancellation left a producer liability open: "
+                        + ", ".join(completion.open_producer_liability_ids),
+                        type="stagegraph_cancellation_unresolved",
+                        non_retryable=True,
+                    )
             if completion.can_terminalize:
                 if self._pending_commands:
                     # F1: drain what was delivered during the final cycle before closing.
                     continue
-                if self._active_pauses:
+                if self._active_pauses and not cancelling:
                     # Terminalization requires every pause resumed (reducer rule): the family
                     # holds at this boundary until the resume is delivered.
                     if not self._quiescent and workflow.patched(QUIESCENCE_PATCH):
@@ -806,6 +905,27 @@ class StageGraphWorkflow:
                     start_to_close_timeout=timeout,
                     retry_policy=retry,
                 )
+                if not terminal.accepted and cancelling and (
+                    terminal.reason_code in LIABILITY_REJECTIONS
+                ):
+                    # A liability remains (an async child's pending usage, an in_doubt unit):
+                    # the run stays `cancelling`; wait for the reconciliation hint or the
+                    # timer, then propose again.
+                    def reconciled(waited: int = liability_hints_seen) -> bool:
+                        return self._liability_hints > waited
+
+                    try:
+                        await workflow.wait_condition(
+                            reconciled, timeout=timedelta(seconds=cancellation_backoff)
+                        )
+                    except TimeoutError:
+                        pass
+                    liability_hints_seen = self._liability_hints
+                    cancellation_backoff = min(cancellation_backoff * 2, 3_600)
+                    projection = replace(
+                        projection, run_version=terminal.resulting_run_version
+                    )
+                    continue
                 if not terminal.accepted:
                     raise ApplicationError(
                         f"StageGraph terminalization rejected: {terminal.reason_code}",
@@ -980,6 +1100,7 @@ class StageGraphWorkflow:
     def _continuation(self, run_input: StageGraphRunInput, projection: Any) -> StageGraphRunInput:
         return replace(
             run_input,
+            cancel_requested=self._cancel_requested,
             initial_projection=projection,
             initial_run_version=projection.run_version,
             force_continue_as_new=False,

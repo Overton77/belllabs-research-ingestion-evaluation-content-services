@@ -188,7 +188,11 @@ async def run_supporting_graph_goal_smoke(
     refs = tuple(
         ref for execution in result.execution_results for ref in execution.output_refs
     )
-    if result.convergence_proposal.action != "complete" or not refs:
+    if (
+        result.convergence_proposal is None
+        or result.convergence_proposal.action != "complete"
+        or not refs
+    ):
         raise RuntimeError("Scenario C did not independently verify reconciliation")
     return SupportingGraphTemporalSmokeResult(
         workflow_id=submission.workflow_id,
