@@ -982,6 +982,16 @@ async def test_stagegraph_runs_through_the_production_composition_with_fork_rela
     assert sections["temporal"]["freshness"] == "current", sections["temporal"]
     assert sections["async_children_detail"]["freshness"] == "current", sections
     unit_key = read.json()["data"]["units"][0]["unit_key"]
+    # REQ-CP-EXEC-015: the unit's operation execution is listed by its unit key, and the
+    # run's root, family and operations by their kind, on the persistent namespace.
+    assert await _visible(stack.client, f"BellLabsUnitKey = '{unit_key}'", 1) == 1
+    kinds = sorted(
+        [
+            str(execution.search_attributes.get("BellLabsWorkflowKind", ["?"])[0])
+            async for execution in stack.client.list_workflows(f"BellLabsRunId = '{source_run}'")
+        ]
+    )
+    assert kinds == ["family", "operation", "operation", "root"], kinds
     history = await stack.http.get(
         f"/run-control/v1/inspection/runs/{source_run}/units/{unit_key}/checkpoints",
         params={"request_scope": SCOPE},
