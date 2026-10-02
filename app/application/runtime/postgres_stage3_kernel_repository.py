@@ -20,8 +20,7 @@ from app.application.runtime.runtime_reconciliation import (
 )
 from app.application.runtime.runtime_recovery import ForkAdmission
 from app.application.runtime.runtime_resources import ResourceCapacity, ResourceExhausted
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.graph_runtime.contracts import ForkReceipt, ForkRequest
+from app.domain.control_plane.canonical import sha256_digest, stable_json_digest
 from app.domain.graph_runtime.kernel import (
     RESOURCE_ACQUISITION_ORDER,
     DecisionRequest,
@@ -33,6 +32,11 @@ from app.domain.graph_runtime.kernel import (
     WaitLeaseProjection,
 )
 from app.domain.run_control.errors import IdempotencyConflict
+from app.domain.run_control.forks import (
+    RunForkReceipt,
+    RunForkRequest,
+    fork_request_fingerprint,
+)
 
 RETENTION_DAYS = 90
 _LIVE_LEASE_STATUSES = frozenset(
@@ -82,86 +86,7 @@ class PostgresExecutionLineageRepository:
         scope = lineage.envelope.request_scope
         async with self._pool.acquire() as connection, connection.transaction():
             await _set_scope(connection, scope)
-            await _lock(connection, f"lineage:{scope}:{lineage.lineage_id}")
-            prior = await connection.fetchrow(
-                """
-                SELECT lineage_payload
-                FROM belllabs_control.runtime_lineage_records
-                WHERE request_scope = $1 AND lineage_id = $2
-                FOR UPDATE
-                """,
-                scope,
-                lineage.lineage_id,
-            )
-            if prior is not None:
-                persisted = PersistedExecutionLineage.model_validate(
-                    _json(prior["lineage_payload"])
-                )
-                if persisted != lineage:
-                    raise IdempotencyConflict("lineage identity was reused with conflicting facts")
-                return persisted
-            digest_owner = await connection.fetchval(
-                """
-                SELECT lineage_id
-                FROM belllabs_control.runtime_lineage_records
-                WHERE request_scope = $1 AND lineage_digest = $2
-                """,
-                scope,
-                lineage.lineage_digest,
-            )
-            if digest_owner is not None:
-                raise IdempotencyConflict("lineage digest is already bound to another identity")
-            parent_id = lineage.envelope.parent_lineage_id
-            if parent_id is not None:
-                parent_exists = await connection.fetchval(
-                    """
-                    SELECT 1
-                    FROM belllabs_control.runtime_lineage_records
-                    WHERE request_scope = $1 AND lineage_id = $2
-                    """,
-                    scope,
-                    parent_id,
-                )
-                if parent_exists is None:
-                    raise ValueError("lineage parent must be persisted before its child")
-            await connection.execute(
-                """
-                INSERT INTO belllabs_control.runtime_lineage_records (
-                    lineage_id, request_scope, belllabs_run_id, execution_epoch,
-                    lineage_digest, result_manifest_ref, lineage_payload,
-                    recorded_at, retain_until
-                )
-                VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9)
-                """,
-                lineage.lineage_id,
-                scope,
-                lineage.envelope.belllabs_run_id,
-                lineage.envelope.execution_epoch,
-                lineage.lineage_digest,
-                lineage.envelope.result_manifest_ref,
-                _dump(lineage),
-                lineage.recorded_at,
-                lineage.retain_until,
-            )
-            for parent_edge in lineage.parent_edges:
-                edge = parent_edge.model_dump(mode="json")
-                await connection.execute(
-                    """
-                    INSERT INTO belllabs_control.runtime_lineage_edges (
-                        request_scope, lineage_id, parent_identity_key, child_identity_key,
-                        relationship, edge_digest, recorded_at
-                    )
-                    VALUES ($1, $2, $3, $4, $5, $6, $7)
-                    """,
-                    scope,
-                    lineage.lineage_id,
-                    parent_edge.parent.canonical_key,
-                    parent_edge.child.canonical_key,
-                    parent_edge.relationship,
-                    sha256_digest(edge),
-                    lineage.recorded_at,
-                )
-            return lineage
+            return await append_lineage_in_transaction(connection, lineage)
 
     async def provenance_for_result(
         self,
@@ -220,6 +145,97 @@ class PostgresExecutionLineageRepository:
                 key=lambda item: (item.recorded_at, item.lineage_id),
             )
         )
+
+async def append_lineage_in_transaction(
+    connection: asyncpg.Connection, lineage: PersistedExecutionLineage
+) -> PersistedExecutionLineage:
+    """Append one immutable lineage record and its edges in the caller's transaction.
+
+    The caller has set the request scope. A fork materialization appends its lineage in
+    the same transaction as its reuse decisions (RRM-006).
+    """
+
+    scope = lineage.envelope.request_scope
+    await _lock(connection, f"lineage:{scope}:{lineage.lineage_id}")
+    prior = await connection.fetchrow(
+        """
+        SELECT lineage_payload
+        FROM belllabs_control.runtime_lineage_records
+        WHERE request_scope = $1 AND lineage_id = $2
+        FOR UPDATE
+        """,
+        scope,
+        lineage.lineage_id,
+    )
+    if prior is not None:
+        persisted = PersistedExecutionLineage.model_validate(
+            _json(prior["lineage_payload"])
+        )
+        if persisted != lineage:
+            raise IdempotencyConflict("lineage identity was reused with conflicting facts")
+        return persisted
+    digest_owner = await connection.fetchval(
+        """
+        SELECT lineage_id
+        FROM belllabs_control.runtime_lineage_records
+        WHERE request_scope = $1 AND lineage_digest = $2
+        """,
+        scope,
+        lineage.lineage_digest,
+    )
+    if digest_owner is not None:
+        raise IdempotencyConflict("lineage digest is already bound to another identity")
+    parent_id = lineage.envelope.parent_lineage_id
+    if parent_id is not None:
+        parent_exists = await connection.fetchval(
+            """
+            SELECT 1
+            FROM belllabs_control.runtime_lineage_records
+            WHERE request_scope = $1 AND lineage_id = $2
+            """,
+            scope,
+            parent_id,
+        )
+        if parent_exists is None:
+            raise ValueError("lineage parent must be persisted before its child")
+    await connection.execute(
+        """
+        INSERT INTO belllabs_control.runtime_lineage_records (
+            lineage_id, request_scope, belllabs_run_id, execution_epoch,
+            lineage_digest, result_manifest_ref, lineage_payload,
+            recorded_at, retain_until
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9)
+        """,
+        lineage.lineage_id,
+        scope,
+        lineage.envelope.belllabs_run_id,
+        lineage.envelope.execution_epoch,
+        lineage.lineage_digest,
+        lineage.envelope.result_manifest_ref,
+        _dump(lineage),
+        lineage.recorded_at,
+        lineage.retain_until,
+    )
+    for parent_edge in lineage.parent_edges:
+        await connection.execute(
+            """
+            INSERT INTO belllabs_control.runtime_lineage_edges (
+                request_scope, lineage_id, parent_identity_key, child_identity_key,
+                relationship, edge_digest, recorded_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            """,
+            scope,
+            lineage.lineage_id,
+            parent_edge.parent.canonical_key,
+            parent_edge.child.canonical_key,
+            parent_edge.relationship,
+            # Set-free edge: value-identical to the former JSON-mode digest (RRM-015).
+            stable_json_digest(parent_edge),
+            lineage.recorded_at,
+        )
+    return lineage
 
 
 class PostgresDecisionRepository:
@@ -747,14 +763,20 @@ class PostgresResourceLeaseJournal:
 
 
 class PostgresForkRepository:
-    """Durable fork request/admission/receipt state for process-loss recovery."""
+    """Durable fork saga state (v2: snapshot, patch, derived run) for process-loss recovery.
+
+    RRM-001 disposition row 35: the advisory guard, the admission and materialization claims
+    and idempotency are kept; `reserve()` resolves the source snapshot (a foreign key) instead
+    of the retired runtime binding. Idempotency compares the fork intent without its request
+    times (`fork_request_fingerprint`), so a later replay continues the persisted intent.
+    """
 
     def __init__(self, pool: asyncpg.Pool) -> None:
         self._pool = pool
 
     @asynccontextmanager
-    async def guard(self, request: ForkRequest) -> AsyncIterator[None]:
-        key = f"fork-execution:{request.source_epoch.request_scope}:{request.request_id}"
+    async def guard(self, request: RunForkRequest) -> AsyncIterator[None]:
+        key = f"fork-execution:{request.request_scope}:{request.request_id}"
         async with self._pool.acquire() as connection:
             await connection.execute(
                 "SELECT pg_advisory_lock(hashtextextended($1, 0))",
@@ -768,15 +790,15 @@ class PostgresForkRepository:
                     key,
                 )
 
-    async def reserve(self, request: ForkRequest) -> bool:
-        scope = request.source_epoch.request_scope
-        digest = sha256_digest(request.model_dump(mode="json"))
+    async def reserve(self, request: RunForkRequest) -> bool:
+        scope = request.request_scope
+        digest = fork_request_fingerprint(request)
         async with self._pool.acquire() as connection, connection.transaction():
             await _set_scope(connection, scope)
             await _lock(connection, f"fork:{scope}:{request.request_id}")
             prior = await connection.fetchrow(
                 """
-                SELECT request_digest, request_payload
+                SELECT request_digest
                 FROM belllabs_control.runtime_fork_requests
                 WHERE request_scope = $1
                   AND (request_id = $2 OR idempotency_key = $3)
@@ -787,153 +809,130 @@ class PostgresForkRepository:
                 request.idempotency_key,
             )
             if prior is not None:
-                persisted = ForkRequest.model_validate(_json(prior["request_payload"]))
-                if prior["request_digest"] != digest or persisted != request:
+                if prior["request_digest"] != digest:
                     raise IdempotencyConflict("fork identity has conflicting intent")
                 return False
-            binding_id = await connection.fetchval(
+            snapshot_digest = await connection.fetchval(
                 """
-                SELECT binding_id
-                FROM belllabs_control.runtime_execution_bindings
-                WHERE request_scope = $1 AND belllabs_run_id = $2
-                  AND execution_epoch = $3
+                SELECT snapshot_digest
+                FROM belllabs_control.run_snapshot_manifests
+                WHERE request_scope = $1 AND snapshot_id = $2 AND source_run_id = $3
                 """,
                 scope,
-                request.source_epoch.belllabs_run_id,
-                request.source_epoch.execution_epoch,
+                request.snapshot_id,
+                request.source_run_id,
             )
-            if binding_id is None:
-                raise LookupError("fork source binding is unavailable")
+            if snapshot_digest is None:
+                raise LookupError("fork source snapshot is unavailable")
+            if snapshot_digest != request.snapshot_digest:
+                raise IdempotencyConflict("fork names another digest of its source snapshot")
             await connection.execute(
                 """
                 INSERT INTO belllabs_control.runtime_fork_requests (
                     request_scope, request_id, idempotency_key, source_binding_id,
                     request_digest, request_payload, status, requested_at,
-                    updated_at, retain_until
+                    updated_at, retain_until, schema_version, source_run_id,
+                    source_snapshot_id, patch_digest, target_run_id
                 )
-                VALUES ($1, $2, $3, $4, $5, $6::jsonb, 'reserved', $7, $7, $8)
+                VALUES (
+                    $1, $2, $3, NULL, $4, $5::jsonb, 'reserved', $6, $6, $7, $8, $9,
+                    $10, $11, $12
+                )
                 """,
                 scope,
                 request.request_id,
                 request.idempotency_key,
-                binding_id,
                 digest,
                 _dump(request),
                 request.requested_at,
                 request.requested_at + timedelta(days=RETENTION_DAYS),
+                request.schema_version,
+                request.source_run_id,
+                request.snapshot_id,
+                request.patch.patch_digest,
+                request.derived_run_id,
             )
             return True
 
-    async def get(self, request_scope: str, request_id: str) -> ForkReceipt | None:
-        async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, request_scope)
-            payload = await connection.fetchval(
-                """
-                SELECT receipt_payload
-                FROM belllabs_control.runtime_fork_requests
-                WHERE request_scope = $1 AND request_id = $2
-                """,
-                request_scope,
-                request_id,
-            )
-        return ForkReceipt.model_validate(_json(payload)) if payload else None
+    async def get_request(self, request_scope: str, request_id: str) -> RunForkRequest | None:
+        payload = await self._column(request_scope, request_id, "request_payload")
+        return RunForkRequest.model_validate(_json(payload)) if payload else None
 
-    async def claim_admission(self, request: ForkRequest) -> bool:
-        scope = request.source_epoch.request_scope
-        async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, scope)
-            await _lock(connection, f"fork:{scope}:{request.request_id}")
-            result = await connection.execute(
-                """
-                UPDATE belllabs_control.runtime_fork_requests
-                SET status = 'admitting', updated_at = $3
-                WHERE request_scope = $1 AND request_id = $2 AND status = 'reserved'
-                """,
-                scope,
-                request.request_id,
-                request.requested_at,
-            )
-            return _rowcount(result) == 1
-
-    async def release_admission_claim(self, request: ForkRequest) -> None:
-        scope = request.source_epoch.request_scope
-        async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, scope)
-            await _lock(connection, f"fork:{scope}:{request.request_id}")
-            await connection.execute(
-                """
-                UPDATE belllabs_control.runtime_fork_requests
-                SET status = 'reserved', updated_at = $3
-                WHERE request_scope = $1 AND request_id = $2 AND status = 'admitting'
-                """,
-                scope,
-                request.request_id,
-                request.requested_at,
-            )
-
-    async def claim_copy(self, request: ForkRequest) -> bool:
-        scope = request.source_epoch.request_scope
-        async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, scope)
-            await _lock(connection, f"fork:{scope}:{request.request_id}")
-            result = await connection.execute(
-                """
-                UPDATE belllabs_control.runtime_fork_requests
-                SET status = 'copying', updated_at = $3
-                WHERE request_scope = $1 AND request_id = $2 AND status = 'admitted'
-                """,
-                scope,
-                request.request_id,
-                request.requested_at,
-            )
-            return _rowcount(result) == 1
-
-    async def release_copy_claim(self, request: ForkRequest) -> None:
-        scope = request.source_epoch.request_scope
-        async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, scope)
-            await _lock(connection, f"fork:{scope}:{request.request_id}")
-            await connection.execute(
-                """
-                UPDATE belllabs_control.runtime_fork_requests
-                SET status = 'admitted', updated_at = $3
-                WHERE request_scope = $1 AND request_id = $2 AND status = 'copying'
-                """,
-                scope,
-                request.request_id,
-                request.requested_at,
-            )
+    async def get(self, request_scope: str, request_id: str) -> RunForkReceipt | None:
+        payload = await self._column(request_scope, request_id, "receipt_payload")
+        return RunForkReceipt.model_validate(_json(payload)) if payload else None
 
     async def get_admission(
         self,
         request_scope: str,
         request_id: str,
     ) -> ForkAdmission | None:
+        payload = await self._column(request_scope, request_id, "admission_payload")
+        return ForkAdmission.model_validate(_json(payload)) if payload else None
+
+    async def _column(
+        self,
+        request_scope: str,
+        request_id: str,
+        column: Literal["request_payload", "receipt_payload", "admission_payload"],
+    ) -> Any:
         async with self._pool.acquire() as connection, connection.transaction():
             await _set_scope(connection, request_scope)
-            payload = await connection.fetchval(
-                """
-                SELECT admission_payload
+            return await connection.fetchval(
+                f"""
+                SELECT {column}
                 FROM belllabs_control.runtime_fork_requests
-                WHERE request_scope = $1 AND request_id = $2
+                WHERE request_scope = $1 AND request_id = $2 AND schema_version IS NOT NULL
                 """,
                 request_scope,
                 request_id,
             )
-        return ForkAdmission.model_validate(_json(payload)) if payload else None
+
+    async def claim_admission(self, request: RunForkRequest) -> bool:
+        return await self._transition(request, from_status="reserved", to_status="admitting")
+
+    async def release_admission_claim(self, request: RunForkRequest) -> None:
+        await self._transition(request, from_status="admitting", to_status="reserved")
+
+    async def claim_copy(self, request: RunForkRequest) -> bool:
+        return await self._transition(request, from_status="admitted", to_status="copying")
+
+    async def release_copy_claim(self, request: RunForkRequest) -> None:
+        await self._transition(request, from_status="copying", to_status="admitted")
+
+    async def _transition(
+        self, request: RunForkRequest, *, from_status: str, to_status: str
+    ) -> bool:
+        scope = request.request_scope
+        async with self._pool.acquire() as connection, connection.transaction():
+            await _set_scope(connection, scope)
+            await _lock(connection, f"fork:{scope}:{request.request_id}")
+            result = await connection.execute(
+                """
+                UPDATE belllabs_control.runtime_fork_requests
+                SET status = $4, updated_at = $5
+                WHERE request_scope = $1 AND request_id = $2 AND status = $3
+                """,
+                scope,
+                request.request_id,
+                from_status,
+                to_status,
+                request.requested_at,
+            )
+            return _rowcount(result) == 1
 
     async def record_admission(
         self,
-        request: ForkRequest,
+        request: RunForkRequest,
         admission: ForkAdmission,
     ) -> ForkAdmission:
-        scope = request.source_epoch.request_scope
+        scope = request.request_scope
         async with self._pool.acquire() as connection, connection.transaction():
             await _set_scope(connection, scope)
             await _lock(connection, f"fork:{scope}:{request.request_id}")
             row = await connection.fetchrow(
                 """
-                SELECT request_payload, admission_payload, status
+                SELECT request_digest, admission_payload, status
                 FROM belllabs_control.runtime_fork_requests
                 WHERE request_scope = $1 AND request_id = $2
                 FOR UPDATE
@@ -941,7 +940,7 @@ class PostgresForkRepository:
                 scope,
                 request.request_id,
             )
-            if row is None or ForkRequest.model_validate(_json(row["request_payload"])) != request:
+            if row is None or row["request_digest"] != fork_request_fingerprint(request):
                 raise LookupError("fork reservation is unavailable")
             if row["admission_payload"] is not None:
                 persisted = ForkAdmission.model_validate(_json(row["admission_payload"]))
@@ -963,14 +962,14 @@ class PostgresForkRepository:
             )
             return admission
 
-    async def record(self, request: ForkRequest, receipt: ForkReceipt) -> ForkReceipt:
-        scope = request.source_epoch.request_scope
+    async def record(self, request: RunForkRequest, receipt: RunForkReceipt) -> RunForkReceipt:
+        scope = request.request_scope
         async with self._pool.acquire() as connection, connection.transaction():
             await _set_scope(connection, scope)
             await _lock(connection, f"fork:{scope}:{request.request_id}")
             row = await connection.fetchrow(
                 """
-                SELECT request_payload, receipt_payload, status
+                SELECT request_digest, receipt_payload, status
                 FROM belllabs_control.runtime_fork_requests
                 WHERE request_scope = $1 AND request_id = $2
                 FOR UPDATE
@@ -978,15 +977,15 @@ class PostgresForkRepository:
                 scope,
                 request.request_id,
             )
-            if row is None or ForkRequest.model_validate(_json(row["request_payload"])) != request:
+            if row is None or row["request_digest"] != fork_request_fingerprint(request):
                 raise LookupError("fork reservation is unavailable")
             if row["receipt_payload"] is not None:
-                persisted = ForkReceipt.model_validate(_json(row["receipt_payload"]))
+                persisted = RunForkReceipt.model_validate(_json(row["receipt_payload"]))
                 if persisted != receipt:
                     raise IdempotencyConflict("fork receipt has conflicting identities")
                 return persisted
             if row["status"] != "copying":
-                raise IdempotencyConflict("fork copy was not atomically claimed")
+                raise IdempotencyConflict("fork materialization was not atomically claimed")
             await connection.execute(
                 """
                 UPDATE belllabs_control.runtime_fork_requests

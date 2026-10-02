@@ -8,6 +8,7 @@ import asyncpg
 import pytest
 
 from app.application.run_control.postgres_run_control_repository import PostgresRunControlRepository
+from app.application.runtime.postgres_run_forks import PostgresRunSnapshotRepository
 from app.application.runtime.postgres_runtime_authority import (
     PostgresBootstrapAuthority,
     PostgresBootstrapDecisionBridge,
@@ -38,8 +39,6 @@ from app.domain.control_plane.canonical import sha256_digest
 from app.domain.graph_runtime.contracts import (
     ActorRef,
     Correlation,
-    ForkReceipt,
-    ForkRequest,
     GraphExecutionSubmission,
     RuntimeExecutionBinding,
     RuntimeExecutionStatus,
@@ -50,10 +49,7 @@ from app.domain.graph_runtime.definitions import (
     RuntimeDefinitionKind,
 )
 from app.domain.graph_runtime.identities import (
-    AgentThreadKey,
-    BellLabsRunKey,
     ExecutionEpochKey,
-    LangGraphCheckpointKey,
 )
 from app.domain.graph_runtime.kernel import (
     DecisionRequest,
@@ -66,7 +62,15 @@ from app.domain.graph_runtime.kernel import (
     ResourceLeaseStatus,
 )
 from app.domain.run_control.errors import IdempotencyConflict
+from app.domain.run_control.forks import (
+    RunForkPatch,
+    RunForkReceipt,
+    RunForkRequest,
+    admission_request_ref,
+    lineage_for,
+)
 from app.integrations.postgres import apply_application_migrations
+from tests.fixtures.run_forks import technical_snapshot
 from tests.unit.run_control.test_run_control import request as run_request
 from tests.unit.run_control.test_run_control import service as run_control_service
 
@@ -379,31 +383,33 @@ async def test_stage3_kernel_postgres_persistence_slice(
             )
         )
         assert bootstrap_decision_id.startswith("decision-")
-        fork_request = ForkRequest(
+        # RRM-006: the versioned fork saga state (snapshot, patch, derived run).
+        snapshot = technical_snapshot(run_id)
+        await PostgresRunSnapshotRepository(pool).put(snapshot)
+        fork_target = run_request(request_id="fork-1")
+        fork_request = RunForkRequest(
             request_id="fork-1",
             idempotency_key="fork-1",
-            source_epoch=binding.epoch,
-            source_checkpoint=LangGraphCheckpointKey(
-                deployment_endpoint_id="endpoint-1",
-                agent_server_thread_id="thread-1",
-                langgraph_checkpoint_id="checkpoint-1",
+            request_scope="tenant-1",
+            source_run_id=run_id,
+            source_execution_epoch=1,
+            snapshot_id=snapshot.snapshot_id,
+            snapshot_digest=snapshot.snapshot_digest,
+            patch=RunForkPatch.create(
+                source_snapshot_id=snapshot.snapshot_id,
+                source_snapshot_digest=snapshot.snapshot_digest,
+                target_admission_request_ref=admission_request_ref(fork_target),
             ),
-            target_run=BellLabsRunKey(
-                request_scope="tenant-1",
-                belllabs_run_id="run-fork-1",
-            ),
-            run_plan_digest=binding.run_plan_digest,
-            actor=ActorRef(
-                actor_id="operator-1",
-                actor_type="operator",
-                authority_ref="authority:operator@1",
-            ),
+            target=fork_target,
+            derived_run_id="run-fork-1",
+            actor_id="operator",
             reason="durable recovery fork",
             requested_at=NOW,
         )
         fork_repo = PostgresForkRepository(pool)
         assert await fork_repo.reserve(fork_request) is True
         assert await fork_repo.reserve(fork_request) is False
+        assert await fork_repo.get_request("tenant-1", "fork-1") == fork_request
         assert await fork_repo.claim_admission(fork_request) is True
         assert await fork_repo.claim_admission(fork_request) is False
         fork_admission = ForkAdmission(
@@ -413,8 +419,9 @@ async def test_stage3_kernel_postgres_persistence_slice(
                 belllabs_run_id="run-fork-1",
                 execution_epoch=1,
             ),
+            admission_ref="admission:tenant-1:operator:fork-1",
             budget_reservation_ref="budget:fork-1",
-            admitted_run_plan_digest=binding.run_plan_digest,
+            admitted_effective_configuration_digest=fork_target.effective_configuration_digest,
         )
         assert (
             await fork_repo.record_admission(fork_request, fork_admission)
@@ -422,23 +429,29 @@ async def test_stage3_kernel_postgres_persistence_slice(
         )
         assert await fork_repo.claim_copy(fork_request) is True
         assert await fork_repo.claim_copy(fork_request) is False
-        fork_receipt = ForkReceipt(
+        fork_receipt = RunForkReceipt(
             request_id="fork-1",
-            source_epoch=binding.epoch,
-            target_epoch=fork_admission.target_epoch,
-            target_thread=AgentThreadKey(
-                **fork_admission.target_epoch.model_dump(),
-                agent_server_thread_id="thread-fork-1",
-                relationship="fork",
-                parent_belllabs_run_id=run_id,
+            request_scope="tenant-1",
+            source_run_id=run_id,
+            snapshot_id=snapshot.snapshot_id,
+            snapshot_digest=snapshot.snapshot_digest,
+            patch_digest=fork_request.patch.patch_digest,
+            target_run_id="run-fork-1",
+            admission_ref=fork_admission.admission_ref,
+            admitted_effective_configuration_digest=(
+                fork_admission.admitted_effective_configuration_digest
             ),
-            status="accepted",
+            lineage=lineage_for(fork_request, admission_ref=fork_admission.admission_ref),
             recorded_at=NOW,
         )
         assert await fork_repo.record(fork_request, fork_receipt) == fork_receipt
         assert await fork_repo.get("tenant-1", "fork-1") == fork_receipt
         concurrent_fork = fork_request.model_copy(
-            update={"request_id": "fork-concurrent", "idempotency_key": "fork-concurrent"}
+            update={
+                "request_id": "fork-concurrent",
+                "idempotency_key": "fork-concurrent",
+                "derived_run_id": "run-fork-2",
+            }
         )
         assert await fork_repo.reserve(concurrent_fork) is True
         admission_claims = await asyncio.gather(

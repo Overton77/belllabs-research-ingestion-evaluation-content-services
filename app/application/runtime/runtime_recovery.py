@@ -12,14 +12,21 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 from app.domain.graph_runtime.contracts import (
     CancelRunIntervention,
-    ForkReceipt,
-    ForkRequest,
     RuntimeExecutionBinding,
     RuntimeExecutionStatus,
 )
-from app.domain.graph_runtime.identities import AgentThreadKey, ExecutionEpochKey
+from app.domain.graph_runtime.identities import DIGEST_PATTERN, ExecutionEpochKey
 from app.domain.graph_runtime.kernel import CancellationContext
 from app.domain.run_control.errors import IdempotencyConflict
+from app.domain.run_control.forks import (
+    DERIVED_EXECUTION_EPOCH,
+    ForkLineageManifest,
+    ForkRejected,
+    RunForkReceipt,
+    RunForkRequest,
+    fork_request_fingerprint,
+    lineage_for,
+)
 
 
 class RecoveryMode(StrEnum):
@@ -184,12 +191,15 @@ def apply_terminal_runtime_observation(
 
 
 class ForkAdmission(BaseModel):
+    """The derived run's independent admission (REQ-CP-EXEC-012, REQ-CP-RUN-001)."""
+
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     request_id: str
     target_epoch: ExecutionEpochKey
+    admission_ref: str = Field(min_length=1)
     budget_reservation_ref: str = Field(min_length=1)
-    admitted_run_plan_digest: str = Field(min_length=1)
+    admitted_effective_configuration_digest: str = Field(pattern=DIGEST_PATTERN)
 
 
 class ForkAdmissionObservation(BaseModel):
@@ -203,56 +213,73 @@ class ForkAdmissionObservation(BaseModel):
             raise ValueError("only admitted fork observations contain an admission")
 
 
-class ForkRuntimeObservation(BaseModel):
+class ForkMaterialization(BaseModel):
+    """The recorded fork lineage and reuse decisions of an admitted derived run.
+
+    It replaces the Agent Server-shaped provider `copy_checkpoint` (RRM-001 disposition row
+    33): nothing is copied from the source run; the fork records its lineage and the reuse
+    decisions the derived run's units consult, by immutable ref.
+    """
+
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    status: Literal["copied", "definitively_missing", "ambiguous"]
-    target_thread: AgentThreadKey | None = None
+    request_id: str
+    target_run_id: str
+    lineage: ForkLineageManifest
+
+
+class ForkMaterializationObservation(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    status: Literal["materialized", "definitively_missing", "ambiguous"]
+    materialization: ForkMaterialization | None = None
 
     def model_post_init(self, _context: object) -> None:
-        if (self.status == "copied") != (self.target_thread is not None):
-            raise ValueError("only copied fork observations contain a target thread")
+        if (self.status == "materialized") != (self.materialization is not None):
+            raise ValueError("only materialized fork observations contain a materialization")
 
 
 class ForkAuthority(Protocol):
-    async def admit_fork(self, request: ForkRequest) -> ForkAdmission: ...
+    async def admit_fork(self, request: RunForkRequest) -> ForkAdmission: ...
 
     async def reconcile_fork_admission(
         self,
-        request: ForkRequest,
+        request: RunForkRequest,
     ) -> ForkAdmissionObservation: ...
 
 
-class ForkRuntimeClient(Protocol):
-    async def copy_checkpoint(
+class ForkMaterializer(Protocol):
+    async def materialize(
         self,
-        request: ForkRequest,
-        source_binding: RuntimeExecutionBinding,
+        request: RunForkRequest,
         admission: ForkAdmission,
-    ) -> AgentThreadKey: ...
+    ) -> ForkMaterialization: ...
 
-    async def reconcile_checkpoint_copy(
+    async def reconcile_materialization(
         self,
-        request: ForkRequest,
-        source_binding: RuntimeExecutionBinding,
+        request: RunForkRequest,
         admission: ForkAdmission,
-    ) -> ForkRuntimeObservation: ...
+    ) -> ForkMaterializationObservation: ...
 
 
 class ForkRepository(Protocol):
-    def guard(self, request: ForkRequest) -> AbstractAsyncContextManager[None]: ...
+    def guard(self, request: RunForkRequest) -> AbstractAsyncContextManager[None]: ...
 
-    async def reserve(self, request: ForkRequest) -> bool: ...
+    async def reserve(self, request: RunForkRequest) -> bool: ...
 
-    async def get(self, request_scope: str, request_id: str) -> ForkReceipt | None: ...
+    async def get_request(
+        self, request_scope: str, request_id: str
+    ) -> RunForkRequest | None: ...
 
-    async def claim_admission(self, request: ForkRequest) -> bool: ...
+    async def get(self, request_scope: str, request_id: str) -> RunForkReceipt | None: ...
 
-    async def release_admission_claim(self, request: ForkRequest) -> None: ...
+    async def claim_admission(self, request: RunForkRequest) -> bool: ...
 
-    async def claim_copy(self, request: ForkRequest) -> bool: ...
+    async def release_admission_claim(self, request: RunForkRequest) -> None: ...
 
-    async def release_copy_claim(self, request: ForkRequest) -> None: ...
+    async def claim_copy(self, request: RunForkRequest) -> bool: ...
+
+    async def release_copy_claim(self, request: RunForkRequest) -> None: ...
 
     async def get_admission(
         self,
@@ -262,67 +289,78 @@ class ForkRepository(Protocol):
 
     async def record_admission(
         self,
-        request: ForkRequest,
+        request: RunForkRequest,
         admission: ForkAdmission,
     ) -> ForkAdmission: ...
 
-    async def record(self, request: ForkRequest, receipt: ForkReceipt) -> ForkReceipt: ...
+    async def record(self, request: RunForkRequest, receipt: RunForkReceipt) -> RunForkReceipt: ...
 
 
 class InMemoryForkRepository:
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
-        self._requests: dict[tuple[str, str], ForkRequest] = {}
+        self._requests: dict[tuple[str, str], RunForkRequest] = {}
         self._admissions: dict[tuple[str, str], ForkAdmission] = {}
-        self._receipts: dict[tuple[str, str], ForkReceipt] = {}
+        self._receipts: dict[tuple[str, str], RunForkReceipt] = {}
         self._admission_claims: set[tuple[str, str]] = set()
         self._copy_claims: set[tuple[str, str]] = set()
         self._guards: dict[tuple[str, str], asyncio.Lock] = {}
 
     @asynccontextmanager
-    async def guard(self, request: ForkRequest) -> AsyncIterator[None]:
-        key = (request.source_epoch.request_scope, request.request_id)
+    async def guard(self, request: RunForkRequest) -> AsyncIterator[None]:
+        key = (request.request_scope, request.request_id)
         lock = self._guards.setdefault(key, asyncio.Lock())
         async with lock:
             yield
 
-    async def reserve(self, request: ForkRequest) -> bool:
-        key = (request.source_epoch.request_scope, request.request_id)
+    async def reserve(self, request: RunForkRequest) -> bool:
+        key = (request.request_scope, request.request_id)
         async with self._lock:
-            prior = self._requests.get(key)
+            prior = self._requests.get(key) or next(
+                (
+                    item
+                    for (scope, _), item in self._requests.items()
+                    if scope == request.request_scope
+                    and item.idempotency_key == request.idempotency_key
+                ),
+                None,
+            )
             if prior is not None:
-                if prior != request:
+                if fork_request_fingerprint(prior) != fork_request_fingerprint(request):
                     raise IdempotencyConflict("fork identity has conflicting intent")
                 return False
             self._requests[key] = deepcopy(request)
             return True
 
-    async def get(self, request_scope: str, request_id: str) -> ForkReceipt | None:
+    async def get_request(self, request_scope: str, request_id: str) -> RunForkRequest | None:
+        return deepcopy(self._requests.get((request_scope, request_id)))
+
+    async def get(self, request_scope: str, request_id: str) -> RunForkReceipt | None:
         return deepcopy(self._receipts.get((request_scope, request_id)))
 
-    async def claim_admission(self, request: ForkRequest) -> bool:
-        key = (request.source_epoch.request_scope, request.request_id)
+    async def claim_admission(self, request: RunForkRequest) -> bool:
+        key = (request.request_scope, request.request_id)
         async with self._lock:
             if key in self._admission_claims or key in self._admissions:
                 return False
             self._admission_claims.add(key)
             return True
 
-    async def release_admission_claim(self, request: ForkRequest) -> None:
-        key = (request.source_epoch.request_scope, request.request_id)
+    async def release_admission_claim(self, request: RunForkRequest) -> None:
+        key = (request.request_scope, request.request_id)
         async with self._lock:
             self._admission_claims.discard(key)
 
-    async def claim_copy(self, request: ForkRequest) -> bool:
-        key = (request.source_epoch.request_scope, request.request_id)
+    async def claim_copy(self, request: RunForkRequest) -> bool:
+        key = (request.request_scope, request.request_id)
         async with self._lock:
             if key in self._copy_claims or key in self._receipts:
                 return False
             self._copy_claims.add(key)
             return True
 
-    async def release_copy_claim(self, request: ForkRequest) -> None:
-        key = (request.source_epoch.request_scope, request.request_id)
+    async def release_copy_claim(self, request: RunForkRequest) -> None:
+        key = (request.request_scope, request.request_id)
         async with self._lock:
             self._copy_claims.discard(key)
 
@@ -335,10 +373,10 @@ class InMemoryForkRepository:
 
     async def record_admission(
         self,
-        request: ForkRequest,
+        request: RunForkRequest,
         admission: ForkAdmission,
     ) -> ForkAdmission:
-        key = (request.source_epoch.request_scope, request.request_id)
+        key = (request.request_scope, request.request_id)
         async with self._lock:
             prior = self._admissions.get(key)
             if prior is not None:
@@ -349,8 +387,8 @@ class InMemoryForkRepository:
             self._admission_claims.discard(key)
             return deepcopy(admission)
 
-    async def record(self, request: ForkRequest, receipt: ForkReceipt) -> ForkReceipt:
-        key = (request.source_epoch.request_scope, request.request_id)
+    async def record(self, request: RunForkRequest, receipt: RunForkReceipt) -> RunForkReceipt:
+        key = (request.request_scope, request.request_id)
         async with self._lock:
             prior = self._receipts.get(key)
             if prior is not None:
@@ -363,50 +401,44 @@ class InMemoryForkRepository:
 
 
 class RuntimeForkService:
-    """Admits a new BellLabs run/budget before copying provider checkpoint state."""
+    """The audited fork saga, versioned for semantic forks (RRM-001 disposition row 33).
+
+    reserve -> admit the derived run independently at epoch 1 -> record the admission ->
+    materialize the fork (lineage and reuse decisions; nothing is copied from the source)
+    -> one durable receipt. Every step is idempotent, and a step whose outcome was lost is
+    reconciled from durable state before it is retried; an ambiguous outcome fails closed.
+    """
 
     def __init__(
         self,
         *,
         repository: ForkRepository,
         authority: ForkAuthority,
-        runtime: ForkRuntimeClient,
+        materializer: ForkMaterializer,
     ) -> None:
         self._repository = repository
         self._authority = authority
-        self._runtime = runtime
+        self._materializer = materializer
 
-    async def fork(
-        self,
-        request: ForkRequest,
-        source_binding: RuntimeExecutionBinding,
-    ) -> ForkReceipt:
-        if request.source_epoch != source_binding.epoch:
-            raise ValueError("fork source does not match its persisted runtime binding")
-        if request.target_run.request_scope != request.source_epoch.request_scope:
-            raise ValueError("fork cannot cross request scopes")
-        if request.target_run.belllabs_run_id == request.source_epoch.belllabs_run_id:
-            raise ValueError("fork must create a new BellLabs run")
-        if request.run_plan_digest != source_binding.run_plan_digest:
-            raise ValueError("fork RunPlan differs from the source epoch")
+    async def fork(self, request: RunForkRequest) -> RunForkReceipt:
         async with self._repository.guard(request):
-            return await self._fork_guarded(request, source_binding)
+            return await self._fork_guarded(request)
 
-    async def _fork_guarded(
-        self,
-        request: ForkRequest,
-        source_binding: RuntimeExecutionBinding,
-    ) -> ForkReceipt:
+    async def _fork_guarded(self, request: RunForkRequest) -> RunForkReceipt:
         created = await self._repository.reserve(request)
         if not created:
-            prior = await self._repository.get(
-                request.source_epoch.request_scope,
-                request.request_id,
-            )
+            prior = await self._repository.get(request.request_scope, request.request_id)
             if prior is not None:
                 return prior
+            # A replay continues the persisted intent (its original request times).
+            persisted = await self._repository.get_request(
+                request.request_scope, request.request_id
+            )
+            if persisted is None:
+                raise IdempotencyConflict("fork idempotency key belongs to another request")
+            request = persisted
         admission = await self._repository.get_admission(
-            request.source_epoch.request_scope,
+            request.request_scope,
             request.request_id,
         )
         admission_was_persisted = admission is not None
@@ -431,59 +463,72 @@ class RuntimeForkService:
                 self._validate_admission(request, admission)
                 admission = await self._repository.record_admission(request, admission)
         if not created and admission_was_persisted:
-            runtime_observation = await self._runtime.reconcile_checkpoint_copy(
+            observation = await self._materializer.reconcile_materialization(
                 request,
-                source_binding,
                 admission,
             )
-            if runtime_observation.status == "ambiguous":
-                raise RuntimeError("fork provider application remains ambiguous")
-            if runtime_observation.status == "copied":
-                assert runtime_observation.target_thread is not None
+            if observation.status == "ambiguous":
+                raise ForkRejected(
+                    "fork_materialization_ambiguous",
+                    "fork materialization remains ambiguous; no receipt is recorded",
+                )
+            if observation.status == "materialized":
+                assert observation.materialization is not None
                 return await self._record_receipt(
-                    request,
-                    admission,
-                    runtime_observation.target_thread,
+                    request, admission, observation.materialization
                 )
             await self._repository.release_copy_claim(request)
         if not await self._repository.claim_copy(request):
-            raise RuntimeError("fork checkpoint copy is already in progress")
-        target_thread = await self._runtime.copy_checkpoint(
-            request,
-            source_binding,
-            admission,
-        )
-        return await self._record_receipt(request, admission, target_thread)
+            raise RuntimeError("fork materialization is already in progress")
+        materialization = await self._materializer.materialize(request, admission)
+        return await self._record_receipt(request, admission, materialization)
 
     @staticmethod
-    def _validate_admission(request: ForkRequest, admission: ForkAdmission) -> None:
+    def _validate_admission(request: RunForkRequest, admission: ForkAdmission) -> None:
         if (
             admission.request_id != request.request_id
-            or admission.target_epoch.request_scope != request.source_epoch.request_scope
-            or admission.target_epoch.belllabs_run_id != request.target_run.belllabs_run_id
-            or admission.admitted_run_plan_digest != request.run_plan_digest
+            or admission.target_epoch.request_scope != request.request_scope
+            or admission.target_epoch.belllabs_run_id != request.derived_run_id
+            or admission.target_epoch.belllabs_run_id == request.source_run_id
         ):
             raise ValueError("fork admission does not match the immutable request")
+        # REQ-CP-EXEC-012 (RRM-001 §7 #12): the derived run is a new run at epoch 1.
+        if admission.target_epoch.execution_epoch != DERIVED_EXECUTION_EPOCH:
+            raise ValueError("fork admission must target execution epoch 1")
+        # The admitted configuration is the compiled (possibly patched) target's; a fork
+        # never requires the source's run plan or ERC digest to be unchanged.
+        if (
+            admission.admitted_effective_configuration_digest
+            != request.target.effective_configuration_digest
+        ):
+            raise ValueError("fork admission bound another effective configuration")
 
     async def _record_receipt(
         self,
-        request: ForkRequest,
+        request: RunForkRequest,
         admission: ForkAdmission,
-        target_thread: AgentThreadKey,
-    ) -> ForkReceipt:
+        materialization: ForkMaterialization,
+    ) -> RunForkReceipt:
+        lineage = materialization.lineage
         if (
-            target_thread.belllabs_run_id != admission.target_epoch.belllabs_run_id
-            or target_thread.execution_epoch != admission.target_epoch.execution_epoch
-            or target_thread.relationship != "fork"
-            or target_thread.parent_belllabs_run_id != request.source_epoch.belllabs_run_id
+            materialization.request_id != request.request_id
+            or materialization.target_run_id != admission.target_epoch.belllabs_run_id
+            or lineage != lineage_for(request, admission_ref=admission.admission_ref)
         ):
-            raise ValueError("provider fork returned an invalid child thread identity")
-        receipt = ForkReceipt(
+            raise ValueError("fork materialization does not match the admitted request")
+        receipt = RunForkReceipt(
             request_id=request.request_id,
-            source_epoch=request.source_epoch,
-            target_epoch=admission.target_epoch,
-            target_thread=target_thread,
-            status="accepted",
+            request_scope=request.request_scope,
+            source_run_id=request.source_run_id,
+            snapshot_id=request.snapshot_id,
+            snapshot_digest=request.snapshot_digest,
+            patch_digest=request.patch.patch_digest,
+            target_run_id=admission.target_epoch.belllabs_run_id,
+            admission_ref=admission.admission_ref,
+            admitted_effective_configuration_digest=(
+                admission.admitted_effective_configuration_digest
+            ),
+            lineage=lineage,
             recorded_at=request.requested_at,
         )
         return await self._repository.record(request, receipt)

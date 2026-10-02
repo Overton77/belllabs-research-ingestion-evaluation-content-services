@@ -115,8 +115,15 @@ class BellLabsRunInput:
     # REQ-CP-EXEC-015: carried in the input (and through Continue-As-New); absent means
     # `disabled`, so every captured history replays unchanged.
     search_attribute_policy: SearchAttributePolicy = "disabled"
+    # REQ-CP-EXEC-015 / REQ-CP-EXEC-012 (RRM-006): the source run of a fork root; it sets
+    # `BellLabsParentRunId` on the root only. Absent for ordinary roots and every history.
+    parent_run_id: str | None = None
 
     def __post_init__(self) -> None:
+        if self.parent_run_id is not None and (
+            not self.parent_run_id or self.parent_run_id == self.run_id
+        ):
+            raise ValueError("a fork root's parent run must be another BellLabs run")
         if not all(
             (
                 self.run_id,

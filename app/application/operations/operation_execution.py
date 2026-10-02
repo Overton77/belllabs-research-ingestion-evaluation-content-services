@@ -41,6 +41,7 @@ from app.domain.operation_execution.contracts import (
     OperationSettlement,
     PromotedArtifact,
     PromptTrustClass,
+    ReusedResultRef,
     RuntimeInvocation,
     RuntimeResult,
     RuntimeUsage,
@@ -440,6 +441,28 @@ class SnapshotPort(Protocol):
     async def clone_restore(self, request: SnapshotCloneRequest) -> SnapshotCloneResult: ...
 
 
+class ReusedSourceResult(Protocol):
+    """An immutable source result a fork-derived unit settles by reference (EXEC-012)."""
+
+    @property
+    def ref(self) -> ReusedResultRef: ...
+
+    @property
+    def source_settlement(self) -> OperationSettlement: ...
+
+
+class ForkReusePort(Protocol):
+    """RRM-006: the reuse decision recorded for a fork-derived unit, if any.
+
+    Returns `None` for an ordinary unit or one the fork decided to re-execute; raises (fails
+    closed) for an unmaterialized fork or an incompatible restore.
+    """
+
+    async def reused_result(
+        self, binding: OperationExecutionBinding
+    ) -> ReusedSourceResult | None: ...
+
+
 class OperationExecutionService:
     """Binds immutable intent before invoking any semantic provider side effect."""
 
@@ -458,6 +481,7 @@ class OperationExecutionService:
         journal: OperationExecutionJournalPort | None = None,
         journal_claimed_by: str = "operation-runtime",
         lineage: CheckpointLineageService | None = None,
+        fork_reuse: ForkReusePort | None = None,
     ) -> None:
         self._authority = authority
         self._bindings = bindings
@@ -471,6 +495,7 @@ class OperationExecutionService:
         self._journal = journal
         self._journal_claimed_by = journal_claimed_by
         self._lineage = lineage
+        self._fork_reuse = fork_reuse
 
     async def execute(
         self,
@@ -671,6 +696,12 @@ class OperationExecutionService:
                 )
             accepted_leaf = decision.accepted_checkpoint
             reconciled = True
+        if self._fork_reuse is not None and not reconciled:
+            # REQ-CP-EXEC-012: a fork-derived unit inside the reuse frontier settles by the
+            # immutable source result; cognition is never re-run and nothing is copied.
+            reused = await self._fork_reuse.reused_result(binding)
+            if reused is not None:
+                return await self._settle_reused(binding, claim, admitted, reused)
         if admitted.deep_binding is None and admission.prior_dispatch and not reconciled:
             # A native effect dispatched by an earlier holder is ambiguous: it is reconciled
             # through its claim, never repeated speculatively (REQ-CP-RUN-007).
@@ -937,6 +968,34 @@ class OperationExecutionService:
         )
         await self._complete_post_effects(binding, settled)
         return _public_result(binding, settled)
+
+    async def _settle_reused(
+        self,
+        binding: OperationExecutionBinding,
+        claim: OperationEffectClaim | None,
+        admitted: UnitAttempt,
+        reused: ReusedSourceResult,
+    ) -> OperationExecutionResult:
+        source = reused.source_settlement
+        settled_at = datetime.now(UTC)
+        settlement = OperationSettlement(
+            settlement_id=_stable_id("operation-settlement", binding.binding_id),
+            binding_id=binding.binding_id,
+            status="completed",
+            output_text=source.output_text,
+            structured_output=source.structured_output,
+            output_refs=source.output_refs,
+            settled_at=settled_at,
+            reused_result=reused.ref,
+        )
+        return await self._settle(
+            binding,
+            claim,
+            settlement,
+            started_at=settled_at,
+            attempt=admitted.attempt,
+            admitted=admitted,
+        )
 
     async def _reconciliation(
         self,
@@ -1232,11 +1291,12 @@ def _binding_for(request: OperationExecutionRequest, fingerprint: str) -> Operat
 def settlement_result_manifest(settlement: OperationSettlement) -> bytes:
     """Canonical immutable result manifest bytes; transcripts and payloads stay out."""
 
+    excluded = {"output_text", "structured_output", "event_payloads"}
+    if settlement.reused_result is None:
+        # RRM-006: the field is additive; manifests without a reused result stay byte-identical.
+        excluded.add("reused_result")
     return json.dumps(
-        settlement.model_dump(
-            mode="json",
-            exclude={"output_text", "structured_output", "event_payloads"},
-        ),
+        settlement.model_dump(mode="json", exclude=excluded),
         sort_keys=True,
         separators=(",", ":"),
     ).encode()

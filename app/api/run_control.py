@@ -115,6 +115,11 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
         {"workflow_run.read", "workflow_run.read_checkpoint_summary"}
     ),
     "relay": frozenset({"workflow_run.relay"}),
+    # REQ-CP-EXEC-012/016 (RRM-006): snapshots and forks are separately authorized; no
+    # existing role holds them. A fork also admits a run, so it needs `workflow_run.admit`.
+    "fork_operator": frozenset(
+        {"workflow_run.read", "workflow_run.snapshot", "workflow_run.fork"}
+    ),
 }
 
 
