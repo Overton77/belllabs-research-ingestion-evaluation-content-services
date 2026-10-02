@@ -1045,3 +1045,136 @@ async def test_an_attempt_captures_only_its_own_tip_descending_from_its_pin() ->
         await _own_result_config(
             saver, plan.model_copy(update={"attempt_ref": "attempt-c"}), resumed
         )
+
+
+# --- re-review regression: a lost wake-up hint is recovered by resending ------------------
+
+
+@pytest.mark.asyncio
+async def test_lost_wake_up_hint_is_recovered_by_resending_the_same_decision() -> None:
+    """The decision is accepted and applied, but the hint to the parked `OperationWorkflow`
+    fails (Temporal unavailable). Resending the *same* command replays it idempotently and
+    re-sends the hint; the workflow wakes and the unit converges. A different decision for
+    the resolved revision is still rejected."""
+
+    from temporalio.testing import WorkflowEnvironment
+    from temporalio.worker import Worker
+
+    from app.application.operations.unit_reconciliation import UnitReconciliationService
+    from app.domain.operation_execution.contracts import OperationWorkflowRequest
+    from app.integrations.temporal_unit_reconciliation import TemporalUnitReconciliationNudge
+    from app.temporal.operation_activities import (
+        OperationExecutionActivities,
+        parse_operation_result,
+    )
+    from app.temporal.workflow_sandbox import coordinator_workflow_runner
+    from app.temporal.workflows.operation import OperationWorkflow
+
+    harness = await recovery_harness()
+    unit = stage_recovery_unit(harness.run_id)
+    request = await harness.request(unit)
+    namespace = _namespace(request)
+    harness.saver.crash_after(AFTER_TOOL_CHECKPOINT)
+    await harness.crash(request)
+    leaf_id = await _leaf_id(harness, namespace)
+    await _fork_stamped_sibling(harness, namespace, leaf_id)
+    workflow_request = OperationWorkflowRequest(
+        semantic_attempt_id=request.identity.semantic_key,
+        operation_kind="bound_operation",
+        operation=request,
+        timeout_seconds=3600,
+    )
+    activities = OperationExecutionActivities(harness.service, worker_identity="worker:resend")
+
+    async with await WorkflowEnvironment.start_time_skipping() as environment:
+
+        class FlakyNudge:
+            def __init__(self) -> None:
+                self.inner = TemporalUnitReconciliationNudge(environment.client)
+                self.calls = 0
+
+            async def nudge(self, *, operation_workflow_id: str, decision_id: str) -> None:
+                self.calls += 1
+                if self.calls == 1:
+                    raise RuntimeError("Temporal unavailable")
+                await self.inner.nudge(
+                    operation_workflow_id=operation_workflow_id, decision_id=decision_id
+                )
+
+        nudge = FlakyNudge()
+        reconciliation = UnitReconciliationService(
+            run_control=harness.run_control, lineage=harness.lineage, nudge=nudge
+        )
+        async with (
+            Worker(
+                environment.client,
+                task_queue="rrm004-resend-workflows",
+                workflows=[OperationWorkflow],
+                workflow_runner=coordinator_workflow_runner(),
+            ),
+            Worker(
+                environment.client,
+                task_queue=workflow_request.activity_task_queue,
+                activities=[activities.execute],
+            ),
+        ):
+            handle = await environment.client.start_workflow(
+                OperationWorkflow.run,
+                workflow_request,
+                id=workflow_request.workflow_id,
+                task_queue="rrm004-resend-workflows",
+            )
+            async with asyncio.timeout(60):
+                for _ in range(1200):
+                    if await harness.lineage.get_incident("tenant-1", unit.unit_key, 1):
+                        break
+                    await asyncio.sleep(0.05)
+            incident = await harness.lineage.get_incident("tenant-1", unit.unit_key, 1)
+            assert incident is not None and incident.reason == "multiple_stamped_leaves"
+            assert incident.operation_workflow_id == workflow_request.workflow_id
+            run = await harness.run_control.get_run("tenant-1", harness.run_id)
+            abandon = reconciler_command(
+                harness.run_id,
+                run.version,
+                "reconcile-abandon-resend",
+                ReconcileUnitAction(
+                    unit_key=unit.unit_key,
+                    execution_generation=1,
+                    incident_id=incident.incident_id,
+                    decision="abandon_unit",
+                ),
+            )
+            with pytest.raises(RuntimeError, match="Temporal unavailable"):
+                await reconciliation.reconcile_unit(abandon)
+            resolved = await harness.lineage.get_incident("tenant-1", unit.unit_key, 1)
+            assert resolved is not None and resolved.status == "resolved"
+            description = await handle.describe()
+            assert description.status is not None and description.status.name == "RUNNING"
+
+            other = reconciler_command(
+                harness.run_id,
+                run.version + 1,
+                "reconcile-other-decision",
+                ReconcileUnitAction(
+                    unit_key=unit.unit_key,
+                    execution_generation=1,
+                    incident_id=incident.incident_id,
+                    decision="start_new_generation",
+                ),
+            )
+            with pytest.raises(UnitReconciliationRejected, match="another decision"):
+                await reconciliation.reconcile_unit(other)
+
+            resent = await reconciliation.reconcile_unit(abandon)
+            assert resent.status == CommandStatus.ACCEPTED
+            workflow_result = await asyncio.wait_for(handle.result(), timeout=120)
+
+    result = parse_operation_result(workflow_result.result or {})
+    assert workflow_result.disposition == "failed"
+    assert result.failure_code == "in_doubt_abandoned"
+    assert nudge.calls == 2
+    assert len(harness.model.calls) == 1, "abandon never invokes the model"
+    run = await harness.run_control.get_run("tenant-1", harness.run_id)
+    assert [item.decision_id for item in run.unit_reconciliations] == [
+        "reconcile-abandon-resend"
+    ]

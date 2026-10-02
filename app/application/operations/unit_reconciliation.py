@@ -79,10 +79,34 @@ class UnitReconciliationService:
             raise UnitReconciliationRejected(
                 "no recorded in_doubt incident matches this unit generation and run"
             )
-        if incident.status != "operator_required":
-            raise UnitReconciliationRejected("the incident revision is already resolved")
         accepted = action.accepted_checkpoint
-        if accepted is not None:
+        if incident.status == "resolved":
+            # An exact resend of the accepted command is the documented recovery when the
+            # wake-up hint was lost: run control replays it idempotently, the lineage
+            # application is idempotent, and the hint is sent again. Any other decision for
+            # a resolved revision is rejected.
+            run = await self._run_control.get_run(command.request_scope, command.run_id)
+            recorded = next(
+                (
+                    item
+                    for item in run.unit_reconciliations
+                    if item.incident_id == action.incident_id
+                    and item.unit_key == action.unit_key
+                    and item.execution_generation == action.execution_generation
+                ),
+                None,
+            )
+            if (
+                recorded is None
+                or recorded.decision_id != command.command_id
+                or incident.decision_id != command.command_id
+                or recorded.decision != action.decision
+                or recorded.accepted_checkpoint != accepted
+            ):
+                raise UnitReconciliationRejected(
+                    "the incident revision is already resolved by another decision"
+                )
+        elif accepted is not None:
             # `CON-CP-CHECKPOINT-LINEAGE-V1`: the named key must be a stamped root-namespace
             # descendant of the source. It is checked before run control accepts anything,
             # so an invalid key can never release the operator wait.
