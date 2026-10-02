@@ -138,8 +138,9 @@ def test_generic_artifact_worker_serves_the_cancel_beside_the_execute() -> None:
 
 
 @pytest.mark.asyncio
-async def test_child_cancellation_resolves_the_operation_credential_only_when_children_exist(
-) -> None:
+async def test_child_cancellation_resolves_the_operation_credential_only_when_children_exist() -> (
+    None
+):
     from app.temporal.deployment_composition import ProductionAsyncChildCancellation
 
     calls: list[Any] = []
@@ -178,9 +179,7 @@ async def test_child_cancellation_resolves_the_operation_credential_only_when_ch
     parent = SimpleNamespace(
         binding_id="binding-parent", request_scope="tenant-1", secret_refs=(token,)
     )
-    assert await port.cancel_children(cast(Any, parent), reason="r", requested_at=at) == (
-        "record",
-    )
+    assert await port.cancel_children(cast(Any, parent), reason="r", requested_at=at) == ("record",)
     assert calls == [
         ("list", "tenant-1", "binding-parent"),
         ("resolve", ("environment:BELLABS_ASYNC_SUBAGENT_SERVER_TOKEN",)),
@@ -241,7 +240,10 @@ async def test_deployment_runtime_never_swallows_a_cancel_during_cognition_or_th
     monkeypatch.setattr(composition, "AsyncChildCompletion", Completion)
     monkeypatch.setattr(composition, "PostgresAsyncSubagentAuthority", lambda pool: pool)
     runtime = composition.DeploymentOperationRuntime(
-        cast(Any, Inner()), cast(Any, Children()), pool=cast(Any, "pool"), policies={},
+        cast(Any, Inner()),
+        cast(Any, Children()),
+        pool=cast(Any, "pool"),
+        policies={},
         wait_seconds=5,
     )
     for cognition_blocks in (True, False):
@@ -277,7 +279,10 @@ async def test_deployment_runtime_observes_the_latest_checkpoint_inside_the_gran
             return "delegated"
 
     runtime = composition.DeploymentOperationRuntime(
-        cast(Any, Inner()), cast(Any, object()), pool=cast(Any, "pool"), policies={},
+        cast(Any, Inner()),
+        cast(Any, object()),
+        pool=cast(Any, "pool"),
+        policies={},
         wait_seconds=5,
     )
     result = await runtime.observe_latest(_invocation(), {"environment:KEY": "v"})
@@ -375,3 +380,113 @@ async def test_the_api_reconciliation_never_reaches_the_provider() -> None:
         await provider.cancel(cast(Any, None), cast(Any, None))
     with pytest.raises(AsyncSubagentError, match="not composed"):
         await provider.check(cast(Any, None), cast(Any, None))
+
+
+# --- StageGraph producer liability under cancellation ------------------------------------
+
+
+def _claim(effect_id: str, kind: str, operation_ref: str, *, settled: bool) -> Any:
+    from app.domain.run_control.contracts import (
+        ConsequentialEffectClaim,
+        EffectDisposition,
+        EffectSettlement,
+        EffectSettlementOutcome,
+    )
+
+    at = datetime(2026, 10, 2, tzinfo=UTC)
+    return ConsequentialEffectClaim(
+        effect_id=effect_id,
+        run_id="run-1",
+        effect_kind=kind,
+        operation_ref=operation_ref,
+        provider_idempotency_key=f"key:{effect_id}",
+        reservation_id="reservation",
+        disposition=EffectDisposition.CANCELLED if settled else EffectDisposition.CLAIMED,
+        claimed_at=at,
+        settlement=(
+            EffectSettlement(
+                settlement_id=f"settlement:{effect_id}",
+                observation_id=f"observation:{effect_id}",
+                outcome=EffectSettlementOutcome.CANCELLED,
+                usage_settlement_ref=f"usage:{effect_id}",
+                settled_at=at,
+            )
+            if settled
+            else None
+        ),
+    )
+
+
+def test_a_cancelled_units_pending_child_usage_does_not_hold_its_producer_open() -> None:
+    from app.application.orchestration.service import producer_effects_settled
+    from app.domain.run_control.contracts import EffectLedgerState
+
+    def ledger(*claims: Any) -> EffectLedgerState:
+        return EffectLedgerState(run_id="run-1", claims={item.effect_id: item for item in claims})
+
+    unit = _claim("unit", "operation.runtime", "binding-1", settled=True)
+    own_child = _claim("child-1", "async_subagent.child", "binding-1", settled=False)
+    other_child = _claim("child-2", "async_subagent.child", "binding-2", settled=False)
+    tool = _claim("tool", "tool-effect:send-email", "binding-1", settled=False)
+    # Not cancelled (or no binding): every claimed effect must be settled, as before.
+    assert producer_effects_settled(ledger(unit)) is True
+    assert producer_effects_settled(ledger(unit, own_child)) is False
+    # A cancelled unit: its own children's pending usage is the run's terminal liability.
+    assert producer_effects_settled(ledger(unit, own_child), cancelled_binding_id="binding-1")
+    # Another unit's child, or any other unsettled effect, still holds the producer open.
+    for blocking in (other_child, tool):
+        assert (
+            producer_effects_settled(
+                ledger(unit, own_child, blocking), cancelled_binding_id="binding-1"
+            )
+            is False
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_refused_completion_is_proposed_again_under_a_new_identity() -> None:
+    """RRM-008's StageGraph saga proposes terminalization again after a liability refusal;
+    the new proposal must not reuse the refused one's identity (that was an identity
+    conflict that failed the family), and an Activity retry must replay its own receipt."""
+
+    from app.application.orchestration.service import StageGraphDecisionService
+    from app.domain.run_control.contracts import CommandStatus
+
+    first = datetime(2026, 10, 2, 12, 0, tzinfo=UTC)
+    second = datetime(2026, 10, 2, 12, 1, tzinfo=UTC)
+    receipts: dict[str, Any] = {}
+
+    class Repository:
+        async def get_family_admission_receipt(
+            self, request_scope: str, run_id: str, issuer: str, command_id: str
+        ) -> Any:
+            return receipts.get(command_id)
+
+    def refused(at: datetime) -> Any:
+        return SimpleNamespace(
+            command_result=SimpleNamespace(status=CommandStatus.REJECTED, recorded_at=at)
+        )
+
+    service = StageGraphDecisionService(cast(Any, object()), cast(Any, Repository()))
+    base = "stagegraph:complete-abc"
+
+    def request(at: datetime) -> Any:
+        return SimpleNamespace(
+            request_scope="tenant-1", run_id="run-1", idempotency_issuer="w", occurred_at=at
+        )
+
+    identity = service._completion_command_id  # noqa: SLF001 - the identity rule itself
+    assert await identity(request(first), base) == base
+    receipts[base] = refused(first)
+    # An Activity retry of the refused request replays its own receipt.
+    assert await identity(request(first), base) == base
+    # The saga's next proposal (a later workflow time) takes the next unused identity.
+    assert await identity(request(second), base) == f"{base}:retry:1"
+    receipts[f"{base}:retry:1"] = refused(second)
+    third = datetime(2026, 10, 2, 12, 2, tzinfo=UTC)
+    assert await identity(request(third), base) == f"{base}:retry:2"
+    # An accepted proposal is final: its identity is replayed, never skipped.
+    receipts[f"{base}:retry:2"] = SimpleNamespace(
+        command_result=SimpleNamespace(status=CommandStatus.ACCEPTED, recorded_at=third)
+    )
+    assert await identity(request(third), base) == f"{base}:retry:2"

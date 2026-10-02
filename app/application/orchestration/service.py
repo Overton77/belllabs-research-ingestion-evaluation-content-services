@@ -6,6 +6,7 @@ from typing import Literal, Protocol
 
 from pydantic import TypeAdapter
 
+from app.application.async_subagents.parent_effects import ASYNC_CHILD_EFFECT_KIND
 from app.application.control_plane.service import ControlPlaneService
 from app.application.operations.operation_execution import bind_operation_execution_request
 from app.application.operations.semantic_operation_bindings import (
@@ -72,6 +73,7 @@ from app.domain.run_control.contracts import (
     ActorContext,
     ApplyAuthorityBatchAction,
     CommandStatus,
+    EffectLedgerState,
     LifecycleAction,
     LifecycleCommand,
     RecordObligationEvidenceAction,
@@ -189,6 +191,37 @@ class StageGraphLaunchService:
             baseline_reservation=dict(budget.reservations.get("baseline", {})),
             semantic_input_binding_ref=semantic_input_binding_ref,
         )
+
+
+# Completion proposals one StageGraph run may make (each rejected one keeps its receipt).
+MAX_COMPLETION_PROPOSALS = 256
+
+
+def producer_effects_settled(
+    effects: EffectLedgerState, *, cancelled_binding_id: str | None = None
+) -> bool:
+    """Whether a producer's result may close its liability on the run's effects.
+
+    Every claimed effect must be settled, with one exception under cancellation (RRM-008
+    steps 4-5, composed by RRM-009): the async children of a unit the saga settled
+    `cancelled` were reached by that saga, and a child whose provider attributed no usage
+    keeps it pending on the child's own effect. That pending usage is a liability of the
+    run's terminal settlement (the reducer refuses `cancelled` until a privileged usage
+    reconciliation; the family waits for it), not of the producer, exactly as the operation
+    boundary does not park the cancelled unit on it (`_settle_cancelled`). Without this,
+    a StageGraph run cancelled while its unit's async child ran failed its family with
+    "cancellation left a producer liability open" (found by the RRM-009 live drill).
+    """
+
+    return all(
+        claim.settlement is not None
+        or (
+            cancelled_binding_id is not None
+            and claim.effect_kind == ASYNC_CHILD_EFFECT_KIND
+            and claim.operation_ref == cancelled_binding_id
+        )
+        for claim in effects.claims.values()
+    )
 
 
 class StageGraphDecisionService:
@@ -340,11 +373,17 @@ class StageGraphDecisionService:
         current_projection = replace(request.projection, run_version=run.version)
         effects = await self._run_control.get_effects(request.request_scope, request.run_id)
         budget = await self._run_control.get_budget(request.request_scope, request.run_id)
+        cancelled_binding = (
+            str(request.observation.operation_result.get("binding_id") or "") or None
+            if run.phase.value == "cancelling"
+            and request.observation.operation_disposition == "cancelled"
+            else None
+        )
         observation = replace(
             request.observation,
             reservations_and_usage_settled=True,
-            effects_settled=all(
-                claim.settlement is not None for claim in effects.claims.values()
+            effects_settled=producer_effects_settled(
+                effects, cancelled_binding_id=cancelled_binding
             ),
             cancellation_reconciled=(
                 run.phase.value != "cancelling"
@@ -692,7 +731,9 @@ class StageGraphDecisionService:
         )
         receipt = await self._run_control.execute_family_admission(
             LifecycleCommand(
-                command_id=f"stagegraph:{mutation.mutation_id}",
+                command_id=await self._completion_command_id(
+                    request, f"stagegraph:{mutation.mutation_id}"
+                ),
                 idempotency_issuer=request.idempotency_issuer,
                 request_scope=request.request_scope,
                 run_id=request.run_id,
@@ -713,6 +754,36 @@ class StageGraphDecisionService:
             resulting_run_version=result.resulting_run_version,
             reason_code=result.reason_code,
         )
+
+    async def _completion_command_id(
+        self, request: StageGraphCompletionActivityRequest, base: str
+    ) -> str:
+        """The identity of this completion proposal.
+
+        RRM-008's cancellation saga proposes terminalization again after a liability
+        rejection (`budget_not_settled`, `effects_not_settled`, ...) once the liability is
+        reconciled or its backoff elapses. The projection, and so the mutation identity, is
+        unchanged, but the proposal is a new decision (its `proposed_at` and settled facts
+        differ), so reusing the identity of the rejected proposal was an identity conflict
+        that failed the family (found by the RRM-009 live drill). A rejected proposal keeps
+        its receipt; the next proposal takes the next unused `:retry:{n}` identity. An
+        Activity retry of the same request finds its own receipt and replays it.
+        """
+
+        command_id = base
+        for attempt in range(1, MAX_COMPLETION_PROPOSALS + 1):
+            prior = await self._repository.get_family_admission_receipt(
+                request.request_scope, request.run_id, request.idempotency_issuer, command_id
+            )
+            if (
+                prior is None
+                or prior.command_result.status != CommandStatus.REJECTED
+                # the result records the command's `occurred_at` (the request's, on a retry)
+                or prior.command_result.recorded_at == request.occurred_at
+            ):
+                return command_id
+            command_id = f"{base}:retry:{attempt}"
+        raise ValueError("StageGraph completion was refused too many times")
 
     async def _verify_family_head(
         self,
