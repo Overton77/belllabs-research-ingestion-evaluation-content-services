@@ -60,3 +60,17 @@ class SnapshotCreationInProgress(RuntimeError):
 
 class SnapshotCloneInProgress(RuntimeError):
     """Another worker owns the durable snapshot-clone claim."""
+
+
+class RuntimeInvocationFailure(RuntimeError):
+    """A runtime invocation failed after it was admitted to provider work (REQ-CP-RUN-007).
+
+    It carries only the original exception type and whether a terminal result was observed
+    afterwards, never provider or secret text. The operation boundary settles such a unit
+    `failed` only when no terminal result exists and every effect claim is settled.
+    """
+
+    def __init__(self, error_type: str, *, terminal_result_observed: bool) -> None:
+        super().__init__(f"{error_type} after runtime admission")
+        self.error_type = error_type
+        self.terminal_result_observed = terminal_result_observed

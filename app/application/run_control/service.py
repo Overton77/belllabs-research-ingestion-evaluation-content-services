@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Protocol
 from uuid import NAMESPACE_URL, uuid5
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from app.application.control_plane.service import ControlPlaneService
 from app.application.run_control.run_control_repository import (
@@ -17,7 +17,7 @@ from app.application.run_control.run_control_repository import (
     RunControlRepository,
     authority_state_digest,
 )
-from app.domain.control_plane.canonical import sha256_digest
+from app.domain.control_plane.canonical import contract_fingerprint, sha256_digest
 from app.domain.control_plane.errors import ControlPlaneError
 from app.domain.run_control.contracts import (
     ActorContext,
@@ -1025,10 +1025,10 @@ class RunControlService:
 
 
 def _fingerprint(value: object, *, exclude: set[str]) -> str:
-    if not hasattr(value, "model_dump"):
+    if not isinstance(value, BaseModel):
         raise TypeError("fingerprinted values must be Pydantic contracts")
-    payload = value.model_dump(mode="json", exclude=exclude)
-    return sha256_digest(payload)
+    # Set-valued fields are sorted, never iterated: a JSON-mode dump is hash-seed ordered.
+    return contract_fingerprint(value, exclude=exclude)
 
 
 def _require_same_fingerprint(actual: str, expected: str, subject: str) -> None:

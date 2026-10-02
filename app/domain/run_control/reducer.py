@@ -43,6 +43,7 @@ from app.domain.run_control.contracts import (
     PauseAction,
     PauseDecision,
     ProposeContinuationAction,
+    ReconcileUnitAction,
     RecordAsyncChildFactAction,
     RecordFinalizationResultAction,
     RecordObligationEvidenceAction,
@@ -63,9 +64,11 @@ from app.domain.run_control.contracts import (
     SetWaitAction,
     StartAction,
     TerminalizeAction,
+    UnitReconciliationDecision,
     UsageRecord,
     UsageSettlementRecord,
     WaitCondition,
+    operator_reconciliation_condition_id,
 )
 
 
@@ -113,6 +116,8 @@ ACTION_PERMISSIONS: dict[str, str] = {
     "record_operation_settlement_evidence": "workflow_run.accept_output_evidence",
     "terminalize": "workflow_run.terminalize",
     "record_readiness": "workflow_run.decide_readiness",
+    # AMD-RRM-001: privileged operator reconciliation of an in_doubt runtime unit.
+    "reconcile_unit": "workflow_run.reconcile_unit",
 }
 LIFECYCLE_ACTION_KINDS = frozenset((*ACTION_PERMISSIONS, "apply_authority_batch"))
 AUTHORITY_BATCH_ACTION_TYPES = (
@@ -205,6 +210,7 @@ def reduce_lifecycle(
         projection.accepted_operation_settlement_evidence
     )
     async_children = list[AsyncChildAuthorityState](projection.async_children)
+    unit_reconciliations = list[UnitReconciliationDecision](projection.unit_reconciliations)
     evidence_frontier_digest = projection.evidence_frontier_digest
     next_budget = budget
     next_effects = effects
@@ -216,6 +222,24 @@ def reduce_lifecycle(
         if phase != RunPhase.PENDING:
             raise ReductionRejected("invalid_phase", "only a pending run can start")
         phase = RunPhase.ACTIVE
+    elif (
+        isinstance(action, SetWaitAction)
+        and action.condition.kind == "operator_reconciliation"
+    ):
+        # REQ-CP-RUN-007 (AMD-RRM-001): while a unit is in_doubt the run keeps its phase;
+        # a cancelling run stays cancelling with reconciliation `operator_required`.
+        if phase not in {
+            RunPhase.ACTIVE,
+            RunPhase.WAITING,
+            RunPhase.PAUSED,
+            RunPhase.CANCELLING,
+        }:
+            raise ReductionRejected(
+                "invalid_phase", "operator reconciliation waits need a non-terminal run"
+            )
+        if any(item.condition_id == action.condition.condition_id for item in waits):
+            raise ReductionRejected("wait_exists", "wait condition identity already exists")
+        waits.append(action.condition)
     elif isinstance(action, SetWaitAction):
         if phase not in {RunPhase.ACTIVE, RunPhase.WAITING}:
             raise ReductionRejected("invalid_phase", "waits apply only to active or waiting runs")
@@ -226,6 +250,14 @@ def reduce_lifecycle(
     elif isinstance(action, SatisfyWaitAction):
         if not any(item.condition_id == action.condition_id for item in waits):
             raise ReductionRejected("wait_not_found", "wait condition is not active")
+        if any(
+            item.condition_id == action.condition_id and item.kind == "operator_reconciliation"
+            for item in waits
+        ):
+            raise ReductionRejected(
+                "operator_decision_required",
+                "an operator reconciliation wait is released only by reconcile_unit",
+            )
         waits = [item for item in waits if item.condition_id != action.condition_id]
         phase = _progress_phase(action.runnable_work_remains, waits, pauses)
     elif isinstance(action, PauseAction):
@@ -463,6 +495,8 @@ def reduce_lifecycle(
         )
         outcome = _terminal_outcome(terminal_projection, next_budget, next_effects, action)
         phase = RunPhase.TERMINAL
+    elif isinstance(action, ReconcileUnitAction):
+        phase, waits = _reconcile_unit(phase, waits, unit_reconciliations, action, command)
     elif isinstance(action, RecordReadinessAction):
         if phase != RunPhase.TERMINAL:
             raise ReductionRejected(
@@ -493,6 +527,7 @@ def reduce_lifecycle(
                 operation_settlement_evidence
             ),
             "async_children": tuple(async_children),
+            "unit_reconciliations": tuple(unit_reconciliations),
             "evidence_frontier_digest": evidence_frontier_digest,
             "updated_at": command.occurred_at,
         }
@@ -671,6 +706,59 @@ def _reduce_authority_batch(
         effect_entries=tuple(effect_entries),
         events=(event,),
     )
+
+
+def _reconcile_unit(
+    phase: RunPhase,
+    waits: list[WaitCondition],
+    decisions: list[UnitReconciliationDecision],
+    action: ReconcileUnitAction,
+    command: LifecycleCommand,
+) -> tuple[RunPhase, list[WaitCondition]]:
+    """Accept one typed decision for a unit generation that waits on operator reconciliation.
+
+    The run kept its phase while the unit was `in_doubt` (REQ-CP-RUN-007). The decision
+    releases that unit's `operator_reconciliation` wait; a run that was waiting only on it
+    becomes active again, and `cancelling` or `paused` runs keep their phase.
+    """
+
+    condition_id = operator_reconciliation_condition_id(
+        action.unit_key, action.execution_generation
+    )
+    wait = next((item for item in waits if item.condition_id == condition_id), None)
+    if (
+        wait is None
+        or wait.kind != "operator_reconciliation"
+        or wait.verification_ref != action.incident_id
+    ):
+        raise ReductionRejected(
+            "reconciliation_not_pending",
+            "no operator reconciliation is pending for this unit generation and incident",
+        )
+    if any(
+        item.unit_key == action.unit_key
+        and item.execution_generation == action.execution_generation
+        for item in decisions
+    ):
+        raise ReductionRejected(
+            "unit_already_reconciled", "the unit generation already has a decision"
+        )
+    decisions.append(
+        UnitReconciliationDecision(
+            decision_id=command.command_id,
+            unit_key=action.unit_key,
+            execution_generation=action.execution_generation,
+            incident_id=action.incident_id,
+            decision=action.decision,
+            accepted_checkpoint=action.accepted_checkpoint,
+            actor_id=command.actor.actor_id,
+            decided_at=command.occurred_at,
+        )
+    )
+    remaining = [item for item in waits if item.condition_id != condition_id]
+    if phase == RunPhase.WAITING and not remaining:
+        phase = RunPhase.ACTIVE
+    return phase, remaining
 
 
 def _progress_phase(

@@ -45,7 +45,6 @@ from app.domain.operation_execution.checkpoint_lineage import (
     STAMP_INVOCATION_ID,
     STAMP_STATE_SCHEMA_DIGEST,
     STAMP_UNIT_KEY,
-    IncompatibleCheckpointSchema,
     OperationActivityAttempt,
 )
 from app.domain.operation_execution.contracts import (
@@ -342,10 +341,10 @@ async def test_operation_before_after_checkpoints_and_idempotent_duplicate_deliv
     # Duplicate delivery: the settled unit returns unchanged with no provider work.
     calls_before = list(stack.model.observed_human_counts)
     duplicate = await stack.service.execute(request, delivery(3, unit))
-    # The journal replays the digest-bound manifest, which deliberately omits output text.
-    assert duplicate.model_dump(exclude={"output_text", "structured_output"}) == (
-        result.model_dump(exclude={"output_text", "structured_output"})
-    )
+    # RRM-004: the manifest commits to the digest-bound output payload, so the settled
+    # replay restores `output_text` and `structured_output` and returns unchanged.
+    assert duplicate == result
+    assert duplicate.output_text == "human-count:1"
     assert stack.model.observed_human_counts == calls_before == [1]
     assert len(await root_lineage(stack.saver, namespace)) == len(chain)
     assert await stack.lineage.list_transitions("tenant-1", namespace) == (transition,)
@@ -423,8 +422,13 @@ async def test_goal_session_lineage_is_linear_rollover_is_empty_and_schema_gated
     # A unit bound to a different cognitive state schema cannot continue the session.
     drifted = executor(4)
     drifted_request = await bound_request(stack, drifted, binding=stack.drifted_binding)
-    with pytest.raises(IncompatibleCheckpointSchema):
-        await stack.service.execute(drifted_request, delivery(1, drifted))
+    # RRM-004 (REQ-CP-DA-018): a digest mismatch is `in_doubt` with a typed incident, not an
+    # error; the model is never called and the session head does not move.
+    parked = await stack.service.execute(drifted_request, delivery(1, drifted))
+    assert parked.status == "in_doubt" and parked.failure_code == "schema_mismatch"
+    incident = await stack.lineage.get_incident("tenant-1", drifted.unit_key, 1)
+    assert incident is not None and incident.reason == "schema_mismatch"
+    assert parked.reconciliation_incident_id == incident.incident_id
     assert stack.model.observed_human_counts == [1, 2, 1, 1]
     assert await stack.lineage.get_namespace_head("tenant-1", session) == two.result_key
 

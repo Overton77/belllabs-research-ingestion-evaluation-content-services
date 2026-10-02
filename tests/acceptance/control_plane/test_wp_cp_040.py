@@ -682,6 +682,11 @@ async def test_shared_session_reuse_is_ordered_and_same_unit_never_reappends_pro
     again: the same-unit re-execution now fails closed before the model is called. The
     intentional cross-iteration session reuse (next unit, pinned to the namespace head) and
     the empty rollover session keep their accepted human-message counts.
+
+    RRM-004 (REQ-CP-DA-018): RRM-003 failed the same-unit re-execution closed because only
+    `not_submitted` was implemented. The full classifier now recognizes the unit's own
+    stamped terminal lineage as `terminal_unobserved` and reconstructs the identical result
+    from it, still with no model call and no re-appended prompt.
     """
 
     binding, _profile, bundle = exact_fixture()
@@ -695,8 +700,13 @@ async def test_shared_session_reuse_is_ordered_and_same_unit_never_reappends_pro
         adapter, lineage, first_unit
     )
 
-    with pytest.raises(CheckpointLineageInDoubt, match="no namespace head"):
-        await adapter.execute(first_invocation, {})
+    reconstructed = await adapter.execute(first_invocation, {})
+    assert reconstructed.checkpoint is not None and first_result.checkpoint is not None
+    assert reconstructed.checkpoint.classification == "terminal_unobserved"
+    assert reconstructed.checkpoint.result_key == first_result.checkpoint.result_key
+    assert reconstructed.output_text == first_result.output_text
+    assert reconstructed.usage == first_result.usage
+    assert model.observed_human_counts == [1]
     with pytest.raises(CheckpointLineageInDoubt, match="unsettled transition"):
         await planned_invocation(first_unit, lineage, attempt=2)
 

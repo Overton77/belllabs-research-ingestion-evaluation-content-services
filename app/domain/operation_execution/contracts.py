@@ -1334,6 +1334,26 @@ class OperationSettlement(Contract):
     # REQ-CP-DA-017: the settlement references the result key of the transition it settles.
     checkpoint_transition_id: str | None = None
     result_checkpoint: QualifiedCheckpointKey | None = None
+    # RRM-004: the digest-bound address of the output payload (`output_text`,
+    # `structured_output`). The result manifest excludes the payload itself but commits to
+    # it, so a settled replay or a settlement recovered from the manifest returns the same
+    # output unchanged.
+    output_payload_ref: str | None = None
+    output_payload_digest: str | None = Field(default=None, pattern=DIGEST_PATTERN)
+    output_payload_size_bytes: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def output_payload_address_is_exact(self) -> OperationSettlement:
+        fields = (
+            self.output_payload_ref,
+            self.output_payload_digest,
+            self.output_payload_size_bytes,
+        )
+        if any(value is not None for value in fields) and not all(
+            value is not None for value in fields
+        ):
+            raise ValueError("output payload ref, digest, and size form one exact address")
+        return self
 
 
 class OperationExecutionResult(Contract):
@@ -1349,6 +1369,8 @@ class OperationExecutionResult(Contract):
     unit_key: str | None = None
     checkpoint_transition_id: str | None = None
     result_checkpoint: QualifiedCheckpointKey | None = None
+    # RRM-004: the typed `in_doubt` incident awaiting operator `reconcile_unit`.
+    reconciliation_incident_id: str | None = None
 
 
 class OperationWorkflowRequest(Contract):

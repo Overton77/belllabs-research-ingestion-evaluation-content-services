@@ -13,6 +13,7 @@ from app.domain.control_plane.contracts import (
     ExactDefinitionRef,
     RunInputManifestRef,
 )
+from app.domain.graph_runtime.identities import QualifiedCheckpointKey
 from app.domain.run_control.contracts import (
     AcceptedObligationEvidence,
     AcceptedOutputEvidence,
@@ -29,6 +30,7 @@ from app.domain.run_control.contracts import (
     LifecycleCommand,
     PauseAction,
     PauseDecision,
+    ReconcileUnitAction,
     RecordFinalizationResultAction,
     RecordObligationEvidenceAction,
     RecordOutputEvidenceAction,
@@ -46,8 +48,9 @@ from app.domain.run_control.contracts import (
     TerminalizeAction,
     VerifiedRunConfiguration,
     WaitCondition,
+    operator_reconciliation_condition_id,
 )
-from app.domain.run_control.errors import IdempotencyConflict
+from app.domain.run_control.errors import CommandRejected, IdempotencyConflict
 
 NOW = datetime(2026, 7, 19, 18, 0, tzinfo=UTC)
 DIGEST = "sha256:" + "a" * 64
@@ -777,3 +780,267 @@ async def test_terminalization_binds_authoritatively_accepted_obligation_evidenc
     )
     assert terminal.status == CommandStatus.ACCEPTED
     assert terminal.terminal_outcome == RunOutcome.COMPLETED
+
+
+# --- RRM-004: `reconcile_unit` and the `operator_reconciliation` wait (CON-CP-LIFECYCLE-V1) ---
+
+UNIT_KEY = "bl-unit-v1:" + "e" * 64
+# `reconcile_unit` is privileged: the ordinary operator fixture does not hold it.
+RECONCILE_PERMISSIONS = ALL_PERMISSIONS | {"workflow_run.reconcile_unit"}
+
+
+def reconciler_command(
+    run_id: str, version: int, command_id: str, action: object
+) -> LifecycleCommand:
+    return command(run_id, version, command_id, action).model_copy(
+        update={"actor": actor().model_copy(update={"permissions": RECONCILE_PERMISSIONS})}
+    )
+INCIDENT_ID = "unit-in-doubt:fixture"
+
+
+def operator_wait(unit_key: str = UNIT_KEY, generation: int = 1) -> WaitCondition:
+    return WaitCondition(
+        condition_id=operator_reconciliation_condition_id(unit_key, generation),
+        kind="operator_reconciliation",
+        scope=frozenset({unit_key}),
+        verification_ref=INCIDENT_ID,
+        timeout_policy_ref="operator-reconciliation:no-timeout",
+    )
+
+
+def reconcile(
+    decision: str = "abandon_unit",
+    *,
+    generation: int = 1,
+    incident_id: str = INCIDENT_ID,
+    accepted: QualifiedCheckpointKey | None = None,
+) -> ReconcileUnitAction:
+    return ReconcileUnitAction(
+        unit_key=UNIT_KEY,
+        execution_generation=generation,
+        incident_id=incident_id,
+        decision=decision,  # type: ignore[arg-type]
+        accepted_checkpoint=accepted,
+    )
+
+
+def set_wait(
+    run_id: str, version: int, command_id: str, condition: WaitCondition, *, runnable: bool
+) -> LifecycleCommand:
+    return command(
+        run_id,
+        version,
+        command_id,
+        SetWaitAction(condition=condition, runnable_work_remains=runnable),
+    )
+
+
+async def _started_run(run_service: RunControlService, request_id: str) -> str:
+    admitted = await run_service.admit(request(request_id=request_id))
+    assert admitted.run_id is not None
+    started = await run_service.execute(command(admitted.run_id, 1, "start", StartAction()))
+    assert started.status == CommandStatus.ACCEPTED
+    return admitted.run_id
+
+
+@pytest.mark.asyncio
+async def test_in_doubt_unit_keeps_the_run_phase_until_reconcile_unit_decides() -> None:
+    """REQ-CP-RUN-007: the run stays in its phase with an `operator_reconciliation` wait,
+    which only the typed, privileged `reconcile_unit` command releases."""
+
+    run_service, _repository = service()
+    run_id = await _started_run(run_service, "reconcile-unit")
+    parked = await run_service.execute(
+        set_wait(run_id, 2, "park", operator_wait(), runnable=False)
+    )
+    assert parked.status == CommandStatus.ACCEPTED
+    assert parked.phase == RunPhase.ACTIVE, "an in_doubt unit does not change the run phase"
+
+    released = await run_service.execute(
+        command(
+            run_id,
+            3,
+            "satisfy-operator-wait",
+            SatisfyWaitAction(
+                condition_id=operator_wait().condition_id, verification_evidence_ref="evidence"
+            ),
+        )
+    )
+    assert released.status == CommandStatus.REJECTED
+    assert released.reason_code == "operator_decision_required"
+
+    for command_id, action in (
+        ("reconcile-other-incident", reconcile(incident_id="unit-in-doubt:other")),
+        ("reconcile-other-generation", reconcile(generation=2)),
+    ):
+        rejected = await run_service.execute(reconciler_command(run_id, 3, command_id, action))
+        assert rejected.status == CommandStatus.REJECTED
+        assert rejected.reason_code == "reconciliation_not_pending"
+
+    stale = await run_service.execute(
+        reconciler_command(run_id, 2, "reconcile-stale", reconcile())
+    )
+    assert stale.status == CommandStatus.STALE
+
+    # The ordinary operator fixture lacks the privileged permission.
+    unprivileged = command(run_id, 3, "reconcile-unprivileged", reconcile())
+    with pytest.raises(CommandRejected, match="reconcile_unit"):
+        await run_service.execute(unprivileged)
+
+    decided = await run_service.execute(
+        reconciler_command(run_id, 3, "reconcile-abandon", reconcile())
+    )
+    assert decided.status == CommandStatus.ACCEPTED
+    projection = await run_service.get_run("tenant-1", run_id)
+    assert projection.active_waits == ()
+    assert projection.phase == RunPhase.ACTIVE
+    assert [
+        (item.decision_id, item.unit_key, item.execution_generation, item.decision)
+        for item in projection.unit_reconciliations
+    ] == [("reconcile-abandon", UNIT_KEY, 1, "abandon_unit")]
+
+    again = await run_service.execute(
+        reconciler_command(run_id, 4, "reconcile-again", reconcile())
+    )
+    assert again.status == CommandStatus.REJECTED
+    assert again.reason_code == "reconciliation_not_pending"
+    replayed = await run_service.execute(
+        reconciler_command(run_id, 3, "reconcile-abandon", reconcile())
+    )
+    assert replayed == decided, "the accepted decision is idempotent by command identity"
+
+
+@pytest.mark.asyncio
+async def test_operator_wait_preserves_cancelling_and_waiting_phases() -> None:
+    """A cancelling run stays cancelling (`operator_required`); a run waiting on other
+    conditions stays waiting after the unit's decision."""
+
+    run_service, _repository = service()
+    cancelling_run = await _started_run(run_service, "reconcile-cancelling")
+    cancelled = await run_service.execute(command(cancelling_run, 2, "cancel", CancelAction()))
+    assert cancelled.phase == RunPhase.CANCELLING
+    parked = await run_service.execute(
+        set_wait(cancelling_run, 3, "park", operator_wait(), runnable=True)
+    )
+    assert parked.status == CommandStatus.ACCEPTED and parked.phase == RunPhase.CANCELLING
+    decided = await run_service.execute(
+        reconciler_command(cancelling_run, 4, "decide", reconcile())
+    )
+    assert decided.status == CommandStatus.ACCEPTED and decided.phase == RunPhase.CANCELLING
+
+    waiting_run = await _started_run(run_service, "reconcile-waiting")
+    other = WaitCondition(
+        condition_id="dependency:other",
+        kind="dependency",
+        scope=frozenset({"stage:other"}),
+        verification_ref="dependency:other",
+        timeout_policy_ref="timeout:none",
+    )
+    waiting = await run_service.execute(
+        set_wait(waiting_run, 2, "wait-other", other, runnable=False)
+    )
+    assert waiting.phase == RunPhase.WAITING
+    parked = await run_service.execute(
+        set_wait(waiting_run, 3, "park", operator_wait(), runnable=True)
+    )
+    assert parked.phase == RunPhase.WAITING
+    decided = await run_service.execute(
+        reconciler_command(waiting_run, 4, "decide", reconcile())
+    )
+    assert decided.phase == RunPhase.WAITING
+    projection = await run_service.get_run("tenant-1", waiting_run)
+    assert [item.condition_id for item in projection.active_waits] == ["dependency:other"]
+
+
+def test_reconcile_unit_decisions_are_typed() -> None:
+    accepted = QualifiedCheckpointKey(
+        checkpointer_ref_digest=DIGEST,
+        thread_id="belllabs/stage/unit/gen/1",
+        checkpoint_id="checkpoint-1",
+        parent_checkpoint_id="checkpoint-0",
+    )
+    assert reconcile("accept_descendant", accepted=accepted).accepted_checkpoint == accepted
+    with pytest.raises(ValueError, match="accepted checkpoint"):
+        reconcile("accept_descendant")
+    with pytest.raises(ValueError, match="accepted checkpoint"):
+        reconcile("start_new_generation", accepted=accepted)
+    with pytest.raises(ValueError, match="root-namespace"):
+        reconcile(
+            "accept_descendant", accepted=accepted.model_copy(update={"checkpoint_ns": "sub"})
+        )
+
+
+def _equal_sets_with_different_iteration_order(
+    items: frozenset[str],
+) -> tuple[frozenset[str], frozenset[str]]:
+    """Two equal frozensets whose iteration orders differ (hash-collision placement)."""
+
+    import random
+
+    ordered = sorted(items)
+    generator = random.Random(4)
+    base = frozenset(ordered)
+    for _ in range(2_000):
+        shuffled = list(ordered)
+        generator.shuffle(shuffled)
+        candidate = frozenset(shuffled)
+        if list(candidate) != list(base):
+            return base, candidate
+    raise AssertionError("no insertion order changed the iteration order")
+
+
+@pytest.mark.asyncio
+async def test_command_fingerprint_is_independent_of_set_iteration_order() -> None:
+    """RRM-004 root cause of the intermittent RRM-003 merge-gate failure.
+
+    `model_dump(mode="json")` lists a `frozenset` in iteration order, which depends on the
+    per-process string-hash seed and on how the set was built. Run control fingerprinted a
+    revalidated copy of each command while the journal coordinator re-fingerprinted its own
+    instance, so an exact replay failed for some `PYTHONHASHSEED` values ("stored operation
+    authority result conflicts with exact replay command"). Fingerprints now sort sets.
+    """
+
+    from app.domain.control_plane.canonical import contract_fingerprint
+
+    first_order, second_order = _equal_sets_with_different_iteration_order(ALL_PERMISSIONS)
+    first = command("run-x", 1, "fingerprint", StartAction()).model_copy(
+        update={
+            "actor": ActorContext.model_construct(
+                actor_id="operator",
+                authority_refs=frozenset({"authority:lifecycle"}),
+                permissions=first_order,
+            )
+        }
+    )
+    second = first.model_copy(
+        update={"actor": first.actor.model_copy(update={"permissions": second_order})}
+    )
+    assert first == second
+    # The defect: JSON-mode dumps of equal commands differ, so their digests differ.
+    assert sha256_digest(first.model_dump(mode="json")) != sha256_digest(
+        second.model_dump(mode="json")
+    )
+    assert contract_fingerprint(first, exclude={"occurred_at"}) == contract_fingerprint(
+        second, exclude={"occurred_at"}
+    )
+
+    # End to end: an exact replay rebuilt with a differently ordered actor is accepted.
+    run_service, _repository = service()
+    admitted = await run_service.admit(request(request_id="fingerprint-order"))
+    assert admitted.run_id is not None
+    ordered_actor = ActorContext.model_construct(
+        actor_id="operator",
+        authority_refs=frozenset({"authority:lifecycle"}),
+        permissions=first_order,
+    )
+    started = await run_service.execute(
+        command(admitted.run_id, 1, "start", StartAction()).model_copy(
+            update={"actor": ordered_actor}
+        )
+    )
+    replay = await run_service.execute(
+        command(admitted.run_id, 1, "start", StartAction()).model_copy(
+            update={"actor": ordered_actor.model_copy(update={"permissions": second_order})}
+        )
+    )
+    assert replay == started

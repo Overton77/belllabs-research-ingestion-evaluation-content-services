@@ -13,6 +13,7 @@ from pydantic import (
 
 from app.domain.control_plane.canonical import canonical_json, sha256_digest
 from app.domain.control_plane.contracts import ExactDefinitionRef, RunInputManifestRef
+from app.domain.graph_runtime.identities import UNIT_KEY_PATTERN, QualifiedCheckpointKey
 
 DIGEST_PATTERN = r"^sha256:[0-9a-f]{64}$"
 MAX_AUTHORITY_BATCH_BYTES = 65_536
@@ -266,7 +267,17 @@ class AdmissionDecision(Contract):
 
 class WaitCondition(Contract):
     condition_id: str = Field(min_length=1)
-    kind: Literal["dependency", "timer", "approval", "resource", "budget", "external_result"]
+    # `operator_reconciliation` (AMD-RRM-001, REQ-CP-RUN-007): an `in_doubt` runtime unit
+    # waits for the typed `reconcile_unit` command; it is never resolved by re-execution.
+    kind: Literal[
+        "dependency",
+        "timer",
+        "approval",
+        "resource",
+        "budget",
+        "external_result",
+        "operator_reconciliation",
+    ]
     scope: frozenset[str] = Field(min_length=1)
     verification_ref: str = Field(min_length=1)
     timeout_policy_ref: str = Field(min_length=1)
@@ -479,6 +490,53 @@ class DecideContinuationAction(Contract):
 class TerminalizeAction(Contract):
     kind: Literal["terminalize"] = "terminalize"
     proposal: TerminalizationProposal
+
+
+UnitReconciliationDecisionKind = Literal[
+    "accept_descendant",
+    "abandon_unit",
+    "start_new_generation",
+]
+
+
+def operator_reconciliation_condition_id(unit_key: str, execution_generation: int) -> str:
+    """The `operator_reconciliation` wait of one `in_doubt` unit generation."""
+
+    return f"operator-reconciliation:{unit_key}:gen:{execution_generation}"
+
+
+class ReconcileUnitAction(Contract):
+    """`reconcile_unit` (`CON-CP-LIFECYCLE-V1`, AMD-RRM-001): the privileged, typed operator
+    decision for one `in_doubt` runtime-unit generation (REQ-CP-DA-018, REQ-CP-RUN-007)."""
+
+    kind: Literal["reconcile_unit"] = "reconcile_unit"
+    unit_key: str = Field(pattern=UNIT_KEY_PATTERN)
+    execution_generation: int = Field(ge=1)
+    incident_id: str = Field(min_length=1, max_length=256)
+    decision: UnitReconciliationDecisionKind
+    # `accept_descendant` names the exact stamped root-namespace descendant to adopt.
+    accepted_checkpoint: QualifiedCheckpointKey | None = None
+
+    @model_validator(mode="after")
+    def accepted_checkpoint_matches_decision(self) -> ReconcileUnitAction:
+        if (self.decision == "accept_descendant") != (self.accepted_checkpoint is not None):
+            raise ValueError("only accept_descendant names an exact accepted checkpoint")
+        if self.accepted_checkpoint is not None and not self.accepted_checkpoint.is_root:
+            raise ValueError("an accepted descendant must be a root-namespace checkpoint")
+        return self
+
+
+class UnitReconciliationDecision(Contract):
+    """An accepted `reconcile_unit` decision, held by the run projection as authority."""
+
+    decision_id: str = Field(min_length=1)
+    unit_key: str = Field(pattern=UNIT_KEY_PATTERN)
+    execution_generation: int = Field(ge=1)
+    incident_id: str = Field(min_length=1, max_length=256)
+    decision: UnitReconciliationDecisionKind
+    accepted_checkpoint: QualifiedCheckpointKey | None = None
+    actor_id: str = Field(min_length=1)
+    decided_at: AwareDatetime
 
 
 class AcceptFinalizationPlanAction(Contract):
@@ -706,7 +764,8 @@ LifecycleAction = Annotated[
     | RecordOperationSettlementEvidenceAction
     | ApplyAuthorityBatchAction
     | TerminalizeAction
-    | RecordReadinessAction,
+    | RecordReadinessAction
+    | ReconcileUnitAction,
     Field(discriminator="kind"),
 ]
 
@@ -765,6 +824,8 @@ class RunProjection(Contract):
     finalization_output_refs: tuple[str, ...] = ()
     finalization_omission_reason: str | None = None
     async_children: tuple[AsyncChildAuthorityState, ...] = ()
+    # AMD-RRM-001: accepted `reconcile_unit` decisions, one per in_doubt unit generation.
+    unit_reconciliations: tuple[UnitReconciliationDecision, ...] = ()
     updated_at: AwareDatetime
 
     @model_validator(mode="after")

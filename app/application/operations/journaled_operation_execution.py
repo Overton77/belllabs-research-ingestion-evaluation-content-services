@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+from collections.abc import Callable
 from datetime import datetime
 from typing import Protocol
 from uuid import NAMESPACE_URL, uuid5
@@ -14,7 +16,8 @@ from app.application.operations.operation_journal import (
     OperationJournalService,
 )
 from app.application.workspaces.artifact_promotion import ArtifactPayloadAddress
-from app.domain.control_plane.canonical import sha256_digest
+from app.domain.control_plane.canonical import contract_fingerprint, sha256_digest
+from app.domain.operation_execution.checkpoint_lineage import UnitReconciliationIncident
 from app.domain.operation_execution.contracts import (
     OperationExecutionBinding,
     OperationSettlement,
@@ -35,6 +38,7 @@ from app.domain.run_control.contracts import (
     CommandStatus,
     DomainEventEnvelope,
     EffectDisposition,
+    EffectLedgerState,
     EffectSettlementOutcome,
     LifecycleCommand,
     ObserveEffectAction,
@@ -43,13 +47,22 @@ from app.domain.run_control.contracts import (
     RunProjection,
     SettleEffectAction,
     SettlePendingUsageAction,
+    SetWaitAction,
+    UnitReconciliationDecision,
+    WaitCondition,
+    operator_reconciliation_condition_id,
 )
+
+OUTPUT_PAYLOAD_MEDIA_TYPE = "application/vnd.belllabs.operation-output+json"
+SETTLEMENT_MEDIA_TYPE = "application/vnd.belllabs.operation-settlement+json"
 
 
 class JournalRunControlReader(Protocol):
     async def get_run(self, request_scope: str, run_id: str) -> RunProjection: ...
 
     async def get_budget(self, request_scope: str, run_id: str) -> BudgetState: ...
+
+    async def get_effects(self, request_scope: str, run_id: str) -> EffectLedgerState: ...
 
     async def execute(self, command: LifecycleCommand) -> CommandResult: ...
 
@@ -159,10 +172,53 @@ class JournaledOperationExecutionCoordinator:
                 size_bytes=settlement.result_manifest_size_bytes,
             )
         )
-        replay = OperationSettlement.model_validate_json(content)
+        return await self._restore(binding, OperationSettlement.model_validate_json(content))
+
+    async def load_result_manifest(
+        self,
+        binding: OperationExecutionBinding,
+        *,
+        manifest_ref: str,
+        manifest_digest: str,
+        manifest_size_bytes: int,
+    ) -> OperationSettlement:
+        """The exact settlement a fenced result observation recorded (`observed_unsettled`)."""
+
+        content = await self._results.retrieve(
+            ArtifactPayloadAddress(
+                object_ref=manifest_ref,
+                content_digest=manifest_digest,
+                size_bytes=manifest_size_bytes,
+            )
+        )
+        return await self._restore(binding, OperationSettlement.model_validate_json(content))
+
+    async def _restore(
+        self, binding: OperationExecutionBinding, replay: OperationSettlement
+    ) -> OperationSettlement:
+        """Re-attach the digest-bound output payload the manifest commits to."""
+
         if replay.binding_id != binding.binding_id:
             raise ValueError("result manifest belongs to another operation binding")
-        return replay
+        if replay.output_payload_ref is None:
+            return replay
+        assert replay.output_payload_digest is not None
+        assert replay.output_payload_size_bytes is not None
+        payload = json.loads(
+            await self._results.retrieve(
+                ArtifactPayloadAddress(
+                    object_ref=replay.output_payload_ref,
+                    content_digest=replay.output_payload_digest,
+                    size_bytes=replay.output_payload_size_bytes,
+                )
+            )
+        )
+        return replay.model_copy(
+            update={
+                "output_text": payload["output_text"],
+                "structured_output": payload["structured_output"],
+            }
+        )
 
     async def settle(
         self,
@@ -183,18 +239,35 @@ class JournaledOperationExecutionCoordinator:
             or settlement.binding_id != binding.binding_id
         ):
             raise ValueError("claim, binding, and settlement authority do not match")
+        output = output_payload(settlement)
+        output_address = await self._results.stage(
+            artifact_id=f"{settlement.settlement_id}:output",
+            content=output,
+            content_digest=f"sha256:{hashlib.sha256(output).hexdigest()}",
+            media_type=OUTPUT_PAYLOAD_MEDIA_TYPE,
+        )
+        settlement = settlement.model_copy(
+            update={
+                "output_payload_ref": output_address.object_ref,
+                "output_payload_digest": output_address.content_digest,
+                "output_payload_size_bytes": output_address.size_bytes,
+            }
+        )
         content = settlement_result_manifest(settlement)
         content_digest = f"sha256:{hashlib.sha256(content).hexdigest()}"
         address = await self._results.stage(
             artifact_id=settlement.settlement_id,
             content=content,
             content_digest=content_digest,
-            media_type="application/vnd.belllabs.operation-settlement+json",
+            media_type=SETTLEMENT_MEDIA_TYPE,
         )
         if before_authority is not None:
-            # REQ-CP-DA-017: the checkpoint transition links this exact immutable manifest
-            # and is accepted by compare-and-set before authority settlement.
-            await before_authority(address.object_ref, address.content_digest)
+            # REQ-CP-EXEC-014 / REQ-CP-DA-017: the fenced result observation (and, for
+            # cognition, the checkpoint transition) fixes this exact immutable manifest by
+            # compare-and-set before authority settlement.
+            await before_authority(
+                address.object_ref, address.content_digest, address.size_bytes
+            )
         current_run = await self._run_control.get_run(binding.request_scope, binding.run_id)
         release_amounts = {
             dimension: limit
@@ -356,6 +429,136 @@ class JournaledOperationExecutionCoordinator:
         )
         return settlement
 
+    async def record_in_doubt(
+        self,
+        binding: OperationExecutionBinding,
+        claim: OperationEffectClaim,
+        incident: UnitReconciliationIncident,
+    ) -> None:
+        """REQ-CP-RUN-007: preserve the ambiguous disposition and park on the operator.
+
+        The unit's effect claim stays unsettled with an `ambiguous` observation, and the run
+        declares an `operator_reconciliation` wait without changing its phase. Both writes
+        are idempotent by command identity, so a repeated in_doubt attempt is a no-op.
+        """
+
+        correlation = f"operation:{binding.semantic_attempt_key}"
+        await self._execute_tolerating(
+            binding,
+            lambda version: LifecycleCommand(
+                command_id=f"operation-effect-in-doubt:{incident.incident_id}",
+                idempotency_issuer="operation-journal",
+                request_scope=binding.request_scope,
+                run_id=binding.run_id,
+                expected_run_version=version,
+                actor=self._actor,
+                action=ObserveEffectAction(
+                    effect_id=claim.effect_claim_id,
+                    observation_id=f"in-doubt:{incident.incident_id}",
+                    disposition=EffectDisposition.AMBIGUOUS,
+                    evidence_refs=(incident.incident_id,),
+                ),
+                reason=f"Runtime unit is in_doubt: {incident.reason}",
+                evidence_refs=(binding.binding_id, incident.incident_id),
+                occurred_at=incident.recorded_at,
+                correlation_id=correlation,
+                causation_id=claim.effect_claim_id,
+            ),
+            tolerated={"effect_observation_exists", "effect_already_settled", "run_is_terminal"},
+        )
+        await self._execute_tolerating(
+            binding,
+            lambda version: LifecycleCommand(
+                command_id=f"operation-reconciliation-wait:{incident.incident_id}",
+                idempotency_issuer="operation-journal",
+                request_scope=binding.request_scope,
+                run_id=binding.run_id,
+                expected_run_version=version,
+                actor=self._actor,
+                action=SetWaitAction(
+                    condition=WaitCondition(
+                        condition_id=operator_reconciliation_condition_id(
+                            incident.unit_key, incident.execution_generation
+                        ),
+                        kind="operator_reconciliation",
+                        scope=frozenset({incident.unit_key}),
+                        verification_ref=incident.incident_id,
+                        timeout_policy_ref="operator-reconciliation:no-timeout",
+                    ),
+                    runnable_work_remains=True,
+                ),
+                reason="Park the in_doubt unit on operator reconciliation",
+                evidence_refs=(binding.binding_id, incident.incident_id),
+                occurred_at=incident.recorded_at,
+                correlation_id=correlation,
+                causation_id=claim.effect_claim_id,
+            ),
+            tolerated={"wait_exists", "invalid_phase", "run_is_terminal"},
+        )
+
+    async def get_unit_reconciliation(
+        self,
+        binding: OperationExecutionBinding,
+        *,
+        unit_key: str,
+        execution_generation: int,
+    ) -> UnitReconciliationDecision | None:
+        """The accepted `reconcile_unit` decision held by run-control authority, if any."""
+
+        run = await self._run_control.get_run(binding.request_scope, binding.run_id)
+        return next(
+            (
+                item
+                for item in run.unit_reconciliations
+                if item.unit_key == unit_key and item.execution_generation == execution_generation
+            ),
+            None,
+        )
+
+    async def unsettled_effect_ids(
+        self,
+        binding: OperationExecutionBinding,
+        claim: OperationEffectClaim,
+    ) -> tuple[str, ...]:
+        """Consequential effects the unit claimed, besides its own, that remain unsettled."""
+
+        effects = await self._run_control.get_effects(binding.request_scope, binding.run_id)
+        return tuple(
+            sorted(
+                effect_id
+                for effect_id, item in effects.claims.items()
+                if item.operation_ref == binding.binding_id
+                and effect_id != claim.effect_claim_id
+                and item.settlement is None
+            )
+        )
+
+    async def _execute_tolerating(
+        self,
+        binding: OperationExecutionBinding,
+        build: Callable[[int], LifecycleCommand],
+        *,
+        tolerated: set[str],
+    ) -> None:
+        for _attempt in range(8):
+            run = await self._run_control.get_run(binding.request_scope, binding.run_id)
+            command = build(run.version)
+            prior = await self._run_control.get_command_result(
+                command.request_scope,
+                command.run_id,
+                command.idempotency_issuer,
+                command.command_id,
+            )
+            result = prior or await self._run_control.execute(command)
+            if result.status == CommandStatus.ACCEPTED or result.reason_code in tolerated:
+                return
+            if result.status == CommandStatus.STALE and prior is None:
+                continue
+            raise RuntimeError(
+                f"in_doubt authority record rejected by run control: {result.reason_code}"
+            )
+        raise RuntimeError("in_doubt authority record remained stale after retries")
+
     async def settle_pending_usage(
         self,
         binding: OperationExecutionBinding,
@@ -501,9 +704,7 @@ class JournaledOperationExecutionCoordinator:
             command = command.model_copy(
                 update={"expected_run_version": prior.resulting_run_version - 1}
             )
-            fingerprint = sha256_digest(
-                command.model_dump(mode="json", exclude={"occurred_at"})
-            )
+            fingerprint = contract_fingerprint(command, exclude={"occurred_at"})
             if (
                 prior.status != CommandStatus.ACCEPTED
                 or prior.command_fingerprint != fingerprint
@@ -515,6 +716,20 @@ class JournaledOperationExecutionCoordinator:
             return command, prior
         result = await self._run_control.execute(command)
         return command, result
+
+
+def output_payload(settlement: OperationSettlement) -> bytes:
+    """Canonical output payload bytes; the manifest commits to their digest."""
+
+    return json.dumps(
+        {
+            "output_text": settlement.output_text,
+            "structured_output": settlement.structured_output,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode()
 
 
 def _effect_claim_id(binding: OperationExecutionBinding) -> str:

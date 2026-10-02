@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any, cast
 
 from deepagents import create_deep_agent
@@ -12,6 +13,7 @@ from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver, CheckpointTuple
+from langgraph.types import StateSnapshot
 
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.graph_runtime.identities import QualifiedCheckpointKey
@@ -19,7 +21,9 @@ from app.domain.operation_execution.checkpoint_lineage import (
     ROOT_CHECKPOINT_NS,
     STAMP_STATE_SCHEMA_DIGEST,
     CheckpointCapture,
+    CheckpointClassification,
     CheckpointInvocationPlan,
+    CheckpointLineageError,
     CheckpointLineageInDoubt,
     IncompatibleCheckpointSchema,
 )
@@ -29,7 +33,10 @@ from app.domain.operation_execution.contracts import (
     RuntimeResult,
     RuntimeUsage,
 )
-from app.domain.operation_execution.errors import DeepAgentMaterializationError
+from app.domain.operation_execution.errors import (
+    DeepAgentMaterializationError,
+    RuntimeInvocationFailure,
+)
 from app.integrations.agents.deep_agents.materializer import ExactDeepAgentMaterializer
 from app.integrations.langsmith_tracing import trace_deep_agent_execute
 
@@ -88,84 +95,115 @@ class DeepAgentRuntimeAdapter:
             }
             disclosure_observer = _SkillDisclosureObserver(binding)
             checkpointer = cast(BaseCheckpointSaver[Any], materialized.checkpointer)
-            # REQ-CP-DA-018 (RRM-003 scope): only `not_submitted` admits a submission. Any
-            # other observed checkpointer state fails closed before the model is invoked;
-            # resume and terminal reconstruction are the recovery protocol's job.
-            source_key = await _classify_not_submitted(checkpointer, plan)
+            # REQ-CP-DA-018: classify the unit generation from the checkpointer before any
+            # provider work, then act exactly as `CON-CP-CHECKPOINT-LINEAGE-V1` prescribes:
+            # submit once, resume without input, reconstruct without invocation, or fail
+            # closed as `in_doubt` with typed candidates.
+            classified = await _classify(checkpointer, agent, plan)
+            source_key = classified.source_key
             thread_config: RunnableConfig = {
                 "configurable": {
                     "thread_id": plan.namespace,
                     "checkpoint_ns": ROOT_CHECKPOINT_NS,
                 }
             }
-            # REQ-CP-DA-016/017: exact namespace thread, root checkpoint_ns, submission
-            # pinned to the expected source, and scalar stamps copied onto every checkpoint.
-            config: RunnableConfig = {
-                "configurable": {
-                    **thread_config["configurable"],
-                    **(
-                        {"checkpoint_id": source_key.checkpoint_id}
-                        if source_key is not None
-                        else {}
-                    ),
-                },
-                "metadata": plan.metadata_stamps(),
-                "callbacks": [disclosure_observer],
-            }
             prior_messages: list[BaseMessage] = []
-            if source_key is not None:
-                prior_snapshot = await agent.aget_state(
-                    {"configurable": dict(config["configurable"])}
+            try:
+                if source_key is not None:
+                    prior_snapshot = await agent.aget_state(
+                        _checkpoint_config(plan.namespace, source_key.checkpoint_id)
+                    )
+                    prior_messages = cast(
+                        list[BaseMessage], prior_snapshot.values.get("messages", [])
+                    )
+                if classified.kind == CheckpointClassification.TERMINAL_UNOBSERVED:
+                    # Terminal reconstruction: the result is the stamped leaf's state.
+                    assert classified.leaf_snapshot is not None
+                    snapshot = classified.leaf_snapshot
+                    result = cast(dict[str, Any], dict(snapshot.values))
+                else:
+                    pinned = (
+                        classified.leaf_id
+                        if classified.kind == CheckpointClassification.INTERRUPTED
+                        else (source_key.checkpoint_id if source_key is not None else None)
+                    )
+                    # REQ-CP-DA-016/017: exact namespace thread, root checkpoint_ns, pinned
+                    # to the expected source (submit) or to the interrupted leaf (resume),
+                    # and scalar stamps copied onto every checkpoint.
+                    config: RunnableConfig = {
+                        "configurable": {
+                            **thread_config["configurable"],
+                            **({"checkpoint_id": pinned} if pinned is not None else {}),
+                        },
+                        "metadata": plan.metadata_stamps(),
+                        "callbacks": [disclosure_observer],
+                    }
+                    # A resume never re-appends the submitted input: it continues the
+                    # pending tasks of the pinned checkpoint with no input.
+                    invoke_input = (
+                        None
+                        if classified.kind == CheckpointClassification.INTERRUPTED
+                        else state
+                    )
+                    result = cast(
+                        dict[str, Any],
+                        await agent.ainvoke(
+                            cast(Any, invoke_input),
+                            context=materialized.context,
+                            config=config,
+                            durability="sync",
+                        ),
+                    )
+                    snapshot = await agent.aget_state(thread_config)
+                actual_state = cast(dict[str, Any], snapshot.values)
+                messages = cast(
+                    list[BaseMessage], actual_state.get("messages", result.get("messages", []))
                 )
-                prior_messages = cast(
-                    list[BaseMessage], prior_snapshot.values.get("messages", [])
+                capture = await _capture_result(
+                    checkpointer,
+                    plan,
+                    source_key,
+                    snapshot_config=snapshot.config,
+                    pending=bool(snapshot.next or snapshot.interrupts),
+                    classification=classified.kind,
+                    summary={
+                        "state_keys": sorted(actual_state),
+                        "message_count": len(messages),
+                        "step": (snapshot.metadata or {}).get("step"),
+                    },
                 )
-            result = cast(
-                dict[str, Any],
-                await agent.ainvoke(
-                    cast(Any, state),
-                    context=materialized.context,
-                    config=config,
-                    durability="sync",
-                ),
-            )
-            snapshot = await agent.aget_state(thread_config)
-            actual_state = cast(dict[str, Any], snapshot.values)
-            messages = cast(
-                list[BaseMessage], actual_state.get("messages", result.get("messages", []))
-            )
-            capture = await _capture_result(
-                checkpointer,
-                plan,
-                source_key,
-                snapshot_config=snapshot.config,
-                pending=bool(snapshot.next or snapshot.interrupts),
-                summary={
-                    "state_keys": sorted(actual_state),
-                    "message_count": len(messages),
-                    "step": (snapshot.metadata or {}).get("step"),
-                },
-            )
-
-        final = next((item for item in reversed(messages) if isinstance(item, AIMessage)), None)
-        output_text = _message_text(final) if final is not None else ""
-        structured = _structured_output(result.get("structured_response"), output_text)
-        inspection = _inspect_state(
-            binding,
-            actual_state,
-            messages,
-            materialized.resolved_attachments,
-            disclosure_observer.disclosed_skills,
-            permissions is not None,
-        )
-        return RuntimeResult(
-            output_text=output_text,
-            structured_output=structured if isinstance(structured, dict) else None,
-            usage=_usage(invocation, messages[len(prior_messages) :]),
-            provider_run_id=(str(final.id) if final is not None and final.id else None),
-            event_payloads=(inspection,),
-            checkpoint=capture,
-        )
+                final = next(
+                    (item for item in reversed(messages) if isinstance(item, AIMessage)), None
+                )
+                output_text = _message_text(final) if final is not None else ""
+                structured = _structured_output(result.get("structured_response"), output_text)
+                inspection = _inspect_state(
+                    binding,
+                    actual_state,
+                    messages,
+                    materialized.resolved_attachments,
+                    disclosure_observer.disclosed_skills,
+                    permissions is not None,
+                )
+                return RuntimeResult(
+                    output_text=output_text,
+                    structured_output=structured if isinstance(structured, dict) else None,
+                    usage=_usage(invocation, messages[len(prior_messages) :]),
+                    provider_run_id=(str(final.id) if final is not None and final.id else None),
+                    event_payloads=(inspection,),
+                    checkpoint=capture,
+                )
+            except CheckpointLineageError:
+                raise
+            except Exception as error:
+                # REQ-CP-RUN-007 (narrowed): report whether a terminal result exists after the
+                # failure, so the boundary settles `failed` only when none does.
+                raise RuntimeInvocationFailure(
+                    type(error).__name__,
+                    terminal_result_observed=await _terminal_result_may_exist(
+                        checkpointer, agent, plan
+                    ),
+                ) from error
 
 
 _MAX_LINEAGE_WALK = 100_000
@@ -211,42 +249,168 @@ def _parent_id(item: CheckpointTuple) -> str | None:
     return cast(str | None, item.parent_config["configurable"].get("checkpoint_id"))
 
 
-async def _classify_not_submitted(
-    checkpointer: BaseCheckpointSaver[Any], plan: CheckpointInvocationPlan
-) -> QualifiedCheckpointKey | None:
-    source = plan.expected_source
-    thread_config: RunnableConfig = {
-        "configurable": {"thread_id": plan.namespace, "checkpoint_ns": ROOT_CHECKPOINT_NS}
-    }
-    if source is None:
-        if await checkpointer.aget_tuple(thread_config) is not None:
-            raise CheckpointLineageInDoubt(
-                "the namespace has root checkpoints but BellLabs records no namespace head"
-            )
-        return None
-    recorded = await checkpointer.aget_tuple(
-        _checkpoint_config(plan.namespace, source.checkpoint_id)
-    )
-    if recorded is None:
-        raise CheckpointLineageInDoubt("the recorded source checkpoint is missing")
-    if recorded.metadata.get(STAMP_STATE_SCHEMA_DIGEST) != plan.state_schema_digest:
-        raise IncompatibleCheckpointSchema(
-            "source checkpoint state-schema stamp differs from the binding (REQ-CP-CS-007)"
-        )
-    if _parent_id(recorded) != source.parent_checkpoint_id:
-        raise CheckpointLineageInDoubt("the source checkpoint's ancestry differs from its record")
-    async for item in checkpointer.alist(thread_config):
-        if _parent_id(item) == source.checkpoint_id:
-            raise CheckpointLineageInDoubt(
-                "a root checkpoint already descends from the expected source"
-            )
+@dataclass(frozen=True)
+class _Classified:
+    kind: CheckpointClassification
+    source_key: QualifiedCheckpointKey | None
+    leaf_id: str | None = None
+    leaf_snapshot: StateSnapshot | None = None
+
+
+def _qualified(plan: CheckpointInvocationPlan, item: CheckpointTuple) -> QualifiedCheckpointKey:
     return QualifiedCheckpointKey(
         checkpointer_ref_digest=plan.checkpointer_ref_digest,
         thread_id=plan.namespace,
         checkpoint_ns=ROOT_CHECKPOINT_NS,
-        checkpoint_id=source.checkpoint_id,
-        parent_checkpoint_id=_parent_id(recorded),
+        checkpoint_id=str(item.config["configurable"]["checkpoint_id"]),
+        parent_checkpoint_id=_parent_id(item),
     )
+
+
+def _stamped(item: CheckpointTuple, plan: CheckpointInvocationPlan) -> bool:
+    return all(item.metadata.get(key) == value for key, value in plan.metadata_stamps().items())
+
+
+async def _classify(
+    checkpointer: BaseCheckpointSaver[Any],
+    agent: Any,
+    plan: CheckpointInvocationPlan,
+) -> _Classified:
+    """`CON-CP-CHECKPOINT-LINEAGE-V1` classification of one unit generation.
+
+    Descendants of the expected source are the root-namespace checkpoints whose parent chain
+    reaches it (for a new namespace, every root checkpoint). None means `not_submitted`.
+    Exactly one stamped lineage with no unstamped or foreign descendant is `interrupted`
+    when its leaf has pending tasks and `terminal_unobserved` when it has none. Anything
+    else, including a pending LangGraph interrupt, is `in_doubt`. An operator-accepted
+    descendant (`accept_descendant`) is classified as if it were the unique leaf; stamped
+    descendants it has since gained (a resumed run) are followed to their unique leaf.
+    """
+
+    source = plan.expected_source
+    thread_config: RunnableConfig = {
+        "configurable": {"thread_id": plan.namespace, "checkpoint_ns": ROOT_CHECKPOINT_NS}
+    }
+    source_key: QualifiedCheckpointKey | None = None
+    if source is not None:
+        recorded = await checkpointer.aget_tuple(
+            _checkpoint_config(plan.namespace, source.checkpoint_id)
+        )
+        if recorded is None:
+            raise CheckpointLineageInDoubt(
+                "the recorded source checkpoint is missing", reason="missing_checkpoint"
+            )
+        if recorded.metadata.get(STAMP_STATE_SCHEMA_DIGEST) != plan.state_schema_digest:
+            raise IncompatibleCheckpointSchema(
+                "source checkpoint state-schema stamp differs from the binding (REQ-CP-CS-007)"
+            )
+        if _parent_id(recorded) != source.parent_checkpoint_id:
+            raise CheckpointLineageInDoubt(
+                "the source checkpoint's ancestry differs from its record",
+                reason="ancestry_mismatch",
+            )
+        source_key = _qualified(plan, recorded)
+    items: dict[str, CheckpointTuple] = {}
+    async for item in checkpointer.alist(thread_config):
+        if len(items) >= _MAX_LINEAGE_WALK:
+            raise CheckpointLineageInDoubt(
+                "the checkpointer lineage cannot be classified", reason="unclassifiable"
+            )
+        items[str(item.config["configurable"]["checkpoint_id"])] = item
+    parents = {checkpoint_id: _parent_id(item) for checkpoint_id, item in items.items()}
+
+    def descends(checkpoint_id: str, ancestor: str | None) -> bool:
+        cursor = parents.get(checkpoint_id)
+        for _ in range(len(parents) + 1):
+            if cursor == ancestor:
+                return True
+            if cursor is None:
+                return False
+            cursor = parents.get(cursor)
+        return False
+
+    root_id = source.checkpoint_id if source is not None else None
+    descendants = {
+        checkpoint_id
+        for checkpoint_id in items
+        if checkpoint_id != root_id and descends(checkpoint_id, root_id)
+    }
+    if not descendants:
+        return _Classified(CheckpointClassification.NOT_SUBMITTED, source_key)
+    stamped = {
+        checkpoint_id for checkpoint_id in descendants if _stamped(items[checkpoint_id], plan)
+    }
+    scope = descendants
+    if plan.accepted_leaf is not None:
+        accepted = plan.accepted_leaf.checkpoint_id
+        path_ok = accepted in stamped and _qualified(plan, items[accepted]) == plan.accepted_leaf
+        cursor = parents.get(accepted) if path_ok else None
+        while path_ok and cursor != root_id:
+            if cursor is None or cursor not in stamped:
+                path_ok = False
+                break
+            cursor = parents.get(cursor)
+        if not path_ok:
+            raise CheckpointLineageInDoubt(
+                "the accepted descendant is not a stamped root-namespace descendant of the "
+                "source",
+                reason="accepted_descendant_invalid",
+            )
+        scope = {accepted} | {
+            checkpoint_id for checkpoint_id in descendants if descends(checkpoint_id, accepted)
+        }
+    leaves = sorted(
+        checkpoint_id
+        for checkpoint_id in scope
+        if not any(parents.get(other) == checkpoint_id for other in scope)
+    )
+    candidates = tuple(
+        _qualified(plan, items[checkpoint_id])
+        for checkpoint_id in leaves
+        if checkpoint_id in stamped
+    )
+    if scope - stamped:
+        raise CheckpointLineageInDoubt(
+            "a root checkpoint descending from the source is not this unit generation's",
+            reason="foreign_descendant",
+            candidates=candidates,
+        )
+    if len(leaves) != 1:
+        raise CheckpointLineageInDoubt(
+            "more than one stamped leaf descends from the source",
+            reason="multiple_stamped_leaves",
+            candidates=candidates,
+        )
+    leaf_id = leaves[0]
+    snapshot = await agent.aget_state(_checkpoint_config(plan.namespace, leaf_id))
+    if snapshot.interrupts or any(task.interrupts for task in snapshot.tasks):
+        raise CheckpointLineageInDoubt(
+            "the stamped leaf holds a pending LangGraph interrupt",
+            reason="pending_interrupt",
+            candidates=candidates,
+        )
+    return _Classified(
+        (
+            CheckpointClassification.INTERRUPTED
+            if snapshot.next
+            else CheckpointClassification.TERMINAL_UNOBSERVED
+        ),
+        source_key,
+        leaf_id=leaf_id,
+        leaf_snapshot=snapshot,
+    )
+
+
+async def _terminal_result_may_exist(
+    checkpointer: BaseCheckpointSaver[Any], agent: Any, plan: CheckpointInvocationPlan
+) -> bool:
+    """After a failure: True unless classification shows no terminal stamped result."""
+
+    try:
+        classified = await _classify(checkpointer, agent, plan)
+    except Exception:  # noqa: BLE001 - an unclassifiable lineage is not provably non-terminal
+        return True
+    return classified.kind == CheckpointClassification.TERMINAL_UNOBSERVED
 
 
 async def _capture_result(
@@ -257,6 +421,7 @@ async def _capture_result(
     snapshot_config: RunnableConfig,
     pending: bool,
     summary: dict[str, object],
+    classification: CheckpointClassification = CheckpointClassification.NOT_SUBMITTED,
 ) -> CheckpointCapture:
     """Capture the result config and verify a fully stamped root lineage to the source."""
 
@@ -303,6 +468,7 @@ async def _capture_result(
         result_key=result_key,
         ancestry_verified=True,
         stamped_checkpoint_count=stamped,
+        classification=classification,
         redacted_summary_digest=sha256_digest(
             {
                 "namespace": plan.namespace,

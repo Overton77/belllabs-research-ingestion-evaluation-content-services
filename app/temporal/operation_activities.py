@@ -45,12 +45,19 @@ class OperationExecutionActivities:
     async def execute(self, payload: dict[str, Any]) -> dict[str, Any]:
         info = activity.info()
         # REQ-CP-EXEC-014: the real Temporal delivery is observed, never part of identity.
+        # Its claim lease ends with the scheduler's own deadline for this attempt, so the
+        # retry Temporal schedules after a lost worker finds the lease expired.
         attempt = OperationActivityAttempt(
             workflow_id=info.workflow_id,
             workflow_run_id=info.workflow_run_id,
             activity_id=info.activity_id,
             attempt=info.attempt,
             worker_identity=self._worker_identity,
+            lease_expires_at=(
+                info.started_time + info.start_to_close_timeout
+                if info.start_to_close_timeout is not None
+                else None
+            ),
         )
         try:
             request = OperationExecutionRequest.model_validate(payload)
