@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
@@ -386,6 +387,24 @@ async def scheduled_activities(
     return scheduled
 
 
+async def completed_activities(stack: ProductionStack, workflow_id: str, name: str) -> int:
+    """How many `name` Activities of the execution completed (returned a result)."""
+
+    history = await stack.client.get_workflow_handle(workflow_id).fetch_history()
+    scheduled = {
+        event.event_id
+        for event in history.events
+        if event.event_type == EventType.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED
+        and event.activity_task_scheduled_event_attributes.activity_type.name == name
+    }
+    return sum(
+        1
+        for event in history.events
+        if event.event_type == EventType.EVENT_TYPE_ACTIVITY_TASK_COMPLETED
+        and event.activity_task_completed_event_attributes.scheduled_event_id in scheduled
+    )
+
+
 async def signals(stack: ProductionStack, workflow_id: str) -> list[str]:
     history = await stack.client.get_workflow_handle(workflow_id).fetch_history()
     return [
@@ -393,6 +412,18 @@ async def signals(stack: ProductionStack, workflow_id: str) -> list[str]:
         for event in history.events
         if event.event_type == EventType.EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED
     ]
+
+
+async def workflow_state(stack: ProductionStack, workflow_id: str) -> str:
+    """The execution's status, with the close event's failure when it failed."""
+
+    handle = stack.client.get_workflow_handle(workflow_id)
+    description = await handle.describe()
+    status = description.status.name if description.status is not None else "UNKNOWN"
+    if status == "RUNNING":
+        return status
+    history = await handle.fetch_history()
+    return f"{status}: {str(history.events[-1])[:1500]}"
 
 
 async def _json(stack: ProductionStack, path: str) -> dict[str, Any]:
@@ -501,6 +532,7 @@ async def run_cancellation_drill(
     operation_id = f"operation/{run_id}:operation:{DRAFT_OPERATION}:attempt:1"
     evidence: dict[str, Any] = {"run_id": run_id, "window": gate.window}
     child_id = provider_run_id = None
+    refused_at = 0.0
     if gate.window in {"sync_child", "cognition"}:
         await asyncio.wait_for(gate.held.wait(), timeout=180)
     if async_children:
@@ -560,9 +592,25 @@ async def run_cancellation_drill(
             "usage_disposition": link.usage_disposition,
             "pending_before": pending["pending_external_amounts"],
         }
-        # The pending usage is a liability: the run stays `cancelling`.
+        # The pending usage is a liability: the run stays `cancelling` and the family waits
+        # on it (liability backoff or the `liability_reconciled` hint).
         await asyncio.sleep(3)
         assert (await _run(stack, run_id))["phase"] == "cancelling"
+        family_state = await workflow_state(stack, family_id)
+        assert family_state == "RUNNING", (
+            family_state,
+            await workflow_state(stack, operation_id),
+            await operation_rows(stack, run_id),
+        )
+
+        # The family proposed terminalization and the reducer refused it on the liability:
+        # the family now waits on its backoff (30 s) or the `liability_reconciled` hint.
+        async def terminal_proposal_refused() -> bool:
+            return await completed_activities(stack, family_id, "stagegraph.complete") >= 1
+
+        await _wait_for(stack, run_id, terminal_proposal_refused, 120)
+        assert (await _run(stack, run_id))["phase"] == "cancelling"
+        refused_at = time.monotonic()
         usage = await attributed_usage(child_id, provider_run_id)
         response = await reconcile_child_usage(stack, run_id, child_id, usage)
         assert response.status_code == 200, response.text
@@ -579,6 +627,10 @@ async def run_cancellation_drill(
         return (await _run(stack, run_id))["phase"] == "terminal"
 
     await _wait_for(stack, run_id, terminal, 180)
+    if async_children:
+        # Woken by the hint, not by the family's 30 s liability timer.
+        evidence["terminal_after_refusal_seconds"] = round(time.monotonic() - refused_at, 1)
+        assert evidence["terminal_after_refusal_seconds"] < 25, evidence
     run = await _run(stack, run_id)
     assert run["terminal_outcome"] == "cancelled", run
     receipts = await _receipt_states(stack, run_id, command_id)
