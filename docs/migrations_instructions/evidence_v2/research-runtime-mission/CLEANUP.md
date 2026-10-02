@@ -119,3 +119,14 @@ Scope: snapshot, fork and patch modules; command, receipt and intervention paths
 - Fork saga (`prepare`, claim, admit, materialize, record) over `ForkRepository`, `ForkAuthority` and `ForkMaterializer` ports: a generic reserve/claim/settle saga with receipts.
 - Boundary-command ledger (`BoundaryCommandRecord`, per-space sequence, requested vs applied, delivery update) with `temporal_boundary_commands.py` as the sole Temporal-specific delivery: a provider-neutral operator-command receipt ledger.
 - Shared Postgres helpers (`_set_scope`, JSON load/dump, advisory lock) repeated across the run-fork, stage3 kernel and lineage repositories: one `application` infrastructure helper.
+
+### CR-3 integration
+
+The coordinator checked the diff independently: it deletes four unreferenced symbols, with no wire or persisted identity changes. It was merged `--no-ff` at `1bdfd5c`. Merge gates:
+- ruff: clean.
+- mypy: 366 files, no issues.
+- Hermetic pytest: 954 passed, 72 skipped, 2 xfailed.
+- Pytest with the disposable Postgres/Mongo stack (DSNs exported explicitly) and `--env-file`: 996 passed, 30 skipped, 2 xfailed.
+
+The service gate needs the DSNs exported explicitly. The developer `.env` does not supply them, so `--env-file` alone runs the hermetic set.
+
