@@ -20,3 +20,5 @@
 - [ ] Stop the current session. Do not create/start a company fixture, run its report/fork, schedule an automation or message another agent to execute it.
 
 This ticket is not full system/mission acceptance. If a required prerequisite fails, return the named owning ticket for rework and do not emit readiness.
+- [ ] (Coordinator, from the RRM-016 merge gate.) Two RRM-007 Temporal tests (`test_rrm_007_boundary_interventions.py`, time-skipping) have each failed once with a wall-clock `asyncio` timeout while the host was heavily loaded, and passed in isolation. Before the final gate, run the full suite at least three times on the final integration commit. Then either show those tests stable, or make their waits load-tolerant without weakening what they assert. Record the result.
+- [ ] (Coordinator.) RRM-015 (required before RRM-010), RRM-016, RRM-018 and RRM-019 are accepted. RRM-018 and RRM-019 block multi-iteration GoalDirected runs on Mongo documents and with differing output refs.

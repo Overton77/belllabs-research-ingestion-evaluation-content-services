@@ -1,6 +1,6 @@
 # RRM-016 implementation evidence
 
-Disposition: ready_for_review (independent review `approve_with_fixes`; fixes 1-5 applied in `0c8522f` and the following documentation commit; re-review pending)
+Disposition: accepted 2026-10-02 (independent review approve_with_fixes, then two re-check rounds; RRM-018/RRM-019 opened (strict xfail reproductions); tested head `79bd1d3`; merged into integration at `f99ac1d`)
 Recorded date: 2026-10-02 (America/New_York)
 Qualification identity: RRM-016 compose GoalDirected operations with the run-control journal and operation authority. Requirements: REQ-CP-RUN-006 (budgets reserve, consume, release and settle), REQ-CP-RUN-007 (consequential effects claimed and reconciled to exactly one settlement), REQ-CP-RUN-009 (usage settles exactly once, AMD-RRM-001), REQ-CP-EXEC-014 (claim-fenced attempts), REQ-CP-DA-013 (exact exclusive writable slots), REQ-CP-DA-018 (crash windows), REQ-BP-GD-004 (independent verifier), REQ-BP-GD-011 (durable pause), REQ-BP-GD-012 (shared-session ordering).
 Base revision and head revision: base integration `6e77850`. Integration merged in three times (no rebase): `fd10c8e` (CR-2 at `ac7daf9`), `ddec4fa` (RRM-006 at `2799e17`), `54cd977` (CR-3 at `9d0ffbd`). Code commits: `5969f52` (implementation and tests), `aa87988` (captured post-change history, fork reuse outcome, RRM-018 reproduction), `731b770` (RRM-019 reproduction). Tested code head before review: `731b770` (its documentation commit `2c43b43` also corrected the spec identifiers in one comment). Review-fix code commit: `0c8522f`; **tested code head after review: `0c8522f`** (see Review disposition). The documentation commit recording the review follows it and changes no code. Not merged into integration (the coordinator owns review and merge).
@@ -303,6 +303,20 @@ Re-check gates (DSN runs and full runs under the stack lock):
 | Full hermetic (DSNs unset) | **977 passed, 74 skipped, 3 xfailed**, 0 failed |
 | Full with both DSNs exported and `--env-file` | **1020 passed, 30 skipped, 4 xfailed**, 0 failed. A first run on the same tree took 380 s instead of about 240 s and timed out one RRM-007 time-skipping test (`test_goal_directed_policy_pause_is_durable_across_forced_continue_as_new`, a 120 s Temporal client RPC timeout under host load; the test uses fake activities and none of the changed code). It passed alone and in the hermetic run, and the full rerun above is clean. |
 
+## Integration merge gates (coordinator, merge commit `f99ac1d`)
+
+Tested head `79bd1d3` merged `--no-ff` into `integration/research-runtime-mission` at `f99ac1d`.
+
+| Command | Result |
+|---|---|
+| `uv run --no-sync ruff check app tests scripts` | All checks passed |
+| `uv run --no-sync mypy app` | no issues, 366 files |
+| `hermetic full pytest (DSNs unset), first run` | 1 failed (test_goal_directed_policy_pause_is_durable_across_forced_continue_as_new: wall-clock asyncio timeout while the host was heavily loaded by a concurrent agent; the run took 283 s against a usual 120 s), 976 passed |
+| `that test alone, three times` | 3 of 3 passed in about 10 s each |
+| `hermetic full pytest (DSNs unset), rerun` | 977 passed, 74 skipped, 3 xfailed, 0 failed |
+| `full pytest with Postgres/Mongo DSNs exported and --env-file` | 1020 passed, 30 skipped, 4 xfailed, 0 failed |
+| `git diff --check` | clean |
+
 ## Final disposition
 
-ready_for_review
+accepted
