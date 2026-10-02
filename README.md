@@ -565,15 +565,19 @@ Prerequisites, in order:
 4. A persistent Temporal namespace (`TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE`,
    `TEMPORAL_TASK_QUEUE`) whose Search Attributes are registered by the administrative step
    below. Workers and the API only verify them at readiness and never mutate the namespace.
-5. The RRM-013 async subagent Agent Server (`langgraph.async_subagents.json`, launch commands in
-   `docs/migrations_instructions/evidence_v2/research-runtime-mission/RRM-013/README.md`). Its
-   `BELLABS_ASYNC_SUBAGENT_SERVER_TOKEN` is now the HMAC secret for scope-bound claims
-   (`app/agent_server/async_subagents/auth.py`); the parent mints a short-lived claim per request
-   scope and the server refuses a header scope that differs from the claim. Hosted-child tracing
-   stays an explicit opt-in (`LANGSMITH_TRACING`, default off).
+5. The async subagent Agent Server (`langgraph.async_subagents.json`, recipe in
+   `docs/migrations_instructions/evidence_v2/research-runtime-mission/RRM-013/README.md`), built
+   from a revision that carries the scope-bound claim auth: `BELLABS_ASYNC_SUBAGENT_SERVER_TOKEN` is
+   the HMAC secret (`app/agent_server/async_subagents/auth.py`), the parent mints a short-lived claim
+   per request scope and the server refuses a header scope that differs from the claim (an image
+   built before RRM-009 still accepts only the static token). Hosted-child tracing stays an
+   explicit opt-in (`LANGSMITH_TRACING`, default off). The worker spawns children only with
+   `ASYNC_SUBAGENT_SPAWNING_ENABLED=true` and completes them at the parent boundary within
+   `ASYNC_SUBAGENT_COMPLETION_WAIT_SECONDS` (default 120).
 6. Provider credentials referenced only as `environment:<NAME>` secret references
-   (`OPENAI_API_KEY`, `FIRECRAWL_API_KEY`, `TAVILY_API_KEY`) and Node for the pinned stdio MCP
-   servers and the `agent_browser_page` host tool (`WEB_RESEARCH_AGENT_BROWSER_NODE`).
+   (`OPENAI_API_KEY`, `FIRECRAWL_API_KEY`, `TAVILY_API_KEY`, `BELLABS_ASYNC_SUBAGENT_SERVER_TOKEN`)
+   and Node for the pinned stdio MCP servers and the `agent_browser_page` host tool
+   (`WEB_RESEARCH_AGENT_BROWSER_NODE`, required whenever the pins mount a host tool).
 
 Launch, each in its own terminal, after exporting the environment above:
 
@@ -593,12 +597,20 @@ the boundary command relay for `BOUNDARY_RELAY_REQUEST_SCOPES` every
 unset), `OPERATION_JOURNAL_CLAIMED_BY`, `ASYNC_SUBAGENT_SUBMITTER_IDENTITY`,
 `CAPABILITY_PINS_PATH`, `DEEP_AGENT_SANDBOX_WORKSPACE_ROOT`.
 
+Before deploying over in-flight work, drain it: GoalDirected runs started before RRM-016
+(RRM-016 deploy note) and outstanding `settle_pending_usage` redeliveries from before RRM-013
+(RRM-013 fingerprint note). Give the workers a graceful shutdown shorter than the operations'
+heartbeat timeout once RRM-008 lands.
+
 The technical qualification of this composition is
 `tests/acceptance/control_plane/test_rrm_009_production_composition.py` (disposable PostgreSQL and
 Mongo, a persistent `start_local` namespace, bounded technical inputs, no company definitions).
-Live model, MCP and Agent Server calls run only behind `BELLABS_RUN_RRM_009_LIVE=1`. Cleanup: stop
-the three processes, drop the disposable schemas (`belllabs_control`, the LangGraph schema), and
-delete the Temporal dev-server database file; the Agent Server teardown is in the RRM-013 README.
+Live model, MCP, browser and Agent Server calls run only in
+`tests/acceptance/control_plane/test_rrm_009_live_capabilities.py` behind
+`BELLABS_RUN_RRM_009_LIVE=1`. The full runbook (prerequisites, commands, flags, cleanup by exact
+container names) is in `docs/migrations_instructions/evidence_v2/research-runtime-mission/RRM-009/README.md`.
+Cleanup: stop the three processes, drop the disposable schemas (`belllabs_control`, the LangGraph
+schema), and delete the Temporal dev-server database file.
 
 ## Verification
 
