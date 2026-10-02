@@ -414,11 +414,16 @@ def unit_result(
 
 
 def in_doubt_incident(
-    unit: RuntimeUnitIdentity, *, generation: int = 1, reason: str = "multiple_stamped_leaves"
+    unit: RuntimeUnitIdentity,
+    *,
+    generation: int = 1,
+    reason: str = "multiple_stamped_leaves",
+    revision: int = 1,
 ) -> UnitReconciliationIncident:
     namespace = cognitive_session_namespace(unit, generation)
     return UnitReconciliationIncident(
-        incident_id=unit_incident_id(unit.request_scope, unit.unit_key, generation),
+        incident_id=unit_incident_id(unit.request_scope, unit.unit_key, generation, revision),
+        revision=revision,
         request_scope=unit.request_scope,
         belllabs_run_id=unit.belllabs_run_id,
         unit_key=unit.unit_key,
@@ -604,6 +609,15 @@ async def assert_checkpoint_recovery_repository_contract(
         await repository.apply_reconciliation(
             request_scope, reconciliation(incident, "accept_descendant", decision_id="other")
         )
+    # A resolved incident can be followed by exactly the next revision; a skipped revision
+    # or a second revision-1 opener converges on the current incident.
+    revision_two = in_doubt_incident(doubtful, revision=2)
+    assert await repository.open_incident(revision_two) == revision_two
+    assert await repository.open_incident(in_doubt_incident(doubtful)) == revision_two
+    assert await repository.open_incident(in_doubt_incident(doubtful, revision=3)) == (
+        revision_two
+    )
+    assert await repository.get_incident(request_scope, doubtful.unit_key, 1) == revision_two
 
     # `start_new_generation` fences the generation (EXEC-005): its attempts and late
     # results are refused, the late write is recorded, and generation 2 is admitted.

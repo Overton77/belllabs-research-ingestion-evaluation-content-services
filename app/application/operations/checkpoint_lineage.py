@@ -419,6 +419,21 @@ def decide_result(
     return "accept"
 
 
+def decide_incident_opening(
+    incident: UnitReconciliationIncident, latest: UnitReconciliationIncident | None
+) -> bool:
+    """Whether `incident` becomes the unit generation's current incident.
+
+    The first incident opens revision 1. A later revision opens only on top of a resolved
+    one (an accepted decision that could not be applied). Any other opener is answered
+    with the current incident, so concurrent openers converge on one revision.
+    """
+
+    if latest is None:
+        return incident.revision == 1
+    return incident.revision == latest.revision + 1 and latest.status == "resolved"
+
+
 def advance_namespace(
     record: NamespaceRecord, transition: CheckpointTransitionObservation
 ) -> NamespaceRecord:
@@ -472,6 +487,7 @@ class InMemoryCheckpointLineageRepository:
         self.transitions: dict[tuple[str, str, int], CheckpointTransitionObservation] = {}
         self.results: dict[tuple[str, str, int], UnitResultObservation] = {}
         self.incidents: dict[tuple[str, str, int], UnitReconciliationIncident] = {}
+        self.incident_history: list[UnitReconciliationIncident] = []
         self.rejections: list[LineageWriteRejection] = []
 
     async def record_attempt(
@@ -683,8 +699,10 @@ class InMemoryCheckpointLineageRepository:
     ) -> UnitReconciliationIncident:
         key = (incident.request_scope, incident.unit_key, incident.execution_generation)
         async with self._lock:
-            stored = self.incidents.setdefault(key, incident)
-            return deepcopy(stored)
+            if decide_incident_opening(incident, self.incidents.get(key)):
+                self.incidents[key] = incident
+                self.incident_history.append(incident)
+            return deepcopy(self.incidents[key])
 
     async def get_incident(
         self, request_scope: str, unit_key: str, execution_generation: int
@@ -857,10 +875,29 @@ class UnitAttempt:
     admission: AttemptAdmission
     namespace: NamespaceClaim | None
     deep_binding: DeepAgentExecutionBinding | None
+    acquired_at: datetime | None = None
+    lease_expires_at: datetime | None = None
 
     @property
     def fence(self) -> int:
         return self.admission.observation.claim_fence
+
+    def work_budget(self, now: datetime) -> float:
+        """Seconds this holder may still work before its lease could be taken over.
+
+        The lease ends at the scheduler's deadline for the attempt (Temporal `started_time`
+        plus start-to-close, a server timestamp) or the composition default. The holder
+        stops a safety margin earlier: 20% of the lease length, at least 1 s and at most
+        30 s. The margin absorbs clock skew between the Temporal server and this worker,
+        and the time to release the lease. It is computed once from the wall clock; the
+        caller enforces it with the event loop's monotonic timer.
+        """
+
+        if self.lease_expires_at is None:
+            return float("inf")
+        total = (self.lease_expires_at - (self.acquired_at or now)).total_seconds()
+        margin = min(max(total * 0.2, 1.0), 30.0)
+        return (self.lease_expires_at - now).total_seconds() - margin
 
 
 class CheckpointLineageService:
@@ -948,6 +985,8 @@ class CheckpointLineageService:
             admission=admission,
             namespace=namespace,
             deep_binding=deep_binding,
+            acquired_at=now,
+            lease_expires_at=lease_until,
         )
 
     def plan(
@@ -965,7 +1004,7 @@ class CheckpointLineageService:
             admitted.namespace,
             admitted.deep_binding,
             accepted_leaf,
-        )
+        ).model_copy(update={"attempt_ref": admitted.holder})
 
     async def release(self, admitted: UnitAttempt) -> None:
         await self._repository.release_lease(
@@ -1033,11 +1072,22 @@ class CheckpointLineageService:
         unsettled_effect_ids: tuple[str, ...] = (),
     ) -> UnitReconciliationIncident:
         unit = admitted.unit
+        prior = admitted.admission.incident
+        # An in_doubt classification after an accepted decision (for example an accepted
+        # descendant that no longer classifies) opens the next revision with its own wait.
+        revision = (
+            1
+            if prior is None
+            else prior.revision + 1
+            if prior.status == "resolved"
+            else prior.revision
+        )
         return await self._repository.open_incident(
             UnitReconciliationIncident(
                 incident_id=unit_incident_id(
-                    unit.request_scope, unit.unit_key, admitted.execution_generation
+                    unit.request_scope, unit.unit_key, admitted.execution_generation, revision
                 ),
+                revision=revision,
                 request_scope=unit.request_scope,
                 belllabs_run_id=unit.belllabs_run_id,
                 unit_key=unit.unit_key,

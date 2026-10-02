@@ -23,6 +23,7 @@ from app.application.operations.postgres_checkpoint_lineage import (
     PostgresCheckpointLineageRepository,
 )
 from app.application.operations.unit_reconciliation import (
+    AcceptedCheckpointVerifier,
     ReconciliationRunControl,
     UnitReconciliationNudge,
     UnitReconciliationService,
@@ -40,6 +41,7 @@ def compose_postgres_operation_recovery(
     *,
     run_control: ReconciliationRunControl,
     nudge: UnitReconciliationNudge | None = None,
+    verifier: AcceptedCheckpointVerifier | None = None,
     clock: Callable[[], datetime] | None = None,
     default_lease: timedelta = DEFAULT_CLAIM_LEASE,
 ) -> OperationRecoveryComposition:
@@ -47,6 +49,6 @@ def compose_postgres_operation_recovery(
     return OperationRecoveryComposition(
         lineage=CheckpointLineageService(repository, clock=clock, default_lease=default_lease),
         reconciliation=UnitReconciliationService(
-            run_control=run_control, lineage=repository, nudge=nudge
+            run_control=run_control, lineage=repository, nudge=nudge, verifier=verifier
         ),
     )

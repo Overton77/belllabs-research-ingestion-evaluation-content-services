@@ -18,6 +18,7 @@ import json
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
@@ -39,6 +40,7 @@ from app.application.operations.journaled_operation_execution import (
 from app.application.operations.operation_execution import (
     InMemoryOperationBindingRepository,
     OperationExecutionService,
+    RunControlOperationAuthority,
     RuntimePort,
 )
 from app.application.operations.operation_journal import (
@@ -48,6 +50,12 @@ from app.application.operations.operation_journal import (
 from app.application.operations.unit_reconciliation import UnitReconciliationService
 from app.application.run_control.service import RunControlService
 from app.domain.control_plane.canonical import sha256_digest
+from app.domain.control_plane.contracts import (
+    DefinitionKind,
+    ExactDefinitionRef,
+    WorkflowWorkspaceContract,
+    WorkspaceSlot,
+)
 from app.domain.graph_runtime.identities import RuntimeUnitIdentity
 from app.domain.operation_execution.checkpoint_lineage import OperationActivityAttempt
 from app.domain.operation_execution.contracts import (
@@ -57,6 +65,10 @@ from app.domain.operation_execution.contracts import (
     OperationExecutionResult,
     RuntimeInvocation,
     RuntimeResult,
+    WorkspaceContract,
+    WorkspaceOwner,
+    WorkspaceOwnerKind,
+    WorkspaceSlotBinding,
 )
 from app.domain.operation_execution.journal import (
     OperationClaimResult,
@@ -79,6 +91,9 @@ from app.integrations.agents.deep_agents import (
     ExactDeepAgentMaterializer,
     ResolvedSkillBundle,
     StateSandboxFactory,
+)
+from app.integrations.agents.deep_agents.checkpoint_verifier import (
+    LangGraphCheckpointDescendantVerifier,
 )
 from app.integrations.artifact_payloads import InMemoryArtifactPayloadStore
 from app.integrations.conformance_operation_runtime import (
@@ -356,9 +371,83 @@ class MutableClock:
         self.now += delta
 
 
+# --- REAL run-control operation authority (review fix 2) ---------------------------------
+
+GOVERNED_WORKSPACE_CONTRACT = WorkflowWorkspaceContract(
+    slots=(
+        WorkspaceSlot(
+            name="output",
+            path="/workspace/output",
+            access="exclusive_write",
+            purpose="operation output",
+        ),
+    )
+)
+
+
+def governed_workspace(workspace: WorkspaceContract) -> WorkspaceContract:
+    """The fixture workspace bound to the exact compiled workspace contract."""
+
+    return workspace.model_copy(
+        update={
+            "workflow_contract_digest": sha256_digest(
+                GOVERNED_WORKSPACE_CONTRACT.model_dump(mode="json")
+            ),
+            "slot_bindings": (
+                WorkspaceSlotBinding(
+                    slot_name="output",
+                    logical_path="/workspace/output",
+                    access="exclusive_write",
+                    owner=WorkspaceOwner(kind=WorkspaceOwnerKind.STAGE, owner_id="stage:draft"),
+                ),
+            ),
+        }
+    )
+
+
+class FixtureControlPlane:
+    """The admitted run's exact effective configuration, as F1 would return it."""
+
+    def __init__(self, request: OperationExecutionRequest) -> None:
+        self._request = request
+
+    async def retrieve_for_admission(self, digest: str) -> SimpleNamespace:
+        del digest
+        request = self._request
+        return SimpleNamespace(
+            effective_authority=SimpleNamespace(
+                capabilities=request.capability_grant.capabilities
+            ),
+            source_refs=(
+                request.workspace.template_ref,
+                ExactDefinitionRef(
+                    kind=DefinitionKind.PROMPT,
+                    logical_id="system",
+                    revision=1,
+                    digest="sha256:" + "a" * 64,
+                ),
+            ),
+            workflow_workspace_contract=GOVERNED_WORKSPACE_CONTRACT,
+        )
+
+
+def run_control_authority(run_control: RunControlService) -> RunControlOperationAuthority:
+    return RunControlOperationAuthority(
+        run_control,
+        FixtureControlPlane(  # type: ignore[arg-type]
+            operation_request().model_copy(
+                update={"workspace": governed_workspace(operation_request().workspace)}
+            )
+        ),
+    )
+
+
 class AcceptingAuthority:
     async def verify(self, request: OperationExecutionRequest) -> None:
         del request
+
+    async def verify_continuation(self, request: OperationExecutionRequest, binding: Any) -> None:
+        del request, binding
 
 
 @dataclass
@@ -376,6 +465,7 @@ class RecoveryHarness:
     service: OperationExecutionService
     reconciliation: UnitReconciliationService
     binding: DeepAgentExecutionBinding
+    real_authority: bool = False
     _attempts: dict[str, int] = field(default_factory=dict)
 
     async def request(self, unit: RuntimeUnitIdentity) -> OperationExecutionRequest:
@@ -393,12 +483,22 @@ class RecoveryHarness:
         )
         assert reserved.status == CommandStatus.ACCEPTED
         version = reserved.resulting_run_version
+        workspace = (
+            governed_workspace(self.binding.workspace)
+            if self.real_authority
+            else self.binding.workspace
+        )
         deep_binding = bind_unit(
-            self.binding, unit, control_revision=version, reservation_id=reservation_id
+            self.binding,
+            unit,
+            control_revision=version,
+            reservation_id=reservation_id,
+            workspace=workspace,
         )
         return OperationExecutionRequest.model_validate(
             {
                 **operation_request().model_dump(mode="python"),
+                "workspace": workspace,
                 "identity": OperationAttemptIdentity(
                     run_id=self.run_id,
                     operation_id=unit.semantic_operation_id,
@@ -415,7 +515,9 @@ class RecoveryHarness:
             }
         )
 
-    def attempt(self, request: OperationExecutionRequest) -> OperationActivityAttempt:
+    def attempt(
+        self, request: OperationExecutionRequest, *, lease: timedelta | None = None
+    ) -> OperationActivityAttempt:
         """The next Temporal-shaped Activity attempt of the request's operation workflow."""
 
         workflow_id = f"operation/{request.identity.semantic_key}"
@@ -427,6 +529,7 @@ class RecoveryHarness:
             activity_id="1",
             attempt=number,
             worker_identity=f"worker:rrm-004:{number}",
+            lease_expires_at=self.clock() + lease if lease is not None else None,
         )
 
     async def crash(
@@ -460,7 +563,9 @@ class RecoveryHarness:
         )
 
 
-async def recovery_harness(*, model: ScriptedRecoveryModel | None = None) -> RecoveryHarness:
+async def recovery_harness(
+    *, model: ScriptedRecoveryModel | None = None, real_authority: bool = False
+) -> RecoveryHarness:
     from tests.acceptance.control_plane.test_wp_cp_040 import exact_fixture
 
     run_control, _repository = run_control_service()
@@ -493,7 +598,9 @@ async def recovery_harness(*, model: ScriptedRecoveryModel | None = None) -> Rec
         asset_manifest_digests={"skill:fixture.skill:1": SKILL_DIGEST},
     )
     service = OperationExecutionService(
-        authority=AcceptingAuthority(),
+        authority=(
+            run_control_authority(run_control) if real_authority else AcceptingAuthority()
+        ),
         bindings=InMemoryOperationBindingRepository(),
         runtime=runtime,
         sandbox=ConformanceSandbox(),
@@ -518,8 +625,15 @@ async def recovery_harness(*, model: ScriptedRecoveryModel | None = None) -> Rec
         model=model,
         runtime=runtime,
         service=service,
-        reconciliation=UnitReconciliationService(run_control=run_control, lineage=lineage),
+        reconciliation=UnitReconciliationService(
+            run_control=run_control,
+            lineage=lineage,
+            verifier=LangGraphCheckpointDescendantVerifier(
+                {binding.checkpointer_ref.digest: saver}
+            ),
+        ),
         binding=binding,
+        real_authority=real_authority,
     )
 
 

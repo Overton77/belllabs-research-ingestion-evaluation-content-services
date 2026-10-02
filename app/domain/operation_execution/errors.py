@@ -70,7 +70,15 @@ class RuntimeInvocationFailure(RuntimeError):
     `failed` only when no terminal result exists and every effect claim is settled.
     """
 
-    def __init__(self, error_type: str, *, terminal_result_observed: bool) -> None:
+    def __init__(
+        self,
+        error_type: str,
+        *,
+        terminal_result_observed: bool,
+        candidates: tuple[object, ...] = (),
+    ) -> None:
         super().__init__(f"{error_type} after runtime admission")
         self.error_type = error_type
         self.terminal_result_observed = terminal_result_observed
+        # Qualified keys of the terminal stamped leaf an operator may accept.
+        self.candidates = candidates

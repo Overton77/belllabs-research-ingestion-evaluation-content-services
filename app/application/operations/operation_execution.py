@@ -58,6 +58,7 @@ from app.domain.run_control.contracts import (
     LifecycleCommand,
     RecordUsageAction,
     RunPhase,
+    RunProjection,
     UnitReconciliationDecision,
 )
 from app.domain.run_control.errors import IdempotencyConflict
@@ -65,6 +66,10 @@ from app.domain.run_control.errors import IdempotencyConflict
 
 class OperationExecutionInProgress(RuntimeError):
     """A durable claim exists and requires retry or explicit reconciliation."""
+
+
+class OperationLeaseExpired(OperationExecutionInProgress):
+    """The holder stopped at its lease deadline; a retry classifies and continues the unit."""
 
 
 class OperationBudgetViolation(ValueError):
@@ -76,7 +81,15 @@ class OperationBudgetReconciliationInProgress(RuntimeError):
 
 
 class OperationAuthorityPort(Protocol):
-    async def verify(self, request: OperationExecutionRequest) -> None: ...
+    async def verify(self, request: OperationExecutionRequest) -> None:
+        """Admit the first binding of a semantic operation attempt."""
+        ...
+
+    async def verify_continuation(
+        self, request: OperationExecutionRequest, binding: OperationExecutionBinding
+    ) -> None:
+        """Admit a retry, takeover or recovery of an already bound attempt."""
+        ...
 
 
 class RunControlOperationAuthority:
@@ -92,6 +105,42 @@ class RunControlOperationAuthority:
             raise ValueError("operation is not bound to the accepted Run Control revision")
         if run.phase != RunPhase.ACTIVE:
             raise ValueError("semantic operations require an active Workflow Run")
+        await self._verify_bound_authority(request, run)
+
+    async def verify_continuation(
+        self, request: OperationExecutionRequest, binding: OperationExecutionBinding
+    ) -> None:
+        """Admit a technical retry, claim takeover or recovery of the same bound attempt.
+
+        REQ-CP-EXEC-005 (AMD-RRM-001): Activity attempts, worker restarts and claim takeovers
+        are not disruptive; they continue the same semantic attempt, whose own claim has
+        already advanced the run version past the bound revision. So the exact-revision check
+        of the first binding does not apply. What must still hold: the binding is the one
+        being continued, the run never went backwards, the configuration and reservation
+        are the bound ones, and the run is not terminal, paused or cancelling (cancellation
+        reconciliation is REQ-CP-EXEC-008's saga). A run that is `waiting` is admitted:
+        while a unit is `in_doubt` the run keeps its phase, and other waits do not supersede
+        a claimed unit (REQ-CP-RUN-007, REQ-CP-EXEC-014).
+        """
+
+        run = await self._run_control.get_run(request.request_scope, request.identity.run_id)
+        if (
+            binding.run_id != request.identity.run_id
+            or binding.request_scope != request.request_scope
+            or binding.run_control_revision != request.run_control_revision
+        ):
+            raise ValueError("continuation does not target the bound operation attempt")
+        if run.version < binding.run_control_revision:
+            raise ValueError("run authority is older than the operation binding")
+        if run.phase not in {RunPhase.ACTIVE, RunPhase.WAITING}:
+            raise ValueError(
+                f"a bound operation cannot continue in a {run.phase.value} Workflow Run"
+            )
+        await self._verify_bound_authority(request, run)
+
+    async def _verify_bound_authority(
+        self, request: OperationExecutionRequest, run: RunProjection
+    ) -> None:
         if run.effective_configuration_digest != request.effective_configuration_digest:
             raise ValueError("operation configuration does not match the admitted run")
         configuration = await self._control_plane.retrieve_for_admission(
@@ -330,6 +379,7 @@ class OperationExecutionJournalPort(Protocol):
         *,
         unit_key: str,
         execution_generation: int,
+        incident_id: str,
     ) -> UnitReconciliationDecision | None: ...
 
     async def unsettled_effect_ids(
@@ -451,6 +501,8 @@ class OperationExecutionService:
                 await self._complete_post_effects(prior, settlement)
                 return _public_result(prior, settlement)
             binding = prior
+            # A retry, takeover or recovery continues the bound attempt (REQ-CP-EXEC-005).
+            await self._authority.verify_continuation(request, binding)
         else:
             await self._authority.verify(request)
             binding = _binding_for(request, fingerprint)
@@ -458,8 +510,7 @@ class OperationExecutionService:
                 binding,
                 request_scope=request.request_scope,
             )
-
-        await self._authority.verify(request)
+            await self._authority.verify(request)
         claim_result = (
             await self._journal.acquire(
                 binding,
@@ -532,8 +583,30 @@ class OperationExecutionService:
                 "a live attempt holds the unit's claim lease; retry until its settlement is "
                 "visible or the lease expires (REQ-CP-EXEC-014)"
             )
+        budget = admitted.work_budget(lineage.now())
+        if budget <= 0:
+            with suppress(Exception):
+                await lineage.release(admitted)
+            raise OperationLeaseExpired(
+                "the attempt's claim lease is already within its safety margin"
+            )
         try:
-            result = await self._recover_or_dispatch(request, binding, claim, admitted, lineage)
+            # REQ-CP-EXEC-014: a live holder never outlives its lease. It stops (cancelling
+            # in-flight cognition) before a later attempt may take the lease over, so a
+            # superseded holder cannot keep calling the model or tools.
+            async with asyncio.timeout(budget) as deadline:
+                result = await self._recover_or_dispatch(
+                    request, binding, claim, admitted, lineage
+                )
+        except TimeoutError as error:
+            with suppress(Exception):
+                await lineage.release(admitted)
+            if not deadline.expired():
+                raise
+            raise OperationLeaseExpired(
+                "the attempt reached its claim lease deadline and stopped; a later attempt "
+                "classifies and continues the unit (REQ-CP-EXEC-014)"
+            ) from error
         except (Exception, asyncio.CancelledError):
             # The holder knows it is stopping: release the lease so the next attempt takes it
             # over (advancing the fence) instead of waiting for it to expire. A lost worker
@@ -684,7 +757,12 @@ class OperationExecutionService:
                 if ambiguity is not None:
                     reason, unsettled = ambiguity
                     return await self._in_doubt(
-                        binding, claim, admitted, reason=reason, unsettled_effect_ids=unsettled
+                        binding,
+                        claim,
+                        admitted,
+                        reason=reason,
+                        candidates=_failure_candidates(error),
+                        unsettled_effect_ids=unsettled,
                     )
             settlement = OperationSettlement(
                 settlement_id=_stable_id("operation-settlement", binding.binding_id),
@@ -731,7 +809,7 @@ class OperationExecutionService:
             not error.terminal_result_observed
         )
         if isinstance(error, RuntimeInvocationFailure) and error.terminal_result_observed:
-            return "terminal_result_after_failure", ()
+            return "terminal_result_after_failure", ()  # candidates travel on the error
         if (
             admitted.deep_binding is not None
             and admitted.admission.prior_dispatch
@@ -873,6 +951,7 @@ class OperationExecutionService:
                 binding,
                 unit_key=admitted.unit.unit_key,
                 execution_generation=admitted.execution_generation,
+                incident_id=incident.incident_id,
             )
             if decision is not None:
                 return decision
@@ -1213,6 +1292,12 @@ def _unsettled_result(
         unit_key=binding.runtime_unit.unit_key if binding.runtime_unit is not None else None,
         reconciliation_incident_id=incident_id,
     )
+
+
+def _failure_candidates(error: BaseException) -> tuple[QualifiedCheckpointKey, ...]:
+    if not isinstance(error, RuntimeInvocationFailure):
+        return ()
+    return tuple(item for item in error.candidates if isinstance(item, QualifiedCheckpointKey))
 
 
 def _error_type(error: BaseException) -> str:

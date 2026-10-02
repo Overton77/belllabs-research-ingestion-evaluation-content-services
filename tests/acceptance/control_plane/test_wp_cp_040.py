@@ -989,6 +989,11 @@ async def test_operation_service_pins_records_and_links_the_result_checkpoint() 
         async def verify(self, request: OperationExecutionRequest) -> None:
             del request
 
+        async def verify_continuation(
+            self, request: OperationExecutionRequest, binding: Any
+        ) -> None:
+            del request, binding
+
     binding, _profile, bundle = exact_fixture()
     model = SessionProbeModel(observed_human_counts=[])
     repository = InMemoryCheckpointLineageRepository()

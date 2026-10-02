@@ -722,26 +722,32 @@ def _reconcile_unit(
     becomes active again, and `cancelling` or `paused` runs keep their phase.
     """
 
-    condition_id = operator_reconciliation_condition_id(
+    base_condition = operator_reconciliation_condition_id(
         action.unit_key, action.execution_generation
     )
-    wait = next((item for item in waits if item.condition_id == condition_id), None)
-    if (
-        wait is None
-        or wait.kind != "operator_reconciliation"
-        or wait.verification_ref != action.incident_id
-    ):
+    wait = next(
+        (
+            item
+            for item in waits
+            if item.kind == "operator_reconciliation"
+            and item.verification_ref == action.incident_id
+            and action.unit_key in item.scope
+            and (
+                item.condition_id == base_condition
+                or item.condition_id.startswith(f"{base_condition}:revision:")
+            )
+        ),
+        None,
+    )
+    if wait is None:
         raise ReductionRejected(
             "reconciliation_not_pending",
             "no operator reconciliation is pending for this unit generation and incident",
         )
-    if any(
-        item.unit_key == action.unit_key
-        and item.execution_generation == action.execution_generation
-        for item in decisions
-    ):
+    condition_id = wait.condition_id
+    if any(item.incident_id == action.incident_id for item in decisions):
         raise ReductionRejected(
-            "unit_already_reconciled", "the unit generation already has a decision"
+            "unit_already_reconciled", "the incident revision already has a decision"
         )
     decisions.append(
         UnitReconciliationDecision(

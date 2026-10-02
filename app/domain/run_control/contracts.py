@@ -499,10 +499,13 @@ UnitReconciliationDecisionKind = Literal[
 ]
 
 
-def operator_reconciliation_condition_id(unit_key: str, execution_generation: int) -> str:
-    """The `operator_reconciliation` wait of one `in_doubt` unit generation."""
+def operator_reconciliation_condition_id(
+    unit_key: str, execution_generation: int, revision: int = 1
+) -> str:
+    """The `operator_reconciliation` wait of one incident revision of a unit generation."""
 
-    return f"operator-reconciliation:{unit_key}:gen:{execution_generation}"
+    base = f"operator-reconciliation:{unit_key}:gen:{execution_generation}"
+    return base if revision == 1 else f"{base}:revision:{revision}"
 
 
 class ReconcileUnitAction(Contract):

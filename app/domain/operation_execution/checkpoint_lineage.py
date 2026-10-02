@@ -35,6 +35,10 @@ STAMP_EXECUTION_GENERATION = "belllabs_execution_generation"
 STAMP_INVOCATION_ID = "belllabs_invocation_id"
 STAMP_BINDING_DIGEST = "belllabs_binding_digest"
 STAMP_STATE_SCHEMA_DIGEST = "belllabs_state_schema_digest"
+# RRM-004: the Activity attempt (lease holder) that wrote a checkpoint. It is not part of the
+# unit generation's attribution stamps above; it lets an attempt capture its own result tip
+# and never another, superseded attempt's checkpoint.
+STAMP_ATTEMPT_REF = "belllabs_attempt_ref"
 
 
 class Contract(BaseModel):
@@ -282,6 +286,8 @@ class CheckpointInvocationPlan(Contract):
     state_schema_digest: str = Field(pattern=DIGEST_PATTERN)
     # `reconcile_unit` `accept_descendant`: classify as if this stamped key were the leaf.
     accepted_leaf: QualifiedCheckpointKey | None = None
+    # The lease holder (Activity attempt observation) this invocation runs for.
+    attempt_ref: str | None = Field(default=None, min_length=1, max_length=256)
 
     @model_validator(mode="after")
     def source_is_a_root_checkpoint_of_this_namespace(self) -> CheckpointInvocationPlan:
@@ -313,6 +319,14 @@ class CheckpointInvocationPlan(Contract):
             STAMP_BINDING_DIGEST: self.binding_digest,
             STAMP_STATE_SCHEMA_DIGEST: self.state_schema_digest,
         }
+
+    def invocation_metadata(self) -> dict[str, str | int]:
+        """The stamps plus this attempt's ownership marker (scalar, no secrets)."""
+
+        metadata = self.metadata_stamps()
+        if self.attempt_ref is not None:
+            metadata[STAMP_ATTEMPT_REF] = self.attempt_ref
+        return metadata
 
 
 class CheckpointCapture(Contract):
@@ -404,8 +418,19 @@ def unit_result_observation_id(request_scope: str, unit_key: str, execution_gene
     return f"unit-result:{uuid5(NAMESPACE_URL, identity)}"
 
 
-def unit_incident_id(request_scope: str, unit_key: str, execution_generation: int) -> str:
+def unit_incident_id(
+    request_scope: str, unit_key: str, execution_generation: int, revision: int = 1
+) -> str:
+    """Identity of one incident revision of a unit generation (revision 1 keeps the base ID).
+
+    A unit generation re-enters `in_doubt` only when an accepted decision could not be
+    applied (for example an `accept_descendant` key that no longer classifies). That opens
+    a new revision with its own operator wait, so the unit is never stranded.
+    """
+
     identity = f"unit-in-doubt:{request_scope}:{unit_key}:{execution_generation}"
+    if revision > 1:
+        identity = f"{identity}:revision:{revision}"
     return f"unit-in-doubt:{uuid5(NAMESPACE_URL, identity)}"
 
 
@@ -479,6 +504,7 @@ class UnitReconciliationIncident(Contract):
     candidates: tuple[QualifiedCheckpointKey, ...] = Field(default=(), max_length=64)
     unsettled_effect_ids: tuple[str, ...] = Field(default=(), max_length=64)
     status: Literal["operator_required", "resolved"] = "operator_required"
+    revision: int = Field(default=1, ge=1)
     decision: IncidentDecision | None = None
     decision_id: str | None = None
     accepted_checkpoint: QualifiedCheckpointKey | None = None
@@ -487,9 +513,9 @@ class UnitReconciliationIncident(Contract):
     @model_validator(mode="after")
     def incident_shape(self) -> UnitReconciliationIncident:
         if self.incident_id != unit_incident_id(
-            self.request_scope, self.unit_key, self.execution_generation
+            self.request_scope, self.unit_key, self.execution_generation, self.revision
         ):
-            raise ValueError("incident id is not derived from its unit generation")
+            raise ValueError("incident id is not derived from its unit generation revision")
         if (self.status == "resolved") != (self.decision is not None):
             raise ValueError("exactly a resolved incident carries its decision")
         if (self.decision is None) != (self.decision_id is None):
@@ -500,13 +526,14 @@ class UnitReconciliationIncident(Contract):
 
     @property
     def identity_digest(self) -> str:
-        return sha256_digest(
-            {
-                "request_scope": self.request_scope,
-                "unit_key": self.unit_key,
-                "execution_generation": self.execution_generation,
-            }
-        )
+        identity: dict[str, object] = {
+            "request_scope": self.request_scope,
+            "unit_key": self.unit_key,
+            "execution_generation": self.execution_generation,
+        }
+        if self.revision > 1:
+            identity["revision"] = self.revision
+        return sha256_digest(identity)
 
 
 class LineageWriteRejection(Contract):

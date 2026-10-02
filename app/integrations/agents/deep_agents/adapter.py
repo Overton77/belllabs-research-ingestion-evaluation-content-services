@@ -19,6 +19,7 @@ from app.domain.control_plane.canonical import sha256_digest
 from app.domain.graph_runtime.identities import QualifiedCheckpointKey
 from app.domain.operation_execution.checkpoint_lineage import (
     ROOT_CHECKPOINT_NS,
+    STAMP_ATTEMPT_REF,
     STAMP_STATE_SCHEMA_DIGEST,
     CheckpointCapture,
     CheckpointClassification,
@@ -135,7 +136,7 @@ class DeepAgentRuntimeAdapter:
                             **thread_config["configurable"],
                             **({"checkpoint_id": pinned} if pinned is not None else {}),
                         },
-                        "metadata": plan.metadata_stamps(),
+                        "metadata": plan.invocation_metadata(),
                         "callbacks": [disclosure_observer],
                     }
                     # A resume never re-appends the submitted input: it continues the
@@ -154,7 +155,11 @@ class DeepAgentRuntimeAdapter:
                             durability="sync",
                         ),
                     )
-                    snapshot = await agent.aget_state(thread_config)
+                    # Capture this attempt's own result tip, never the thread's latest
+                    # checkpoint (which a superseded attempt may have written).
+                    snapshot = await agent.aget_state(
+                        await _own_result_config(checkpointer, plan, classified)
+                    )
                 actual_state = cast(dict[str, Any], snapshot.values)
                 messages = cast(
                     list[BaseMessage], actual_state.get("messages", result.get("messages", []))
@@ -198,11 +203,13 @@ class DeepAgentRuntimeAdapter:
             except Exception as error:
                 # REQ-CP-RUN-007 (narrowed): report whether a terminal result exists after the
                 # failure, so the boundary settles `failed` only when none does.
+                terminal, candidates = await _terminal_result_may_exist(
+                    checkpointer, agent, plan
+                )
                 raise RuntimeInvocationFailure(
                     type(error).__name__,
-                    terminal_result_observed=await _terminal_result_may_exist(
-                        checkpointer, agent, plan
-                    ),
+                    terminal_result_observed=terminal,
+                    candidates=candidates,
                 ) from error
 
 
@@ -401,16 +408,59 @@ async def _classify(
     )
 
 
+async def _own_result_config(
+    checkpointer: BaseCheckpointSaver[Any],
+    plan: CheckpointInvocationPlan,
+    classified: _Classified,
+) -> RunnableConfig:
+    """The unique tip this attempt wrote, descending from what it classified and pinned."""
+
+    thread_config: RunnableConfig = {
+        "configurable": {"thread_id": plan.namespace, "checkpoint_ns": ROOT_CHECKPOINT_NS}
+    }
+    if plan.attempt_ref is None:
+        return thread_config  # adapter-level harnesses without a lease holder
+    own: dict[str, str | None] = {}
+    async for item in checkpointer.alist(thread_config):
+        if item.metadata.get(STAMP_ATTEMPT_REF) == plan.attempt_ref:
+            own[str(item.config["configurable"]["checkpoint_id"])] = _parent_id(item)
+    tips = [checkpoint_id for checkpoint_id in own if checkpoint_id not in own.values()]
+    if len(tips) != 1:
+        raise CheckpointLineageInDoubt(
+            "this attempt's invocation has no unique result tip", reason="unclassifiable"
+        )
+    pinned = (
+        classified.leaf_id
+        if classified.kind == CheckpointClassification.INTERRUPTED
+        else (classified.source_key.checkpoint_id if classified.source_key else None)
+    )
+    cursor = own[tips[0]]
+    while cursor in own:
+        cursor = own[cursor]
+    if cursor != pinned:
+        raise CheckpointLineageInDoubt(
+            "the captured result does not descend from the checkpoint this attempt pinned",
+            reason="ancestry_mismatch",
+        )
+    return _checkpoint_config(plan.namespace, tips[0])
+
+
 async def _terminal_result_may_exist(
     checkpointer: BaseCheckpointSaver[Any], agent: Any, plan: CheckpointInvocationPlan
-) -> bool:
-    """After a failure: True unless classification shows no terminal stamped result."""
+) -> tuple[bool, tuple[QualifiedCheckpointKey, ...]]:
+    """After a failure: whether a terminal stamped result may exist, with its candidates."""
 
     try:
         classified = await _classify(checkpointer, agent, plan)
+    except CheckpointLineageInDoubt as error:
+        return True, error.candidates
     except Exception:  # noqa: BLE001 - an unclassifiable lineage is not provably non-terminal
-        return True
-    return classified.kind == CheckpointClassification.TERMINAL_UNOBSERVED
+        return True, ()
+    if classified.kind != CheckpointClassification.TERMINAL_UNOBSERVED:
+        return False, ()
+    assert classified.leaf_id is not None
+    leaf = await checkpointer.aget_tuple(_checkpoint_config(plan.namespace, classified.leaf_id))
+    return True, ((_qualified(plan, leaf),) if leaf is not None else ())
 
 
 async def _capture_result(

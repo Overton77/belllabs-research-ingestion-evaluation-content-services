@@ -32,6 +32,8 @@ async def main() -> None:
     async with open_persistent_stack(
         os.environ["RRM004_DSN"],
         paths,
+        mongo_uri=os.environ["RRM004_MONGO_URI"],
+        mongo_database=os.environ["RRM004_MONGO_DATABASE"],
         hang_after_put=int(os.environ["RRM004_HANG_AFTER_CHECKPOINT"]),
     ) as stack:
         activities = OperationExecutionActivities(

@@ -20,6 +20,7 @@ from app.application.operations.checkpoint_lineage import (
     UnitGenerationRecord,
     check_generation_admission,
     check_namespace_owner,
+    decide_incident_opening,
     decide_lease,
     decide_result,
     decide_transition,
@@ -449,6 +450,12 @@ class PostgresCheckpointLineageRepository:
         async with self._pool.acquire() as connection, connection.transaction():
             await _set_scope(connection, scope)
             await _lock_unit(connection, scope, incident.unit_key)
+            latest = await _incident(
+                connection, scope, incident.unit_key, incident.execution_generation
+            )
+            if not decide_incident_opening(incident, latest):
+                assert latest is not None
+                return latest
             await connection.execute(
                 """
                 INSERT INTO belllabs_control.runtime_reconciliation_incidents (
@@ -827,6 +834,8 @@ async def _incident(
         SELECT incident_payload FROM belllabs_control.runtime_reconciliation_incidents
         WHERE request_scope = $1 AND incident_type = $2 AND unit_key = $3
           AND (incident_payload->>'execution_generation')::bigint = $4
+        ORDER BY COALESCE((incident_payload->>'revision')::bigint, 1) DESC
+        LIMIT 1
         """,
         scope,
         INCIDENT_TYPE,

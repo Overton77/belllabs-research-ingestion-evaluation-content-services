@@ -146,7 +146,7 @@ async def test_runtime_role_grants_and_rls_admit_the_full_lineage_contract(
             assert await connection.fetchval(
                 "SELECT count(*) FROM belllabs_control.runtime_reconciliation_incidents"
                 " WHERE unit_key IS NOT NULL"
-            ) == 2
+            ) == 3, "two unit generations' incidents, one of them at revision 2"
         async with runtime.acquire() as connection, connection.transaction():
             await connection.execute(
                 "SELECT set_config('belllabs.request_scope', 'tenant-2', true)"

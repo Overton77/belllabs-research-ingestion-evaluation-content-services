@@ -478,7 +478,7 @@ class JournaledOperationExecutionCoordinator:
                 action=SetWaitAction(
                     condition=WaitCondition(
                         condition_id=operator_reconciliation_condition_id(
-                            incident.unit_key, incident.execution_generation
+                            incident.unit_key, incident.execution_generation, incident.revision
                         ),
                         kind="operator_reconciliation",
                         scope=frozenset({incident.unit_key}),
@@ -502,15 +502,18 @@ class JournaledOperationExecutionCoordinator:
         *,
         unit_key: str,
         execution_generation: int,
+        incident_id: str,
     ) -> UnitReconciliationDecision | None:
-        """The accepted `reconcile_unit` decision held by run-control authority, if any."""
+        """The accepted `reconcile_unit` decision for this incident revision, if any."""
 
         run = await self._run_control.get_run(binding.request_scope, binding.run_id)
         return next(
             (
                 item
                 for item in run.unit_reconciliations
-                if item.unit_key == unit_key and item.execution_generation == execution_generation
+                if item.unit_key == unit_key
+                and item.execution_generation == execution_generation
+                and item.incident_id == incident_id
             ),
             None,
         )

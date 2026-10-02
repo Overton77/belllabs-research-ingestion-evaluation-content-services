@@ -6,7 +6,9 @@ application PostgreSQL run control, journal and checkpoint lineage) and is kille
 after the Deep Agent's post-tool checkpoint is durable. Temporal times the lost Activity
 attempt out; worker 2 (a fresh composition in this process) receives the retry, takes over
 the expired claim lease by advancing the fence, classifies the unit `interrupted`, resumes
-the pinned checkpoint without re-appending the prompt, and settles once.
+the pinned checkpoint without re-appending the prompt, and settles once. Both workers
+compose the production `RunControlOperationAuthority`: worker 2's recovery is admitted as a
+continuation of the bound attempt although the claim moved the run version.
 
 Opt-in through `TEST_APPLICATION_POSTGRES_DSN` (disposable stack only). The user's docker
 compose Temporal stack is never used.
@@ -19,12 +21,15 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import asyncpg
 import pytest
 from langchain_core.runnables import RunnableConfig
+from pymongo import AsyncMongoClient
 from temporalio.client import WorkflowHandle
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
@@ -47,7 +52,11 @@ from app.temporal.operation_activities import OperationExecutionActivities, pars
 from app.temporal.workflow_sandbox import coordinator_workflow_runner
 from app.temporal.workflows.operation import OperationWorkflow
 from tests.fixtures.checkpoint_lineage import bind_unit
-from tests.fixtures.checkpoint_recovery import RESULT_MARKER, stage_recovery_unit
+from tests.fixtures.checkpoint_recovery import (
+    RESULT_MARKER,
+    governed_workspace,
+    stage_recovery_unit,
+)
 from tests.fixtures.rrm004_persistent_stack import (
     SAVER_SCHEMA,
     WORKFLOW_TASK_QUEUE,
@@ -67,6 +76,19 @@ from tests.unit.run_control.test_run_control import request as run_request
 # is the second model call. Worker 1 is lost right after that checkpoint is durable.
 HANG_AFTER_CHECKPOINT = 6
 ACTIVITY_TIMEOUT_SECONDS = 15
+
+
+@pytest.fixture
+async def mongo_database(test_mongodb_uri: str) -> AsyncIterator[str]:
+    """A dedicated database in the disposable Mongo for the production OEB binding store."""
+
+    name = f"rrm004_restart_{uuid4().hex[:12]}"
+    yield name
+    client: AsyncMongoClient[Any] = AsyncMongoClient(test_mongodb_uri)
+    try:
+        await client.drop_database(name)
+    finally:
+        await client.close()
 
 
 def _root(namespace: str, checkpoint_id: str | None = None) -> RunnableConfig:
@@ -89,15 +111,18 @@ async def _bound_request(stack: PersistentStack, run_id: str) -> OperationExecut
         )
     )
     assert reserved.status == CommandStatus.ACCEPTED
+    workspace = governed_workspace(stack.binding.workspace)
     deep_binding = bind_unit(
         stack.binding,
         unit,
         control_revision=reserved.resulting_run_version,
         reservation_id=reservation_id,
+        workspace=workspace,
     )
     return OperationExecutionRequest.model_validate(
         {
             **operation_request().model_dump(mode="python"),
+            "workspace": workspace,
             "identity": OperationAttemptIdentity(
                 run_id=run_id,
                 operation_id=unit.semantic_operation_id,
@@ -130,7 +155,9 @@ async def _wait_for(path: Path, process: subprocess.Popen[bytes], seconds: float
     raise AssertionError(f"{path.name} did not appear")
 
 
-def _spawn_worker_1(target: str, dsn: str, root: Path) -> subprocess.Popen[bytes]:
+def _spawn_worker_1(
+    target: str, dsn: str, root: Path, mongo_uri: str, mongo_database: str
+) -> subprocess.Popen[bytes]:
     """Worker 1 runs in its own OS process so that it can be killed like a lost host.
 
     (A plain `Popen`: asyncio subprocesses are unavailable on the selector loop that the
@@ -144,6 +171,8 @@ def _spawn_worker_1(target: str, dsn: str, root: Path) -> subprocess.Popen[bytes
             **os.environ,
             "RRM004_TEMPORAL_TARGET": target,
             "RRM004_DSN": dsn,
+            "RRM004_MONGO_URI": mongo_uri,
+            "RRM004_MONGO_DATABASE": mongo_database,
             "RRM004_ROOT": str(root),
             "RRM004_HANG_AFTER_CHECKPOINT": str(HANG_AFTER_CHECKPOINT),
             # A different string-hash seed from this process: the cross-process replay of
@@ -163,7 +192,10 @@ def _model_calls(paths: StackPaths) -> list[dict[str, int]]:
 
 @pytest.mark.asyncio
 async def test_worker_restart_resumes_the_interrupted_unit_and_settles_once(
-    test_application_postgres_dsn: str, tmp_path: Path
+    test_application_postgres_dsn: str,
+    test_mongodb_uri: str,
+    mongo_database: str,
+    tmp_path: Path,
 ) -> None:
     require_disposable_postgres(test_application_postgres_dsn)
     paths = StackPaths(tmp_path)
@@ -176,7 +208,12 @@ async def test_worker_restart_resumes_the_interrupted_unit_and_settles_once(
     finally:
         await owner.close()
 
-    async with open_persistent_stack(test_application_postgres_dsn, paths) as stack:
+    async with open_persistent_stack(
+        test_application_postgres_dsn,
+        paths,
+        mongo_uri=test_mongodb_uri,
+        mongo_database=mongo_database,
+    ) as stack:
         await stack.saver.setup()
         admitted = await stack.run_control.admit(run_request(request_id="rrm-004-restart"))
         assert admitted.run_id is not None
@@ -199,7 +236,9 @@ async def test_worker_restart_resumes_the_interrupted_unit_and_settles_once(
 
     async with await WorkflowEnvironment.start_local(dev_server_log_level="error") as env:
         target = env.client.service_client.config.target_host
-        worker_1 = _spawn_worker_1(target, test_application_postgres_dsn, tmp_path)
+        worker_1 = _spawn_worker_1(
+            target, test_application_postgres_dsn, tmp_path, test_mongodb_uri, mongo_database
+        )
         try:
             await _wait_for(tmp_path / "worker-1-ready", worker_1, 120)
             handle: WorkflowHandle[Any, Any] = await env.client.start_workflow(
@@ -215,7 +254,12 @@ async def test_worker_restart_resumes_the_interrupted_unit_and_settles_once(
             worker_1.wait(timeout=60)
         killed_pid = int(paths.crash_marker.read_text(encoding="utf-8"))
 
-        async with open_persistent_stack(test_application_postgres_dsn, paths) as stack:
+        async with open_persistent_stack(
+            test_application_postgres_dsn,
+            paths,
+            mongo_uri=test_mongodb_uri,
+            mongo_database=mongo_database,
+        ) as stack:
             lineage = stack.recovery.lineage.repository
             # The durable state worker 1 left: a dispatching attempt, six stamped root
             # checkpoints, no transition, no result, no settlement.

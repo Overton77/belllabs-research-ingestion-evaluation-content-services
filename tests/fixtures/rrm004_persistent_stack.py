@@ -16,23 +16,26 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import UTC
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 import asyncpg
+from beanie import init_beanie
 from langchain_core.messages import BaseMessage
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.store.memory import InMemoryStore
+from pymongo import AsyncMongoClient
 
 from app.application.operations.journaled_operation_execution import (
     JournaledOperationExecutionCoordinator,
 )
-from app.application.operations.operation_execution import (
-    InMemoryOperationBindingRepository,
-    OperationExecutionService,
+from app.application.operations.mongo_operation_execution_repository import (
+    MongoOperationBindingRepository,
 )
+from app.application.operations.operation_execution import OperationExecutionService
 from app.application.operations.operation_journal import OperationJournalService
 from app.application.operations.operation_recovery_composition import (
     OperationRecoveryComposition,
@@ -59,7 +62,8 @@ from app.integrations.conformance_operation_runtime import (
     ConformanceSandbox,
     ConformanceSecretResolver,
 )
-from tests.fixtures.checkpoint_recovery import AcceptingAuthority, ScriptedRecoveryModel
+from app.integrations.mongodb import BEANIE_MODELS
+from tests.fixtures.checkpoint_recovery import ScriptedRecoveryModel, run_control_authority
 from tests.unit.operations.test_operation_execution import MCP_DIGEST, SKILL_DIGEST
 from tests.unit.run_control.test_run_control import actor
 from tests.unit.run_control.test_run_control import service as run_control_service
@@ -173,13 +177,24 @@ def saver_dsn(dsn: str) -> str:
 
 @asynccontextmanager
 async def open_persistent_stack(
-    dsn: str, paths: StackPaths, *, hang_after_put: int | None = None
+    dsn: str,
+    paths: StackPaths,
+    *,
+    mongo_uri: str,
+    mongo_database: str,
+    hang_after_put: int | None = None,
 ) -> AsyncIterator[PersistentStack]:
     from tests.acceptance.control_plane.test_wp_cp_040 import exact_fixture
 
     os.environ["RRM004_MODEL_LOG"] = str(paths.model_log)
     pool = await asyncpg.create_pool(dsn=dsn, min_size=1, max_size=6)
+    mongo: AsyncMongoClient[Any] = AsyncMongoClient(
+        mongo_uri, serverSelectionTimeoutMS=5_000, tz_aware=True, tzinfo=UTC
+    )
     try:
+        # The production OEB binding store: a replacement worker finds the binding the
+        # lost worker created and continues it (fingerprints compared across processes).
+        await init_beanie(database=mongo[mongo_database], document_models=BEANIE_MODELS)
         run_control, _ = run_control_service(PostgresRunControlRepository(pool))  # type: ignore[arg-type]
         async with HangAfterCheckpointSaver.from_conn_string(saver_dsn(dsn)) as saver:
             saver.hang_after_put = hang_after_put
@@ -203,8 +218,9 @@ async def open_persistent_stack(
                 asset_manifest_digests={"skill:fixture.skill:1": SKILL_DIGEST},
             )
             service = OperationExecutionService(
-                authority=AcceptingAuthority(),
-                bindings=InMemoryOperationBindingRepository(),
+                # The production run-control authority (review fix 2), not an accepting fake.
+                authority=run_control_authority(run_control),
+                bindings=MongoOperationBindingRepository(),
                 runtime=adapter,
                 sandbox=ConformanceSandbox(),
                 assets=assets,
@@ -230,4 +246,5 @@ async def open_persistent_stack(
                 binding=binding,
             )
     finally:
+        await mongo.close()
         await pool.close()

@@ -21,6 +21,7 @@ from langgraph.checkpoint.base.id import uuid6
 from app.application.operations.journaled_operation_execution import _effect_claim_id
 from app.application.operations.operation_execution import (
     OperationExecutionInProgress,
+    OperationLeaseExpired,
     bind_operation_execution_request,
 )
 from app.application.operations.unit_reconciliation import UnitReconciliationRejected
@@ -38,7 +39,11 @@ from app.domain.run_control.contracts import (
     ClaimEffectAction,
     CommandStatus,
     EffectDisposition,
+    PauseAction,
+    PauseDecision,
     ReconcileUnitAction,
+    ResumeAction,
+    ResumeDecision,
     RunPhase,
     operator_reconciliation_condition_id,
 )
@@ -48,6 +53,7 @@ from tests.fixtures.checkpoint_recovery import (
     SimulatedWorkerCrash,
     recovery_harness,
     result_digest,
+    run_control_authority,
     stage_recovery_unit,
 )
 from tests.unit.run_control.test_run_control import command, reconciler_command
@@ -611,8 +617,8 @@ async def test_failure_after_a_terminal_checkpoint_is_in_doubt_then_reconstructe
     assert incident is not None
     leaf = await harness.saver.aget_tuple(_root(namespace, leaf_id))
     assert leaf is not None and leaf.parent_config is not None
-    accepted = incident.expected_source  # None: a fresh namespace
-    assert accepted is None
+    # The incident records the terminal stamped leaf as the operator's candidate.
+    assert incident.candidates == (_key(harness, request, leaf),)
     decided = await harness.reconcile(
         request,
         "reconcile-terminal",
@@ -669,3 +675,373 @@ async def test_lost_worker_lease_is_honored_until_it_expires() -> None:
         (1, True),
         (2, False),
     ]
+
+
+# --- review fix 1: an invalid accepted descendant never strands the unit ------------------
+
+
+async def _parked_with_two_leaves(
+    harness: RecoveryHarness,
+) -> tuple[OperationExecutionRequest, str, str, str]:
+    unit = stage_recovery_unit(harness.run_id)
+    request = await harness.request(unit)
+    namespace = _namespace(request)
+    harness.saver.crash_after(AFTER_TOOL_CHECKPOINT)
+    await harness.crash(request)
+    leaf_id = await _leaf_id(harness, namespace)
+    sibling_id = await _fork_stamped_sibling(harness, namespace, leaf_id)
+    parked = await harness.run(request)
+    assert parked.failure_code == "multiple_stamped_leaves"
+    return request, namespace, leaf_id, sibling_id
+
+
+@pytest.mark.asyncio
+async def test_unverifiable_accepted_descendant_is_rejected_before_run_control() -> None:
+    """A non-candidate key that is not a stamped descendant (here: no such checkpoint) is
+    rejected before run control, so the operator wait stays pending and a valid decision
+    still resolves the unit."""
+
+    harness = await recovery_harness()
+    request, namespace, leaf_id, _sibling = await _parked_with_two_leaves(harness)
+    unit = request.runtime_unit
+    assert unit is not None
+    incident = await harness.lineage.get_incident("tenant-1", unit.unit_key, 1)
+    assert incident is not None
+    real = next(item for item in incident.candidates if item.checkpoint_id == leaf_id)
+    for bogus in (
+        real.model_copy(update={"checkpoint_id": "no-such-checkpoint"}),
+        real.model_copy(update={"parent_checkpoint_id": "wrong-parent"}),
+    ):
+        with pytest.raises(UnitReconciliationRejected, match="verified stamped"):
+            await harness.reconcile(
+                request,
+                f"reconcile-bogus-{bogus.checkpoint_id}-{bogus.parent_checkpoint_id}",
+                ReconcileUnitAction(
+                    unit_key=unit.unit_key,
+                    execution_generation=1,
+                    incident_id=incident.incident_id,
+                    decision="accept_descendant",
+                    accepted_checkpoint=bogus,
+                ),
+            )
+    run = await harness.run_control.get_run("tenant-1", harness.run_id)
+    assert [item.condition_id for item in run.active_waits] == [
+        operator_reconciliation_condition_id(unit.unit_key, 1)
+    ]
+    assert run.unit_reconciliations == ()
+    decided = await harness.reconcile(
+        request,
+        "reconcile-real",
+        ReconcileUnitAction(
+            unit_key=unit.unit_key,
+            execution_generation=1,
+            incident_id=incident.incident_id,
+            decision="accept_descendant",
+            accepted_checkpoint=real,
+        ),
+    )
+    assert decided.status == CommandStatus.ACCEPTED
+    assert (await harness.run(request)).status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_accepted_descendant_that_fails_at_dispatch_reopens_the_next_incident_revision() -> (
+    None
+):
+    """A verified, non-candidate descendant (the common parent of two stamped leaves) is
+    accepted; at dispatch it still has two leaves, so the unit is in doubt again. That opens
+    incident revision 2 with its own operator wait, and a second decision completes it."""
+
+    baseline = await _baseline_digest()
+    harness = await recovery_harness()
+    request, namespace, leaf_id, sibling_id = await _parked_with_two_leaves(harness)
+    unit = request.runtime_unit
+    assert unit is not None
+    first = await harness.lineage.get_incident("tenant-1", unit.unit_key, 1)
+    assert first is not None and first.revision == 1
+    leaf = await harness.saver.aget_tuple(_root(namespace, leaf_id))
+    assert leaf is not None and leaf.parent_config is not None
+    parent = await harness.saver.aget_tuple(leaf.parent_config)
+    assert parent is not None
+    parent_key = _key(harness, request, parent)
+    assert parent_key not in first.candidates
+    decided = await harness.reconcile(
+        request,
+        "reconcile-parent",
+        ReconcileUnitAction(
+            unit_key=unit.unit_key,
+            execution_generation=1,
+            incident_id=first.incident_id,
+            decision="accept_descendant",
+            accepted_checkpoint=parent_key,
+        ),
+    )
+    assert decided.status == CommandStatus.ACCEPTED
+
+    reparked = await harness.run(request)
+    assert reparked.status == "in_doubt"
+    assert reparked.failure_code == "multiple_stamped_leaves"
+    second = await harness.lineage.get_incident("tenant-1", unit.unit_key, 1)
+    assert second is not None
+    assert (second.revision, second.status) == (2, "operator_required")
+    assert reparked.reconciliation_incident_id == second.incident_id != first.incident_id
+    run = await harness.run_control.get_run("tenant-1", harness.run_id)
+    assert [(item.condition_id, item.verification_ref) for item in run.active_waits] == [
+        (operator_reconciliation_condition_id(unit.unit_key, 1, 2), second.incident_id)
+    ]
+    assert len(harness.model.calls) == 1, "no provider work while the decision is unusable"
+
+    accepted = next(item for item in second.candidates if item.checkpoint_id == leaf_id)
+    redecided = await harness.reconcile(
+        request,
+        "reconcile-leaf",
+        ReconcileUnitAction(
+            unit_key=unit.unit_key,
+            execution_generation=1,
+            incident_id=second.incident_id,
+            decision="accept_descendant",
+            accepted_checkpoint=accepted,
+        ),
+    )
+    assert redecided.status == CommandStatus.ACCEPTED
+    recovered = await harness.run(request)
+    assert recovered.status == "completed"
+    assert result_digest(recovered) == baseline
+    run = await harness.run_control.get_run("tenant-1", harness.run_id)
+    assert [item.incident_id for item in run.unit_reconciliations] == [
+        first.incident_id,
+        second.incident_id,
+    ]
+    assert run.active_waits == ()
+    chain_ids = {
+        str(item.config["configurable"]["checkpoint_id"])
+        for item in await _chain(harness, namespace, recovered.result_checkpoint.checkpoint_id)  # type: ignore[union-attr]
+    }
+    assert leaf_id in chain_ids and sibling_id not in chain_ids
+
+
+# --- review fix 2: the REAL run-control authority admits retries and recovery -------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "window", ["after_intermediate_checkpoint", "after_terminal_checkpoint", "before_settlement"]
+)
+async def test_real_run_control_authority_admits_recovery_after_a_lost_worker(
+    window: str,
+) -> None:
+    """REQ-CP-EXEC-005/014: the unit's own claim advanced the run past the bound revision.
+    The first-binding check would refuse that run version; the continuation check admits the
+    same bound attempt, so recovery converges under the production authority."""
+
+    baseline = await _baseline_digest()
+    harness = await recovery_harness(real_authority=True)
+    request = await harness.request(stage_recovery_unit(harness.run_id))
+    _inject(harness, window)
+    await harness.crash(request)
+    run = await harness.run_control.get_run("tenant-1", harness.run_id)
+    assert run.version > request.run_control_revision
+    authority = run_control_authority(harness.run_control)
+    with pytest.raises(ValueError, match="Run Control revision"):
+        await authority.verify(request)
+    await authority.verify_continuation(request, bind_operation_execution_request(request))
+
+    recovered = await harness.run(request)
+    assert recovered.status == "completed"
+    assert result_digest(recovered) == baseline
+    assert len(harness.model.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_real_run_control_authority_admits_a_concurrent_retry_as_in_progress() -> None:
+    """A redelivered attempt (attempt 2) while attempt 1 still holds the lease passes
+    authority and stands down retryably; it is never rejected as non-retryable."""
+
+    harness = await recovery_harness(real_authority=True)
+    request = await harness.request(stage_recovery_unit(harness.run_id))
+    entered, release = harness.model.gate_on(2)
+    first = asyncio.create_task(harness.run(request))
+    await asyncio.wait_for(entered.wait(), timeout=30)
+    with pytest.raises(OperationExecutionInProgress):
+        await harness.run(request)
+    release.set()
+    result = await first
+    assert result.status == "completed"
+    assert await harness.run(request) == result
+
+
+@pytest.mark.asyncio
+async def test_real_authority_continuation_fails_closed_for_paused_runs() -> None:
+    """A paused run admits no continuation (fail-closed); after resume, recovery converges."""
+
+    harness = await recovery_harness(real_authority=True)
+    request = await harness.request(stage_recovery_unit(harness.run_id))
+    _inject(harness, "after_intermediate_checkpoint")
+    await harness.crash(request)
+    run = await harness.run_control.get_run("tenant-1", harness.run_id)
+    paused = await harness.run_control.execute(
+        command(
+            harness.run_id,
+            run.version,
+            "pause-for-continuation",
+            PauseAction(
+                decision=PauseDecision(
+                    decision_id="pause-1",
+                    scope=frozenset({"run"}),
+                    reason="operator pause",
+                    authority_ref="authority:lifecycle",
+                ),
+                runnable_work_remains=False,
+            ),
+        )
+    )
+    assert paused.status == CommandStatus.ACCEPTED and paused.phase == RunPhase.PAUSED
+    with pytest.raises(ValueError, match="paused Workflow Run"):
+        await harness.run(request)
+    assert len(harness.model.calls) == 1
+    resumed = await harness.run_control.execute(
+        command(
+            harness.run_id,
+            paused.resulting_run_version,
+            "resume-for-continuation",
+            ResumeAction(
+                decision=ResumeDecision(
+                    decision_id="resume-1",
+                    pause_decision_id="pause-1",
+                    reason="operator resume",
+                    authority_ref="authority:lifecycle",
+                )
+            ),
+        )
+    )
+    assert resumed.phase == RunPhase.ACTIVE
+    assert (await harness.run(request)).status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_real_authority_continuation_rejects_terminal_or_foreign_bindings() -> None:
+    from types import SimpleNamespace
+
+    harness = await recovery_harness(real_authority=True)
+    request = await harness.request(stage_recovery_unit(harness.run_id))
+    binding = bind_operation_execution_request(request)
+
+    class TerminalRunControl:
+        def __init__(self, phase: RunPhase) -> None:
+            self.phase = phase
+
+        async def get_run(self, _scope: str, _run_id: str) -> SimpleNamespace:
+            return SimpleNamespace(
+                version=request.run_control_revision + 3,
+                phase=self.phase,
+                effective_configuration_digest=request.effective_configuration_digest,
+            )
+
+    for phase in (RunPhase.TERMINAL, RunPhase.CANCELLING, RunPhase.PENDING):
+        authority = run_control_authority(TerminalRunControl(phase))  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match="cannot continue"):
+            await authority.verify_continuation(request, binding)
+    authority = run_control_authority(harness.run_control)
+    foreign = binding.model_copy(update={"run_control_revision": binding.run_control_revision - 1})
+    with pytest.raises(ValueError, match="bound operation attempt"):
+        await authority.verify_continuation(request, foreign)
+
+
+# --- review fix 3: a live holder never outlives its lease ---------------------------------
+
+
+@pytest.mark.asyncio
+async def test_slow_holder_stops_at_its_lease_deadline_before_a_takeover_proceeds() -> None:
+    """REQ-CP-EXEC-014: holder A overruns (stalls in its second model call) past its lease
+    budget (3 s lease, 1 s safety margin). A cancels its own cognition, releases the lease
+    and reports a retryable `OperationLeaseExpired`; it writes nothing. B then takes over,
+    resumes A's last durable checkpoint and settles; nothing of A's was rejected because A
+    never attempted a late write."""
+
+    baseline = await _baseline_digest()
+    harness = await recovery_harness()
+    unit = stage_recovery_unit(harness.run_id)
+    request = await harness.request(unit)
+    entered, _never = harness.model.gate_on(2)
+    started = asyncio.get_running_loop().time()
+    holder_a = asyncio.create_task(
+        harness.service.execute(request, harness.attempt(request, lease=timedelta(seconds=3)))
+    )
+    await asyncio.wait_for(entered.wait(), timeout=30)
+    with pytest.raises(OperationLeaseExpired):
+        await asyncio.wait_for(holder_a, timeout=30)
+    stopped_after = asyncio.get_running_loop().time() - started
+    assert 1.5 <= stopped_after < 3.0, "A stops inside its lease, before it could be taken over"
+    assert await harness.lineage.get_transition("tenant-1", unit.unit_key, 1) is None
+    assert await harness.lineage.get_result("tenant-1", unit.unit_key, 1) is None
+
+    recovered = await harness.run(request)
+    assert recovered.status == "completed"
+    assert result_digest(recovered) == baseline
+    attempts = await harness.lineage.list_attempts("tenant-1", unit.unit_key)
+    assert [(item.attempt.attempt, item.claim_fence) for item in attempts] == [(1, 1), (2, 2)]
+    assert await harness.lineage.list_rejections("tenant-1", unit.unit_key) == ()
+    transition = await harness.lineage.get_transition("tenant-1", unit.unit_key, 1)
+    assert transition is not None
+    assert transition.classification == CheckpointClassification.INTERRUPTED
+    assert transition.claim_fence == 2
+    assert len(harness.model.calls) == 3  # A's stalled call was cancelled, never answered
+    assert {human for human, _tools in harness.model.calls} == {1}
+
+
+@pytest.mark.asyncio
+async def test_an_attempt_captures_only_its_own_tip_descending_from_its_pin() -> None:
+    """The capture follows this attempt's ownership marker, never the thread's latest
+    checkpoint: a newer tip written by a superseded attempt is ignored, and an own lineage
+    that does not start at the pinned checkpoint is `in_doubt`."""
+
+    from langgraph.checkpoint.base import empty_checkpoint
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    from app.domain.operation_execution.checkpoint_lineage import (
+        STAMP_ATTEMPT_REF,
+        CheckpointInvocationPlan,
+        CheckpointLineageInDoubt,
+    )
+    from app.integrations.agents.deep_agents.adapter import _Classified, _own_result_config
+
+    saver = InMemorySaver()
+    namespace = "belllabs/stage/fixture/gen/1"
+
+    async def put(parent: str | None, attempt_ref: str) -> str:
+        config: RunnableConfig = _root(namespace, parent) if parent else _root(namespace)
+        written = await saver.aput(
+            config,
+            {**empty_checkpoint(), "id": str(uuid6())},
+            {STAMP_ATTEMPT_REF: attempt_ref},
+            {},
+        )
+        return str(written["configurable"]["checkpoint_id"])
+
+    leaf = await put(None, "attempt-a")
+    own_first = await put(leaf, "attempt-b")
+    own_tip = await put(own_first, "attempt-b")
+    await put(leaf, "attempt-a")  # newest checkpoint of the thread: the superseded holder's
+    unit = stage_recovery_unit("run-own-tip")
+    plan = CheckpointInvocationPlan(
+        request_scope="tenant-1",
+        unit_key=unit.unit_key,
+        execution_generation=1,
+        claim_fence=2,
+        namespace=namespace,
+        invocation_id=submission_invocation_id(unit.unit_key, 1),
+        checkpointer_ref_digest="sha256:" + "c" * 64,
+        binding_digest="sha256:" + "b" * 64,
+        state_schema_digest="sha256:" + "5" * 64,
+        attempt_ref="attempt-b",
+    )
+    resumed = _Classified(CheckpointClassification.INTERRUPTED, None, leaf_id=leaf)
+    config = await _own_result_config(saver, plan, resumed)
+    assert config["configurable"]["checkpoint_id"] == own_tip
+    elsewhere = _Classified(CheckpointClassification.INTERRUPTED, None, leaf_id=own_first)
+    with pytest.raises(CheckpointLineageInDoubt, match="does not descend"):
+        await _own_result_config(saver, plan, elsewhere)
+    with pytest.raises(CheckpointLineageInDoubt, match="no unique result tip"):
+        await _own_result_config(
+            saver, plan.model_copy(update={"attempt_ref": "attempt-c"}), resumed
+        )

@@ -15,6 +15,8 @@ from __future__ import annotations
 from typing import Protocol
 
 from app.application.operations.checkpoint_lineage import CheckpointLineageRepository
+from app.domain.graph_runtime.identities import QualifiedCheckpointKey
+from app.domain.operation_execution.checkpoint_lineage import UnitReconciliationIncident
 from app.domain.run_control.contracts import (
     CommandResult,
     CommandStatus,
@@ -34,6 +36,14 @@ class ReconciliationRunControl(Protocol):
     async def get_run(self, request_scope: str, run_id: str) -> RunProjection: ...
 
 
+class AcceptedCheckpointVerifier(Protocol):
+    """Reads the registered checkpointer to verify a stamped root-namespace descendant."""
+
+    async def is_stamped_descendant(
+        self, incident: UnitReconciliationIncident, key: QualifiedCheckpointKey
+    ) -> bool: ...
+
+
 class UnitReconciliationNudge(Protocol):
     """Delivers a wake-up hint to the parked operation; never the authority itself."""
 
@@ -47,10 +57,12 @@ class UnitReconciliationService:
         run_control: ReconciliationRunControl,
         lineage: CheckpointLineageRepository,
         nudge: UnitReconciliationNudge | None = None,
+        verifier: AcceptedCheckpointVerifier | None = None,
     ) -> None:
         self._run_control = run_control
         self._lineage = lineage
         self._nudge = nudge
+        self._verifier = verifier
 
     async def reconcile_unit(self, command: LifecycleCommand) -> CommandResult:
         action = command.action
@@ -67,13 +79,25 @@ class UnitReconciliationService:
             raise UnitReconciliationRejected(
                 "no recorded in_doubt incident matches this unit generation and run"
             )
+        if incident.status != "operator_required":
+            raise UnitReconciliationRejected("the incident revision is already resolved")
         accepted = action.accepted_checkpoint
-        if accepted is not None and (
-            incident.namespace is None or accepted.thread_id != incident.namespace
-        ):
-            raise UnitReconciliationRejected(
-                "accept_descendant must name a checkpoint of the unit's own namespace"
-            )
+        if accepted is not None:
+            # `CON-CP-CHECKPOINT-LINEAGE-V1`: the named key must be a stamped root-namespace
+            # descendant of the source. It is checked before run control accepts anything,
+            # so an invalid key can never release the operator wait.
+            if incident.namespace is None or accepted.thread_id != incident.namespace:
+                raise UnitReconciliationRejected(
+                    "accept_descendant must name a checkpoint of the unit's own namespace"
+                )
+            if accepted not in incident.candidates and not (
+                self._verifier is not None
+                and await self._verifier.is_stamped_descendant(incident, accepted)
+            ):
+                raise UnitReconciliationRejected(
+                    "accept_descendant must name a recorded candidate or a verified stamped "
+                    "root-namespace descendant of the source"
+                )
         result = await self._run_control.execute(command)
         if result.status != CommandStatus.ACCEPTED:
             return result
@@ -83,6 +107,7 @@ class UnitReconciliationService:
             for item in run.unit_reconciliations
             if item.unit_key == action.unit_key
             and item.execution_generation == action.execution_generation
+            and item.incident_id == action.incident_id
         )
         await self._lineage.apply_reconciliation(command.request_scope, decision)
         if self._nudge is not None:

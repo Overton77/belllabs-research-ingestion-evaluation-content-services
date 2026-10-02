@@ -41,6 +41,13 @@ class ConformanceAuthority:
         ):
             raise ValueError("operation authority binding is not accepted")
 
+    async def verify_continuation(
+        self, request: OperationExecutionRequest, binding: OperationExecutionBinding
+    ) -> None:
+        if binding.run_control_revision != request.run_control_revision:
+            raise ValueError("continuation does not target the bound operation attempt")
+        await self.verify(request)
+
 
 class ConformanceSandbox:
     def __init__(self) -> None:
