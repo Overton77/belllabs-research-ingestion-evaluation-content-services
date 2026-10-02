@@ -348,3 +348,38 @@ async def test_post_change_goal_directed_history_replays_on_the_journaled_path()
         workflows=[GoalDirectedWorkflow, OperationWorkflow],
         workflow_runner=coordinator_workflow_runner(),
     ).replay_workflow(history)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=WorkflowFailureError,
+    reason=(
+        "RRM-019: the family promotes every iteration's output refs, the terminal proposal "
+        "names only the last executor's, so the reducer rejects terminal_output_mismatch"
+    ),
+)
+@pytest.mark.asyncio
+async def test_iterations_with_distinct_output_refs_terminalize() -> None:
+    try:
+        environment = await WorkflowEnvironment.start_time_skipping()
+    except RuntimeError as error:
+        pytest.skip(f"Temporal test server is unavailable: {error}")
+    async with environment:
+        run_control = goal_run_control()
+        composition = await _composition(run_control)
+        composition.model.stable_output_ref = False
+        run_id = await admit_goal_run(run_control, "rrm-019-distinct-output-refs")
+        family_worker, cognitive_worker = _workers(environment, composition)
+        async with family_worker, cognitive_worker:
+            try:
+                result = await environment.client.execute_workflow(
+                    GoalDirectedWorkflow.run,
+                    goal_run_input(run_id, goal_blueprint(), baseline=BASELINE),
+                    id=f"family/{run_id}/1",
+                    task_queue=QUEUE,
+                )
+            except WorkflowFailureError as failure:
+                # Only the RRM-019 rejection is the expected failure; anything else fails.
+                assert "terminal_output_mismatch" in str(failure.cause), failure.cause
+                raise
+        assert result.goal_iterations == 2

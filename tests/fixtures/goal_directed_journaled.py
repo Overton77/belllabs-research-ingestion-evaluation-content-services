@@ -345,6 +345,8 @@ class GoalScriptedModel(ScriptedRecoveryModel):
     """
 
     accept_at: int = 2
+    # One stable output record across iterations (default); `False` reproduces RRM-019.
+    stable_output_ref: bool = True
     _turns: list[dict[str, Any]] = PrivateAttr(default_factory=list)
 
     @property
@@ -395,7 +397,7 @@ class GoalScriptedModel(ScriptedRecoveryModel):
             )
         else:
             payload = (
-                executor_payload(turn["iteration"], self.accept_at)
+                executor_payload(turn["iteration"], self.accept_at, self.stable_output_ref)
                 if turn["role"] == "executor"
                 else verifier_payload(turn["iteration"], self.accept_at)
             )
@@ -403,13 +405,17 @@ class GoalScriptedModel(ScriptedRecoveryModel):
         return ChatResult(generations=[ChatGeneration(message=message)])
 
 
-def executor_payload(iteration: int, accept_at: int) -> dict[str, object]:
+def executor_payload(
+    iteration: int, accept_at: int, stable_output_ref: bool = True
+) -> dict[str, object]:
     return {
         "schema_version": "belllabs.goal-executor-observation.v1",
         "disposition": "completed",
         # One stable record across iterations: the family promotes every iteration's output
-        # refs, and the terminal proposal must name exactly the accepted ones.
-        "output_refs": ["artifact:rrm016:record"],
+        # refs while the terminal proposal names only the last executor's (RRM-019).
+        "output_refs": [
+            "artifact:rrm016:record" if stable_output_ref else f"artifact:rrm016:{iteration}"
+        ],
         "completion_claim": iteration >= accept_at,
         "accepted_fact_refs": [f"fact:rrm016:{iteration}"],
         "evidence_refs": [f"evidence:executor:{iteration}"],
