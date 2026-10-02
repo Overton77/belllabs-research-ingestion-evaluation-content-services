@@ -36,7 +36,6 @@ from app.domain.run_control.contracts import (
     ClaimEffectAction,
     CommandResult,
     CommandStatus,
-    DomainEventEnvelope,
     EffectDisposition,
     EffectLedgerState,
     EffectSettlementOutcome,
@@ -772,46 +771,3 @@ def _claim_for(
         claimed_by=claimed_by,
         claimed_at=binding.bound_at,
     )
-
-
-def _runtime_outbox_events(
-    *,
-    binding: OperationExecutionBinding,
-    settlement: OperationSettlement,
-    claim: OperationEffectClaim,
-    result_manifest_ref: str,
-    aggregate_version: int,
-    actor: ActorContext,
-    correlation_id: str,
-) -> tuple[DomainEventEnvelope, ...]:
-    events = []
-    event_count = len(settlement.event_payloads)
-    for index, payload in enumerate(settlement.event_payloads, start=1):
-        events.append(
-            DomainEventEnvelope(
-                event_id=str(
-                    uuid5(
-                        NAMESPACE_URL,
-                        f"operation-event:{binding.request_scope}:"
-                        f"{settlement.settlement_id}:{index}",
-                    )
-                ),
-                event_type="operation.runtime_event_recorded",
-                aggregate_id=binding.run_id,
-                aggregate_version=aggregate_version,
-                sequence=index + 1,
-                is_version_final=index == event_count,
-                occurred_at=settlement.settled_at,
-                recorded_at=settlement.settled_at,
-                actor=actor,
-                correlation_id=correlation_id,
-                causation_id=claim.effect_claim_id,
-                payload={
-                    "operation_id": binding.operation_id,
-                    "event_index": index - 1,
-                    "event_payload_digest": sha256_digest(payload),
-                    "result_manifest_ref": result_manifest_ref,
-                },
-            )
-        )
-    return tuple(events)
