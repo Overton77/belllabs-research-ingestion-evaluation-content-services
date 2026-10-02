@@ -3,8 +3,8 @@
 **What to build:** every identity, fingerprint or idempotency digest computed from a Pydantic contract is stable across processes, whatever the string-hash seed.
 
 **Blocked by:** None. Discovered by RRM-004 while diagnosing the intermittent RRM-003 merge-gate failure.
-**Blocks:** No mission ticket. RRM-004 fixed the sites on the crash-recovery path; the remaining sites are latent.
-**Status:** ready-for-agent
+**Blocks:** **RRM-010 (required before the readiness gate).** `app/application/runtime/postgres_runtime_authority.py` hashes the run projection, including `WaitCondition.scope` (a frozenset), into `lifecycle_digest` with a JSON-mode dump. That digest is therefore seed-dependent across processes. RRM-004 fixed the sites on the crash-recovery path; the remaining sites are latent until composed.
+**Status:** ready-for-agent (required before RRM-010)
 **Branch:** `wp/rrm-015-set-order-stable-digests`
 **Authority:** idempotency and replay requirements already accepted: REQ-CP-RUN-003/008, REQ-CP-EXEC-004/005, and the CP-020 operation-journal invariants
 

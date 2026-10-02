@@ -1,9 +1,9 @@
 # RRM-004 implementation evidence
 
-Disposition: ready_for_review (implemented; independent review pending)
+Disposition: ready_for_review (independent review `approve_with_fixes`; all findings addressed in `284ed20` and the following documentation commit; re-review pending)
 Recorded date: 2026-10-01 (America/New_York)
 Qualification identity: RRM-004 recover checkpoint and settlement crash windows. Requirements: REQ-CP-DA-018 (classification and crash windows); REQ-CP-EXEC-003/004/005/008(narrow)/014 (claim lease, takeover and fence); REQ-CP-RUN-007 (narrowed post-dispatch rule, `in_doubt`, run phase, `operator_reconciliation`); REQ-CP-DA-017 (transition linked to the fenced result). Contracts: `CON-CP-CHECKPOINT-LINEAGE-V1` (classification table, crash windows, operator decisions) and `CON-CP-LIFECYCLE-V1` `reconcile_unit` (AMD-RRM-001, accepted meta `main` `a50d833`).
-Base revision and head revision: base `8762d3e` (integration `integration/research-runtime-mission`, RRM-001 and RRM-003 merged). Tested code head: ``a90022cddbd39348e8a3179a89685e2ceb0ac02b`` on `wp/rrm-004-checkpoint-recovery`. The evidence/ticket commit follows it and changes documentation only. Not merged (the coordinator owns review and merge).
+Base revision and head revision: base `8762d3e` (integration `integration/research-runtime-mission`, RRM-001 and RRM-003 merged). Tested code head: ``a90022cddbd39348e8a3179a89685e2ceb0ac02b`` on `wp/rrm-004-checkpoint-recovery`. The evidence/ticket commit `404d253` follows it and changes documentation only. Review-fix code commit: `284ed20`; its documentation commit follows. Not merged (the coordinator owns review and merge).
 Framework/package baseline: `uv sync --frozen` from the committed `uv.lock` (no dependency change); CPython 3.12.14 (Codex runtime), pytest 8.4.2, ruff 0.15.22, mypy 1.20.2, pydantic 2.13.4, langgraph 1.2.10, langgraph-checkpoint 4.1.1, langgraph-checkpoint-postgres 3.1.1, deepagents 0.7.5, temporalio 1.30.0 (its downloaded dev server serves `WorkflowEnvironment.start_local`), asyncpg 0.31.0, psycopg 3.3.4
 
 ## Worktree provenance
@@ -177,6 +177,7 @@ Persistent technical qualification:
 - Real `AsyncPostgresSaver` in `rrm004_restart_saver`.
 - Application PostgreSQL run control, operation journal and checkpoint lineage, composed through `compose_postgres_operation_recovery`.
 - A real `create_deep_agent` graph with the deterministic scripted model.
+- The production `RunControlOperationAuthority` and the production Mongo OEB binding store (`MongoOperationBindingRepository`, a dedicated database in the disposable Mongo), both added after review. Worker 2 therefore finds worker 1's binding, compares its fingerprint across processes with different hash seeds, and is admitted as a continuation.
 - The worker processes share a content-addressed file payload store, a stand-in for the production S3 artifact store.
 
 Sanitized record printed by the restart test (IDs and PIDs vary per run):
@@ -216,7 +217,7 @@ RRM-004 EVIDENCE worker restart: {"attempts": [{"activity_attempt": 1, "claim_fe
 - **Production impact.** Any crash-recovery replay of journal authority, and any cross-process re-binding (the OEB request fingerprint covers `CapabilityGrant.capabilities`), could spuriously fail in about 1 process in 8. It hit exactly the path this ticket makes live.
 - **Fix.** `contract_fingerprint` dumps in Python mode, so `_normalize` sorts sets. It is used for run-control command, request and family fingerprints, the journal coordinator replay, `OperationJournalMutation.validate`, and the OEB request fingerprint.
 - **Verification.** Seeds 1, 7 and 10 now pass (4/4 each). The deterministic regression test above covers it, and the restart proof runs worker 1 under `PYTHONHASHSEED=7` while worker 2 has a random seed. No retry was added. The remaining JSON-mode digest sites are latent and outside this path: RRM-015.
-- **Compatibility note.** Fingerprints persisted before this change used iteration order. Re-submitting such a stored command fails closed (`IdempotencyConflict`); it is never silently accepted. Only disposable stacks hold such rows today.
+- **Compatibility note (review finding 6).** `contract_fingerprint` changes a stored digest only where the old digest was set-order (hash-seed) dependent. For a contract with no set-valued field, the Python-mode dump normalizes to the same canonical JSON. The independent reviewer measured 525 affected call sites, all differing only in set order. Fingerprints persisted before this change are therefore either unchanged or were already unstable across processes. Re-submitting a seed-ordered stored command fails closed (`IdempotencyConflict`); it is never silently accepted. Only disposable stacks hold such rows, so this is accepted pre-production. The remaining JSON-mode digest sites are RRM-015, which is **required before RRM-010**: `postgres_runtime_authority` hashes waits with a frozenset `scope` into `lifecycle_digest`.
 
 ## Replacement and deletion checks
 
@@ -230,8 +231,11 @@ What RRM-009 must plug in (production composition):
 1. `compose_postgres_operation_recovery(pool, run_control=…, nudge=TemporalUnitReconciliationNudge(client))`. Pass `lineage` into `OperationExecutionService`, with the journaled coordinator over `PostgresAtomicOperationJournalRepository` and an S3 `ResultPayloadStore`.
 2. The registered persistent `AsyncPostgresSaver` as the binding's checkpointer.
 3. A deployment-stable `journal_claimed_by`. The claim payload digest includes it, so a per-worker value makes the replacement worker's claim replay conflict.
-4. **Defect to fix with a test.** `RunControlOperationAuthority.verify` requires `run.version == request.run_control_revision` on every attempt. After the first claim the run version has moved, so a recovery attempt would be rejected as non-retryable. Re-verification of an existing binding must check bound authority, not the live version, and must accept the in_doubt `waiting` phase. All RRM-004 proofs use an accepting authority, like RRM-003.
-5. The `operator` API role does not grant `workflow_run.reconcile_unit`; no route exposes `UnitReconciliationService` yet.
+4. `RunControlOperationAuthority` as the operation authority. Its `verify_continuation` (review fix 2) admits retries and recoveries; the restart proof composes it.
+5. `LangGraphCheckpointDescendantVerifier(registered checkpointers)` as the `verifier` of `compose_postgres_operation_recovery`.
+6. A persistent OEB binding store (Mongo), so a replacement worker continues the bound attempt instead of re-binding.
+
+The `operator` API role lacking `workflow_run.reconcile_unit`, and the missing route, are now recorded in the RRM-007 ticket (review finding 5).
 
 What RRM-013 must know:
 - Async children are not yet effect claims of the parent unit. Once they are registered as run-control effects with `operation_ref = binding_id`, the narrowed rule already turns an unsettled child into `in_doubt` (`unsettled_effect_ids`).
@@ -249,7 +253,8 @@ What RRM-007 must know:
 What RRM-008 must know:
 - A parked `OperationWorkflow` ignores `request_cancel` (the wait condition watches only the hint).
 - The cancellation saga must decide `cancelled` for an in_doubt unit: `abandon`-like settlement with the latest checkpoint, per EXEC-008's interrupted rule. The run stays `cancelling` with `operator_required`.
-- A holder releases its lease on `asyncio.CancelledError`. A heartbeat-cancelled cognitive attempt therefore hands over at once, and the next attempt classifies `interrupted`.
+- A holder releases its lease when it stops on its own: on an exception, on `asyncio.CancelledError`, and at its lease deadline (`OperationLeaseExpired`, review fix 3). There is **no Activity heartbeat and no heartbeat timeout yet**, so a Temporal cancel does not reach a running cognitive attempt today; heartbeat-driven cancellation is RRM-008's. The lease-deadline timeout does not contradict it: a heartbeat cancel arrives as `CancelledError`, and the same release path hands over at once.
+- Orphan lineages after a settlement without a transition (budget violation after a terminal leaf, provider `failed`, `abandon_unit`, cancellation of an `interrupted` unit) wedge a shared GoalDirected session namespace: the next unit classifies `foreign_descendant`. Review finding 4 was recorded as an RRM-008 acceptance item (see Review disposition).
 
 Other:
 - **Deviation (lease placement).** The lease and fence live on `runtime_unit_generations`, not on `operation_effect_claims`; see Changed paths.
@@ -275,6 +280,34 @@ Other:
 - `CrashingSaver` / `HangAfterCheckpointSaver`: reusable crash injection at durable boundaries.
 
 None of these carries company, fixture or provider specifics.
+
+## Review disposition
+
+Independent review verdict: `approve_with_fixes`. All findings are addressed on this branch with new commits; nothing was amended.
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 (blocking) | A bad `accept_descendant` permanently strands the unit. A non-candidate or nonexistent key was accepted by run control, which released the wait. The next attempt re-parked `in_doubt`, but `open_incident` kept the resolved incident and `record_in_doubt` replayed the stored commands, so no wait was re-created and every further decision was `reconciliation_not_pending`. | **Fixed (`284ed20`).** (a) `UnitReconciliationService` validates the key *before* run control: it must be a recorded candidate or a verified stamped root-namespace descendant of the source (`LangGraphCheckpointDescendantVerifier`, a checkpointer read only; the root namespace, the unit generation's three stamps and the parent link are checked back to the source). A resolved incident cannot be decided again. Terminal-after-failure incidents now carry the terminal leaf as a candidate. (b) Chosen option: a superseding **incident revision**. An `in_doubt` classification after an accepted decision opens revision `n+1`: a new incident ID and identity digest, its own `operator_reconciliation` wait (`…:revision:n+1`), and its own ambiguous observation. Decisions are keyed by incident revision in the reducer, run projection and lookups. Only revision `n+1` on top of a resolved revision `n` may open (`decide_incident_opening`), so concurrent openers converge. This is spec-consistent: each revision is resolved only by a typed `reconcile_unit` command, and nothing is re-executed speculatively. (c) Tests: `test_unverifiable_accepted_descendant_is_rejected_before_run_control` (a nonexistent key and a wrong-parent key are rejected; the wait stays pending; a valid decision completes). `test_accepted_descendant_that_fails_at_dispatch_reopens_the_next_incident_revision` (accepting the verified common parent of two leaves re-parks at revision 2 with a new wait and 0 model calls; a second decision completes with the baseline digest; the projection holds both decisions). The recovery repository contract covers revision opening in memory and on Postgres, including under the runtime role. |
+| 2 (blocking) | `RunControlOperationAuthority.verify` required the exact bound run version and an `active` phase on every unsettled attempt, while the first claim moves the version, so every retry, recovery or nudge re-run was rejected as non-retryable in a real composition. | **Fixed (`284ed20`).** New port method `verify_continuation(request, binding)`, called for a prior (bound) attempt; the exact check stays for the first binding. It relies on REQ-CP-EXEC-005 (retries, restarts and takeovers are not disruptive and continue the semantic attempt), REQ-CP-EXEC-014 (the bound claim continues by fence) and REQ-CP-RUN-007 (an `in_doubt` run keeps its phase). It admits a run in `active` or `waiting` whose version is at least the bound revision, with the bound configuration, capabilities, prompts, workspace and reservation. It stays fail-closed for terminal, pending, paused or cancelling runs (cancellation is EXEC-008's saga) and for a foreign binding. Tests with the **real** authority: `test_real_run_control_authority_admits_recovery_after_a_lost_worker[after_intermediate_checkpoint/after_terminal_checkpoint/before_settlement]`. In each, the first-binding check raises `Run Control revision` while the continuation passes, and recovery reaches the baseline digest with 2 model calls. `test_real_run_control_authority_admits_a_concurrent_retry_as_in_progress` (attempt 2 stands down retryably). `test_real_authority_continuation_fails_closed_for_paused_runs` (rejected while paused, with no model call; recovers after resume). `test_real_authority_continuation_rejects_terminal_or_foreign_bindings`. The **worker-restart proof** now composes the real authority with the Mongo binding store. Its first post-fix run was red until the replacement worker could find the persisted binding, which demonstrates the defect it guards. |
+| 3 (non-blocking, fixed) | A live attempt could overrun its lease and keep calling the model and tools after a takeover; capture read the thread's latest checkpoint. | **Fixed (`284ed20`).** The service bounds the holder's work with `asyncio.timeout(work_budget)`. The lease deadline is the Temporal `started_time` plus start-to-close (a server timestamp) or the default lease. The margin is 20% of the lease, at least 1 s and at most 30 s; it absorbs server-to-worker clock skew and the release write. The budget is computed once from the wall clock and then enforced by the event loop's monotonic timer. On expiry the holder cancels its cognition, releases the lease and raises the retryable `OperationLeaseExpired`. Every invocation also stamps `belllabs_attempt_ref` (the lease holder), and capture selects this attempt's unique tip, which must descend from the checkpoint it pinned; otherwise it is `in_doubt`. Real heartbeat and cancel remain RRM-008's and are not contradicted. Tests: `test_slow_holder_stops_at_its_lease_deadline_before_a_takeover_proceeds` (A stops within its 3 s lease and writes nothing; B resumes, fence 2, no rejection, baseline digest). `test_an_attempt_captures_only_its_own_tip_descending_from_its_pin` (a newer tip from another attempt is ignored; a wrong pin or no tip is `in_doubt`). |
+| 4 (plausible) | Orphan descendants after a settlement without a transition wedge a shared GoalDirected session. | **Recorded, not changed here.** Chosen: an explicit acceptance item in the RRM-008 ticket, which owns settling partial lineages (cancel of an `interrupted` unit, `abandon`, budget). It must decide between advancing the head over the settled branch by a recorded transition and requiring a session rollover, and prove that the next iteration proceeds. |
+| 5 | The `operator` API role lacks `workflow_run.reconcile_unit`, and no route exposes `UnitReconciliationService`. | **Recorded** in the RRM-007 ticket body (governed delivery and receipts for `reconcile_unit`). |
+| 6 | Fingerprint compatibility. | **Recorded** above (Intermittent-failure diagnosis, Compatibility note). RRM-015 is marked **required before RRM-010** in its body and in the index; the RRM-014 and RRM-015 index rows were added. RRM-014 stays non-blocking for RRM-010. |
+| 7 | Evidence README. | This section, the updated gates below, and the corrected RRM-008 note on heartbeat cancellation (Unresolved risks). |
+
+Post-review gates (tested code head `284ed20`):
+
+| Command | Result |
+|---|---|
+| `uv run --no-sync ruff check app tests scripts` | All checks passed! |
+| `uv run --no-sync mypy app` | Success: no issues found in 340 source files |
+| Owning suites with both service DSNs (the list above plus `tests/integration/mongodb/test_operation_execution_mongodb_integration.py`) | 305 passed, 1 skipped (WSL-only BP-010 recovery) |
+| Worker-restart proof, both DSNs: `pytest -s tests/integration/temporal/test_rrm_004_worker_restart_recovery.py` (real authority, Mongo bindings) | 1 passed in 40 s; worker 1 → worker 2, attempts fences `[1, 2]`, `interrupted`, human counts `[1, 1]`, one settlement, `technical_attempt [2]` |
+| Full pytest, hermetic (`BELLABS_RUN_*_LIVE=0 LANGSMITH_TRACING=false`) | 747 passed, 54 skipped, 2 xfailed, 0 failed |
+| Full pytest with `TEST_APPLICATION_POSTGRES_DSN` and `TEST_MONGODB_URI` | 777 passed, 24 skipped, 2 xfailed, 0 failed |
+| `git diff --check 8762d3e HEAD` | clean |
+
+The delta against the pre-review head is +10 passed in both full runs: the 10 new review-fix tests in `test_checkpoint_recovery_classification.py`. The skips are unchanged. No test was skipped, xfailed or deselected. Two existing assertions were adjusted to the new protocol: the role test's incident count is 3 (revision 2 added to the contract), and the terminal test asserts the recorded candidate.
 
 ## Final disposition
 
