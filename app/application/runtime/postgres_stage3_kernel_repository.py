@@ -146,6 +146,7 @@ class PostgresExecutionLineageRepository:
             )
         )
 
+
 async def append_lineage_in_transaction(
     connection: asyncpg.Connection, lineage: PersistedExecutionLineage
 ) -> PersistedExecutionLineage:
@@ -168,9 +169,7 @@ async def append_lineage_in_transaction(
         lineage.lineage_id,
     )
     if prior is not None:
-        persisted = PersistedExecutionLineage.model_validate(
-            _json(prior["lineage_payload"])
-        )
+        persisted = PersistedExecutionLineage.model_validate(_json(prior["lineage_payload"]))
         if persisted != lineage:
             raise IdempotencyConflict("lineage identity was reused with conflicting facts")
         return persisted

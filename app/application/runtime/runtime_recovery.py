@@ -267,9 +267,7 @@ class ForkRepository(Protocol):
 
     async def reserve(self, request: RunForkRequest) -> bool: ...
 
-    async def get_request(
-        self, request_scope: str, request_id: str
-    ) -> RunForkRequest | None: ...
+    async def get_request(self, request_scope: str, request_id: str) -> RunForkRequest | None: ...
 
     async def get(self, request_scope: str, request_id: str) -> RunForkReceipt | None: ...
 
@@ -474,9 +472,7 @@ class RuntimeForkService:
                 )
             if observation.status == "materialized":
                 assert observation.materialization is not None
-                return await self._record_receipt(
-                    request, admission, observation.materialization
-                )
+                return await self._record_receipt(request, admission, observation.materialization)
             await self._repository.release_copy_claim(request)
         if not await self._repository.claim_copy(request):
             raise RuntimeError("fork materialization is already in progress")

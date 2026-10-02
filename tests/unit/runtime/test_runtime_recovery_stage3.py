@@ -233,9 +233,7 @@ def _service(
     authority = authority or ForkAuthority()
     materializer = materializer or ForkMaterializer()
     return (
-        RuntimeForkService(
-            repository=repository, authority=authority, materializer=materializer
-        ),
+        RuntimeForkService(repository=repository, authority=authority, materializer=materializer),
         repository,
         authority,
         materializer,
@@ -297,9 +295,7 @@ class TimeoutAfterMaterializer(ForkMaterializer):
 
     async def reconcile_materialization(self, _request, _admission):  # type: ignore[no-untyped-def]
         assert self.recorded is not None
-        return ForkMaterializationObservation(
-            status="materialized", materialization=self.recorded
-        )
+        return ForkMaterializationObservation(status="materialized", materialization=self.recorded)
 
 
 @pytest.mark.asyncio
