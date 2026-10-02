@@ -13,9 +13,11 @@ Wire the existing fork admission/copy saga to local Deep Agent checkpoint lineag
 - [x] Snapshot binds authoritative projection/version, exact configuration/binding digests, cycles/revision, accepted results/evidence, budgets/effects, child status and cognitive/sandbox references.
 - [x] Protected identity, authority, evidence, budgets and terminality fields cannot be patched.
 - [x] New run starts at epoch 1 with its own admission, reservation, thread/namespace and explicit source checkpoint lineage.
+  - Namespaces are not separate receipt fields: each derived unit gets its own cognitive namespace derived from its derived `unit_key` (a different run gives a different key). Source checkpoint lineage is explicit as the reuse candidates' result checkpoint keys in the snapshot plus the receipt lineage (seed checkpoint `null`; the seed is deferred to RRM-017).
 - [x] Reuse only settled compatible immutable results; active parent children remain parent-owned and pending messages/effects are not blindly copied.
 - [x] Fork idempotency and admission/provider-copy crash recovery use the audited existing saga and one durable receipt.
 - [x] Real persistence/API-to-Temporal technical forks for both families produce distinct artifact/result refs; original state and artifacts remain unchanged.
+  - **Caveat (review 2026-10-02):** for GoalDirected this is proven for snapshot, independent admission and a fresh derived run only. GoalDirected operations bypass the run-control journal and the demonstration uses an accepting operation authority, so the "no unresolved effect" quiescence check passes vacuously for GoalDirected and neither governed settlement nor reuse is proven for it. RRM-016 (mission-blocking for RRM-010) closes this.
 - [x] Stale expected version/checkpoint, incompatible restore, unauthorized scope and ambiguous copy fail safely.
 - [x] Prove the supported fork boundary precisely. Arbitrary executable graph-node forks remain deferred unless resume/patch compatibility and macro reuse are separately qualified.
 - [x] Record safe-boundary/quiescence, patch, reuse and lineage manifests plus reviewed integration commit.

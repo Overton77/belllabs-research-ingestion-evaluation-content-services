@@ -3,8 +3,8 @@
 **What to build:** GoalDirected executor and verifier operations settle through the same governed path as StageGraph operations: `RunControlOperationAuthority` verification, the journaled effect claim, the fenced result observation and an accepted run-control settlement, with usage recorded exactly once.
 
 **Blocked by:** RRM-004 (journal and fence), RRM-007 (it edits `goal_directed.py`; land after it or coordinate the region).
-**Blocks:** RRM-009 production composition of GoalDirected cognition; reuse-candidate eligibility of GoalDirected units in RRM-006 snapshots.
-**Status:** ready-for-agent after RRM-007 is accepted (found by RRM-006)
+**Blocks:** **RRM-010** (mission-blocking, coordinator decision 2026-10-02 after the RRM-006 review); RRM-009 production composition of GoalDirected cognition; governed GoalDirected fork evidence (RRM-006 snapshots see GoalDirected units as `excluded/not_accepted`, and the effect-quiescence check is vacuous for them).
+**Status:** ready-for-agent after RRM-007 is accepted (found by RRM-006); **required before RRM-010**
 **Branch:** `wp/rrm-016-goal-directed-journaled-operations`
 **Authority:** REQ-CP-RUN-007 (claimed and reconciled effects), REQ-CP-RUN-006/009 (budgets settle once), REQ-CP-EXEC-014 (claim fence), REQ-BP-GD-011/012
 
