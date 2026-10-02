@@ -51,6 +51,7 @@ from app.domain.operation_execution.errors import (
     DeepAgentMaterializationError,
     RuntimeInvocationFailure,
 )
+from app.integrations.agents.deep_agents.capability_lineage import capability_lineage
 from app.integrations.agents.deep_agents.checkpoint_reads import (
     MAX_LINEAGE_WALK,
     checkpoint_parent_id,
@@ -187,6 +188,7 @@ class DeepAgentRuntimeAdapter:
                 "messages": [{"role": "user", "content": user_prompt}],
             }
             disclosure_observer = _SkillDisclosureObserver(binding)
+            model_calls = _ModelCallObserver()
             checkpointer = cast(BaseCheckpointSaver[Any], materialized.checkpointer)
             # REQ-CP-DA-018: classify the unit generation from the checkpointer before any
             # provider work, then act exactly as `CON-CP-CHECKPOINT-LINEAGE-V1` prescribes:
@@ -229,7 +231,7 @@ class DeepAgentRuntimeAdapter:
                             **({"checkpoint_id": pinned} if pinned is not None else {}),
                         },
                         "metadata": plan.invocation_metadata(),
-                        "callbacks": [disclosure_observer],
+                        "callbacks": [disclosure_observer, model_calls],
                     }
                     # A resume never re-appends the submitted input: it continues the
                     # pending tasks of the pinned checkpoint with no input.
@@ -286,10 +288,27 @@ class DeepAgentRuntimeAdapter:
                 inspection["workspace_candidates"] = await self._capture_workspace_outputs(
                     materialized.backend, invocation.binding, actual_state
                 )
+                own_messages = messages[len(prior_messages) :]
+                # REQ-CP-DA-007: in-process sync subagents spend the parent's reservation, so
+                # their model calls (observed at the chat-model boundary; they never enter the
+                # parent's messages) are part of the operation's observed usage.
+                subordinate_calls = model_calls.calls_outside(messages)
+                usage = _usage(invocation, own_messages, subordinate_calls)
+                inspection["capability_lineage"] = capability_lineage(
+                    binding,
+                    own_messages,
+                    usage_amounts=usage.amounts,
+                    model_calls=(
+                        *_message_usage(own_messages),
+                        *({**call, "scope": "subordinate"} for call in subordinate_calls),
+                    ),
+                    disclosed_skills=disclosure_observer.disclosed_skills,
+                    operation_secret_refs=invocation.binding.secret_refs,
+                )
                 return RuntimeResult(
                     output_text=output_text,
                     structured_output=structured if isinstance(structured, dict) else None,
-                    usage=_usage(invocation, messages[len(prior_messages) :]),
+                    usage=usage,
                     provider_run_id=(str(final.id) if final is not None and final.id else None),
                     event_payloads=(inspection,),
                     checkpoint=capture,
@@ -342,6 +361,21 @@ def _effective_permissions(
     return _permissions(binding)
 
 
+def _subagent_specs(materialized: MaterializedDeepAgentArguments) -> list[SubAgent]:
+    """Sync subagent specs; their framework permissions follow the parent's rule.
+
+    deepagents refuses filesystem permissions beside an executable sandbox, so a child's
+    rules apply only without one (the parent's `_effective_permissions` rule).
+    """
+
+    if not isinstance(materialized.backend, SandboxBackendProtocol):
+        return cast(list[SubAgent], list(materialized.subagents))
+    return [
+        cast(SubAgent, {key: value for key, value in spec.items() if key != "permissions"})
+        for spec in materialized.subagents
+    ]
+
+
 def _compile(
     materialized: MaterializedDeepAgentArguments,
     binding: DeepAgentExecutionBinding,
@@ -361,7 +395,7 @@ def _compile(
         system_prompt=system_prompt,
         tools=list(materialized.tools),
         middleware=[*materialized.middleware, *extra_middleware],
-        subagents=cast(list[SubAgent], list(materialized.subagents)),
+        subagents=_subagent_specs(materialized),
         skills=list(materialized.skills),
         permissions=_effective_permissions(materialized, binding),
         backend=materialized.backend,
@@ -603,6 +637,7 @@ async def _terminal_result_may_exist(
     leaf = await checkpointer.aget_tuple(root_checkpoint_config(plan.namespace, classified.leaf_id))
     return True, ((_qualified(plan, leaf),) if leaf is not None else ())
 
+
 def _within(path: str, slot: str) -> bool:
     normalized = slot.rstrip("/")
     return path == normalized or path.startswith(normalized + "/")
@@ -810,7 +845,11 @@ def _message_text(message: BaseMessage | None) -> str:
     return "\n".join(parts)
 
 
-def _usage(invocation: RuntimeInvocation, messages: list[BaseMessage]) -> RuntimeUsage:
+def _usage(
+    invocation: RuntimeInvocation,
+    messages: list[BaseMessage],
+    subordinate_calls: tuple[dict[str, object], ...] = (),
+) -> RuntimeUsage:
     turns = 0
     total_tokens = 0
     for message in messages:
@@ -819,6 +858,9 @@ def _usage(invocation: RuntimeInvocation, messages: list[BaseMessage]) -> Runtim
         turns += 1
         metadata: Mapping[str, Any] = message.usage_metadata or {}
         total_tokens += int(metadata.get("total_tokens", 0))
+    for call in subordinate_calls:
+        turns += 1
+        total_tokens += int(cast(int, call["total_tokens"]))
     amounts = {}
     if "model.turns" in invocation.binding.budget_limits:
         amounts["model.turns"] = turns
@@ -890,6 +932,60 @@ def _inspect_state(
         "message_count": len(messages),
         "resolved_attachments": list(resolved_attachments),
     }
+
+
+def _message_usage(messages: list[BaseMessage]) -> tuple[dict[str, object], ...]:
+    return tuple(
+        {
+            "message_id": str(message.id or ""),
+            "scope": "operation",
+            **_token_counts(message.usage_metadata or {}),
+        }
+        for message in messages
+        if isinstance(message, AIMessage)
+    )
+
+
+def _token_counts(metadata: Mapping[str, Any]) -> dict[str, int]:
+    return {
+        "input_tokens": int(metadata.get("input_tokens", 0)),
+        "output_tokens": int(metadata.get("output_tokens", 0)),
+        "total_tokens": int(metadata.get("total_tokens", 0)),
+    }
+
+
+class _ModelCallObserver(BaseCallbackHandler):
+    """Every chat-model completion of the invocation, parent and in-process children alike.
+
+    Recorded at the model boundary with the provider-reported token counts and the message
+    identity, never the content. `run_inline` keeps the handler on the event loop thread.
+    """
+
+    run_inline = True
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._calls: dict[str, dict[str, object]] = {}
+
+    def on_llm_end(self, response: Any, **kwargs: Any) -> None:
+        del kwargs
+        for generations in getattr(response, "generations", ()):
+            for generation in generations:
+                message = getattr(generation, "message", None)
+                if not isinstance(message, AIMessage) or not message.id:
+                    continue
+                self._calls[str(message.id)] = {
+                    "message_id": str(message.id),
+                    **_token_counts(message.usage_metadata or {}),
+                }
+
+    def calls_outside(self, messages: list[BaseMessage]) -> tuple[dict[str, object], ...]:
+        """The observed calls whose message never entered the parent's state."""
+
+        parent = {str(message.id) for message in messages if message.id}
+        return tuple(
+            self._calls[identity] for identity in sorted(self._calls) if identity not in parent
+        )
 
 
 class _SkillDisclosureObserver(BaseCallbackHandler):

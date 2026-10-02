@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
@@ -18,6 +19,7 @@ from app.application.operations.checkpoint_lineage import (
 )
 from app.application.operations.journaled_operation_execution import (
     JournaledOperationExecutionCoordinator,
+    output_payload,
 )
 from app.application.operations.operation_execution import (
     InMemoryOperationBindingRepository,
@@ -27,6 +29,7 @@ from app.application.operations.operation_execution import (
     OperationExecutionService,
     RunControlOperationAuthority,
     RunControlOperationBudgetAuthority,
+    settlement_result_manifest,
 )
 from app.application.operations.operation_journal import OperationJournalMutation
 from app.application.workspaces.artifact_promotion import ArtifactPayloadAddress
@@ -1143,6 +1146,9 @@ async def test_journaled_operation_settles_usage_effect_and_terminalizes(
             ),
         ),
         provider_run_id="provider:journal-operation",
+        # RRM-009: the runtime's event payloads (inspection, capability lineage) are kept in
+        # the digest-bound output payload and restored with it.
+        event_payloads=({"kind": "deep_agent.capability_lineage.v1", "invocations": []},),
         settled_at=NOW,
     )
 
@@ -1172,6 +1178,16 @@ async def test_journaled_operation_settles_usage_effect_and_terminalizes(
         }
     ) == settlement
     assert await coordinator.get_settlement(binding) == result
+    assert json.loads(output_payload(settlement))["event_payloads"] == [
+        {"kind": "deep_agent.capability_lineage.v1", "invocations": []}
+    ]
+    assert "event_payloads" not in json.loads(settlement_result_manifest(result))
+    # A settlement without event payloads keeps the earlier output payload bytes.
+    assert output_payload(settlement.model_copy(update={"event_payloads": ()})) == json.dumps(
+        {"output_text": "done", "structured_output": None},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
     if pending_external:
         effects = await run_service.get_effects("tenant-1", run_id)
         assert effects.claims[acquired.claim.effect_claim_id].settlement is None

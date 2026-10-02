@@ -221,6 +221,7 @@ class JournaledOperationExecutionCoordinator:
             update={
                 "output_text": payload["output_text"],
                 "structured_output": payload["structured_output"],
+                "event_payloads": tuple(payload.get("event_payloads", ())),
             }
         )
 
@@ -782,13 +783,21 @@ class JournaledOperationExecutionCoordinator:
 
 
 def output_payload(settlement: OperationSettlement) -> bytes:
-    """Canonical output payload bytes; the manifest commits to their digest."""
+    """Canonical output payload bytes; the manifest commits to their digest.
 
+    RRM-009: the runtime's event payloads (the materialization inspection and the
+    sanitized capability lineage) travel in the same digest-bound payload, so the journaled
+    path keeps them durably. A settlement without them keeps the earlier byte layout.
+    """
+
+    payload: dict[str, object] = {
+        "output_text": settlement.output_text,
+        "structured_output": settlement.structured_output,
+    }
+    if settlement.event_payloads:
+        payload["event_payloads"] = list(settlement.event_payloads)
     return json.dumps(
-        {
-            "output_text": settlement.output_text,
-            "structured_output": settlement.structured_output,
-        },
+        payload,
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
