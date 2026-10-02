@@ -210,6 +210,28 @@ def test_identity_route_requires_the_deployment_credential(
     )
     assert auth_module.verify_bearer(f"Bearer {expired}") is None
     assert auth_module.claim_expiry(claim) is not None
+    # RRM-009 review: at most one hour, a random jti, and a forged long lifetime is refused
+    # even when correctly signed.
+    expiry = auth_module.claim_expiry(claim)
+    assert expiry is not None and expiry - datetime.now(UTC) <= timedelta(minutes=31)
+    with pytest.raises(ValueError, match="at most one hour"):
+        auth_module.mint_scope_claim("offline-secret", "tenant-1", ttl=timedelta(hours=2))
+    assert claim != auth_module.mint_scope_claim("offline-secret", "tenant-1")
+
+    def signed(payload: dict[str, object]) -> str:
+        body = auth_module._b64(json.dumps(payload).encode("utf-8"))
+        prefix = f"{auth_module.CLAIM_PREFIX}.{body}"
+        return f"{prefix}.{auth_module._signature('offline-secret', prefix)}"
+
+    issued = int(datetime.now(UTC).timestamp())
+    long_lived = signed(
+        {"scope": "tenant-1", "iat": issued, "exp": issued + 7 * 86_400, "jti": "a" * 32}
+    )
+    no_jti = signed({"scope": "tenant-1", "iat": issued, "exp": issued + 600})
+    well_formed = signed({"scope": "tenant-1", "iat": issued, "exp": issued + 600, "jti": "a" * 32})
+    assert auth_module.verify_bearer(f"Bearer {long_lived}") is None
+    assert auth_module.verify_bearer(f"Bearer {no_jti}") is None
+    assert auth_module.verify_bearer(f"Bearer {well_formed}") == "tenant-1"
     monkeypatch.delenv(auth_module.TOKEN_ENV)
     assert auth_module.verify_bearer(f"Bearer {claim}") is None
 

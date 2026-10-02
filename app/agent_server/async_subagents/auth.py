@@ -4,7 +4,8 @@ The parent's `AsyncSubagentContract.deployment_credential_ref`
 (`environment:BELLABS_ASYNC_SUBAGENT_SERVER_TOKEN`) names the deployment's signing secret,
 never a bearer token. The parent presents a **signed scope claim** as its bearer:
 
-    bl1.<base64url(json{"scope", "iat", "exp"})>.<base64url(HMAC-SHA256(secret, "bl1.<body>"))>
+    bl1.<body>.<base64url(HMAC-SHA256(secret, "bl1.<body>"))>
+    body = base64url(json{"scope", "iat", "exp", "jti"})
 
 The server verifies the signature in constant time against its own secret (Compose resolves
 `BELLABS_ASYNC_SUBAGENT_SERVER_TOKEN` from the invoking shell through the tracked
@@ -14,6 +15,19 @@ Scope isolation therefore no longer rests on a client-asserted header under one 
 token: a claim is valid for exactly one scope until its expiry. Threads and runs are scoped
 by `metadata.request_scope`; assistants are read-only deployment topology; Store and crons
 are disabled.
+
+Lifetime (RRM-009 review): a claim lives at most one hour (default 30 minutes; the parent
+re-mints before it lapses) and carries a random `jti` for audit correlation. The server
+refuses a claim whose declared lifetime exceeds the maximum or that lacks a well-formed
+`jti`. There is no replay cache: within its lifetime a claim can be replayed for its scope.
+
+Design note, cross-tenant risk (unresolved, production follow-up): the signing key is
+symmetric and shared by every parent worker and the server. Any process holding it can mint
+a claim for **any** request scope, so a compromised parent worker is not confined to its own
+tenant; scope isolation holds only against callers that do not hold the key. Production
+should move to asymmetric signing (workers sign with private keys, the server verifies with
+public keys, issuance mediated by a BellLabs authority that binds worker identity to the
+scopes it may claim) or to per-scope keys distributed only to the workers serving that scope.
 """
 
 from __future__ import annotations
@@ -23,6 +37,8 @@ import binascii
 import hmac
 import json
 import os
+import re
+import uuid
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from typing import Any
@@ -35,8 +51,9 @@ TOKEN_ENV = "BELLABS_ASYNC_SUBAGENT_SERVER_TOKEN"
 SCOPE_HEADER = b"x-belllabs-request-scope"
 PARENT_IDENTITY = "belllabs-parent-operation"
 CLAIM_PREFIX = "bl1"
-DEFAULT_CLAIM_TTL = timedelta(hours=12)
-MAX_CLAIM_TTL = timedelta(days=7)
+DEFAULT_CLAIM_TTL = timedelta(minutes=30)
+MAX_CLAIM_TTL = timedelta(hours=1)
+_JTI = re.compile(r"^[0-9a-f]{32}$")
 
 auth = Auth()
 
@@ -66,7 +83,7 @@ def mint_scope_claim(
     if not secret or not request_scope.strip():
         raise ValueError("a scope claim requires the signing secret and a request scope")
     if ttl <= timedelta(0) or ttl > MAX_CLAIM_TTL:
-        raise ValueError("scope claim lifetime must be positive and at most seven days")
+        raise ValueError("scope claim lifetime must be positive and at most one hour")
     issued = now or datetime.now(UTC)
     body = _b64(
         json.dumps(
@@ -74,6 +91,7 @@ def mint_scope_claim(
                 "scope": request_scope.strip(),
                 "iat": int(issued.timestamp()),
                 "exp": int((issued + ttl).timestamp()),
+                "jti": uuid.uuid4().hex,
             },
             sort_keys=True,
             separators=(",", ":"),
@@ -114,10 +132,18 @@ def verify_scope_claim(token: str, *, secret: str, now: datetime | None = None) 
         scope = str(payload["scope"])
         issued = int(payload["iat"])
         expires = int(payload["exp"])
+        jti = str(payload["jti"])
     except (ValueError, TypeError, KeyError, binascii.Error):
         return None
     moment = int((now or datetime.now(UTC)).timestamp())
-    if not scope or expires <= issued or moment >= expires or moment < issued - 300:
+    if (
+        not scope
+        or not _JTI.match(jti)
+        or expires <= issued
+        or expires - issued > int(MAX_CLAIM_TTL.total_seconds())
+        or moment >= expires
+        or moment < issued - 300
+    ):
         return None
     return scope
 
