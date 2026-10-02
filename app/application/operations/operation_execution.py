@@ -17,7 +17,7 @@ from app.application.operations.checkpoint_lineage import (
     UnitAttempt,
     transition_id_for,
 )
-from app.application.operations.operation_progress import report_phase
+from app.application.operations.operation_progress import cancel_requested, report_phase
 from app.application.run_control.service import RunControlService
 from app.domain.control_plane.canonical import contract_fingerprint, sha256_digest
 from app.domain.control_plane.contracts import DefinitionKind, SecretRef
@@ -77,6 +77,14 @@ from app.domain.run_control.forks import ForkRejected
 _LEASE_DEADLINE: ContextVar[asyncio.Timeout | None] = ContextVar(
     "belllabs_operation_lease_deadline", default=None
 )
+
+
+def _uncancel_current_task() -> None:
+    """Clear the swallowed cancellation so the settlement's own awaits are not cancelled."""
+
+    task = asyncio.current_task()
+    if task is not None:
+        task.uncancel()
 
 
 def _lease_deadline_expired() -> bool:
@@ -205,10 +213,11 @@ class RunControlOperationAuthority:
         self, request: OperationExecutionRequest, binding: OperationExecutionBinding
     ) -> None:
         """RRM-008 (REQ-CP-EXEC-008): the accepted cancel is the authority for settling the
-        bound attempt `cancelled`. The run may be `cancelling`, or still active, waiting or
-        paused when the family's cancel reached the unit before run control's transition
-        became visible; it is never terminal or pending. The binding stays the authentic
-        one (configuration, prompts, workspace and reservation are the bound ones)."""
+        bound attempt `cancelled`. The intent is journaled first: the run is `cancelling`
+        (the accepted `cancel` command moved it there before any delivery), never pending,
+        active or terminal. A Temporal cancellation without that journal entry is not a
+        cancel of the unit (review F1). The binding stays the authentic one
+        (configuration, prompts, workspace and reservation are the bound ones)."""
 
         run = await self._run_control.get_run(request.request_scope, request.identity.run_id)
         if (
@@ -219,9 +228,9 @@ class RunControlOperationAuthority:
             raise ValueError("cancellation does not target the bound operation attempt")
         if run.version < binding.run_control_revision:
             raise ValueError("run authority is older than the operation binding")
-        if run.phase in {RunPhase.PENDING, RunPhase.TERMINAL}:
+        if run.phase != RunPhase.CANCELLING:
             raise ValueError(
-                f"a bound operation cannot be cancelled in a {run.phase.value} Workflow Run"
+                f"run control journaled no cancel for a {run.phase.value} Workflow Run"
             )
         await self._verify_bound_authority(request, run)
 
@@ -1101,13 +1110,7 @@ class OperationExecutionService:
             usage=latest.usage if latest is not None else RuntimeUsage(),
             provider_run_id=latest.provider_run_id if latest is not None else None,
             event_payloads=(
-                (
-                    {
-                        "cancelled_async_children": [
-                            item.model_dump(mode="json") for item in children
-                        ]
-                    },
-                )
+                ({"cancelled_async_children": [item.model_dump(mode="json") for item in children]},)
                 if children
                 else ()
             ),
@@ -1129,6 +1132,17 @@ class OperationExecutionService:
             plan=plan if capture is not None else None,
             capture=capture,
         )
+
+    async def _cancel_journaled(
+        self, request: OperationExecutionRequest, binding: OperationExecutionBinding
+    ) -> bool:
+        """Whether run control journaled the cancel this attempt is being asked to apply."""
+
+        try:
+            await self._authority.verify_cancellation(request, binding)
+        except ValueError:
+            return False
+        return True
 
     async def _cancel_children(
         self, binding: OperationExecutionBinding, requested_at: datetime
@@ -1167,13 +1181,23 @@ class OperationExecutionService:
             try:
                 runtime_result = await self._runtime.execute(invocation, resolved_secrets)
             except asyncio.CancelledError:
-                # REQ-CP-EXEC-008 step 3: the Temporal cancel reached this Activity through
-                # its heartbeat and interrupted the in-flight step. The holder records the
-                # latest durable checkpoint and settles `cancelled` itself; nothing resumes.
-                # The lease deadline (REQ-CP-EXEC-014) also cancels the body: that is not a
-                # cancellation of the unit, and the holder stands down for a takeover.
-                if admitted is None or plan is None or _lease_deadline_expired():
+                # REQ-CP-EXEC-008 step 3: a requested Temporal cancel reached this Activity
+                # through its heartbeat and interrupted the in-flight step. The holder
+                # records the latest durable checkpoint and settles `cancelled` itself;
+                # nothing resumes. Every other cancellation of the task is not a cancel of
+                # the unit (REQ-CP-EXEC-011): the lease deadline (REQ-CP-EXEC-014), a worker
+                # shutdown, a heartbeat or start-to-close timeout, a pause or a reset. The
+                # holder then stands down and the next attempt classifies and recovers. The
+                # journal is the authority: run control must hold the accepted cancel.
+                if (
+                    admitted is None
+                    or plan is None
+                    or _lease_deadline_expired()
+                    or not cancel_requested()
+                    or not await self._cancel_journaled(request, binding)
+                ):
                     raise
+                _uncancel_current_task()
                 try:
                     latest = await self._observe_latest(invocation, resolved_secrets)
                 except CheckpointLineageInDoubt as error:

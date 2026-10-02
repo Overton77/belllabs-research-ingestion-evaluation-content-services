@@ -93,6 +93,8 @@ class _CancellationEntered(Exception):
     def __init__(self, run_version: int) -> None:
         super().__init__("GoalDirected run is cancelling")
         self.run_version = run_version
+
+
 # Terminalization rejections that name a liability the saga waits for (an async child's
 # pending usage, an unsettled effect, an operator reconciliation), never a defect.
 LIABILITY_REJECTIONS = frozenset(
@@ -745,8 +747,12 @@ class GoalDirectedWorkflow:
             if delivery.kind == "pause":
                 decision = delivery.payload.get("decision") or {}
                 paused = self._paused_state(
-                    state, str(decision.get("decision_id", "")), delivery.command_id, run_version,
-                    run_input, blueprint,
+                    state,
+                    str(decision.get("decision_id", "")),
+                    delivery.command_id,
+                    run_version,
+                    run_input,
+                    blueprint,
                 )
                 outcome = await self._boundary_fact(
                     run_input,
@@ -1121,30 +1127,38 @@ class GoalDirectedWorkflow:
             and reservation_id is not None
         ):
             if result.disposition == "in_doubt":
-                raise ApplicationError(
-                    "a cancelled GoalDirected unit left its generation superseded; its "
-                    "re-admission is a separate decision",
-                    type="goal_cancellation_unresolved",
-                    non_retryable=True,
+                # The unit has no settlement (a pre-saga operation boundary returned it
+                # parked, or a generation boundary superseded it). It stays a liability of
+                # the run: its reservation and effect are unsettled, so the terminalization
+                # below is rejected until the operator's `reconcile_unit` settles it (the
+                # reducer rejects `start_new_generation` while the run is cancelling). The
+                # saga waits for that; it never fails in place of reconciliation.
+                pass
+            else:
+                accepted = await self._reconcile_operation(
+                    run_input,
+                    blueprint,
+                    claim,
+                    role,
+                    dispatch,
+                    result,
+                    executor_result,
+                    activity_timeout,
                 )
-            accepted = await self._reconcile_operation(
-                run_input, blueprint, claim, role, dispatch, result, executor_result,
-                activity_timeout,
-            )
-            settlement = accepted.settlement
-            if settlement is None:
-                raise ApplicationError(
-                    "GoalDirected cancelled operation has no accepted run-control settlement",
-                    type="goal_operation_settlement_missing",
-                    non_retryable=True,
-                )
-            if settlement.reservation_id != reservation_id:
-                raise ApplicationError(
-                    "GoalDirected cancelled settlement does not match the admitted operation",
-                    type="goal_operation_settlement_mismatch",
-                    non_retryable=True,
-                )
-            run_version = max(run_version, settlement.settled_run_version)
+                settlement = accepted.settlement
+                if settlement is None:
+                    raise ApplicationError(
+                        "GoalDirected cancelled operation has no accepted run-control settlement",
+                        type="goal_operation_settlement_missing",
+                        non_retryable=True,
+                    )
+                if settlement.reservation_id != reservation_id:
+                    raise ApplicationError(
+                        "GoalDirected cancelled settlement does not match the admitted operation",
+                        type="goal_operation_settlement_mismatch",
+                        non_retryable=True,
+                    )
+                run_version = max(run_version, settlement.settled_run_version)
         # Delivered-but-unapplied commands are superseded by the cancellation.
         while self._pending_commands:
             delivery = min(self._pending_commands, key=lambda item: item.target_sequence)
@@ -1225,9 +1239,7 @@ class GoalDirectedWorkflow:
                 # Probe the authoritative digests: a rejected proposal reports them.
                 digests = await self._lifecycle_outcome(
                     run_input,
-                    self._cancellation_proposal(
-                        run_input, run_version, None, f"probe:{attempt}"
-                    ),
+                    self._cancellation_proposal(run_input, run_version, None, f"probe:{attempt}"),
                     activity_timeout,
                 )
                 run_version = digests.resulting_run_version
@@ -1251,6 +1263,7 @@ class GoalDirectedWorkflow:
                     type="goal_cancellation_rejected",
                     non_retryable=True,
                 )
+
             # A liability remains (step 5): wait for its reconciliation hint or the timer.
             def reconciled(waited: int = seen) -> bool:
                 return self._liability_hints > waited
@@ -1517,16 +1530,13 @@ class GoalDirectedWorkflow:
                 goal_revision_id=claim.identity.iteration.goal_revision_id,
                 operation_role=role,
                 operation_binding_ref=dispatch.operation_binding_ref,
-                required_output_contract_refs=tuple(
-                    sorted(blueprint.required_output_contracts)
-                ),
+                required_output_contract_refs=tuple(sorted(blueprint.required_output_contracts)),
                 operation_request=dispatch.workflow_request,
                 claim=claim,
                 executor_result=executor_result,
                 operation_result=result,
                 remaining_iterations=max(
-                    blueprint.max_iterations
-                    - claim.identity.iteration.goal_iteration,
+                    blueprint.max_iterations - claim.identity.iteration.goal_iteration,
                     0,
                 ),
                 protected_fact_classes=(
@@ -1567,9 +1577,7 @@ class GoalDirectedWorkflow:
                     blueprint.acceptance_contract if role == "verifier" else None
                 ),
                 acceptance_version=(
-                    blueprint.verifier_policy.acceptance_version
-                    if role == "verifier"
-                    else None
+                    blueprint.verifier_policy.acceptance_version if role == "verifier" else None
                 ),
                 recorded_at=workflow.now(),
             ),
@@ -1682,9 +1690,7 @@ class GoalDirectedWorkflow:
             # The run is already cancelling (an earlier or outside cancel was applied).
             self._run_cancelling = True
             return outcome
-        if outcome.reason_code == STALE_RUN_VERSION and workflow.patched(
-            STALE_VERSION_RETRY_PATCH
-        ):
+        if outcome.reason_code == STALE_RUN_VERSION and workflow.patched(STALE_VERSION_RETRY_PATCH):
             if outcome.phase == CANCELLING:
                 await self._enter_cancellation(
                     run_input, outcome.resulting_run_version, activity_timeout

@@ -25,13 +25,13 @@ PARK_IN_DOUBT_PATCH = "rrm-004-park-in-doubt-units"
 # `operation.cancel`, which never dispatches or resumes cognition. Histories recorded before
 # the patch replay the exact earlier command sequence.
 CANCELLATION_SAGA_PATCH = "rrm-008-operation-cancellation-saga"
+NUDGE_SNAPSHOT_PATCH = "rrm-008-nudge-snapshot-before-activity"
 TERMINAL_DISPOSITIONS = frozenset({"completed", "cancelled", "failed", "in_doubt"})
 
 
 def _parks(result: dict[str, object]) -> bool:
     return (
-        result.get("status") == "in_doubt"
-        and result.get("failure_code") != "generation_superseded"
+        result.get("status") == "in_doubt" and result.get("failure_code") != "generation_superseded"
     )
 
 
@@ -171,6 +171,11 @@ class OperationWorkflow:
     async def _run_governed(self, request: OperationWorkflowRequest) -> dict[str, object]:
         cancel_mode = self._cancel_requested
         while True:
+            # Review F2: snapshot the hint counter before the Activity, as the legacy path
+            # does, so a `reconcile_unit` hint that lands while it runs is not lost.
+            snapshot_first = workflow.patched(NUDGE_SNAPSHOT_PATCH)
+            if snapshot_first:
+                self._nudges_seen = self._reconciliation_nudges
             try:
                 if cancel_mode:
                     result = await self._cancel_operation(request)
@@ -185,7 +190,9 @@ class OperationWorkflow:
             # and waits durably for operator reconciliation. A cancel reaches it here; it
             # is never re-executed speculatively, and after a cancel every wake-up runs the
             # cancellation settlement, which applies only an accepted decision.
-            self._nudges_seen = self._reconciliation_nudges
+            if not snapshot_first:
+                self._nudges_seen = self._reconciliation_nudges
+
             def woken(cancelling: bool = cancel_mode) -> bool:
                 return self._reconciliation_nudges > self._nudges_seen or (
                     self._cancel_requested and not cancelling

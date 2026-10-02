@@ -17,6 +17,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal, Protocol
 from uuid import NAMESPACE_URL, uuid5
 
+import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.domain.operation_execution.async_subagent_reconciliation import (
@@ -55,6 +56,15 @@ DEFAULT_SUBMISSION_LEASE = timedelta(seconds=120)
 # The fenced work (identity check, submission, first observation) is bounded below the lease
 # so a holder never outlives it, whatever the SDK's own timeouts (RRM-013 review N4).
 SUBMISSION_LEASE_MARGIN_SECONDS = 10.0
+
+
+# Errors a provider request or its transport raises (RRM-008 review note): the service
+# records the ambiguity for these and lets any other exception surface.
+PROVIDER_CANCEL_ERRORS: tuple[type[BaseException], ...] = (
+    httpx.HTTPError,
+    OSError,
+    TimeoutError,
+)
 
 
 class AsyncSubagentError(RuntimeError):
@@ -1137,7 +1147,9 @@ class AsyncSubagentService:
                     execution = await self.cancel(
                         binding.request_scope, child_id, reason, requested_at
                     )
-                except Exception:  # noqa: BLE001 - the ambiguity is recorded, never assumed
+                except PROVIDER_CANCEL_ERRORS:
+                    # The provider or transport failed: `cancel` recorded the ambiguity.
+                    # A programming error surfaces instead of becoming an ambiguous child.
                     execution = await self._details.get_execution(binding.request_scope, child_id)
                 link = await self._details.get_link(binding.request_scope, child_id)
                 receipt = link.cancellation_receipt or "ambiguous"
@@ -1212,12 +1224,12 @@ class AsyncSubagentService:
                 request_scope, child_execution_id, "result", f"late_rejected:{decision_ref}"
             )
             raise AsyncSubagentError("late or superseded child result cannot mutate the parent")
-        await self._authority.decide_result(
-            request_scope, child_execution_id, decision, decision_ref
-        )
         if self._parent_effects is not None:
-            # RRM-008: the run cannot terminalize while a required or degradable child has
-            # no final decision; the link's decision is recorded on the run's child fact.
+            # RRM-008 (review F4): run control first. It refuses a decision without the
+            # child's terminal lifecycle fact and is idempotent by command identity, so a
+            # crash between the two writes leaves the authority and the link undecided and
+            # a retry completes the same decision; the run cannot terminalize while a
+            # required or degradable child has no final decision.
             await self._parent_effects.decide_result(
                 request_scope,
                 execution.parent_run_id,
@@ -1226,6 +1238,9 @@ class AsyncSubagentService:
                 decision_ref=decision_ref,
                 decided_at=decided_at,
             )
+        await self._authority.decide_result(
+            request_scope, child_execution_id, decision, decision_ref
+        )
         updated = link.model_copy(
             update={
                 "result_decision": decision,

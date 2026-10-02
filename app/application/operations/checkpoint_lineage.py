@@ -964,6 +964,8 @@ class CheckpointLineageService:
         """Record the attempt and try to hold the claim lease before any provider work."""
 
         unit, generation, namespace, deep_binding = self._resolve(binding)
+        if namespace is not None:
+            await self._refuse_sealed_head(unit, namespace)
         now = self._clock()
         lease_until = attempt.lease_expires_at or (now + self._default_lease)
         admission = await self._repository.record_attempt(
@@ -987,6 +989,41 @@ class CheckpointLineageService:
             deep_binding=deep_binding,
             acquired_at=now,
             lease_expires_at=lease_until,
+        )
+
+    async def _refuse_sealed_head(
+        self, unit: RuntimeUnitIdentity, namespace: NamespaceClaim
+    ) -> None:
+        """RRM-008 (REQ-BP-GD-012, REQ-CP-DA-017): never pin a unit to unverified cognition.
+
+        A unit's expected source is the namespace head. When the transition that produced
+        it is not seedable (a `failed` or `timed_out` settlement advanced the head for
+        bookkeeping only), the unit is refused before its attempt is recorded, so it holds
+        no lease and reserves no in-flight marker: a shared session continues only in a new
+        session generation, never by branching the sealed thread.
+        """
+
+        expected = await self._repository.get_namespace_head(
+            unit.request_scope, namespace.namespace
+        )
+        if expected is None:
+            return
+        head = next(
+            (
+                transition
+                for transition in await self._repository.list_transitions(
+                    unit.request_scope, namespace.namespace
+                )
+                if transition.result_key == expected
+            ),
+            None,
+        )
+        if head is None or head.seedable:
+            return
+        raise CheckpointLineageConflict(
+            "the session namespace head is sealed: the previous unit settled "
+            f"{head.result_manifest_ref!r} without verified cognition; the session continues "
+            "only in a new session generation (REQ-BP-GD-012)"
         )
 
     def plan(
@@ -1036,6 +1073,9 @@ class CheckpointLineageService:
                 capture,
                 result_manifest_ref=result_manifest_ref,
                 result_manifest_digest=result_manifest_digest,
+                # A completed unit's result and a cancelled unit's partial evidence
+                # (REQ-CP-EXEC-008) may seed the next unit; failed cognition may not.
+                seedable=status in {"completed", "cancelled"},
             )
             if plan is not None and capture is not None
             else None
@@ -1055,9 +1095,7 @@ class CheckpointLineageService:
             result_manifest_ref=result_manifest_ref,
             result_manifest_digest=result_manifest_digest,
             result_manifest_size_bytes=result_manifest_size_bytes,
-            checkpoint_transition_id=(
-                transition.transition_id if transition is not None else None
-            ),
+            checkpoint_transition_id=(transition.transition_id if transition is not None else None),
             observed_at=self._clock(),
         )
         return await self._repository.record_result(result, transition=transition)
@@ -1127,6 +1165,7 @@ class CheckpointLineageService:
         *,
         result_manifest_ref: str,
         result_manifest_digest: str,
+        seedable: bool = True,
     ) -> CheckpointTransitionObservation:
         if (
             capture.namespace != plan.namespace
@@ -1153,15 +1192,14 @@ class CheckpointLineageService:
             result_manifest_ref=result_manifest_ref,
             result_manifest_digest=result_manifest_digest,
             redacted_summary_digest=capture.redacted_summary_digest,
+            seedable=seedable,
             observed_at=self._clock(),
         )
 
     @staticmethod
     def _resolve(
         binding: OperationExecutionBinding,
-    ) -> tuple[
-        RuntimeUnitIdentity, int, NamespaceClaim | None, DeepAgentExecutionBinding | None
-    ]:
+    ) -> tuple[RuntimeUnitIdentity, int, NamespaceClaim | None, DeepAgentExecutionBinding | None]:
         unit = binding.runtime_unit
         if unit is None:
             raise ValueError("lineage-qualified execution requires a runtime unit (EXEC-013)")

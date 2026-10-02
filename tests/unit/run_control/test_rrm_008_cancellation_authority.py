@@ -55,6 +55,8 @@ from tests.unit.run_control.test_run_control import (
     WORKFLOW_DIGEST,
     command,
     operator_wait,
+    reconcile,
+    reconciler_command,
     request,
     service,
 )
@@ -162,6 +164,20 @@ async def test_cancelling_terminalization_cancels_declared_waits_but_not_operato
     assert refused.status == CommandStatus.REJECTED
     assert refused.reason_code == "unresolved_terminal_dependencies"
     assert (await run_service.get_run("tenant-1", run_id)).phase == RunPhase.CANCELLING
+    # Review note: a cancelling run re-executes nothing, so `start_new_generation` is
+    # rejected; `abandon_unit` settles the parked unit and the saga can finish.
+    new_generation = await run_service.execute(
+        reconciler_command(run_id, 5, "new-generation", reconcile("start_new_generation"))
+    )
+    assert new_generation.status == CommandStatus.REJECTED
+    assert new_generation.reason_code == "cancelling_run_rejects_new_generation"
+    abandoned = await run_service.execute(
+        reconciler_command(run_id, 5, "abandon", reconcile("abandon_unit"))
+    )
+    assert abandoned.status == CommandStatus.ACCEPTED and abandoned.phase == RunPhase.CANCELLING
+    terminal = await run_service.execute(command(run_id, 6, "terminal-2", _terminal(6)))
+    assert terminal.status == CommandStatus.ACCEPTED, terminal.reason
+    assert terminal.terminal_outcome == RunOutcome.CANCELLED
 
 
 @pytest.mark.asyncio

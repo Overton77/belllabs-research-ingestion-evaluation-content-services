@@ -38,12 +38,14 @@ from app.application.operations.journaled_operation_execution import _effect_cla
 from app.application.operations.operation_execution import (
     bind_operation_execution_request,
 )
+from app.application.operations.operation_progress import CURRENT_CANCEL_PROBE
 from app.domain.operation_execution.async_subagent_reconciliation import (
     ASYNC_CHILD_RECONCILE_PERMISSION,
 )
 from app.domain.operation_execution.checkpoint_lineage import (
     STAMP_INVOCATION_ID,
     CheckpointClassification,
+    CheckpointLineageConflict,
     submission_invocation_id,
 )
 from app.domain.operation_execution.contracts import (
@@ -54,6 +56,7 @@ from app.domain.operation_execution.contracts import (
 )
 from app.domain.orchestration.goal_directed import GoalDirectedInterpreter
 from app.domain.run_control.contracts import (
+    CancelAction,
     ClaimEffectAction,
     CommandStatus,
     ReconcileUnitAction,
@@ -120,12 +123,22 @@ async def _cancel(harness: RecoveryHarness, request: OperationExecutionRequest) 
 
 
 async def _cancel_mid_cognition(
-    harness: RecoveryHarness, request: OperationExecutionRequest, entered: asyncio.Event
+    harness: RecoveryHarness,
+    request: OperationExecutionRequest,
+    entered: asyncio.Event,
+    *,
+    cancel_requested: bool = True,
 ) -> Any:
     """Run an attempt and cancel it like Temporal does through the heartbeat: the running
-    Activity task receives `asyncio.CancelledError` inside its in-flight step."""
+    Activity task receives `asyncio.CancelledError` inside its in-flight step. The Activity
+    runner's probe says whether that cancellation was requested (review F1); any other cause
+    (worker shutdown, heartbeat timeout) is modelled by `cancel_requested=False`."""
 
-    task = asyncio.create_task(harness.service.execute(request, harness.attempt(request)))
+    token = CURRENT_CANCEL_PROBE.set(lambda: cancel_requested)
+    try:
+        task = asyncio.create_task(harness.service.execute(request, harness.attempt(request)))
+    finally:
+        CURRENT_CANCEL_PROBE.reset(token)
     gate = asyncio.ensure_future(entered.wait())
     done, _pending = await asyncio.wait({task, gate}, timeout=30, return_when="FIRST_COMPLETED")
     if task in done:
@@ -244,6 +257,70 @@ async def test_cancel_during_model_work_settles_with_the_latest_checkpoint() -> 
     assert result.result_checkpoint.checkpoint_id == await _leaf_id(harness, _namespace(request))
     assert result.usage.amounts == {"tokens.total": 0}, "the interrupted call is unobservable"
     assert harness.runtime.invocations == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cause", ["worker_shutdown", "heartbeat_timeout"])
+async def test_task_cancellation_that_is_not_a_requested_cancel_recovers_on_the_next_attempt(
+    cause: str,
+) -> None:
+    """Review F1 (REQ-CP-EXEC-011): Temporal also cancels an Activity's task for a worker
+    shutdown or a heartbeat/start-to-close timeout. Neither is a cancel of the unit: the
+    holder re-raises (releasing its lease), nothing is settled, and the next attempt
+    classifies the interrupted lineage and completes without re-appending the prompt."""
+
+    harness = await recovery_harness()
+    unit = stage_recovery_unit(harness.run_id)
+    request = await harness.request(unit)
+    entered, _gate = harness.model.gate_on(1)
+    with pytest.raises(asyncio.CancelledError):
+        await _cancel_mid_cognition(harness, request, entered, cancel_requested=False)
+    assert _settlements(harness, request) == [], f"{cause}: nothing is settled"
+    assert await harness.lineage.get_transition("tenant-1", unit.unit_key, 1) is None
+
+    result = await harness.run(request)
+    assert result.status == "completed", result
+    assert await harness.lineage.get_namespace_in_flight("tenant-1", _namespace(request)) is None
+    [settlement] = _settlements(harness, request)
+    assert settlement.status == "completed"
+    assert all(human == 1 for human, _tools in harness.model.calls), "no re-appended prompt"
+    attempts = await harness.lineage.list_attempts("tenant-1", unit.unit_key)
+    assert [(item.attempt.attempt, item.claim_fence) for item in attempts] == [(1, 1), (2, 2)]
+    transition = await harness.lineage.get_transition("tenant-1", unit.unit_key, 1)
+    assert transition is not None and transition.seedable
+
+
+@pytest.mark.asyncio
+async def test_requested_cancel_without_journaled_intent_stands_down() -> None:
+    """Review F1: the journal is the authority. A requested Temporal cancellation of an
+    attempt whose run control holds no accepted `cancel` is not applied: the holder stands
+    down (nothing is settled). Once the operator's cancel is journaled, the saga's
+    `operation.cancel` settles the unit `cancelled` with its interrupted lineage."""
+
+    harness, prepare, _templates, run_id = await _goal_harness("journal")
+    first_claim, _second = await _claims(run_id)
+    run = await harness.run_control.get_run(SCOPE, run_id)
+    first = await prepare.prepare(_preparation(run_id, first_claim, "executor", run.version, 0))
+    operation = first.workflow_request.operation
+    assert operation.runtime_unit is not None
+    entered, _gate = harness.model.gate_on(1)
+    with pytest.raises(asyncio.CancelledError):
+        await _cancel_mid_cognition(harness, operation, entered, cancel_requested=True)
+    assert _settlements(harness, operation) == []
+    assert (await harness.run_control.get_run(SCOPE, run_id)).phase.value == "active"
+
+    run = await harness.run_control.get_run(SCOPE, run_id)
+    cancelled = await harness.run_control.execute(
+        command(run_id, run.version, "operator-cancel", CancelAction())
+    )
+    assert cancelled.status == CommandStatus.ACCEPTED and cancelled.phase.value == "cancelling"
+    settled = await _cancel(harness, operation)
+    assert settled.status == "cancelled" and settled.failure_code == "cancelled"
+    transition = await harness.lineage.get_transition(SCOPE, operation.runtime_unit.unit_key, 1)
+    assert transition is not None
+    assert transition.classification == CheckpointClassification.INTERRUPTED
+    assert settled.result_checkpoint == transition.result_key
+    assert len(harness.model.calls) == 1, "the interrupted call never resumed"
 
 
 @pytest.mark.asyncio
@@ -559,6 +636,122 @@ async def test_cancel_during_async_work_cancels_the_child_and_leaves_its_usage_p
     assert set(budget.reservations) == {"baseline"}, "only the run-level baseline remains"
 
 
+class _FlakyEffects:
+    """A parent-effects port that fails `decide_result` a given number of times, before or
+    after delegating to the real run-control adapter."""
+
+    def __init__(self, inner: Any, *, failures: int, after_write: bool) -> None:
+        self.inner = inner
+        self.failures = failures
+        self.after_write = after_write
+        self.calls = 0
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.inner, name)
+
+    async def decide_result(self, *args: Any, **kwargs: Any) -> None:
+        self.calls += 1
+        if self.failures and not self.after_write:
+            self.failures -= 1
+            raise ConnectionError("run control unreachable before the decision")
+        await self.inner.decide_result(*args, **kwargs)
+        if self.failures:
+            self.failures -= 1
+            raise ConnectionError("crashed after the run-control decision")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("after_write", [False, True])
+async def test_child_result_decision_is_crash_safe_and_idempotent(after_write: bool) -> None:
+    """Review F4: the decision is recorded in run control first (it refuses a child without
+    a terminal lifecycle fact and is idempotent by command identity). A failure before or
+    after that write leaves the authority and the link undecided; the retry completes the
+    same decision once, and a repeated decision changes nothing."""
+
+    from app.domain.operation_execution.contracts import AsyncSubagentContract as Contract
+    from tests.acceptance.control_plane.test_wp_cp_045 import contract as base_contract
+
+    harness = await recovery_harness()
+    events: list[str] = []
+    provider = DeterministicProvider(events)
+    authority = InMemoryAsyncSubagentAuthority()
+    effects = _FlakyEffects(
+        RunControlAsyncChildEffects(harness.run_control, actor=actor()),
+        failures=1,
+        after_write=after_write,
+    )
+    children = AsyncSubagentService(
+        InMemoryAsyncSubagentDetailRepository(),
+        authority,
+        provider,
+        parent_effects=effects,  # type: ignore[arg-type]
+        allow_new_spawns=True,
+    )
+    unit = stage_recovery_unit(harness.run_id)
+    request = await harness.request(unit)
+    binding = bind_operation_execution_request(request)
+    child_contract = Contract.create(
+        **{
+            **base_contract().model_dump(mode="python", exclude={"contract_digest"}),
+            "budget_limits": {"tokens.total": 5},
+        }
+    )
+    child = await children.spawn(
+        AsyncSubagentSpawnRequest(
+            request_scope="tenant-1",
+            parent_run_id=harness.run_id,
+            parent_operation_id=unit.semantic_operation_id,
+            parent_binding_id=binding.binding_id,
+            execution_generation=1,
+            contract=child_contract,
+            dependency_class=AsyncSubagentDependencyClass.REQUIRED_BLOCKING,
+            objective_ref="ref:objective:decide",
+            objective="Report once.",
+            context_slice_ref="ref:context-slice:decide",
+            reservation_id="reservation:rrm-008-decide",
+            idempotency_key="rrm-008-decide",
+            requested_at=datetime.now(UTC),
+            parent_reservation_id=request.budget_reservation_id,
+        )
+    )
+    provider.next_status = "success"
+    completed = await children.reconcile("tenant-1", child.child_execution_id)
+    assert completed.lifecycle == AsyncSubagentLifecycle.COMPLETED
+
+    async def decide() -> Any:
+        return await children.decide_result(
+            "tenant-1",
+            child.child_execution_id,
+            "admit",
+            parent_open=True,
+            current_generation=1,
+            decided_at=datetime.now(UTC),
+        )
+
+    async def recorded_decisions() -> list[str]:
+        run = await harness.run_control.get_run("tenant-1", harness.run_id)
+        [state] = [
+            item
+            for item in run.async_children
+            if item.child_execution_id == child.child_execution_id
+        ]
+        return [item.outcome.value for item in state.decisions]
+
+    with pytest.raises(ConnectionError):
+        await decide()
+    link = await children.link("tenant-1", child.child_execution_id)
+    assert link.result_decision is None, "the link is decided only after run control"
+    assert await recorded_decisions() == (["accepted"] if after_write else [])
+
+    decided = await decide()
+    assert decided.result_decision == "admit"
+    assert await recorded_decisions() == ["accepted"]
+    again = await decide()
+    assert again.result_decision == "admit"
+    assert await recorded_decisions() == ["accepted"], "a repeated decision is idempotent"
+    assert effects.calls == 3
+
+
 # --- shared GoalDirected session namespace (RRM-004 review finding 4) --------------------------
 
 
@@ -602,9 +795,15 @@ async def _claims(run_id: str) -> tuple[Any, Any]:
 async def test_shared_session_head_advances_over_a_unit_settled_without_completing(
     case: str,
 ) -> None:
-    """Decision (RRM-004 finding 4): the head advances by a recorded transition to the unit's
-    latest durable checkpoint (no rollover). The next iteration's unit in the same session
-    namespace classifies `not_submitted` with that head as its source and completes."""
+    """Decision (RRM-004 finding 4, review F3): the head advances by a recorded transition
+    to the unit's latest durable checkpoint, so the orphan branch never parks the next unit
+    `in_doubt` as `foreign_descendant`. Only verified cognition is fed forward: after a
+    cancellation (REQ-CP-EXEC-008 keeps the partial evidence) the next unit in the same
+    session classifies `not_submitted` from that head and completes; after a provider
+    `failed` or a budget violation the head is sealed, the next unit in that session is
+    refused before any provider work, and the session continues only in a new session
+    generation (REQ-BP-GD-012). The scripted model refuses unmatched tool calls, as a
+    provider does."""
 
     harness, prepare, _templates, run_id = await _goal_harness(case)
     first_claim, second_claim = await _claims(run_id)
@@ -617,6 +816,11 @@ async def test_shared_session_head_advances_over_a_unit_settled_without_completi
     if case == "cancelled_interrupted":
         harness.saver.crash_after(AFTER_TOOL_CHECKPOINT)
         await harness.crash(operation)
+        run = await harness.run_control.get_run(SCOPE, run_id)
+        journaled = await harness.run_control.execute(
+            command(run_id, run.version, "operator-cancel", CancelAction())
+        )
+        assert journaled.status == CommandStatus.ACCEPTED
         settled = await _cancel(harness, operation)
         assert settled.status == "cancelled"
         expected = CheckpointClassification.INTERRUPTED
@@ -642,26 +846,45 @@ async def test_shared_session_head_advances_over_a_unit_settled_without_completi
     assert head == transition.result_key
     assert head is not None and head.checkpoint_id == await _leaf_id(harness, namespace)
     assert await harness.lineage.get_namespace_in_flight(SCOPE, namespace) is None
+    assert transition.seedable is (case == "cancelled_interrupted")
     calls_before = len(harness.model.calls)
 
-    # The next iteration proceeds in the same session namespace from the advanced head.
     run = await harness.run_control.get_run(SCOPE, run_id)
     second = await prepare.prepare(_preparation(run_id, second_claim, "executor", run.version, 1))
     next_operation = second.workflow_request.operation
     assert next_operation.runtime_unit is not None
     assert _namespace(next_operation) == namespace
-    result = await harness.run(next_operation)
-    assert result.status == "completed", result
-    assert len(harness.model.calls) == calls_before + 2
-    next_transition = await harness.lineage.get_transition(
-        SCOPE, next_operation.runtime_unit.unit_key, 1
+    if case != "cancelled_interrupted":
+        # The sealed head is refused before dispatch: no model call, no transition, the
+        # head and the namespace untouched, no lease left behind.
+        with pytest.raises(CheckpointLineageConflict, match="sealed"):
+            await harness.run(next_operation)
+        assert len(harness.model.calls) == calls_before
+        assert (
+            await harness.lineage.get_transition(SCOPE, next_operation.runtime_unit.unit_key, 1)
+            is None
+        )
+        assert await harness.lineage.get_namespace_head(SCOPE, namespace) == head
+        assert await harness.lineage.get_namespace_in_flight(SCOPE, namespace) is None
+        assert _settlements(harness, next_operation) == []
+        return
+
+    # After a cancellation the run is cancelling (the journal is the authority), so no unit
+    # runs; the lineage proof is that the next unit of the same session would be admitted
+    # `not_submitted` from the advanced head (no orphan branch, no incident) and that the
+    # head's partial evidence ends in answered tool calls, which a provider accepts.
+    lineage_service = harness.service._lineage
+    assert lineage_service is not None
+    admitted = await lineage_service.admit_attempt(
+        bind_operation_execution_request(next_operation), harness.attempt(next_operation)
     )
-    assert next_transition is not None
-    assert next_transition.classification == CheckpointClassification.NOT_SUBMITTED
-    assert next_transition.source_key == head
-    assert await harness.lineage.get_namespace_head(SCOPE, namespace) == next_transition.result_key
-    # The new unit's lineage descends from the settled unit's latest checkpoint.
-    chain = await _chain(harness, namespace, next_transition.result_key.checkpoint_id)
-    assert head.checkpoint_id in {
-        str(item.config["configurable"]["checkpoint_id"]) for item in chain
-    }
+    try:
+        assert admitted.admission.lease_granted
+        assert admitted.admission.observation.expected_source == head
+        assert admitted.admission.existing_transition is None
+        assert admitted.admission.incident is None, "the orphan branch is explained by the head"
+        plan = lineage_service.plan(admitted)
+        assert plan is not None and plan.expected_source == head
+    finally:
+        await lineage_service.release(admitted)
+    assert len(harness.model.calls) == calls_before

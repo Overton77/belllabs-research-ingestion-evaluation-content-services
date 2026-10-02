@@ -78,6 +78,22 @@ def current_progress() -> CognitionProgress | None:
     return CURRENT_PROGRESS.get()
 
 
+# RRM-008 review F1: the Activity runner reports *why* the attempt's task was cancelled. A
+# unit settles `cancelled` only for a requested cancellation; every other cause of a Temporal
+# cancellation (worker shutdown, heartbeat or start-to-close timeout, pause, reset, not found)
+# re-raises so the holder stands down and the next attempt recovers the unit
+# (REQ-CP-EXEC-011). Outside an Activity no probe is registered: nothing is a cancel.
+CancellationProbe = Callable[[], bool]
+CURRENT_CANCEL_PROBE: ContextVar[CancellationProbe | None] = ContextVar(
+    "belllabs_cancel_probe", default=None
+)
+
+
+def cancel_requested() -> bool:
+    probe = CURRENT_CANCEL_PROBE.get()
+    return probe is not None and bool(probe())
+
+
 def report_phase(phase: CognitionPhase) -> None:
     progress = CURRENT_PROGRESS.get()
     if progress is not None:
@@ -91,7 +107,10 @@ def register_checkpoint_reader(reader: CheckpointReader | None) -> None:
 
 
 __all__ = [
+    "CURRENT_CANCEL_PROBE",
     "CURRENT_PROGRESS",
+    "CancellationProbe",
+    "cancel_requested",
     "CheckpointReader",
     "CognitionPhase",
     "CognitionProgress",

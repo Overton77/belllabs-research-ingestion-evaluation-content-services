@@ -154,17 +154,13 @@ def goal_template_workspace(workspace: WorkspaceContract) -> WorkspaceContract:
 
     return workspace.model_copy(
         update={
-            "workflow_contract_digest": sha256_digest(
-                GOAL_WORK_CONTRACT.model_dump(mode="json")
-            ),
+            "workflow_contract_digest": sha256_digest(GOAL_WORK_CONTRACT.model_dump(mode="json")),
             "slot_bindings": (
                 WorkspaceSlotBinding(
                     slot_name="work",
                     logical_path="/work",
                     access="exclusive_write",
-                    owner=WorkspaceOwner(
-                        kind=WorkspaceOwnerKind.RUN, owner_id="goal-template"
-                    ),
+                    owner=WorkspaceOwner(kind=WorkspaceOwnerKind.RUN, owner_id="goal-template"),
                 ),
             ),
             "exclusive_write_paths": ("/work",),
@@ -367,6 +363,9 @@ class GoalScriptedModel(ScriptedRecoveryModel):
     stable_output_ref: bool = True
     # Tokens each scripted call reports (RRM-008 drives a budget violation by raising it).
     tokens_per_call: int = 5
+    # RRM-008 review F3: like a real provider, refuse a prompt in which an AI message's
+    # `tool_calls` are not all answered by tool messages (an OpenAI 400).
+    validate_tool_pairing: bool = True
     _turns: list[dict[str, Any]] = PrivateAttr(default_factory=list)
 
     @property
@@ -374,6 +373,18 @@ class GoalScriptedModel(ScriptedRecoveryModel):
         return self._turns
 
     def _observe(self, messages: list[BaseMessage]) -> tuple[int, int]:
+        if self.validate_tool_pairing:
+            unanswered: set[str] = set()
+            for item in messages:
+                if isinstance(item, AIMessage) and item.tool_calls:
+                    unanswered |= {str(call["id"]) for call in item.tool_calls}
+                elif isinstance(item, ToolMessage):
+                    unanswered.discard(str(item.tool_call_id))
+            if unanswered:
+                raise AssertionError(
+                    f"unmatched tool_calls reached the model (a provider rejects this): "
+                    f"{sorted(unanswered)}"
+                )
         human_indexes = [index for index, item in enumerate(messages) if item.type == "human"]
         last_human = human_indexes[-1]
         content = str(messages[last_human].content)
