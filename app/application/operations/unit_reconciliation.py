@@ -42,7 +42,7 @@ class ReconciliationRunControl(Protocol):
     async def get_run(self, request_scope: str, run_id: str) -> RunProjection: ...
 
     async def get_boundary_command(
-        self, request_scope: str, run_id: str, command_id: str
+        self, request_scope: str, run_id: str, idempotency_issuer: str, command_id: str
     ) -> BoundaryCommandStatus | None: ...
 
     async def record_boundary_receipt(
@@ -156,7 +156,10 @@ class UnitReconciliationService:
             # RRM-007: the hint reached the parked unit's execution; `applied` is recorded
             # by the operation boundary when it acts on the decision.
             status = await self._run_control.get_boundary_command(
-                command.request_scope, command.run_id, command.command_id
+                command.request_scope,
+                command.run_id,
+                command.idempotency_issuer,
+                command.command_id,
             )
             if status is not None and status.state == ReceiptState.ACCEPTED:
                 await self._run_control.record_boundary_receipt(

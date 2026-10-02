@@ -42,7 +42,7 @@ class BellLabsRunWorkflow:
             None,
         )
         if duplicate is not None:
-            return replace(duplicate, status="duplicate")
+            return replace(duplicate, status="duplicate", cached_status=duplicate.status)
         status: Literal["accepted", "duplicate", "stale_generation", "gap"]
         if message.execution_generation != self._continuity.execution_generation:
             status = "stale_generation"
@@ -61,8 +61,12 @@ class BellLabsRunWorkflow:
             sequence=message.sequence,
             status=status,
             technical_segment=self._continuity.technical_segment,
+            cached_status=status,
         )
-        self._receipts.append(receipt)
+        if status != "gap":
+            # A gap is transient (the earlier message may still arrive): it is not cached,
+            # so a redelivery is decided again (F7).
+            self._receipts.append(receipt)
         return receipt
 
     @workflow.signal

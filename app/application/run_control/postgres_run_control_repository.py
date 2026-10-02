@@ -440,13 +440,15 @@ class PostgresRunControlRepository:
     # --- Boundary commands and receipts (RRM-007) -------------------------------------------
 
     async def get_boundary_command(
-        self, request_scope: str, run_id: str, command_id: str
+        self, request_scope: str, run_id: str, idempotency_issuer: str, command_id: str
     ) -> BoundaryCommandStatus | None:
         async with self._pool.acquire() as connection, connection.transaction():
             await _set_scope(connection, request_scope)
             if not await _run_exists_on(connection, request_scope, run_id):
                 raise RunControlNotFound(f"workflow run not found: {run_id}")
-            return await _boundary_command(connection, request_scope, run_id, command_id)
+            return await _boundary_command(
+                connection, request_scope, run_id, idempotency_issuer, command_id
+            )
 
     async def list_boundary_commands(
         self, request_scope: str, run_id: str
@@ -457,16 +459,19 @@ class PostgresRunControlRepository:
                 raise RunControlNotFound(f"workflow run not found: {run_id}")
             rows = await connection.fetch(
                 """
-                SELECT command_id
+                SELECT idempotency_issuer, command_id
                 FROM belllabs_control.boundary_commands
                 WHERE request_scope = $1 AND run_id = $2
-                ORDER BY sequence_space, target_sequence, recorded_at, command_id
+                ORDER BY sequence_space, target_sequence, recorded_at, idempotency_issuer,
+                         command_id
                 """,
                 request_scope,
                 run_id,
             )
             statuses = [
-                await _boundary_command(connection, request_scope, run_id, row["command_id"])
+                await _boundary_command(
+                    connection, request_scope, run_id, row["idempotency_issuer"], row["command_id"]
+                )
                 for row in rows
             ]
         return tuple(status for status in statuses if status is not None)
@@ -480,7 +485,11 @@ class PostgresRunControlRepository:
             await _set_scope(connection, request_scope)
             await _advisory_lock(connection, f"run:{receipt.run_id}")
             status = await _boundary_command(
-                connection, request_scope, receipt.run_id, receipt.command_id
+                connection,
+                request_scope,
+                receipt.run_id,
+                receipt.idempotency_issuer,
+                receipt.command_id,
             )
             if status is None:
                 raise RunControlNotFound(f"boundary command not found: {receipt.command_id}")
@@ -494,14 +503,24 @@ class PostgresRunControlRepository:
     ) -> None:
         run_id = mutation.result.run_id
         scope = mutation.request_scope
-        new_ids = {record.command_id for record in mutation.boundary_commands}
+        new_ids = {
+            (record.idempotency_issuer, record.command_id) for record in mutation.boundary_commands
+        }
         for record in mutation.boundary_commands:
-            if await _boundary_command(connection, scope, run_id, record.command_id) is not None:
+            if (
+                await _boundary_command(
+                    connection, scope, run_id, record.idempotency_issuer, record.command_id
+                )
+                is not None
+            ):
                 raise IdempotencyConflict(
                     f"boundary command already recorded: {record.command_id}"
                 )
             own = tuple(
-                item for item in mutation.boundary_receipts if item.command_id == record.command_id
+                item
+                for item in mutation.boundary_receipts
+                if (item.idempotency_issuer, item.command_id)
+                == (record.idempotency_issuer, record.command_id)
             )
             sequence = record.target_sequence
             if sequence == 0 and record.target.kind != "run_control" and _was_accepted(own):
@@ -546,9 +565,11 @@ class PostgresRunControlRepository:
             for item in own:
                 await _insert_receipt(connection, item)
         for item in mutation.boundary_receipts:
-            if item.command_id in new_ids:
+            if (item.idempotency_issuer, item.command_id) in new_ids:
                 continue
-            status = await _boundary_command(connection, scope, run_id, item.command_id)
+            status = await _boundary_command(
+                connection, scope, run_id, item.idempotency_issuer, item.command_id
+            )
             if status is None:
                 raise RunControlNotFound(f"boundary command not found: {item.command_id}")
             updated = append_receipt(status, item)
@@ -1264,15 +1285,21 @@ class PostgresRunControlRepository:
 
 
 async def _boundary_command(
-    connection: asyncpg.Connection, request_scope: str, run_id: str, command_id: str
+    connection: asyncpg.Connection,
+    request_scope: str,
+    run_id: str,
+    idempotency_issuer: str,
+    command_id: str,
 ) -> BoundaryCommandStatus | None:
     raw = await connection.fetchval(
         """
         SELECT command FROM belllabs_control.boundary_commands
-        WHERE request_scope = $1 AND run_id = $2 AND command_id = $3
+        WHERE request_scope = $1 AND run_id = $2 AND idempotency_issuer = $3
+          AND command_id = $4
         """,
         request_scope,
         run_id,
+        idempotency_issuer,
         command_id,
     )
     if raw is None:
@@ -1280,11 +1307,13 @@ async def _boundary_command(
     rows = await connection.fetch(
         """
         SELECT receipt FROM belllabs_control.boundary_command_receipts
-        WHERE request_scope = $1 AND run_id = $2 AND command_id = $3
+        WHERE request_scope = $1 AND run_id = $2 AND idempotency_issuer = $3
+          AND command_id = $4
         ORDER BY ordinal
         """,
         request_scope,
         run_id,
+        idempotency_issuer,
         command_id,
     )
     return BoundaryCommandStatus(
@@ -1299,12 +1328,14 @@ async def _insert_receipt(connection: asyncpg.Connection, receipt: BoundaryComma
     await connection.execute(
         """
         INSERT INTO belllabs_control.boundary_command_receipts
-            (request_scope, run_id, command_id, ordinal, state, rejection_reason,
-             recorded_by, transport_ref, applied_run_version, receipt, recorded_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11)
+            (request_scope, run_id, idempotency_issuer, command_id, ordinal, state,
+             rejection_reason, recorded_by, transport_ref, applied_run_version, receipt,
+             recorded_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12)
         """,
         receipt.request_scope,
         receipt.run_id,
+        receipt.idempotency_issuer,
         receipt.command_id,
         receipt.ordinal,
         receipt.state.value,

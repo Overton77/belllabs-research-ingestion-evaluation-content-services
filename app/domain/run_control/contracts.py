@@ -644,6 +644,8 @@ class BoundaryCommandReceipt(Contract):
 
     schema_version: Literal["belllabs.boundary-receipt.v1"] = "belllabs.boundary-receipt.v1"
     command_id: str = Field(min_length=1)
+    # The command identity is (issuer, command_id): two principals may reuse an ID (F5).
+    idempotency_issuer: str = Field(min_length=1)
     run_id: str = Field(min_length=1)
     request_scope: str = Field(min_length=1)
     ordinal: int = Field(ge=1)
@@ -686,6 +688,7 @@ class BoundaryCommandStatus(Contract):
             if (
                 receipt.ordinal != index
                 or receipt.command_id != self.command.command_id
+                or receipt.idempotency_issuer != self.command.idempotency_issuer
                 or receipt.state not in RECEIPT_TRANSITIONS[previous]
             ):
                 raise ValueError("boundary receipts must follow the closed receipt state machine")
@@ -716,6 +719,8 @@ class ApplyBoundaryCommandAction(Contract):
 
     kind: Literal["apply_boundary_command"] = "apply_boundary_command"
     command_id: str = Field(min_length=1)
+    # The accepting principal's idempotency issuer: with `command_id` the exact command.
+    command_issuer: str = Field(min_length=1)
     action: FamilyBoundaryAction
     boundary_ref: str = Field(min_length=1, max_length=512)
     runnable_work_remains: bool
@@ -727,6 +732,13 @@ class ApplyBoundaryCommandAction(Contract):
         if self.resume_reservation and not isinstance(self.action, ResumeAction):
             raise ValueError("only a resume application probes a re-reservation")
         return self
+
+
+# Family boundary facts whose stale result is never persisted (F2): the boundary binds the
+# current version and retries at the new one, so a race can never strand a command.
+BOUNDARY_FACT_KINDS: frozenset[str] = frozenset(
+    {"apply_boundary_command", "observe_quiescence", "set_wait"}
+)
 
 
 class ObserveQuiescenceAction(Contract):

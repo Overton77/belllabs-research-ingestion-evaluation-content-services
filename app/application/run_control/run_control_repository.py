@@ -13,6 +13,7 @@ from app.domain.control_plane.canonical import sha256_digest
 from app.domain.operation_execution.journal import OperationJournalSettlement
 from app.domain.run_control.budget import roll_up_child_budget
 from app.domain.run_control.contracts import (
+    FAMILY_BOUNDARY_COMMAND_KINDS,
     AdmissionDecision,
     BoundaryCommandReceipt,
     BoundaryCommandRecord,
@@ -309,7 +310,7 @@ class RunControlRepository(Protocol):
     ) -> ConsumerApplyResult: ...
 
     async def get_boundary_command(
-        self, request_scope: str, run_id: str, command_id: str
+        self, request_scope: str, run_id: str, idempotency_issuer: str, command_id: str
     ) -> BoundaryCommandStatus | None: ...
 
     async def list_boundary_commands(
@@ -352,10 +353,13 @@ def _was_accepted(receipts: tuple[BoundaryCommandReceipt, ...]) -> bool:
 
 
 def pending_delivery(status: BoundaryCommandStatus) -> bool:
-    return status.state == ReceiptState.ACCEPTED and status.command.target.kind in {
-        "root",
-        "family",
-    }
+    """Accepted family commands awaiting delivery. `cancel` delivery is RRM-008's (F3)."""
+
+    return (
+        status.state == ReceiptState.ACCEPTED
+        and status.command.target.kind in {"root", "family"}
+        and status.command.kind in FAMILY_BOUNDARY_COMMAND_KINDS
+    )
 
 
 class InMemoryRunControlRepository:
@@ -380,7 +384,8 @@ class InMemoryRunControlRepository:
         self._family_results: dict[
             tuple[str, str, str, str], FamilyAdmissionReceipt
         ] = {}
-        self._boundary_commands: dict[tuple[str, str], BoundaryCommandStatus] = {}
+        # Keyed by (run_id, idempotency_issuer, command_id): the exact command identity.
+        self._boundary_commands: dict[tuple[str, str, str], BoundaryCommandStatus] = {}
 
     async def get_admission_decision(
         self, request_scope: str, idempotency_issuer: str, request_id: str
@@ -579,7 +584,7 @@ class InMemoryRunControlRepository:
     def _record_boundary_commands(self, mutation: CommandMutation) -> None:
         run_id = mutation.result.run_id
         for record in mutation.boundary_commands:
-            key = (run_id, record.command_id)
+            key = (run_id, record.idempotency_issuer, record.command_id)
             if key in self._boundary_commands:
                 raise IdempotencyConflict(
                     f"boundary command already recorded: {record.command_id}"
@@ -594,7 +599,7 @@ class InMemoryRunControlRepository:
                 sequence = 1 + max(
                     (
                         item.command.target_sequence
-                        for (item_run, _), item in self._boundary_commands.items()
+                        for (item_run, _, _), item in self._boundary_commands.items()
                         if item_run == run_id
                         and item.command.target.sequence_space == record.target.sequence_space
                     ),
@@ -605,8 +610,12 @@ class InMemoryRunControlRepository:
                 receipts=receipts,
             )
         for receipt in mutation.boundary_receipts:
-            key = (run_id, receipt.command_id)
-            if any(item.command_id == receipt.command_id for item in mutation.boundary_commands):
+            key = (run_id, receipt.idempotency_issuer, receipt.command_id)
+            if any(
+                (item.idempotency_issuer, item.command_id)
+                == (receipt.idempotency_issuer, receipt.command_id)
+                for item in mutation.boundary_commands
+            ):
                 continue
             status = self._boundary_commands.get(key)
             if status is None:
@@ -614,10 +623,10 @@ class InMemoryRunControlRepository:
             self._boundary_commands[key] = append_receipt(status, receipt)
 
     async def get_boundary_command(
-        self, request_scope: str, run_id: str, command_id: str
+        self, request_scope: str, run_id: str, idempotency_issuer: str, command_id: str
     ) -> BoundaryCommandStatus | None:
         self._require_scope(request_scope, run_id)
-        return deepcopy(self._boundary_commands.get((run_id, command_id)))
+        return deepcopy(self._boundary_commands.get((run_id, idempotency_issuer, command_id)))
 
     async def list_boundary_commands(
         self, request_scope: str, run_id: str
@@ -625,13 +634,14 @@ class InMemoryRunControlRepository:
         self._require_scope(request_scope, run_id)
         return tuple(
             deepcopy(item)
-            for (item_run, _), item in sorted(
+            for (item_run, _, _), item in sorted(
                 self._boundary_commands.items(),
                 key=lambda entry: (
                     entry[1].command.target.sequence_space,
                     entry[1].command.target_sequence,
                     entry[1].command.recorded_at,
                     entry[0][1],
+                    entry[0][2],
                 ),
             )
             if item_run == run_id
@@ -644,7 +654,7 @@ class InMemoryRunControlRepository:
     ) -> BoundaryCommandStatus:
         self._require_scope(request_scope, receipt.run_id)
         async with self._lock:
-            key = (receipt.run_id, receipt.command_id)
+            key = (receipt.run_id, receipt.idempotency_issuer, receipt.command_id)
             status = self._boundary_commands.get(key)
             if status is None:
                 raise RunControlNotFound(f"boundary command not found: {receipt.command_id}")

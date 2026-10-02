@@ -82,11 +82,12 @@ class StageGraphWorkflow:
         self._resumed_pauses: set[str] = set()
         self._active_pauses: dict[str, tuple[str, ...]] = {}
         self._pending_commands: list[BoundaryCommandDelivery] = []
-        self._command_acks: dict[str, BoundaryCommandAck] = {}
-        self._applied_command_ids: set[str] = set()
+        self._command_acks: dict[tuple[str, str], BoundaryCommandAck] = {}
+        self._applied_command_ids: set[tuple[str, str]] = set()
         self._quiescent = False
         self._execution_epoch = 1
         self._technical_segment = 1
+        self._last_delivered_sequence = 0
         self._runtime_state: dict[str, Any] = {}
 
     @workflow.signal
@@ -110,7 +111,8 @@ class StageGraphWorkflow:
     def deliver_boundary_command(self, delivery: BoundaryCommandDelivery) -> BoundaryCommandAck:
         """Acknowledge one accepted command: evidence of `delivered`, never of `applied`."""
 
-        prior = self._command_acks.get(delivery.command_id)
+        key = _command_key(delivery)
+        prior = self._command_acks.get(key)
         if prior is not None:
             return replace(prior, status="duplicate")
         status: str
@@ -118,17 +120,27 @@ class StageGraphWorkflow:
             status = "stale_generation"
         elif delivery.execution_epoch != self._execution_epoch:
             status = "stale_target"
-        elif delivery.command_id in self._applied_command_ids:
+        elif key in self._applied_command_ids:
             status = "duplicate"
+        elif delivery.target_sequence != self._last_delivered_sequence + 1:
+            # F7: the family refuses a non-contiguous sequence; a gap is transient and is
+            # not cached, so the redelivery after the missing command is decided again.
+            return BoundaryCommandAck(
+                command_id=delivery.command_id,
+                status="gap",
+                technical_segment=self._technical_segment,
+                detail=f"expected sequence {self._last_delivered_sequence + 1}",
+            )
         else:
             status = "delivered"
+            self._last_delivered_sequence = delivery.target_sequence
             self._pending_commands.append(delivery)
         ack = BoundaryCommandAck(
             command_id=delivery.command_id,
             status=status,  # type: ignore[arg-type]
             technical_segment=self._technical_segment,
         )
-        self._command_acks[delivery.command_id] = ack
+        self._command_acks[key] = ack
         return ack
 
     @workflow.query
@@ -145,12 +157,13 @@ class StageGraphWorkflow:
 
         return {
             "pending_command_ids": [item.command_id for item in self._pending_commands],
-            "applied_command_ids": sorted(self._applied_command_ids),
+            "applied_command_ids": sorted(key[1] for key in self._applied_command_ids),
             "active_pauses": {key: list(value) for key, value in self._active_pauses.items()},
             "satisfied_wait_ids": sorted(self._satisfied_waits),
             "declared_wait_ids": sorted(self._declared_waits),
             "technical_segment": self._technical_segment,
             "quiescent": self._quiescent,
+            "last_delivered_sequence": self._last_delivered_sequence,
         }
 
     @workflow.run
@@ -173,11 +186,18 @@ class StageGraphWorkflow:
         self._active_pauses.update(
             {item.decision_id: tuple(item.scope) for item in run_input.active_pauses}
         )
-        self._applied_command_ids.update(run_input.applied_boundary_command_ids)
+        self._applied_command_ids.update(
+            _split_key(item) for item in run_input.applied_boundary_command_ids
+        )
         self._quiescent = run_input.quiescent
-        carried = {item.command_id for item in self._pending_commands}
+        self._last_delivered_sequence = max(
+            self._last_delivered_sequence, run_input.last_delivered_sequence
+        )
+        carried = {_command_key(item) for item in self._pending_commands}
         self._pending_commands.extend(
-            item for item in run_input.pending_boundary_commands if item.command_id not in carried
+            item
+            for item in run_input.pending_boundary_commands
+            if _command_key(item) not in carried
         )
         interpreter = StageGraphInterpreter(
             blueprint,
@@ -252,13 +272,15 @@ class StageGraphWorkflow:
 
         def blocked_candidates(
             projection_now: Any,
+            satisfied: set[str] | None = None,
+            pauses: dict[str, tuple[str, ...]] | None = None,
         ) -> tuple[frozenset[str], set[str], frozenset[str]]:
             """Candidates blocked by unsatisfied waits and by applied pauses."""
 
+            satisfied = self._satisfied_waits if satisfied is None else satisfied
+            pauses = self._active_pauses if pauses is None else pauses
             unsatisfied = {
-                item.wait_id
-                for item in blueprint.waits
-                if item.wait_id not in self._satisfied_waits
+                item.wait_id for item in blueprint.waits if item.wait_id not in satisfied
             }
             by_wait = frozenset(
                 instance.candidate.semantic_prefix
@@ -292,16 +314,19 @@ class StageGraphWorkflow:
                 for instance in projection_now.stages.values()
                 if instance.status in {"ready", "blocked"}
                 and any(
-                    _pause_covers(scope, instance.candidate.stage_id)
-                    for scope in self._active_pauses.values()
+                    _pause_covers(scope, instance.candidate.stage_id) for scope in pauses.values()
                 )
             )
             return by_wait, unsatisfied, by_pause
 
-        def runnable_work_remains(projection_now: Any) -> bool:
+        def runnable_work_remains(
+            projection_now: Any,
+            satisfied: set[str] | None = None,
+            pauses: dict[str, tuple[str, ...]] | None = None,
+        ) -> bool:
             if active:
                 return True
-            by_wait, _unsatisfied, by_pause = blocked_candidates(projection_now)
+            by_wait, _unsatisfied, by_pause = blocked_candidates(projection_now, satisfied, pauses)
             return bool(
                 interpreter.frontier(
                     projection_now,
@@ -326,18 +351,19 @@ class StageGraphWorkflow:
             while self._pending_commands and not self._cancel_requested:
                 delivery = min(self._pending_commands, key=lambda item: item.target_sequence)
                 self._pending_commands.remove(delivery)
-                applicable, rejection = self._decide(delivery, blueprint)
+                # F4: decide purely; the family state changes only when authority applied.
+                satisfied, pauses, rejection = self._decide(delivery, blueprint)
                 outcome = await self._apply(
                     run_input,
                     delivery,
                     boundary_ref,
-                    applicable=applicable,
                     rejection=rejection,
-                    runnable=runnable_work_remains(projection),
+                    runnable=runnable_work_remains(projection, satisfied, pauses),
                     activity_timeout=timeout,
                 )
-                self._applied_command_ids.add(delivery.command_id)
+                self._mark_handled(delivery, outcome)
                 if outcome.accepted:
+                    self._satisfied_waits, self._active_pauses = satisfied, pauses
                     projection = replace(projection, run_version=outcome.resulting_run_version)
                     applied_any = True
                     self._quiescent = not runnable_work_remains(projection)
@@ -730,6 +756,40 @@ class StageGraphWorkflow:
 
             completion = interpreter.completion(projection)
             if completion.can_terminalize:
+                if self._pending_commands:
+                    # F1: drain what was delivered during the final cycle before closing.
+                    continue
+                if self._active_pauses:
+                    # Terminalization requires every pause resumed (reducer rule): the family
+                    # holds at this boundary until the resume is delivered.
+                    if not self._quiescent and workflow.patched(QUIESCENCE_PATCH):
+                        outcome = await self._boundary_fact(
+                            run_input,
+                            BoundaryLifecycleRequest(
+                                command_id=(
+                                    f"stagegraph:{run_input.run_id}:epoch:"
+                                    f"{run_input.execution_epoch}:quiescence:"
+                                    f"{projection.run_version}"
+                                ),
+                                action={
+                                    "kind": "observe_quiescence",
+                                    "boundary_ref": boundary_ref,
+                                    "runnable_work_remains": False,
+                                },
+                                reason="StageGraph completed its admissible work under a pause",
+                                boundary_ref=boundary_ref,
+                            ),
+                            timeout,
+                        )
+                        self._quiescent = True
+                        if outcome.accepted:
+                            projection = replace(
+                                projection, run_version=outcome.resulting_run_version
+                            )
+                    await workflow.wait_condition(
+                        lambda: self._cancel_requested or bool(self._pending_commands)
+                    )
+                    continue
                 terminal = await workflow.execute_activity(
                     "stagegraph.complete",
                     StageGraphCompletionActivityRequest(
@@ -792,45 +852,61 @@ class StageGraphWorkflow:
 
     def _decide(
         self, delivery: BoundaryCommandDelivery, blueprint: StageGraphBlueprint
-    ) -> tuple[bool, str]:
-        """Apply the delivered command to the family's boundary state, if it applies here.
+    ) -> tuple[set[str], dict[str, tuple[str, ...]], str]:
+        """Decide a delivered command without touching the family state (F4).
 
-        Returns `(applicable, rejection_reason)`. A release whose wait is not held, a resume
+        Returns the satisfied waits and active pauses the command would leave, and the
+        rejection reason (empty when applicable). A release whose wait is not held, a resume
         of an unknown pause, or a pause with an unknown scope is `not_applicable`.
         """
 
+        satisfied = set(self._satisfied_waits)
+        pauses = dict(self._active_pauses)
         payload = delivery.payload
         if delivery.kind == "satisfy_wait":
             condition_id = str(payload.get("condition_id", ""))
             wait_id = condition_id.removeprefix(WAIT_CONDITION_PREFIX)
             if (
                 not condition_id.startswith(WAIT_CONDITION_PREFIX)
-                or wait_id in self._satisfied_waits
+                or wait_id in satisfied
                 or wait_id not in {item.wait_id for item in blueprint.waits}
             ):
-                return False, "not_applicable"
-            self._satisfied_waits.add(wait_id)
-            return True, ""
+                return satisfied, pauses, "not_applicable"
+            satisfied.add(wait_id)
+            return satisfied, pauses, ""
+        decision = payload.get("decision") or {}
         if delivery.kind == "pause":
-            decision = payload.get("decision") or {}
             decision_id = str(decision.get("decision_id", ""))
             scope = tuple(sorted(str(item) for item in decision.get("scope", ())))
             known_stages = {item.stage_id for item in blueprint.stages}
             if (
                 not decision_id
-                or decision_id in self._active_pauses
+                or decision_id in pauses
                 or not scope
                 or any(not _known_scope(item, known_stages) for item in scope)
             ):
-                return False, "not_applicable"
-            self._active_pauses[decision_id] = scope
-            return True, ""
-        decision = payload.get("decision") or {}
+                return satisfied, pauses, "not_applicable"
+            pauses[decision_id] = scope
+            return satisfied, pauses, ""
         pause_id = str(decision.get("pause_decision_id", ""))
-        if pause_id not in self._active_pauses:
-            return False, "not_applicable"
-        del self._active_pauses[pause_id]
-        return True, ""
+        if pause_id not in pauses:
+            return satisfied, pauses, "not_applicable"
+        del pauses[pause_id]
+        return satisfied, pauses, ""
+
+    def _mark_handled(
+        self, delivery: BoundaryCommandDelivery, outcome: BoundaryLifecycleOutcome
+    ) -> None:
+        """A command is handled only once authority applied or terminally rejected it (F2)."""
+
+        if outcome.receipt_state not in {"applied", "rejected"}:
+            raise ApplicationError(
+                f"boundary command {delivery.command_id} left the ledger in "
+                f"{outcome.receipt_state or 'no'} state after {outcome.reason_code}",
+                type="boundary_command_unresolved",
+                non_retryable=True,
+            )
+        self._applied_command_ids.add(_command_key(delivery))
 
     async def _apply(
         self,
@@ -838,20 +914,20 @@ class StageGraphWorkflow:
         delivery: BoundaryCommandDelivery,
         boundary_ref: str,
         *,
-        applicable: bool,
         rejection: str,
         runnable: bool,
         activity_timeout: timedelta,
     ) -> BoundaryLifecycleOutcome:
-        if not applicable:
+        if rejection:
             return await self._boundary_fact(
                 run_input,
                 BoundaryLifecycleRequest(
-                    command_id=f"boundary-reject:{delivery.command_id}",
+                    command_id=f"boundary-reject:{delivery.idempotency_issuer}:{delivery.command_id}",
                     action={},
                     reason=f"StageGraph boundary cannot apply {delivery.kind}",
                     boundary_ref=boundary_ref,
                     boundary_command_id=delivery.command_id,
+                    boundary_command_issuer=delivery.idempotency_issuer,
                     rejection_reason=rejection,
                 ),
                 activity_timeout,
@@ -859,23 +935,23 @@ class StageGraphWorkflow:
         return await self._boundary_fact(
             run_input,
             BoundaryLifecycleRequest(
-                command_id=f"boundary-apply:{delivery.command_id}",
+                command_id=f"boundary-apply:{delivery.idempotency_issuer}:{delivery.command_id}",
                 action={
                     "kind": "apply_boundary_command",
                     "command_id": delivery.command_id,
+                    "command_issuer": delivery.idempotency_issuer,
                     "action": delivery.payload,
                     "boundary_ref": boundary_ref,
                     "runnable_work_remains": runnable,
                     "boundary_state": {
                         "family": "StageGraph",
                         "technical_segment": self._technical_segment,
-                        "satisfied_wait_ids": sorted(self._satisfied_waits),
-                        "active_pause_ids": sorted(self._active_pauses),
                     },
                 },
                 reason=f"StageGraph boundary applied {delivery.kind}",
                 boundary_ref=boundary_ref,
                 boundary_command_id=delivery.command_id,
+                boundary_command_issuer=delivery.idempotency_issuer,
             ),
             activity_timeout,
         )
@@ -917,9 +993,25 @@ class StageGraphWorkflow:
             pending_boundary_commands=tuple(
                 sorted(self._pending_commands, key=lambda item: item.target_sequence)
             ),
-            applied_boundary_command_ids=tuple(sorted(self._applied_command_ids)),
+            applied_boundary_command_ids=tuple(
+                sorted(_join_key(key) for key in self._applied_command_ids)
+            ),
             quiescent=self._quiescent,
+            last_delivered_sequence=self._last_delivered_sequence,
         )
+
+
+def _command_key(delivery: BoundaryCommandDelivery) -> tuple[str, str]:
+    return (delivery.idempotency_issuer, delivery.command_id)
+
+
+def _join_key(key: tuple[str, str]) -> str:
+    return f"{key[0]}::{key[1]}"
+
+
+def _split_key(value: str) -> tuple[str, str]:
+    issuer, separator, command_id = value.partition("::")
+    return (issuer, command_id) if separator else ("", value)
 
 
 def _pause_covers(scope: tuple[str, ...], stage_id: str) -> bool:

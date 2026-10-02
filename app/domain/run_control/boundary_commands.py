@@ -144,6 +144,7 @@ def receipt(
 ) -> BoundaryCommandReceipt:
     return BoundaryCommandReceipt(
         command_id=command.command_id,
+        idempotency_issuer=command.idempotency_issuer,
         run_id=command.run_id,
         request_scope=command.request_scope,
         ordinal=ordinal,

@@ -16,6 +16,7 @@ from temporalio.exceptions import ApplicationError
 from app.application.run_control.boundary_interventions import (
     BoundaryApplicationRejected,
     BoundaryCommandApplicationService,
+    BoundaryFactStale,
 )
 from app.domain.orchestration.contracts import (
     BoundaryLifecycleOutcome,
@@ -23,6 +24,7 @@ from app.domain.orchestration.contracts import (
 )
 from app.domain.run_control.boundary_commands import receipt as boundary_receipt
 from app.domain.run_control.contracts import CommandStatus, ReceiptState
+from app.domain.run_control.errors import ReceiptTransitionRejected
 
 
 async def apply_boundary_fact(
@@ -53,10 +55,20 @@ async def apply_boundary_fact(
         raise ApplicationError(
             str(error), type="boundary_fact_rejected", non_retryable=True
         ) from error
-    receipt_state = ""
+    except BoundaryFactStale as error:
+        # Retryable: no result was stored, so the next attempt binds the new version.
+        raise ApplicationError(str(error), type="boundary_fact_stale") from error
+    except ReceiptTransitionRejected as error:
+        # F8: the ledger refused the transition (for example the command was already closed
+        # by the terminal outcome): a deterministic outcome, not a workflow failure.
+        return await _current_outcome(service, request, reason_code=error.code)
+    receipt_state, sequence = "", 0
     if request.boundary_command_id:
-        receipt_state = await service.boundary_receipt_state(
-            request.request_scope, request.run_id, request.boundary_command_id
+        receipt_state, sequence = await service.boundary_receipt_state(
+            request.request_scope,
+            request.run_id,
+            request.boundary_command_issuer,
+            request.boundary_command_id,
         )
     return BoundaryLifecycleOutcome(
         accepted=result.status == CommandStatus.ACCEPTED,
@@ -65,6 +77,7 @@ async def apply_boundary_fact(
         resulting_run_version=result.resulting_run_version,
         phase=result.phase.value,
         receipt_state=receipt_state,
+        target_sequence=sequence,
     )
 
 
@@ -76,7 +89,10 @@ async def _record_rejection(
     """The boundary could not apply the delivered command: terminal `rejected` receipt."""
 
     status = await service.run_control.get_boundary_command(
-        request.request_scope, request.run_id, request.boundary_command_id
+        request.request_scope,
+        request.run_id,
+        request.boundary_command_issuer,
+        request.boundary_command_id,
     )
     if status is None:
         raise ApplicationError(
@@ -84,33 +100,36 @@ async def _record_rejection(
             type="boundary_command_not_found",
             non_retryable=True,
         )
-    if status.state == ReceiptState.ACCEPTED:
-        status = await service.record_receipt(
-            request.request_scope,
-            boundary_receipt(
-                status.command,
-                ordinal=1,
-                state=ReceiptState.DELIVERED,
-                recorded_by=request.boundary_ref,
-                detail="delivery acknowledged by the applying boundary",
-                transport_ref=request.boundary_ref,
-                recorded_at=when,
-            ),
-        )
-    if status.state == ReceiptState.DELIVERED:
-        status = await service.record_receipt(
-            request.request_scope,
-            boundary_receipt(
-                status.command,
-                ordinal=1,
-                state=ReceiptState.REJECTED,
-                recorded_by=request.boundary_ref,
-                rejection_reason=request.rejection_reason,  # type: ignore[arg-type]
-                detail=request.reason,
-                transport_ref=request.boundary_ref,
-                recorded_at=when,
-            ),
-        )
+    try:
+        if status.state == ReceiptState.ACCEPTED:
+            status = await service.record_receipt(
+                request.request_scope,
+                boundary_receipt(
+                    status.command,
+                    ordinal=1,
+                    state=ReceiptState.DELIVERED,
+                    recorded_by=request.boundary_ref,
+                    detail="delivery acknowledged by the applying boundary",
+                    transport_ref=request.boundary_ref,
+                    recorded_at=when,
+                ),
+            )
+        if status.state == ReceiptState.DELIVERED:
+            status = await service.record_receipt(
+                request.request_scope,
+                boundary_receipt(
+                    status.command,
+                    ordinal=1,
+                    state=ReceiptState.REJECTED,
+                    recorded_by=request.boundary_ref,
+                    rejection_reason=request.rejection_reason,  # type: ignore[arg-type]
+                    detail=request.reason,
+                    transport_ref=request.boundary_ref,
+                    recorded_at=when,
+                ),
+            )
+    except ReceiptTransitionRejected as error:
+        return await _current_outcome(service, request, reason_code=error.code)
     run = await service.run_control.get_run(request.request_scope, request.run_id)
     return BoundaryLifecycleOutcome(
         accepted=False,
@@ -119,4 +138,33 @@ async def _record_rejection(
         resulting_run_version=run.version,
         phase=run.phase.value,
         receipt_state=status.state.value,
+        target_sequence=status.command.target_sequence,
+    )
+
+
+async def _current_outcome(
+    service: BoundaryCommandApplicationService,
+    request: BoundaryLifecycleRequest,
+    *,
+    reason_code: str,
+) -> BoundaryLifecycleOutcome:
+    """The ledger's current state for the command, reported without applying anything."""
+
+    run = await service.run_control.get_run(request.request_scope, request.run_id)
+    receipt_state, sequence = "", 0
+    if request.boundary_command_id:
+        receipt_state, sequence = await service.boundary_receipt_state(
+            request.request_scope,
+            request.run_id,
+            request.boundary_command_issuer,
+            request.boundary_command_id,
+        )
+    return BoundaryLifecycleOutcome(
+        accepted=False,
+        status="rejected",
+        reason_code=reason_code,
+        resulting_run_version=run.version,
+        phase=run.phase.value,
+        receipt_state=receipt_state,
+        target_sequence=sequence,
     )

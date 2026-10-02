@@ -1182,7 +1182,7 @@ async def test_lost_wake_up_hint_is_recovered_by_resending_the_same_decision() -
     # once the hint reached the parked operation (the resend), application when the
     # operation boundary acted on the decision; the lost first hint left no receipt.
     status = await harness.run_control.get_boundary_command(
-        "tenant-1", harness.run_id, "reconcile-abandon-resend"
+        "tenant-1", harness.run_id, "operator", "reconcile-abandon-resend"
     )
     assert status is not None
     assert [(item.state.value, item.recorded_by) for item in status.receipts] == [

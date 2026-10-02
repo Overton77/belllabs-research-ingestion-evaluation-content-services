@@ -160,7 +160,9 @@ class Authority:
         return result
 
     async def states(self, run_id: str, command_id: str) -> list[str]:
-        status = await self.run_control.get_boundary_command(SCOPE, run_id, command_id)
+        status = await self.run_control.get_boundary_command(
+            SCOPE, run_id, "operator", command_id
+        )
         return [item.state.value for item in status.receipts] if status is not None else []
 
     async def run(self, run_id: str) -> Any:
@@ -402,7 +404,19 @@ async def test_stagegraph_scoped_pause_leaves_unrelated_work_admissible() -> Non
                 ),
             )
             await until(lambda: _state_is(authority, run_id, "release", "applied"))
-            assert (await authority.run(run_id)).phase == RunPhase.ACTIVE
+            # The release's own transition moved the run back to `active` (the unrelated
+            # stages were admissible); the phase may already have moved on since.
+            release_status = await authority.run_control.get_boundary_command(
+                SCOPE, run_id, "operator", "release"
+            )
+            assert release_status is not None
+            release_version = release_status.receipts[-1].applied_run_version
+            transitions = await authority.run_control.list_transitions(SCOPE, run_id)
+            assert [
+                item.resulting_phase
+                for item in transitions
+                if item.resulting_version == release_version
+            ] == [RunPhase.ACTIVE]
             # The unrelated stages run to completion while the paused stage is held.
             await asyncio.wait_for(activities.downstream_started.wait(), timeout=30)
             await until(lambda: _phase_is(authority, run_id, RunPhase.PAUSED))
@@ -452,6 +466,7 @@ class GovernedGoalActivities(FakeGoalDirectedActivities):
         self.release_executor = asyncio.Event()
         self.release_executor.set()
         self.executor_started = asyncio.Event()
+        self.final_executor_started = asyncio.Event()
         self._no_progress_until = no_progress_until_iteration
 
     @activity.defn(name="goaldirected.apply_lifecycle_command")
@@ -478,6 +493,9 @@ class GovernedGoalActivities(FakeGoalDirectedActivities):
         operation_id = str(request["identity"]["operation_id"])
         if operation_id.endswith("/1/executor"):
             self.executor_started.set()
+            await self.release_executor.wait()
+        elif operation_id.endswith(f"/{self._complete_at_iteration}/executor"):
+            self.final_executor_started.set()
             await self.release_executor.wait()
         self.operation_started.set()
         return {"operation_id": str(request["identity"])}
@@ -573,9 +591,12 @@ async def test_goal_directed_command_pause_is_durable_and_resume_continues_the_f
                 paused["released_reservation_ids"],
             ) == (2, "goal-revision:1", 1, [], [])
             assert paused["next_iteration_reservation"] == dict(blueprint.iteration_reservation)
-            status = await authority.run_control.get_boundary_command(SCOPE, run_id, "pause")
+            status = await authority.run_control.get_boundary_command(
+                SCOPE, run_id, "operator", "pause"
+            )
             assert status is not None
             assert status.receipts[-1].boundary_state["next_goal_iteration"] == 2
+            assert status.receipts[-1].boundary_state["held_reservation_ids"] == ["baseline"]
 
             # REQ-CP-EXEC-006: redelivery and stale deliveries never apply twice.
             delivery = BoundaryCommandDelivery(
@@ -587,6 +608,7 @@ async def test_goal_directed_command_pause_is_durable_and_resume_continues_the_f
                 accepted_run_version=2,
                 payload=pause("hold-run").model_dump(mode="json"),
                 payload_digest=status.command.payload_digest,
+                idempotency_issuer="operator",
             )
             duplicate = await handle.execute_update(
                 GoalDirectedWorkflow.deliver_boundary_command, delivery
@@ -604,11 +626,46 @@ async def test_goal_directed_command_pause_is_durable_and_resume_continues_the_f
             assert foreign.status == "stale_target"
             assert await authority.facade.redeliver(SCOPE, run_id) == ()
 
+            # F7: an out-of-order sequence is a transient gap at the family.
+            gap = await handle.execute_update(
+                GoalDirectedWorkflow.deliver_boundary_command,
+                replace(delivery, command_id="too-early", target_sequence=5),
+            )
+            assert gap.status == "gap"
+
+            # Gate the final executor before resuming, so the late pause below is delivered
+            # while the final unit runs.
+            activities.release_executor.clear()
             await authority.intervene(run_id, "resume", resume("hold-run", "release-run"))
             await until(lambda: _state_is(authority, run_id, "resume", "applied"), seconds=60)
+            # F1: a pause delivered during the final iteration is closed `not_applicable` by
+            # the boundary before it terminalizes, never left `delivered`.
+            await asyncio.wait_for(activities.final_executor_started.wait(), timeout=60)
+            await authority.intervene(run_id, "late-pause", pause("hold-late"))
+            await until(lambda: _state_is(authority, run_id, "late-pause", "delivered"))
+            assert (await authority.run(run_id)).phase == RunPhase.ACTIVE
+            activities.release_executor.set()
             result = await asyncio.wait_for(handle.result(), timeout=120)
             final_state = await handle.query(GoalDirectedWorkflow.boundary_state)
             history = await handle.fetch_history()
+            late = await authority.run_control.get_boundary_command(
+                SCOPE, run_id, "operator", "late-pause"
+            )
+            assert late is not None
+            assert [item.state.value for item in late.receipts] == [
+                "accepted",
+                "delivered",
+                "rejected",
+            ]
+            assert late.receipts[-1].rejection_reason == "not_applicable"
+            # F1: a command accepted after the family closed is a terminal `stale_target`.
+            await authority.intervene(run_id, "after-close", pause("hold-after"))
+            after = await authority.run_control.get_boundary_command(
+                SCOPE, run_id, "operator", "after-close"
+            )
+            assert after is not None
+            assert [item.state.value for item in after.receipts] == ["accepted", "rejected"]
+            assert after.receipts[-1].rejection_reason == "stale_target"
 
         assert result.convergence_proposal.action == "complete"
         assert result.goal_iterations == 2
@@ -619,7 +676,7 @@ async def test_goal_directed_command_pause_is_durable_and_resume_continues_the_f
         projection = await authority.run(run_id)
         assert projection.active_pauses == () and projection.phase == RunPhase.ACTIVE
         assert final_state["paused"] is None
-        assert final_state["applied_command_ids"] == ["pause", "resume"]
+        assert final_state["applied_command_ids"] == ["late-pause", "pause", "resume"]
         await Replayer(
             workflows=[GoalDirectedWorkflow, OperationWorkflow],
             workflow_runner=coordinator_workflow_runner(),

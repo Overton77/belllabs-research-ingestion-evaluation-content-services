@@ -534,10 +534,21 @@ class JournaledOperationExecutionCoordinator:
         """
 
         recorder = getattr(self._run_control, "record_boundary_receipt", None)
-        lookup = getattr(self._run_control, "get_boundary_command", None)
+        lookup = getattr(self._run_control, "list_boundary_commands", None)
         if recorder is None or lookup is None:
             return
-        status = await lookup(binding.request_scope, binding.run_id, decision.decision_id)
+        # The decision records the command ID; the issuer is found on the run's ledger.
+        status = next(
+            (
+                item
+                for item in await lookup(binding.request_scope, binding.run_id)
+                if item.command.kind == "reconcile_unit"
+                and item.command.command_id == decision.decision_id
+                and item.command.target.target_ref
+                == f"{decision.unit_key}:gen:{decision.execution_generation}"
+            ),
+            None,
+        )
         if status is None or status.state in {ReceiptState.APPLIED, ReceiptState.REJECTED}:
             return
         now = datetime.now(UTC)

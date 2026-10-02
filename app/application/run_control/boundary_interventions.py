@@ -31,6 +31,7 @@ from app.application.run_control.run_control_repository import pending_delivery
 from app.application.run_control.service import RunControlService
 from app.domain.run_control.boundary_commands import receipt
 from app.domain.run_control.contracts import (
+    BOUNDARY_FACT_KINDS,
     ActorContext,
     BoundaryCommandReceipt,
     BoundaryCommandStatus,
@@ -39,8 +40,9 @@ from app.domain.run_control.contracts import (
     LifecycleAction,
     LifecycleCommand,
     ReceiptState,
+    RunPhase,
 )
-from app.domain.run_control.errors import CommandRejected, IdempotencyConflict
+from app.domain.run_control.errors import CommandRejected
 
 logger = logging.getLogger(__name__)
 LIFECYCLE_ACTION_ADAPTER: TypeAdapter[LifecycleAction] = TypeAdapter(LifecycleAction)
@@ -103,6 +105,30 @@ class BoundaryCommandDeliveryService:
         """
 
         delivered: list[BoundaryCommandStatus] = []
+        run = await self._run_control.get_run(request_scope, run_id)
+        if run.phase == RunPhase.TERMINAL:
+            # F1: nothing is delivered to a terminal run; what run control did not close in
+            # its terminalizing commit is closed here with the same terminal reason.
+            return tuple(
+                [
+                    await self._run_control.record_boundary_receipt(
+                        request_scope,
+                        receipt(
+                            status.command,
+                            ordinal=1,
+                            state=ReceiptState.REJECTED,
+                            recorded_by=DELIVERY_RECORDER,
+                            rejection_reason="terminal_run",
+                            detail="the run is terminal; nothing is delivered",
+                            recorded_at=self._clock(),
+                        ),
+                    )
+                    for status in await self._run_control.list_boundary_commands(
+                        request_scope, run_id
+                    )
+                    if pending_delivery(status)
+                ]
+            )
         pending = sorted(
             (
                 status
@@ -191,6 +217,10 @@ class BoundaryApplicationRejected(ValueError):
     """The boundary fact was refused for a reason that a retry cannot repair."""
 
 
+class BoundaryFactStale(RuntimeError):
+    """Authority kept moving under the fact; the activity retries (no result was stored)."""
+
+
 class BoundaryCommandApplicationService:
     """Serves the family boundaries' lifecycle facts (`apply_boundary_command`, `set_wait`,
     `observe_quiescence`, a policy pause) with the boundary's own actor.
@@ -236,11 +266,16 @@ class BoundaryCommandApplicationService:
             raise BoundaryApplicationRejected(
                 f"boundary fact is not a typed lifecycle action: {error}"
             ) from error
+        if typed.kind not in BOUNDARY_FACT_KINDS and typed.kind != "pause":
+            raise BoundaryApplicationRejected(
+                f"{typed.kind} is not a family boundary fact"
+            )
         when = occurred_at or self._clock()
         prior = await self._run_control.get_command_result(
             request_scope, run_id, idempotency_issuer, command_id
         )
-        if prior is not None and prior.status != CommandStatus.STALE:
+        if prior is not None:
+            # Boundary facts never store a STALE result (F2), so a stored result is final.
             return prior
         for _attempt in range(self._attempts):
             run = await self._run_control.get_run(request_scope, run_id)
@@ -260,28 +295,25 @@ class BoundaryCommandApplicationService:
             )
             try:
                 result = await self._run_control.execute(command)
-            except IdempotencyConflict:
-                # A stale attempt was stored with another expected version: the stored
-                # result is authoritative for this identity.
-                stored = await self._run_control.get_command_result(
-                    request_scope, run_id, idempotency_issuer, command_id
-                )
-                if stored is None:
-                    raise
-                return stored
             except CommandRejected as error:
                 raise BoundaryApplicationRejected(str(error)) from error
             if result.status != CommandStatus.STALE:
                 return result
-        raise BoundaryApplicationRejected(
+        raise BoundaryFactStale(
             f"boundary fact {command_id} remained stale after {self._attempts} attempts"
         )
 
     async def boundary_receipt_state(
-        self, request_scope: str, run_id: str, command_id: str
-    ) -> str:
-        status = await self._run_control.get_boundary_command(request_scope, run_id, command_id)
-        return status.state.value if status is not None else ""
+        self, request_scope: str, run_id: str, idempotency_issuer: str, command_id: str
+    ) -> tuple[str, int]:
+        """The command's current receipt state and target sequence (`("", 0)` if unknown)."""
+
+        status = await self._run_control.get_boundary_command(
+            request_scope, run_id, idempotency_issuer, command_id
+        )
+        if status is None:
+            return "", 0
+        return status.state.value, status.command.target_sequence
 
     async def record_receipt(
         self, request_scope: str, update: BoundaryCommandReceipt

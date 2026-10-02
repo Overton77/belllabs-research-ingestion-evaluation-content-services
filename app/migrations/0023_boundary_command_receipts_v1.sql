@@ -27,7 +27,9 @@ CREATE TABLE belllabs_control.boundary_commands (
     payload_digest text NOT NULL CHECK (payload_digest ~ '^sha256:[0-9a-f]{64}$'),
     command jsonb NOT NULL,
     recorded_at timestamptz NOT NULL,
-    PRIMARY KEY (request_scope, run_id, command_id)
+    -- The command identity is the lifecycle command's: (issuer, command_id) per run, exactly
+    -- like lifecycle_command_results, so two principals never collide on one ID.
+    PRIMARY KEY (request_scope, run_id, idempotency_issuer, command_id)
 );
 
 -- Monotonic, unique per-target sequencing (REQ-CP-EXEC-006); unsequenced rejections are 0.
@@ -38,6 +40,7 @@ CREATE UNIQUE INDEX boundary_commands_target_sequence_idx
 CREATE TABLE belllabs_control.boundary_command_receipts (
     request_scope text NOT NULL,
     run_id text NOT NULL,
+    idempotency_issuer text NOT NULL,
     command_id text NOT NULL,
     ordinal integer NOT NULL CHECK (ordinal >= 1),
     state text NOT NULL CHECK (state IN ('accepted', 'delivered', 'applied', 'rejected')),
@@ -52,9 +55,11 @@ CREATE TABLE belllabs_control.boundary_command_receipts (
     applied_run_version bigint CHECK (applied_run_version IS NULL OR applied_run_version >= 1),
     receipt jsonb NOT NULL,
     recorded_at timestamptz NOT NULL,
-    PRIMARY KEY (request_scope, run_id, command_id, ordinal),
-    FOREIGN KEY (request_scope, run_id, command_id)
-        REFERENCES belllabs_control.boundary_commands(request_scope, run_id, command_id),
+    PRIMARY KEY (request_scope, run_id, idempotency_issuer, command_id, ordinal),
+    FOREIGN KEY (request_scope, run_id, idempotency_issuer, command_id)
+        REFERENCES belllabs_control.boundary_commands(
+            request_scope, run_id, idempotency_issuer, command_id
+        ),
     CONSTRAINT boundary_receipt_rejection_shape
         CHECK ((state = 'rejected') = (rejection_reason IS NOT NULL)),
     CONSTRAINT boundary_receipt_applied_shape

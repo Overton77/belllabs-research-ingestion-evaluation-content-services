@@ -9,6 +9,8 @@ is evidence of `delivered`; application is a separate fact the family records it
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from temporalio.client import Client
 
 from app.application.run_control.boundary_interventions import BoundaryDeliveryResult
@@ -42,6 +44,7 @@ def family_delivery(status: BoundaryCommandStatus) -> BoundaryCommandDelivery:
         accepted_run_version=command.accepted_run_version,
         payload=stable_json_dump(command.action),
         payload_digest=command.payload_digest,
+        idempotency_issuer=command.idempotency_issuer,
     )
 
 
@@ -54,7 +57,17 @@ class TemporalBoundaryCommandTransport:
         target = command.target
         if target.family_workflow_id is None:
             raise ValueError("only a family-targeted command is delivered by this transport")
+        family_ref = target.family_workflow_id
+        if not await self._running(family_ref):
+            # F1: the exact target execution is closed; the command can never apply there.
+            return BoundaryDeliveryResult(
+                "stale_target", family_ref, "the family execution is not running"
+            )
         if target.root_workflow_id is not None:
+            if not await self._running(target.root_workflow_id):
+                return BoundaryDeliveryResult(
+                    "stale_target", target.root_workflow_id, "the root execution is not running"
+                )
             root_receipt: WorkflowMessageReceipt = await self._client.get_workflow_handle(
                 target.root_workflow_id
             ).execute_update(
@@ -68,7 +81,11 @@ class TemporalBoundaryCommandTransport:
                 ),
                 result_type=WorkflowMessageReceipt,
             )
-            if root_receipt.status == "gap":
+            # F7: the root answers `duplicate` for a cached receipt and keeps the cached
+            # status; a cached `accepted` is a delivery, anything else is decided again.
+            if root_receipt.status == "duplicate":
+                root_receipt = replace(root_receipt, status=root_receipt.cached_status)
+            if root_receipt.status in {"gap", "duplicate"}:
                 raise BoundaryDeliveryGap(
                     f"root {target.root_workflow_id} has not received the command before "
                     f"sequence {command.target_sequence}"
@@ -86,8 +103,17 @@ class TemporalBoundaryCommandTransport:
             family_delivery(status),
             result_type=BoundaryCommandAck,
         )
+        if ack.status == "gap":
+            raise BoundaryDeliveryGap(
+                f"family {target.family_workflow_id} has not received the command before "
+                f"sequence {command.target_sequence}"
+            )
         return BoundaryDeliveryResult(
             ack.status,
             f"{target.family_workflow_id}@segment:{ack.technical_segment}",
             ack.detail,
         )
+
+    async def _running(self, workflow_id: str) -> bool:
+        description = await self._client.get_workflow_handle(workflow_id).describe()
+        return description.status is not None and description.status.name == "RUNNING"

@@ -11,6 +11,8 @@ Opt-in through `TEST_APPLICATION_POSTGRES_DSN` (disposable stack only).
 
 from __future__ import annotations
 
+import asyncio
+
 import asyncpg
 import pytest
 
@@ -120,7 +122,7 @@ async def test_receipts_are_durable_scoped_and_role_bounded(
             boundary_command(run_id, 4, "apply:pause:again", apply("pause", pause()))
         )
         assert duplicate.reason_code == "boundary_command_already_applied"
-        status = await run_service.get_boundary_command("tenant-1", run_id, "pause")
+        status = await run_service.get_boundary_command("tenant-1", run_id, "operator", "pause")
         assert status is not None
         assert states(status) == ["accepted", "delivered", "applied"]
         assert status.receipts[-1].applied_run_version == 4
@@ -141,6 +143,50 @@ async def test_receipts_are_durable_scoped_and_role_bounded(
             await run_service.get_run("tenant-1", run_id)
         )
 
+        # F8: concurrent appends for one command keep the state machine valid.
+        raced = await run_service.execute(command(run_id, 5, "raced", pause("p-raced")))
+        assert raced.status == CommandStatus.ACCEPTED
+        raced_status = await run_service.get_boundary_command(
+            "tenant-1", run_id, "operator", "raced"
+        )
+        assert raced_status is not None
+        first, second = await asyncio.gather(
+            run_service.record_boundary_receipt("tenant-1", delivered(raced_status)),
+            run_service.record_boundary_receipt("tenant-1", delivered(raced_status)),
+        )
+        assert states(first) == states(second) == ["accepted", "delivered"]
+        applied_receipt = delivered(raced_status).model_copy(
+            update={
+                "state": ReceiptState.APPLIED,
+                "recorded_by": "boundary",
+                "applied_run_version": 5,
+            }
+        )
+        outcomes = await asyncio.gather(
+            run_service.record_boundary_receipt("tenant-1", applied_receipt),
+            run_service.record_boundary_receipt("tenant-1", applied_receipt),
+            run_service.record_boundary_receipt(
+                "tenant-1",
+                delivered(raced_status).model_copy(
+                    update={"state": ReceiptState.REJECTED, "rejection_reason": "superseded"}
+                ),
+            ),
+            return_exceptions=True,
+        )
+        assert sum(isinstance(item, ReceiptTransitionRejected) for item in outcomes) == 1
+        final = await run_service.get_boundary_command("tenant-1", run_id, "operator", "raced")
+        assert final is not None and states(final) == ["accepted", "delivered", "applied"]
+        async with pool.acquire() as connection:
+            rows = await connection.fetch(
+                "SELECT ordinal, state FROM belllabs_control.boundary_command_receipts "
+                "WHERE command_id = 'raced' ORDER BY ordinal"
+            )
+        assert [(row["ordinal"], row["state"]) for row in rows] == [
+            (1, "accepted"),
+            (2, "delivered"),
+            (3, "applied"),
+        ]
+
         # Forced RLS: the runtime role sees only its scope and may insert but never update
         # or delete; the read-only role may only read.
         async with pool.acquire() as connection, connection.transaction():
@@ -152,14 +198,14 @@ async def test_receipts_are_durable_scoped_and_role_bounded(
                 await connection.fetchval(
                     "SELECT count(*) FROM belllabs_control.boundary_commands"
                 )
-                == 4
+                == 5
             )
             assert (
                 await connection.fetchval(
                     "SELECT count(*) FROM belllabs_control.boundary_command_receipts"
                 )
-                == 8
-            ), "stale: 1; pause: 3; release: 1; resume: 3 (delivered recorded by the boundary)"
+                == 11
+            ), "stale 1; pause 3; release 1; resume 3 (delivered recorded by the boundary); raced 3"
             await connection.execute(
                 "SELECT set_config('belllabs.request_scope', 'tenant-2', true)"
             )

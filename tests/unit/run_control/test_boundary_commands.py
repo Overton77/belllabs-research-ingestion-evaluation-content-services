@@ -132,6 +132,7 @@ def apply(
 ) -> ApplyBoundaryCommandAction:
     return ApplyBoundaryCommandAction(
         command_id=command_id,
+        command_issuer="operator",
         action=action,
         boundary_ref=boundary_ref,
         runnable_work_remains=runnable,
@@ -147,6 +148,7 @@ def states(status: BoundaryCommandStatus) -> list[str]:
 def delivered(status: BoundaryCommandStatus) -> BoundaryCommandReceipt:
     return BoundaryCommandReceipt(
         command_id=status.command.command_id,
+        idempotency_issuer=status.command.idempotency_issuer,
         run_id=status.command.run_id,
         request_scope=status.command.request_scope,
         ordinal=1,
@@ -182,7 +184,7 @@ async def test_run_control_is_the_boundary_when_no_execution_target_is_declared(
         RunPhase.PAUSED,
         3,
     )
-    status = await run_service.get_boundary_command("tenant-1", run_id, "pause")
+    status = await run_service.get_boundary_command("tenant-1", run_id, "operator", "pause")
     assert status is not None
     assert states(status) == ["accepted", "delivered", "applied"]
     assert status.command.target.kind == "run_control"
@@ -193,7 +195,7 @@ async def test_run_control_is_the_boundary_when_no_execution_target_is_declared(
     # A cancel is applied only when the reducer records the terminal outcome.
     cancelled = await run_service.execute(command(run_id, 3, "cancel", CancelAction()))
     assert cancelled.phase == RunPhase.CANCELLING
-    cancel_status = await run_service.get_boundary_command("tenant-1", run_id, "cancel")
+    cancel_status = await run_service.get_boundary_command("tenant-1", run_id, "operator", "cancel")
     assert cancel_status is not None and states(cancel_status) == ["accepted", "delivered"]
     await run_service.execute(
         command(
@@ -232,7 +234,7 @@ async def test_run_control_is_the_boundary_when_no_execution_target_is_declared(
         )
     )
     assert terminal.terminal_outcome == RunOutcome.CANCELLED
-    cancel_status = await run_service.get_boundary_command("tenant-1", run_id, "cancel")
+    cancel_status = await run_service.get_boundary_command("tenant-1", run_id, "operator", "cancel")
     assert cancel_status is not None
     assert states(cancel_status) == ["accepted", "delivered", "applied"]
     assert cancel_status.receipts[-1].applied_run_version == 6
@@ -256,7 +258,7 @@ async def test_family_target_makes_interventions_pending_until_the_boundary_appl
     assert (accepted.phase, accepted.resulting_run_version) == (RunPhase.ACTIVE, 2)
     projection = await run_service.get_run("tenant-1", run_id)
     assert projection.version == 2 and projection.active_pauses == ()
-    status = await run_service.get_boundary_command("tenant-1", run_id, "pause")
+    status = await run_service.get_boundary_command("tenant-1", run_id, "operator", "pause")
     assert status is not None
     assert states(status) == ["accepted"]
     assert (status.command.target.kind, status.command.target_sequence) == ("family", 1)
@@ -266,7 +268,7 @@ async def test_family_target_makes_interventions_pending_until_the_boundary_appl
     # An exact replay returns the stored result without a second receipt.
     replayed = await run_service.execute(command(run_id, 2, "pause", pause()))
     assert replayed == accepted
-    status = await run_service.get_boundary_command("tenant-1", run_id, "pause")
+    status = await run_service.get_boundary_command("tenant-1", run_id, "operator", "pause")
     assert status is not None and states(status) == ["accepted"]
 
     # The boundary cannot apply what was not delivered... unless it saw the delivery
@@ -292,7 +294,9 @@ async def test_family_target_makes_interventions_pending_until_the_boundary_appl
         )
     )
     assert release.status == CommandStatus.ACCEPTED and release.resulting_run_version == 3
-    release_status = await run_service.get_boundary_command("tenant-1", run_id, "release")
+    release_status = await run_service.get_boundary_command(
+        "tenant-1", run_id, "operator", "release"
+    )
     assert release_status is not None and release_status.command.target_sequence == 2
 
     delivered_status = await run_service.record_boundary_receipt("tenant-1", delivered(status))
@@ -312,7 +316,7 @@ async def test_family_target_makes_interventions_pending_until_the_boundary_appl
     )
     projection = await run_service.get_run("tenant-1", run_id)
     assert [item.decision_id for item in projection.active_pauses] == ["pause-1"]
-    status = await run_service.get_boundary_command("tenant-1", run_id, "pause")
+    status = await run_service.get_boundary_command("tenant-1", run_id, "operator", "pause")
     assert status is not None
     assert states(status) == ["accepted", "delivered", "applied"]
     assert status.receipts[-1].applied_run_version == 4
@@ -345,7 +349,9 @@ async def test_family_target_makes_interventions_pending_until_the_boundary_appl
         )
     )
     assert released.status == CommandStatus.ACCEPTED and released.phase == RunPhase.PAUSED
-    release_status = await run_service.get_boundary_command("tenant-1", run_id, "release")
+    release_status = await run_service.get_boundary_command(
+        "tenant-1", run_id, "operator", "release"
+    )
     assert release_status is not None
     assert states(release_status) == ["accepted", "delivered", "applied"]
     assert release_status.receipts[1].detail == "delivery acknowledged by the applying boundary"
@@ -359,7 +365,9 @@ async def test_rejections_are_typed_terminal_receipts_and_never_consume_a_sequen
 
     stale = await run_service.execute(command(run_id, 1, "stale-pause", pause()))
     assert stale.status == CommandStatus.STALE
-    stale_status = await run_service.get_boundary_command("tenant-1", run_id, "stale-pause")
+    stale_status = await run_service.get_boundary_command(
+        "tenant-1", run_id, "operator", "stale-pause"
+    )
     assert stale_status is not None
     assert states(stale_status) == ["rejected"]
     assert stale_status.receipts[0].rejection_reason == "stale_version"
@@ -367,7 +375,9 @@ async def test_rejections_are_typed_terminal_receipts_and_never_consume_a_sequen
 
     orphan = await run_service.execute(command(run_id, 2, "orphan-resume", resume("missing")))
     assert orphan.status == CommandStatus.REJECTED and orphan.reason_code == "pause_not_found"
-    orphan_status = await run_service.get_boundary_command("tenant-1", run_id, "orphan-resume")
+    orphan_status = await run_service.get_boundary_command(
+        "tenant-1", run_id, "operator", "orphan-resume"
+    )
     assert orphan_status is not None
     assert orphan_status.receipts[0].rejection_reason == "not_applicable"
 
@@ -377,14 +387,14 @@ async def test_rejections_are_typed_terminal_receipts_and_never_consume_a_sequen
     rejected = await run_service.execute(unauthorized)
     assert rejected.reason_code == "invalid_pause_authority"
     unauthorized_status = await run_service.get_boundary_command(
-        "tenant-1", run_id, "unauthorized-pause"
+        "tenant-1", run_id, "operator", "unauthorized-pause"
     )
     assert unauthorized_status is not None
     assert unauthorized_status.receipts[0].rejection_reason == "unauthorized"
 
     accepted = await run_service.execute(command(run_id, 2, "pause", pause()))
     assert accepted.status == CommandStatus.ACCEPTED
-    status = await run_service.get_boundary_command("tenant-1", run_id, "pause")
+    status = await run_service.get_boundary_command("tenant-1", run_id, "operator", "pause")
     assert status is not None and status.command.target_sequence == 1, "no sequence gap"
 
     # A boundary that is not the declared target cannot apply the command.
@@ -394,7 +404,7 @@ async def test_rejections_are_typed_terminal_receipts_and_never_consume_a_sequen
         )
     )
     assert foreign.status == CommandStatus.REJECTED and foreign.reason_code == "stale_target"
-    status = await run_service.get_boundary_command("tenant-1", run_id, "pause")
+    status = await run_service.get_boundary_command("tenant-1", run_id, "operator", "pause")
     assert status is not None
     assert states(status) == ["accepted", "rejected"]
     assert status.receipts[-1].rejection_reason == "stale_target"
@@ -435,7 +445,7 @@ async def test_resume_must_re_reserve_the_next_unit_of_work() -> None:
     )
     assert rejected.status == CommandStatus.REJECTED
     assert rejected.reason_code == "insufficient_budget"
-    status = await run_service.get_boundary_command("tenant-1", run_id, "resume")
+    status = await run_service.get_boundary_command("tenant-1", run_id, "operator", "resume")
     assert status is not None
     assert states(status) == ["accepted", "delivered", "rejected"]
     assert status.receipts[-1].rejection_reason == "insufficient_budget"
@@ -531,7 +541,9 @@ async def test_reconcile_unit_is_sequenced_per_unit_and_applied_by_the_operation
         reconciler_command(run_id, 3, "reconcile-abandon", reconcile())
     )
     assert decided.status == CommandStatus.ACCEPTED and decided.resulting_run_version == 4
-    status = await run_service.get_boundary_command("tenant-1", run_id, "reconcile-abandon")
+    status = await run_service.get_boundary_command(
+        "tenant-1", run_id, "operator", "reconcile-abandon"
+    )
     assert status is not None
     assert states(status) == ["accepted"]
     assert status.command.kind == "reconcile_unit"
@@ -599,3 +611,133 @@ def test_run_control_receipts_follow_the_special_cases() -> None:
             ),
             receipts=(receipts[0], receipts[2]),
         )
+
+
+@pytest.mark.asyncio
+async def test_terminal_outcome_closes_every_open_command_in_the_same_commit() -> None:
+    """F1: a run that ends leaves no command at `accepted` or `delivered`; the terminalizing
+    commit rejects them `terminal_run` (a cancel overtaken by another outcome is `superseded`)."""
+
+    run_service, _ = service()
+    run_id = await started(run_service, "boundary-terminal", TARGET)
+    await run_service.execute(command(run_id, 2, "pause", pause()))
+    status = await run_service.get_boundary_command("tenant-1", run_id, "operator", "pause")
+    assert status is not None
+    await run_service.record_boundary_receipt("tenant-1", delivered(status))
+    await run_service.execute(command(run_id, 2, "pause-2", pause("p2")))
+    cancelled = await run_service.execute(command(run_id, 2, "cancel", CancelAction()))
+    assert cancelled.phase == RunPhase.CANCELLING
+    await run_service.execute(
+        command(
+            run_id,
+            3,
+            "release-baseline",
+            RecordUsageAction(
+                usage_id="usage:release",
+                reservation_id="baseline",
+                actual_amounts={},
+                release_amounts={"tokens.total": 20},
+            ),
+        )
+    )
+    terminal = await run_service.execute(
+        command(
+            run_id,
+            4,
+            "terminalize",
+            TerminalizeAction(
+                proposal=TerminalizationProposal(
+                    proposal_id="terminal",
+                    expected_run_version=4,
+                    workflow_type_digest=WORKFLOW_DIGEST,
+                    obligation_revision="obligations:1",
+                    evidence_frontier_digest=INITIAL_EVIDENCE_FRONTIER,
+                    accepted_obligation_evidence_digest=EMPTY_EVIDENCE_DIGEST,
+                    proposing_execution_binding_ref="execution:test",
+                    required_obligations_accepted=True,
+                    cancellation_settled=True,
+                    budget_settled=True,
+                    effects_settled=True,
+                    proposed_at=NOW,
+                )
+            ),
+        )
+    )
+    assert terminal.terminal_outcome == RunOutcome.CANCELLED
+    ledger = {
+        item.command.command_id: item
+        for item in await run_service.list_boundary_commands("tenant-1", run_id)
+    }
+    assert states(ledger["pause"]) == ["accepted", "delivered", "rejected"]
+    assert states(ledger["pause-2"]) == ["accepted", "rejected"]
+    assert {ledger[name].receipts[-1].rejection_reason for name in ("pause", "pause-2")} == {
+        "terminal_run"
+    }
+    assert states(ledger["cancel"]) == ["accepted", "delivered", "applied"]
+    # A command accepted against a terminal run is rejected at acceptance.
+    late = await run_service.execute(command(run_id, 5, "late-pause", pause("late")))
+    assert late.status == CommandStatus.REJECTED and late.reason_code == "run_is_terminal"
+    late_status = await run_service.get_boundary_command(
+        "tenant-1", run_id, "operator", "late-pause"
+    )
+    assert late_status is not None
+    assert late_status.receipts[0].rejection_reason == "terminal_run"
+
+
+@pytest.mark.asyncio
+async def test_two_principals_may_reuse_a_command_id() -> None:
+    """F5: the command identity is (issuer, command_id), as for every lifecycle command."""
+
+    run_service, _ = service()
+    run_id = await started(run_service, "boundary-issuers", TARGET)
+    first = await run_service.execute(command(run_id, 2, "pause", pause("p-operator")))
+    other = command(run_id, 2, "pause", pause("p-other")).model_copy(
+        update={"idempotency_issuer": "other-operator"}
+    )
+    second = await run_service.execute(other)
+    assert first.status == second.status == CommandStatus.ACCEPTED
+    ledger = await run_service.list_boundary_commands("tenant-1", run_id)
+    assert [
+        (item.command.idempotency_issuer, item.command.command_id, item.command.target_sequence)
+        for item in ledger
+    ] == [("operator", "pause", 1), ("other-operator", "pause", 2)]
+    applied = await run_service.execute(
+        boundary_command(
+            run_id,
+            2,
+            "apply:other",
+            apply("pause", pause("p-other")).model_copy(
+                update={"command_issuer": "other-operator"}
+            ),
+        )
+    )
+    assert applied.status == CommandStatus.ACCEPTED
+    mine = await run_service.get_boundary_command("tenant-1", run_id, "operator", "pause")
+    theirs = await run_service.get_boundary_command("tenant-1", run_id, "other-operator", "pause")
+    assert mine is not None and theirs is not None
+    assert states(mine) == ["accepted"]
+    assert states(theirs) == ["accepted", "delivered", "applied"]
+
+
+@pytest.mark.asyncio
+async def test_boundary_facts_never_persist_a_stale_result() -> None:
+    """F2: a boundary fact that lost a version race is answered STALE without a stored result,
+    so the retry at the new version is not an idempotency conflict."""
+
+    run_service, _ = service()
+    run_id = await started(run_service, "boundary-stale-fact", TARGET)
+    await run_service.execute(command(run_id, 2, "pause", pause()))
+    stale = await run_service.execute(
+        boundary_command(run_id, 1, "apply:pause", apply("pause", pause()))
+    )
+    assert stale.status == CommandStatus.STALE
+    assert (
+        await run_service.get_command_result(
+            "tenant-1", run_id, "goal-directed-worker", "apply:pause"
+        )
+        is None
+    ), "no STALE result is stored for a boundary fact"
+    retried = await run_service.execute(
+        boundary_command(run_id, 2, "apply:pause", apply("pause", pause()))
+    )
+    assert retried.status == CommandStatus.ACCEPTED and retried.phase == RunPhase.PAUSED

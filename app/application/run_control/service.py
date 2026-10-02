@@ -30,6 +30,7 @@ from app.domain.run_control.boundary_commands import (
     run_control_boundary_receipts,
 )
 from app.domain.run_control.contracts import (
+    BOUNDARY_FACT_KINDS,
     ActorContext,
     AdmissionDecision,
     ApplyAuthorityBatchAction,
@@ -547,6 +548,19 @@ class RunControlService:
         budget = await self._repository.get_budget(command.request_scope, command.run_id)
         effects = await self._repository.get_effects(command.request_scope, command.run_id)
         if command.expected_run_version != projection.version:
+            if command.action.kind in BOUNDARY_FACT_KINDS:
+                # F2: a boundary fact's stale outcome is never persisted; the boundary binds
+                # the current version and retries, so a version race cannot strand a command
+                # behind a stored STALE result for its identity.
+                return self._non_transition_result(
+                    command,
+                    fingerprint,
+                    projection,
+                    CommandStatus.STALE,
+                    "stale_run_version",
+                    f"expected version {command.expected_run_version}, current version is "
+                    f"{projection.version}",
+                )
             return await self._commit_non_transition_result(
                 command,
                 fingerprint,
@@ -611,13 +625,16 @@ class RunControlService:
             )
         elif pending_status is not None:
             boundary_receipts = self._applied_boundary_receipts(
-                command, pending_status, reduction.result.resulting_run_version
+                command,
+                pending_status,
+                reduction.result.resulting_run_version,
+                held_reservation_ids=tuple(sorted(reduction.budget.reservations)),
             )
-        elif (
-            isinstance(command.action, TerminalizeAction)
-            and reduction.projection.terminal_outcome == RunOutcome.CANCELLED
-        ):
-            boundary_receipts = await self._cancel_applied_receipts(command)
+        elif isinstance(command.action, TerminalizeAction):
+            assert reduction.projection.terminal_outcome is not None
+            boundary_receipts = await self._terminal_receipts(
+                command, reduction.projection.terminal_outcome
+            )
         mutation = CommandMutation(
             result=reduction.result,
             request_scope=command.request_scope,
@@ -911,7 +928,7 @@ class RunControlService:
         action = command.action
         assert isinstance(action, ApplyBoundaryCommandAction)
         status = await self._repository.get_boundary_command(
-            command.request_scope, command.run_id, action.command_id
+            command.request_scope, command.run_id, action.command_issuer, action.command_id
         )
         if status is None:
             return None, (
@@ -941,7 +958,11 @@ class RunControlService:
 
     @staticmethod
     def _applied_boundary_receipts(
-        command: LifecycleCommand, status: BoundaryCommandStatus, resulting_run_version: int
+        command: LifecycleCommand,
+        status: BoundaryCommandStatus,
+        resulting_run_version: int,
+        *,
+        held_reservation_ids: tuple[str, ...] = (),
     ) -> tuple[BoundaryCommandReceipt, ...]:
         action = command.action
         assert isinstance(action, ApplyBoundaryCommandAction)
@@ -968,7 +989,11 @@ class RunControlService:
                 recorded_by=action.boundary_ref,
                 transport_ref=action.boundary_ref,
                 applied_run_version=resulting_run_version,
-                boundary_state=action.boundary_state,
+                # F8: the reservations actually held at application, from budget authority.
+                boundary_state={
+                    **action.boundary_state,
+                    "held_reservation_ids": list(held_reservation_ids),
+                },
                 recorded_at=command.occurred_at,
             )
         )
@@ -1012,21 +1037,25 @@ class RunControlService:
         )
         return tuple(receipts)
 
-    async def _cancel_applied_receipts(
-        self, command: LifecycleCommand
+    async def _terminal_receipts(
+        self, command: LifecycleCommand, outcome: RunOutcome
     ) -> tuple[BoundaryCommandReceipt, ...]:
-        """A cancel command is `applied` when the reducer records the terminal outcome."""
+        """Every non-terminal command reaches a terminal receipt when the run does (F1).
+
+        A cancel is `applied` by a `cancelled` outcome and `superseded` by any other. A
+        pending or delivered family command (pause, resume, wait release) that no boundary
+        applied is `rejected(terminal_run)`; a `reconcile_unit` still pending is
+        `rejected(terminal_run)` too. All in the terminalizing commit.
+        """
 
         receipts: list[BoundaryCommandReceipt] = []
         for status in await self._repository.list_boundary_commands(
             command.request_scope, command.run_id
         ):
-            if status.command.kind != "cancel" or status.state not in {
-                ReceiptState.ACCEPTED,
-                ReceiptState.DELIVERED,
-            }:
+            if status.state not in {ReceiptState.ACCEPTED, ReceiptState.DELIVERED}:
                 continue
-            if status.state == ReceiptState.ACCEPTED:
+            cancel_applied = status.command.kind == "cancel" and outcome == RunOutcome.CANCELLED
+            if status.state == ReceiptState.ACCEPTED and cancel_applied:
                 receipts.append(
                     receipt(
                         status.command,
@@ -1037,14 +1066,29 @@ class RunControlService:
                         recorded_at=command.occurred_at,
                     )
                 )
+            if cancel_applied:
+                receipts.append(
+                    receipt(
+                        status.command,
+                        ordinal=1,
+                        state=ReceiptState.APPLIED,
+                        recorded_by=RUN_CONTROL_RECORDER,
+                        detail="terminal outcome cancelled",
+                        applied_run_version=command.expected_run_version + 1,
+                        recorded_at=command.occurred_at,
+                    )
+                )
+                continue
             receipts.append(
                 receipt(
                     status.command,
                     ordinal=1,
-                    state=ReceiptState.APPLIED,
+                    state=ReceiptState.REJECTED,
                     recorded_by=RUN_CONTROL_RECORDER,
-                    detail="terminal outcome cancelled",
-                    applied_run_version=command.expected_run_version + 1,
+                    rejection_reason=(
+                        "superseded" if status.command.kind == "cancel" else "terminal_run"
+                    ),
+                    detail=f"run terminalized {outcome.value} before the command was applied",
                     recorded_at=command.occurred_at,
                 )
             )
@@ -1056,9 +1100,11 @@ class RunControlService:
         return await self._repository.list_boundary_commands(request_scope, run_id)
 
     async def get_boundary_command(
-        self, request_scope: str, run_id: str, command_id: str
+        self, request_scope: str, run_id: str, idempotency_issuer: str, command_id: str
     ) -> BoundaryCommandStatus | None:
-        return await self._repository.get_boundary_command(request_scope, run_id, command_id)
+        return await self._repository.get_boundary_command(
+            request_scope, run_id, idempotency_issuer, command_id
+        )
 
     async def record_boundary_receipt(
         self, request_scope: str, boundary_receipt: BoundaryCommandReceipt

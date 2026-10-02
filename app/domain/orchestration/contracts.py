@@ -62,6 +62,9 @@ class WorkflowMessageReceipt:
     sequence: int
     status: Literal["accepted", "duplicate", "stale_generation", "gap"]
     technical_segment: int
+    # RRM-007 (F7): on a `duplicate`, the status the root cached for this message, so a
+    # transport never treats a cached gap or stale result as a delivery.
+    cached_status: Literal["accepted", "duplicate", "stale_generation", "gap"] = "accepted"
 
 
 @dataclass(frozen=True)
@@ -105,7 +108,9 @@ class RunContinuityState:
 # advances today. A delivery for another generation is `stale_generation`.
 FAMILY_EXECUTION_GENERATION = 1
 FamilyBoundaryCommandKind = Literal["pause", "resume", "satisfy_wait"]
-BoundaryAckStatus = Literal["delivered", "duplicate", "stale_generation", "stale_target"]
+BoundaryAckStatus = Literal[
+    "delivered", "duplicate", "stale_generation", "stale_target", "gap"
+]
 
 
 @dataclass(frozen=True)
@@ -124,6 +129,8 @@ class BoundaryCommandDelivery:
     accepted_run_version: int
     payload: dict[str, Any]
     payload_digest: str
+    # The accepting principal's issuer: with `command_id` the exact command identity (F5).
+    idempotency_issuer: str = ""
 
     def __post_init__(self) -> None:
         if not self.command_id or not self.payload_digest or self.target_sequence < 1:
@@ -170,6 +177,7 @@ class BoundaryLifecycleRequest:
     evidence_refs: tuple[str, ...] = ()
     # The delivered command this fact applies or rejects (empty for waits and quiescence).
     boundary_command_id: str = ""
+    boundary_command_issuer: str = ""
     # Set when the boundary could not apply the delivered command; no action is executed.
     rejection_reason: str = ""
 
@@ -181,8 +189,10 @@ class BoundaryLifecycleOutcome:
     reason_code: str
     resulting_run_version: int
     phase: str
-    # The boundary command's receipt state after this fact (`applied`, `rejected`, ...).
+    # The boundary command's receipt state after this fact (`applied`, `rejected`, ...) and
+    # its target sequence, so a boundary that applied its own command keeps its contiguity.
     receipt_state: str = ""
+    target_sequence: int = 0
 
 
 @dataclass(frozen=True)
@@ -837,6 +847,7 @@ class StageGraphRunInput:
     pending_boundary_commands: tuple[BoundaryCommandDelivery, ...] = ()
     applied_boundary_command_ids: tuple[str, ...] = ()
     quiescent: bool = False
+    last_delivered_sequence: int = 0
 
 
 @dataclass(frozen=True)
@@ -1223,6 +1234,7 @@ class GoalDirectedRunInput:
     continue_as_new_iterations: int = 20
     # Forces one continuation at the next iteration boundary (also while paused).
     force_continue_as_new: bool = False
+    last_delivered_sequence: int = 0
 
 
 @dataclass(frozen=True)
