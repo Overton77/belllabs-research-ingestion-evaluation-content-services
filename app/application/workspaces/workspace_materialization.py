@@ -25,6 +25,7 @@ from app.domain.operation_execution.errors import (
     WorkspaceSlotConflict,
 )
 from app.domain.operation_execution.materialization import (
+    slot_ownership_boundary,
     verify_workspace_manifest,
 )
 from app.domain.run_control.errors import IdempotencyConflict
@@ -382,7 +383,7 @@ class InMemoryWorkspaceManifestRepository:
             requested = [
                 (
                     request.namespace_id,
-                    _ownership_boundary(slot.logical_path),
+                    slot_ownership_boundary(slot.logical_path),
                     slot.owner.owner_id,
                 )
                 for slot in request.slots
@@ -460,7 +461,3 @@ def _path_within_slot(logical_path: str, slot_path: str) -> bool:
     normalized_slot = slot_path.rstrip("/")
     return logical_path == normalized_slot or logical_path.startswith(normalized_slot + "/")
 
-
-def _ownership_boundary(logical_path: str) -> str:
-    parts = [part for part in logical_path.split("/") if part]
-    return "/" + "/".join(parts[:2])

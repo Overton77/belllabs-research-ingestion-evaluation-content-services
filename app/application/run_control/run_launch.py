@@ -128,6 +128,16 @@ class RunLaunchService:
                 f"the run is {run.phase.value}; only a pending admitted run can be launched",
             )
         family, workflow_input = self._validated_input(request, run)
+        # The family settles exactly the baseline it is told about (GoalDirected at closing),
+        # so the input must carry the admitted baseline reservation, never another amount.
+        budget = await self._run_control.get_budget(request.request_scope, request.run_id)
+        if dict(workflow_input.baseline_reservation) != dict(
+            budget.reservations.get("baseline", {})
+        ):
+            raise RunLaunchRejected(
+                "budget_mismatch",
+                "family input does not carry the admitted baseline reservation",
+            )
         fork = await self._fork_of(request)
         parent_run_id: str | None = None
         fork_request_id: str | None = None

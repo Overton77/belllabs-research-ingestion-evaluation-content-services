@@ -80,6 +80,8 @@ def _input(run_id: str, *, version: int = 1, **overrides: Any) -> dict[str, Any]
             blueprint=graph.model_dump(mode="json"),
             initial_run_version=version,
             semantic_input_binding_ref="semantic-input:launch",
+            # `request()` admits this baseline reservation.
+            baseline_reservation={"tokens.total": 20},
         )
     )
     values.update(overrides)
@@ -117,6 +119,8 @@ async def test_launch_starts_only_an_input_bound_to_the_admitted_run() -> None:
         (_input("another-run"), "identity_mismatch"),
         (_input(run_id, semantic_input_binding_ref=""), "invalid_family_input"),
         (_input(run_id, execution_epoch=2), "invalid_family_input"),
+        (_input(run_id, baseline_reservation={}), "budget_mismatch"),
+        (_input(run_id, baseline_reservation={"tokens.total": 21}), "budget_mismatch"),
     ):
         with pytest.raises(RunLaunchRejected) as rejected:
             await launcher.launch(_launch(run_id, payload), actor())

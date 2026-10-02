@@ -5,7 +5,9 @@
 -- a worker running as the least-privilege login (`belllabs_app`, member of
 -- belllabs_control_runtime) could not open a claim: the production composition qualified
 -- in RRM-009 is the first path that journals as that login rather than as the schema owner.
--- Grant-only: no rows, digests or identities change. Number 0025 belongs to a concurrent ticket.
+-- Grant-only and least-privilege: one column of INSERT, no UPDATE, no new table privilege,
+-- and the table keeps its forced row-level security. No rows, digests or identities change.
+-- Numbered 0025: RRM-008, the only concurrent ticket, adds no migration.
 
 GRANT INSERT (unit_key)
     ON belllabs_control.operation_effect_claims

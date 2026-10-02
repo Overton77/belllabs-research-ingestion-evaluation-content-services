@@ -9,6 +9,7 @@ from app.domain.operation_execution.contracts import (
 )
 from app.domain.operation_execution.errors import WorkspaceSlotConflict
 from app.domain.operation_execution.materialization import (
+    slot_ownership_boundary,
     verify_workspace_manifest,
 )
 from app.domain.run_control.errors import IdempotencyConflict
@@ -28,7 +29,7 @@ class MongoWorkspaceManifestRepository:
             for slot in request.slots:
                 if slot.access != "exclusive_write":
                     continue
-                reservation_path = _ownership_boundary(slot.logical_path)
+                reservation_path = slot_ownership_boundary(slot.logical_path)
                 reservation = WorkspaceSlotReservationDocument(
                     namespace_id=request.namespace_id,
                     workspace_id=request.workspace_id,
@@ -134,8 +135,3 @@ class MongoWorkspaceManifestRepository:
                 raise IdempotencyConflict("workspace manifest identity conflict") from None
             return prior
 
-
-def _ownership_boundary(logical_path: str) -> str:
-    parts = [part for part in logical_path.split("/") if part]
-    boundary = parts[:2]
-    return "/" + "/".join(boundary)

@@ -17,6 +17,7 @@ from hashlib import sha256
 from pathlib import Path
 
 from app.application.workspaces.artifact_promotion import ArtifactPayloadAddress
+from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import SecretRef
 from app.domain.operation_execution.contracts import OperationExecutionBinding
 from app.domain.operation_execution.errors import WorkspaceDigestMismatch
@@ -127,7 +128,7 @@ class RecordedOperationEventSink:
         self._digests: dict[str, tuple[str, str]] = {}
 
     async def publish(self, *, event_key: str, binding_id: str, payload: dict[str, object]) -> None:
-        digest = sha256(repr(sorted(payload.items())).encode("utf-8")).hexdigest()
+        digest = sha256_digest(payload)
         prior = self._digests.get(event_key)
         if prior is not None and prior != (binding_id, digest):
             raise ValueError("event idempotency key has conflicting payload")

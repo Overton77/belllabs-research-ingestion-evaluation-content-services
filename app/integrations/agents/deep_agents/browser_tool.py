@@ -54,7 +54,7 @@ class AgentBrowserPageTool(BaseTool):
         "Open one public web page in the governed browser and return JSON with its final "
         "URL, title and a text excerpt. Only the requested page's host is reachable."
     )
-    args_schema: type[BaseModel] = AgentBrowserPageInput
+    args_schema: type[AgentBrowserPageInput] = AgentBrowserPageInput
 
     _node_executable: Path = PrivateAttr()
     _entrypoint: Path = PrivateAttr()
@@ -174,7 +174,9 @@ def _public_host(url: str) -> str:
     host = (parts.hostname or "").lower()
     if parts.scheme not in {"http", "https"} or not host or host in {"localhost"}:
         raise WebResearchRuntimeDependencyError("agent_browser_page requires a public http(s) URL")
-    if host.endswith(".local") or re.fullmatch(r"\d+\.\d+\.\d+\.\d+", host):
+    # IP literals (IPv4, and IPv6, whose hostname contains ':') and local names are refused:
+    # the tool reaches public hosts by name only.
+    if host.endswith(".local") or ":" in host or re.fullmatch(r"\d+\.\d+\.\d+\.\d+", host):
         raise WebResearchRuntimeDependencyError("agent_browser_page refuses local addresses")
     return host
 

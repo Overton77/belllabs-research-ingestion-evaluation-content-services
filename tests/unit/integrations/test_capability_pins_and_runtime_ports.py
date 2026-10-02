@@ -200,3 +200,21 @@ async def test_recorded_events_are_idempotent_by_key() -> None:
     await sink.publish(event_key="k", binding_id="b", payload={"kind": "x"})
     with pytest.raises(ValueError, match="conflicting"):
         await sink.publish(event_key="k", binding_id="b", payload={"kind": "y"})
+
+
+def test_browser_tool_reaches_public_hosts_by_name_only() -> None:
+    from app.integrations.agents.deep_agents.browser_tool import _public_host
+    from app.integrations.web_research_runtime import WebResearchRuntimeDependencyError
+
+    assert _public_host("https://Example.COM/path?q=1") == "example.com"
+    for url in (
+        "http://localhost/",
+        "http://127.0.0.1:8080/",
+        "http://[::1]/",
+        "http://[fe80::1]/admin",
+        "http://printer.local/",
+        "file:///etc/hosts",
+        "ftp://example.com/",
+    ):
+        with pytest.raises(WebResearchRuntimeDependencyError):
+            _public_host(url)
