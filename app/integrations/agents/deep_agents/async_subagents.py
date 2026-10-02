@@ -23,7 +23,7 @@ must not postpone annotation evaluation.
 import asyncio
 import json
 from collections.abc import Callable, Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, cast
 
 from deepagents.middleware import async_subagents as deepagents_async
@@ -41,6 +41,7 @@ from langgraph.types import Command
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import APIStatusError
 
+from app.agent_server.async_subagents.auth import claim_expiry, mint_scope_claim
 from app.application.async_subagents.service import (
     AsyncProviderAmbiguity,
     AsyncServedGraphMismatch,
@@ -76,6 +77,9 @@ _CANCEL_ACK_POLLS = 10
 # Every Agent Protocol request of the governed adapter is bounded well below the submission
 # lease (120 s by default), so a fence holder never outlives its lease on a slow server.
 SDK_REQUEST_TIMEOUT_SECONDS = 60.0
+# RRM-009 (RRM-013 N8): the bearer is a scope claim signed with the deployment secret the
+# contract's credential reference names; it is re-minted before it lapses.
+CLAIM_REFRESH_MARGIN = timedelta(minutes=10)
 _CANCEL_ACK_INTERVAL_SECONDS = 0.5
 _TERMINAL_RUN_STATUSES = frozenset({"success", "error", "timeout", "interrupted"})
 
@@ -106,6 +110,7 @@ class DeepAgentsAsyncSubagentAdapter:
         self._middleware: dict[str, AsyncSubAgentMiddleware] = {}
         self._contracts: dict[str, AsyncSubagentContract] = {}
         self._clients: dict[str, LangGraphClient] = {}
+        self._claims: dict[str, str] = {}
 
     # ------------------------------------------------------------------ exact tool surface
 
@@ -113,17 +118,34 @@ class DeepAgentsAsyncSubagentAdapter:
         headers = {"x-auth-scheme": "langsmith"}
         if contract.deployment_credential_ref is not None:
             try:
-                token = self._secrets[contract.deployment_credential_ref]
+                secret = self._secrets[contract.deployment_credential_ref]
             except KeyError as error:
                 raise AsyncSubagentError(
                     "async subagent deployment credential reference was not resolved"
                 ) from error
-            headers["Authorization"] = f"Bearer {token}"
+            if self._request_scope is None:
+                raise AsyncSubagentError(
+                    "a scope-bound Agent Server claim requires the parent request scope"
+                )
+            claim = self._claims.get(contract.contract_digest)
+            if claim is None or _claim_lapsing(claim, self._now()):
+                claim = mint_scope_claim(secret, self._request_scope, now=self._now())
+                self._claims[contract.contract_digest] = claim
+            headers["Authorization"] = f"Bearer {claim}"
         if self._request_scope is not None:
             headers[REQUEST_SCOPE_HEADER] = self._request_scope
         return headers
 
+    def _refresh_claim(self, contract: AsyncSubagentContract) -> None:
+        """Drop the cached middleware and client once their claim is about to lapse."""
+
+        claim = self._claims.get(contract.contract_digest)
+        if claim is not None and _claim_lapsing(claim, self._now()):
+            self._middleware.pop(contract.contract_digest, None)
+            self._clients.pop(contract.contract_digest, None)
+
     def _tools(self, contract: AsyncSubagentContract) -> dict[str, Any]:
+        self._refresh_claim(contract)
         middleware = self._middleware.get(contract.contract_digest)
         if middleware is None:
             spec: AsyncSubAgent = {
@@ -147,6 +169,7 @@ class DeepAgentsAsyncSubagentAdapter:
         return cast(dict[str, StructuredTool], self._tools(contract))
 
     def _client(self, contract: AsyncSubagentContract) -> LangGraphClient:
+        self._refresh_claim(contract)
         client = self._clients.get(contract.contract_digest)
         if client is None:
             client = deepagents_async.get_client(
@@ -605,6 +628,11 @@ def attribute_usage(
     return AsyncSubagentUsage(
         provider_run_id=run_id, attribution="provider_attributed", attributed_amounts=amounts
     )
+
+
+def _claim_lapsing(claim: str, now: datetime) -> bool:
+    expiry = claim_expiry(claim)
+    return expiry is None or expiry - now <= CLAIM_REFRESH_MARGIN
 
 
 class BellLabsAsyncSubagentMiddleware(AgentMiddleware[Any, Any, Any]):

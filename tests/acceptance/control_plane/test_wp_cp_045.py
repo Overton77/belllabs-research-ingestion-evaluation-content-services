@@ -487,8 +487,12 @@ def test_governance_classifier_never_launches_hidden_work(
 
 
 def test_actual_deep_agents_075_middleware_surface_is_wrapped_exactly() -> None:
+    # RRM-009: the credential reference names a signing secret; the adapter mints a claim
+    # bound to the parent's request scope, so the scope is required.
     adapter = DeepAgentsAsyncSubagentAdapter(
-        now=lambda: NOW, secrets={"environment:AGENT_SERVER_TOKEN": "offline"}
+        now=lambda: NOW,
+        secrets={"environment:AGENT_SERVER_TOKEN": "offline"},
+        request_scope="tenant-a",
     )
     tools = adapter._tools(contract())  # qualification inspects the actual installed mechanism
     assert tuple(tools) == adapter.tool_names
@@ -506,7 +510,9 @@ async def test_actual_middleware_start_and_check_are_governed_before_sdk_submiss
     details = InMemoryAsyncSubagentDetailRepository()
     authority = InMemoryAsyncSubagentAuthority()
     secrets = {"environment:AGENT_SERVER_TOKEN": "offline-token"}
-    provider = DeepAgentsAsyncSubagentAdapter(now=lambda: NOW, secrets=secrets)
+    provider = DeepAgentsAsyncSubagentAdapter(
+        now=lambda: NOW, secrets=secrets, request_scope="tenant-a"
+    )
     service = AsyncSubagentService(details, authority, provider, allow_new_spawns=True)
 
     execution = await service.spawn(request())
@@ -526,7 +532,7 @@ async def test_actual_middleware_start_and_check_are_governed_before_sdk_submiss
     recovered_service = AsyncSubagentService(
         details,
         authority,
-        DeepAgentsAsyncSubagentAdapter(now=lambda: NOW, secrets=secrets),
+        DeepAgentsAsyncSubagentAdapter(now=lambda: NOW, secrets=secrets, request_scope="tenant-a"),
     )
     completed = await recovered_service.reconcile("tenant-a", execution.child_execution_id)
     assert completed.lifecycle == AsyncSubagentLifecycle.COMPLETED

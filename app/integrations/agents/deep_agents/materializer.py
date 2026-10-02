@@ -507,6 +507,12 @@ def _exact(registry: Mapping[str, Any], digest: str, kind: str) -> Any:
         ) from error
 
 
+def tool_schema_digest(tool: BaseTool) -> str:
+    """The digest an exact binding pins for a tool's model-facing input schema."""
+
+    return _tool_schema_digest(tool)
+
+
 def _tool_schema_digest(tool: BaseTool) -> str:
     schema_type = tool.get_input_schema()
     schema = (

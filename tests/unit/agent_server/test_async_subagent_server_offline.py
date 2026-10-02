@@ -178,23 +178,40 @@ async def test_hosted_graph_is_built_through_the_canonical_adapter_and_stamps_id
 def test_identity_route_requires_the_deployment_credential(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv(auth_module.TOKEN_ENV, "offline-token")
+    """RRM-009 (RRM-013 N8): the credential reference names a signing secret; the bearer
+    is a scope claim signed with it, valid for one scope until it expires. The raw secret
+    is never an accepted bearer."""
+
+    from datetime import UTC, datetime, timedelta
+
+    monkeypatch.setenv(auth_module.TOKEN_ENV, "offline-secret")
+    claim = auth_module.mint_scope_claim("offline-secret", "tenant-1")
     client = TestClient(identity_app)
     assert client.get("/belllabs/async-subagents/served-graphs").status_code == 401
-    wrong = client.get(
-        "/belllabs/async-subagents/served-graphs", headers={"Authorization": "Bearer other"}
-    )
-    assert wrong.status_code == 401
+    for bearer in ("other", "offline-secret", claim[:-2] + "zz"):
+        wrong = client.get(
+            "/belllabs/async-subagents/served-graphs",
+            headers={"Authorization": f"Bearer {bearer}"},
+        )
+        assert wrong.status_code == 401, bearer
     ok = client.get(
         "/belllabs/async-subagents/served-graphs",
-        headers={"Authorization": "Bearer offline-token"},
+        headers={"Authorization": f"Bearer {claim}"},
     )
     assert ok.status_code == 200
     assert ok.json()["graphs"][0]["graph_id"] == TECHNICAL_CHILD_GRAPH_ID
-    assert auth_module.verify_bearer("Bearer offline-token")
-    assert not auth_module.verify_bearer("Basic offline-token")
+    assert auth_module.verify_bearer(f"Bearer {claim}") == "tenant-1"
+    assert auth_module.verify_bearer(f"Basic {claim}") is None
+    # The claim is bound to its scope and secret, and lapses.
+    other = auth_module.mint_scope_claim("another-secret", "tenant-1")
+    assert auth_module.verify_bearer(f"Bearer {other}") is None
+    expired = auth_module.mint_scope_claim(
+        "offline-secret", "tenant-2", now=datetime.now(UTC) - timedelta(days=1)
+    )
+    assert auth_module.verify_bearer(f"Bearer {expired}") is None
+    assert auth_module.claim_expiry(claim) is not None
     monkeypatch.delenv(auth_module.TOKEN_ENV)
-    assert not auth_module.verify_bearer("Bearer offline-token")
+    assert auth_module.verify_bearer(f"Bearer {claim}") is None
 
 
 def test_hosted_context_defaults_copy_mutable_values_and_order_required_fields_first() -> None:

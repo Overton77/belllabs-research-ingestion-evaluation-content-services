@@ -33,6 +33,7 @@ from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import NotFoundError
 from pymongo import AsyncMongoClient
 
+from app.agent_server.async_subagents.auth import mint_scope_claim
 from app.application.async_subagents.parent_effects import (
     async_child_effect_id,
     async_child_usage_id,
@@ -127,7 +128,8 @@ def sdk_client() -> LangGraphClient:
     return get_client(
         url=os.environ["AGENT_SERVER_ENDPOINT"].rstrip("/"),
         headers={
-            "Authorization": f"Bearer {os.environ[TOKEN_ENV]}",
+            # RRM-009: the environment holds the signing secret; the bearer is a scope claim.
+            "Authorization": f"Bearer {mint_scope_claim(os.environ[TOKEN_ENV], SCOPE)}",
             REQUEST_SCOPE_HEADER: SCOPE,
         },
     )
