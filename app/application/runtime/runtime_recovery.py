@@ -116,17 +116,6 @@ class CancellationPlan(BaseModel):
     accepted_at: AwareDatetime
 
 
-class CancellationSettlement(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    cancellation_id: str
-    binding_id: str
-    status: Literal["cancelled"] = "cancelled"
-    usage_settlement_refs: tuple[str, ...] = ()
-    effect_settlement_refs: tuple[str, ...] = ()
-    settled_at: AwareDatetime
-
-
 def build_cancellation_plan(
     intervention: CancelRunIntervention,
     binding: RuntimeExecutionBinding,
