@@ -35,11 +35,20 @@ from app.api.run_control import (
 from app.application.async_subagents.mongo_async_subagent_repository import (
     MongoAsyncSubagentDetailRepository,
 )
+from app.application.async_subagents.parent_effects import RunControlAsyncChildEffects
+from app.application.async_subagents.postgres_async_subagents import PostgresAsyncSubagentAuthority
+from app.application.async_subagents.service import AsyncSubagentService
+from app.application.async_subagents.usage_reconciliation import (
+    AsyncChildUsageReconciliation,
+    ProviderNotComposed,
+)
 from app.application.orchestration.fork_templates import StageGraphForkTemplateDerivation
 from app.application.orchestration.mongo_stagegraph_repository import (
     MongoStageGraphOperationTemplateRepository,
 )
+from app.application.orchestration.service import orchestration_lifecycle_actor
 from app.application.run_control.boundary_relay import BoundaryCommandRelay
+from app.application.run_control.liability_hints import FamilyLiabilityHints
 from app.application.run_control.run_launch import RunLaunchService
 from app.application.runtime.postgres_run_forks import PostgresForkMaterializationStore
 from app.application.runtime.postgres_stage3_kernel_repository import PostgresForkRepository
@@ -55,7 +64,10 @@ from app.integrations.capability_pins import CapabilityPins
 from app.integrations.langgraph_persistence import StandalonePersistenceLifespan
 from app.integrations.temporal_boundary_commands import TemporalBoundaryCommandTransport
 from app.integrations.temporal_operation_submission import TemporalGenericArtifactSubmitter
-from app.integrations.temporal_unit_reconciliation import TemporalUnitReconciliationNudge
+from app.integrations.temporal_unit_reconciliation import (
+    TemporalFamilyLiabilityHint,
+    TemporalUnitReconciliationNudge,
+)
 from app.integrations.temporal_visibility import TemporalVisibilityInspectionReader
 from app.integrations.temporal_workflow_submission import TemporalWorkflowSubmitter
 from app.temporal.coordinator_runtime import coordinator_task_queues
@@ -144,6 +156,21 @@ async def compose_runtime_control(
         client, task_queue=generic_artifact_task_queue(settings.temporal_task_queue)
     )
     interventions = await get_boundary_intervention_service(request)
+    # RRM-008 composed: the `liability_reconciled` hint after operator decisions, and the
+    # privileged usage reconciliation of cancelled async children (no provider access).
+    hints = FamilyLiabilityHints(run_control, TemporalFamilyLiabilityHint(client))
+    state.family_liability_hints = hints
+    state.async_child_usage_reconciliation = AsyncChildUsageReconciliation(
+        AsyncSubagentService(
+            MongoAsyncSubagentDetailRepository(),
+            PostgresAsyncSubagentAuthority(pool),
+            ProviderNotComposed(),
+            parent_effects=RunControlAsyncChildEffects(
+                run_control, actor=orchestration_lifecycle_actor()
+            ),
+        ),
+        hints,
+    )
     relay = BoundaryCommandRelay(
         run_control=run_control,
         interventions=interventions,

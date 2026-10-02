@@ -23,7 +23,14 @@ from app.application.operations.postgres_operation_journal import (
 )
 from app.application.run_control.postgres_run_control_repository import PostgresRunControlRepository
 from app.domain.control_plane.canonical import sha256_digest
-from app.domain.run_control.contracts import ClaimEffectAction, CommandStatus, StartAction
+from app.domain.run_control.contracts import (
+    CANCEL_SEQUENCE_SPACE,
+    CancelAction,
+    ClaimEffectAction,
+    CommandStatus,
+    RunPhase,
+    StartAction,
+)
 from app.integrations.postgres import MIGRATIONS_ROOT
 from tests.integration.postgres.test_checkpoint_lineage_postgres import (
     require_disposable_postgres,
@@ -179,6 +186,21 @@ async def test_relay_lists_pending_family_commands_under_the_runtime_role_and_sc
         assert await run_service.runs_with_pending_boundary_commands("tenant-1") == (pending,)
         assert await run_service.runs_with_pending_boundary_commands("tenant-2") == (other.run_id,)
         assert await run_service.runs_with_pending_boundary_commands("tenant-3") == ()
+
+        # RRM-008 composed: an accepted, undelivered cancel is pending in its own `cancel`
+        # sequence space (it never consumes an `execution` sequence) and is listed too.
+        cancelling = await started(run_service, "rrm009-relay-cancel", TARGET)
+        cancelled = await run_service.execute(
+            command(cancelling, 2, "relay-cancel", CancelAction())
+        )
+        assert cancelled.phase == RunPhase.CANCELLING
+        (status,) = await run_service.list_boundary_commands("tenant-1", cancelling)
+        assert status.command.target.sequence_space == CANCEL_SEQUENCE_SPACE
+        assert [receipt.state.value for receipt in status.receipts] == ["accepted"]
+        assert await run_service.runs_with_pending_boundary_commands("tenant-1") == (
+            pending,
+            cancelling,
+        )
     finally:
         await runtime.close()
         await owner.close()

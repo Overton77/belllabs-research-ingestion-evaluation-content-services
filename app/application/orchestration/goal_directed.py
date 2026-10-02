@@ -38,6 +38,10 @@ from app.domain.operation_execution.contracts import (
     WorkspaceOwnerKind,
     workspace_durable_reference,
 )
+from app.domain.operation_execution.heartbeats import (
+    DEFAULT_OPERATION_HEARTBEATS,
+    OperationHeartbeatPolicy,
+)
 from app.domain.orchestration.contracts import (
     GoalExecutionClaim,
     GoalExecutionResult,
@@ -376,12 +380,15 @@ class GoalDirectedOperationPreparationService:
         run_control: RunControlService,
         documents: GoalDirectedDocumentRepository,
         actor: ActorContext,
+        heartbeats: OperationHeartbeatPolicy = DEFAULT_OPERATION_HEARTBEATS,
     ) -> None:
         self._templates = templates
         self._operation_bindings = operation_bindings
         self._run_control = run_control
         self._documents = documents
         self._actor = actor
+        # RRM-009 (RRM-008 composition): heartbeat timeout per operation class.
+        self._heartbeats = heartbeats
 
     async def prepare(self, request: GoalOperationPreparationRequest) -> GoalOperationDispatch:
         if request.operation_role == "executor":
@@ -484,6 +491,7 @@ class GoalDirectedOperationPreparationService:
             execution_generation=request.execution_generation,
             operation_kind="bound_operation",
             operation=operation,
+            heartbeat_timeout_seconds=self._heartbeats.timeout_for(operation),
         )
         return GoalOperationDispatch(
             workflow_request=workflow_request,

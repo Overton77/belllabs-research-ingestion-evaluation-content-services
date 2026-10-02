@@ -6,13 +6,18 @@ from typing import Annotated
 
 import asyncpg
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
-from pydantic import TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from app.api.control_plane import (
     ControlPlanePrincipal,
     get_control_plane_principal,
     get_control_plane_service,
 )
+from app.application.async_subagents.service import (
+    AsyncSubagentDecisionRejected,
+    AsyncSubagentError,
+)
+from app.application.async_subagents.usage_reconciliation import AsyncChildUsageReconciliation
 from app.application.operations.operation_recovery_composition import (
     compose_postgres_operation_recovery,
 )
@@ -25,6 +30,10 @@ from app.application.run_control.boundary_interventions import (
     BoundaryCommandDeliveryService,
     BoundaryCommandTransport,
     BoundaryInterventionService,
+)
+from app.application.run_control.liability_hints import (
+    LIABILITY_DECISION_KINDS,
+    FamilyLiabilityHints,
 )
 from app.application.run_control.postgres_run_control_repository import PostgresRunControlRepository
 from app.application.run_control.run_control_repository import RunControlRepository
@@ -49,9 +58,14 @@ from app.application.run_control.web_research_admission import (
     register_web_research_admission_policies,
 )
 from app.config import get_settings
+from app.domain.operation_execution.async_subagent_reconciliation import (
+    ASYNC_CHILD_RECONCILE_PERMISSION,
+)
 from app.domain.operation_execution.contracts import (
+    AsyncSubagentUsage,
     GenericArtifactWorkflowRequest,
     GenericArtifactWorkflowResult,
+    ParentAsyncSubagentLink,
 )
 from app.domain.run_control.contracts import (
     ActorContext,
@@ -59,6 +73,7 @@ from app.domain.run_control.contracts import (
     BoundaryCommandStatus,
     BudgetState,
     CommandResult,
+    CommandStatus,
     EffectLedgerEntry,
     EffectLedgerState,
     LifecycleCommand,
@@ -137,8 +152,14 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     ),
     # RRM-007 (RRM-004 review): `reconcile_unit` is privileged; the plain operator role does
     # not hold it. This role decides `in_doubt` units through the governed route only.
+    # RRM-008 composed by RRM-009: the privileged usage reconciliation of a cancelled async
+    # child (`workflow_run.reconcile_async_child`) belongs to the same privileged role.
     "reconciliation_operator": frozenset(
-        {"workflow_run.read", "workflow_run.reconcile_unit"}
+        {
+            "workflow_run.read",
+            "workflow_run.reconcile_unit",
+            "workflow_run.reconcile_async_child",
+        }
     ),
     "relay": frozenset({"workflow_run.relay"}),
     # REQ-CP-EXEC-012/016 (RRM-006): snapshots and forks are separately authorized; no
@@ -324,6 +345,26 @@ async def get_run_launch_service(request: Request) -> RunLaunchService:
     return launcher
 
 
+def get_family_liability_hints(request: Request) -> FamilyLiabilityHints | None:
+    """RRM-008 composed by RRM-009: the `liability_reconciled` hint to a cancelling family,
+    attached by the deployment (`compose_runtime_control`); absent, the family's timer is
+    the only retry."""
+
+    return getattr(request.app.state, "family_liability_hints", None)
+
+
+async def get_async_child_usage_reconciliation(
+    request: Request,
+) -> AsyncChildUsageReconciliation:
+    service = getattr(request.app.state, "async_child_usage_reconciliation", None)
+    if service is None:
+        raise HTTPException(
+            status_code=503,
+            detail="async child usage reconciliation is not composed",
+        )
+    return service
+
+
 async def get_generic_artifact_submitter(
     request: Request,
 ) -> GenericArtifactSubmissionPort:
@@ -397,6 +438,29 @@ ArtifactSubmitter = Annotated[
     Depends(get_generic_artifact_submitter),
 ]
 Launcher = Annotated[RunLaunchService, Depends(get_run_launch_service)]
+LiabilityHints = Annotated[FamilyLiabilityHints | None, Depends(get_family_liability_hints)]
+ChildUsageReconciliation = Annotated[
+    AsyncChildUsageReconciliation, Depends(get_async_child_usage_reconciliation)
+]
+
+
+class AsyncChildUsageReconciliationRequest(BaseModel):
+    """A privileged statement of what the provider attributes to each provider run of a
+    cancelled child (zero is a recorded decision, never a default)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    request_scope: str = Field(min_length=1)
+    actor: ActorContext
+    run_usage: dict[str, AsyncSubagentUsage] = Field(min_length=1)
+    settlement_ref: str = Field(min_length=1, max_length=512)
+
+
+class AsyncChildUsageReconciliationReceipt(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    link: ParentAsyncSubagentLink
+    liability_hint_sent: bool
 
 
 @router.post("/run-requests", response_model=AdmissionDecision, status_code=201)
@@ -455,6 +519,7 @@ async def execute_command(
     command: LifecycleCommand,
     principal: Principal,
     interventions: Interventions,
+    hints: LiabilityHints,
 ) -> CommandResult:
     """Every public command enters here; a boundary command (pause, resume, wait release,
     cancel) is accepted by run control and reaches Temporal only as a recorded delivery
@@ -476,9 +541,18 @@ async def execute_command(
         command.actor.permissions,
         command.actor.authority_refs,
     )
-    return await interventions.execute(
+    result = await interventions.execute(
         command.model_copy(update={"actor": trusted_actor, "occurred_at": datetime.now(UTC)})
     )
+    if (
+        hints is not None
+        and result.status == CommandStatus.ACCEPTED
+        and command.action.kind in LIABILITY_DECISION_KINDS
+    ):
+        # RRM-008: an operator decision may have resolved a liability the cancelling family
+        # waits on; wake its terminalization retry (a hint only; no-op unless cancelling).
+        await hints.notify(command.request_scope, run_id, f"command:{command.command_id}")
+    return result
 
 
 @router.post("/runs/{run_id}/reconcile-unit", response_model=CommandResult)
@@ -488,6 +562,7 @@ async def reconcile_unit(
     principal: Principal,
     reconciliation: UnitReconciliation,
     interventions: Interventions,
+    hints: LiabilityHints,
 ) -> CommandResult:
     """RRM-007 (RRM-004 review): governed delivery of the privileged `reconcile_unit`
     decision. Run control records `accepted`; the lineage applies the decision; the parked
@@ -509,13 +584,56 @@ async def reconcile_unit(
     if "workflow_run.reconcile_unit" not in trusted_actor.permissions:
         raise HTTPException(status_code=403, detail="workflow_run.reconcile_unit required")
     try:
-        return await reconciliation.reconcile_unit(
+        result = await reconciliation.reconcile_unit(
             command.model_copy(
                 update={"actor": trusted_actor, "occurred_at": datetime.now(UTC)}
             )
         )
     except UnitReconciliationRejected as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+    if hints is not None and result.status == CommandStatus.ACCEPTED:
+        # RRM-008: the decided unit may have been the cancelling family's last liability.
+        await hints.notify(command.request_scope, run_id, f"reconcile-unit:{command.command_id}")
+    return result
+
+
+@router.post(
+    "/runs/{run_id}/async-children/{child_execution_id}/reconcile-usage",
+    response_model=AsyncChildUsageReconciliationReceipt,
+)
+async def reconcile_async_child_usage(
+    run_id: str,
+    child_execution_id: str,
+    body: AsyncChildUsageReconciliationRequest,
+    principal: Principal,
+    reconciliation: ChildUsageReconciliation,
+) -> AsyncChildUsageReconciliationReceipt:
+    """RRM-008 composed by RRM-009: the privileged reconciliation of a cancelled async
+    child's pending usage (REQ-CP-RUN-009), then the `liability_reconciled` hint."""
+
+    _authorize_scope(principal, body.request_scope)
+    trusted_actor = _authorize_actor(
+        principal, body.actor.actor_id, body.actor.permissions, body.actor.authority_refs
+    )
+    if ASYNC_CHILD_RECONCILE_PERMISSION not in trusted_actor.permissions:
+        raise HTTPException(
+            status_code=403, detail=f"{ASYNC_CHILD_RECONCILE_PERMISSION} required"
+        )
+    try:
+        link, hinted = await reconciliation.reconcile_usage(
+            body.request_scope,
+            run_id,
+            child_execution_id,
+            actor=trusted_actor,
+            run_usage=body.run_usage,
+            settlement_ref=body.settlement_ref,
+            reconciled_at=datetime.now(UTC),
+        )
+    except AsyncSubagentDecisionRejected as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+    except AsyncSubagentError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return AsyncChildUsageReconciliationReceipt(link=link, liability_hint_sent=hinted)
 
 
 @router.get(

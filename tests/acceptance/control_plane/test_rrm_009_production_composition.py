@@ -174,6 +174,8 @@ API_STATE_ATTRIBUTES = (
     "boundary_command_transport",
     "unit_reconciliation_nudge",
     "unit_reconciliation_verifier",
+    "family_liability_hints",
+    "async_child_usage_reconciliation",
 )
 
 

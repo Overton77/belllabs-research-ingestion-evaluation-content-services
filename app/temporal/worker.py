@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Protocol
 
 import asyncpg
@@ -41,6 +42,7 @@ from app.application.schema.supporting_graph_reconciliation import (
 )
 from app.config import Settings, get_settings
 from app.domain.control_plane.extensions import ExtensionRegistry
+from app.domain.operation_execution.heartbeats import OperationHeartbeatPolicy
 from app.domain.run_control.contracts import ActorContext
 from app.domain.schema_grounding.definitions import register_schema_grounding_extensions
 from app.integrations.control_plane_payloads import (
@@ -132,12 +134,33 @@ class ProductionWorkerSet:
         )
 
 
+def operation_heartbeat_policy(settings: Settings) -> OperationHeartbeatPolicy:
+    """The deployment's heartbeat timeout per operation class (RRM-008 composed by RRM-009)."""
+
+    return OperationHeartbeatPolicy(
+        deep_agent_seconds=settings.operation_heartbeat_timeout_seconds,
+        deep_agent_async_children_seconds=(
+            settings.operation_async_children_heartbeat_timeout_seconds
+        ),
+        bound_seconds=settings.operation_bound_heartbeat_timeout_seconds,
+    )
+
+
 def create_production_workers(
     client: Client, settings: Settings, composition: WorkerActivityComposition
 ) -> ProductionWorkerSet:
     """Both family workers, the cognitive worker and the generic artifact worker, on the
-    canonical queues derived from `TEMPORAL_TASK_QUEUE`."""
+    canonical queues derived from `TEMPORAL_TASK_QUEUE`.
 
+    The workers that serve `operation.execute` also serve `operation.cancel` (RRM-008) and
+    drain with `WORKER_GRACEFUL_SHUTDOWN_SECONDS`, which must be shorter than every operation
+    heartbeat timeout the families declare: the composition refuses otherwise.
+    """
+
+    operation_heartbeat_policy(settings).verify_graceful_shutdown(
+        settings.worker_graceful_shutdown_seconds
+    )
+    drain = timedelta(seconds=settings.worker_graceful_shutdown_seconds)
     return ProductionWorkerSet(
         coordinator=create_coordinator_workers(
             client,
@@ -148,6 +171,7 @@ def create_production_workers(
             client,
             task_queue=BellLabsTaskQueues.from_base(settings.temporal_task_queue).agent_cognitive,
             activities=composition.operation,
+            graceful_shutdown_timeout=drain,
         ),
         artifacts=(
             create_generic_artifact_worker(
@@ -155,6 +179,7 @@ def create_production_workers(
                 task_queue=generic_artifact_task_queue(settings.temporal_task_queue),
                 operations=composition.operation,
                 artifacts=composition.artifacts,
+                graceful_shutdown_timeout=drain,
             )
             if composition.artifacts is not None
             else None

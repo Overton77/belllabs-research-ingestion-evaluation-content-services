@@ -183,11 +183,21 @@ def create_agent_cognitive_worker(
     *,
     task_queue: str,
     activities: OperationExecutionActivities,
+    graceful_shutdown_timeout: timedelta = timedelta(),
 ) -> Worker:
+    """`operation.execute` and `operation.cancel` (RRM-008) on the cognitive queue.
+
+    A deployment drains with a `graceful_shutdown_timeout` shorter than every heartbeat
+    timeout it serves (`OperationHeartbeatPolicy.verify_graceful_shutdown`): a worker
+    shutdown is never a cancel of the unit, so the drained attempt settles nothing and
+    Temporal's retry lands on a live worker.
+    """
+
     return Worker(
         client,
         task_queue=task_queue,
         activities=agent_cognitive_activities(activities),
+        graceful_shutdown_timeout=graceful_shutdown_timeout,
     )
 
 

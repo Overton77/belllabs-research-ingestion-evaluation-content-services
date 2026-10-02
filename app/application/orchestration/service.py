@@ -33,6 +33,10 @@ from app.domain.operation_execution.contracts import (
     OperationWorkflowRequest,
     PromptSegment,
 )
+from app.domain.operation_execution.heartbeats import (
+    DEFAULT_OPERATION_HEARTBEATS,
+    OperationHeartbeatPolicy,
+)
 from app.domain.orchestration.bindings import RunSemanticInputBinding
 from app.domain.orchestration.contracts import (
     GoalDirectedRunInput,
@@ -825,9 +829,13 @@ class StageGraphOperationPreparationService:
         *,
         templates: StageGraphOperationTemplateProvider,
         operation_bindings: SemanticOperationBindingRepository,
+        heartbeats: OperationHeartbeatPolicy = DEFAULT_OPERATION_HEARTBEATS,
     ) -> None:
         self._templates = templates
         self._operation_bindings = operation_bindings
+        # RRM-009 (RRM-008 composition): the deployment's heartbeat timeout per operation
+        # class, which bounds worker-loss detection and cancel latency of the unit.
+        self._heartbeats = heartbeats
 
     async def materialize(
         self,
@@ -935,6 +943,7 @@ class StageGraphOperationPreparationService:
             execution_generation=proposal.identity.execution_generation,
             operation_kind="bound_operation",
             operation=operation,
+            heartbeat_timeout_seconds=self._heartbeats.timeout_for(operation),
         )
 
 

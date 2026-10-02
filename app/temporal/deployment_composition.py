@@ -27,7 +27,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 import asyncpg
@@ -63,6 +63,7 @@ from app.application.operations.operation_execution import (
     OperationExecutionService,
     RunControlOperationAuthority,
     RunControlOperationBudgetAuthority,
+    SecretResolutionPort,
 )
 from app.application.operations.operation_journal import OperationJournalService
 from app.application.operations.operation_recovery_composition import (
@@ -110,6 +111,7 @@ from app.application.workspaces.workspace_materialization import (
 )
 from app.config import PROJECT_ROOT, Settings
 from app.domain.operation_execution.contracts import (
+    AsyncChildCancellationRecord,
     AsyncSubagentContract,
     AsyncSubagentDependencyClass,
     OperationExecutionBinding,
@@ -159,7 +161,7 @@ from app.temporal.coordinator_runtime import (
     create_routed_coordinator_activities,
 )
 from app.temporal.operation_activities import OperationExecutionActivities
-from app.temporal.worker import WorkerActivityComposition
+from app.temporal.worker import WorkerActivityComposition, operation_heartbeat_policy
 
 DEFAULT_ARTIFACT_PAYLOAD_ROOT = PROJECT_ROOT / ".artifact-payloads"
 ASYNC_CHILD_COMPLETION_KIND = "async_child_completion.v1"
@@ -335,6 +337,41 @@ class ProductionAsyncSubagentMiddlewareFactory:
         )
 
 
+class ProductionAsyncChildCancellation:
+    """RRM-008 step 4 in production: the operation boundary's `AsyncChildCancellationPort`.
+
+    `OperationExecutionService.cancel_children` names only the parent binding. The provider
+    adapter of that parent's children needs the operation's own scope-bound credential, so
+    this port resolves the binding's `secret_refs` (the same resolver cognition uses), builds
+    the parent's governed `AsyncSubagentService` exactly as the middleware does, and cancels
+    every active child under its link policy. A parent that spawned no child resolves no
+    secret and calls no provider.
+    """
+
+    def __init__(
+        self,
+        children: ProductionAsyncSubagentMiddlewareFactory,
+        authority: PostgresAsyncSubagentAuthority,
+        secrets: SecretResolutionPort,
+    ) -> None:
+        self._children = children
+        self._authority = authority
+        self._secrets = secrets
+
+    async def cancel_children(
+        self,
+        binding: OperationExecutionBinding,
+        *,
+        reason: str,
+        requested_at: datetime,
+    ) -> tuple[AsyncChildCancellationRecord, ...]:
+        if not await self._authority.list_child_ids(binding.request_scope, binding.binding_id):
+            return ()
+        resolved = await self._secrets.resolve(binding.secret_refs)
+        service, _adapter = self._children.service(binding, resolved)
+        return await service.cancel_children(binding, reason=reason, requested_at=requested_at)
+
+
 class DeploymentOperationRuntime:
     """The deployment's operation runtime around the canonical Deep Agent adapter.
 
@@ -344,8 +381,11 @@ class DeploymentOperationRuntime:
       (`AsyncChildCompletion`); the records travel with the runtime's event payloads into the
       settlement's digest-bound output payload.
 
-    Every other runtime capability (for example RRM-008's `observe_latest`) is the wrapped
-    adapter's.
+    Every other runtime capability is the wrapped adapter's. RRM-008: a requested cancel
+    reaches `execute` as `asyncio.CancelledError` (during cognition or during the children's
+    completion wait) and is never caught here; the operation boundary decides whether it is a
+    journaled cancel of the unit (`observe_latest` then reports the latest durable
+    checkpoint, still inside the granted egress) or anything else (re-raised).
     """
 
     def __init__(
@@ -390,6 +430,12 @@ class DeploymentOperationRuntime:
                 )
             }
         )
+
+    async def observe_latest(
+        self, invocation: RuntimeInvocation, resolved_secrets: Mapping[str, str]
+    ) -> RuntimeResult:
+        with granted_network_hosts(invocation.binding.capability_grant.network_hosts):
+            return await self._runtime.observe_latest(invocation, resolved_secrets)
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._runtime, name)
@@ -510,6 +556,7 @@ class ProductionWorkerActivityCompositionFactory:
             wait_seconds=settings.async_subagent_completion_wait_seconds,
         )
         verifier = PinnedCapabilityAssetVerifier(pins)
+        secrets = EnvironmentSecretResolver()
         service = OperationExecutionService(
             authority=RunControlOperationAuthority(run_control, control_plane),
             bindings=bindings,
@@ -517,7 +564,7 @@ class ProductionWorkerActivityCompositionFactory:
             sandbox=BindingWorkspaceMaterializer(workspaces),
             assets=verifier,
             mcp=verifier,
-            secrets=EnvironmentSecretResolver(),
+            secrets=secrets,
             events=RecordedOperationEventSink(),
             budget=RunControlOperationBudgetAuthority(run_control, actor=actor),
             journal=JournaledOperationExecutionCoordinator(
@@ -532,6 +579,11 @@ class ProductionWorkerActivityCompositionFactory:
             lineage=recovery.lineage,
             fork_reuse=ForkReuseResolver(
                 PostgresForkMaterializationStore(postgres_pool), results=payloads, bindings=bindings
+            ),
+            # RRM-008 step 4: the cancellation saga cancels the unit's active async children
+            # with the operation's own scope-bound credential.
+            children=ProductionAsyncChildCancellation(
+                children, PostgresAsyncSubagentAuthority(postgres_pool), secrets
             ),
         )
         self.operation = ProductionOperationComposition(
@@ -549,6 +601,10 @@ class ProductionWorkerActivityCompositionFactory:
             results=PostgresWorkflowResultRepository(postgres_pool),
         )
         goal_documents = MongoGoalDirectedDocumentRepository()
+        # RRM-008 composed: heartbeat timeout per operation class, and a worker drain shorter
+        # than every one of them (refused before any worker is created).
+        heartbeats = operation_heartbeat_policy(settings)
+        heartbeats.verify_graceful_shutdown(settings.worker_graceful_shutdown_seconds)
         coordinator = create_routed_coordinator_activities(
             bindings=semantic_bindings,
             handlers=SemanticHandlerRegistry(),
@@ -567,12 +623,14 @@ class ProductionWorkerActivityCompositionFactory:
                     ),
                     authority_refs=frozenset({f"authority:{GOAL_DIRECTED_WORKER_ACTOR}"}),
                 ),
+                operation_heartbeats=heartbeats,
             ),
             stagegraph=StageGraphCoordinatorDependencies(
                 run_control=run_control,
                 repository=PostgresRunControlRepository(postgres_pool),
                 operation_bindings=bindings,
                 templates=MongoStageGraphOperationTemplateRepository(),
+                operation_heartbeats=heartbeats,
             ),
             completion=completion,
         )
@@ -610,6 +668,7 @@ __all__ = [
     "DEFAULT_ASYNC_RESULT_POLICIES",
     "DeploymentCapabilityComponents",
     "DeploymentCapabilityRegistry",
+    "ProductionAsyncChildCancellation",
     "ProductionAsyncSubagentMiddlewareFactory",
     "ProductionOperationComposition",
     "ProductionWorkerActivityCompositionFactory",

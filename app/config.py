@@ -211,6 +211,15 @@ class Settings(BaseSettings):
     # How long the parent operation boundary waits for its async children to finish before
     # settling the parent; an unfinished child stays an unsettled effect of the run.
     async_subagent_completion_wait_seconds: float = Field(default=120.0, ge=0, le=3_600)
+    # RRM-008 composed by RRM-009: the heartbeat timeout of `operation.execute`/`cancel` per
+    # operation class. A cancel reaches running cognition within about 0.8 * timeout (the SDK
+    # heartbeat throttle); a unit holding async children is cancelled sooner because its
+    # children keep spending until they are cancelled. Every worker's graceful shutdown must
+    # be shorter than the shortest of them (checked when the worker set is composed).
+    operation_heartbeat_timeout_seconds: int = Field(default=30, ge=1, le=3_600)
+    operation_async_children_heartbeat_timeout_seconds: int = Field(default=15, ge=1, le=3_600)
+    operation_bound_heartbeat_timeout_seconds: int = Field(default=30, ge=1, le=3_600)
+    worker_graceful_shutdown_seconds: float = Field(default=10.0, ge=0, le=3_600)
     # Digest/revision pins of the search and browser capabilities the deployment mounts.
     capability_pins_path: Path = (
         PROJECT_ROOT / "infra" / "capability-pins" / "research-capabilities.json"

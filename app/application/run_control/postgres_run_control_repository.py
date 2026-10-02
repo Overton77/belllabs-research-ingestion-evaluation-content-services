@@ -18,6 +18,7 @@ from app.application.run_control.run_control_repository import (
 )
 from app.domain.run_control.budget import roll_up_child_budget
 from app.domain.run_control.contracts import (
+    CANCEL_SEQUENCE_SPACE,
     EXECUTION_SEQUENCE_SPACE,
     AdmissionDecision,
     BoundaryCommandReceipt,
@@ -481,8 +482,9 @@ class PostgresRunControlRepository:
         self, request_scope: str, *, limit: int = 100
     ) -> tuple[str, ...]:
         # The latest receipt of an operator family command in the root's `execution`
-        # sequence space is still `accepted`: inline delivery failed or never ran
-        # (`pending_delivery`); the relay re-drives those runs in acceptance order.
+        # sequence space, or of a cancel in its own `cancel` space (RRM-008), is still
+        # `accepted`: inline delivery failed or never ran (`pending_delivery`); the relay
+        # re-drives those runs in acceptance order.
         async with self._pool.acquire() as connection, connection.transaction():
             await _set_scope(connection, request_scope)
             rows = await connection.fetch(
@@ -501,8 +503,10 @@ class PostgresRunControlRepository:
                 WHERE c.request_scope = $1
                   AND latest.state = 'accepted'
                   AND c.target_kind IN ('root', 'family')
-                  AND c.kind IN ('pause', 'resume', 'satisfy_wait')
-                  AND c.sequence_space = $2
+                  AND (
+                    (c.kind IN ('pause', 'resume', 'satisfy_wait') AND c.sequence_space = $2)
+                    OR (c.kind = 'cancel' AND c.sequence_space = $4)
+                  )
                 GROUP BY c.run_id
                 ORDER BY first_accepted
                 LIMIT $3
@@ -510,6 +514,7 @@ class PostgresRunControlRepository:
                 request_scope,
                 EXECUTION_SEQUENCE_SPACE,
                 limit,
+                CANCEL_SEQUENCE_SPACE,
             )
         return tuple(str(row["run_id"]) for row in rows)
 

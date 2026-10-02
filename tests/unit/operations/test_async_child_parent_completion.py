@@ -178,8 +178,11 @@ async def test_deployment_runtime_completes_children_after_cognition_and_delegat
             calls.append(f"cognition:{sorted(granted) if granted is not None else 'unbound'}")
             return RuntimeResult(output_text="done", event_payloads=({"kind": "inspection"},))
 
-        async def observe_latest(self) -> str:
-            return "delegated"
+        async def observe_latest(self, invocation: Any, secrets: Any) -> RuntimeResult:
+            del secrets
+            granted = GRANTED_NETWORK_HOSTS.get()
+            calls.append(f"observe:{sorted(granted) if granted is not None else 'unbound'}")
+            return RuntimeResult(output_text="delegated")
 
     class Children:
         def service(self, binding: Any, secrets: Any) -> tuple[Any, Any]:
@@ -238,4 +241,7 @@ async def test_deployment_runtime_completes_children_after_cognition_and_delegat
     )
     plain = await runtime.execute(cast(Any, without_children), {})
     assert calls == ["cognition:[]"] and plain.event_payloads == ({"kind": "inspection"},)
-    assert await runtime.observe_latest() == "delegated"
+    # RRM-008's `observe_latest` is the adapter's, inside the operation's granted egress.
+    calls.clear()
+    latest = await runtime.observe_latest(cast(Any, with_children), {})
+    assert latest.output_text == "delegated" and calls == ["observe:['example.com']"]

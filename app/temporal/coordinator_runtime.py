@@ -54,6 +54,10 @@ from app.application.web_research.web_research_semantic_handlers import (
     WebResearchHandlerDependencies,
     register_web_research_stagegraph_handlers,
 )
+from app.domain.operation_execution.heartbeats import (
+    DEFAULT_OPERATION_HEARTBEATS,
+    OperationHeartbeatPolicy,
+)
 from app.domain.run_control.contracts import ActorContext
 from app.integrations.control_plane_payloads import ContentAddressedPayloadStore
 from app.temporal.activities.goal_directed import (
@@ -101,6 +105,8 @@ class GoalDirectedCoordinatorDependencies:
     templates: GoalOperationTemplateProvider
     documents: GoalDirectedDocumentRepository
     actor: ActorContext
+    # RRM-009: the deployment's heartbeat timeout per operation class (RRM-008 cancel latency).
+    operation_heartbeats: OperationHeartbeatPolicy = DEFAULT_OPERATION_HEARTBEATS
 
 
 @dataclass(frozen=True)
@@ -111,6 +117,7 @@ class StageGraphCoordinatorDependencies:
     repository: RunControlRepository
     operation_bindings: SemanticOperationBindingRepository
     templates: StageGraphOperationTemplateProvider
+    operation_heartbeats: OperationHeartbeatPolicy = DEFAULT_OPERATION_HEARTBEATS
 
 
 @dataclass(frozen=True)
@@ -167,6 +174,7 @@ def create_routed_coordinator_activities(
             operation_materializer=StageGraphOperationPreparationService(
                 templates=stagegraph.templates,
                 operation_bindings=stagegraph.operation_bindings,
+                heartbeats=stagegraph.operation_heartbeats,
             ),
             boundary=BoundaryCommandApplicationService(
                 stagegraph.run_control, orchestration_lifecycle_actor()
@@ -183,6 +191,7 @@ def create_routed_coordinator_activities(
             boundary=BoundaryCommandApplicationService(
                 goal_directed.run_control, orchestration_lifecycle_actor()
             ),
+            heartbeats=goal_directed.operation_heartbeats,
         ),
     )
 

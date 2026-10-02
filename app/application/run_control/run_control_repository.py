@@ -322,7 +322,8 @@ class RunControlRepository(Protocol):
     async def runs_with_pending_boundary_commands(
         self, request_scope: str, *, limit: int = 100
     ) -> tuple[str, ...]:
-        """Runs of the scope holding an accepted, undelivered family command (RRM-009 relay)."""
+        """Runs of the scope holding an accepted, undelivered family command or cancel
+        (RRM-009 relay; the cancel in its own `cancel` space, RRM-008)."""
         ...
 
     async def record_boundary_receipt(
