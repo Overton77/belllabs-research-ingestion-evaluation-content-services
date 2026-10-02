@@ -4,7 +4,7 @@
 
 **Blocked by:** RRM-004 (journal and fence), RRM-007 (it edits `goal_directed.py`; land after it or coordinate the region).
 **Blocks:** **RRM-010** (mission-blocking, coordinator decision 2026-10-02 after the RRM-006 review); RRM-009 production composition of GoalDirected cognition; governed GoalDirected fork evidence (RRM-006 snapshots see GoalDirected units as `excluded/not_accepted`, and the effect-quiescence check is vacuous for them).
-**Status:** implemented; independent review pending ([evidence](../../../evidence_v2/research-runtime-mission/RRM-016/README.md)); **required before RRM-010**
+**Status:** implemented; review `approve_with_fixes`, fixes applied (`0c8522f`), re-review pending ([evidence](../../../evidence_v2/research-runtime-mission/RRM-016/README.md)); **required before RRM-010**. Deploy note: drain in-flight pre-RRM-016 GoalDirected runs before deploying.
 **Branch:** `wp/rrm-016-goal-directed-journaled-operations`
 **Authority:** REQ-CP-RUN-007 (claimed and reconciled effects), REQ-CP-RUN-006/009 (budgets settle once), REQ-CP-EXEC-014 (claim fence), REQ-BP-GD-011/012
 

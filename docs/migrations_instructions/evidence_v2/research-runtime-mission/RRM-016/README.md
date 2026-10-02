@@ -1,9 +1,9 @@
 # RRM-016 implementation evidence
 
-Disposition: ready_for_review (implemented; independent review pending)
+Disposition: ready_for_review (independent review `approve_with_fixes`; fixes 1-5 applied in `0c8522f` and the following documentation commit; re-review pending)
 Recorded date: 2026-10-02 (America/New_York)
 Qualification identity: RRM-016 compose GoalDirected operations with the run-control journal and operation authority. Requirements: REQ-CP-RUN-006 (budgets reserve, consume, release and settle), REQ-CP-RUN-007 (consequential effects claimed and reconciled to exactly one settlement), REQ-CP-RUN-009 (usage settles exactly once, AMD-RRM-001), REQ-CP-EXEC-014 (claim-fenced attempts), REQ-CP-DA-013 (exact exclusive writable slots), REQ-CP-DA-018 (crash windows), REQ-BP-GD-004 (independent verifier), REQ-BP-GD-011 (durable pause), REQ-BP-GD-012 (shared-session ordering).
-Base revision and head revision: base integration `6e77850`. Integration merged in three times (no rebase): `fd10c8e` (CR-2 at `ac7daf9`), `ddec4fa` (RRM-006 at `2799e17`), `54cd977` (CR-3 at `9d0ffbd`). Code commits: `5969f52` (implementation and tests), `aa87988` (captured post-change history, fork reuse outcome, RRM-018 reproduction), `731b770` (RRM-019 reproduction). **Tested code head: `731b770`.** The documentation commit that adds this README follows it; its only code change corrects the spec identifiers in one comment (`_prompt_segments`), re-verified with ruff, mypy and the owning suites. Not merged into integration (the coordinator owns review and merge).
+Base revision and head revision: base integration `6e77850`. Integration merged in three times (no rebase): `fd10c8e` (CR-2 at `ac7daf9`), `ddec4fa` (RRM-006 at `2799e17`), `54cd977` (CR-3 at `9d0ffbd`). Code commits: `5969f52` (implementation and tests), `aa87988` (captured post-change history, fork reuse outcome, RRM-018 reproduction), `731b770` (RRM-019 reproduction). Tested code head before review: `731b770` (its documentation commit `2c43b43` also corrected the spec identifiers in one comment). Review-fix code commit: `0c8522f`; **tested code head after review: `0c8522f`** (see Review disposition). The documentation commit recording the review follows it and changes no code. Not merged into integration (the coordinator owns review and merge).
 Framework/package baseline: `uv sync --frozen` from the committed `uv.lock` (no dependency change); CPython 3.12 (Codex runtime); temporalio 1.30.0 (`WorkflowEnvironment.start_local` dev server), deepagents 0.7.5, langgraph 1.2.10, langgraph-checkpoint-postgres 3.1.1, pydantic 2.13.4, pytest 8.4.2, ruff 0.15.22, mypy 1.20.2.
 
 ## Worktree provenance
@@ -25,7 +25,8 @@ Framework/package baseline: `uv sync --frozen` from the committed `uv.lock` (no 
    - **Fix:** a GoalDirected unit binds the exact compiled slots under its role-scoped root `/goal/{iteration}/{role}` (`goal_unit_workspace_root`, `app/domain/orchestration/runtime_units.py`). Each slot is owned by the iteration (executor) or the evaluator (verifier).
    - `RunControlOperationAuthority._verify_bound_authority` recomputes that root from the digest-bound runtime unit and compares the exact rebased slot set. StageGraph units and units without a runtime unit have no root, so their behaviour is unchanged.
    - Executor and verifier writable paths stay disjoint, as the interpreter's REQ-BP-GD-004 isolation check requires.
-   - A template without compiled slots keeps the legacy projection, and the real authority rejects it.
+   - A template without compiled slots fails closed at preparation (review fix 3).
+   - Before it derives the root, the authority admits a GoalDirected unit only on a run whose execution target is GoalDirected, and only when the unit's location names the request's operation (`goal-iteration/{n}/{role}`) and run (review fix 1).
 
 **One governed composition.** Every executor and verifier operation now runs through `OperationExecutionService`, using the real `RunControlOperationAuthority`, the `JournaledOperationExecutionCoordinator` and `CheckpointLineageService`. Each operation is claimed at its bound revision, its result manifest is fenced, and it is observed and settled once in one authority batch: usage, effect settlement and settlement evidence bound to the binding.
 
@@ -211,8 +212,8 @@ In-run replays also pass in the RRM-016 Temporal test, the RRM-007 GoalDirected 
    - Alternative: `admitted_input`, the StageGraph precedent for a reducer-admitted cycle objective. The adapter renders both identically, as user content.
 2. **Role-rooted slots in the generic authority.** The authority admits the compiled slot set rebased under `/goal/{iteration}/{role}`, which it recomputes from the unit identity. Spec text relied on: REQ-CP-DA-013 ("exact exclusive writable slots") and REQ-BP-GD-004 (independent verifier).
    - Alternative: declare per-role slots in a versioned Workflow Type workspace contract.
-   - Production templates must carry compiled slots. RRM-009 must compose them; the legacy no-slot projection is rejected by the real authority.
-3. **Consumption reads the current run version**, as StageGraph's `decide_result` does, rather than the version the settlement batch produced. A concurrent version move, for example a cancel, is visible to the family's next command.
+   - Production templates must carry compiled slots. RRM-009 must compose them; a template without them fails closed at preparation.
+3. **Consumption reads the current run version**, as StageGraph's `decide_result` does, rather than the version the settlement batch produced. A concurrent version move, for example a cancel, makes the family's next command stale; since review fix 2 the family retries it once at the reported version, or enters its cancellation boundary when the run is `cancelling`.
 4. **Test-only settlement port.** `FixtureGoalSettlements` is used only where run control is itself a fixture (sandbox rollover). The governed port is proved everywhere else.
 
 **Unresolved gates**
@@ -225,13 +226,22 @@ In-run replays also pass in the RRM-016 Temporal test, the RRM-007 GoalDirected 
 - **RRM-019:** the family promotes the union of all iterations' output refs, but the terminalization proposal names only the last executor's, so the reducer rejects `terminal_output_mismatch` when iterations produce different refs. Strict-xfail reproduction. The RRM-016 fixtures use one stable output ref, as the existing fixtures did.
 
 **Other risks**
-- **Claim revision.** The journaled claim requires `run.version == bound revision` at claim time. A version move between admission and the first claim makes the claim STALE (`shadow_denied`, then `OperationExecutionInProgress`).
-  - GoalDirected operations are sequential and pending boundary commands do not move the version, so it cannot happen here today.
-  - An async child's usage settling between operations, or a cancel, could cause it.
+- **Claim revision.** The journaled claim requires `run.version == bound revision` at claim time. A version move between the operation's admission and its first claim makes the claim STALE (`shadow_denied`, then `OperationExecutionInProgress`).
+  - Review fix 2 covers the family's own commands (admissions and lifecycle facts), not this window inside the operation boundary.
+  - GoalDirected operations are sequential and pending boundary commands do not move the version, so only an outside command landing in that short window (a late child effect, a cancel) can cause it.
   - It is the same for StageGraph with concurrent admissions. It was not changed here.
+- **Re-admission and RRM-018.** A re-admitted executor (review fix 2) persists its Goal Revision again; on the MongoDB document repository that is the RRM-018 conflict, so RRM-018 matters for this path too.
+
+**Deploy note (review finding 2).** Drain every in-flight GoalDirected run started before RRM-016 (let it finish or cancel it) before deploying this change. Replay of their histories stays deterministic, but once such a run executes past its recorded history on RRM-016 workers, `workflow.patched` returns true there, so the run mixes compositions:
+- an operation the old preparer already admitted is bound to the pre-admission run version, so the journaled boundary's claim at that revision is stale and the operation never dispatches (`OperationExecutionInProgress`);
+- an operation the old composition settled without the journal has no run-control settlement, so the patched family fails closed (`goal_operation_settlement_missing`).
+
+Runs started after the deploy take the patched paths throughout.
 - **Merge-commit content.** RRM-006's GoalDirected fork demonstration was updated inside merge commit `ddec4fa`, so that merge stays green.
 
 **What RRM-008 must know (the new GoalDirected settlement path)**
+- **The cancellation seam (review fix 2).** When an authority result shows the run already `cancelling` (a stale family admission or lifecycle fact, or a family `cancel` rejected because the run is cancelling), the family does not retry and does not issue another cancel: `_enter_cancellation` marks the run cancelling and calls `_stop_for_cancellation`, which today raises the existing `goal_cancelling` hand-off. Replace `_stop_for_cancellation`'s body with the saga; `_enter_cancellation` is the single entry for authority-observed cancellation. Proven by `test_outside_cancel_enters_the_cancellation_boundary_not_a_lifecycle_failure`.
+- **Stale retries.** Behind `rrm-016-stale-version-retry`, a stale family command is retried once at the reported version under a new identity (`…:at-version:{v}` for lifecycle facts; `admission_attempt=2` and `…:attempt:2` for admissions). Keep `tests/fixtures/histories/rrm016_post_change/goal_directed_stale_version_retry.run1.json` replaying.
 - A GoalDirected operation's cancelled or failed settlement is written by the journaled coordinator in the operation boundary (`settle`, status `cancelled` maps to `EffectDisposition.CANCELLED`), with usage and reservation release, exactly as for StageGraph.
 - The family's `reconcile_operation` requires a `completed` result. A cancelled operation raises the child's `ChildWorkflowError`, and the family's existing `_stop_for_cancellation` issues `cancel`.
   - RRM-008 should add a cancellation consumption path that reads the cancelled settlement through `RunControlGoalOperationSettlements`. Its checks already accept any settled outcome: usage record, released reservation, settled claim, accepted evidence.
@@ -250,6 +260,31 @@ In-run replays also pass in the RRM-016 Temporal test, the RRM-007 GoalDirected 
 - `tests/fixtures/temporal_history.py`: decodes `workflow.patched` IDs and activity inputs from captured histories.
 
 None of these carries company, fixture or provider specifics.
+
+## Review disposition
+
+Independent review verdict: `approve_with_fixes`; nothing blocking. All fixes are new commits (nothing amended).
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | The slot root was recomputed from `request.runtime_unit` without cross-checks, so a goal unit could borrow a root on another family's run or for another iteration or role. | **Fixed (`0c8522f`).** `_verify_family_unit` in `RunControlOperationAuthority._verify_bound_authority`: a `goal_directed` unit requires a run whose execution target is `GoalDirected`, `unit.belllabs_run_id == identity.run_id`, and `goal_unit_operation_id(unit) == identity.operation_id`; the preparer uses the same `goal_operation_id`. Tests (`test_rrm_016_goal_directed_settlement.py`): `test_authority_rejects_a_goal_unit_on_a_run_that_is_not_goal_directed[StageGraph]` and `[None]` (no target) → `requires a GoalDirected Workflow Run`; `test_authority_rejects_a_goal_unit_whose_location_is_not_its_operation[2-executor]` and `[1-verifier]` → `location does not match its operation`, while the genuine operation is admitted. |
+| 2 | The run version read in `observe` is consumed later; any outside command in between failed the run on the next command, with no retry. | **Fixed (`0c8522f`)**, behind `workflow.patched("rrm-016-stale-version-retry")` (the retry adds commands only on a stale result). A stale lifecycle fact is retried once as `{command_id}:at-version:{v}` at the version the stale result reported (the activity reads it; a terminalization proposal is rebound to it). A stale admission is reported by the preparation activity as `goal_admission_stale` (current version, phase) and re-admitted once (`admission_attempt=2`, a new command identity); the preparer now persists the binding only after its admission is accepted, so a stale admission leaves nothing bound and the re-admission binds the same semantic attempt at the new revision. A stale result showing `cancelling` is not retried and no second cancel is issued: the family enters its cancellation boundary (RRM-008's seam). Tests (`test_rrm_016_goal_directed_journaled.py`): `test_outside_commands_between_settlement_and_next_command_do_not_fail_the_run` (an outside reserve/release after every settlement read but one: two re-admissions and one lifecycle retry, the run completes `COMPLETED`, four operation usage records, consumed 40, the history replays); `test_outside_cancel_enters_the_cancellation_boundary_not_a_lifecycle_failure` (an API cancel after the executor's settlement: the family ends with `goal_cancelling`, not a lifecycle rejection; the run stays `cancelling`; no re-admission and no family cancel command); `test_stale_version_retry_history_replays` (captured fixture). |
+| 3 | The no-slots branch in `_workspace_for` was unreachable and its comment misleading. | **Fixed (`0c8522f`).** Removed; a template without compiled slots fails closed. Two fixtures that still used slot-less templates (the WP-BP-020 real-preparer test and the docker sandbox rollover) now carry the compiled `/work` slot; their writable paths are unchanged (`/goal/{i}/{role}/work`). |
+| 4 (optional) | Compare `observe`'s binding and reservation against the stored binding. | **Done (`0c8522f`).** With a binding reader composed (production passes the operation binding store), `observe` requires the stored binding to equal the admitted operation's binding and its reservation to be the operation's. |
+| 5 | Deploy note and review disposition. | **Done.** "Deploy note" under Unresolved risks; this section. |
+
+Post-review gates (code head `0c8522f`; DSN runs and full runs under the stack lock):
+
+| Gate | Result |
+|---|---|
+| `uv run --no-sync ruff check app tests scripts` | All checks passed |
+| `uv run --no-sync mypy app` | Success: no issues found in 366 source files |
+| Owning suites (the list in Deterministic verification) | 397 passed, 1 xfailed (RRM-019); +7 over the pre-review run: 4 fix-1 cases, 2 fix-2 tests, 1 replay |
+| Replay subset (same `-k` command as in Replay and recovery artifacts) | 12 passed (+1: the stale-retry history) |
+| Demonstration and RRM-006 forks, with both DSNs: `pytest -q -s tests/acceptance/control_plane/test_rrm_016_goal_directed_demo.py tests/acceptance/control_plane/test_rrm_006_semantic_forks.py` | 3 passed; demonstration unchanged (4 accepted settlements, consumed `tokens.total` 40, pause and resume receipts `accepted/delivered/applied`, terminal `completed`); GoalDirected fork `excluded_units: []` |
+| Full hermetic (DSNs unset, `BELLABS_RUN_*_LIVE=0`, `LANGSMITH_TRACING=false`) | **975 passed, 74 skipped, 3 xfailed**, 0 failed (+7 over `731b770`) |
+| Full with both DSNs exported and `--env-file ../biotech-research-ingestion-evaluation-system/.env` | **1018 passed, 30 skipped, 4 xfailed**, 0 failed (+7 over `731b770`) |
+| `git diff --check` | clean |
 
 ## Final disposition
 
