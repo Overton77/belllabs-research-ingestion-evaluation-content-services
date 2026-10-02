@@ -321,9 +321,8 @@ class CancellableGoalActivities(GovernedGoalActivities):
             )
         return await super().reconcile(request)
 
-    @property
-    def functions(self) -> list[object]:
-        return [*super().functions, self.cancel_operation]
+    # `functions` is inherited: the BP-020 base already lists `operation.cancel`, which this
+    # class overrides (a second entry would be a duplicate activity name).
 
 
 async def _cancel(authority: Authority, run_id: str, command_id: str = "cancel") -> Any:
