@@ -7,7 +7,7 @@ from typing import TypeVar
 from pydantic import TypeAdapter
 
 from app.application.control_plane.control_plane_repository import DefinitionRepository
-from app.domain.control_plane.canonical import sha256_digest
+from app.domain.control_plane.canonical import sha256_digest, stable_json_dump
 from app.domain.control_plane.compiler import compile_effective_run_configuration
 from app.domain.control_plane.contracts import (
     AgentProfileDefinition,
@@ -588,8 +588,9 @@ class ControlPlaneService:
         return definition
 
     async def _persist_erc(self, erc: EffectiveRunConfiguration) -> None:
+        erc_payload = stable_json_dump(erc)
         payload = json.dumps(
-            erc.model_dump(mode="json"),
+            erc_payload,
             sort_keys=True,
             separators=(",", ":"),
             ensure_ascii=False,
@@ -601,7 +602,7 @@ class ControlPlaneService:
             "compiler_version": erc.compiler_version,
             "compilation_id": erc.context.compilation_id,
             "compiled_at": erc.context.compiled_at,
-            "payload": erc.model_dump(mode="json"),
+            "payload": erc_payload,
             "payload_ref": None,
         }
         if len(payload) > self._externalize_above_bytes:

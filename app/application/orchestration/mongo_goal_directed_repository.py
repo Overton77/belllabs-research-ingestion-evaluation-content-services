@@ -6,7 +6,7 @@ from beanie import Document
 from pymongo.errors import DuplicateKeyError
 
 from app.application.orchestration.goal_directed import document_payload
-from app.domain.control_plane.canonical import sha256_digest
+from app.domain.control_plane.canonical import sha256_digest, stable_json_dump
 from app.domain.operation_execution.contracts import OperationExecutionRequest
 from app.domain.orchestration.contracts import (
     GoalExecutionResult,
@@ -151,7 +151,7 @@ class MongoGoalDirectedDocumentRepository:
         recorded_at: datetime,
     ) -> None:
         for operation_role, template in (("executor", executor), ("verifier", verifier)):
-            payload = template.model_dump(mode="json")
+            payload = stable_json_dump(template)
             document = GoalOperationTemplateDocument(
                 request_scope=request_scope,
                 semantic_input_binding_ref=semantic_input_binding_ref,

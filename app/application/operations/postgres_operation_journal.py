@@ -11,7 +11,7 @@ from app.application.operations.operation_journal import (
     OperationJournalMutation,
     _is_journal_only_authority_mutation,
 )
-from app.domain.control_plane.canonical import sha256_digest
+from app.domain.control_plane.canonical import sha256_digest, stored_payload_matches
 from app.domain.operation_execution.journal import (
     OperationClaimResult,
     OperationEffectClaim,
@@ -665,7 +665,7 @@ class PostgresAtomicOperationJournalRepository:
             mutation.transition.transition_id,
         )
         if prior_transition is not None:
-            if _json(prior_transition) != mutation.transition.model_dump(mode="json"):
+            if not stored_payload_matches(_json(prior_transition), mutation.transition):
                 raise IdempotencyConflict("operation lifecycle transition collision")
         else:
             await connection.execute(
@@ -691,7 +691,7 @@ class PostgresAtomicOperationJournalRepository:
                 event.event_id,
             )
             if prior_event is not None:
-                if _json(prior_event) != event.model_dump(mode="json"):
+                if not stored_payload_matches(_json(prior_event), event):
                     raise IdempotencyConflict("operation outbox event collision")
             else:
                 await connection.execute(

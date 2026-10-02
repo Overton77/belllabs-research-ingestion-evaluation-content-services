@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Protocol
 
-from app.domain.control_plane.canonical import sha256_digest
+from app.domain.control_plane.canonical import stable_json_digest
 from app.domain.operation_execution.contracts import (
     MaterializedWorkspace,
     OperationExecutionBinding,
@@ -219,7 +219,7 @@ class SandboxSnapshotService:
         self._clock = clock or (lambda: datetime.now(UTC))
 
     async def create(self, request: SandboxSnapshotCreateRequest) -> SandboxSnapshot:
-        creation_identity = sha256_digest(request.model_dump(mode="json", exclude={"created_at"}))
+        creation_identity = stable_json_digest(request, exclude={"created_at"})
         prior = await self._snapshots.get_snapshot(request.snapshot_id)
         if prior is not None:
             if prior.creation_identity != creation_identity:
@@ -289,9 +289,7 @@ class SandboxSnapshotService:
         self._verify_clone_contract(request, snapshot)
         await self._authority.verify_restore(request, snapshot)
 
-        request_fingerprint = sha256_digest(
-            request.model_dump(mode="json", exclude={"requested_at"})
-        )
+        request_fingerprint = stable_json_digest(request, exclude={"requested_at"})
         prior_clone = await self._snapshots.get_clone(request.clone_id)
         if prior_clone is not None:
             if (

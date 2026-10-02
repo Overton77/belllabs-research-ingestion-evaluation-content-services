@@ -7,7 +7,7 @@ from uuid import NAMESPACE_URL, uuid5
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from pymongo.errors import DuplicateKeyError
 
-from app.domain.control_plane.canonical import sha256_digest
+from app.domain.control_plane.canonical import sha256_digest, stored_payload_matches
 from app.domain.operation_execution.contracts import (
     OperationExecutionBinding,
     OperationSettlement,
@@ -171,7 +171,7 @@ class MongoOperationBindingAuthorityMigrationRepository:
             if (
                 prior is None
                 or prior.canonical_digest != digest
-                or prior.payload != binding.model_dump(mode="json")
+                or not stored_payload_matches(prior.payload, binding)
             ):
                 raise ValueError("v2 operation binding authority conflict") from None
         return BindingAuthorityRecord(
