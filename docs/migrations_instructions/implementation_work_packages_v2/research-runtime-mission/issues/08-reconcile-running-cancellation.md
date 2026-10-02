@@ -3,7 +3,7 @@
 **What to build:** cancel through the application facade stops or safely quiesces a running technical operation, reconciles its child/provider/effect/usage state, and terminalizes only after authoritative settlement.
 
 **Blocked by:** RRM-004, RRM-007 and RRM-013.
-**Status:** implemented; independent review pending (branch head: see the evidence README)
+**Status:** implemented; independent review pending (tested head `242fc45`; see the evidence README)
 **Branch:** `wp/rrm-008-cancellation`
 **Authority:** EXEC-008/011, RUN-005/006/007/009/010, async subordinate DA requirements; REQ-CP-EXEC-008 seven-step saga and REQ-CP-DA-008/011 cancel hooks (clarified) — AMD-RRM-001 (accepted 2026-10-01 at meta `6c89143`, merged into meta main `a50d833`; see [RRM-001 contract authority](../RRM-001-contract-authority.md) §4)
 **Evidence:** `docs/migrations_instructions/evidence_v2/research-runtime-mission/RRM-008/`
