@@ -20,6 +20,7 @@ from app.domain.operation_execution.contracts import (
     SubagentStateSlice,
     WorkspaceContract,
     WorkspaceMaterializationManifest,
+    WorkspaceSlotBinding,
 )
 from app.domain.operation_execution.errors import WorkspaceDigestMismatch
 
@@ -306,12 +307,83 @@ def slot_ownership_boundary(logical_path: str) -> str:
     """
 
     parts = [part for part in logical_path.split("/") if part]
-    depth = (
-        3
-        if len(parts) >= 3
+    depth = 3 if _goal_role_root(logical_path) is not None else 2
+    return "/" + "/".join(parts[:depth])
+
+
+def _goal_role_root(logical_path: str) -> tuple[int, str] | None:
+    """`(iteration, role)` of a path under a GoalDirected role root `/goal/{n}/{role}`."""
+
+    parts = [part for part in logical_path.split("/") if part]
+    if (
+        len(parts) >= 3
         and parts[0] == "goal"
         and parts[1].isdigit()
         and parts[2] in GOAL_ROLE_SEGMENTS
-        else 2
+    ):
+        return int(parts[1]), parts[2]
+    return None
+
+
+def _goal_slot_shape(slot: WorkspaceSlotBinding) -> tuple[object, ...]:
+    """A role-rooted slot without its root and owner identity: the compiled template slot."""
+
+    relative = "/" + "/".join([part for part in slot.logical_path.split("/") if part][3:])
+    return (
+        slot.slot_name,
+        relative,
+        slot.access,
+        slot.owner.kind,
+        slot.durable_ref,
+        slot.content_digest,
     )
-    return "/" + "/".join(parts[:depth])
+
+
+def shared_goal_workspace_slots(
+    current: tuple[WorkspaceSlotBinding, ...],
+    requested: tuple[WorkspaceSlotBinding, ...],
+) -> tuple[WorkspaceSlotBinding, ...] | None:
+    """The slots a `shared` GoalDirected workspace holds after `requested` (RRM-020).
+
+    A `shared` workspace keeps one identity across iterations (`GoalWorkspaceSnapshotPolicy`:
+    workspace continuity is independent from model-session continuity), while each iteration's
+    unit binds the compiled slots under its own role root `/goal/{iteration}/{role}` (RRM-016,
+    REQ-CP-DA-013). The declared rule, and the only one under which one workspace identity is
+    materialized with another slot set:
+
+    - every requested slot lies under one role root, and every current slot lies under a root
+      of the same role, so an executor workspace never takes a verifier root (REQ-BP-GD-004);
+    - an iteration already in the workspace is requested again with exactly its slots (a
+      retry), which returns `current` unchanged;
+    - otherwise the iteration is later than every iteration in the workspace, its slots are
+      the same compiled slot set (name, relative path, access, owner kind, input) as every
+      earlier iteration's, and its owners own nothing in the workspace yet. The result is
+      `current` followed by the requested slots, so earlier roots keep their owners.
+
+    Anything else returns `None`, and the caller keeps treating the request as a conflict.
+    """
+
+    requested_roots = {_goal_role_root(slot.logical_path) for slot in requested}
+    requested_root = requested_roots.pop() if len(requested_roots) == 1 else None
+    if requested_root is None:
+        return None
+    iteration, role = requested_root
+    groups: dict[int, list[WorkspaceSlotBinding]] = {}
+    for slot in current:
+        root = _goal_role_root(slot.logical_path)
+        if root is None or root[1] != role:
+            return None
+        groups.setdefault(root[0], []).append(slot)
+    if iteration in groups:
+        return current if tuple(groups[iteration]) == requested else None
+    if iteration <= max(groups, default=0):
+        return None
+    shape = sorted((_goal_slot_shape(slot) for slot in requested), key=repr)
+    if any(
+        sorted((_goal_slot_shape(slot) for slot in group), key=repr) != shape
+        for group in groups.values()
+    ):
+        return None
+    if {slot.owner.owner_id for slot in requested} & {slot.owner.owner_id for slot in current}:
+        return None
+    return current + requested
