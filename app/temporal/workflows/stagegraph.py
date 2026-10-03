@@ -30,6 +30,8 @@ with workflow.unsafe.imports_passed_through():
         LateResultFacts,
         StageGraphAdmissionActivityRequest,
         StageGraphAdmissionActivityResult,
+        StageGraphBaselineSettlementRequest,
+        StageGraphBaselineSettlementResult,
         StageGraphCompletionActivityRequest,
         StageGraphCompletionActivityResult,
         StageGraphCycleActivityRequest,
@@ -69,6 +71,13 @@ CANCELLATION_SAGA_PATCH = "rrm-008-stagegraph-cancellation-saga"
 # `in_doubt` / `generation_superseded` with an unsettled claim; under the saga the family runs
 # `operation.cancel` for it once so that the operation boundary settles the claim.
 SETTLE_SUPERSEDED_PATCH = "rrm-008-stagegraph-settle-superseded-generation"
+# RRM-021 (REQ-CP-RUN-006): a run admitted with a baseline reservation releases it before it
+# proposes terminalization (every terminal outcome), so the reducer finds no reservation left.
+# Histories recorded before the patch replay unchanged.
+SETTLE_BASELINE_PATCH = "rrm-021-settle-stagegraph-baseline"
+# RRM-021 review: a family that fails with no admissible work (`stagegraph_blocked`) releases
+# the baseline before the failure is raised.
+RELEASE_BASELINE_ON_BLOCKED_PATCH = "rrm-021-release-baseline-on-blocked"
 LIABILITY_REJECTIONS = frozenset(
     {
         "budget_not_settled",
@@ -336,6 +345,7 @@ class StageGraphWorkflow:
         cancellation_requested_children: set[str] = set()
         pending_cycle: dict[str, Any] | None = None
         liability_hints_seen = self._liability_hints
+        baseline_settled = False
         cancellation_backoff = run_input.cancellation_retry_seconds
 
         def blocked_candidates(
@@ -909,6 +919,13 @@ class StageGraphWorkflow:
                         lambda: self._cancel_requested or bool(self._pending_commands)
                     )
                     continue
+                if (
+                    run_input.baseline_reservation
+                    and not baseline_settled
+                    and workflow.patched(SETTLE_BASELINE_PATCH)
+                ):
+                    await self._release_baseline(run_input, timeout, retry)
+                    baseline_settled = True
                 terminal = await workflow.execute_activity(
                     "stagegraph.complete",
                     StageGraphCompletionActivityRequest(
@@ -982,9 +999,43 @@ class StageGraphWorkflow:
                     schedule_trace=tuple(schedule_trace),
                     completion_proposal=completion,
                 )
+            if (
+                run_input.baseline_reservation
+                and not baseline_settled
+                and workflow.patched(RELEASE_BASELINE_ON_BLOCKED_PATCH)
+            ):
+                # The family fails without proposing terminalization: the admitted baseline
+                # must not stay reserved (a later failed terminalization would otherwise be
+                # rejected `budget_not_settled`).
+                await self._release_baseline(run_input, timeout, retry)
             raise ApplicationError(
                 "StageGraph has no admissible work and no terminal completion proposal",
                 type="stagegraph_blocked",
+                non_retryable=True,
+            )
+
+    async def _release_baseline(
+        self, run_input: StageGraphRunInput, activity_timeout: timedelta, retry: RetryPolicy
+    ) -> None:
+        """RRM-021: release the admitted baseline through run control (idempotent)."""
+
+        settlement = await workflow.execute_activity(
+            "stagegraph.settle_baseline",
+            StageGraphBaselineSettlementRequest(
+                run_id=run_input.run_id,
+                request_scope=run_input.request_scope,
+                occurred_at=workflow.now(),
+                idempotency_issuer=run_input.lifecycle_idempotency_issuer,
+                correlation_id=run_input.correlation_id,
+                baseline_reservation=dict(run_input.baseline_reservation),
+            ),
+            result_type=StageGraphBaselineSettlementResult,
+            start_to_close_timeout=activity_timeout,
+            retry_policy=retry,
+        )
+        if not settlement.accepted:
+            raise ApplicationError(
+                f"StageGraph baseline settlement rejected: {settlement.reason_code}",
                 non_retryable=True,
             )
 

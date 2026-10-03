@@ -34,6 +34,8 @@ def coordinator_activities(family: str, activities: Any) -> Sequence[ActivityCal
             activities.decide_result,
             activities.apply_cycle,
             activities.complete_stagegraph,
+            # RRM-021: releases the admitted baseline reservation before terminalization.
+            activities.settle_baseline,
             # RRM-007: the family boundary's run-control facts (waits, quiescence, applied
             # boundary commands), bound to the current run version by the activity.
             activities.apply_boundary_command,

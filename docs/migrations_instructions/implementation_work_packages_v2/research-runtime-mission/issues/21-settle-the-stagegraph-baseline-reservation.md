@@ -4,7 +4,7 @@
 
 **Blocked by:** None.
 **Blocks:** Every StageGraph run admitted with a non-empty baseline reservation, through any launch path (RRM-009's governed launch included). Today every StageGraph harness admits `baseline_reservations={}` (the WP-BP-010 live gate, RRM-009's technical qualification). Whether it blocks RRM-010 is the coordinator's decision.
-**Status:** open (found by RRM-009, 2026-10-02)
+**Status:** implemented; independent review pending (found by RRM-009, 2026-10-02; code `c30c9f8`, review fixes `45e9b6d`; evidence `evidence_v2/research-runtime-mission/RRM-021/README.md`)
 **Branch:** `wp/rrm-021-stagegraph-baseline-settlement`
 **Authority:** REQ-CP-RUN-006 (budgets: reservations are released or settled before terminalization), the reducer's terminalization rule (`budget_not_settled`)
 
@@ -17,6 +17,6 @@
 
 ## Acceptance
 
-- [ ] A StageGraph run admitted with a baseline reservation releases (or settles against recorded usage) the baseline before it proposes terminalization, and completes.
-- [ ] The change is replay-safe for in-flight StageGraph histories (`workflow.patched`).
-- [ ] The governed launch keeps refusing a family input whose baseline differs from the admitted one (RRM-009).
+- [x] A StageGraph run admitted with a baseline reservation releases (or settles against recorded usage) the baseline before it proposes terminalization, and completes.
+- [x] The change is replay-safe for in-flight StageGraph histories (`workflow.patched`).
+- [x] The governed launch keeps refusing a family input whose baseline differs from the admitted one (RRM-009).

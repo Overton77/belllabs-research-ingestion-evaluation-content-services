@@ -492,12 +492,11 @@ def technical_admission_policies() -> AdmissionPolicyRegistry:
 
 
 def baseline_reservation(family: str) -> dict[str, int]:
-    """The admitted baseline reservation. GoalDirected settles its baseline at closing;
-    StageGraph never settles one, so a StageGraph run admitted with a baseline cannot
-    terminalize (`budget_not_settled`, RRM-021) and its technical runs admit none, as the
-    WP-BP-010 live gate does."""
+    """The admitted baseline reservation, non-empty for both families: GoalDirected settles
+    it at its closing boundary and StageGraph releases it before terminalizing (RRM-021)."""
 
-    return {"tokens.total": 20} if family == "GoalDirected" else {}
+    del family
+    return {"tokens.total": 20}
 
 
 def admission_request(catalog: TechnicalCatalog, request_id: str) -> RunRequest:

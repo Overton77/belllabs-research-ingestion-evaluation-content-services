@@ -47,6 +47,8 @@ from app.domain.orchestration.contracts import (
     StageGraphAcceptedProjection,
     StageGraphAdmissionActivityRequest,
     StageGraphAdmissionActivityResult,
+    StageGraphBaselineSettlementRequest,
+    StageGraphBaselineSettlementResult,
     StageGraphCompletionActivityRequest,
     StageGraphCompletionActivityResult,
     StageGraphCycleActivityRequest,
@@ -195,6 +197,8 @@ class StageGraphLaunchService:
 
 # Completion proposals one StageGraph run may make (each rejected one keeps its receipt).
 MAX_COMPLETION_PROPOSALS = 256
+# RRM-021: a baseline release retried at the reported version while outside commands move it.
+BASELINE_SETTLEMENT_ATTEMPTS = 4
 
 
 def producer_effects_settled(
@@ -753,6 +757,78 @@ class StageGraphDecisionService:
             terminal_outcome=result.terminal_outcome,
             resulting_run_version=result.resulting_run_version,
             reason_code=result.reason_code,
+        )
+
+    async def settle_baseline(
+        self, request: StageGraphBaselineSettlementRequest
+    ) -> StageGraphBaselineSettlementResult:
+        """Release the run's unused baseline reservation before terminalization (RRM-021).
+
+        REQ-CP-RUN-006: reservations are released or settled before terminalization. The
+        stages reserve and settle their own operation reservations, so the admission-time
+        `baseline` reservation is never consumed by a StageGraph run: it is released whole,
+        against zero recorded usage. Idempotent: the authoritative budget is the source of
+        truth, so a baseline already settled (an Activity retry, a continued segment) is a
+        no-op that reports the current run version, and nothing is counted twice.
+        """
+
+        result_version = 0
+        reason_code = ""
+        accepted = True
+        admitted = {
+            dimension: amount
+            for dimension, amount in request.baseline_reservation.items()
+            if amount > 0
+        }
+        for attempt in range(BASELINE_SETTLEMENT_ATTEMPTS):
+            budget = await self._run_control.get_budget(request.request_scope, request.run_id)
+            run = await self._run_control.get_run(request.request_scope, request.run_id)
+            remaining = {
+                dimension: amount
+                for dimension, amount in budget.reservations.get("baseline", {}).items()
+                if amount > 0
+            }
+            if not remaining:
+                return StageGraphBaselineSettlementResult(
+                    accepted=True, resulting_run_version=run.version, reason_code=""
+                )
+            if admitted and admitted != remaining:
+                raise ValueError("StageGraph baseline differs from the admitted reservation")
+            result = await self._run_control.execute(
+                LifecycleCommand(
+                    command_id=(
+                        f"stagegraph:{request.run_id}:baseline-settlement"
+                        if attempt == 0
+                        else f"stagegraph:{request.run_id}:baseline-settlement:"
+                        f"at-version:{run.version}"
+                    ),
+                    idempotency_issuer=request.idempotency_issuer,
+                    request_scope=request.request_scope,
+                    run_id=request.run_id,
+                    expected_run_version=run.version,
+                    actor=orchestration_lifecycle_actor(),
+                    action=RecordUsageAction(
+                        usage_id=f"stagegraph-usage:{request.run_id}:baseline",
+                        actual_amounts={},
+                        reservation_id="baseline",
+                        release_amounts=remaining,
+                    ),
+                    reason="Release the unused StageGraph baseline reservation",
+                    occurred_at=request.occurred_at,
+                    correlation_id=request.correlation_id,
+                )
+            )
+            accepted = result.status == CommandStatus.ACCEPTED
+            result_version = result.resulting_run_version
+            reason_code = result.reason_code
+            if result.status != CommandStatus.STALE:
+                break
+        else:
+            # Still stale after every attempt: retryable, so the Activity retry policy
+            # re-reads the run (the release is idempotent).
+            raise RuntimeError("StageGraph baseline settlement is stale; retrying")
+        return StageGraphBaselineSettlementResult(
+            accepted=accepted, resulting_run_version=result_version, reason_code=reason_code
         )
 
     async def _completion_command_id(

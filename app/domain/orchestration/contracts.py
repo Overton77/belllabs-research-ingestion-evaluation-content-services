@@ -811,6 +811,25 @@ class StageGraphCompletionActivityResult:
 
 
 @dataclass(frozen=True)
+class StageGraphBaselineSettlementRequest:
+    """RRM-021 (REQ-CP-RUN-006): release the run's admitted baseline reservation."""
+
+    run_id: str
+    request_scope: str
+    occurred_at: datetime
+    idempotency_issuer: str
+    correlation_id: str
+    baseline_reservation: dict[str, int] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class StageGraphBaselineSettlementResult:
+    accepted: bool
+    resulting_run_version: int
+    reason_code: str
+
+
+@dataclass(frozen=True)
 class WorkflowEvaluationRequest:
     run_id: str
     workflow_cycle: int
