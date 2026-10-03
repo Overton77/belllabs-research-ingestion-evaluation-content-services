@@ -228,3 +228,8 @@ Repeated infrastructure worth one owner when generalized:
 - Postgres helpers (`_set_scope`, JSON dump/load, advisory lock) in about twelve `postgres_*` repositories under `app/application/` (`grep "def _set_scope"`): one `application` infrastructure module with an agreed JSON normalization.
 - Superseded-but-exported contracts (graph_runtime intervention contracts and the two checkpoint keys) and the legacy Agent Server island: remove together once the `/v2/graph-runtime/schemas` export is decided (RRM-001 §3 row 23).
 - In-memory repositories embedded in service modules (`checkpoint_lineage.py`, `inspection.py`): move to a testing module when a second consumer needs the port without the fakes.
+
+### CR-5 integration
+
+The coordinator checked the diff independently. The twelve removed `_stable_id` copies all had the body `str(uuid5(NAMESPACE_URL, ":".join(parts)))`, so persisted IDs are unchanged. The per-test Mongo fixtures were folded into one factory. It was merged `--no-ff` at `548dff2`; ruff, mypy (384 files) and `git diff --check` are clean. Its full-suite gates run as part of the RRM-010 final gate on the combined commit.
+
