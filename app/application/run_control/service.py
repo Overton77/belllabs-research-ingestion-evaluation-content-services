@@ -825,6 +825,20 @@ class RunControlService:
                     family_fingerprint,
                     family_version,
                 )
+                # RRM-008 F1 composed by RRM-009: a family that terminalizes through its
+                # atomic admission (StageGraph's completion) closes every pending boundary
+                # command in the same commit, exactly like a plain `terminalize`: a cancel is
+                # `applied` by a `cancelled` outcome, everything else reaches its terminal
+                # receipt. Before, only the plain path recorded them, so a production
+                # StageGraph cancel stayed `delivered` after the run was terminal.
+                terminal_receipts: tuple[BoundaryCommandReceipt, ...] = ()
+                if isinstance(command.action, TerminalizeAction):
+                    outcome = reduction.projection.terminal_outcome
+                    if outcome is None:
+                        raise CommandRejected(
+                            "an accepted terminalization must record a terminal outcome"
+                        )
+                    terminal_receipts = await self._terminal_receipts(command, outcome)
                 mutation = CommandMutation(
                     result=reduction.result,
                     request_scope=command.request_scope,
@@ -838,6 +852,7 @@ class RunControlService:
                     ledger_entries=reduction.ledger_entries,
                     effect_entries=reduction.effect_entries,
                     events=events,
+                    boundary_receipts=terminal_receipts,
                 )
                 receipt = FamilyAdmissionReceipt(
                     command_result=reduction.result,
@@ -1110,6 +1125,15 @@ class RunControlService:
         self, request_scope: str, run_id: str
     ) -> tuple[BoundaryCommandStatus, ...]:
         return await self._repository.list_boundary_commands(request_scope, run_id)
+
+    async def runs_with_pending_boundary_commands(
+        self, request_scope: str, *, limit: int = 100
+    ) -> tuple[str, ...]:
+        """Runs whose accepted family commands await delivery (the RRM-009 relay's read)."""
+
+        return await self._repository.runs_with_pending_boundary_commands(
+            request_scope, limit=limit
+        )
 
     async def get_boundary_command(
         self, request_scope: str, run_id: str, idempotency_issuer: str, command_id: str

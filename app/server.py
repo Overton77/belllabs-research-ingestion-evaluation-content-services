@@ -27,6 +27,7 @@ from app.api.run_control import (
 )
 from app.api.run_control import router as run_control_router
 from app.api.run_forks import router as run_forks_router
+from app.api.runtime_composition import compose_runtime_control
 from app.api.runtime_inspection import router as runtime_inspection_router
 from app.api.schema_grounding import router as schema_grounding_router
 from app.application.coordinator.coordinator_composition import (
@@ -46,6 +47,7 @@ from app.integrations.mongodb import create_mongodb
 from app.integrations.postgres import create_postgres_pool
 from app.integrations.runtime_realtime import PostgresRedisApprovalGateway
 from app.integrations.supabase import create_supabase
+from app.integrations.temporal import create_temporal_client
 from app.mcp import create_coordinator_http_deployment, mount_coordinator_http
 from app.middleware.body_limit import BodySizeLimitMiddleware
 
@@ -132,6 +134,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     coordinator_route: BaseRoute | None = None
     try:
         async with AsyncExitStack() as coordinator_stack:
+            if settings.run_control_temporal_enabled:
+                # RRM-009: Temporal-backed inspection, delivery, launch and relay.
+                await compose_runtime_control(
+                    app,
+                    settings,
+                    client=await create_temporal_client(settings),
+                    stack=coordinator_stack,
+                )
             if settings.coordinator_mcp_enabled:
                 coordinator_route = await _mount_coordinator(
                     app,
@@ -287,9 +297,16 @@ async def liveness() -> dict[str, str]:
 
 
 @api.get("/health/ready")
-async def readiness() -> dict[str, str]:
+async def readiness() -> dict[str, object]:
     # External checks live in app.preflight so readiness stays cheap and non-destructive.
-    return {"status": "ready", "mode": "pre-emptive-bootstrap"}
+    # RRM-009 review: the probe is unauthenticated, so it reports status and mode only. The
+    # composition's details (namespace, relay scopes, checkpointer digests) are logged once
+    # by `compose_runtime_control` and stay on `app.state.runtime_control` in process.
+    runtime = getattr(api.state, "runtime_control", None)
+    return {
+        "status": "ready",
+        "mode": "runtime-control" if runtime is not None else "pre-emptive-bootstrap",
+    }
 
 
 @sio.event

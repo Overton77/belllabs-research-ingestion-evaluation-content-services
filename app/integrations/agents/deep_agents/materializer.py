@@ -15,6 +15,7 @@ from deepagents import DeepAgentState
 from deepagents.backends import LangSmithSandbox, StateBackend
 from deepagents.backends.protocol import BackendProtocol
 from deepagents.backends.utils import create_file_data
+from deepagents.middleware.filesystem import FilesystemPermission
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool
@@ -360,17 +361,17 @@ class ExactDeepAgentMaterializer:
                     "model": model_factory(child_binding, secrets),
                     "tools": child_tools,
                     "skills": sorted(child_skill_roots),
+                    # deepagents 0.7.5 reads typed rules (`rule.mode`); a plain mapping
+                    # fails `create_deep_agent` for every sync subagent (RRM-009).
                     "permissions": [
-                        {
-                            "operations": ["read", "write"],
-                            "paths": list(child.writable_paths),
-                            "mode": "allow",
-                        },
-                        {
-                            "operations": ["read", "write"],
-                            "paths": ["/"],
-                            "mode": "deny",
-                        },
+                        FilesystemPermission(
+                            operations=["read", "write"],
+                            paths=list(child.writable_paths),
+                            mode="allow",
+                        ),
+                        FilesystemPermission(
+                            operations=["read", "write"], paths=["/"], mode="deny"
+                        ),
                     ],
                 }
             )
@@ -505,6 +506,12 @@ def _exact(registry: Mapping[str, Any], digest: str, kind: str) -> Any:
         raise DeepAgentMaterializationError(
             f"exact {kind} revision is unavailable; runtime lookup/fallback is forbidden"
         ) from error
+
+
+def tool_schema_digest(tool: BaseTool) -> str:
+    """The digest an exact binding pins for a tool's model-facing input schema."""
+
+    return _tool_schema_digest(tool)
 
 
 def _tool_schema_digest(tool: BaseTool) -> str:

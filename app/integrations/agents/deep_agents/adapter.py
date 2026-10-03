@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 from collections.abc import Mapping
 from contextlib import AsyncExitStack
@@ -7,7 +8,9 @@ from dataclasses import dataclass
 from typing import Annotated, Any, NotRequired, Protocol, cast
 
 from deepagents import create_deep_agent
-from deepagents.backends.protocol import SandboxBackendProtocol
+from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
+from deepagents.backends.state import StateBackend
+from deepagents.backends.utils import file_data_to_string
 from deepagents.middleware.filesystem import FilesystemPermission
 from deepagents.middleware.subagents import SubAgent
 from langchain.agents.middleware.types import AgentMiddleware
@@ -38,6 +41,7 @@ from app.domain.operation_execution.checkpoint_lineage import (
 )
 from app.domain.operation_execution.contracts import (
     AsyncSubagentContract,
+    CapturedWorkspaceCandidate,
     DeepAgentExecutionBinding,
     OperationExecutionBinding,
     RuntimeInvocation,
@@ -48,6 +52,7 @@ from app.domain.operation_execution.errors import (
     DeepAgentMaterializationError,
     RuntimeInvocationFailure,
 )
+from app.integrations.agents.deep_agents.capability_lineage import capability_lineage
 from app.integrations.agents.deep_agents.checkpoint_reads import (
     MAX_LINEAGE_WALK,
     checkpoint_parent_id,
@@ -71,6 +76,23 @@ class AsyncSubagentMiddlewareFactory(Protocol):
     ) -> AgentMiddleware[Any, Any, Any]: ...
 
 
+class WorkspaceOutputCapturePort(Protocol):
+    """Captures a file the agent wrote into one of its exclusive writable slots (RRM-009).
+
+    REQ-CP-DA-014: capture makes the bytes and descriptor durable as a workspace candidate;
+    only the governed promotion decision makes them a consumable artifact.
+    """
+
+    async def capture(
+        self, binding: OperationExecutionBinding, logical_path: str, content: bytes
+    ) -> CapturedWorkspaceCandidate: ...
+
+
+MAX_CAPTURED_OUTPUT_FILES = 64
+MAX_CAPTURED_OUTPUT_BYTES = 4_000_000
+MAX_CAPTURE_LISTING_DEPTH = 4
+
+
 class DeepAgentRuntimeAdapter:
     """The sole production `create_deep_agent` composition root."""
 
@@ -79,9 +101,11 @@ class DeepAgentRuntimeAdapter:
         materializer: ExactDeepAgentMaterializer,
         *,
         async_subagents: AsyncSubagentMiddlewareFactory | None = None,
+        workspace_outputs: WorkspaceOutputCapturePort | None = None,
     ) -> None:
         self._materializer = materializer
         self._async_subagents = async_subagents
+        self._workspace_outputs = workspace_outputs
 
     async def build_hosted_async_subagent_graph(
         self,
@@ -165,6 +189,7 @@ class DeepAgentRuntimeAdapter:
                 "messages": [{"role": "user", "content": user_prompt}],
             }
             disclosure_observer = _SkillDisclosureObserver(binding)
+            model_calls = _ModelCallObserver()
             checkpointer = cast(BaseCheckpointSaver[Any], materialized.checkpointer)
             # REQ-CP-DA-018: classify the unit generation from the checkpointer before any
             # provider work, then act exactly as `CON-CP-CHECKPOINT-LINEAGE-V1` prescribes:
@@ -210,7 +235,7 @@ class DeepAgentRuntimeAdapter:
                             **({"checkpoint_id": pinned} if pinned is not None else {}),
                         },
                         "metadata": plan.invocation_metadata(),
-                        "callbacks": [disclosure_observer],
+                        "callbacks": [disclosure_observer, model_calls],
                     }
                     # A resume never re-appends the submitted input: it continues the
                     # pending tasks of the pinned checkpoint with no input.
@@ -261,10 +286,33 @@ class DeepAgentRuntimeAdapter:
                     disclosure_observer.disclosed_skills,
                     permissions is not None,
                 )
+                # RRM-009 (REQ-CP-DA-014): the agent's writable-slot files become durable
+                # workspace candidates before the result settles; a capture failure after a
+                # terminal checkpoint is classified by the narrowed post-dispatch rule.
+                inspection["workspace_candidates"] = await self._capture_workspace_outputs(
+                    materialized.backend, invocation.binding, actual_state
+                )
+                own_messages = messages[len(prior_messages) :]
+                # REQ-CP-DA-007: in-process sync subagents spend the parent's reservation, so
+                # their model calls (observed at the chat-model boundary; they never enter the
+                # parent's messages) are part of the operation's observed usage.
+                subordinate_calls = model_calls.calls_outside(messages)
+                usage = _usage(invocation, own_messages, subordinate_calls)
+                inspection["capability_lineage"] = capability_lineage(
+                    binding,
+                    own_messages,
+                    usage_amounts=usage.amounts,
+                    model_calls=(
+                        *_message_usage(own_messages),
+                        *({**call, "scope": "subordinate"} for call in subordinate_calls),
+                    ),
+                    disclosed_skills=disclosure_observer.disclosed_skills,
+                    operation_secret_refs=invocation.binding.secret_refs,
+                )
                 return RuntimeResult(
                     output_text=output_text,
                     structured_output=structured if isinstance(structured, dict) else None,
-                    usage=_usage(invocation, messages[len(prior_messages) :]),
+                    usage=usage,
                     provider_run_id=(str(final.id) if final is not None and final.id else None),
                     event_payloads=(inspection,),
                     checkpoint=capture,
@@ -359,6 +407,31 @@ class DeepAgentRuntimeAdapter:
                 checkpoint=capture,
             )
 
+    async def _capture_workspace_outputs(
+        self,
+        backend: BackendProtocol,
+        binding: OperationExecutionBinding,
+        state: dict[str, Any],
+    ) -> list[dict[str, object]]:
+        if self._workspace_outputs is None:
+            return []
+        captured: list[dict[str, object]] = []
+        for logical_path, content in await _slot_files(
+            backend, binding.workspace.exclusive_write_paths, state
+        ):
+            candidate = await self._workspace_outputs.capture(binding, logical_path, content)
+            captured.append(
+                {
+                    "logical_path": candidate.logical_path,
+                    "output_slot": candidate.output_slot,
+                    "candidate_id": candidate.candidate_id,
+                    "content_digest": candidate.content_digest,
+                    "size_bytes": candidate.size_bytes,
+                    "media_type": candidate.media_type,
+                }
+            )
+        return captured
+
 
 def _effective_permissions(
     materialized: MaterializedDeepAgentArguments, binding: DeepAgentExecutionBinding
@@ -368,6 +441,21 @@ def _effective_permissions(
     if isinstance(materialized.backend, SandboxBackendProtocol):
         return None
     return _permissions(binding)
+
+
+def _subagent_specs(materialized: MaterializedDeepAgentArguments) -> list[SubAgent]:
+    """Sync subagent specs; their framework permissions follow the parent's rule.
+
+    deepagents refuses filesystem permissions beside an executable sandbox, so a child's
+    rules apply only without one (the parent's `_effective_permissions` rule).
+    """
+
+    if not isinstance(materialized.backend, SandboxBackendProtocol):
+        return cast(list[SubAgent], list(materialized.subagents))
+    return [
+        cast(SubAgent, {key: value for key, value in spec.items() if key != "permissions"})
+        for spec in materialized.subagents
+    ]
 
 
 def _compile(
@@ -389,7 +477,7 @@ def _compile(
         system_prompt=system_prompt,
         tools=list(materialized.tools),
         middleware=[*materialized.middleware, *extra_middleware],
-        subagents=cast(list[SubAgent], list(materialized.subagents)),
+        subagents=_subagent_specs(materialized),
         skills=list(materialized.skills),
         permissions=_effective_permissions(materialized, binding),
         backend=materialized.backend,
@@ -677,6 +765,69 @@ def _latest_checkpoint_reader(
     return read
 
 
+def _within(path: str, slot: str) -> bool:
+    normalized = slot.rstrip("/")
+    return path == normalized or path.startswith(normalized + "/")
+
+
+async def _slot_files(
+    backend: BackendProtocol, slots: tuple[str, ...], state: dict[str, Any]
+) -> list[tuple[str, bytes]]:
+    """Every file under the exclusive writable slots, from the state or the sandbox."""
+
+    files: list[tuple[str, bytes]] = []
+    if isinstance(backend, StateBackend):
+        state_files = state.get("files", {})
+        for path in sorted(state_files):
+            if not any(_within(path, slot) for slot in slots):
+                continue
+            file_data = state_files[path]
+            text = file_data_to_string(file_data)
+            content = (
+                text.encode("utf-8")
+                if file_data.get("encoding", "utf-8") == "utf-8"
+                else base64.standard_b64decode(text)
+            )
+            files.append((path, content))
+    elif isinstance(backend, SandboxBackendProtocol):
+        paths: list[str] = []
+        for slot in slots:
+            paths.extend(await _list_sandbox_files(backend, slot, depth=0))
+        downloaded = (
+            await backend.adownload_files(sorted(paths))
+            if hasattr(backend, "adownload_files")
+            else backend.download_files(sorted(paths))
+        )
+        for item in downloaded:
+            if item.error is None and item.content is not None:
+                files.append((item.path, item.content))
+    total = sum(len(content) for _path, content in files)
+    if len(files) > MAX_CAPTURED_OUTPUT_FILES or total > MAX_CAPTURED_OUTPUT_BYTES:
+        raise DeepAgentMaterializationError(
+            "writable-slot outputs exceed the capture bound "
+            f"({MAX_CAPTURED_OUTPUT_FILES} files, {MAX_CAPTURED_OUTPUT_BYTES} bytes)"
+        )
+    return files
+
+
+async def _list_sandbox_files(
+    backend: SandboxBackendProtocol, path: str, *, depth: int
+) -> list[str]:
+    if depth > MAX_CAPTURE_LISTING_DEPTH:
+        return []
+    listing = await backend.als(path) if hasattr(backend, "als") else backend.ls(path)
+    if listing.error is not None or not listing.entries:
+        return []
+    found: list[str] = []
+    for entry in listing.entries:
+        entry_path = str(entry["path"])
+        if entry.get("is_dir"):
+            found.extend(await _list_sandbox_files(backend, entry_path, depth=depth + 1))
+        else:
+            found.append(entry_path)
+    return found
+
+
 async def _capture_result(
     checkpointer: BaseCheckpointSaver[Any],
     plan: CheckpointInvocationPlan,
@@ -827,7 +978,11 @@ def _message_text(message: BaseMessage | None) -> str:
     return "\n".join(parts)
 
 
-def _usage(invocation: RuntimeInvocation, messages: list[BaseMessage]) -> RuntimeUsage:
+def _usage(
+    invocation: RuntimeInvocation,
+    messages: list[BaseMessage],
+    subordinate_calls: tuple[dict[str, object], ...] = (),
+) -> RuntimeUsage:
     turns = 0
     total_tokens = 0
     for message in messages:
@@ -836,6 +991,9 @@ def _usage(invocation: RuntimeInvocation, messages: list[BaseMessage]) -> Runtim
         turns += 1
         metadata: Mapping[str, Any] = message.usage_metadata or {}
         total_tokens += int(metadata.get("total_tokens", 0))
+    for call in subordinate_calls:
+        turns += 1
+        total_tokens += int(cast(int, call["total_tokens"]))
     amounts = {}
     if "model.turns" in invocation.binding.budget_limits:
         amounts["model.turns"] = turns
@@ -907,6 +1065,60 @@ def _inspect_state(
         "message_count": len(messages),
         "resolved_attachments": list(resolved_attachments),
     }
+
+
+def _message_usage(messages: list[BaseMessage]) -> tuple[dict[str, object], ...]:
+    return tuple(
+        {
+            "message_id": str(message.id or ""),
+            "scope": "operation",
+            **_token_counts(message.usage_metadata or {}),
+        }
+        for message in messages
+        if isinstance(message, AIMessage)
+    )
+
+
+def _token_counts(metadata: Mapping[str, Any]) -> dict[str, int]:
+    return {
+        "input_tokens": int(metadata.get("input_tokens", 0)),
+        "output_tokens": int(metadata.get("output_tokens", 0)),
+        "total_tokens": int(metadata.get("total_tokens", 0)),
+    }
+
+
+class _ModelCallObserver(BaseCallbackHandler):
+    """Every chat-model completion of the invocation, parent and in-process children alike.
+
+    Recorded at the model boundary with the provider-reported token counts and the message
+    identity, never the content. `run_inline` keeps the handler on the event loop thread.
+    """
+
+    run_inline = True
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._calls: dict[str, dict[str, object]] = {}
+
+    def on_llm_end(self, response: Any, **kwargs: Any) -> None:
+        del kwargs
+        for generations in getattr(response, "generations", ()):
+            for generation in generations:
+                message = getattr(generation, "message", None)
+                if not isinstance(message, AIMessage) or not message.id:
+                    continue
+                self._calls[str(message.id)] = {
+                    "message_id": str(message.id),
+                    **_token_counts(message.usage_metadata or {}),
+                }
+
+    def calls_outside(self, messages: list[BaseMessage]) -> tuple[dict[str, object], ...]:
+        """The observed calls whose message never entered the parent's state."""
+
+        parent = {str(message.id) for message in messages if message.id}
+        return tuple(
+            self._calls[identity] for identity in sorted(self._calls) if identity not in parent
+        )
 
 
 class _SkillDisclosureObserver(BaseCallbackHandler):

@@ -701,10 +701,13 @@ async def run_live_coordinator(
             admission=run_control,
             tickets=tickets,
             dispatcher=dispatcher,
-            submissions=TemporalWorkflowSubmitter(
+            # RRM-009 (REQ-CP-EXEC-015): the live composition is a production root starter,
+            # so its roots start with their Search Attributes on the configured namespace.
+            submissions=TemporalWorkflowSubmitter.for_production(
                 temporal,
                 stagegraph_task_queue=task_queue,
                 goal_directed_task_queue=f"{task_queue}-unused-goal-directed",
+                search_attribute_policy="required",
             ),
             semantic_bindings=provider,
             runtime_plans=UnavailableRuntimePlanPreparer(),

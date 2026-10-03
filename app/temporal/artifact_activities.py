@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from temporalio import activity
@@ -17,6 +17,7 @@ from app.domain.operation_execution.contracts import (
 from app.domain.run_control.errors import IdempotencyConflict
 from app.temporal.artifact_workflow import GenericArtifactWorkflow
 from app.temporal.operation_activities import OperationExecutionActivities
+from app.temporal.registration.activities import agent_cognitive_activities
 from app.temporal.workflow_sandbox import coordinator_workflow_runner
 
 
@@ -69,17 +70,28 @@ class ArtifactPromotionActivities:
         return promoted.model_dump(mode="json")
 
 
+def generic_artifact_activities(
+    operations: OperationExecutionActivities, artifacts: ArtifactPromotionActivities
+) -> tuple[Any, ...]:
+    """The generic artifact worker's surface: the cognitive operation pair (RRM-008: every
+    worker that serves `operation.execute` also serves `operation.cancel`) and promotion."""
+
+    return (*agent_cognitive_activities(operations), artifacts.promote)
+
+
 def create_generic_artifact_worker(
     client: Client,
     *,
     task_queue: str,
     operations: OperationExecutionActivities,
     artifacts: ArtifactPromotionActivities,
+    graceful_shutdown_timeout: timedelta = timedelta(),
 ) -> Worker:
     return Worker(
         client,
         task_queue=task_queue,
         workflows=[GenericArtifactWorkflow],
         workflow_runner=coordinator_workflow_runner(),
-        activities=[operations.execute, artifacts.promote],
+        activities=generic_artifact_activities(operations, artifacts),
+        graceful_shutdown_timeout=graceful_shutdown_timeout,
     )

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import AsyncExitStack
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Protocol
 
 import asyncpg
+from temporalio.client import Client
+from temporalio.worker import Worker
 
 from app.application.control_plane.control_plane_repository import BeanieDefinitionRepository
 from app.application.control_plane.service import ControlPlaneService
@@ -38,6 +42,7 @@ from app.application.schema.supporting_graph_reconciliation import (
 )
 from app.config import Settings, get_settings
 from app.domain.control_plane.extensions import ExtensionRegistry
+from app.domain.operation_execution.heartbeats import OperationHeartbeatPolicy
 from app.domain.run_control.contracts import ActorContext
 from app.domain.schema_grounding.definitions import register_schema_grounding_extensions
 from app.integrations.control_plane_payloads import (
@@ -55,8 +60,13 @@ from app.integrations.schema_neo4j_executor import (
     Neo4jBoundedReadExecutorFactory,
 )
 from app.integrations.temporal import create_temporal_client
+from app.temporal.artifact_activities import (
+    ArtifactPromotionActivities,
+    create_generic_artifact_worker,
+)
 from app.temporal.coordinator_runtime import (
     CoordinatorWorkerActivities,
+    CoordinatorWorkerSet,
     coordinator_task_queues,
     create_coordinator_workers,
 )
@@ -70,19 +80,30 @@ from app.temporal.operation_activities import (
     OperationExecutionActivities,
     create_agent_cognitive_worker,
 )
-from app.temporal.registration.task_queues import BellLabsTaskQueues
+from app.temporal.registration.task_queues import (
+    BellLabsTaskQueues,
+    generic_artifact_task_queue,
+)
 from app.temporal.schema_grounding_activities import (
     SchemaGroundingActivities,
     create_schema_grounding_activity_worker,
 )
+from app.temporal.search_attributes import verify_belllabs_search_attributes
 
 
 @dataclass(frozen=True)
 class WorkerActivityComposition:
-    """Deployment-supplied, fully wired activity adapters."""
+    """Deployment-supplied, fully wired activity adapters.
+
+    `artifacts` serves `GenericArtifactWorkflow` (candidate capture and governed promotion)
+    on its own queue; `resources` holds provider lifespans the composition opened (the
+    persistent LangGraph saver and store) and is closed when the workers stop.
+    """
 
     coordinator: CoordinatorWorkerActivities
     operation: OperationExecutionActivities
+    artifacts: ArtifactPromotionActivities | None = None
+    resources: AsyncExitStack | None = None
 
 
 class WorkerActivityCompositionFactory(Protocol):
@@ -94,6 +115,91 @@ class WorkerActivityCompositionFactory(Protocol):
         run_control: RunControlService,
         postgres_pool: asyncpg.Pool,
     ) -> WorkerActivityComposition: ...
+
+
+@dataclass(frozen=True)
+class ProductionWorkerSet:
+    """The workers a launch-enabled deployment runs for one composition (RRM-009)."""
+
+    coordinator: CoordinatorWorkerSet
+    operation: Worker
+    artifacts: Worker | None
+
+    @property
+    def workers(self) -> tuple[Worker, ...]:
+        return (
+            *self.coordinator.workers,
+            self.operation,
+            *((self.artifacts,) if self.artifacts is not None else ()),
+        )
+
+
+def operation_heartbeat_policy(settings: Settings) -> OperationHeartbeatPolicy:
+    """The deployment's heartbeat timeout per operation class (RRM-008 composed by RRM-009)."""
+
+    return OperationHeartbeatPolicy(
+        deep_agent_seconds=settings.operation_heartbeat_timeout_seconds,
+        deep_agent_async_children_seconds=(
+            settings.operation_async_children_heartbeat_timeout_seconds
+        ),
+        bound_seconds=settings.operation_bound_heartbeat_timeout_seconds,
+    )
+
+
+def create_production_workers(
+    client: Client, settings: Settings, composition: WorkerActivityComposition
+) -> ProductionWorkerSet:
+    """Both family workers, the cognitive worker and the generic artifact worker, on the
+    canonical queues derived from `TEMPORAL_TASK_QUEUE`.
+
+    The workers that serve `operation.execute` also serve `operation.cancel` (RRM-008) and
+    drain with `WORKER_GRACEFUL_SHUTDOWN_SECONDS`, which must be shorter than every operation
+    heartbeat timeout the families declare: the composition refuses otherwise.
+    """
+
+    operation_heartbeat_policy(settings).verify_graceful_shutdown(
+        settings.worker_graceful_shutdown_seconds
+    )
+    drain = timedelta(seconds=settings.worker_graceful_shutdown_seconds)
+    return ProductionWorkerSet(
+        coordinator=create_coordinator_workers(
+            client,
+            task_queues=coordinator_task_queues(settings.temporal_task_queue),
+            activities=composition.coordinator,
+        ),
+        operation=create_agent_cognitive_worker(
+            client,
+            task_queue=BellLabsTaskQueues.from_base(settings.temporal_task_queue).agent_cognitive,
+            activities=composition.operation,
+            graceful_shutdown_timeout=drain,
+        ),
+        artifacts=(
+            create_generic_artifact_worker(
+                client,
+                task_queue=generic_artifact_task_queue(settings.temporal_task_queue),
+                operations=composition.operation,
+                artifacts=composition.artifacts,
+                graceful_shutdown_timeout=drain,
+            )
+            if composition.artifacts is not None
+            else None
+        ),
+    )
+
+
+async def production_workers_or_close(
+    client: Client, settings: Settings, composition: WorkerActivityComposition
+) -> ProductionWorkerSet:
+    """`create_production_workers`, closing the composition's resources (the persistent saver
+    and store) when the worker set refuses to start, for example on a drain that is not
+    shorter than a heartbeat timeout (RRM-009 review)."""
+
+    try:
+        return create_production_workers(client, settings, composition)
+    except BaseException:
+        if composition.resources is not None:
+            await composition.resources.aclose()
+        raise
 
 
 def compose_worker_run_control_service(
@@ -123,13 +229,20 @@ async def main(
     family_admission_registry: FamilyAdmissionRegistry | None = None,
 ) -> None:
     settings = get_settings()
-    if settings.coordinator_launch_enabled and composition_factory is None:
-        raise RuntimeError(
-            "COORDINATOR_LAUNCH_ENABLED requires a deployment WorkerActivityCompositionFactory; "
-            "refusing to advertise injection-only workers as active"
-        )
     configure_langsmith_tracing(settings)
     client = await create_temporal_client(settings)
+    if settings.coordinator_launch_enabled:
+        if composition_factory is None:
+            # RRM-009: the deployment composition is the repository's own; an explicit
+            # factory is still accepted so a deployment can register extra exact components.
+            from app.temporal.deployment_composition import (
+                ProductionWorkerActivityCompositionFactory,
+            )
+
+            composition_factory = ProductionWorkerActivityCompositionFactory(client)
+        # REQ-CP-EXEC-015: readiness verifies the namespace's Search Attributes and never
+        # mutates it; `scripts/register_belllabs_search_attributes.py` is the admin step.
+        await verify_belllabs_search_attributes(client, settings.temporal_namespace)
     mongo_client, _database = await create_mongodb(settings)
     postgres_pool = await create_application_postgres_pool(settings)
     family_writer_pool = None
@@ -164,6 +277,8 @@ async def main(
         )
         coordinator_workers = None
         operation_worker = None
+        artifact_worker = None
+        composition: WorkerActivityComposition | None = None
         if settings.coordinator_launch_enabled:
             assert composition_factory is not None
             composition = await composition_factory.build(
@@ -172,18 +287,10 @@ async def main(
                 run_control=run_control,
                 postgres_pool=postgres_pool,
             )
-            coordinator_workers = create_coordinator_workers(
-                client,
-                task_queues=coordinator_task_queues(settings.temporal_task_queue),
-                activities=composition.coordinator,
-            )
-            operation_worker = create_agent_cognitive_worker(
-                client,
-                task_queue=BellLabsTaskQueues.from_base(
-                    settings.temporal_task_queue
-                ).agent_cognitive,
-                activities=composition.operation,
-            )
+            production = await production_workers_or_close(client, settings, composition)
+            coordinator_workers = production.coordinator
+            operation_worker = production.operation
+            artifact_worker = production.artifacts
         linked_service = LinkedRunService(
             control_plane,
             run_control,
@@ -231,7 +338,13 @@ async def main(
             workers.extend(coordinator_workers.workers)
         if operation_worker is not None:
             workers.append(operation_worker)
-        await asyncio.gather(*(worker.run() for worker in workers))
+        if artifact_worker is not None:
+            workers.append(artifact_worker)
+        try:
+            await asyncio.gather(*(worker.run() for worker in workers))
+        finally:
+            if composition is not None and composition.resources is not None:
+                await composition.resources.aclose()
     finally:
         if family_writer_pool is not None:
             await family_writer_pool.close()

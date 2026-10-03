@@ -23,6 +23,10 @@ from app.application.run_control.boundary_interventions import (
 )
 from app.application.run_control.service import RunControlService
 from app.domain.coordinator.launch import LaunchAuthorizationError, TerminalWorkflowCompletion
+from app.domain.operation_execution.heartbeats import (
+    DEFAULT_OPERATION_HEARTBEATS,
+    OperationHeartbeatPolicy,
+)
 from app.domain.orchestration.contracts import (
     BoundaryLifecycleOutcome,
     BoundaryLifecycleRequest,
@@ -159,6 +163,7 @@ def compose_goal_directed_activities(
     actor: ActorContext,
     completion: TerminalWorkflowCompletionPort | None = None,
     boundary: BoundaryCommandApplicationService | None = None,
+    heartbeats: OperationHeartbeatPolicy = DEFAULT_OPERATION_HEARTBEATS,
 ) -> GoalDirectedActivities:
     """Wire production GoalDirected activities on the OperationWorkflow path."""
 
@@ -169,6 +174,7 @@ def compose_goal_directed_activities(
             run_control=run_control,
             documents=documents,
             actor=actor,
+            heartbeats=heartbeats,
         ),
         # RRM-016: the family consumes each operation's journaled run-control settlement.
         results=GoalDirectedOperationResultService(

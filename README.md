@@ -537,6 +537,103 @@ uv run python -m app.temporal.run_operation_probe
 These probes exercise the current baseline and are migration fixtures, not the final product
 experience.
 
+### Production-shaped composition (RRM-009)
+
+The deployment composition lives in code, not in test fixtures: `app.temporal.worker` builds
+`ProductionWorkerActivityCompositionFactory` (`app/temporal/deployment_composition.py`) and the API
+lifespan runs `compose_runtime_control` (`app/api/runtime_composition.py`). Both compose the real
+application PostgreSQL, Mongo definitions/bindings, the object artifact store, the persistent
+LangGraph saver/store, the canonical task queues and the digest-pinned research capabilities in
+`infra/capability-pins/research-capabilities.json` (regenerate only with
+`scripts/pin_research_capabilities.py`; the pins resolve `workspace://` locators beside this checkout:
+`../.agents/skills/agent-browser` and `../.tools`).
+
+Prerequisites, in order:
+
+1. Application PostgreSQL with the migrations applied as the owner
+   (`APPLICATION_MIGRATION_DATABASE_DIRECT`), the least-privilege runtime login
+   (`APPLICATION_DATABASE_DIRECT`, a member of `belllabs_control_runtime`; see
+   `infra/application-postgres/init/001-runtime-user.sql`) and a dedicated family-writer login
+   (`APPLICATION_FAMILY_WRITER_DATABASE_DIRECT`, a member of `belllabs_family_repository_writer`,
+   migration 0017; migration 0026 lets it close the boundary ledger when a family terminalizes).
+   Atomic family admission refuses to run as the owner.
+2. The persistent LangGraph saver/store database and schema
+   (`LANGGRAPH_CHECKPOINT_DATABASE_DIRECT`, `LANGGRAPH_CHECKPOINT_SCHEMA`, default
+   `belllabs_langgraph`; set `LANGGRAPH_CHECKPOINT_SETUP=1` once to let the first worker create the
+   LangGraph tables).
+3. Mongo (`MONGODB_URI`, `MONGODB_DATABASE`) and the artifact payload store (`S3_BUCKET`, or
+   `ARTIFACT_PAYLOAD_ROOT` for the content-addressed filesystem store). The S3 store uses the normal
+   AWS credential chain (`AWS_PROFILE`, `AWS_REGION`); an S3-compatible server is addressed with
+   `AWS_ENDPOINT_URL_S3` (qualified against MinIO by `test_rrm_009_object_store.py`).
+4. A persistent Temporal namespace (`TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE`,
+   `TEMPORAL_TASK_QUEUE`) whose Search Attributes are registered by the administrative step
+   below. Workers and the API only verify them at readiness and never mutate the namespace.
+5. The async subagent Agent Server (`langgraph.async_subagents.json`, recipe in
+   `docs/migrations_instructions/evidence_v2/research-runtime-mission/RRM-013/README.md`), built
+   from a revision that carries the scope-bound claim auth: `BELLABS_ASYNC_SUBAGENT_SERVER_TOKEN` is
+   the HMAC secret (`app/agent_server/async_subagents/auth.py`), the parent mints a short-lived claim
+   per request scope and the server refuses a header scope that differs from the claim (an image
+   built before RRM-009 still accepts only the static token). Hosted-child tracing stays an
+   explicit opt-in (`LANGSMITH_TRACING`, default off). The worker spawns children only with
+   `ASYNC_SUBAGENT_SPAWNING_ENABLED=true` and completes them at the parent boundary within
+   `ASYNC_SUBAGENT_COMPLETION_WAIT_SECONDS` (default 120).
+6. Provider credentials referenced only as `environment:<NAME>` secret references
+   (`OPENAI_API_KEY`, `FIRECRAWL_API_KEY`, `TAVILY_API_KEY`, `BELLABS_ASYNC_SUBAGENT_SERVER_TOKEN`)
+   and Node for the pinned stdio MCP servers and the `agent_browser_page` host tool
+   (`WEB_RESEARCH_AGENT_BROWSER_NODE`, required whenever the pins mount a host tool).
+
+Launch, each in its own terminal, after exporting the environment above:
+
+```powershell
+uv run python scripts/register_belllabs_search_attributes.py        # idempotent admin step
+$env:COORDINATOR_LAUNCH_ENABLED="1"; uv run python -m app.temporal.worker
+$env:RUN_CONTROL_TEMPORAL_ENABLED="1"; uv run uvicorn app.server:asgi_app --host 127.0.0.1 --port 8000
+```
+
+`RUN_CONTROL_TEMPORAL_ENABLED=1` makes the API verify the Search Attributes, open the persistent
+saver, attach the inspection readers, the boundary command transport, the reconciliation nudge and
+verifier, the fork services and the governed launch (`POST /run-control/v1/runs/{run_id}/launch`,
+a `TemporalWorkflowSubmitter.for_production(..., search_attribute_policy="required")`), and run
+the boundary command relay for `BOUNDARY_RELAY_REQUEST_SCOPES` every
+`BOUNDARY_RELAY_INTERVAL_SECONDS`. `/health/ready` reports the composition. Other knobs:
+`INSPECTION_CURSOR_KEY` (shared by every API replica; derived from `RUNTIME_CHECKPOINT_SIGNING_KEY` when
+unset), `OPERATION_JOURNAL_CLAIMED_BY`, `ASYNC_SUBAGENT_SUBMITTER_IDENTITY`,
+`CAPABILITY_PINS_PATH`, `DEEP_AGENT_SANDBOX_WORKSPACE_ROOT`.
+
+Running cancellation (RRM-008, composed by RRM-009). A cancel enters through
+`POST /run-control/v1/runs/{run_id}/commands` (`cancel`), is journaled first and delivered in its own
+`cancel` sequence space, inline or by the relay. It reaches running cognition through the
+`operation.execute` heartbeat, whose timeout is chosen per operation class:
+`OPERATION_HEARTBEAT_TIMEOUT_SECONDS` (Deep Agent cognition, default 30),
+`OPERATION_ASYNC_CHILDREN_HEARTBEAT_TIMEOUT_SECONDS` (cognition holding async children, default 15)
+and `OPERATION_BOUND_HEARTBEAT_TIMEOUT_SECONDS` (other bound runtimes, default 30). A cancel lands
+within about 0.8 x that timeout (the SDK heartbeat throttle, capped at 60 s). Workers that serve
+`operation.execute` drain with `WORKER_GRACEFUL_SHUTDOWN_SECONDS` (default 10), which must be shorter
+than every heartbeat timeout: the worker refuses to start otherwise, and a worker shutdown is never a
+cancel of a unit. The unit's active async children are cancelled with the operation's own credential.
+A cancelled child whose provider attributed no usage keeps the run `cancelling` until a
+`reconciliation_operator` records the attributed usage with
+`POST /run-control/v1/runs/{run_id}/async-children/{child_execution_id}/reconcile-usage`; that route,
+an accepted `reconcile-unit` and accepted operator settlement commands send the family the
+`liability_reconciled` hint so it terminalizes without waiting for its backoff.
+
+Before deploying over in-flight work, drain it: GoalDirected runs started before RRM-016
+(RRM-016 deploy note) and outstanding `settle_pending_usage` redeliveries from before RRM-013
+(RRM-013 fingerprint note). Stop workers within `WORKER_GRACEFUL_SHUTDOWN_SECONDS`.
+
+The technical qualification of this composition is
+`tests/acceptance/control_plane/test_rrm_009_production_composition.py` (disposable PostgreSQL and
+Mongo, a persistent `start_local` namespace, bounded technical inputs, no company definitions).
+Live model, MCP, browser and Agent Server calls run only in
+`tests/acceptance/control_plane/test_rrm_009_live_capabilities.py` behind
+`BELLABS_RUN_RRM_009_LIVE=1`. Cancellation inside this composition is qualified by
+`tests/acceptance/control_plane/test_rrm_009_production_cancellation.py` (sync child: DSN opt-in;
+async child on the Agent Server: the same live opt-in). The full runbook (prerequisites, commands,
+flags, cleanup by exact
+container names) is in `docs/migrations_instructions/evidence_v2/research-runtime-mission/RRM-009/README.md`.
+Cleanup: stop the three processes, drop the disposable schemas (`belllabs_control`, the LangGraph
+schema), and delete the Temporal dev-server database file.
+
 ## Verification
 
 Run the standard checks from this repository:

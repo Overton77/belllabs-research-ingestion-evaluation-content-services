@@ -26,8 +26,8 @@ app = FastAPI(
 def require_deployment_credential(
     authorization: Annotated[str | None, Header()] = None,
 ) -> None:
-    if not verify_bearer(authorization or ""):
-        raise HTTPException(status_code=401, detail="invalid bearer token")
+    if verify_bearer(authorization or "") is None:
+        raise HTTPException(status_code=401, detail="invalid scope claim")
 
 
 @app.get("/belllabs/async-subagents/served-graphs")

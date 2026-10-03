@@ -1,0 +1,238 @@
+{
+  "checkpointers": [
+    {
+      "ref": {
+        "digest": "sha256:4bee4d60658958a81d7506ffb6fee2c9719913443691a0c7658838882fb65fc8",
+        "kind": "runtime_profile",
+        "logical_id": "checkpointer.wp-cp-040",
+        "revision": 1
+      }
+    }
+  ],
+  "mcp_servers": [
+    {
+      "credential_env": "FIRECRAWL_API_KEY",
+      "module_digest": "sha256:69e305ec3cf14ddbfe62a7c509e218a9ec4b44c82604bffa023159130769498b",
+      "module_locator": "workspace://.tools/reviewed/firecrawl-mcp-7232b6d1cdd80335107d53a33b80c902b515a334/dist/index.js",
+      "package_name": "firecrawl-mcp",
+      "package_version": "3.22.4",
+      "ref": {
+        "digest": "sha256:51b71ee634465d5d9704eb4be1da694e52701ea43f67184b71580db69566dba8",
+        "kind": "mcp_server",
+        "logical_id": "mcp.firecrawl",
+        "revision": 1
+      },
+      "schema_digest": "sha256:ebedae3e8de7e3292afba8c01aa2b1282636c4a51bff6369b04f0ba08f9db512",
+      "server_id": "mcp.firecrawl",
+      "server_name": "firecrawl",
+      "tools": [
+        {
+          "schema_digest": "sha256:4ede17428f1b79e3f552755e8be12a45104d76b0750ef411529ec605a6ea5ffd",
+          "tool_name": "firecrawl_agent"
+        },
+        {
+          "schema_digest": "sha256:ed15924a10e9cd3e35b4730e8b62e1755203c33d601be8b297aec2e6a1db1fa7",
+          "tool_name": "firecrawl_agent_status"
+        },
+        {
+          "schema_digest": "sha256:a00991ab75f9f13931ab7945f330b25dad9ed2ccd6817cb203e902dd19a97802",
+          "tool_name": "firecrawl_check_crawl_status"
+        },
+        {
+          "schema_digest": "sha256:5400e2878a9fc25561e105e8fb758c105104e6c45c65aec97879e2dbc5a98007",
+          "tool_name": "firecrawl_crawl"
+        },
+        {
+          "schema_digest": "sha256:fb1154fa6a67145faf9906dd9a70de8c6a778af0104b4aa706623c66221cbaa0",
+          "tool_name": "firecrawl_extract"
+        },
+        {
+          "schema_digest": "sha256:aa71e3186aa9325c5fd1112ab0a4b162373867063a1bd7fbab3e5d1cc3d27ac1",
+          "tool_name": "firecrawl_feedback"
+        },
+        {
+          "schema_digest": "sha256:1a44ce37de4536ae2eff1b3a144249cf58138de6653bf0714999c644238ae213",
+          "tool_name": "firecrawl_interact"
+        },
+        {
+          "schema_digest": "sha256:583d31d65f47b2340303c06d748039ed177de6a4a08f7520d0e74759c775214c",
+          "tool_name": "firecrawl_interact_stop"
+        },
+        {
+          "schema_digest": "sha256:ced0ac45619abfe537a7aa80d8458879b35659b1e88fd76820523440d40fc36e",
+          "tool_name": "firecrawl_map"
+        },
+        {
+          "schema_digest": "sha256:c2e507e037e7976d1dedfc1fdac8f7e394a4aca514f9c5361733d6a57ecbfaa8",
+          "tool_name": "firecrawl_monitor_check"
+        },
+        {
+          "schema_digest": "sha256:76ee935ffe6ab865c1c62694f15710915ee5cffdeb6c202bfb08e7a7cc0d54d2",
+          "tool_name": "firecrawl_monitor_checks"
+        },
+        {
+          "schema_digest": "sha256:920b9c25858eb686b2dd76e3bac119352f1fbbc81951c9d28da0027d00281511",
+          "tool_name": "firecrawl_monitor_create"
+        },
+        {
+          "schema_digest": "sha256:8d3eeed9a04a49c594ba859ab0d65442cc708419e5970edbdda436832d0f178d",
+          "tool_name": "firecrawl_monitor_delete"
+        },
+        {
+          "schema_digest": "sha256:a893a5254830ab6ae812878a7c79641a8a41a7f920b8815dc7e4685e01ed0989",
+          "tool_name": "firecrawl_monitor_get"
+        },
+        {
+          "schema_digest": "sha256:e05b1c888417b9d74629372247da7c98b6a28a019a358710f3c4a122ed3f7d49",
+          "tool_name": "firecrawl_monitor_list"
+        },
+        {
+          "schema_digest": "sha256:65f8b6a1c898d005793e16b6a63ca7513791ef8317e4838ef17a00882cb967f7",
+          "tool_name": "firecrawl_monitor_run"
+        },
+        {
+          "schema_digest": "sha256:e0662ce5cfe35ce0d96d8bd01c73b0163bdd14dd5c3e7f7af7752b0e09c846e5",
+          "tool_name": "firecrawl_monitor_update"
+        },
+        {
+          "schema_digest": "sha256:5c79dc29730974a7cb6d38c483deb3956a4fecfc924a4b6dd6c028708dd063db",
+          "tool_name": "firecrawl_parse"
+        },
+        {
+          "schema_digest": "sha256:ebaf5758739de10a2cf70aab079847e619338f1c14ea012199529bc19dfef4dd",
+          "tool_name": "firecrawl_research_inspect_paper"
+        },
+        {
+          "schema_digest": "sha256:476e8c3d702b062a093853d91337dea9975e0bc5a7f5ac347c409d21137e6796",
+          "tool_name": "firecrawl_research_read_paper"
+        },
+        {
+          "schema_digest": "sha256:049e8f150d0d0020491b1bbaec710321b80ca7d386ba7adfb58cd01bcb36918b",
+          "tool_name": "firecrawl_research_related_papers"
+        },
+        {
+          "schema_digest": "sha256:ede4e6eb732f64562fa3acd0ee65730f3a7adf837521a278a8075a46150c247c",
+          "tool_name": "firecrawl_research_search_github"
+        },
+        {
+          "schema_digest": "sha256:b12edec8a11320ef880408238a72924848429a61c00a23577eeaef440f980dc1",
+          "tool_name": "firecrawl_research_search_papers"
+        },
+        {
+          "schema_digest": "sha256:72591ba13168ebbc6f89fbab46ba03263cb8743586b729092c47ed8f5f4586bf",
+          "tool_name": "firecrawl_scrape"
+        },
+        {
+          "schema_digest": "sha256:b83ed81adeb767072941a3d6c342a6bd02cc123bf672eeb1a68daad536aed4a8",
+          "tool_name": "firecrawl_search"
+        },
+        {
+          "schema_digest": "sha256:589e482975c8da7acb05fe6bb3024b12d733e4b30eb90b2c38d6640cae68ada8",
+          "tool_name": "firecrawl_search_feedback"
+        }
+      ]
+    },
+    {
+      "credential_env": "TAVILY_API_KEY",
+      "module_digest": "sha256:60d2f3d0553f4879225990fd42e43265244ef5ac6d02799f6bafa5aef2d2d05e",
+      "module_locator": "workspace://.tools/node_modules/tavily-mcp/build/index.js",
+      "package_name": "tavily-mcp",
+      "package_version": "0.2.21",
+      "ref": {
+        "digest": "sha256:938435222bb3ffcba06fa26f31934ed3ceecbdaa0942894bd108aed46d18a3c9",
+        "kind": "mcp_server",
+        "logical_id": "mcp.tavily",
+        "revision": 1
+      },
+      "schema_digest": "sha256:a534a3b0be3804f2827f536071d95cf4b4973b06b324b22124ff743a7ac681bd",
+      "server_id": "mcp.tavily",
+      "server_name": "tavily",
+      "tools": [
+        {
+          "schema_digest": "sha256:15eaeafc15ccb422dca60935465b90c9c41f28fa09575020dabd320caf83ae8e",
+          "tool_name": "tavily_crawl"
+        },
+        {
+          "schema_digest": "sha256:0157958d70e1f81ab18c0897885a0e1187468c21ca99a3855074428d9fade21c",
+          "tool_name": "tavily_extract"
+        },
+        {
+          "schema_digest": "sha256:8d1be08a9485f81e113aaf1fde856d302d5eb8253ffae4f506ed40d4ff23c25c",
+          "tool_name": "tavily_map"
+        },
+        {
+          "schema_digest": "sha256:6769879e2f6f86386e0174cd29bd7e6a9879099d221a1ef675684c848f527529",
+          "tool_name": "tavily_research"
+        },
+        {
+          "schema_digest": "sha256:f2ee9d767927a6b8c5e25a3dd229e6f41945831e30ab3387d552cec2c47aa464",
+          "tool_name": "tavily_search"
+        }
+      ]
+    }
+  ],
+  "models": [
+    {
+      "provider": "openai",
+      "ref": {
+        "digest": "sha256:9114734fb63922a805011bfee5b9c003cf6dffca30e08f81133e7129c91b41d4",
+        "kind": "model",
+        "logical_id": "model.wp-cp-040",
+        "revision": 1
+      }
+    }
+  ],
+  "sandboxes": [
+    {
+      "backend": "state",
+      "ref": {
+        "digest": "sha256:7f6d8e74cbcc990dccfc8fcf4cf80aceeaab2ffedb6cc31fc34a969f3e5e0e79",
+        "kind": "sandbox_profile",
+        "logical_id": "sandbox.wp-cp-040",
+        "revision": 1
+      }
+    }
+  ],
+  "schema_version": "belllabs.capability-pins.v1",
+  "skills": [
+    {
+      "bundle_digest": "sha256:30722859c783baa15e5a073984e66e716566bc0bef28dbd2cef3ed78e2d1fab3",
+      "mount_root": "/skills/agent-browser",
+      "ref": {
+        "digest": "sha256:30722859c783baa15e5a073984e66e716566bc0bef28dbd2cef3ed78e2d1fab3",
+        "kind": "skill",
+        "logical_id": "skill.agent-browser",
+        "revision": 1
+      },
+      "skill_md_digest": "sha256:328161bfdbdef994868bd804cf7af58fe96daf266c736ec57ad2ade9b09f6d66",
+      "skill_name": "agent-browser",
+      "source_locator": "workspace://.agents/skills/agent-browser"
+    }
+  ],
+  "stores": [
+    {
+      "ref": {
+        "digest": "sha256:a7aa7349afd6c033fa9ededa8fcf1be0cd87638d59b58bf42d208316057f1d7f",
+        "kind": "memory_policy",
+        "logical_id": "store.wp-cp-040",
+        "revision": 1
+      }
+    }
+  ],
+  "tools": [
+    {
+      "entrypoint_digest": "sha256:8e382f4a5ba22f45e1e0339abfe5a55ed95a19540b16a69ee3faf31c8dc8216a",
+      "entrypoint_locator": "workspace://.tools/node_modules/agent-browser/bin/agent-browser.js",
+      "kind": "agent_browser_page",
+      "package_version": "0.33.0",
+      "ref": {
+        "digest": "sha256:4ce2fe636e0244348609c3e82ac5e90312cd753c9e41b0dc03fcdfd3c6cb858a",
+        "kind": "tool",
+        "logical_id": "tool.agent-browser-page",
+        "revision": 1
+      },
+      "schema_digest": "sha256:4ce2fe636e0244348609c3e82ac5e90312cd753c9e41b0dc03fcdfd3c6cb858a",
+      "tool_name": "agent_browser_page"
+    }
+  ]
+}

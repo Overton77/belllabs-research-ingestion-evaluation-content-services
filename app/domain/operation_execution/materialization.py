@@ -290,3 +290,28 @@ def verify_workspace_manifest(
         raise WorkspaceDigestMismatch("workspace materialization manifest digest is invalid")
     if (manifest.revision == 1) != (manifest.prior_manifest_digest is None):
         raise WorkspaceDigestMismatch("workspace materialization manifest lineage is invalid")
+
+
+GOAL_ROLE_SEGMENTS = frozenset({"executor", "verifier"})
+
+
+def slot_ownership_boundary(logical_path: str) -> str:
+    """The reservation key of an exclusive writable slot within one workspace namespace.
+
+    Two slots conflict when they share their first two path components, so nested or
+    sibling slots under one root are never owned by two workspaces. A GoalDirected unit binds
+    its slots under its role root `/goal/{iteration}/{role}` (RRM-016, REQ-CP-DA-013), and
+    that root is the ownership boundary: the iteration's executor and its independently
+    bound verifier (REQ-BP-GD-004) own disjoint roots in the run's one namespace (RRM-009).
+    """
+
+    parts = [part for part in logical_path.split("/") if part]
+    depth = (
+        3
+        if len(parts) >= 3
+        and parts[0] == "goal"
+        and parts[1].isdigit()
+        and parts[2] in GOAL_ROLE_SEGMENTS
+        else 2
+    )
+    return "/" + "/".join(parts[:depth])

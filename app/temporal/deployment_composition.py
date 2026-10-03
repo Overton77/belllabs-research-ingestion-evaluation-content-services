@@ -1,0 +1,717 @@
+"""The deployment `WorkerActivityCompositionFactory` (RRM-009, CP-050 prerequisite).
+
+`python -m app.temporal.worker` composes this factory when `COORDINATOR_LAUNCH_ENABLED` is
+set. It wires, through the existing application ports and nothing else:
+
+* the application PostgreSQL authority (run control, operation journal, checkpoint lineage
+  and recovery, fork materialization, typed results) on the worker's runtime pool;
+* MongoDB immutable definitions, operation bindings, family documents and templates,
+  workspace manifests and async-child detail;
+* the object artifact store (S3 when a bucket is configured, otherwise the shared
+  content-addressed directory) for result payloads, artifact promotion and candidates;
+* the persistent, registered LangGraph saver and store (REQ-CP-DA-004, DA-016), opened once
+  per worker process and registered under the deployment's exact checkpointer and store
+  digests;
+* the exact capability registry from the deployment pins (models, Skills, MCP servers,
+  host tools, sandboxes), the governed async-subagent middleware (RRM-013), the recovery
+  composition (RRM-004), the fork reuse resolver (RRM-006), the boundary application
+  services (RRM-007) and the journaled GoalDirected settlement (RRM-016);
+* the canonical workflow and activity registries and task queues.
+
+Nothing here is company- or fixture-specific. Deterministic qualification models are
+registered through `additional_components`, exactly like any other exact model revision.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from contextlib import AsyncExitStack
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from typing import Any
+
+import asyncpg
+from langchain_core.tools import BaseTool
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.store.base import BaseStore
+from temporalio.client import Client
+
+from app.application.async_subagents.mongo_async_subagent_repository import (
+    MongoAsyncSubagentDetailRepository,
+)
+from app.application.async_subagents.parent_completion import (
+    AdmissionRule,
+    AsyncChildCompletion,
+    admit_typed_manifest,
+)
+from app.application.async_subagents.parent_effects import RunControlAsyncChildEffects
+from app.application.async_subagents.postgres_async_subagents import PostgresAsyncSubagentAuthority
+from app.application.async_subagents.service import AsyncSubagentService
+from app.application.control_plane.service import ControlPlaneService
+from app.application.coordinator.coordinator_results import TerminalWorkflowCompletionService
+from app.application.coordinator.postgres_workflow_result_repository import (
+    PostgresWorkflowResultRepository,
+)
+from app.application.operations.checkpoint_lineage import DEFAULT_CLAIM_LEASE
+from app.application.operations.journaled_operation_execution import (
+    JournaledOperationExecutionCoordinator,
+)
+from app.application.operations.mongo_operation_execution_repository import (
+    MongoOperationBindingRepository,
+)
+from app.application.operations.operation_execution import (
+    OperationExecutionService,
+    RunControlOperationAuthority,
+    RunControlOperationBudgetAuthority,
+    SecretResolutionPort,
+)
+from app.application.operations.operation_journal import OperationJournalService
+from app.application.operations.operation_recovery_composition import (
+    OperationRecoveryComposition,
+    compose_postgres_operation_recovery,
+)
+from app.application.operations.postgres_operation_journal import (
+    PostgresAtomicOperationJournalRepository,
+)
+from app.application.orchestration.mongo_goal_directed_repository import (
+    MongoGoalDirectedDocumentRepository,
+)
+from app.application.orchestration.mongo_stagegraph_repository import (
+    MongoStageGraphOperationTemplateRepository,
+)
+from app.application.orchestration.orchestration_routing import SemanticHandlerRegistry
+from app.application.orchestration.postgres_orchestration_binding_repository import (
+    PostgresRunSemanticInputBindingRepository,
+)
+from app.application.orchestration.service import (
+    F1OrchestrationBindingVerifier,
+    RunControlLifecycleGateway,
+    orchestration_lifecycle_actor,
+)
+from app.application.run_control.postgres_run_control_repository import PostgresRunControlRepository
+from app.application.run_control.service import RunControlService
+from app.application.runtime.postgres_run_forks import PostgresForkMaterializationStore
+from app.application.runtime.run_forks import ForkReuseResolver
+from app.application.workspaces.artifact_promotion import (
+    ArtifactPayloadAddress,
+    ArtifactPayloadPort,
+    ArtifactPromotionService,
+    ArtifactValidationAuthorityPort,
+    StaticArtifactValidationAuthority,
+)
+from app.application.workspaces.mongo_artifact_repository import MongoArtifactMetadataRepository
+from app.application.workspaces.mongo_workspace_repository import MongoWorkspaceManifestRepository
+from app.application.workspaces.postgres_artifact_repository import (
+    PostgresArtifactDurableReferenceRepository,
+)
+from app.application.workspaces.workspace_candidates import WorkspaceCandidateCaptureService
+from app.application.workspaces.workspace_materialization import (
+    BindingWorkspaceMaterializer,
+    WorkspaceMaterializationService,
+)
+from app.config import PROJECT_ROOT, Settings
+from app.domain.operation_execution.contracts import (
+    AsyncChildCancellationRecord,
+    AsyncSubagentContract,
+    AsyncSubagentDependencyClass,
+    DeepAgentMCPServerComponent,
+    OperationExecutionBinding,
+    RuntimeInvocation,
+    RuntimeResult,
+)
+from app.domain.run_control.contracts import ActorContext
+from app.integrations.agents.deep_agents import (
+    DeepAgentRuntimeAdapter,
+    DeepAgentsAsyncSubagentAdapter,
+    DockerSandboxFactory,
+    ExactComponentRegistry,
+    ExactDeepAgentMaterializer,
+    LangSmithSandboxFactory,
+    OpenAIExactModelFactory,
+    StateSandboxFactory,
+)
+from app.integrations.agents.deep_agents.async_subagents import BellLabsAsyncSubagentMiddleware
+from app.integrations.agents.deep_agents.browser_tool import (
+    AgentBrowserPageTool,
+    granted_network_hosts,
+)
+from app.integrations.agents.deep_agents.checkpoint_verifier import (
+    LangGraphCheckpointDescendantVerifier,
+)
+from app.integrations.agents.deep_agents.materializer import (
+    ModelFactory,
+    ResolvedSkillBundle,
+    SandboxFactory,
+)
+from app.integrations.artifact_payloads import S3ArtifactPayloadStore
+from app.integrations.capability_pins import CapabilityPins
+from app.integrations.filesystem_workspace import FilesystemWorkspaceProvisioner
+from app.integrations.langgraph_persistence import StandalonePersistenceLifespan
+from app.integrations.operation_runtime_ports import (
+    EnvironmentSecretResolver,
+    FilesystemArtifactPayloadStore,
+    PinnedCapabilityAssetVerifier,
+    RecordedOperationEventSink,
+)
+from app.integrations.temporal_unit_reconciliation import TemporalUnitReconciliationNudge
+from app.integrations.workspace_candidate_contents import ObjectStoreWorkspaceCandidateContents
+from app.temporal.artifact_activities import ArtifactPromotionActivities
+from app.temporal.coordinator_runtime import (
+    GoalDirectedCoordinatorDependencies,
+    StageGraphCoordinatorDependencies,
+    create_routed_coordinator_activities,
+)
+from app.temporal.operation_activities import OperationExecutionActivities
+from app.temporal.worker import WorkerActivityComposition, operation_heartbeat_policy
+
+DEFAULT_ARTIFACT_PAYLOAD_ROOT = PROJECT_ROOT / ".artifact-payloads"
+ASYNC_CHILD_COMPLETION_KIND = "async_child_completion.v1"
+# The result admission policies this deployment decides at the parent boundary, by the
+# contract's `result_admission_policy_ref`; a child of any other policy is left undecided.
+DEFAULT_ASYNC_RESULT_POLICIES: Mapping[str, AdmissionRule] = {
+    "policy:async-result:technical-child@1": admit_typed_manifest,
+}
+DEFAULT_WORKSPACE_ROOT = PROJECT_ROOT / ".workspaces"
+GOAL_DIRECTED_WORKER_ACTOR = "goal-directed-worker"
+
+
+@dataclass(frozen=True)
+class DeploymentCapabilityComponents:
+    """Exact components a deployment registers beside the pinned catalog.
+
+    Keys are immutable definition digests (`ExactComponentRegistry` semantics). A
+    qualification registers its deterministic model under the model digest it binds; a
+    deployment registers nothing here unless it serves a component the pin file cannot
+    describe (a structured output schema, a middleware instance).
+    """
+
+    model_factories: Mapping[str, ModelFactory] = field(default_factory=dict)
+    prompts: Mapping[str, str] = field(default_factory=dict)
+    tools: Mapping[str, BaseTool] = field(default_factory=dict)
+    skill_bundles: Mapping[str, ResolvedSkillBundle] = field(default_factory=dict)
+    sandbox_factories: Mapping[str, SandboxFactory] = field(default_factory=dict)
+    structured_output_schemas: Mapping[str, type[Any] | dict[str, Any]] = field(
+        default_factory=dict
+    )
+    # Exact MCP server components (by ref digest) the worker may launch besides the pinned
+    # ones; compared by full equality before every launch (qualification harnesses only).
+    mcp_servers: Mapping[str, DeepAgentMCPServerComponent] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class DeploymentCapabilityRegistry:
+    registry: ExactComponentRegistry
+    pins: CapabilityPins
+    checkpointers: Mapping[str, BaseCheckpointSaver[Any]]
+
+    def disclosure(self) -> dict[str, object]:
+        return {
+            **self.pins.disclosure(),
+            "checkpointer_digests": sorted(self.checkpointers),
+            "store_digests": sorted(self.registry.stores),
+            "model_digests": sorted(self.registry.model_factories),
+            "sandbox_digests": sorted(self.registry.sandbox_factories),
+        }
+
+
+def build_deployment_capability_registry(
+    settings: Settings,
+    pins: CapabilityPins,
+    *,
+    saver: BaseCheckpointSaver[Any],
+    store: BaseStore,
+    additional: DeploymentCapabilityComponents | None = None,
+) -> DeploymentCapabilityRegistry:
+    """The exact component registry: pinned catalog plus the persistent saver and store."""
+
+    extra = additional or DeploymentCapabilityComponents()
+    model_factories: dict[str, ModelFactory] = {
+        model.ref.digest: OpenAIExactModelFactory() for model in pins.models
+    }
+    model_factories.update(extra.model_factories)
+    sandbox_factories: dict[str, SandboxFactory] = {}
+    for sandbox in pins.sandboxes:
+        if sandbox.backend == "state":
+            sandbox_factories[sandbox.ref.digest] = StateSandboxFactory()
+        elif sandbox.backend == "docker":
+            sandbox_factories[sandbox.ref.digest] = DockerSandboxFactory(
+                workspace_root=settings.deep_agent_sandbox_workspace_root
+                or DEFAULT_WORKSPACE_ROOT / "sandboxes"
+            )
+        else:
+            sandbox_factories[sandbox.ref.digest] = LangSmithSandboxFactory()
+    sandbox_factories.update(extra.sandbox_factories)
+    tools: dict[str, BaseTool] = {}
+    for tool in pins.tools:
+        if settings.web_research_agent_browser_node is None:
+            raise ValueError("pinned agent-browser tool requires WEB_RESEARCH_AGENT_BROWSER_NODE")
+        tools[tool.ref.digest] = AgentBrowserPageTool(
+            node_executable=settings.web_research_agent_browser_node,
+            entrypoint=tool.verify_entrypoint(),
+            command_timeout_seconds=settings.web_research_browser_command_timeout_seconds,
+            max_output_bytes=settings.web_research_max_browser_output_bytes,
+        )
+    tools.update(extra.tools)
+    skill_bundles: dict[str, ResolvedSkillBundle] = {
+        skill.bundle_digest: skill.bundle() for skill in pins.skills
+    }
+    skill_bundles.update(extra.skill_bundles)
+    checkpointers = {item.ref.digest: saver for item in pins.checkpointers}
+    stores = {item.ref.digest: store for item in pins.stores}
+    registry = ExactComponentRegistry(
+        model_factories=model_factories,
+        prompts=dict(extra.prompts),
+        tools=tools,
+        skill_bundles=skill_bundles,
+        sandbox_factories=sandbox_factories,
+        checkpointers=checkpointers,
+        stores=stores,
+        structured_output_schemas=dict(extra.structured_output_schemas),
+    )
+    return DeploymentCapabilityRegistry(registry=registry, pins=pins, checkpointers=checkpointers)
+
+
+def artifact_payload_store(settings: Settings) -> ArtifactPayloadPort:
+    if settings.s3_bucket:
+        return S3ArtifactPayloadStore(settings, settings.s3_bucket)
+    return FilesystemArtifactPayloadStore(
+        settings.artifact_payload_root or DEFAULT_ARTIFACT_PAYLOAD_ROOT
+    )
+
+
+class ProductionAsyncSubagentMiddlewareFactory:
+    """RRM-013 in production: one governed `AsyncSubagentService` per parent operation.
+
+    The provider adapter is built from the operation's resolved secrets (the deployment
+    credential reference the parent binding declares) and its request scope; reservations,
+    links and the parent's effect claim go through the worker's run control before any
+    provider call. New spawns are allowed only when the deployment opts in.
+    """
+
+    def __init__(
+        self,
+        *,
+        pool: asyncpg.Pool,
+        run_control: RunControlService,
+        actor: ActorContext,
+        allow_new_spawns: bool,
+        submitter_identity: str,
+        dependency_class: AsyncSubagentDependencyClass = (
+            AsyncSubagentDependencyClass.REQUIRED_BLOCKING
+        ),
+    ) -> None:
+        self._pool = pool
+        self._run_control = run_control
+        self._actor = actor
+        self._allow_new_spawns = allow_new_spawns
+        self._submitter_identity = submitter_identity
+        self._dependency_class = dependency_class
+
+    def service(
+        self, binding: OperationExecutionBinding, resolved_secrets: Mapping[str, str]
+    ) -> tuple[AsyncSubagentService, DeepAgentsAsyncSubagentAdapter]:
+        """The governed service of one parent operation, over its scope-bound credential."""
+
+        adapter = DeepAgentsAsyncSubagentAdapter(
+            secrets=resolved_secrets, request_scope=binding.request_scope
+        )
+        service = AsyncSubagentService(
+            MongoAsyncSubagentDetailRepository(),
+            PostgresAsyncSubagentAuthority(self._pool),
+            adapter,
+            parent_effects=RunControlAsyncChildEffects(self._run_control, actor=self._actor),
+            allow_new_spawns=self._allow_new_spawns,
+            submitter_identity=self._submitter_identity,
+        )
+        return service, adapter
+
+    def middleware(
+        self,
+        binding: OperationExecutionBinding,
+        contracts: tuple[AsyncSubagentContract, ...],
+        resolved_secrets: Mapping[str, str],
+    ) -> BellLabsAsyncSubagentMiddleware:
+        service, adapter = self.service(binding, resolved_secrets)
+        return BellLabsAsyncSubagentMiddleware(
+            service=service,
+            adapter=adapter,
+            binding=binding,
+            contracts=contracts,
+            dependency_class=self._dependency_class,
+        )
+
+
+class ProductionAsyncChildCancellation:
+    """RRM-008 step 4 in production: the operation boundary's `AsyncChildCancellationPort`.
+
+    `OperationExecutionService.cancel_children` names only the parent binding. The provider
+    adapter of that parent's children needs the operation's own scope-bound credential, so
+    this port resolves the binding's `secret_refs` (the same resolver cognition uses), builds
+    the parent's governed `AsyncSubagentService` exactly as the middleware does, and cancels
+    every active child under its link policy. A parent that spawned no child resolves no
+    secret and calls no provider.
+    """
+
+    def __init__(
+        self,
+        children: ProductionAsyncSubagentMiddlewareFactory,
+        authority: PostgresAsyncSubagentAuthority,
+        secrets: SecretResolutionPort,
+    ) -> None:
+        self._children = children
+        self._authority = authority
+        self._secrets = secrets
+
+    async def cancel_children(
+        self,
+        binding: OperationExecutionBinding,
+        *,
+        reason: str,
+        requested_at: datetime,
+    ) -> tuple[AsyncChildCancellationRecord, ...]:
+        if not await self._authority.list_child_ids(binding.request_scope, binding.binding_id):
+            return ()
+        resolved = await self._secrets.resolve(binding.secret_refs)
+        service, _adapter = self._children.service(binding, resolved)
+        return await service.cancel_children(binding, reason=reason, requested_at=requested_at)
+
+
+class DeploymentOperationRuntime:
+    """The deployment's operation runtime around the canonical Deep Agent adapter.
+
+    * Constrained egress: the operation's granted `network_hosts` bound every governed
+      browser page its cognition opens (`granted_network_hosts`).
+    * After cognition, the parent-boundary completion of the async children it spawned
+      (`AsyncChildCompletion`); the records travel with the runtime's event payloads into the
+      settlement's digest-bound output payload.
+
+    Every other runtime capability is the wrapped adapter's. RRM-008: a requested cancel
+    reaches `execute` as `asyncio.CancelledError` (during cognition or during the children's
+    completion wait) and is never caught here; the operation boundary decides whether it is a
+    journaled cancel of the unit (`observe_latest` then reports the latest durable
+    checkpoint, still inside the granted egress) or anything else (re-raised).
+    """
+
+    def __init__(
+        self,
+        runtime: DeepAgentRuntimeAdapter,
+        children: ProductionAsyncSubagentMiddlewareFactory,
+        *,
+        pool: asyncpg.Pool,
+        policies: Mapping[str, AdmissionRule],
+        wait_seconds: float,
+        launch_verifier: PinnedCapabilityAssetVerifier | None = None,
+    ) -> None:
+        self._runtime = runtime
+        self._children = children
+        self._pool = pool
+        self._policies = dict(policies)
+        self._wait_seconds = wait_seconds
+        self._launch_verifier = launch_verifier
+
+    def _verify_launch(self, invocation: RuntimeInvocation) -> None:
+        # RRM-009 review: every path that materializes the agent (and so starts its stdio
+        # MCP servers) verifies the launch against the pins first, including the
+        # cancellation path's `observe_latest`.
+        if self._launch_verifier is not None:
+            self._launch_verifier.verify_launch(invocation.binding)
+
+    async def execute(
+        self, invocation: RuntimeInvocation, resolved_secrets: Mapping[str, str]
+    ) -> RuntimeResult:
+        self._verify_launch(invocation)
+        with granted_network_hosts(invocation.binding.capability_grant.network_hosts):
+            result = await self._runtime.execute(invocation, resolved_secrets)
+        deep = invocation.binding.deep_agent_binding
+        if deep is None or not deep.async_subagents:
+            return result
+        service, _adapter = self._children.service(invocation.binding, resolved_secrets)
+        records = await AsyncChildCompletion(
+            service,
+            PostgresAsyncSubagentAuthority(self._pool),
+            policies=self._policies,
+            wait_seconds=self._wait_seconds,
+        ).complete(invocation.binding, execution_generation=deep.execution_generation)
+        return result.model_copy(
+            update={
+                "event_payloads": (
+                    *result.event_payloads,
+                    {
+                        "kind": ASYNC_CHILD_COMPLETION_KIND,
+                        "binding_id": invocation.binding.binding_id,
+                        "children": [record.as_payload() for record in records],
+                    },
+                )
+            }
+        )
+
+    async def observe_latest(
+        self, invocation: RuntimeInvocation, resolved_secrets: Mapping[str, str]
+    ) -> RuntimeResult:
+        self._verify_launch(invocation)
+        with granted_network_hosts(invocation.binding.capability_grant.network_hosts):
+            return await self._runtime.observe_latest(invocation, resolved_secrets)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._runtime, name)
+
+
+@dataclass(frozen=True)
+class ProductionOperationComposition:
+    """What the factory built for the operation boundary, kept for the worker's readiness."""
+
+    service: OperationExecutionService
+    recovery: OperationRecoveryComposition
+    capabilities: DeploymentCapabilityRegistry
+    saver: BaseCheckpointSaver[Any]
+    payloads: ArtifactPayloadPort
+    promotion: ArtifactPromotionService
+    candidates: WorkspaceCandidateCaptureService
+
+
+class ProductionWorkerActivityCompositionFactory:
+    def __init__(
+        self,
+        client: Client,
+        *,
+        pins: CapabilityPins | None = None,
+        additional_components: DeploymentCapabilityComponents | None = None,
+        artifact_validation: ArtifactValidationAuthorityPort | None = None,
+        worker_identity: str | None = None,
+        claim_lease: timedelta | None = None,
+        async_result_policies: Mapping[str, AdmissionRule] | None = None,
+    ) -> None:
+        self._client = client
+        self._async_result_policies = dict(
+            async_result_policies
+            if async_result_policies is not None
+            else DEFAULT_ASYNC_RESULT_POLICIES
+        )
+        self._pins = pins
+        self._additional = additional_components
+        self._artifact_validation = artifact_validation
+        self._worker_identity = worker_identity
+        self._claim_lease = claim_lease
+        self.operation: ProductionOperationComposition | None = None
+
+    async def build(
+        self,
+        *,
+        settings: Settings,
+        control_plane: ControlPlaneService,
+        run_control: RunControlService,
+        postgres_pool: asyncpg.Pool,
+    ) -> WorkerActivityComposition:
+        resources = AsyncExitStack()
+        try:
+            return await self._build(
+                resources,
+                settings=settings,
+                control_plane=control_plane,
+                run_control=run_control,
+                postgres_pool=postgres_pool,
+            )
+        except BaseException:
+            # RRM-009 review: a composition that fails partway closes what it opened.
+            await resources.aclose()
+            raise
+
+    async def _build(
+        self,
+        resources: AsyncExitStack,
+        *,
+        settings: Settings,
+        control_plane: ControlPlaneService,
+        run_control: RunControlService,
+        postgres_pool: asyncpg.Pool,
+    ) -> WorkerActivityComposition:
+        persistence = await resources.enter_async_context(
+            StandalonePersistenceLifespan(
+                settings.langgraph_checkpoint_dsn,
+                run_setup=settings.langgraph_checkpoint_setup,
+            )
+        )
+        pins = self._pins if self._pins is not None else CapabilityPins.from_settings(settings)
+        capabilities = build_deployment_capability_registry(
+            settings,
+            pins,
+            saver=persistence.saver,
+            store=persistence.store,
+            additional=self._additional,
+        )
+        actor = orchestration_lifecycle_actor()
+        payloads = artifact_payload_store(settings)
+        bindings = MongoOperationBindingRepository()
+        workspaces = WorkspaceMaterializationService(
+            manifests=MongoWorkspaceManifestRepository(),
+            provisioner=FilesystemWorkspaceProvisioner(
+                settings.deep_agent_sandbox_workspace_root or DEFAULT_WORKSPACE_ROOT
+            ),
+            durable_inputs=_DurableInputsFromPayloads(payloads),
+        )
+        candidates = WorkspaceCandidateCaptureService(
+            materializer=workspaces, contents=ObjectStoreWorkspaceCandidateContents(payloads)
+        )
+        promotion = ArtifactPromotionService(
+            bindings=bindings,
+            metadata=MongoArtifactMetadataRepository(),
+            payloads=payloads,
+            workspaces=workspaces,
+            durable_references=PostgresArtifactDurableReferenceRepository(postgres_pool),
+            validation_authority=self._artifact_validation
+            or StaticArtifactValidationAuthority(
+                permission_outcomes={}, check_outcomes={}, required_check_ids={}
+            ),
+        )
+        recovery = compose_postgres_operation_recovery(
+            postgres_pool,
+            run_control=run_control,
+            nudge=TemporalUnitReconciliationNudge(self._client),
+            verifier=LangGraphCheckpointDescendantVerifier(capabilities.checkpointers),
+            default_lease=self._claim_lease or DEFAULT_CLAIM_LEASE,
+        )
+        children = ProductionAsyncSubagentMiddlewareFactory(
+            pool=postgres_pool,
+            run_control=run_control,
+            actor=actor,
+            allow_new_spawns=settings.async_subagent_spawning_enabled,
+            submitter_identity=settings.async_subagent_submitter_identity,
+        )
+        verifier = PinnedCapabilityAssetVerifier(
+            pins,
+            node_executable=settings.web_research_agent_browser_node,
+            registered_mcp_servers=(
+                self._additional.mcp_servers if self._additional is not None else None
+            ),
+        )
+        adapter = DeploymentOperationRuntime(
+            DeepAgentRuntimeAdapter(
+                ExactDeepAgentMaterializer(capabilities.registry),
+                async_subagents=children,
+                workspace_outputs=candidates,
+            ),
+            children,
+            pool=postgres_pool,
+            policies=self._async_result_policies,
+            wait_seconds=settings.async_subagent_completion_wait_seconds,
+            launch_verifier=verifier,
+        )
+        secrets = EnvironmentSecretResolver()
+        service = OperationExecutionService(
+            authority=RunControlOperationAuthority(run_control, control_plane),
+            bindings=bindings,
+            runtime=adapter,
+            sandbox=BindingWorkspaceMaterializer(workspaces),
+            assets=verifier,
+            mcp=verifier,
+            secrets=secrets,
+            events=RecordedOperationEventSink(),
+            budget=RunControlOperationBudgetAuthority(run_control, actor=actor),
+            journal=JournaledOperationExecutionCoordinator(
+                journal=OperationJournalService(
+                    PostgresAtomicOperationJournalRepository(postgres_pool)
+                ),
+                run_control=run_control,
+                results=payloads,
+                actor=actor,
+            ),
+            journal_claimed_by=settings.operation_journal_claimed_by,
+            lineage=recovery.lineage,
+            fork_reuse=ForkReuseResolver(
+                PostgresForkMaterializationStore(postgres_pool), results=payloads, bindings=bindings
+            ),
+            # RRM-008 step 4: the cancellation saga cancels the unit's active async children
+            # with the operation's own scope-bound credential.
+            children=ProductionAsyncChildCancellation(
+                children, PostgresAsyncSubagentAuthority(postgres_pool), secrets
+            ),
+        )
+        self.operation = ProductionOperationComposition(
+            service=service,
+            recovery=recovery,
+            capabilities=capabilities,
+            saver=persistence.saver,
+            payloads=payloads,
+            promotion=promotion,
+            candidates=candidates,
+        )
+        semantic_bindings = PostgresRunSemanticInputBindingRepository(postgres_pool)
+        completion = TerminalWorkflowCompletionService(
+            runs=run_control,
+            results=PostgresWorkflowResultRepository(postgres_pool),
+        )
+        goal_documents = MongoGoalDirectedDocumentRepository()
+        # RRM-008 composed: heartbeat timeout per operation class, and a worker drain shorter
+        # than every one of them (refused before any worker is created).
+        heartbeats = operation_heartbeat_policy(settings)
+        heartbeats.verify_graceful_shutdown(settings.worker_graceful_shutdown_seconds)
+        coordinator = create_routed_coordinator_activities(
+            bindings=semantic_bindings,
+            handlers=SemanticHandlerRegistry(),
+            lifecycle=RunControlLifecycleGateway(
+                run_control, F1OrchestrationBindingVerifier(control_plane), actor
+            ),
+            goal_directed=GoalDirectedCoordinatorDependencies(
+                run_control=run_control,
+                operation_bindings=bindings,
+                templates=goal_documents,
+                documents=goal_documents,
+                actor=ActorContext(
+                    actor_id=GOAL_DIRECTED_WORKER_ACTOR,
+                    permissions=frozenset(
+                        {"workflow_run.goal_directed", "workflow_run.reserve_budget"}
+                    ),
+                    authority_refs=frozenset({f"authority:{GOAL_DIRECTED_WORKER_ACTOR}"}),
+                ),
+                operation_heartbeats=heartbeats,
+            ),
+            stagegraph=StageGraphCoordinatorDependencies(
+                run_control=run_control,
+                repository=PostgresRunControlRepository(postgres_pool),
+                operation_bindings=bindings,
+                templates=MongoStageGraphOperationTemplateRepository(),
+                operation_heartbeats=heartbeats,
+            ),
+            completion=completion,
+        )
+        return WorkerActivityComposition(
+            coordinator=coordinator,
+            operation=OperationExecutionActivities(service, worker_identity=self._worker_identity),
+            artifacts=ArtifactPromotionActivities(service=promotion, candidates=candidates),
+            resources=resources,
+        )
+
+
+class _DurableInputsFromPayloads:
+    """Governed read-only workspace inputs come from the content-addressed payload store."""
+
+    def __init__(self, payloads: ArtifactPayloadPort) -> None:
+        self._payloads = payloads
+
+    async def retrieve(self, durable_ref: str) -> bytes:
+        object_ref, _, rest = durable_ref.partition("#")
+        digest, _, size = rest.partition(":")
+        if not digest or not size.isdigit():
+            raise ValueError(
+                "durable workspace input must be addressed as <object_ref>#<sha256>:<size>"
+            )
+        return await self._payloads.retrieve(
+            ArtifactPayloadAddress(
+                object_ref=object_ref, content_digest=digest, size_bytes=int(size)
+            )
+        )
+
+
+__all__ = [
+    "ASYNC_CHILD_COMPLETION_KIND",
+    "DeploymentOperationRuntime",
+    "DEFAULT_ASYNC_RESULT_POLICIES",
+    "DeploymentCapabilityComponents",
+    "DeploymentCapabilityRegistry",
+    "ProductionAsyncChildCancellation",
+    "ProductionAsyncSubagentMiddlewareFactory",
+    "ProductionOperationComposition",
+    "ProductionWorkerActivityCompositionFactory",
+    "artifact_payload_store",
+    "build_deployment_capability_registry",
+]

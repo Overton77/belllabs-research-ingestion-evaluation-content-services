@@ -18,6 +18,8 @@ from app.application.run_control.run_control_repository import (
 )
 from app.domain.run_control.budget import roll_up_child_budget
 from app.domain.run_control.contracts import (
+    CANCEL_SEQUENCE_SPACE,
+    EXECUTION_SEQUENCE_SPACE,
     AdmissionDecision,
     BoundaryCommandReceipt,
     BoundaryCommandRecord,
@@ -476,6 +478,46 @@ class PostgresRunControlRepository:
             ]
         return tuple(status for status in statuses if status is not None)
 
+    async def runs_with_pending_boundary_commands(
+        self, request_scope: str, *, limit: int = 100
+    ) -> tuple[str, ...]:
+        # The latest receipt of an operator family command in the root's `execution`
+        # sequence space, or of a cancel in its own `cancel` space (RRM-008), is still
+        # `accepted`: inline delivery failed or never ran (`pending_delivery`); the relay
+        # re-drives those runs in acceptance order.
+        async with self._pool.acquire() as connection, connection.transaction():
+            await _set_scope(connection, request_scope)
+            rows = await connection.fetch(
+                """
+                SELECT c.run_id, min(c.recorded_at) AS first_accepted
+                FROM belllabs_control.boundary_commands c
+                JOIN LATERAL (
+                    SELECT r.state
+                    FROM belllabs_control.boundary_command_receipts r
+                    WHERE r.request_scope = c.request_scope AND r.run_id = c.run_id
+                      AND r.idempotency_issuer = c.idempotency_issuer
+                      AND r.command_id = c.command_id
+                    ORDER BY r.ordinal DESC
+                    LIMIT 1
+                ) latest ON TRUE
+                WHERE c.request_scope = $1
+                  AND latest.state = 'accepted'
+                  AND c.target_kind IN ('root', 'family')
+                  AND (
+                    (c.kind IN ('pause', 'resume', 'satisfy_wait') AND c.sequence_space = $2)
+                    OR (c.kind = 'cancel' AND c.sequence_space = $4)
+                  )
+                GROUP BY c.run_id
+                ORDER BY first_accepted
+                LIMIT $3
+                """,
+                request_scope,
+                EXECUTION_SEQUENCE_SPACE,
+                limit,
+                CANCEL_SEQUENCE_SPACE,
+            )
+        return tuple(str(row["run_id"]) for row in rows)
+
     async def record_boundary_receipt(
         self,
         request_scope: str,
@@ -836,6 +878,8 @@ class PostgresRunControlRepository:
                 await self._insert_ledger(connection, command.ledger_entries)
                 await self._insert_effect_ledger(connection, command.effect_entries)
                 await self._insert_events(connection, command.events)
+            # The terminal receipts of a family-admitted terminalization (migration 0026).
+            await self._record_boundary_commands(connection, command)
             await self._inject("family_admission.after_run_control")
             if accepted:
                 await connection.execute(
