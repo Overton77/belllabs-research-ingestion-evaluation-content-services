@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import os
 from types import SimpleNamespace
 
+import pytest
 from pydantic import SecretStr
 
-from app.config import Settings, get_settings
+from app.config import Settings
 from app.integrations.langsmith_tracing import (
     configure_langsmith_tracing,
     create_traced_async_openai,
@@ -13,33 +15,49 @@ from app.integrations.langsmith_tracing import (
     process_runtime_execute_outputs,
     runtime_execute_metadata,
 )
+from tests.fixtures.isolated_settings import isolated_settings
+
+_LANGSMITH_ENV = (
+    "LANGSMITH_TRACING",
+    "LANGSMITH_API_KEY",
+    "LANGSMITH_PROJECT",
+    "LANGSMITH_ENDPOINT",
+    "LANGSMITH_WORKSPACE_ID",
+)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_langsmith_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Start every test with no LANGSMITH_* variables and restore the originals afterwards.
+
+    `configure_langsmith_tracing` exports into `os.environ`; recording each name with
+    `setenv` first makes `monkeypatch` delete whatever a test exports even when the variable
+    was originally absent, so no test leaks into a later one.
+    """
+
+    for name in _LANGSMITH_ENV:
+        monkeypatch.setenv(name, "")
+        monkeypatch.delenv(name)
 
 
 def test_settings_expose_langsmith_contract() -> None:
-    settings = get_settings()
+    settings = isolated_settings()
     assert settings.langsmith_project == "BellLabsBiotech"
     assert settings.langsmith_endpoint.startswith("https://")
-    assert isinstance(settings.langsmith_tracing, bool)
+    assert settings.langsmith_tracing is False
+    assert settings.langsmith_api_key is None
 
 
-def test_configure_langsmith_tracing_exports_env(monkeypatch) -> None:
-    monkeypatch.delenv("LANGSMITH_TRACING", raising=False)
-    monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
-    monkeypatch.delenv("LANGSMITH_PROJECT", raising=False)
+def test_configure_langsmith_tracing_exports_env() -> None:
     import app.integrations.langsmith_tracing as tracing
 
-    settings = get_settings().model_copy(
-        update={
-            "langsmith_api_key": SecretStr("lsv2_pt_test_key"),
-            "langsmith_tracing": True,
-            "langsmith_project": "BellLabsBiotech-Test",
-            "openai_api_key": SecretStr("sk-test"),
-        }
+    settings = isolated_settings(
+        langsmith_api_key=SecretStr("lsv2_pt_test_key"),
+        langsmith_tracing=True,
+        langsmith_project="BellLabsBiotech-Test",
     )
     enabled = configure_langsmith_tracing(settings)
     assert enabled is True
-    import os
-
     assert os.environ["LANGSMITH_TRACING"] == "true"
     assert os.environ["LANGSMITH_API_KEY"] == "lsv2_pt_test_key"
     assert os.environ["LANGSMITH_PROJECT"] == "BellLabsBiotech-Test"
@@ -105,11 +123,6 @@ def test_embedding_input_processor_summarizes_batch() -> None:
 
 
 def test_langsmith_settings_optional_when_unset() -> None:
-    settings = get_settings().model_copy(
-        update={
-            "langsmith_api_key": None,
-            "langsmith_tracing": False,
-        }
-    )
+    settings = isolated_settings(langsmith_api_key=None, langsmith_tracing=False)
     assert isinstance(settings, Settings)
     assert configure_langsmith_tracing(settings) is False

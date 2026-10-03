@@ -275,6 +275,13 @@ async def _stagegraph_demo(
     }
 
 
+async def _family_recorded_pause(client: Any, family_id: str) -> bool:
+    state = await client.get_workflow_handle(family_id).query(
+        GoalDirectedWorkflow.boundary_state
+    )
+    return state["paused"] is not None
+
+
 async def _goal_directed_demo(
     env: WorkflowEnvironment, pool: asyncpg.Pool, authority: Authority, facade: Facade
 ) -> dict[str, Any]:
@@ -304,6 +311,11 @@ async def _goal_directed_demo(
         assert (await facade.projection(run_id))["phase"] == "active", "delivered is not applied"
         activities.release_executor.set()
         await until(lambda: _phase_is(authority, run_id, RunPhase.PAUSED), seconds=90)
+        # The `applied` receipt and the PAUSED projection are written by the boundary
+        # activity, before the family's workflow task has consumed the activity result. Stop
+        # worker 1 only once the family itself has recorded the pause, or worker 2 would
+        # query a family that is still waiting to re-run that activity.
+        await until(lambda: _family_recorded_pause(env.client, family_id), seconds=90)
     # Worker 1 is gone while the run is paused: nothing is in memory any more.
     paused_rows = await _receipt_rows(pool, run_id)
     assert [row[2] for row in paused_rows if row[0] == "pause"] == [
