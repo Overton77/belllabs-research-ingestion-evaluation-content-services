@@ -1,6 +1,7 @@
 """RRM-020 production proof: a `shared` GoalDirected workspace across two iterations.
 
-The deployment's API and workers (RRM-009's `open_production_stack`: `compose_runtime_control`,
+The deployment's API and workers (RRM-009's `open_production_stack` in
+`tests/fixtures/rrm009_production_harness.py`: `compose_runtime_control`,
 `ProductionWorkerActivityCompositionFactory`, `create_production_workers`, a persistent
 `start_local` namespace, the disposable PostgreSQL and MongoDB) run a two-iteration GoalDirected
 run whose blueprint keeps the default `workspace_mode = "shared"`. Every operation materializes
@@ -36,7 +37,7 @@ from app.models.workspace_materialization import (
     WorkspaceMaterializationManifestDocument,
     WorkspaceSlotReservationDocument,
 )
-from tests.acceptance.control_plane.test_rrm_009_production_composition import (
+from tests.fixtures.rrm009_production_harness import (
     ProductionStack,
     _admit,
     _calls,
