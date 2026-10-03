@@ -9,7 +9,8 @@ model; the real `GoalDirectedOperationResultService` consumes the run-control se
 through `RunControlGoalOperationSettlements`, and the family records no usage of its own.
 
 Storage is pluggable: in-memory run control and journal for the deterministic suites,
-application PostgreSQL (run control, journal, lineage), `AsyncPostgresSaver` and the Mongo
+application PostgreSQL (run control, journal, lineage), `AsyncPostgresSaver`
+and the immutable PostgreSQL
 binding store for the real-Temporal demonstration.
 """
 
@@ -29,18 +30,52 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.store.memory import InMemoryStore
 from pydantic import PrivateAttr
 
-from app.application.operations.checkpoint_lineage import CheckpointLineageService
-from app.application.operations.journaled_operation_execution import (
+from mission_control.adapters.deep_agents import (
+    DeepAgentRuntimeAdapter,
+    ExactComponentRegistry,
+    ExactDeepAgentMaterializer,
+    ResolvedSkillBundle,
+    StateSandboxFactory,
+)
+from mission_control.adapters.operations.conformance import (
+    ConformanceAssetVerifier,
+    ConformanceBudgetAuthority,
+    ConformanceEventSink,
+    ConformanceSandbox,
+    ConformanceSecretResolver,
+)
+from mission_control.adapters.temporal.activities.goal_directed import (
+    GoalDirectedActivities,
+    compose_goal_directed_activities,
+)
+from mission_control.application.execution.boundary_interventions import (
+    BoundaryCommandApplicationService,
+)
+from mission_control.application.execution.operations.checkpoint_lineage import (
+    CheckpointLineageService,
+)
+from mission_control.application.execution.operations.journaled_operation_execution import (
     JournaledOperationExecutionCoordinator,
     ResultPayloadStore,
 )
-from app.application.operations.operation_execution import (
+from mission_control.application.execution.operations.operation_execution import (
     OperationBindingRepository,
     OperationExecutionService,
     RunControlOperationAuthority,
 )
-from app.application.operations.operation_journal import OperationJournalService
-from app.application.orchestration.goal_directed import (
+from mission_control.application.execution.operations.operation_journal import (
+    OperationJournalService,
+)
+from mission_control.application.execution.run_control_repository import (
+    InMemoryRunControlRepository,
+    RunControlRepository,
+)
+from mission_control.application.execution.service import (
+    AdmissionPolicyRegistry,
+    FamilyAdmissionRegistry,
+    RunControlService,
+)
+from mission_control.application.programs.goal_directed import (
     GoalDirectedDocumentRepository,
     GoalDirectedOperationPreparationService,
     GoalDirectedOperationResultService,
@@ -49,24 +84,12 @@ from app.application.orchestration.goal_directed import (
     RunControlGoalOperationSettlements,
     configure_goal_directed_family_admissions,
 )
-from app.application.orchestration.service import (
+from mission_control.application.programs.service import (
     RunControlLifecycleGateway,
     orchestration_lifecycle_actor,
 )
-from app.application.run_control.boundary_interventions import (
-    BoundaryCommandApplicationService,
-)
-from app.application.run_control.run_control_repository import (
-    InMemoryRunControlRepository,
-    RunControlRepository,
-)
-from app.application.run_control.service import (
-    AdmissionPolicyRegistry,
-    FamilyAdmissionRegistry,
-    RunControlService,
-)
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.contracts import (
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.authoring.contracts import (
     DefinitionKind,
     ExactDefinitionRef,
     GoalDirectedBlueprint,
@@ -74,8 +97,8 @@ from app.domain.control_plane.contracts import (
     WorkflowWorkspaceContract,
     WorkspaceSlot,
 )
-from app.domain.control_plane.fixtures import GENERIC_GOAL_DIRECTED
-from app.domain.operation_execution.contracts import (
+from mission_control.domain.authoring.fixtures import GENERIC_GOAL_DIRECTED
+from mission_control.domain.execution.contracts import (
     DeepAgentExecutionBinding,
     OperationExecutionRequest,
     OperationExecutionResult,
@@ -85,35 +108,17 @@ from app.domain.operation_execution.contracts import (
     WorkspaceOwnerKind,
     WorkspaceSlotBinding,
 )
-from app.domain.orchestration.contracts import (
+from mission_control.domain.policies.contracts import ActorContext
+from mission_control.domain.programs.contracts import (
     GoalDirectedRunInput,
     GoalExecutionResult,
     GoalHandoff,
     GoalRevision,
     GoalVerificationResult,
 )
-from app.domain.orchestration.goal_directed_runtime import (
+from mission_control.domain.programs.goal_directed_runtime import (
     GoalOperationReconciliationRequest,
     GoalOperationSettlement,
-)
-from app.domain.run_control.contracts import ActorContext
-from app.integrations.agents.deep_agents import (
-    DeepAgentRuntimeAdapter,
-    ExactComponentRegistry,
-    ExactDeepAgentMaterializer,
-    ResolvedSkillBundle,
-    StateSandboxFactory,
-)
-from app.integrations.conformance_operation_runtime import (
-    ConformanceAssetVerifier,
-    ConformanceBudgetAuthority,
-    ConformanceEventSink,
-    ConformanceSandbox,
-    ConformanceSecretResolver,
-)
-from app.temporal.activities.goal_directed import (
-    GoalDirectedActivities,
-    compose_goal_directed_activities,
 )
 from tests.fixtures.checkpoint_recovery import ScriptedRecoveryModel
 from tests.unit.operations.test_operation_execution import (
@@ -308,7 +313,7 @@ def goal_start_action(run_id: str) -> Any:
     """The family's `start` fact: it binds the run to its GoalDirected execution target,
     which the run-control authority requires of a GoalDirected unit (review fix 1)."""
 
-    from app.domain.run_control.contracts import ExecutionTarget, StartAction
+    from mission_control.domain.policies.contracts import ExecutionTarget, StartAction
 
     return StartAction(
         execution_target=ExecutionTarget(
@@ -320,7 +325,7 @@ def goal_start_action(run_id: str) -> Any:
 async def admit_goal_run(run_control: RunControlService, request_id: str) -> str:
     """Admit a run whose budget bounds `goal.iterations` (the iteration reservation)."""
 
-    from app.domain.run_control.contracts import BudgetApplicability
+    from mission_control.domain.policies.contracts import BudgetApplicability
 
     base = run_request(request_id=request_id)
     dimensions = tuple(

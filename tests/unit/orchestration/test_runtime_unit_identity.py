@@ -8,15 +8,15 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from app.domain.graph_runtime.identities import (
-    GoalDirectedUnitLocation,
-    RuntimeUnitIdentity,
-    StageGraphUnitLocation,
-)
-from app.domain.operation_execution.checkpoint_lineage import (
+from mission_control.domain.execution.checkpoint_lineage import (
     cognitive_session_namespace,
     namespace_owner,
     submission_invocation_id,
+)
+from mission_control.domain.graph_runtime.identities import (
+    GoalDirectedUnitLocation,
+    RuntimeUnitIdentity,
+    StageGraphUnitLocation,
 )
 
 STAGE_CANONICAL = (

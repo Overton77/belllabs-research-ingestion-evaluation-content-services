@@ -8,18 +8,18 @@ import pytest
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from temporalio.exceptions import WorkflowAlreadyStartedError
 
-from app.experiments.langgraph_temporal_stagegraph.config import (
+from experiments.langgraph_temporal_stagegraph.config import (
     ExperimentSettings,
     load_settings,
 )
-from app.experiments.langgraph_temporal_stagegraph.contracts import CompletionRecord, digest_text
-from app.experiments.langgraph_temporal_stagegraph.graph import (
+from experiments.langgraph_temporal_stagegraph.contracts import CompletionRecord, digest_text
+from experiments.langgraph_temporal_stagegraph.graph import (
     choose_synthesis_inputs,
     compile_experiment_graph,
     launch_stage,
     synthesis_ready,
 )
-from app.experiments.langgraph_temporal_stagegraph.repository import (
+from experiments.langgraph_temporal_stagegraph.repository import (
     ExperimentRepository,
     prepare_database,
 )
@@ -74,7 +74,10 @@ class _FakeRepository:
 
 
 @pytest.mark.asyncio
-async def test_launch_idempotency_uses_one_workflow_identity() -> None:
+async def test_launch_idempotency_uses_one_workflow_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("APPLICATION_DATABASE_DIRECT", "postgresql://offline.invalid/experiment")
     settings = load_settings(require_openai=False)
     repository = _FakeRepository()
     temporal = _FakeTemporal()

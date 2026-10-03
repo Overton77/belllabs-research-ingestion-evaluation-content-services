@@ -4,17 +4,17 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.application.runtime.runtime_resources import (
+from mission_control.application.recovery.runtime_resources import (
     InMemoryResourceLeaseJournal,
     ResourceCapacity,
     ResourceExhausted,
 )
-from app.domain.graph_runtime.kernel import (
+from mission_control.domain.graph_runtime.kernel import (
     ResourceKind,
     ResourceLeaseRequest,
     ResourceLeaseStatus,
 )
-from app.domain.run_control.errors import IdempotencyConflict
+from mission_control.domain.policies.errors import IdempotencyConflict
 
 DIGEST = "sha256:" + "a" * 64
 OTHER_DIGEST = "sha256:" + "b" * 64

@@ -6,26 +6,28 @@ import json
 import socket
 from datetime import timedelta
 
-from app.application.capability.catalog_projection import CatalogProjector
-from app.application.capability.catalog_projection_events import (
-    CatalogProjectionEventProcessor,
-)
-from app.application.capability.postgres_capability_search_generation_repository import (
-    PostgresProjectionGenerationRepository,
-)
-from app.application.capability.postgres_capability_search_repository import (
-    PostgresCatalogSearchRepository,
-)
-from app.application.control_plane.control_plane_repository import BeanieDefinitionRepository
-from app.config import Settings
-from app.integrations.capability_embeddings import (
+from mission_control.adapters.capabilities.capability_embeddings import (
     OpenAICapabilityEmbeddingAdapter,
 )
-from app.integrations.catalog_projection_events import (
-    BeanieProjectionEventRepository,
+from mission_control.adapters.postgres.capability.capability_search_generation_repository import (
+    PostgresProjectionGenerationRepository,
 )
-from app.integrations.mongodb import create_mongodb
-from app.integrations.postgres import create_postgres_pool
+from mission_control.adapters.postgres.capability.capability_search_repository import (
+    PostgresCatalogSearchRepository,
+)
+from mission_control.adapters.postgres.capability.projection_events import (
+    PostgresProjectionEventRepository,
+)
+from mission_control.adapters.postgres.connections import create_postgres_pool
+from mission_control.adapters.postgres.control_plane.definition_repository import (
+    PostgresDefinitionRepository,
+)
+from mission_control.application.capabilities.catalog_projection import CatalogProjector
+from mission_control.application.capabilities.catalog_projection_events import (
+    CatalogProjectionEventProcessor,
+)
+from mission_control.bootstrap.catalog_scope import configured_catalog_scope
+from mission_control.bootstrap.settings import Settings
 
 
 def _arguments() -> argparse.Namespace:
@@ -42,14 +44,14 @@ def _arguments() -> argparse.Namespace:
 
 async def _run(args: argparse.Namespace) -> dict[str, object]:
     settings = Settings()
-    mongo_client, _ = await create_mongodb(settings)
+    scope = configured_catalog_scope(settings, requested=getattr(args, "tenant", None))
     postgres_pool = await create_postgres_pool(settings)
     try:
-        definitions = BeanieDefinitionRepository()
+        definitions = PostgresDefinitionRepository(postgres_pool, catalog_scope=scope)
         search = PostgresCatalogSearchRepository(postgres_pool)
         embeddings = OpenAICapabilityEmbeddingAdapter(settings)
         processor = CatalogProjectionEventProcessor(
-            events=BeanieProjectionEventRepository(),
+            events=PostgresProjectionEventRepository(postgres_pool, catalog_scope=scope),
             generations=PostgresProjectionGenerationRepository(postgres_pool),
             projector_factory=lambda generation: CatalogProjector(
                 definitions=definitions,
@@ -59,16 +61,10 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
                 embedding_dimensions=settings.capability_embedding_dimensions,
                 projection_generation=generation,
             ),
-            lease_duration=timedelta(
-                seconds=settings.capability_projection_lease_seconds
-            ),
+            lease_duration=timedelta(seconds=settings.capability_projection_lease_seconds),
             max_attempts=settings.capability_projection_max_attempts,
-            base_backoff=timedelta(
-                seconds=settings.capability_projection_base_backoff_seconds
-            ),
-            max_backoff=timedelta(
-                seconds=settings.capability_projection_max_backoff_seconds
-            ),
+            base_backoff=timedelta(seconds=settings.capability_projection_base_backoff_seconds),
+            max_backoff=timedelta(seconds=settings.capability_projection_max_backoff_seconds),
         )
         summary = await processor.process_batch(
             owner=args.owner,
@@ -77,7 +73,6 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
         return summary.model_dump(mode="json")
     finally:
         await postgres_pool.close()
-        await mongo_client.close()
 
 
 def main() -> None:

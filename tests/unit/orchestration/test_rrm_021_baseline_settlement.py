@@ -12,12 +12,16 @@ from typing import Any, cast
 
 import pytest
 
-from app.application.orchestration.service import (
+from mission_control.application.programs.service import (
     BASELINE_SETTLEMENT_ATTEMPTS,
     StageGraphDecisionService,
 )
-from app.domain.orchestration.contracts import StageGraphBaselineSettlementRequest
-from app.domain.run_control.contracts import CommandStatus, LifecycleCommand, RecordUsageAction
+from mission_control.domain.policies.contracts import (
+    CommandStatus,
+    LifecycleCommand,
+    RecordUsageAction,
+)
+from mission_control.domain.programs.contracts import StageGraphBaselineSettlementRequest
 
 SCOPE = "tenant-1"
 RUN = "run-rrm-021"

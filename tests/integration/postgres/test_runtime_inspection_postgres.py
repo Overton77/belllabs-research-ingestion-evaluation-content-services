@@ -15,25 +15,27 @@ import asyncpg
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
-from app.application.operations.postgres_checkpoint_lineage import (
+from mission_control.adapters.deep_agents.checkpoint_history import (
+    LangGraphCheckpointHistoryReader,
+)
+from mission_control.adapters.postgres.operations.checkpoint_lineage import (
     PostgresCheckpointLineageRepository,
 )
-from app.application.run_control.inspection import (
+from mission_control.adapters.postgres.run_control.inspection_repository import (
+    PostgresInspectionReadRepository,
+)
+from mission_control.adapters.postgres.run_control.run_control_repository import (
+    PostgresRunControlRepository,
+)
+from mission_control.application.execution.inspection import (
     InspectionCursorCodec,
     RuntimeInspectionService,
 )
-from app.application.run_control.postgres_inspection_repository import (
-    PostgresInspectionReadRepository,
-)
-from app.application.run_control.postgres_run_control_repository import PostgresRunControlRepository
-from app.domain.run_control.contracts import RunPhase
-from app.domain.run_control.inspection import (
+from mission_control.domain.policies.contracts import RunPhase
+from mission_control.domain.policies.inspection import (
     CheckpointNotInUnitLineage,
     InspectionNotFound,
     InvalidInspectionCursor,
-)
-from app.integrations.agents.deep_agents.checkpoint_history import (
-    LangGraphCheckpointHistoryReader,
 )
 from tests.fixtures.checkpoint_lineage import BINDING, CHECKPOINTER
 from tests.fixtures.runtime_inspection import (

@@ -1,23 +1,12 @@
 ---
+description: Historical work-package provenance; current ownership comes from AGENTS.md
 alwaysApply: false
 ---
 
-# Parallel blueprint worktrees
+# Historical work-package reference
 
-When `WP-BP-010` and `WP-BP-020` are active concurrently:
-
-- Follow `docs/migrations_instructions/implementation_work_packages_v2/PARALLEL_WORKTREE_PROTOCOL.md`.
-- Both branches must start from the same accepted `WP-CP-045` revision and record it as
-  `BP_BASE_REVISION`.
-- StageGraph owns only StageGraph regions and paths; GoalDirected owns only GoalDirected regions
-  and paths. Never resolve a shared-file conflict by taking one entire side.
-- Family-neutral orchestration contracts, run control, root/operation workflows, Deep Agents
-  materialization, async delegation semantics, and registries are integrator-owned.
-- Preserve unrelated dirty changes. Do not perform whole-file formatting, bulk relocation, sibling
-  WP implementation, or opportunistic cleanup in shared files.
-- Merge both branches through `integration/bp-runtimes`; run deterministic and credential-gated
-  real-LLM API-to-Temporal qualifications there before target-branch merge.
-- Runtime proof must traverse the BellLabs API, admission, root workflow, real family workflow,
-  `OperationWorkflow`, and accepted Deep Agents adapter. Provider invocation alone is not proof.
-- Keep complete Skills/MCP/sandbox/snapshot capability combination out of the BP scope; it belongs
-  to `WP-CP-050`.
+This rule's original BellLabs work-package scope has been superseded by the
+owner-approved general Mission Control implementation and package organization.
+Read root AGENTS.md, docs/knowledge/index.md, and the current accepted specification.
+Historical WP files retain provenance; they do not impose old paths, stores,
+approval gates or parallel-worktree requirements on current authorized work.

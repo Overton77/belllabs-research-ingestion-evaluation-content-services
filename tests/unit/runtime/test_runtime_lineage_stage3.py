@@ -4,17 +4,17 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.application.runtime.runtime_lineage import (
+from mission_control.application.recovery.runtime_lineage import (
     InMemoryExecutionLineageRepository,
     PersistedExecutionLineage,
 )
-from app.domain.graph_runtime.definitions import ExecutionLineageEnvelope
-from app.domain.graph_runtime.kernel import (
+from mission_control.domain.graph_runtime.definitions import ExecutionLineageEnvelope
+from mission_control.domain.graph_runtime.kernel import (
     LineageKind,
     LineageParentEdge,
     ProviderQualifiedLineageRecord,
 )
-from app.domain.run_control.errors import IdempotencyConflict
+from mission_control.domain.policies.errors import IdempotencyConflict
 
 DIGEST_A = "sha256:" + "a" * 64
 DIGEST_B = "sha256:" + "b" * 64

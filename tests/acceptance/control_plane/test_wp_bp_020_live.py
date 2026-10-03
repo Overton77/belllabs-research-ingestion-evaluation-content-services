@@ -18,56 +18,65 @@ from temporalio import activity
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
-from app.api.control_plane import ControlPlanePrincipal, get_control_plane_principal
-from app.api.run_control import get_run_control_service, router
-from app.application.operations.checkpoint_lineage import (
+from mission_control.adapters.deep_agents import (
+    DeepAgentRuntimeAdapter,
+    DockerSandboxFactory,
+    ExactComponentRegistry,
+    ExactDeepAgentMaterializer,
+    OpenAIExactModelFactory,
+)
+from mission_control.adapters.operations.conformance import (
+    ConformanceAssetVerifier,
+    ConformanceBudgetAuthority,
+    ConformanceEventSink,
+    ConformanceSecretResolver,
+)
+from mission_control.adapters.storage.artifact_payloads import InMemoryArtifactPayloadStore
+from mission_control.adapters.temporal.workflow_sandbox import coordinator_workflow_runner
+from mission_control.adapters.temporal.workflows.belllabs_run import BellLabsRunWorkflow
+from mission_control.adapters.temporal.workflows.goal_directed import GoalDirectedWorkflow
+from mission_control.adapters.temporal.workflows.operation import OperationWorkflow
+from mission_control.application.execution.operations.checkpoint_lineage import (
     CheckpointLineageService,
     InMemoryCheckpointLineageRepository,
 )
-from app.application.operations.journaled_operation_execution import (
+from mission_control.application.execution.operations.journaled_operation_execution import (
     JournaledOperationExecutionCoordinator,
 )
-from app.application.operations.operation_execution import (
+from mission_control.application.execution.operations.operation_execution import (
     InMemoryOperationBindingRepository,
     OperationExecutionService,
 )
-from app.application.operations.operation_journal import OperationJournalService
-from app.application.orchestration.goal_directed import (
-    GoalDirectedOperationPreparationService,
-    configure_goal_directed_family_admissions,
+from mission_control.application.execution.operations.operation_journal import (
+    OperationJournalService,
 )
-from app.application.orchestration.service import (
-    RunControlLifecycleGateway,
-    orchestration_lifecycle_actor,
+from mission_control.application.execution.run_control_repository import (
+    InMemoryRunControlRepository,
 )
-from app.application.run_control.run_control_repository import InMemoryRunControlRepository
-from app.application.run_control.service import (
+from mission_control.application.execution.service import (
     AdmissionPolicyRegistry,
     FamilyAdmissionRegistry,
     RunControlService,
 )
-from app.config import Settings
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.contracts import GoalDirectedBlueprint, SecretRef
-from app.domain.operation_execution.checkpoint_lineage import OperationActivityAttempt
-from app.domain.operation_execution.contracts import (
+from mission_control.application.programs.goal_directed import (
+    GoalDirectedOperationPreparationService,
+    configure_goal_directed_family_admissions,
+)
+from mission_control.application.programs.service import (
+    RunControlLifecycleGateway,
+    orchestration_lifecycle_actor,
+)
+from mission_control.bootstrap.settings import Settings
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.authoring.contracts import GoalDirectedBlueprint, SecretRef
+from mission_control.domain.execution.checkpoint_lineage import OperationActivityAttempt
+from mission_control.domain.execution.contracts import (
     DeepAgentExecutionBinding,
     MaterializedWorkspace,
     OperationExecutionRequest,
     StructuredOutputBinding,
 )
-from app.domain.orchestration.contracts import (
-    BellLabsRunInput,
-    GoalDirectedRunInput,
-    GoalRevision,
-    LifecycleCommandOutcome,
-    LifecycleCommandRequest,
-)
-from app.domain.orchestration.goal_directed_runtime import (
-    GoalExecutorObservation,
-    GoalVerifierObservation,
-)
-from app.domain.run_control.contracts import (
+from mission_control.domain.policies.contracts import (
     ActorContext,
     BudgetApplicability,
     BudgetDimensionLimit,
@@ -76,24 +85,22 @@ from app.domain.run_control.contracts import (
     RunPhase,
     VerifiedRunConfiguration,
 )
-from app.integrations.agents.deep_agents import (
-    DeepAgentRuntimeAdapter,
-    DockerSandboxFactory,
-    ExactComponentRegistry,
-    ExactDeepAgentMaterializer,
-    OpenAIExactModelFactory,
+from mission_control.domain.programs.contracts import (
+    BellLabsRunInput,
+    GoalDirectedRunInput,
+    GoalRevision,
+    LifecycleCommandOutcome,
+    LifecycleCommandRequest,
 )
-from app.integrations.artifact_payloads import InMemoryArtifactPayloadStore
-from app.integrations.conformance_operation_runtime import (
-    ConformanceAssetVerifier,
-    ConformanceBudgetAuthority,
-    ConformanceEventSink,
-    ConformanceSecretResolver,
+from mission_control.domain.programs.goal_directed_runtime import (
+    GoalExecutorObservation,
+    GoalVerifierObservation,
 )
-from app.temporal.workflow_sandbox import coordinator_workflow_runner
-from app.temporal.workflows.belllabs_run import BellLabsRunWorkflow
-from app.temporal.workflows.goal_directed import GoalDirectedWorkflow
-from app.temporal.workflows.operation import OperationWorkflow
+from mission_control.interfaces.http.control_plane import (
+    ControlPlanePrincipal,
+    get_control_plane_principal,
+)
+from mission_control.interfaces.http.run_control import get_run_control_service, router
 from tests.acceptance.control_plane.test_wp_bp_020_sandbox_rollover import (
     Documents,
     SandboxRolloverActivities,
@@ -174,13 +181,11 @@ def _live_run_request() -> Any:
         else item
         for item in base.budget_envelope.dimensions
     )
-    return base.model_copy(
-        update={"budget_envelope": BudgetEnvelope(dimensions=dimensions)}
-    )
+    return base.model_copy(update={"budget_envelope": BudgetEnvelope(dimensions=dimensions)})
 
 
 def _live_blueprint() -> GoalDirectedBlueprint:
-    from app.domain.control_plane.fixtures import GENERIC_GOAL_DIRECTED
+    from mission_control.domain.authoring.fixtures import GENERIC_GOAL_DIRECTED
 
     session = GENERIC_GOAL_DIRECTED.session_policy.model_copy(
         update={
@@ -313,21 +318,21 @@ class LiveGoalActivities(SandboxRolloverActivities):
                 "will bind protected facts, policies, workspace, snapshots, and source digests. "
                 "On iteration 2, "
                 "read /goal/2/executor/work/artifact.txt, return completion_claim=true, preserve "
-                "output_refs=[\"artifact:/goal/1/executor/work/artifact.txt\"], and omit handoff. "
+                'output_refs=["artifact:/goal/1/executor/work/artifact.txt"], and omit handoff. '
                 "Always cite an evidence ref and use output_contract_ref fixture-output. "
                 "After the tool result, immediately submit the required structured response; "
                 "never finish with plain text."
                 if role == "executor"
-                else
-                "You are an independent verifier. Use the execute tool before answering and read "
+                else "You are an independent verifier. Use the execute tool before "
+                "answering and read "
                 "the shared artifact. On iteration 1, read /goal/1/verifier/work/artifact.txt "
-                "and return decision=\"rejected\", accepted_obligation_refs=[], "
-                "unmet_obligations=[\"fixture-obligation\"]. On iteration 2, read "
+                'and return decision="rejected", accepted_obligation_refs=[], '
+                'unmet_obligations=["fixture-obligation"]. On iteration 2, read '
                 "/goal/2/verifier/input/artifact.txt; if it contains Moderna, Spikevax, and mRNA "
-                "vaccine, return decision=\"accepted\", "
-                "accepted_obligation_refs=[\"fixture-obligation\"], unmet_obligations=[], and "
-                "obligation_applicability=[[\"fixture-obligation\", true]]. Always use "
-                "output_contract_ref=\"fixture-output\". After the tool result, immediately "
+                'vaccine, return decision="accepted", '
+                'accepted_obligation_refs=["fixture-obligation"], unmet_obligations=[], and '
+                'obligation_applicability=[["fixture-obligation", true]]. Always use '
+                'output_contract_ref="fixture-output". After the tool result, immediately '
                 "submit the required structured response; never finish with plain text."
             )
             base = operation_request(prompt=instruction)
@@ -382,9 +387,7 @@ class LiveGoalActivities(SandboxRolloverActivities):
             model_factories={deep_binding.model.ref.digest: OpenAIExactModelFactory()},
             skill_bundles={bundle.bundle_digest: bundle},
             sandbox_factories={
-                deep_binding.sandbox.ref.digest: DockerSandboxFactory(
-                    workspace_root=workspace_root
-                )
+                deep_binding.sandbox.ref.digest: DockerSandboxFactory(workspace_root=workspace_root)
             },
             checkpointers={deep_binding.checkpointer_ref.digest: InMemorySaver()},
             stores={deep_binding.store_ref.digest: InMemoryStore()},
@@ -455,9 +458,7 @@ class LiveGoalActivities(SandboxRolloverActivities):
         return result.model_dump(mode="json")
 
     @activity.defn(name="goaldirected.apply_lifecycle_command")
-    async def lifecycle(
-        self, request: LifecycleCommandRequest
-    ) -> LifecycleCommandOutcome:
+    async def lifecycle(self, request: LifecycleCommandRequest) -> LifecycleCommandOutcome:
         return await self._lifecycle.execute(request)
 
 
@@ -634,9 +635,13 @@ async def test_live_api_root_goal_directed_rollover_deep_agents_docker_vertical(
 
 
 def _history_tail(label: str, events: Sequence[Any]) -> str:
-    return label + " history tail:\n" + "\n".join(
-        f"{event.event_id}: event_type={event.event_type}: {str(event)[:1_000]}"
-        for event in events[-12:]
+    return (
+        label
+        + " history tail:\n"
+        + "\n".join(
+            f"{event.event_id}: event_type={event.event_type}: {str(event)[:1_000]}"
+            for event in events[-12:]
+        )
     )
 
 

@@ -14,8 +14,10 @@ from typing import Any
 
 from temporalio import activity
 
-from app.application.operations.operation_execution import bind_operation_execution_request
-from app.domain.operation_execution.contracts import (
+from mission_control.application.execution.operations.operation_execution import (
+    bind_operation_execution_request,
+)
+from mission_control.domain.execution.contracts import (
     OperationExecutionRequest,
     OperationExecutionResult,
 )

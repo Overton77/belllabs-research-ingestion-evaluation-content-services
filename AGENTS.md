@@ -1,44 +1,49 @@
-# Agent instructions
+# Mission Control agent guide
 
-Thin index. Prefer Cursor rules under `.cursor/rules/` over duplicating guidance here.
+Read the accepted [general specification](../mission-control-general/general-mission-control/SPECIFICATION.md)
+and relevant runtime/database/workflow annex, then the closest scoped AGENTS.md.
+[Knowledge navigation](docs/knowledge/index.md) explains application logic.
+[Removal guide](docs/REMOVAL_GUIDE.md) explains changed paths and recovery.
 
-## Cursor rules (start here)
+## Work by concern
 
-| Rule | Apply | Use when |
-|------|-------|----------|
-| [`api-runbook.mdc`](.cursor/rules/api-runbook.mdc) | Globs (Compose/API/server/worker) | Start Docker, hit HTTP, routers, worker |
-| [`codebase-organization.mdc`](.cursor/rules/codebase-organization.mdc) | Globs (`app/`, tests, org docs) | Package map, imports, placement |
-| [`workflows-domain-contracts.mdc`](.cursor/rules/workflows-domain-contracts.mdc) | Globs (temporal/domain/agents) | Temporal macro runtime + Deep Agents + contracts |
-| [`biotech-meta-reference.mdc`](.cursor/rules/biotech-meta-reference.mdc) | **Manual** | Canonical SPECs/ADRs in `../biotech-meta` |
-| [`project-organization.mdc`](.cursor/rules/project-organization.mdc) | Always | SPEC/WP reading order, layering hard rules |
-| [`tech-stack-authority.mdc`](.cursor/rules/tech-stack-authority.mdc) | Manual/related | Stores, runtime roles, worker pools |
-| [`agent-framework-coexistence.mdc`](.cursor/rules/agent-framework-coexistence.mdc) | Always | Framework-neutral contracts; Deep Agents bounded |
-| [`wp-bp-010-stagegraph.mdc`](.cursor/rules/wp-bp-010-stagegraph.mdc) / [`wp-bp-020-goal-directed.mdc`](.cursor/rules/wp-bp-020-goal-directed.mdc) | Family globs | Blueprint package ownership |
-| [`engineering-sequence.mdc`](.cursor/rules/engineering-sequence.mdc) / [`parallel-blueprint-worktrees.mdc`](.cursor/rules/parallel-blueprint-worktrees.mdc) | As configured | Spec→implement sequence; parallel WP worktrees |
+| Concern | Start |
+| --- | --- |
+| Public request, identity or permissions | src/mission_control/interfaces/http and bootstrap/api.py |
+| Admission, commands, lifecycle | src/mission_control/application/missions and execution |
+| StageGraph or GoalDirected decisions | src/mission_control/domain/programs and application/programs |
+| Durable workflow mechanics | src/mission_control/adapters/temporal |
+| Fork, checkpoint incident or reconciliation | src/mission_control/application/recovery |
+| Persistent records or migrations | src/mission_control/adapters/postgres |
+| Directory skills, tools or providers | src/mission_control/adapters/capabilities and deep_agents |
+| Application-specific knowledge | integrations/biotech; never import it from the kernel |
+| Startup, restricted pools or installation | src/mission_control/bootstrap |
 
-## Non-negotiables (pointers only)
+## Invariants
 
-- Application lives in `app/`. Dependency direction: `domain ← application ← api | temporal | integrations`.
-- Temporal = sole production macro runtime. Deep Agents = bounded cognition inside `operation.execute`.
-- BellLabs API (`app.server:asgi_app`) = governed public facade. Agent Server is not a competing scheduler.
-- Specs: `../biotech-meta` (read-only unless the task owns a meta change). WPs cannot amend `SPEC-*`.
-- Canonical org doc: `docs/interview_and_research_result_documentation/CANONICAL_APPLICATION_CODEBASE_ORGANIZATION.md`.
-- v2 packages: `docs/migrations_instructions/implementation_work_packages_v2/`. Stage 0–8 tree is historical only.
+Interfaces call application handlers; application uses domain rules and ports;
+adapters implement ports; bootstrap wires them. Domain imports no database,
+Temporal, FastAPI or provider SDK. One distribution imports mission_control from
+src/mission_control; do not recreate app/ as a compatibility kernel.
 
-## Cloud / local stack (one-liners)
+Temporal alone schedules missions. Deep Agents is bounded operation cognition.
+Reducers own lifecycle and settlement. Accepted command, delivered signal and
+applied effect are distinct; execution completion is not mission acceptance.
 
-Full runbook → [`api-runbook.mdc`](.cursor/rules/api-runbook.mdc).
+Application PostgreSQL and Temporal persistence are separate. Common SQL belongs
+to its independent owner. Local transitional readiness is not production readiness.
+Do not invent missing provider bindings, schemas, grants or model routes.
 
-```bash
-docker compose up -d
-uv run uvicorn app.server:asgi_app --host 127.0.0.1 --port 8000   # make server
-uv run python -m app.temporal.worker                              # make worker (separate)
-```
+Preserve dirty work and user files, including ignored app/personal_code. Use
+recoverable checkpoints before broad cleanup. No live destructive migrations,
+volume deletion, commit, push, deployment or paid experiments without authorization.
+Historical BellLabs WPs/specs are provenance, not competing current authority.
 
-Compose readiness: `application-postgres`, `redis`, `temporal-postgres`, `temporal`, `temporal-ui` running; `temporal-schema` / `temporal-create-namespace` exit 0. Do not `docker compose down --volumes` unless asked. Never commit `.env` — use `.env.example` names in Cursor secrets.
+## Verify
 
-```bash
-uv run ruff check app tests
-uv run mypy app
-uv run pytest
-```
+Run `uv run ruff check src tests`, `uv run mypy src/mission_control` and relevant
+`uv run --group biotech pytest` selections (the optional group is needed for
+Biotech-domain tests; plain runtime installation remains independent).
+Use real local PostgreSQL/Temporal for persistence and
+runtime claims. Report passed, failed, blocked and unrun checks separately.
+Operational setup: [operator guide](docs/MISSION_CONTROL_LOCAL_API.md).

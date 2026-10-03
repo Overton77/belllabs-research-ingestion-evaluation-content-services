@@ -6,34 +6,39 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-from app.application.capability.catalog_projection import CatalogProjector
-from app.application.capability.catalog_projection_admin import (
+from mission_control.adapters.capabilities.capability_embeddings import (
+    OpenAICapabilityEmbeddingAdapter,
+)
+from mission_control.adapters.postgres.capability.capability_search_generation_repository import (
+    PostgresProjectionGenerationRepository,
+)
+from mission_control.adapters.postgres.capability.capability_search_repository import (
+    PostgresCatalogSearchRepository,
+)
+from mission_control.adapters.postgres.capability.projection_events import (
+    PostgresProjectionEventRepository,
+)
+from mission_control.adapters.postgres.connections import create_postgres_pool
+from mission_control.adapters.postgres.control_plane.definition_repository import (
+    PostgresDefinitionRepository,
+)
+from mission_control.application.capabilities.catalog_projection import CatalogProjector
+from mission_control.application.capabilities.catalog_projection_admin import (
     filter_projection_refs,
     rebuild_capability_search_projection,
     verify_capability_search_projection,
 )
-from app.application.capability.catalog_projection_metadata import build_workflow_compatibility
-from app.application.capability.postgres_capability_search_generation_repository import (
-    PostgresProjectionGenerationRepository,
+from mission_control.application.capabilities.catalog_projection_metadata import (
+    build_workflow_compatibility,
 )
-from app.application.capability.postgres_capability_search_repository import (
-    PostgresCatalogSearchRepository,
-)
-from app.application.control_plane.control_plane_repository import BeanieDefinitionRepository
-from app.config import Settings
-from app.domain.control_plane.contracts import DefinitionKind
-from app.integrations.capability_embeddings import OpenAICapabilityEmbeddingAdapter
-from app.integrations.catalog_projection_admin import (
-    BeanieProjectionEventCompletionRepository,
-    list_published_definition_refs,
-)
-from app.integrations.mongodb import create_mongodb
-from app.integrations.postgres import create_postgres_pool
+from mission_control.bootstrap.catalog_scope import configured_catalog_scope
+from mission_control.bootstrap.settings import Settings
+from mission_control.domain.authoring.contracts import DefinitionKind
 
 
 def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Verify the capability-search projection against MongoDB authority."
+        description="Verify the capability-search projection against PostgreSQL authority."
     )
     parser.add_argument("--tenant", required=True)
     parser.add_argument("--kind", choices=[kind.value for kind in DefinitionKind])
@@ -51,15 +56,15 @@ def _arguments() -> argparse.Namespace:
 
 async def _run(args: argparse.Namespace) -> dict[str, Any]:
     settings = Settings()
-    mongo_client, _ = await create_mongodb(settings)
+    scope = configured_catalog_scope(settings, requested=getattr(args, "tenant", None))
     postgres_pool = await create_postgres_pool(settings)
     try:
-        all_refs = await list_published_definition_refs()
+        definitions = PostgresDefinitionRepository(postgres_pool, catalog_scope=scope)
+        all_refs = await definitions.list_published_definition_refs()
         refs = filter_projection_refs(
             all_refs,
             kind=DefinitionKind(args.kind) if args.kind else None,
         )
-        definitions = BeanieDefinitionRepository()
         search = PostgresCatalogSearchRepository(postgres_pool)
         generations = PostgresProjectionGenerationRepository(postgres_pool)
         grouped: dict[str, list] = {}
@@ -120,7 +125,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
             rebuilt = await rebuild_capability_search_projection(
                 refs=refs,
                 projector=projector,
-                events=BeanieProjectionEventCompletionRepository(),
+                events=PostgresProjectionEventRepository(postgres_pool, catalog_scope=scope),
                 generations=generations,
                 tenant_scope=args.tenant,
                 projection_generation=repair_generation,
@@ -157,7 +162,6 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
         }
     finally:
         await postgres_pool.close()
-        await mongo_client.close()
 
 
 def main() -> None:

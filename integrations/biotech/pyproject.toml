@@ -1,0 +1,16 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "biotech-mission-adapters"
+version = "0.1.0"
+description = "Explicit Biotech knowledge adapters, outside the general Mission Control kernel"
+requires-python = ">=3.12"
+dependencies = ["mission-control==0.1.0", "neo4j==6.2.0", "graphql-core==3.2.11"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/biotech_mission_adapters"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/biotech_mission_adapters/migrations" = "biotech_mission_adapters/migrations"

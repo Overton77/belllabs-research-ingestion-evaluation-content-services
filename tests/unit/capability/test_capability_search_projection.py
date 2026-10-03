@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from app.domain.control_plane.contracts import (
+from mission_control.domain.authoring.contracts import (
     AuthorityCeiling,
     BudgetCeiling,
     CatalogPayloadRef,
@@ -18,11 +18,11 @@ from app.domain.control_plane.contracts import (
     WorkflowTypeDefinition,
     WorkflowWorkspaceContract,
 )
-from app.domain.control_plane.stagegraph_builder import (
+from mission_control.domain.authoring.stagegraph_builder import (
     StageGraphStageSpec,
     build_stagegraph_v2,
 )
-from app.domain.coordinator.contracts import (
+from mission_control.domain.coordinator.contracts import (
     AuthorizationState,
     CandidateTrustTier,
     CapabilitySearchHit,
@@ -38,9 +38,9 @@ from app.domain.coordinator.contracts import (
     SelectionFacts,
     WorkflowDesignDraft,
 )
-from app.domain.coordinator.errors import CoordinatorDomainError, CoordinatorErrorCode
-from app.domain.coordinator.policy import evaluate_selection, require_selectable
-from app.domain.coordinator.search_document import (
+from mission_control.domain.coordinator.errors import CoordinatorDomainError, CoordinatorErrorCode
+from mission_control.domain.coordinator.policy import evaluate_selection, require_selectable
+from mission_control.domain.coordinator.search_document import (
     SEARCH_DOCUMENT_FORMAT_VERSION,
     render_search_document,
     search_document_source,
@@ -108,9 +108,7 @@ def test_internal_search_hit_requires_exact_projection_evidence() -> None:
         fused_rank=0.038,
         compatibility_summary="compatible",
         authorization_state=AuthorizationState.SELECTABLE,
-        reasons=(
-            PolicyReason(code=PolicyReasonCode.SELECTABLE, message="Selectable."),
-        ),
+        reasons=(PolicyReason(code=PolicyReasonCode.SELECTABLE, message="Selectable."),),
         source_digest=exact.digest,
         indexed_at=NOW,
         projection_generation="generation-1",
@@ -225,10 +223,7 @@ def test_renderer_is_stable_labeled_and_normalizes_unordered_metadata() -> None:
     assert first.search_document_format_version == SEARCH_DOCUMENT_FORMAT_VERSION == 1
     assert first.search_text.splitlines() == [
         "title: Current web research",
-        (
-            "logical identifier and aliases: prompt.web-research; "
-            "aliases: latest, stable"
-        ),
+        ("logical identifier and aliases: prompt.web-research; aliases: latest, stable"),
         "asset kind: prompt",
         "short description: Find current sources. Return citations.",
         (
@@ -267,9 +262,7 @@ def test_mcp_server_and_tool_project_independently_without_sibling_leakage() -> 
         transport="streamable_http",
         endpoint="https://example.invalid/mcp/",
         credential_refs=(),
-        allowed_tools=frozenset(
-            {"firecrawl_scrape", "firecrawl_search", "firecrawl_interact"}
-        ),
+        allowed_tools=frozenset({"firecrawl_scrape", "firecrawl_search", "firecrawl_interact"}),
         network_requirements=(),
         schema_snapshot_ref=payload,
         schema_digest=DIGEST,
@@ -377,9 +370,7 @@ def test_selection_policy_reports_sorted_missing_capabilities_and_ignores_rank()
         )
     )
     assert decision.authorization_state == AuthorizationState.INCOMPATIBLE
-    assert decision.missing_capabilities == frozenset(
-        {"browser.process", "network.web"}
-    )
+    assert decision.missing_capabilities == frozenset({"browser.process", "network.web"})
     assert [reason.message.rsplit(": ", 1)[-1] for reason in decision.reasons] == [
         "browser.process",
         "network.web",

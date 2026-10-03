@@ -21,25 +21,25 @@ from typing import Any, cast
 
 import pytest
 
-from app.application.async_subagents.service import AsyncSubagentError
-from app.application.async_subagents.usage_reconciliation import (
-    AsyncChildUsageReconciliation,
-    ProviderNotComposed,
-)
-from app.application.run_control.liability_hints import (
+from mission_control.adapters.temporal.artifact_activities import generic_artifact_activities
+from mission_control.adapters.temporal.worker import operation_heartbeat_policy
+from mission_control.application.execution.liability_hints import (
     LIABILITY_DECISION_KINDS,
     FamilyLiabilityHints,
 )
-from app.domain.control_plane.contracts import SecretRef
-from app.domain.operation_execution.heartbeats import (
+from mission_control.application.subordinates.service import AsyncSubagentError
+from mission_control.application.subordinates.usage_reconciliation import (
+    AsyncChildUsageReconciliation,
+    ProviderNotComposed,
+)
+from mission_control.domain.authoring.contracts import SecretRef
+from mission_control.domain.execution.heartbeats import (
     DEFAULT_OPERATION_HEARTBEATS,
     OperationHeartbeatPolicy,
     cancel_latency_bound_seconds,
     operation_heartbeat_class,
 )
-from app.domain.run_control.contracts import CancelAction, RunPhase
-from app.temporal.artifact_activities import generic_artifact_activities
-from app.temporal.worker import operation_heartbeat_policy
+from mission_control.domain.policies.contracts import CancelAction, RunPhase
 from tests.fixtures.isolated_settings import isolated_settings
 from tests.unit.operations.test_operation_execution import operation_request
 from tests.unit.run_control.test_boundary_commands import FAMILY_WORKFLOW_ID, TARGET, started
@@ -133,7 +133,9 @@ def test_generic_artifact_worker_serves_the_cancel_beside_the_execute() -> None:
 async def test_child_cancellation_resolves_the_operation_credential_only_when_children_exist() -> (
     None
 ):
-    from app.temporal.deployment_composition import ProductionAsyncChildCancellation
+    from mission_control.adapters.temporal.deployment_composition import (
+        ProductionAsyncChildCancellation,
+    )
 
     calls: list[Any] = []
     children: dict[str, tuple[str, ...]] = {"binding-quiet": (), "binding-parent": ("child-1",)}
@@ -201,9 +203,9 @@ def _invocation(*contracts: str) -> Any:
 async def test_deployment_runtime_never_swallows_a_cancel_during_cognition_or_the_child_wait(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import app.temporal.deployment_composition as composition
-    from app.domain.operation_execution.contracts import RuntimeResult
-    from app.integrations.agents.deep_agents.browser_tool import GRANTED_NETWORK_HOSTS
+    import mission_control.adapters.temporal.deployment_composition as composition
+    from mission_control.adapters.deep_agents.browser_tool import GRANTED_NETWORK_HOSTS
+    from mission_control.domain.execution.contracts import RuntimeResult
 
     stage = {"cognition_blocks": True}
     entered = asyncio.Event()
@@ -255,9 +257,9 @@ async def test_deployment_runtime_never_swallows_a_cancel_during_cognition_or_th
 async def test_deployment_runtime_observes_the_latest_checkpoint_inside_the_granted_egress(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import app.temporal.deployment_composition as composition
-    from app.domain.operation_execution.contracts import RuntimeResult
-    from app.integrations.agents.deep_agents.browser_tool import GRANTED_NETWORK_HOSTS
+    import mission_control.adapters.temporal.deployment_composition as composition
+    from mission_control.adapters.deep_agents.browser_tool import GRANTED_NETWORK_HOSTS
+    from mission_control.domain.execution.contracts import RuntimeResult
 
     observed: list[Any] = []
 
@@ -378,7 +380,7 @@ async def test_the_api_reconciliation_never_reaches_the_provider() -> None:
 
 
 def _claim(effect_id: str, kind: str, operation_ref: str, *, settled: bool) -> Any:
-    from app.domain.run_control.contracts import (
+    from mission_control.domain.policies.contracts import (
         ConsequentialEffectClaim,
         EffectDisposition,
         EffectSettlement,
@@ -410,8 +412,8 @@ def _claim(effect_id: str, kind: str, operation_ref: str, *, settled: bool) -> A
 
 
 def test_a_cancelled_units_pending_child_usage_does_not_hold_its_producer_open() -> None:
-    from app.application.orchestration.service import producer_effects_settled
-    from app.domain.run_control.contracts import EffectLedgerState
+    from mission_control.application.programs.service import producer_effects_settled
+    from mission_control.domain.policies.contracts import EffectLedgerState
 
     def ledger(*claims: Any) -> EffectLedgerState:
         return EffectLedgerState(run_id="run-1", claims={item.effect_id: item for item in claims})
@@ -441,8 +443,8 @@ async def test_a_refused_completion_is_proposed_again_under_a_new_identity() -> 
     the new proposal must not reuse the refused one's identity (that was an identity
     conflict that failed the family), and an Activity retry must replay its own receipt."""
 
-    from app.application.orchestration.service import StageGraphDecisionService
-    from app.domain.run_control.contracts import CommandStatus
+    from mission_control.application.programs.service import StageGraphDecisionService
+    from mission_control.domain.policies.contracts import CommandStatus
 
     first = datetime(2026, 10, 2, 12, 0, tzinfo=UTC)
     second = datetime(2026, 10, 2, 12, 1, tzinfo=UTC)
@@ -489,7 +491,7 @@ async def test_deployment_runtime_verifies_the_mcp_launch_before_any_materializa
     """RRM-009 review: cognition and the cancellation path's `observe_latest` both start the
     agent's stdio MCP servers, so both verify the launch against the pins first."""
 
-    import app.temporal.deployment_composition as composition
+    import mission_control.adapters.temporal.deployment_composition as composition
 
     calls: list[str] = []
 
@@ -529,9 +531,12 @@ async def test_composition_resources_are_closed_when_build_or_worker_start_fails
 
     from contextlib import AsyncExitStack
 
-    import app.temporal.deployment_composition as composition
-    from app.integrations.capability_pins import CapabilityPinError
-    from app.temporal.worker import WorkerActivityComposition, production_workers_or_close
+    import mission_control.adapters.temporal.deployment_composition as composition
+    from mission_control.adapters.capabilities.capability_pins import CapabilityPinError
+    from mission_control.adapters.temporal.worker import (
+        WorkerActivityComposition,
+        production_workers_or_close,
+    )
 
     events: list[str] = []
 

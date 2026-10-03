@@ -4,20 +4,20 @@ from datetime import timedelta
 
 import pytest
 
-from app.application.coordinator.coordinator_launch import (
+from mission_control.application.coordinator.coordinator_launch import (
     CoordinatorWorkflowLaunchService,
 )
-from app.application.orchestration.orchestration_binding_repository import (
+from mission_control.application.programs.orchestration_binding_repository import (
     InMemoryRunSemanticInputBindingRepository,
     RunSemanticInputBindingService,
 )
-from app.domain.coordinator.launch import (
+from mission_control.domain.coordinator.launch import (
     LaunchIdempotencyConflict,
     LaunchTicketState,
     LaunchTicketUnavailable,
     WorkflowSubmission,
 )
-from app.domain.run_control.contracts import (
+from mission_control.domain.policies.contracts import (
     AdmissionDecision,
     DecisionStatus,
 )
@@ -106,9 +106,7 @@ async def test_repeated_prepare_and_launch_return_same_ticket_and_run() -> None:
         dispatcher=dispatcher,
         submissions=submissions,
         semantic_bindings=FixtureSemanticBindingProvider(),
-        binding_service=RunSemanticInputBindingService(
-            InMemoryRunSemanticInputBindingRepository()
-        ),
+        binding_service=RunSemanticInputBindingService(InMemoryRunSemanticInputBindingRepository()),
     )
     first = await launch.launch(first_ticket.ticket_id, context)
     second = await launch.launch(
@@ -148,13 +146,9 @@ async def test_expired_ticket_is_cas_transitioned_and_cannot_launch() -> None:
         dispatcher=RecordingDispatcher(),
         submissions=IdempotentSubmission(),
         semantic_bindings=FixtureSemanticBindingProvider(),
-        binding_service=RunSemanticInputBindingService(
-            InMemoryRunSemanticInputBindingRepository()
-        ),
+        binding_service=RunSemanticInputBindingService(InMemoryRunSemanticInputBindingRepository()),
     )
-    expired_context = context.model_copy(
-        update={"observed_at": NOW + timedelta(minutes=16)}
-    )
+    expired_context = context.model_copy(update={"observed_at": NOW + timedelta(minutes=16)})
     with pytest.raises(LaunchTicketUnavailable, match="expired"):
         await launch.launch(public.ticket_id, expired_context)
     private = await tickets.get(public.ticket_id, request_scope=SCOPE)

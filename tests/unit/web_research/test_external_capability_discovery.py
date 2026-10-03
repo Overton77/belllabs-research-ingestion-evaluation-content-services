@@ -5,26 +5,26 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.application.web_research.external_candidate_repository import (
+from mission_control.adapters.capabilities.mcp_registry import (
+    MCPRegistryAdapter,
+    MCPRegistryHttpRequest,
+    MCPRegistryHttpResponse,
+)
+from mission_control.adapters.capabilities.npx_skills_discovery import (
+    NpxSkillsDiscoveryAdapter,
+    SkillDiscoveryDependencyError,
+    SkillDiscoverySubprocessRequest,
+    SkillDiscoverySubprocessResult,
+)
+from mission_control.application.capabilities.external_candidate_repository import (
     InMemoryExternalCandidateRepository,
 )
-from app.application.web_research.external_capability_discovery import (
+from mission_control.application.capabilities.external_capability_discovery import (
     ExternalCandidateRepository,
     ExternalCapabilityDiscoveryDisabled,
     ExternalCapabilityDiscoveryService,
     ExternalDiscoveryBatch,
     ExternalDiscoveryCandidate,
-)
-from app.integrations.mcp_registry import (
-    MCPRegistryAdapter,
-    MCPRegistryHttpRequest,
-    MCPRegistryHttpResponse,
-)
-from app.integrations.npx_skills_discovery import (
-    NpxSkillsDiscoveryAdapter,
-    SkillDiscoveryDependencyError,
-    SkillDiscoverySubprocessRequest,
-    SkillDiscoverySubprocessResult,
 )
 
 NOW = datetime(2026, 7, 25, 16, 0, tzinfo=UTC)
@@ -107,9 +107,7 @@ async def test_registry_adapter_paginates_and_records_untrusted_candidates() -> 
                         "server": {
                             "name": "io.github.firecrawl/firecrawl-mcp",
                             "version": "1.2.3",
-                            "repository": {
-                                "url": "https://github.com/firecrawl/firecrawl-mcp"
-                            },
+                            "repository": {"url": "https://github.com/firecrawl/firecrawl-mcp"},
                         },
                         "status": "active",
                     }
@@ -247,9 +245,7 @@ async def test_service_returns_durable_sanitized_evidence_reference() -> None:
     batch = await service.discover_mcp_servers("search")
     candidate = batch.candidates[0]
     assert candidate.raw_response_ref is not None
-    assert candidate.raw_response_ref.startswith(
-        "mongodb://external-discovery-evidence/"
-    )
+    assert candidate.raw_response_ref.startswith("mission-control://external-discovery-evidence/")
     persisted = await records.get_candidate(candidate.candidate_id)
     evidence = await records.get_evidence(persisted.evidence_id)
     assert evidence.evidence.query == "search"

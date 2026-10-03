@@ -4,23 +4,28 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.application.runtime.agent_server_actions import BellLabsAgentServerActionResolver
-from app.application.runtime.runtime_decisions import (
+from mission_control.application.recovery.agent_server_actions import (
+    BellLabsAgentServerActionResolver,
+)
+from mission_control.application.recovery.runtime_decisions import (
     DecisionResponseAuthorization,
     DurableDecisionService,
     InMemoryDecisionRepository,
 )
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.graph_runtime.contracts import (
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.graph_runtime.contracts import (
     ActorRef,
     AppendInputIntervention,
     Correlation,
     RespondToInterruptIntervention,
     RuntimeExecutionBinding,
 )
-from app.domain.graph_runtime.definitions import ContentAddressedRef, RuntimeDefinitionKind
-from app.domain.graph_runtime.identities import ExecutionEpochKey
-from app.domain.graph_runtime.kernel import DecisionRequest, DecisionResponse
+from mission_control.domain.graph_runtime.definitions import (
+    ContentAddressedRef,
+    RuntimeDefinitionKind,
+)
+from mission_control.domain.graph_runtime.identities import ExecutionEpochKey
+from mission_control.domain.graph_runtime.kernel import DecisionRequest, DecisionResponse
 
 DIGEST = "sha256:" + "a" * 64
 NOW = datetime(2026, 8, 6, 20, 0, tzinfo=UTC)

@@ -13,14 +13,14 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.domain.control_plane.canonical import (
+from mission_control.domain.authoring.canonical import (
     contract_fingerprint,
     sha256_digest,
     stable_json_digest,
     stable_json_dump,
     stored_payload_matches,
 )
-from app.domain.graph_runtime.definitions import (
+from mission_control.domain.graph_runtime.definitions import (
     MCPServerDefinition,
     StageCapabilityRequirement,
 )
@@ -197,9 +197,14 @@ def test_launch_proposal_digest_is_independent_of_set_iteration_order() -> None:
 def test_structural_compiler_requirement_digest_is_independent_of_set_iteration_order() -> None:
     """Stage requirement reference digests (`compile_structural_graph_assembly`)."""
 
-    from app.application.runtime.runtime_run_plan import compile_structural_graph_assembly
-    from app.domain.control_plane.stagegraph_builder import StageGraphStageSpec, build_stagegraph_v2
-    from app.domain.graph_runtime.definitions import (
+    from mission_control.application.recovery.runtime_run_plan import (
+        compile_structural_graph_assembly,
+    )
+    from mission_control.domain.authoring.stagegraph_builder import (
+        StageGraphStageSpec,
+        build_stagegraph_v2,
+    )
+    from mission_control.domain.graph_runtime.definitions import (
         OperationAssemblySpec,
         RuntimeDefinitionKind,
         StageExecutionBinding,
@@ -304,8 +309,12 @@ async def test_bootstrap_authority_projection_digests_are_independent_of_set_ite
 
     from types import SimpleNamespace
 
-    from app.application.runtime import postgres_runtime_authority
-    from app.application.runtime.postgres_runtime_authority import PostgresBootstrapAuthority
+    from mission_control.adapters.postgres.runtime import (
+        runtime_authority as postgres_runtime_authority,
+    )
+    from mission_control.adapters.postgres.runtime.runtime_authority import (
+        PostgresBootstrapAuthority,
+    )
     from tests.unit.run_control.test_run_control import request, service
 
     run_service, repository = service()
@@ -357,10 +366,13 @@ async def test_graph_admission_and_reconciliation_ids_are_independent_of_set_ite
 ):
     """`SchemaGraphAdmissionService.decide` ids and the reconciliation request digest."""
 
-    from app.application.schema.schema_workspace_binding import SchemaGraphAdmissionService
-    from app.application.schema.supporting_graph_reconciliation import (
+    from biotech_mission_adapters.application.schema.schema_workspace_binding import (
+        SchemaGraphAdmissionService,
+    )
+    from biotech_mission_adapters.application.schema.supporting_graph_reconciliation import (
         _reconciliation_request_digest,
     )
+
     from tests.unit.schema.test_schema_grounding_services import _reconciliation_fixture
 
     request, _records, _factory = await _reconciliation_fixture()
@@ -403,7 +415,7 @@ async def test_sandbox_snapshot_identities_are_independent_of_set_iteration_orde
 async def _prepared_exact_refs(provider: object, family: str, initial_goal: str | None) -> tuple:
     """Exact input refs the real launch preparation freezes for a semantic binding provider."""
 
-    from app.application.coordinator.coordinator_semantic_bindings import (
+    from mission_control.application.coordinator.coordinator_semantic_bindings import (
         WorkflowSemanticBindingProviderRouter,
     )
     from tests.unit.coordinator.test_coordinator_launch_preparation import launch_fixture
@@ -434,7 +446,9 @@ async def _prepared_exact_refs(provider: object, family: str, initial_goal: str 
 async def test_semantic_binding_operation_template_refs_are_independent_of_set_order() -> None:
     """Both schema binding providers digest every operation request template."""
 
-    from app.application.operations.operation_execution import InMemoryOperationBindingRepository
+    from mission_control.application.execution.operations.operation_execution import (
+        InMemoryOperationBindingRepository,
+    )
     from tests.unit.coordinator.test_coordinator_semantic_binding_integration import (
         _schema_context_provider,
         _supporting_graph_provider,
@@ -469,8 +483,11 @@ async def test_web_research_record_digests_are_independent_of_set_iteration_orde
 
     from types import SimpleNamespace
 
-    from app.application.web_research.web_research_semantic_handlers import _append
-    from app.domain.coordinator.web_research_runtime import PublicGoalAdmission
+    from biotech_mission_adapters.application.web_research.web_research_semantic_handlers import (
+        _append,
+    )
+    from biotech_mission_adapters.domain.coordinator.web_research_runtime import PublicGoalAdmission
+
     from tests.unit.web_research.test_web_research_semantic_handlers import (
         request as stage_request,
     )
@@ -497,51 +514,15 @@ async def test_web_research_record_digests_are_independent_of_set_iteration_orde
 
 
 @pytest.mark.asyncio
-async def test_goal_operation_template_documents_are_independent_of_set_iteration_order(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The GoalDirected template document digest and its exact-replay payload."""
-
-    from types import SimpleNamespace
-
-    from app.application.orchestration import mongo_goal_directed_repository as repository
-    from tests.unit.operations.test_operation_execution import operation_request
-
-    documents: list[SimpleNamespace] = []
-
-    async def insert_exact(document: object, _model: object, _identity: object) -> None:
-        documents.append(document)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(repository, "GoalOperationTemplateDocument", SimpleNamespace)
-    monkeypatch.setattr(repository, "_insert_exact", insert_exact)
-    first, second = with_different_set_orders(operation_request())
-    assert_json_dumps_differ(first, second)
-
-    store = object.__new__(repository.MongoGoalDirectedDocumentRepository)
-    for template in (first, second):
-        await store.persist_templates(
-            request_scope="tenant-1",
-            semantic_input_binding_ref="binding:one",
-            executor=template,
-            verifier=template,
-            recorded_at=datetime(2026, 1, 1, tzinfo=UTC),
-        )
-
-    digests = {document.document_digest for document in documents}
-    payloads = {json.dumps(document.payload, sort_keys=True) for document in documents}
-    assert len(documents) == 4
-    assert len(digests) == 1
-    assert len(payloads) == 1
-
-
-@pytest.mark.asyncio
 async def test_effective_run_configuration_persistence_is_independent_of_set_order() -> None:
     """The persisted ERC record (and its externalised payload ref) replays exactly."""
 
-    from app.application.control_plane.control_plane_repository import InMemoryDefinitionRepository
-    from app.application.control_plane.service import ControlPlaneService
-    from app.domain.control_plane.extensions import ExtensionRegistry
-    from app.integrations.control_plane_payloads import InMemoryPayloadStore
+    from mission_control.adapters.storage.control_plane_payloads import InMemoryPayloadStore
+    from mission_control.application.authoring.control_plane_repository import (
+        InMemoryDefinitionRepository,
+    )
+    from mission_control.application.authoring.service import ControlPlaneService
+    from mission_control.domain.authoring.extensions import ExtensionRegistry
     from tests.unit.control_plane.test_control_plane import configured_service, invocation
 
     compiler, _repository, records = await configured_service()
@@ -616,7 +597,7 @@ def test_stable_json_dump_follows_the_declared_type_like_model_dump() -> None:
 
 
 def test_stable_json_dump_normalizes_aware_datetimes_inside_sets() -> None:
-    from datetime import UTC, datetime, timedelta, timezone
+    from datetime import datetime, timedelta, timezone
 
     from pydantic import BaseModel
 
@@ -660,10 +641,10 @@ async def test_journal_replay_proofs_accept_reordered_sets_and_reject_changed_fi
 
     from types import SimpleNamespace
 
-    from app.application.operations.postgres_operation_journal import (
+    from mission_control.adapters.postgres.operations.operation_journal import (
         PostgresAtomicOperationJournalRepository,
     )
-    from app.domain.run_control.errors import IdempotencyConflict
+    from mission_control.domain.policies.errors import IdempotencyConflict
     from tests.fixtures.set_order import json_with_reversed_sets
 
     run, budget, transition, result, event = await _run_control_replay_material()
@@ -717,50 +698,3 @@ async def test_journal_replay_proofs_accept_reordered_sets_and_reject_changed_fi
         await commit({**reordered_transition, "command_id": "other"}, reordered_event)
     with pytest.raises(IdempotencyConflict, match="outbox event collision"):
         await commit(reordered_transition, {**reordered_event, "event_type": "other"})
-
-
-@pytest.mark.asyncio
-async def test_mongo_binding_replay_proof_accepts_reordered_sets_and_rejects_changes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The duplicate-key proof in `MongoOperationBindingAuthorityMigrationRepository`."""
-
-    from types import SimpleNamespace
-
-    from pymongo.errors import DuplicateKeyError
-
-    from app.application.operations import mongo_operation_authority_migration as migration
-    from app.application.operations.operation_execution import _binding_for
-    from tests.fixtures.set_order import json_with_reversed_sets
-    from tests.unit.operations.test_operation_execution import operation_request
-
-    binding = _binding_for(operation_request(), DIGEST)
-    reordered = json_with_reversed_sets(binding)
-    assert reordered != stable_json_dump(binding)
-    digest = sha256_digest(binding)
-
-    async def create_with(prior_payload: object, prior_digest: str = digest) -> object:
-        class Document:
-            binding_id = "binding_id"
-            request_scope = "request_scope"
-
-            def __init__(self, **values: object) -> None:
-                self.values = values
-
-            async def insert(self) -> None:
-                raise DuplicateKeyError("duplicate")
-
-            @classmethod
-            async def find_one(cls, *_criteria: object) -> object:
-                return SimpleNamespace(canonical_digest=prior_digest, payload=prior_payload)
-
-        monkeypatch.setattr(migration, "OperationExecutionBindingAuthorityV2Document", Document)
-        repository = object.__new__(migration.MongoOperationBindingAuthorityMigrationRepository)
-        return await repository.create_binding(binding.request_scope, binding)
-
-    record = await create_with(reordered)
-    assert record.binding == binding  # type: ignore[attr-defined]
-    with pytest.raises(ValueError, match="authority conflict"):
-        await create_with({**reordered, "binding_id": "other"})
-    with pytest.raises(ValueError, match="authority conflict"):
-        await create_with(reordered, prior_digest=DIGEST)

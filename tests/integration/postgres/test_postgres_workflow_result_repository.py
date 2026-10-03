@@ -7,26 +7,26 @@ from typing import Any
 
 import pytest
 
-from app.application.coordinator.coordinator_composition import (
+from mission_control.adapters.postgres.coordinator.workflow_result_repository import (
+    PostgresWorkflowResultRepository,
+)
+from mission_control.application.coordinator.coordinator_facade import BlueprintRuntimeStatus
+from mission_control.bootstrap.coordinator_composition import (
     CoordinatorProductionDependencies,
     build_production_coordinator_facade,
 )
-from app.application.coordinator.coordinator_facade import BlueprintRuntimeStatus
-from app.application.coordinator.postgres_workflow_result_repository import (
-    PostgresWorkflowResultRepository,
-)
-from app.config import get_settings
-from app.domain.control_plane.contracts import (
+from mission_control.bootstrap.settings import get_settings
+from mission_control.domain.authoring.contracts import (
     DefinitionKind,
     DefinitionSelector,
     ExactDefinitionRef,
 )
-from app.domain.coordinator.launch import (
+from mission_control.domain.coordinator.launch import (
     BlueprintFamily,
     StageGraphResultDetails,
     WorkflowResultRecord,
 )
-from app.domain.run_control.contracts import RunOutcome, RunPhase
+from mission_control.domain.policies.contracts import RunOutcome, RunPhase
 
 NOW = datetime(2026, 7, 26, 19, 0, tzinfo=UTC)
 SENTINEL = "sk-proj-SENTINEL_OPENAI_KEY_1234567890"
@@ -70,11 +70,7 @@ def result(
             workflow_cycles=1,
             stage_cycles={"browser_verify": 1},
             operation_attempts={"browser_verify": 1},
-            output_refs={
-                "verified_research_result": (
-                    "belllabs://web-research/results/final",
-                )
-            },
+            output_refs={"verified_research_result": ("belllabs://web-research/results/final",)},
             schedule_trace=("browser_verify",),
         ),
         completed_at=NOW,
@@ -134,8 +130,7 @@ class _Connection:
             if row is None:
                 return None
             if len(args) >= 3 and (
-                row["tenant_scope"] != args[1]
-                or row["request_scope"] != args[2]
+                row["tenant_scope"] != args[1] or row["request_scope"] != args[2]
             ):
                 return None
             return row
@@ -178,11 +173,7 @@ async def test_save_get_and_repeated_save_are_immutable_and_idempotent() -> None
     persisted = pool.connection.rows[expected.run_id]
     assert persisted["result_digest"].startswith("sha256:")
     assert SENTINEL not in json.dumps(persisted)
-    set_configs = [
-        args
-        for query, args in pool.connection.calls
-        if "set_config" in query
-    ]
+    set_configs = [args for query, args in pool.connection.calls if "set_config" in query]
     assert ("global",) in set_configs
 
 
@@ -212,9 +203,7 @@ async def test_nonterminal_run_and_secret_material_fail_before_persistence() -> 
         await repository.save(
             result(
                 output_contract_results={
-                    "verified_web_research": {
-                        "summary": f"provider returned api_key={SENTINEL}"
-                    }
+                    "verified_web_research": {"summary": f"provider returned api_key={SENTINEL}"}
                 }
             )
         )
@@ -244,12 +233,17 @@ def test_production_composition_uses_only_application_pool_for_results() -> None
     application_pool = _Pool()
     ref = ExactDefinitionRef(
         kind=DefinitionKind.SKILL,
-        logical_id="skill.belllabs-workflow-coordinator",
+        logical_id="skill.mission-control-coordinator",
         revision=1,
         digest="sha256:" + "a" * 64,
     )
     facade = build_production_coordinator_facade(
-        settings=get_settings(),
+        settings=get_settings().model_copy(
+            update={
+                "mission_control_catalog_scope": "installation:test-coordinator",
+                "external_capability_discovery_enabled": False,
+            }
+        ),
         capability_postgres_pool=capability_pool,  # type: ignore[arg-type]
         application_postgres_pool=application_pool,  # type: ignore[arg-type]
         dependencies=CoordinatorProductionDependencies(

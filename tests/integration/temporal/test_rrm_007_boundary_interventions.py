@@ -28,34 +28,29 @@ from temporalio.client import WorkflowHandle
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
 
-from app.application.orchestration.service import orchestration_lifecycle_actor
-from app.application.run_control.boundary_interventions import (
+from mission_control.adapters.temporal.boundary_activities import apply_boundary_fact
+from mission_control.adapters.temporal.boundary_commands import TemporalBoundaryCommandTransport
+from mission_control.adapters.temporal.submission import TemporalWorkflowSubmitter
+from mission_control.adapters.temporal.workflow_sandbox import coordinator_workflow_runner
+from mission_control.adapters.temporal.workflows.belllabs_run import BellLabsRunWorkflow
+from mission_control.adapters.temporal.workflows.goal_directed import GoalDirectedWorkflow
+from mission_control.adapters.temporal.workflows.operation import OperationWorkflow
+from mission_control.adapters.temporal.workflows.stagegraph import (
+    StageGraphWorkflow,
+    wait_condition_id,
+)
+from mission_control.application.execution.boundary_interventions import (
     BoundaryCommandApplicationService,
     BoundaryCommandDeliveryService,
     BoundaryInterventionService,
 )
-from app.application.run_control.service import RunControlService
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.contracts import GoalDirectedBlueprint
-from app.domain.control_plane.fixtures import GENERIC_GOAL_DIRECTED
-from app.domain.coordinator.launch import BlueprintFamily
-from app.domain.orchestration.contracts import (
-    BoundaryCommandDelivery,
-    BoundaryLifecycleOutcome,
-    BoundaryLifecycleRequest,
-    GoalDirectedRunInput,
-    LifecycleCommandOutcome,
-    LifecycleCommandRequest,
-    StageGraphCompletionActivityRequest,
-    StageGraphCompletionActivityResult,
-    StageGraphInitializeRequest,
-    StageGraphInitializeResult,
-)
-from app.domain.orchestration.goal_directed_runtime import (
-    GoalOperationReconciliationRequest,
-    GoalOperationReconciliationResult,
-)
-from app.domain.run_control.contracts import (
+from mission_control.application.execution.service import RunControlService
+from mission_control.application.programs.service import orchestration_lifecycle_actor
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.authoring.contracts import GoalDirectedBlueprint
+from mission_control.domain.authoring.fixtures import GENERIC_GOAL_DIRECTED
+from mission_control.domain.coordinator.launch import BlueprintFamily
+from mission_control.domain.policies.contracts import (
     BudgetApplicability,
     CancelAction,
     CommandStatus,
@@ -68,14 +63,22 @@ from app.domain.run_control.contracts import (
     SatisfyWaitAction,
     StartAction,
 )
-from app.integrations.temporal_boundary_commands import TemporalBoundaryCommandTransport
-from app.integrations.temporal_workflow_submission import TemporalWorkflowSubmitter
-from app.temporal.boundary_activities import apply_boundary_fact
-from app.temporal.workflow_sandbox import coordinator_workflow_runner
-from app.temporal.workflows.belllabs_run import BellLabsRunWorkflow
-from app.temporal.workflows.goal_directed import GoalDirectedWorkflow
-from app.temporal.workflows.operation import OperationWorkflow
-from app.temporal.workflows.stagegraph import StageGraphWorkflow, wait_condition_id
+from mission_control.domain.programs.contracts import (
+    BoundaryCommandDelivery,
+    BoundaryLifecycleOutcome,
+    BoundaryLifecycleRequest,
+    GoalDirectedRunInput,
+    LifecycleCommandOutcome,
+    LifecycleCommandRequest,
+    StageGraphCompletionActivityRequest,
+    StageGraphCompletionActivityResult,
+    StageGraphInitializeRequest,
+    StageGraphInitializeResult,
+)
+from mission_control.domain.programs.goal_directed_runtime import (
+    GoalOperationReconciliationRequest,
+    GoalOperationReconciliationResult,
+)
 from tests.fixtures.operation_activities import wait_heartbeating
 from tests.integration.temporal.test_wp_bp_010_temporal import (
     QUEUE,
@@ -180,9 +183,7 @@ class Authority:
         return result
 
     async def states(self, run_id: str, command_id: str) -> list[str]:
-        status = await self.run_control.get_boundary_command(
-            SCOPE, run_id, "operator", command_id
-        )
+        status = await self.run_control.get_boundary_command(SCOPE, run_id, "operator", command_id)
         return [item.state.value for item in status.receipts] if status is not None else []
 
     async def run(self, run_id: str) -> Any:
@@ -196,9 +197,7 @@ WAIT_SECONDS = 180.0
 RESULT_SECONDS = 300.0
 
 
-async def until(
-    predicate: Callable[[], Awaitable[bool]], *, seconds: float = WAIT_SECONDS
-) -> None:
+async def until(predicate: Callable[[], Awaitable[bool]], *, seconds: float = WAIT_SECONDS) -> None:
     """Poll authority until `predicate` holds (receipts are recorded by activities).
 
     The deadline is monotonic wall time, not an iteration count, so a slow poll cannot
@@ -339,9 +338,7 @@ async def test_stagegraph_declared_wait_is_governed_and_survives_continue_as_new
                 StageGraphWorkflow.run, run_input, id=workflow_id, task_queue=QUEUE
             )
             # REQ-BP-SG-009: the held wait is declared to authority and inspectable.
-            await until(
-                lambda: _has_wait(authority, run_id, condition_id), seconds=WAIT_SECONDS
-            )
+            await until(lambda: _has_wait(authority, run_id, condition_id), seconds=WAIT_SECONDS)
             projection = await authority.run(run_id)
             assert projection.phase == RunPhase.WAITING
             assert projection.execution_target is not None
@@ -551,9 +548,7 @@ class GovernedGoalActivities(FakeGoalDirectedActivities):
         payload.pop("verification_digest")
         return result.model_copy(
             update={
-                "verification_result": replace(
-                    draft, verification_digest=sha256_digest(payload)
-                )
+                "verification_result": replace(draft, verification_digest=sha256_digest(payload))
             }
         )
 

@@ -11,17 +11,17 @@ from datetime import timedelta
 
 import pytest
 
-from app.application.async_subagents.parent_effects import (
+from mission_control.application.subordinates.parent_effects import (
     RunControlAsyncChildEffects,
     async_child_effect_id,
     async_child_usage_id,
 )
-from app.application.async_subagents.service import (
+from mission_control.application.subordinates.service import (
     AsyncSubagentService,
     InMemoryAsyncSubagentAuthority,
     InMemoryAsyncSubagentDetailRepository,
 )
-from app.domain.run_control.contracts import (
+from mission_control.domain.policies.contracts import (
     BudgetApplicability,
     BudgetDimensionLimit,
     CommandStatus,

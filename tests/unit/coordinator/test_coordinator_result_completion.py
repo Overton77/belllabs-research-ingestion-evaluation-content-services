@@ -5,16 +5,16 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.application.coordinator.coordinator_results import (
+from mission_control.application.coordinator.coordinator_results import (
     InMemoryWorkflowResultRepository,
     TerminalWorkflowCompletionService,
 )
-from app.domain.coordinator.launch import (
+from mission_control.domain.coordinator.launch import (
     BlueprintFamily,
     StageGraphResultDetails,
     TerminalWorkflowCompletion,
 )
-from app.domain.run_control.contracts import RunOutcome, RunPhase
+from mission_control.domain.policies.contracts import RunOutcome, RunPhase
 
 NOW = datetime(2026, 7, 28, 20, 0, tzinfo=UTC)
 
@@ -89,9 +89,7 @@ async def test_terminal_completion_is_idempotent_and_recoverable_after_ambiguous
 
     retried = await service.complete(completion())
     assert retried.run_id == "run-1"
-    assert (
-        await repository.get("tenant-a", "tenant-a", "run-1")
-    ) == retried
+    assert (await repository.get("tenant-a", "tenant-a", "run-1")) == retried
 
 
 @pytest.mark.asyncio

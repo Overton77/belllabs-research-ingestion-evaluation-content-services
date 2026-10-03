@@ -5,9 +5,14 @@ import asyncio
 import asyncpg
 import pytest
 
-from app.application.orchestration.postgres_linked_run_repository import PostgresLinkedRunRepository
-from app.application.run_control.postgres_run_control_repository import PostgresRunControlRepository
-from app.domain.composition.contracts import (
+from mission_control.adapters.postgres.connections import apply_application_migrations
+from mission_control.adapters.postgres.orchestration.linked_run_repository import (
+    PostgresLinkedRunRepository,
+)
+from mission_control.adapters.postgres.run_control.run_control_repository import (
+    PostgresRunControlRepository,
+)
+from mission_control.domain.composition.contracts import (
     DependencyAssessment,
     LinkedRunResultAdmissionDecision,
     ResultEvidenceAssessment,
@@ -15,13 +20,12 @@ from app.domain.composition.contracts import (
     RunDependencyClass,
     RunDependencyRevision,
 )
-from app.domain.run_control.contracts import (
+from mission_control.domain.policies.contracts import (
     CancelAction,
     ClaimEffectAction,
     CommandStatus,
     DecisionStatus,
 )
-from app.integrations.postgres import apply_application_migrations
 from tests.unit.run_control.test_run_control import command, request, service
 
 

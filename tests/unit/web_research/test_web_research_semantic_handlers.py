@@ -6,27 +6,15 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-
-from app.application.orchestration.goal_directed import InMemoryGoalOperationTemplateRepository
-from app.application.orchestration.orchestration_binding_repository import (
-    InMemoryRunSemanticInputBindingRepository,
-)
-from app.application.orchestration.orchestration_routing import (
-    BoundStageOperationExecutor,
-    BoundWorkflowEvaluator,
-    SemanticHandlerRegistry,
-    SemanticRoutingError,
-)
-from app.application.web_research.web_research_repository import (
+from biotech_mission_adapters.application.web_research.web_research_repository import (
     InMemoryWebResearchRecordRepository,
 )
-from app.application.web_research.web_research_semantic_handlers import (
+from biotech_mission_adapters.application.web_research.web_research_semantic_handlers import (
     WebResearchHandlerDependencies,
     build_web_research_run_binding,
     register_web_research_stagegraph_handlers,
 )
-from app.domain.control_plane.contracts import DefinitionKind, ExactDefinitionRef
-from app.domain.coordinator.web_research_runtime import (
+from biotech_mission_adapters.domain.coordinator.web_research_runtime import (
     BrowserExecutionGrantBinding,
     BrowserPageVerification,
     ExactOperationExecutionBinding,
@@ -41,18 +29,32 @@ from app.domain.coordinator.web_research_runtime import (
     ReviewedSkillMountBinding,
     WebResearchGoal,
 )
-from app.domain.orchestration.bindings import StageHandlerBinding
-from app.domain.orchestration.contracts import (
+
+from mission_control.adapters.temporal.coordinator_runtime import (
+    GoalDirectedCoordinatorDependencies,
+    StageGraphCoordinatorDependencies,
+    create_routed_coordinator_activities,
+)
+from mission_control.application.programs.goal_directed import (
+    InMemoryGoalOperationTemplateRepository,
+)
+from mission_control.application.programs.orchestration_binding_repository import (
+    InMemoryRunSemanticInputBindingRepository,
+)
+from mission_control.application.programs.orchestration_routing import (
+    BoundStageOperationExecutor,
+    BoundWorkflowEvaluator,
+    SemanticHandlerRegistry,
+    SemanticRoutingError,
+)
+from mission_control.domain.authoring.contracts import DefinitionKind, ExactDefinitionRef
+from mission_control.domain.policies.contracts import ActorContext
+from mission_control.domain.programs.bindings import StageHandlerBinding
+from mission_control.domain.programs.contracts import (
     StageCandidateIdentity,
     StageExecutionIdentity,
     StageOperationRequest,
     WorkflowEvaluationRequest,
-)
-from app.domain.run_control.contracts import ActorContext
-from app.temporal.coordinator_runtime import (
-    GoalDirectedCoordinatorDependencies,
-    StageGraphCoordinatorDependencies,
-    create_routed_coordinator_activities,
 )
 
 CONFIGURATION_DIGEST = "sha256:" + "1" * 64
@@ -240,10 +242,7 @@ class FakeSearch:
                 NormalizedSearchResult(
                     title=f"{self.provider} result",
                     url=f"https://{self.provider}.example/source?access_token=discard-me",
-                    snippet=(
-                        f"{self.provider} reports public evidence; "
-                        f"api_key={OPENAI_SENTINEL}"
-                    ),
+                    snippet=(f"{self.provider} reports public evidence; api_key={OPENAI_SENTINEL}"),
                 ),
             ),
             provider_request_id="provider-secret-request-id",
@@ -522,6 +521,7 @@ def test_routed_activity_composition_registers_web_research_handlers() -> None:
         records=InMemoryWebResearchRecordRepository(),
     )
 
+    register_web_research_stagegraph_handlers(registry, dependencies)
     activities = create_routed_coordinator_activities(
         bindings=InMemoryRunSemanticInputBindingRepository(),
         handlers=registry,
@@ -542,7 +542,6 @@ def test_routed_activity_composition_registers_web_research_handlers() -> None:
             operation_bindings=cast(Any, object()),
             templates=cast(Any, object()),
         ),
-        web_research=dependencies,
     )
 
     exact = next(

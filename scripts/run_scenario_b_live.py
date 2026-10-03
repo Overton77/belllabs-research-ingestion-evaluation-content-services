@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from app.config import PROJECT_ROOT
+from mission_control.bootstrap.settings import PROJECT_ROOT
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -45,7 +45,7 @@ def _project_path(path: Path, *, argument: str) -> Path:
 
 
 async def run(args: argparse.Namespace) -> dict[str, Any]:
-    from app.application.runners.scenario_b_live import run_scenario_b_live
+    from mission_control.bootstrap.runners.scenario_b_live import run_scenario_b_live
 
     return await run_scenario_b_live(
         tenant_scope=args.tenant_scope,

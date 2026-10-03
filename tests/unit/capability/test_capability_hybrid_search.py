@@ -5,19 +5,26 @@ from hashlib import sha256
 
 import pytest
 
-from app.application.capability.capability_search import (
+from mission_control.adapters.postgres.capability.capability_search_repository import (
+    _filtered_query,
+)
+from mission_control.application.authoring.control_plane_repository import (
+    InMemoryDefinitionRepository,
+)
+from mission_control.application.capabilities.capability_search import (
     CapabilitySearchService,
     weighted_rrf,
 )
-from app.application.capability.capability_search_repository import (
+from mission_control.application.capabilities.capability_search_repository import (
     CapabilityEmbedding,
     InMemoryCatalogSearchRepository,
     RankedCapabilityDocument,
 )
-from app.application.capability.catalog_projection import CatalogProjectionError, CatalogProjector
-from app.application.capability.postgres_capability_search_repository import _filtered_query
-from app.application.control_plane.control_plane_repository import InMemoryDefinitionRepository
-from app.domain.control_plane.contracts import (
+from mission_control.application.capabilities.catalog_projection import (
+    CatalogProjectionError,
+    CatalogProjector,
+)
+from mission_control.domain.authoring.contracts import (
     CatalogPayloadRef,
     DefinitionKind,
     ExactDefinitionRef,
@@ -27,7 +34,7 @@ from app.domain.control_plane.contracts import (
     PublishedDefinition,
     SourceProvenance,
 )
-from app.domain.coordinator.contracts import (
+from mission_control.domain.coordinator.contracts import (
     AuthorizationState,
     CapabilitySearchRequest,
     CatalogAssetStatus,
@@ -289,9 +296,7 @@ async def test_exact_rehydration_rejects_stale_digest_and_retirement() -> None:
         clock=lambda: NOW,
     )
     projected = await projector.project(firecrawl.ref)
-    stale = projected.document.model_copy(
-        update={"source_digest": "sha256:" + "0" * 64}
-    )
+    stale = projected.document.model_copy(update={"source_digest": "sha256:" + "0" * 64})
     await search.upsert(stale)
     service = CapabilitySearchService(
         search=search,
@@ -313,9 +318,7 @@ async def test_exact_rehydration_rejects_stale_digest_and_retirement() -> None:
     retired_projection = await projector.project(firecrawl.ref)
     assert retired_projection.document.status == CatalogAssetStatus.RETIRED
     retired = await service.search(
-        request.model_copy(
-            update={"status_filter": frozenset({CatalogAssetStatus.RETIRED})}
-        )
+        request.model_copy(update={"status_filter": frozenset({CatalogAssetStatus.RETIRED})})
     )
     assert retired.hits[0].authorization_state == AuthorizationState.UNAVAILABLE
 

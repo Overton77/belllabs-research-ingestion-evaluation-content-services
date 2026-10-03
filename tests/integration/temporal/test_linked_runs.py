@@ -9,20 +9,20 @@ from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
-from app.application.orchestration.linked_runs import (
+from mission_control.adapters.temporal.linked_run_activities import (
+    LinkedRunActivities,
+    LinkedRunDecisionGateway,
+)
+from mission_control.adapters.temporal.linked_run_workflow import (
+    LinkedRunObserverWorkflow,
+    LinkedRunWorkflow,
+)
+from mission_control.adapters.temporal.workflow_sandbox import coordinator_workflow_runner
+from mission_control.application.programs.linked_runs import (
     InMemoryLinkedRunRepository,
     LinkedRunService,
 )
-from app.domain.composition.contracts import (
-    DependencyAssessment,
-    LinkedChildResultObservation,
-    LinkedResultAdmissionProposal,
-    LinkedRunContinuationState,
-    LinkedRunRequest,
-    ResultEvidenceAssessment,
-    RunDependencyClass,
-)
-from app.domain.control_plane.contracts import (
+from mission_control.domain.authoring.contracts import (
     AuthorityCeiling,
     BudgetCeiling,
     CompilationContext,
@@ -34,13 +34,16 @@ from app.domain.control_plane.contracts import (
     LinkedRunSlotConstraint,
     RunInputManifestRef,
 )
-from app.domain.orchestration.contracts import (
-    BellLabsRunInput,
-    StageGraphCompletionProposal,
-    StageGraphRunInput,
-    StageGraphRunResult,
+from mission_control.domain.composition.contracts import (
+    DependencyAssessment,
+    LinkedChildResultObservation,
+    LinkedResultAdmissionProposal,
+    LinkedRunContinuationState,
+    LinkedRunRequest,
+    ResultEvidenceAssessment,
+    RunDependencyClass,
 )
-from app.domain.run_control.contracts import (
+from mission_control.domain.policies.contracts import (
     ActorContext,
     AdmissionDecision,
     BudgetApplicability,
@@ -51,16 +54,13 @@ from app.domain.run_control.contracts import (
     RunPhase,
     RunRequest,
 )
-from app.domain.run_control.errors import AdmissionRejected, IdempotencyConflict
-from app.temporal.linked_run_activities import (
-    LinkedRunActivities,
-    LinkedRunDecisionGateway,
+from mission_control.domain.policies.errors import AdmissionRejected, IdempotencyConflict
+from mission_control.domain.programs.contracts import (
+    BellLabsRunInput,
+    StageGraphCompletionProposal,
+    StageGraphRunInput,
+    StageGraphRunResult,
 )
-from app.temporal.linked_run_workflow import (
-    LinkedRunObserverWorkflow,
-    LinkedRunWorkflow,
-)
-from app.temporal.workflow_sandbox import coordinator_workflow_runner
 
 NOW = datetime(2026, 7, 19, 21, 0, tzinfo=UTC)
 DIGEST = "sha256:" + "a" * 64

@@ -7,16 +7,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from mcp.types import TextContent
-
-from app.domain.control_plane.contracts import DefinitionKind, ExactDefinitionRef
-from app.domain.coordinator.web_research_runtime import (
-    GovernedBrowserVerificationRequest,
-    GovernedSearchRequest,
-    ReviewedRuntimeArtifactBinding,
-)
-from app.integrations import web_research_runtime
-from app.integrations.web_research_runtime import (
+from biotech_mission_adapters.adapters.infrastructure import web_research_runtime
+from biotech_mission_adapters.adapters.infrastructure.web_research_runtime import (
     AgentBrowserSubprocessAdapter,
     BrowserSubprocessRequest,
     BrowserSubprocessResult,
@@ -24,6 +16,15 @@ from app.integrations.web_research_runtime import (
     TavilyMCPSearchAdapter,
     WebResearchRuntimeDependencyError,
 )
+from biotech_mission_adapters.domain.coordinator.web_research_runtime import (
+    GovernedBrowserVerificationRequest,
+    GovernedSearchRequest,
+    ReviewedRuntimeArtifactBinding,
+)
+from mcp.types import TextContent
+
+from mission_control.adapters.capabilities import browser_subprocess
+from mission_control.domain.authoring.contracts import DefinitionKind, ExactDefinitionRef
 
 
 def exact_ref(kind: DefinitionKind, logical_id: str, digit: str) -> ExactDefinitionRef:
@@ -90,21 +91,11 @@ def test_tools_snapshot_attestation_is_line_ending_stable_and_drift_sensitive() 
     lf = json.dumps(snapshot, indent=2) + "\n"
     crlf = lf.replace("\n", "\r\n")
 
-    expected = web_research_runtime._canonical_tools_snapshot_digest(
-        json.loads(lf)
-    )
-    assert (
-        web_research_runtime._canonical_tools_snapshot_digest(json.loads(crlf))
-        == expected
-    )
+    expected = web_research_runtime._canonical_tools_snapshot_digest(json.loads(lf))
+    assert web_research_runtime._canonical_tools_snapshot_digest(json.loads(crlf)) == expected
     drifted = json.loads(lf)
-    drifted["tools"][0]["inputSchema"]["properties"]["limit"] = {
-        "type": "integer"
-    }
-    assert (
-        web_research_runtime._canonical_tools_snapshot_digest(drifted)
-        != expected
-    )
+    drifted["tools"][0]["inputSchema"]["properties"]["limit"] = {"type": "integer"}
+    assert web_research_runtime._canonical_tools_snapshot_digest(drifted) != expected
 
 
 def test_pinned_tavily_text_envelope_is_decoded_without_accepting_arbitrary_text() -> None:
@@ -146,10 +137,7 @@ def test_pinned_tavily_text_envelope_is_decoded_without_accepting_arbitrary_text
     }
     for malformed in (
         "Search results are available at https://example.com",
-        (
-            "Detailed Results:\n\nTitle: Missing URL\n"
-            "Content: This must fail closed."
-        ),
+        ("Detailed Results:\n\nTitle: Missing URL\nContent: This must fail closed."),
         (
             "Detailed Results:\n\nTitle: Unsafe URL\n"
             "URL: file:///tmp/evidence\nContent: This must fail closed."
@@ -348,8 +336,7 @@ class FakeScreenshots:
 
 def test_agent_browser_session_identity_preserves_full_run_uniqueness() -> None:
     suffix = (
-        ":execution-epoch:1:workflow-cycle:0:stage:browser_verify:"
-        "stage-cycle:0:operation-attempt:1"
+        ":execution-epoch:1:workflow-cycle:0:stage:browser_verify:stage-cycle:0:operation-attempt:1"
     )
     first = web_research_runtime._session_id(  # noqa: SLF001
         "operation:run-one" + suffix
@@ -439,7 +426,7 @@ async def test_browser_output_collection_does_not_wait_forever_for_daemon_pipe_e
     process.stderr = stderr  # type: ignore[attr-defined]
 
     captured_stdout, captured_stderr, exit_code = await asyncio.wait_for(
-        web_research_runtime._collect_bounded_output(  # noqa: SLF001
+        browser_subprocess._collect_bounded_output(  # noqa: SLF001
             process,  # type: ignore[arg-type]
             16_384,
         ),
@@ -513,8 +500,7 @@ async def test_pinned_agent_browser_uses_isolated_bounded_argv_and_artifact_port
         for request in runner.requests
     )
     assert any(
-        "eval" in request.arguments
-        and "innerText?.slice(0, 4000)" in request.arguments[-1]
+        "eval" in request.arguments and "innerText?.slice(0, 4000)" in request.arguments[-1]
         for request in runner.requests
     )
     assert all("--session" not in request.arguments for request in runner.requests)
@@ -567,9 +553,7 @@ async def test_pinned_agent_browser_retries_stale_cdp_bootstrap_in_fresh_session
         )
     )
 
-    open_requests = [
-        item for item in runner.requests if item.arguments[-2] == "open"
-    ]
+    open_requests = [item for item in runner.requests if item.arguments[-2] == "open"]
     assert response.pages[0].verified is True
     assert len(open_requests) == 2
     assert (

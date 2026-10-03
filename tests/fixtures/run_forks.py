@@ -10,12 +10,15 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any
 
-from app.application.async_subagents.service import InMemoryAsyncSubagentDetailRepository
-from app.application.operations.checkpoint_lineage import InMemoryCheckpointLineageRepository
-from app.application.run_control.inspection import InMemoryInspectionReadRepository
-from app.application.run_control.run_control_repository import InMemoryRunControlRepository
-from app.application.run_control.service import RunControlService
-from app.application.runtime.run_forks import (
+from mission_control.application.execution.inspection import InMemoryInspectionReadRepository
+from mission_control.application.execution.operations.checkpoint_lineage import (
+    InMemoryCheckpointLineageRepository,
+)
+from mission_control.application.execution.run_control_repository import (
+    InMemoryRunControlRepository,
+)
+from mission_control.application.execution.service import RunControlService
+from mission_control.application.recovery.run_forks import (
     FamilyHeadRecord,
     ForkCommand,
     ForkPatchPolicyRegistry,
@@ -30,13 +33,17 @@ from app.application.runtime.run_forks import (
     RunSnapshotService,
     SemanticForkService,
 )
-from app.application.runtime.runtime_lineage import InMemoryExecutionLineageRepository
-from app.application.runtime.runtime_recovery import InMemoryForkRepository, RuntimeForkService
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.operation_execution.contracts import AsyncSubagentExecution
-from app.domain.run_control.contracts import ActorContext
-from app.domain.run_control.errors import RunControlNotFound
-from app.domain.run_control.forks import (
+from mission_control.application.recovery.runtime_lineage import InMemoryExecutionLineageRepository
+from mission_control.application.recovery.runtime_recovery import (
+    InMemoryForkRepository,
+    RuntimeForkService,
+)
+from mission_control.application.subordinates.service import InMemoryAsyncSubagentDetailRepository
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.execution.contracts import AsyncSubagentExecution
+from mission_control.domain.policies.contracts import ActorContext
+from mission_control.domain.policies.errors import RunControlNotFound
+from mission_control.domain.policies.forks import (
     CognitiveSeed,
     ForkPatchChange,
     ForkPatchPolicy,
@@ -44,7 +51,10 @@ from app.domain.run_control.forks import (
     RunSnapshotManifest,
     stage_objective_path,
 )
-from app.domain.run_control.inspection import JournalClaimInspection, JournalSettlementSummary
+from mission_control.domain.policies.inspection import (
+    JournalClaimInspection,
+    JournalSettlementSummary,
+)
 from tests.fixtures.checkpoint_recovery import MemoryOperationJournal
 from tests.unit.run_control.test_run_control import ALL_PERMISSIONS, NOW, WORKFLOW_DIGEST
 
@@ -388,7 +398,11 @@ def technical_snapshot(
 ) -> RunSnapshotManifest:
     """A minimal, valid StageGraph snapshot of `run_id` (storage and saga suites)."""
 
-    from app.domain.run_control.forks import BudgetFrontier, FamilyPosition, snapshot_id_for
+    from mission_control.domain.policies.forks import (
+        BudgetFrontier,
+        FamilyPosition,
+        snapshot_id_for,
+    )
     from tests.unit.run_control.test_run_control import request as run_request
 
     admitted = run_request(request_scope=request_scope)

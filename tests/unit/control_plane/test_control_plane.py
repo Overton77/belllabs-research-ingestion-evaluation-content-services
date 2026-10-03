@@ -7,13 +7,15 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 from pydantic import ValidationError
 
-from app.application.control_plane.control_plane_repository import (
+from mission_control.adapters.storage.control_plane_payloads import InMemoryPayloadStore
+from mission_control.application.authoring.control_plane_repository import (
     DefinitionRepository,
     InMemoryDefinitionRepository,
 )
-from app.application.control_plane.service import ControlPlaneService
-from app.domain.control_plane.canonical import canonical_json
-from app.domain.control_plane.contracts import (
+from mission_control.application.authoring.service import ControlPlaneService
+from mission_control.application.ports.payloads import ContentAddressedPayloadStore
+from mission_control.domain.authoring.canonical import canonical_json
+from mission_control.domain.authoring.contracts import (
     AliasRef,
     AuthorityCeiling,
     AvailabilityRequirement,
@@ -43,21 +45,17 @@ from app.domain.control_plane.contracts import (
     WorkspaceSlot,
     WorkspaceTemplateDefinition,
 )
-from app.domain.control_plane.errors import (
+from mission_control.domain.authoring.errors import (
     CompilationRejected,
     DefinitionConflict,
     PayloadIntegrityError,
     RetiredDefinition,
 )
-from app.domain.control_plane.extensions import ExtensionRegistry
-from app.domain.control_plane.fixtures import GENERIC_GOAL_DIRECTED
-from app.domain.control_plane.stagegraph_builder import (
+from mission_control.domain.authoring.extensions import ExtensionRegistry
+from mission_control.domain.authoring.fixtures import GENERIC_GOAL_DIRECTED
+from mission_control.domain.authoring.stagegraph_builder import (
     StageGraphStageSpec,
     build_stagegraph_v2,
-)
-from app.integrations.control_plane_payloads import (
-    ContentAddressedPayloadStore,
-    InMemoryPayloadStore,
 )
 
 NOW = datetime(2026, 1, 2, 3, 4, tzinfo=UTC)
@@ -252,12 +250,8 @@ def test_contracts_forbid_unknown_fields_and_invalid_stage_graphs() -> None:
             title="Cycle",
             description="Invalid",
             stages=(
-                StageGraphStageSpec(
-                    stage_id="a", depends_on=("b",), output_slots=("result",)
-                ),
-                StageGraphStageSpec(
-                    stage_id="b", depends_on=("a",), output_slots=("result",)
-                ),
+                StageGraphStageSpec(stage_id="a", depends_on=("b",), output_slots=("result",)),
+                StageGraphStageSpec(stage_id="b", depends_on=("a",), output_slots=("result",)),
             ),
         )
 

@@ -13,12 +13,14 @@ from uuid import uuid4
 import asyncpg
 import pytest
 
-from app.application.operations.postgres_checkpoint_lineage import (
+from mission_control.adapters.postgres.connections import apply_application_migrations
+from mission_control.adapters.postgres.operations.checkpoint_lineage import (
     PostgresCheckpointLineageRepository,
 )
-from app.application.run_control.postgres_run_control_repository import PostgresRunControlRepository
-from app.domain.operation_execution.checkpoint_lineage import CheckpointNamespaceBusy
-from app.integrations.postgres import apply_application_migrations
+from mission_control.adapters.postgres.run_control.run_control_repository import (
+    PostgresRunControlRepository,
+)
+from mission_control.domain.execution.checkpoint_lineage import CheckpointNamespaceBusy
 from tests.fixtures.checkpoint_lineage import (
     LINEAGE_NOW,
     activity_attempt,
@@ -92,7 +94,8 @@ async def test_runtime_role_grants_and_rls_admit_the_full_lineage_contract(
     """Migrations 0019/0020 grants are sufficient for the production role, and no broader.
 
     Production pools connect as a non-owner member of `belllabs_control_runtime`
-    (`app/integrations/postgres.py`). Every repository call here runs under that role, so
+    (`src/mission_control/adapters/postgres/connections.py`). Every repository call
+    here runs under that role, so
     forced RLS and the table grants are exercised instead of the owner's privileges.
     """
 
@@ -143,10 +146,13 @@ async def test_runtime_role_grants_and_rls_admit_the_full_lineage_contract(
                 with pytest.raises(asyncpg.InsufficientPrivilegeError):
                     async with connection.transaction():
                         await connection.execute(statement)
-            assert await connection.fetchval(
-                "SELECT count(*) FROM belllabs_control.runtime_reconciliation_incidents"
-                " WHERE unit_key IS NOT NULL"
-            ) == 3, "two unit generations' incidents, one of them at revision 2"
+            assert (
+                await connection.fetchval(
+                    "SELECT count(*) FROM belllabs_control.runtime_reconciliation_incidents"
+                    " WHERE unit_key IS NOT NULL"
+                )
+                == 3
+            ), "two unit generations' incidents, one of them at revision 2"
         async with runtime.acquire() as connection, connection.transaction():
             await connection.execute(
                 "SELECT set_config('belllabs.request_scope', 'tenant-2', true)"

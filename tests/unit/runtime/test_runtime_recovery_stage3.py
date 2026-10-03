@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.application.runtime.runtime_recovery import (
+from mission_control.application.recovery.runtime_recovery import (
     ForkAdmission,
     ForkAdmissionObservation,
     ForkMaterialization,
@@ -17,21 +17,21 @@ from app.application.runtime.runtime_recovery import (
     build_cancellation_plan,
     decide_recovery_mode,
 )
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.graph_runtime.contracts import (
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.graph_runtime.contracts import (
     ActorRef,
     CancelRunIntervention,
     Correlation,
     RuntimeExecutionBinding,
     RuntimeExecutionStatus,
 )
-from app.domain.graph_runtime.identities import (
+from mission_control.domain.graph_runtime.identities import (
     AgentThreadKey,
     DeploymentIdentity,
     ExecutionEpochKey,
 )
-from app.domain.run_control.errors import IdempotencyConflict
-from app.domain.run_control.forks import (
+from mission_control.domain.policies.errors import IdempotencyConflict
+from mission_control.domain.policies.forks import (
     ForkRejected,
     RunForkPatch,
     RunForkRequest,

@@ -2,7 +2,8 @@
 
 `model_dump(mode="json")` lists every `set`/`frozenset` in per-process iteration order, so a
 digest or exact-equality proof built from it is not an identity. This scanner finds every
-JSON-mode dump (`model_dump(mode="json", ...)` or `model_dump_json(...)`) in `app/` whose
+JSON-mode dump (`model_dump(mode="json", ...)` or `model_dump_json(...)`) in runtime,
+optional integration, or experiment sources whose
 value flows into a digest-like sink, directly or through a local variable.
 """
 
@@ -13,7 +14,12 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-APP_ROOT = Path(__file__).resolve().parents[2] / "app"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+SOURCE_ROOTS = (
+    PROJECT_ROOT / "src" / "mission_control",
+    PROJECT_ROOT / "integrations" / "biotech" / "src" / "biotech_mission_adapters",
+    PROJECT_ROOT / "experiments",
+)
 
 # Callables that turn a payload into an identity: any name containing one of these tokens.
 _SINK_NAME = re.compile(
@@ -21,8 +27,11 @@ _SINK_NAME = re.compile(
     re.IGNORECASE,
 )
 # Modules that are out of this mission's scope (RRM-013 owns them) and are reported, not scanned.
-EXCLUDED_PARTS = ("app/agent_server/", "app/application/async_subagents/")
-EXCLUDED_FILES = ("app/integrations/agents/deep_agents/async_subagents.py",)
+EXCLUDED_PARTS = (
+    "src/mission_control/adapters/agent_server/",
+    "src/mission_control/application/subordinates/",
+)
+EXCLUDED_FILES = ("src/mission_control/adapters/deep_agents/async_subagents.py",)
 
 
 @dataclass(frozen=True)
@@ -169,10 +178,12 @@ class _Visitor(ast.NodeVisitor):
                 self.sites.append(site)
 
 
-def _scan(root: Path) -> list[tuple[str, _Visitor]]:
+def _scan(root: Path, *, repo: Path | None = None) -> list[tuple[str, _Visitor]]:
     results: list[tuple[str, _Visitor]] = []
-    repo = root.parent
-    for file in sorted(root.rglob("*.py")):
+    repo = repo or root.parent
+    files = sorted(root.rglob("*.py"))
+    assert files, f"Digest guard source scan is empty: {root}"
+    for file in files:
         relative = file.relative_to(repo).as_posix()
         visitor = _Visitor(relative)
         visitor.visit(ast.parse(file.read_text(encoding="utf-8"), filename=str(file)))
@@ -184,17 +195,27 @@ def _excluded(relative: str) -> bool:
     return relative in EXCLUDED_FILES or any(part in relative for part in EXCLUDED_PARTS)
 
 
-def scan_digest_sites(root: Path = APP_ROOT) -> tuple[list[DigestSite], list[DigestSite]]:
+def scan_digest_sites(root: Path | None = None) -> tuple[list[DigestSite], list[DigestSite]]:
     """Return (in-scope sites, sites in excluded RRM-013 areas)."""
 
     in_scope: list[DigestSite] = []
     excluded: list[DigestSite] = []
-    for relative, visitor in _scan(root):
+    scanned = (
+        _scan(root)
+        if root is not None
+        else [entry for source in SOURCE_ROOTS for entry in _scan(source, repo=PROJECT_ROOT)]
+    )
+    for relative, visitor in scanned:
         (excluded if _excluded(relative) else in_scope).extend(visitor.sites)
     return in_scope, excluded
 
 
-def scan_unverifiable_dumps(root: Path = APP_ROOT) -> list[DigestSite]:
+def scan_unverifiable_dumps(root: Path | None = None) -> list[DigestSite]:
     """JSON-capable dumps whose mode is not a literal or that pass `**kwargs` (any function)."""
 
-    return [site for _relative, visitor in _scan(root) for site in visitor.unverifiable]
+    scanned = (
+        _scan(root)
+        if root is not None
+        else [entry for source in SOURCE_ROOTS for entry in _scan(source, repo=PROJECT_ROOT)]
+    )
+    return [site for _relative, visitor in scanned for site in visitor.unverifiable]

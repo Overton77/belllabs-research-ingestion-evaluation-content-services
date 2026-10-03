@@ -28,15 +28,7 @@ from typing import Any, cast
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
-from app.config import PROJECT_ROOT
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.contracts import DefinitionKind
-from app.integrations.agents.deep_agents.browser_tool import (
-    AGENT_BROWSER_PAGE_TOOL_NAME,
-    AgentBrowserPageTool,
-)
-from app.integrations.agents.deep_agents.materializer import tool_schema_digest
-from app.integrations.capability_pins import (
+from mission_control.adapters.capabilities.capability_pins import (
     CapabilityPins,
     PinnedExactRef,
     PinnedMCPServer,
@@ -49,6 +41,14 @@ from app.integrations.capability_pins import (
     read_skill_bundle,
     workspace_path,
 )
+from mission_control.adapters.deep_agents.browser_tool import (
+    AGENT_BROWSER_PAGE_TOOL_NAME,
+    AgentBrowserPageTool,
+)
+from mission_control.adapters.deep_agents.materializer import tool_schema_digest
+from mission_control.bootstrap.settings import PROJECT_ROOT
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.authoring.contracts import DefinitionKind
 
 FIRECRAWL_MODULE = "workspace://.tools/reviewed/firecrawl-mcp-7232b6d1cdd80335107d53a33b80c902b515a334/dist/index.js"
 TAVILY_MODULE = "workspace://.tools/node_modules/tavily-mcp/build/index.js"

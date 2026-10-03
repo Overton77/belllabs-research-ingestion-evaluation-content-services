@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from app.application.run_control.boundary_interventions import (
+from mission_control.application.execution.boundary_interventions import (
     BoundaryCommandDeliveryService,
     BoundaryInterventionService,
 )
-from app.application.run_control.boundary_relay import BoundaryCommandRelay
-from app.domain.run_control.contracts import (
+from mission_control.application.execution.boundary_relay import BoundaryCommandRelay
+from mission_control.domain.policies.contracts import (
     CANCEL_SEQUENCE_SPACE,
     CancelAction,
     CommandStatus,

@@ -4,14 +4,14 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.application.runtime.runtime_bootstrap import (
+from mission_control.application.recovery.runtime_bootstrap import (
     AuthoritativeRuntimeProjection,
     BootstrapRequest,
     CheckpointRuntimeProjection,
     RuntimeBootstrapReconciler,
 )
-from app.domain.graph_runtime.contracts import RuntimeExecutionBinding
-from app.domain.graph_runtime.identities import (
+from mission_control.domain.graph_runtime.contracts import RuntimeExecutionBinding
+from mission_control.domain.graph_runtime.identities import (
     AgentThreadKey,
     DeploymentIdentity,
     ExecutionEpochKey,

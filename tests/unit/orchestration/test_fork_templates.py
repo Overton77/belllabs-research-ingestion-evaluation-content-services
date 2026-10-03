@@ -6,13 +6,17 @@ from datetime import datetime
 
 import pytest
 
-from app.application.orchestration.fork_templates import (
+from mission_control.application.programs.fork_templates import (
     ForkPatchNotApplicable,
     StageGraphForkTemplateDerivation,
 )
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.operation_execution.contracts import OperationExecutionRequest
-from app.domain.run_control.forks import ForkPatchChange, RunForkPatch, stage_objective_path
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.execution.contracts import OperationExecutionRequest
+from mission_control.domain.policies.forks import (
+    ForkPatchChange,
+    RunForkPatch,
+    stage_objective_path,
+)
 from tests.unit.operations.test_operation_execution import operation_request
 
 

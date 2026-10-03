@@ -10,23 +10,20 @@ import pytest
 from fastapi import FastAPI
 from pydantic import Field, ValidationError
 
-from app.api.run_control import (
-    compose_api_run_control_service,
-    configure_family_admission_registry,
-)
-from app.application.run_control.run_control_repository import (
+from mission_control.adapters.temporal.worker import compose_worker_run_control_service
+from mission_control.application.execution.run_control_repository import (
     InMemoryRunControlRepository,
     authority_state_digest,
     upgrade_legacy_operation_pending_usage,
 )
-from app.application.run_control.service import (
+from mission_control.application.execution.service import (
     AdmissionPolicyRegistry,
     FamilyAdmissionRegistry,
     RunControlService,
 )
-from app.domain.control_plane.canonical import canonical_json, sha256_digest
-from app.domain.operation_execution.journal import OperationJournalSettlement
-from app.domain.run_control.contracts import (
+from mission_control.domain.authoring.canonical import canonical_json, sha256_digest
+from mission_control.domain.execution.journal import OperationJournalSettlement
+from mission_control.domain.policies.contracts import (
     MAX_AUTHORITY_BATCH_IDENTITY_SUMMARY_BYTES,
     AcceptedObligationEvidence,
     AcceptedOutputEvidence,
@@ -47,22 +44,25 @@ from app.domain.run_control.contracts import (
     SettlePendingUsageAction,
     StartAction,
 )
-from app.domain.run_control.errors import (
+from mission_control.domain.policies.errors import (
     CommandRejected,
     IdempotencyConflict,
     RunControlNotFound,
 )
-from app.domain.run_control.family_admission import (
+from mission_control.domain.policies.family_admission import (
     AtomicFamilyMutation,
     FamilyAdmissionReceipt,
     FamilyVersionConflict,
 )
-from app.domain.run_control.reducer import (
+from mission_control.domain.policies.reducer import (
     ReductionRejected,
     reduce_lifecycle,
     required_action_permissions,
 )
-from app.temporal.worker import compose_worker_run_control_service
+from mission_control.interfaces.http.run_control import (
+    compose_api_run_control_service,
+    configure_family_admission_registry,
+)
 from tests.unit.run_control.test_run_control import ConfigurationVerifier, command, request
 
 
@@ -279,13 +279,11 @@ async def test_success_reservation_family_state_replay_and_outbox_order() -> Non
     assert receipt.command_result.status == CommandStatus.ACCEPTED
     assert receipt.family_receipt is not None
     assert receipt.family_receipt.family_version == 1
-    assert (await run_service.get_budget("tenant-1", run_id)).reservations[
-        "operation:test:1"
-    ] == {"tokens.total": 10}
+    assert (await run_service.get_budget("tenant-1", run_id)).reservations["operation:test:1"] == {
+        "tokens.total": 10
+    }
     assert (
-        await repository.get_family_head(
-            "tenant-1", run_id, "test_family", TestFamilyMutation
-        )
+        await repository.get_family_head("tenant-1", run_id, "test_family", TestFamilyMutation)
         == mutation
     )
     outbox = await run_service.pending_outbox("tenant-1")
@@ -513,9 +511,7 @@ async def test_plain_command_retries_after_concurrent_parent_rollup() -> None:
     assert result.status == CommandStatus.ACCEPTED
     final_budget = await run_service.get_budget("tenant-1", parent_run_id)
     assert final_budget.reserved["tokens.total"] == 50
-    assert final_budget.reservations["plain-authority-command"] == {
-        "tokens.total": 10
-    }
+    assert final_budget.reservations["plain-authority-command"] == {"tokens.total": 10}
 
 
 @pytest.mark.asyncio
@@ -576,9 +572,7 @@ async def test_stale_rejection_is_reduced_again_and_never_replayed(
         mutation_id=f"stale-rejection-{combined}",
     )
     if combined:
-        task = asyncio.create_task(
-            run_service.execute_family_admission(lifecycle, mutation)
-        )
+        task = asyncio.create_task(run_service.execute_family_admission(lifecycle, mutation))
     else:
         task = asyncio.create_task(run_service.execute(lifecycle))
 
@@ -605,9 +599,9 @@ async def test_stale_rejection_is_reduced_again_and_never_replayed(
         else result_or_receipt
     )
     assert result.status == CommandStatus.ACCEPTED
-    assert (
-        await run_service.get_budget("tenant-1", parent_run_id)
-    ).reservations[f"stale-rejection-{combined}"] == {"tokens.total": 70}
+    assert (await run_service.get_budget("tenant-1", parent_run_id)).reservations[
+        f"stale-rejection-{combined}"
+    ] == {"tokens.total": 70}
 
     if combined:
         replay_receipt = await run_service.execute_family_admission(lifecycle, mutation)
@@ -627,17 +621,13 @@ async def test_concurrent_plain_commands_return_accepted_and_stable_stale_result
             run_id,
             1,
             "plain-concurrent-one",
-            ReserveBudgetAction(
-                reservation_id="plain-concurrent-one", amounts={"tokens.total": 1}
-            ),
+            ReserveBudgetAction(reservation_id="plain-concurrent-one", amounts={"tokens.total": 1}),
         ),
         command(
             run_id,
             1,
             "plain-concurrent-two",
-            ReserveBudgetAction(
-                reservation_id="plain-concurrent-two", amounts={"tokens.total": 1}
-            ),
+            ReserveBudgetAction(reservation_id="plain-concurrent-two", amounts={"tokens.total": 1}),
         ),
     )
     results = await asyncio.gather(*(run_service.execute(item) for item in commands))
@@ -646,9 +636,7 @@ async def test_concurrent_plain_commands_return_accepted_and_stable_stale_result
         CommandStatus.STALE,
     }
     stale_index = next(
-        index
-        for index, result in enumerate(results)
-        if result.status == CommandStatus.STALE
+        index for index, result in enumerate(results) if result.status == CommandStatus.STALE
     )
     assert await run_service.execute(commands[stale_index]) == results[stale_index]
 
@@ -691,9 +679,7 @@ async def test_concurrent_admissions_return_one_accepted_and_one_stable_stale_re
         if receipt.command_result.status == CommandStatus.STALE
     )
     assert (
-        await run_service.execute_family_admission(
-            commands[stale_index], mutations[stale_index]
-        )
+        await run_service.execute_family_admission(commands[stale_index], mutations[stale_index])
         == receipts[stale_index]
     )
 
@@ -741,9 +727,7 @@ async def test_family_admission_commit_rejects_all_cross_bound_identity_tamperin
     with pytest.raises(ValueError, match="accepted family receipt"):
         replace(
             commit,
-            receipt=commit.receipt.model_copy(
-                update={"family_receipt": invalid_family_receipt}
-            ),
+            receipt=commit.receipt.model_copy(update={"family_receipt": invalid_family_receipt}),
         )
 
 
@@ -764,10 +748,7 @@ async def test_registry_permission_action_scope_and_run_binding_rejections() -> 
     unauthorized = reserve.model_copy(
         update={
             "actor": reserve.actor.model_copy(
-                update={
-                    "permissions": reserve.actor.permissions
-                    - {"workflow_run.reserve_budget"}
-                }
+                update={"permissions": reserve.actor.permissions - {"workflow_run.reserve_budget"}}
             )
         }
     )
@@ -895,9 +876,7 @@ async def test_family_reads_hide_missing_and_cross_scope_runs_consistently() -> 
                 scope, target_run, "operator", "missing-command"
             )
         with pytest.raises(RunControlNotFound):
-            await repository.get_family_head(
-                scope, target_run, "test_family", TestFamilyMutation
-            )
+            await repository.get_family_head(scope, target_run, "test_family", TestFamilyMutation)
     assert (
         await repository.get_family_admission_receipt(
             "tenant-1", run_id, "operator", "missing-command"
@@ -977,8 +956,7 @@ def test_family_mutations_inherit_payload_and_sensitive_data_bounds() -> None:
 def test_migration_has_private_repository_dml_and_no_attachment_function() -> None:
     migration = (
         Path(__file__).parents[3]
-        / "app"
-        / "migrations"
+        / "src/mission_control/adapters/postgres/migrations"
         / "0017_atomic_family_admission_v1.sql"
     ).read_text(encoding="utf-8")
     assert "CREATE FUNCTION" not in migration
@@ -988,10 +966,7 @@ def test_migration_has_private_repository_dml_and_no_attachment_function() -> No
     assert "GRANT belllabs_family_repository_writer TO belllabs_app" not in migration
     repository = (
         Path(__file__).parents[3]
-        / "app"
-        / "application"
-        / "run_control"
-        / "postgres_run_control_repository.py"
+        / "src/mission_control/adapters/postgres/run_control/run_control_repository.py"
     ).read_text(encoding="utf-8")
     assert "family_writer_pool: asyncpg.Pool | None = None" in repository
     assert "self._family_writer_pool.acquire()" in repository
@@ -1001,22 +976,17 @@ def test_migration_has_private_repository_dml_and_no_attachment_function() -> No
 def test_operation_settlement_revision_key_uses_forward_migration() -> None:
     migration = (
         Path(__file__).parents[3]
-        / "app"
-        / "migrations"
+        / "src/mission_control/adapters/postgres/migrations"
         / "0018_operation_settlement_revisions_v1.sql"
     ).read_text(encoding="utf-8")
     assert "DROP CONSTRAINT IF EXISTS operation_settlements_pkey" in migration
-    assert (
-        "PRIMARY KEY (request_scope, settlement_id, settlement_revision)"
-        in migration
-    )
+    assert "PRIMARY KEY (request_scope, settlement_id, settlement_revision)" in migration
     assert "pending_candidates" in migration
     assert "'{usage_records}'" in migration
     assert "'{outstanding_usage_ids}'" in migration
     original = (
         Path(__file__).parents[3]
-        / "app"
-        / "migrations"
+        / "src/mission_control/adapters/postgres/migrations"
         / "0012_graph_runtime_operation_journal.sql"
     ).read_text(encoding="utf-8")
     assert "PRIMARY KEY (request_scope, settlement_id)" in original
@@ -1119,9 +1089,7 @@ async def test_authority_batch_commits_one_version_all_authority_and_ordered_out
             "effect_id_digest": sha256_digest("effect-1"),
             "observation_id_digest": sha256_digest("effect-observation-1"),
             "settlement_id_digest": sha256_digest("effect-settlement-1"),
-            "usage_settlement_ref_digest": sha256_digest(
-                "accepted-usage-settlement"
-            ),
+            "usage_settlement_ref_digest": sha256_digest("accepted-usage-settlement"),
         },
         {
             "action_kind": "record_obligation_evidence",
@@ -1186,9 +1154,10 @@ async def test_authority_batch_rejection_rolls_back_and_replays_without_family_a
     assert await run_service.get_budget("tenant-1", run_id) == before_budget
     assert await run_service.get_effects("tenant-1", run_id) == before_effects
     assert len(await repository.list_transitions("tenant-1", run_id)) == 3
-    assert await repository.get_family_head(
-        "tenant-1", run_id, "test_family", TestFamilyMutation
-    ) is None
+    assert (
+        await repository.get_family_head("tenant-1", run_id, "test_family", TestFamilyMutation)
+        is None
+    )
 
 
 @pytest.mark.asyncio
@@ -1214,12 +1183,16 @@ async def test_authority_batch_requires_nested_permissions_and_detects_collision
 
     mutation = family_mutation(run_id, mutation_id="permission-batch")
     await run_service.execute_family_admission(lifecycle, mutation)
-    changed_output = authority_batch().actions[-1].model_copy(
-        update={
-            "evidence": authority_batch().actions[-1].evidence.model_copy(
-                update={"evidence_digest": "sha256:" + "f" * 64}
-            )
-        }
+    changed_output = (
+        authority_batch()
+        .actions[-1]
+        .model_copy(
+            update={
+                "evidence": authority_batch()
+                .actions[-1]
+                .evidence.model_copy(update={"evidence_digest": "sha256:" + "f" * 64})
+            }
+        )
     )
     collision = lifecycle.model_copy(
         update={
@@ -1432,9 +1405,7 @@ async def test_batch_family_policy_rejects_omissions_and_mutation_reference_mism
 async def test_effect_settlement_rejects_spoofed_usage_settlement_reference() -> None:
     run_service, repository, run_id = await prepared_authority_batch_run()
     actions = list(authority_batch().actions)
-    actions[3] = actions[3].model_copy(
-        update={"usage_settlement_ref": "settlement:spoofed"}
-    )
+    actions[3] = actions[3].model_copy(update={"usage_settlement_ref": "settlement:spoofed"})
     spoofed = ApplyAuthorityBatchAction(actions=tuple(actions))
     lifecycle = command(run_id, 3, "spoofed-settlement", spoofed)
     mutation = family_mutation(run_id, mutation_id="spoofed-settlement")
@@ -1447,12 +1418,11 @@ async def test_effect_settlement_rejects_spoofed_usage_settlement_reference() ->
     assert receipt.command_result.reason_code == "usage_settlement_not_found"
     assert (await run_service.get_run("tenant-1", run_id)).version == 3
     assert (await run_service.get_budget("tenant-1", run_id)).settlement_ids == frozenset()
+    assert (await run_service.get_effects("tenant-1", run_id)).claims["effect-1"].settlement is None
     assert (
-        await run_service.get_effects("tenant-1", run_id)
-    ).claims["effect-1"].settlement is None
-    assert await repository.get_family_head(
-        "tenant-1", run_id, "test_family", TestFamilyMutation
-    ) is None
+        await repository.get_family_head("tenant-1", run_id, "test_family", TestFamilyMutation)
+        is None
+    )
 
 
 @pytest.mark.asyncio
@@ -1497,9 +1467,9 @@ async def test_pending_usage_settlement_rejects_empty_and_unrelated_provenance()
             run_id,
             6,
             "settle-with-unrelated-usage",
-            authority_batch().actions[3].model_copy(
-                update={"usage_settlement_ref": "unrelated-usage"}
-            ),
+            authority_batch()
+            .actions[3]
+            .model_copy(update={"usage_settlement_ref": "unrelated-usage"}),
         )
     )
     assert forged.status == CommandStatus.REJECTED
@@ -1553,9 +1523,7 @@ async def test_pending_usage_settlement_rejects_empty_and_unrelated_provenance()
     budget = await run_service.get_budget("tenant-1", run_id)
     assert "empty-pending-settlement" not in budget.settlement_ids
     assert "empty-pending-settlement" not in budget.usage_settlements
-    assert (
-        await run_service.get_effects("tenant-1", run_id)
-    ).claims["effect-1"].settlement is None
+    assert (await run_service.get_effects("tenant-1", run_id)).claims["effect-1"].settlement is None
 
 
 @pytest.mark.asyncio
@@ -1623,10 +1591,7 @@ async def test_legacy_pending_usage_requires_unambiguous_journal_effect_evidence
         legacy_settlement,
     )
     assert upgraded.outstanding_usage_ids == {"legacy-operation-usage"}
-    assert (
-        upgraded.usage_records["legacy-operation-usage"].authority_ref
-        == "operation:1"
-    )
+    assert upgraded.usage_records["legacy-operation-usage"].authority_ref == "operation:1"
     repository._budgets[run_id] = upgraded
     settled = await run_service.execute(
         command(
@@ -1661,17 +1626,16 @@ async def test_legacy_pending_usage_requires_unambiguous_journal_effect_evidence
         )
     with pytest.raises(ValueError, match="totals do not match"):
         upgrade_legacy_operation_pending_usage(
-            legacy_budget.model_copy(
-                update={"pending_settlement": {"tokens.total": 6}}
-            ),
+            legacy_budget.model_copy(update={"pending_settlement": {"tokens.total": 6}}),
             effects,
             legacy_settlement,
         )
 
 
 @pytest.mark.asyncio
-async def test_effect_settlement_requires_exact_operation_authority_and_one_usage_settlement(
-) -> None:
+async def test_effect_settlement_requires_exact_operation_authority_and_one_usage_settlement() -> (
+    None
+):
     run_service, _repository, run_id = await prepared_authority_batch_run()
     wrong_authority_usage = await run_service.execute(
         command(
@@ -1699,11 +1663,9 @@ async def test_effect_settlement_requires_exact_operation_authority_and_one_usag
             run_id,
             observed.resulting_run_version,
             "settle-wrong-authority",
-            authority_batch().actions[3].model_copy(
-                update={
-                    "usage_settlement_ref": "same-reservation-wrong-authority"
-                }
-            ),
+            authority_batch()
+            .actions[3]
+            .model_copy(update={"usage_settlement_ref": "same-reservation-wrong-authority"}),
         )
     )
     assert mismatch.status == CommandStatus.REJECTED
@@ -1849,9 +1811,7 @@ def test_authority_batch_and_lifecycle_command_have_aggregate_byte_ceilings() ->
     run_id = "run:bytes"
     copied = command(run_id, 1, "oversized-command", authority_batch()).model_copy(
         update={
-            "evidence_refs": tuple(
-                f"evidence:{index:02d}:" + "y" * 4000 for index in range(20)
-            )
+            "evidence_refs": tuple(f"evidence:{index:02d}:" + "y" * 4000 for index in range(20))
         }
     )
     with pytest.raises(ValidationError, match="lifecycle command exceeds 65536"):
@@ -1871,10 +1831,7 @@ def test_authority_batch_and_lifecycle_command_have_aggregate_byte_ceilings() ->
     )
     summary = maximum_summary_batch.canonical_identity_summary()
     assert len(summary) == 64
-    assert (
-        len(canonical_json(summary))
-        <= MAX_AUTHORITY_BATCH_IDENTITY_SUMMARY_BYTES
-    )
+    assert len(canonical_json(summary)) <= MAX_AUTHORITY_BATCH_IDENTITY_SUMMARY_BYTES
     assert "output:00" not in canonical_json(summary).decode("utf-8")
 
 
@@ -1886,23 +1843,15 @@ async def test_authority_digest_is_order_independent_for_plain_and_combined_cas(
             return state.model_copy(
                 update={
                     "usage_ids": frozenset(reversed(sorted(state.usage_ids))),
-                    "settlement_ids": frozenset(
-                        reversed(sorted(state.settlement_ids))
-                    ),
+                    "settlement_ids": frozenset(reversed(sorted(state.settlement_ids))),
                     "usage_records": dict(reversed(tuple(state.usage_records.items()))),
-                    "usage_settlements": dict(
-                        reversed(tuple(state.usage_settlements.items()))
-                    ),
+                    "usage_settlements": dict(reversed(tuple(state.usage_settlements.items()))),
                 }
             )
 
-        async def get_effects(
-            self, request_scope: str, run_id: str
-        ) -> EffectLedgerState:
+        async def get_effects(self, request_scope: str, run_id: str) -> EffectLedgerState:
             state = await super().get_effects(request_scope, run_id)
-            return state.model_copy(
-                update={"claims": dict(reversed(tuple(state.claims.items())))}
-            )
+            return state.model_copy(update={"claims": dict(reversed(tuple(state.claims.items())))})
 
     repository = ReorderedAuthorityReadRepository()
     run_service, repository, run_id = await prepared_authority_batch_run(repository)

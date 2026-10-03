@@ -9,25 +9,25 @@ from temporalio import activity
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
-from app.application.operations.checkpoint_lineage import (
-    CheckpointLineageService,
-    InMemoryCheckpointLineageRepository,
-)
-from app.config import Settings
-from app.domain.control_plane.contracts import SecretRef
-from app.domain.operation_execution.checkpoint_lineage import OperationActivityAttempt
-from app.domain.operation_execution.contracts import (
-    OperationExecutionRequest,
-    OperationWorkflowRequest,
-)
-from app.integrations.agents.deep_agents import (
+from mission_control.adapters.deep_agents import (
     DeepAgentRuntimeAdapter,
     ExactComponentRegistry,
     ExactDeepAgentMaterializer,
     LangSmithSandboxFactory,
     OpenAIExactModelFactory,
 )
-from app.temporal.workflows.operation import OperationWorkflow
+from mission_control.adapters.temporal.workflows.operation import OperationWorkflow
+from mission_control.application.execution.operations.checkpoint_lineage import (
+    CheckpointLineageService,
+    InMemoryCheckpointLineageRepository,
+)
+from mission_control.bootstrap.settings import Settings
+from mission_control.domain.authoring.contracts import SecretRef
+from mission_control.domain.execution.checkpoint_lineage import OperationActivityAttempt
+from mission_control.domain.execution.contracts import (
+    OperationExecutionRequest,
+    OperationWorkflowRequest,
+)
 from tests.acceptance.control_plane.test_wp_cp_040 import exact_fixture
 from tests.fixtures.checkpoint_lineage import (
     bind_unit,

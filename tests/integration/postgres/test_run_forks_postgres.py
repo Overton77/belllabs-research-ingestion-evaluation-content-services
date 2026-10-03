@@ -19,27 +19,29 @@ from typing import Any
 import asyncpg
 import pytest
 
-from app.application.run_control.postgres_run_control_repository import PostgresRunControlRepository
-from app.application.runtime.postgres_run_forks import (
+from mission_control.adapters.postgres.run_control.run_control_repository import (
+    PostgresRunControlRepository,
+)
+from mission_control.adapters.postgres.runtime.run_forks import (
     PostgresForkMaterializationStore,
     PostgresForkSourceReader,
     PostgresRunSnapshotRepository,
 )
-from app.application.runtime.postgres_stage3_kernel_repository import (
+from mission_control.adapters.postgres.runtime.stage3_kernel_repository import (
     PostgresForkRepository,
     PostgresStage3RetentionRepository,
 )
-from app.application.runtime.run_forks import (
+from mission_control.application.recovery.run_forks import (
     ForkPatchPolicyRegistry,
     RecordingForkMaterializer,
     RunControlForkAuthority,
     SemanticForkService,
 )
-from app.application.runtime.runtime_recovery import RuntimeForkService
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.run_control.contracts import RunPhase, StartAction
-from app.domain.run_control.errors import IdempotencyConflict
-from app.domain.run_control.forks import (
+from mission_control.application.recovery.runtime_recovery import RuntimeForkService
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.policies.contracts import RunPhase, StartAction
+from mission_control.domain.policies.errors import IdempotencyConflict
+from mission_control.domain.policies.forks import (
     ForkLineageManifest,
     ForkRejected,
     ReuseCandidate,
@@ -395,8 +397,8 @@ async def test_fork_saga_recovers_crashes_under_the_runtime_role_with_one_receip
 
 
 def _lineage_stub(request: Any) -> Any:
-    from app.application.runtime.run_forks import fork_execution_lineage
-    from app.domain.run_control.forks import lineage_for
+    from mission_control.application.recovery.run_forks import fork_execution_lineage
+    from mission_control.domain.policies.forks import lineage_for
 
     return fork_execution_lineage(
         request,
@@ -549,18 +551,18 @@ async def test_active_async_child_in_rrm013_authority_blocks_the_snapshot(
     """The production classifier: RRM-013's `classify_async_children_for_fork` over
     `PostgresAsyncSubagentAuthority.list_children` (0016 authority, 0021 lifecycle)."""
 
-    from app.application.async_subagents.postgres_async_subagents import (
+    from mission_control.adapters.postgres.async_subagents.async_subagents import (
         PostgresAsyncSubagentAuthority,
     )
-    from app.application.run_control.postgres_inspection_repository import (
+    from mission_control.adapters.postgres.run_control.inspection_repository import (
         PostgresInspectionReadRepository,
     )
-    from app.application.runtime.run_forks import (
+    from mission_control.application.recovery.run_forks import (
         LedgerPendingCommands,
         LineageAsyncChildForkClassifier,
         RunSnapshotService,
     )
-    from app.domain.run_control.contracts import StartAction
+    from mission_control.domain.policies.contracts import StartAction
     from tests.acceptance.control_plane.test_wp_cp_045 import request as spawn_request
     from tests.fixtures.run_forks import stagegraph_head
 

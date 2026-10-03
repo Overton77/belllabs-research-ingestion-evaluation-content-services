@@ -15,27 +15,27 @@ from pathlib import Path
 
 import pytest
 
-from app.application.workspaces.workspace_materialization import (
+from mission_control.adapters.storage.filesystem_workspace import FilesystemWorkspaceProvisioner
+from mission_control.application.artifacts.workspace_materialization import (
     InMemoryDurableWorkspaceInputs,
     InMemoryWorkspaceManifestRepository,
     WorkspaceMaterializationService,
 )
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.contracts import DefinitionKind, ExactDefinitionRef
-from app.domain.operation_execution.contracts import (
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.authoring.contracts import DefinitionKind, ExactDefinitionRef
+from mission_control.domain.execution.contracts import (
     WorkspaceMaterializationRequest,
     WorkspaceOwner,
     WorkspaceOwnerKind,
     WorkspaceSlotBinding,
 )
-from app.domain.operation_execution.errors import UndeclaredWorkspacePath, WorkspaceSlotConflict
-from app.domain.operation_execution.materialization import (
+from mission_control.domain.execution.errors import UndeclaredWorkspacePath, WorkspaceSlotConflict
+from mission_control.domain.execution.materialization import (
     slot_ownership_boundary,
     verify_workspace_manifest,
 )
-from app.domain.orchestration.runtime_units import goal_unit_workspace_root
-from app.domain.run_control.errors import IdempotencyConflict
-from app.integrations.filesystem_workspace import FilesystemWorkspaceProvisioner
+from mission_control.domain.policies.errors import IdempotencyConflict
+from mission_control.domain.programs.runtime_units import goal_unit_workspace_root
 from tests.fixtures.checkpoint_lineage import goal_unit
 from tests.unit.workspaces.test_workspace_materialization import RecordingProvisioner
 

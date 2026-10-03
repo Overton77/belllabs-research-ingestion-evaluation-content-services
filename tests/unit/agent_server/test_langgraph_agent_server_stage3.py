@@ -4,14 +4,22 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.application.runtime.graph_runtime_dispatch import (
+from mission_control.adapters.agent_server.client import (
+    AgentServerRuntimeConfig,
+    LangGraphAgentServerClient,
+    LangGraphAgentServerInterventionClient,
+    ResolvedAgentServerAction,
+)
+from mission_control.application.recovery.graph_runtime_dispatch import (
     ExactRuntimeSelector,
     GraphRuntimeDispatchService,
 )
-from app.application.runtime.runtime_execution_bindings import InMemoryRuntimeCoordinationRepository
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.contracts import DefinitionKind, ExactDefinitionRef
-from app.domain.graph_runtime.contracts import (
+from mission_control.application.recovery.runtime_execution_bindings import (
+    InMemoryRuntimeCoordinationRepository,
+)
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.authoring.contracts import DefinitionKind, ExactDefinitionRef
+from mission_control.domain.graph_runtime.contracts import (
     ActorRef,
     CancelRunIntervention,
     Correlation,
@@ -19,19 +27,13 @@ from app.domain.graph_runtime.contracts import (
     RuntimeExecutionBinding,
     RuntimeExecutionStatus,
 )
-from app.domain.graph_runtime.definitions import (
+from mission_control.domain.graph_runtime.definitions import (
     ContentAddressedRef,
     GraphAssemblySpecV2,
     RunPlanV3,
     RuntimeDefinitionKind,
 )
-from app.domain.graph_runtime.identities import DeploymentIdentity, ExecutionEpochKey
-from app.integrations.langgraph_agent_server import (
-    AgentServerRuntimeConfig,
-    LangGraphAgentServerClient,
-    LangGraphAgentServerInterventionClient,
-    ResolvedAgentServerAction,
-)
+from mission_control.domain.graph_runtime.identities import DeploymentIdentity, ExecutionEpochKey
 
 DIGEST = "sha256:" + "a" * 64
 NOW = datetime(2026, 8, 6, 20, 0, tzinfo=UTC)

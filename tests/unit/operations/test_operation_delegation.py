@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from app.application.operations.operation_execution import _binding_for
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.contracts import DefinitionKind
-from app.domain.operation_execution.contracts import (
+from mission_control.application.execution.operations.operation_execution import _binding_for
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.authoring.contracts import DefinitionKind
+from mission_control.domain.execution.contracts import (
     AgentDefinition,
     CapabilityGrant,
     DelegationBinding,
@@ -11,7 +11,7 @@ from app.domain.operation_execution.contracts import (
     ModelPolicy,
     OperationExecutionRequest,
 )
-from app.domain.operation_execution.delegation import admit_delegation
+from mission_control.domain.execution.delegation import admit_delegation
 from tests.unit.operations.test_operation_execution import exact, operation_request
 
 

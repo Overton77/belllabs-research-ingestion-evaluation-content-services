@@ -6,24 +6,25 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from app.api.graph_runtime_schemas import graph_runtime_contract_schemas
-from app.application.runtime.runtime_resources import (
+from mission_control.application.recovery.runtime_resources import (
     InMemoryResourceLeaseJournal,
     ResourceCapacity,
     ResourceExhausted,
 )
-from app.application.runtime.runtime_run_plan import compile_structural_graph_assembly_v3
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.contracts import (
+from mission_control.application.recovery.runtime_run_plan import (
+    compile_structural_graph_assembly_v3,
+)
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.authoring.contracts import (
     DefinitionKind,
     ExactDefinitionRef,
 )
-from app.domain.control_plane.stagegraph_builder import (
+from mission_control.domain.authoring.stagegraph_builder import (
     StageGraphStageSpec,
     build_stagegraph_v2,
 )
-from app.domain.graph_runtime.contracts import RuntimeCapabilityReadiness
-from app.domain.graph_runtime.definitions import (
+from mission_control.domain.graph_runtime.contracts import RuntimeCapabilityReadiness
+from mission_control.domain.graph_runtime.definitions import (
     CapabilityManifestDefinition,
     CapabilityMaturityRecord,
     CompatibilityManifestRef,
@@ -42,12 +43,13 @@ from app.domain.graph_runtime.definitions import (
     StageExecutionBindingV2,
     TemporalExecutionProfileRef,
 )
-from app.domain.graph_runtime.kernel import (
+from mission_control.domain.graph_runtime.kernel import (
     OperationFailureClass,
     OperationFailureClassV2,
     ResourceKindV2,
     ResourceLeaseRequestV2,
 )
+from mission_control.interfaces.http.graph_runtime_schemas import graph_runtime_contract_schemas
 
 DIGEST = "sha256:" + "a" * 64
 
@@ -178,9 +180,7 @@ def test_temporal_contracts_are_versioned_without_mutating_published_v2() -> Non
     assert "adapter_variant" not in OperationAssemblySpec.model_fields
     assert "temporal_execution_profile_ref" not in OperationAssemblySpec.model_fields
     assert "temporal_execution_profile" not in {item.value for item in RuntimeDefinitionKind}
-    assert "stale_execution_generation" not in {
-        item.value for item in OperationFailureClass
-    }
+    assert "stale_execution_generation" not in {item.value for item in OperationFailureClass}
     with pytest.raises(ValidationError, match="Extra inputs"):
         OperationAssemblySpec.model_validate(
             {
@@ -218,9 +218,7 @@ def test_v3_compiler_freezes_temporal_profile_and_fails_closed_on_drift() -> Non
         fallback="reject",
     )
     effective_configuration = SimpleNamespace(
-        effective_authority=SimpleNamespace(
-            capabilities=frozenset({"literature_search"})
-        )
+        effective_authority=SimpleNamespace(capabilities=frozenset({"literature_search"}))
     )
     compiled, unavailable = compile_structural_graph_assembly_v3(
         blueprint=build_stagegraph_v2(

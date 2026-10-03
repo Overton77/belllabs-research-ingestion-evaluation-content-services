@@ -7,15 +7,18 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from pydantic import ValidationError
 
-from app.agent_server.common_state import CommonStateMetadata, _reject_noncompact_payload
-from app.agent_server.reducers import (
+from mission_control.adapters.agent_server.common_state import (
+    CommonStateMetadata,
+    _reject_noncompact_payload,
+)
+from mission_control.adapters.agent_server.reducers import (
     ReducerMergeConflict,
     merge_keyed_canonical_digest,
     merge_monotonic_integer,
     merge_single_assignment,
     merge_unique_events,
 )
-from app.application.operations.operation_executor import (
+from mission_control.application.execution.operations.operation_executor import (
     CancelledOperationOutcome,
     CompletedOperationOutcome,
     ExactStageExecutionBinding,
@@ -23,11 +26,11 @@ from app.application.operations.operation_executor import (
     StageOperationRequest,
     operation_execution_outcome_adapter,
 )
-from app.domain.graph_runtime.contracts import (
+from mission_control.domain.graph_runtime.contracts import (
     _reject_redacted_runtime_payload,
     _reject_sensitive_payload,
 )
-from app.domain.graph_runtime.kernel import (
+from mission_control.domain.graph_runtime.kernel import (
     CancellationContext,
     DecisionRequest,
     LineageKind,
@@ -141,12 +144,8 @@ def test_lineage_identities_and_parent_edges_remain_distinct() -> None:
     assert LineageParentEdge(child=child, parent=parent, relationship="attempt_of").child == child
     with pytest.raises(ValidationError, match="distinct parent"):
         LineageParentEdge(child=parent, parent=parent, relationship="contains")
-    delimiter_left = parent.model_copy(
-        update={"provider": "a:b", "provider_identity": "c"}
-    )
-    delimiter_right = parent.model_copy(
-        update={"provider": "a", "provider_identity": "b:c"}
-    )
+    delimiter_left = parent.model_copy(update={"provider": "a:b", "provider_identity": "c"})
+    delimiter_right = parent.model_copy(update={"provider": "a", "provider_identity": "b:c"})
     assert delimiter_left.canonical_key != delimiter_right.canonical_key
 
 

@@ -22,23 +22,23 @@ from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import BaseTool
 
-from app.application.operations.checkpoint_lineage import (
-    CheckpointLineageService,
-    InMemoryCheckpointLineageRepository,
-)
-from app.domain.control_plane.contracts import DefinitionKind, SecretRef
-from app.domain.operation_execution.contracts import (
-    DeepAgentModelComponent,
-    SyncSubagentProfile,
-)
-from app.integrations.agents.deep_agents import (
+from mission_control.adapters.deep_agents import (
     DeepAgentRuntimeAdapter,
     ExactComponentRegistry,
     ExactDeepAgentMaterializer,
 )
-from app.integrations.agents.deep_agents.capability_lineage import (
+from mission_control.adapters.deep_agents.capability_lineage import (
     CAPABILITY_LINEAGE_KIND,
     credential_references,
+)
+from mission_control.application.execution.operations.checkpoint_lineage import (
+    CheckpointLineageService,
+    InMemoryCheckpointLineageRepository,
+)
+from mission_control.domain.authoring.contracts import DefinitionKind, SecretRef
+from mission_control.domain.execution.contracts import (
+    DeepAgentModelComponent,
+    SyncSubagentProfile,
 )
 from tests.acceptance.control_plane.test_wp_cp_040 import (
     exact,
@@ -194,7 +194,7 @@ def test_invocation_records_keep_no_argument_value_and_bound_model_chosen_string
     """RRM-009 review: a browser call keeps scheme, host and path only; no argument digest is
     kept; an unknown sync subagent name and an over-long Skill path are not echoed."""
 
-    from app.integrations.agents.deep_agents.capability_lineage import (
+    from mission_control.adapters.deep_agents.capability_lineage import (
         MAX_RECORDED_PATH_CHARS,
         UNKNOWN_SUBAGENT,
         invocations,

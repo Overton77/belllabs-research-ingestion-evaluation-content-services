@@ -11,12 +11,13 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from app.application.async_subagents.parent_effects import (
+from mission_control.adapters.deep_agents.async_subagents import DeepAgentsAsyncSubagentAdapter
+from mission_control.application.subordinates.parent_effects import (
     RunControlAsyncChildEffects,
     async_child_effect_id,
     async_child_usage_id,
 )
-from app.application.async_subagents.service import (
+from mission_control.application.subordinates.service import (
     AsyncServedGraphMismatch,
     AsyncSubagentDecisionRejected,
     AsyncSubagentError,
@@ -25,18 +26,17 @@ from app.application.async_subagents.service import (
     InMemoryAsyncSubagentAuthority,
     InMemoryAsyncSubagentDetailRepository,
 )
-from app.domain.operation_execution.async_subagent_reconciliation import (
+from mission_control.domain.execution.async_subagent_reconciliation import (
     AsyncProviderRunRecord,
     AsyncServedGraphIdentity,
     aggregate_child_usage,
     classify_async_children_for_fork,
 )
-from app.domain.operation_execution.contracts import (
+from mission_control.domain.execution.contracts import (
     AsyncSubagentExecution,
     AsyncSubagentLifecycle,
     AsyncSubagentUsage,
 )
-from app.integrations.agents.deep_agents.async_subagents import DeepAgentsAsyncSubagentAdapter
 from tests.acceptance.control_plane.test_wp_cp_045 import (
     GRAPH_BINDING_DIGEST,
     NOW,
@@ -397,20 +397,20 @@ async def test_parent_deep_agent_start_async_task_reserves_and_links_before_the_
     from langgraph.checkpoint.memory import InMemorySaver
     from langgraph.store.memory import InMemoryStore
 
-    from app.application.operations.checkpoint_lineage import (
-        CheckpointLineageService,
-        InMemoryCheckpointLineageRepository,
-    )
-    from app.domain.operation_execution.contracts import DeepAgentExecutionBinding
-    from app.integrations.agents.deep_agents import (
+    from mission_control.adapters.deep_agents import (
         DeepAgentRuntimeAdapter,
         ExactComponentRegistry,
         ExactDeepAgentMaterializer,
         StateSandboxFactory,
     )
-    from app.integrations.agents.deep_agents.async_subagents import (
+    from mission_control.adapters.deep_agents.async_subagents import (
         BellLabsAsyncSubagentMiddleware,
     )
+    from mission_control.application.execution.operations.checkpoint_lineage import (
+        CheckpointLineageService,
+        InMemoryCheckpointLineageRepository,
+    )
+    from mission_control.domain.execution.contracts import DeepAgentExecutionBinding
     from tests.acceptance.control_plane.test_wp_cp_040 import (
         exact_fixture,
         planned_invocation,
@@ -834,7 +834,7 @@ async def test_operator_decisions_require_the_privilege_and_are_exclusive(
 def test_usage_is_attributed_only_when_every_ai_turn_is_reported() -> None:
     """RRM-013 review N6."""
 
-    from app.integrations.agents.deep_agents.async_subagents import attribute_usage
+    from mission_control.adapters.deep_agents.async_subagents import attribute_usage
 
     limits = {"tokens.total": 100, "model.turns": 4}
     stamped = [{"message_id": "a", "total_tokens": 5}]
@@ -1022,3 +1022,27 @@ async def test_reconcile_usage_requires_the_privilege_and_consumes_attributed_ov
     assert settlement.source_pending_amounts == {"tokens.total": 10}
     view = await parent_budget_view(run_control, run_id, child_id)
     assert view["effect_settled"] is True and view["outstanding"] is False
+
+
+@pytest.mark.asyncio
+async def test_cancel_transport_error_crosses_neutral_port_and_records_ambiguity(monkeypatch):
+    import httpx
+
+    from mission_control.application.ports.provider_errors import ProviderTransportError
+
+    client = FakeAgentProtocolClient(served=SERVED)
+    install(monkeypatch, client)
+    service, details, _authority = governed(client)
+    child = await service.spawn(request())
+
+    async def unavailable(*_args, **_kwargs):
+        raise httpx.ConnectError("offline fixture transport failed")
+
+    monkeypatch.setattr(client.runs, "cancel", unavailable)
+    with pytest.raises(ProviderTransportError):
+        await service.cancel("tenant-a", child.child_execution_id, "parent stopped", NOW)
+    link = await details.get_link("tenant-a", child.child_execution_id)
+    assert link.cancellation_requested
+    assert link.cancellation_receipt == "ambiguous"
+    stored = await details.get_execution("tenant-a", child.child_execution_id)
+    assert stored.lifecycle == AsyncSubagentLifecycle.RUNNING

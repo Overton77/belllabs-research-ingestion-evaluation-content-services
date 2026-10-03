@@ -3,20 +3,20 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-
-from app.application.run_control.service import AdmissionPolicyRegistry
-from app.application.run_control.web_research_admission import (
+from biotech_mission_adapters.application.execution.web_research_admission import (
     WEB_RESEARCH_ADMISSION,
     WEB_RESEARCH_INVARIANTS,
     register_web_research_admission_policies,
 )
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.contracts import (
+
+from mission_control.application.execution.service import AdmissionPolicyRegistry
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.authoring.contracts import (
     DefinitionKind,
     ExactDefinitionRef,
     RunInputManifestRef,
 )
-from app.domain.run_control.contracts import (
+from mission_control.domain.policies.contracts import (
     ActorContext,
     BudgetApplicability,
     BudgetDimensionLimit,
@@ -24,7 +24,7 @@ from app.domain.run_control.contracts import (
     RunRequest,
     VerifiedRunConfiguration,
 )
-from app.domain.run_control.errors import AdmissionRejected
+from mission_control.domain.policies.errors import AdmissionRejected
 
 NOW = datetime(2026, 7, 26, 16, 0, tzinfo=UTC)
 
@@ -131,9 +131,7 @@ async def test_web_research_admission_rejects_each_missing_authority(
 ) -> None:
     policies = AdmissionPolicyRegistry()
     register_web_research_admission_policies(policies)
-    evidence = tuple(
-        item for item in _accepted_evidence() if not item.startswith(missing_prefix)
-    )
+    evidence = tuple(item for item in _accepted_evidence() if not item.startswith(missing_prefix))
 
     with pytest.raises(AdmissionRejected, match="missing exact web-research"):
         await policies.validate(_request(evidence), _configuration())

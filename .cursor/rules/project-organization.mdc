@@ -1,41 +1,26 @@
 ---
-description: Canonical application ownership, layering, and migration reading order
+description: Mission Control architecture, source ownership and evidence rules
 alwaysApply: true
 ---
 
-# Project organization
+# Mission Control organization
 
-## Hard rules
+Current authority: `../mission-control-general/general-mission-control/SPECIFICATION.md`,
+its RUNTIME-CONTRACTS.md, DATABASE.md and workflow-types annex.
+CODEBASE-ORGANIZATION.md supplies the approved package direction.
 
-- Read in order: canonical `SPEC-*`/`REQ-*`/`CON-*` in `../biotech-meta`; the v2
-  `docs/migrations_instructions/implementation_work_packages_v2/README.md`;
-  `IMPLEMENTATION_READINESS.md`; the complete active WP and dependencies; accepted dependency
-  evidence; then the as-built guide, code, and tests. The Stage 0–8 package system is frozen
-  historical provenance and cannot authorize implementation.
-- Follow `docs/interview_and_research_result_documentation/CANONICAL_APPLICATION_CODEBASE_ORGANIZATION.md` for projected target paths,
-  ownership, status labels, staged moves, and document lifecycle. If a projected path differs,
-  the active package remains implementation authority.
-- Keep the application here in `app/`; create no sibling application repository, Agent Server
-  app root, or multi-package split without accepted evidence and a new architecture decision.
-- Preserve dependency direction:
-  `app/domain <- app/application <- app/api | app/temporal | app/integrations`.
-- Domain owns contract meaning, including journal, effect, and settlement semantics.
-  Application owns use-case coordination and persistence through ports/adapters.
-- API is transport. Temporal is the sole macro runtime. Integrations are provider/persistence
-  adapters. None may own semantics, lifecycle, readiness, convergence, or terminality.
-- `app/server.py` remains the composition root and the BellLabs API the governed public facade.
-- Agent Server and LangGraph/Deep Agents assets are bounded operation, qualification, or
-  development surfaces—not competing macro schedulers.
-- Application PostgreSQL owns durable run/control events and inbox/ledger/outbox state.
-  Temporal PostgreSQL is separate runtime persistence. MongoDB keeps its assigned immutable
-  document authorities.
-- Extend current modules by default; do not add bridge seams automatically. Create projected
-  target paths only when the active package or an accepted spec-ticket explicitly authorizes them.
-- Do not duplicate domain contracts, interpreters, API authority, MCP control paths, or task
-  queue definitions. Promote accepted experiment behavior before production imports it.
-- Parallel `WP-BP-010`/`WP-BP-020` work must follow
-  `docs/migrations_instructions/implementation_work_packages_v2/PARALLEL_WORKTREE_PROTOCOL.md`,
-  including common-base, family-region ownership, and integrator-only shared paths.
-- Treat `docs/interview_and_research_result_documentation/CODEBASE_DOMAIN_WORKFLOW_GUIDE.md` as as-built reference. Historical plans,
-  experiments, scratch files, and superseded recommendations are non-normative.
-- For the compact `app/` package map and placement test, see `codebase-organization.mdc` (glob-applied).
+Read root AGENTS.md, the closest source AGENTS.md, and docs/knowledge/index.md.
+Concepts explain implementation; they do not amend contracts or certify deployment.
+
+One distribution imports mission_control from src/mission_control. Interfaces
+call application; application uses domain and ports; adapters implement ports;
+bootstrap wires dependencies. Temporal alone schedules missions; Deep Agents
+performs bounded cognition. Checkpoints cannot decide semantic acceptance.
+
+PostgreSQL owns application persistence; Temporal persistence is separate. Common
+SQL belongs to its released owner; the Biotech installer consumes that release.
+Application-specific knowledge services stay outside the general kernel.
+
+Historical BellLabs specs, WPs and old guides are provenance. They cannot restore
+obsolete app/, Mongo or endpoint authority. Preserve unrelated work and recovery
+checkpoints. Report local proof, external blockers and unimplemented scope separately.

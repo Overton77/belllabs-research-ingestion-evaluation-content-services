@@ -14,7 +14,7 @@ import httpx
 import pytest
 from langgraph_sdk.errors import APIStatusError, NotFoundError
 
-from app.agent_server.block_c_qualification.compat import (
+from mission_control.adapters.agent_server.block_c_qualification.compat import (
     ASSEMBLY_ROLE_N,
     ASSEMBLY_ROLE_N1,
     COMPAT_VERSION_N,
@@ -22,10 +22,10 @@ from app.agent_server.block_c_qualification.compat import (
     GRAPH_ID_N,
     GRAPH_ID_N1,
 )
-from app.agent_server.block_c_qualification.compat_route import (
+from mission_control.adapters.agent_server.block_c_qualification.compat_route import (
     IncompatibleResumeRouteError,
 )
-from app.agent_server.block_c_qualification.guarded_resume import (
+from mission_control.adapters.agent_server.block_c_qualification.guarded_resume import (
     guarded_deployment_runs_wait,
     guarded_runs_wait,
 )
@@ -447,9 +447,7 @@ async def test_multitask_replacement_strategies_stop_the_active_run(
     active_state = await tenant_a_client.threads.get_state(thread_id)
     active_checkpoint = active_state.get("checkpoint") or {}
     active_checkpoint_id = str(
-        active_checkpoint.get("checkpoint_id")
-        or active_state.get("checkpoint_id")
-        or ""
+        active_checkpoint.get("checkpoint_id") or active_state.get("checkpoint_id") or ""
     )
     assert active_checkpoint_id
 
@@ -556,9 +554,7 @@ async def test_thread_copy_fork_does_not_mutate_parent(
     await wait_thread_status(tenant_a_client, parent_id, statuses={"interrupted"})
     parent_before = await tenant_a_client.threads.get_state(parent_id)
     parent_values_before = dict(parent_before.get("values") or {})
-    parent_checkpoint = parent_before.get("checkpoint") or parent_before.get(
-        "checkpoint_id"
-    )
+    parent_checkpoint = parent_before.get("checkpoint") or parent_before.get("checkpoint_id")
     parent_history_before = await tenant_a_client.threads.get_history(parent_id, limit=20)
     assert "stable-claim:block-c-single" in (parent_values_before.get("claim_tokens") or [])
     assert await get_thread_status(tenant_a_client, parent_id) == "interrupted"
@@ -568,9 +564,7 @@ async def test_thread_copy_fork_does_not_mutate_parent(
     child_before = await tenant_a_client.threads.get_state(child_id)
     child_values_before = dict(child_before.get("values") or {})
     # Correlated lineage: child must share the parent's interrupted checkpoint values.
-    assert child_values_before.get("claim_tokens") == parent_values_before.get(
-        "claim_tokens"
-    )
+    assert child_values_before.get("claim_tokens") == parent_values_before.get("claim_tokens")
     assert await get_thread_status(tenant_a_client, child_id) == "interrupted"
     assert interrupt_payloads(child_before)
     child_meta = (await tenant_a_client.threads.get(child_id)).get("metadata") or {}
@@ -641,8 +635,7 @@ async def test_cancellation_leaves_typed_cancelled_cleanup_state(
         tenant_a_client,
         thread_id,
         predicate=lambda values, _state: (
-            values.get("wait_status") == "cancelled"
-            and values.get("resource_open") is False
+            values.get("wait_status") == "cancelled" and values.get("resource_open") is False
         ),
         timeout_seconds=30,
     )
@@ -690,9 +683,7 @@ async def test_rollback_cancellation_removes_active_run_state_and_completed_run_
     rolled_back = await tenant_a_client.threads.get_state(thread_id)
     rolled_back_values = rolled_back.get("values") or {}
     assert rolled_back_values == pre_run_values
-    assert await tenant_a_client.threads.get_history(
-        thread_id, limit=50
-    ) == pre_run_history
+    assert await tenant_a_client.threads.get_history(thread_id, limit=50) == pre_run_history
 
     completed = await tenant_a_client.runs.create(
         thread_id,
@@ -719,9 +710,7 @@ async def test_rollback_cancellation_removes_active_run_state_and_completed_run_
             action="rollback",
         )
     assert await tenant_a_client.threads.get_state(thread_id) == completed_state
-    assert await tenant_a_client.threads.get_history(
-        thread_id, limit=50
-    ) == completed_history
+    assert await tenant_a_client.threads.get_history(thread_id, limit=50) == completed_history
 
 
 @pytest.mark.asyncio
@@ -859,9 +848,7 @@ async def test_nn1_provider_fail_open_cross_assistant_resume_is_unsafe(
     """
 
     if os.getenv("BLOCK_C_RUN_NN1_PHASE") != "1":
-        pytest.skip(
-            "Set BLOCK_C_RUN_NN1_PHASE=1 to capture disposable provider fail-open evidence"
-        )
+        pytest.skip("Set BLOCK_C_RUN_NN1_PHASE=1 to capture disposable provider fail-open evidence")
 
     contaminated = await tenant_a_client.threads.create(
         metadata={
@@ -877,9 +864,7 @@ async def test_nn1_provider_fail_open_cross_assistant_resume_is_unsafe(
         input=_run_input(scenario="single_interrupt"),
     )
     await wait_thread_status(tenant_a_client, thread_id, statuses={"interrupted"})
-    before_values = dict(
-        (await tenant_a_client.threads.get_state(thread_id)).get("values") or {}
-    )
+    before_values = dict((await tenant_a_client.threads.get_state(thread_id)).get("values") or {})
     assert "stable-claim:block-c-single" in (before_values.get("claim_tokens") or [])
     assert "claim_tokens_v2" not in before_values
 
@@ -956,9 +941,7 @@ async def test_nn1_deployment_inspect_from_n1_and_guarded_resume_on_n(
     await wait_thread_status(tenant_a_client, thread_id, statuses={"interrupted"})
     parent_before = await tenant_a_client.threads.get_state(thread_id)
     parent_values = dict(parent_before.get("values") or {})
-    parent_checkpoint = parent_before.get("checkpoint") or parent_before.get(
-        "checkpoint_id"
-    )
+    parent_checkpoint = parent_before.get("checkpoint") or parent_before.get("checkpoint_id")
     parent_history = await tenant_a_client.threads.get_history(thread_id, limit=20)
     assert "stable-claim:block-c-single" in (parent_values.get("claim_tokens") or [])
 
@@ -977,9 +960,7 @@ async def test_nn1_deployment_inspect_from_n1_and_guarded_resume_on_n(
     mid_state = await tenant_a_client.threads.get_state(thread_id)
     mid_values = dict(mid_state.get("values") or {})
     assert mid_values == parent_values
-    assert (mid_state.get("checkpoint") or mid_state.get("checkpoint_id")) == (
-        parent_checkpoint
-    )
+    assert (mid_state.get("checkpoint") or mid_state.get("checkpoint_id")) == (parent_checkpoint)
     assert len(await tenant_a_client.threads.get_history(thread_id, limit=20)) == len(
         parent_history
     )
@@ -1051,9 +1032,7 @@ async def test_nn1_deployment_direct_resume_on_n1_is_fail_closed_or_isolated(
     """
 
     if os.getenv("BLOCK_C_RUN_NN1_DEPLOYMENT") != "1":
-        pytest.skip(
-            "Set BLOCK_C_RUN_NN1_DEPLOYMENT=1 for disposable two-endpoint resume evidence"
-        )
+        pytest.skip("Set BLOCK_C_RUN_NN1_DEPLOYMENT=1 for disposable two-endpoint resume evidence")
 
     contaminated = await tenant_a_client.threads.create(
         metadata={
@@ -1134,9 +1113,7 @@ async def test_restart_phase_prepare_or_resume(
 ) -> None:
     phase = os.getenv("BLOCK_C_RUN_RESTART_PHASE", "").strip().lower()
     if phase not in {"prepare", "resume"}:
-        pytest.skip(
-            "Set BLOCK_C_RUN_RESTART_PHASE=prepare|resume and BLOCK_C_RESTART_STATE_PATH"
-        )
+        pytest.skip("Set BLOCK_C_RUN_RESTART_PHASE=prepare|resume and BLOCK_C_RESTART_STATE_PATH")
     state_path = Path(
         os.getenv(
             "BLOCK_C_RESTART_STATE_PATH",
@@ -1161,9 +1138,7 @@ async def test_restart_phase_prepare_or_resume(
         checkpoint = state.get("checkpoint") or {}
         runs = await tenant_a_client.runs.list(thread_id, limit=10)
         assert runs
-        checkpoint_id = str(
-            checkpoint.get("checkpoint_id") or state.get("checkpoint_id") or ""
-        )
+        checkpoint_id = str(checkpoint.get("checkpoint_id") or state.get("checkpoint_id") or "")
         assert checkpoint_id
         write_restart_state(
             state_path,
@@ -1185,9 +1160,7 @@ async def test_restart_phase_prepare_or_resume(
     assistant_id = str(payload["assistant_id"])
     state = await tenant_a_client.threads.get_state(thread_id)
     assert await get_thread_status(tenant_a_client, thread_id) == "interrupted"
-    assert "stable-claim:block-c-single" in (
-        (state.get("values") or {}).get("claim_tokens") or []
-    )
+    assert "stable-claim:block-c-single" in ((state.get("values") or {}).get("claim_tokens") or [])
     await tenant_a_client.runs.wait(
         thread_id,
         assistant_id,

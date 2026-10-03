@@ -14,14 +14,23 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.store.memory import InMemoryStore
 from pydantic import ValidationError
 
-from app.application.operations.checkpoint_lineage import (
+from mission_control.adapters.deep_agents import (
+    DeepAgentRuntimeAdapter,
+    ExactComponentRegistry,
+    ExactDeepAgentMaterializer,
+    ResolvedSkillBundle,
+    StateSandboxFactory,
+)
+from mission_control.application.execution.operations.checkpoint_lineage import (
     CheckpointLineageService,
     InMemoryCheckpointLineageRepository,
 )
-from app.application.operations.operation_execution import bind_operation_execution_request
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.contracts import DefinitionKind, ExactDefinitionRef, SecretRef
-from app.domain.operation_execution.checkpoint_lineage import (
+from mission_control.application.execution.operations.operation_execution import (
+    bind_operation_execution_request,
+)
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.authoring.contracts import DefinitionKind, ExactDefinitionRef, SecretRef
+from mission_control.domain.execution.checkpoint_lineage import (
     STAMP_BINDING_DIGEST,
     STAMP_EXECUTION_GENERATION,
     STAMP_INVOCATION_ID,
@@ -30,7 +39,7 @@ from app.domain.operation_execution.checkpoint_lineage import (
     CheckpointLineageInDoubt,
     IncompatibleCheckpointSchema,
 )
-from app.domain.operation_execution.contracts import (
+from mission_control.domain.execution.contracts import (
     CapabilityGrant,
     CognitiveChannelDefinition,
     CognitiveChannelPack,
@@ -54,21 +63,14 @@ from app.domain.operation_execution.contracts import (
     SubagentStateSlice,
     SyncSubagentProfile,
 )
-from app.domain.operation_execution.errors import (
+from mission_control.domain.execution.errors import (
     DeepAgentMaterializationError,
     DeepAgentRuntimeDrift,
 )
-from app.domain.operation_execution.materialization import (
+from mission_control.domain.execution.materialization import (
     compile_deep_agent_execution_binding,
     compose_cognitive_context_schema,
     compose_cognitive_state_schema,
-)
-from app.integrations.agents.deep_agents import (
-    DeepAgentRuntimeAdapter,
-    ExactComponentRegistry,
-    ExactDeepAgentMaterializer,
-    ResolvedSkillBundle,
-    StateSandboxFactory,
 )
 from tests.fixtures.checkpoint_lineage import (
     activity_attempt,
@@ -79,9 +81,7 @@ from tests.fixtures.checkpoint_lineage import (
 from tests.unit.operations.test_operation_execution import operation_request
 
 DIGEST_A = "sha256:" + "a" * 64
-MCP_TOOL_SCHEMA_DIGEST = (
-    "sha256:bb30ffeeaa9cc8d145c2160ac76df146df61820df24db1078c4db98573714a99"
-)
+MCP_TOOL_SCHEMA_DIGEST = "sha256:bb30ffeeaa9cc8d145c2160ac76df146df61820df24db1078c4db98573714a99"
 SKILL_TEXT = """---
 name: exact-binding-proof
 description: Use for the WP-CP-040 exact binding proof.
@@ -182,17 +182,25 @@ def cognitive_schemas(*, with_child_slices: bool = False):
         ),
     )
     state_slices = (
-        SubagentStateSlice(
-            slice_id="child-state",
-            channel_names=frozenset({"artifact_index", "context_manifest"}),
-        ),
-    ) if with_child_slices else ()
+        (
+            SubagentStateSlice(
+                slice_id="child-state",
+                channel_names=frozenset({"artifact_index", "context_manifest"}),
+            ),
+        )
+        if with_child_slices
+        else ()
+    )
     context_slices = (
-        SubagentContextSlice(
-            slice_id="child-context",
-            field_names=frozenset({"run_id", "operation_id", "workspace_handle"}),
-        ),
-    ) if with_child_slices else ()
+        (
+            SubagentContextSlice(
+                slice_id="child-context",
+                field_names=frozenset({"run_id", "operation_id", "workspace_handle"}),
+            ),
+        )
+        if with_child_slices
+        else ()
+    )
     return (
         (state_pack, skills_pack),
         context_pack,
@@ -236,7 +244,10 @@ def exact_fixture(
                 server_name="qualification",
                 transport="stdio",
                 command=sys.executable,
-                arguments=("-m", "app.agent_server.qualification.wp_cp_040_mcp"),
+                arguments=(
+                    "-m",
+                    "mission_control.adapters.agent_server.qualification.wp_cp_040_mcp",
+                ),
                 tools=(
                     DeepAgentMCPToolComponent(
                         tool_name="lookup_binding_marker",
@@ -611,9 +622,7 @@ def test_nested_frozenset_projections_have_one_canonical_digest() -> None:
             binding.cognitive_state_schema.schema_digest,
             binding.cognitive_context_schema.schema_digest,
         )
-        for binding, _profile, _bundle in (
-            exact_fixture(with_child_slices=True) for _ in range(25)
-        )
+        for binding, _profile, _bundle in (exact_fixture(with_child_slices=True) for _ in range(25))
     }
     assert len(observed) == 1
 
@@ -655,9 +664,7 @@ def test_channel_collision_and_context_secret_material_fail_closed() -> None:
 async def test_actual_deep_agent_progressively_loads_skill_md_into_messages() -> None:
     binding, _profile, bundle = exact_fixture()
     model = SkillReadingModel()
-    adapter = DeepAgentRuntimeAdapter(
-        ExactDeepAgentMaterializer(registry(binding, bundle, model))
-    )
+    adapter = DeepAgentRuntimeAdapter(ExactDeepAgentMaterializer(registry(binding, bundle, model)))
     lineage = CheckpointLineageService(InMemoryCheckpointLineageRepository())
     result = await adapter.execute(await planned_invocation(unit_bound(binding), lineage), {})
 
@@ -665,9 +672,7 @@ async def test_actual_deep_agent_progressively_loads_skill_md_into_messages() ->
     inspection = result.event_payloads[0]
     assert "artifact_index" in inspection["state_keys"]
     assert inspection["skills_metadata"][0]["name"] == "exact-binding-proof"
-    assert "SKILL-MD-IN-MESSAGES-040" in (
-        inspection["skill_instruction_messages"][0]["content"]
-    )
+    assert "SKILL-MD-IN-MESSAGES-040" in (inspection["skill_instruction_messages"][0]["content"])
     assert inspection["skill_instruction_messages"][0]["path"].endswith("SKILL.md")
     assert model.calls == 2
 
@@ -691,9 +696,7 @@ async def test_shared_session_reuse_is_ordered_and_same_unit_never_reappends_pro
 
     binding, _profile, bundle = exact_fixture()
     model = SessionProbeModel(observed_human_counts=[])
-    adapter = DeepAgentRuntimeAdapter(
-        ExactDeepAgentMaterializer(registry(binding, bundle, model))
-    )
+    adapter = DeepAgentRuntimeAdapter(ExactDeepAgentMaterializer(registry(binding, bundle, model)))
     lineage = CheckpointLineageService(InMemoryCheckpointLineageRepository())
     first_unit = unit_bound(binding, iteration=1)
     first_invocation, first_result, first_transition = await execute_and_observe(
@@ -733,7 +736,7 @@ async def test_invocation_is_root_namespaced_pinned_sync_durable_and_fully_stamp
 ) -> None:
     """REQ-CP-DA-016/017: exact thread, root `checkpoint_ns`, source pin, stamps, sync."""
 
-    import app.integrations.agents.deep_agents.adapter as adapter_module
+    import mission_control.adapters.deep_agents.adapter as adapter_module
 
     invoke_kwargs: list[dict[str, Any]] = []
     real_create = adapter_module.create_deep_agent
@@ -820,9 +823,7 @@ async def test_source_state_schema_mismatch_fails_closed_before_model_invocation
         binding.cognitive_state_schema.schema_digest
     )
     model = SessionProbeModel(observed_human_counts=[])
-    adapter = DeepAgentRuntimeAdapter(
-        ExactDeepAgentMaterializer(registry(binding, bundle, model))
-    )
+    adapter = DeepAgentRuntimeAdapter(ExactDeepAgentMaterializer(registry(binding, bundle, model)))
     lineage = CheckpointLineageService(InMemoryCheckpointLineageRepository())
     await execute_and_observe(adapter, lineage, unit_bound(binding, iteration=1))
     second = await planned_invocation(unit_bound(drifted, iteration=2), lineage)
@@ -836,9 +837,7 @@ async def test_source_state_schema_mismatch_fails_closed_before_model_invocation
 async def test_unplanned_or_drifted_invocation_is_refused_before_materialization() -> None:
     binding, _profile, bundle = exact_fixture()
     model = SessionProbeModel(observed_human_counts=[])
-    adapter = DeepAgentRuntimeAdapter(
-        ExactDeepAgentMaterializer(registry(binding, bundle, model))
-    )
+    adapter = DeepAgentRuntimeAdapter(ExactDeepAgentMaterializer(registry(binding, bundle, model)))
     lineage = CheckpointLineageService(InMemoryCheckpointLineageRepository())
     planned = await planned_invocation(unit_bound(binding), lineage)
     assert planned.checkpoint_plan is not None
@@ -847,9 +846,7 @@ async def test_unplanned_or_drifted_invocation_is_refused_before_materialization
         await adapter.execute(planned.model_copy(update={"checkpoint_plan": None}), {})
     with pytest.raises(DeepAgentMaterializationError, match="lineage plan"):
         await adapter.execute(runtime_invocation(binding), {})
-    drifted_plan = planned.checkpoint_plan.model_copy(
-        update={"checkpointer_ref_digest": DIGEST_A}
-    )
+    drifted_plan = planned.checkpoint_plan.model_copy(update={"checkpointer_ref_digest": DIGEST_A})
     with pytest.raises(DeepAgentMaterializationError, match="does not match"):
         await adapter.execute(planned.model_copy(update={"checkpoint_plan": drifted_plan}), {})
     assert model.observed_human_counts == []
@@ -866,9 +863,7 @@ async def test_exact_mcp_server_and_tool_surface_materialize() -> None:
 
 @pytest.mark.asyncio
 async def test_runtime_package_drift_fails_before_model_or_sandbox_effects() -> None:
-    binding, _profile, bundle = exact_fixture(
-        package_versions={"deepagents": "999.0.0"}
-    )
+    binding, _profile, bundle = exact_fixture(package_versions={"deepagents": "999.0.0"})
     calls = 0
 
     def model_factory(_binding, _secrets):  # type: ignore[no-untyped-def]
@@ -962,7 +957,7 @@ def test_sync_subagent_cannot_exceed_parent_tool_or_workspace_ceiling() -> None:
 
 
 def test_create_deep_agent_has_one_non_experiment_production_call_site() -> None:
-    import app.integrations.agents.deep_agents.adapter as adapter_module
+    import mission_control.adapters.deep_agents.adapter as adapter_module
 
     source = inspect.getsource(adapter_module)
     assert source.count("create_deep_agent(") == 1
@@ -972,16 +967,16 @@ def test_create_deep_agent_has_one_non_experiment_production_call_site() -> None
 async def test_operation_service_pins_records_and_links_the_result_checkpoint() -> None:
     """Production seam: `OperationExecutionService` → adapter → transition → settlement."""
 
-    from app.application.operations.operation_execution import (
-        InMemoryOperationBindingRepository,
-        OperationExecutionService,
-    )
-    from app.integrations.conformance_operation_runtime import (
+    from mission_control.adapters.operations.conformance import (
         ConformanceAssetVerifier,
         ConformanceBudgetAuthority,
         ConformanceEventSink,
         ConformanceSandbox,
         ConformanceSecretResolver,
+    )
+    from mission_control.application.execution.operations.operation_execution import (
+        InMemoryOperationBindingRepository,
+        OperationExecutionService,
     )
     from tests.unit.operations.test_operation_execution import MCP_DIGEST, SKILL_DIGEST
 
@@ -1032,9 +1027,7 @@ async def test_operation_service_pins_records_and_links_the_result_checkpoint() 
     replay = await service.execute(request, activity_attempt(attempt=2))
 
     assert request.runtime_unit is not None
-    transition = await repository.get_transition(
-        "tenant-1", request.runtime_unit.unit_key, 1
-    )
+    transition = await repository.get_transition("tenant-1", request.runtime_unit.unit_key, 1)
     assert transition is not None
     assert result.status == "completed"
     assert result.result_checkpoint == transition.result_key

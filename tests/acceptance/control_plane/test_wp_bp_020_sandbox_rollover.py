@@ -19,51 +19,53 @@ from temporalio import activity
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
-from app.application.operations.checkpoint_lineage import (
+from mission_control.adapters.deep_agents import (
+    DeepAgentRuntimeAdapter,
+    DockerSandboxFactory,
+    ExactComponentRegistry,
+    ExactDeepAgentMaterializer,
+)
+from mission_control.adapters.temporal.workflow_sandbox import coordinator_workflow_runner
+from mission_control.adapters.temporal.workflows.belllabs_run import BellLabsRunWorkflow
+from mission_control.adapters.temporal.workflows.goal_directed import GoalDirectedWorkflow
+from mission_control.adapters.temporal.workflows.operation import OperationWorkflow
+from mission_control.application.execution.operations.checkpoint_lineage import (
     CheckpointLineageService,
     InMemoryCheckpointLineageRepository,
 )
-from app.application.operations.operation_execution import bind_operation_execution_request
-from app.application.orchestration.goal_directed import (
+from mission_control.application.execution.operations.operation_execution import (
+    bind_operation_execution_request,
+)
+from mission_control.application.programs.goal_directed import (
     GoalDirectedOperationPreparationService,
     GoalDirectedOperationResultService,
 )
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.contracts import GoalDirectedBlueprint
-from app.domain.control_plane.fixtures import GENERIC_GOAL_DIRECTED
-from app.domain.operation_execution.checkpoint_lineage import (
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.authoring.contracts import GoalDirectedBlueprint
+from mission_control.domain.authoring.fixtures import GENERIC_GOAL_DIRECTED
+from mission_control.domain.execution.checkpoint_lineage import (
     CheckpointCapture,
     OperationActivityAttempt,
 )
-from app.domain.operation_execution.contracts import (
+from mission_control.domain.execution.contracts import (
     OperationExecutionRequest,
     OperationExecutionResult,
     StructuredOutputBinding,
 )
-from app.domain.orchestration.contracts import (
+from mission_control.domain.policies.contracts import ActorContext, RunOutcome
+from mission_control.domain.programs.contracts import (
     BellLabsRunInput,
     GoalDirectedRunInput,
     GoalRevision,
     LifecycleCommandOutcome,
     LifecycleCommandRequest,
 )
-from app.domain.orchestration.goal_directed_runtime import (
+from mission_control.domain.programs.goal_directed_runtime import (
     GoalOperationDispatch,
     GoalOperationPreparationRequest,
     GoalOperationReconciliationRequest,
     GoalOperationReconciliationResult,
 )
-from app.domain.run_control.contracts import ActorContext, RunOutcome
-from app.integrations.agents.deep_agents import (
-    DeepAgentRuntimeAdapter,
-    DockerSandboxFactory,
-    ExactComponentRegistry,
-    ExactDeepAgentMaterializer,
-)
-from app.temporal.workflow_sandbox import coordinator_workflow_runner
-from app.temporal.workflows.belllabs_run import BellLabsRunWorkflow
-from app.temporal.workflows.goal_directed import GoalDirectedWorkflow
-from app.temporal.workflows.operation import OperationWorkflow
 from tests.acceptance.control_plane.test_wp_cp_040 import exact_fixture
 from tests.fixtures.checkpoint_lineage import (
     execute_with_checkpoint_lineage,
@@ -254,8 +256,7 @@ class GoalSandboxModel(BaseChatModel):
         )
         if tool_result is None:
             prior_ai_outputs = sum(
-                isinstance(message, AIMessage) and bool(message.content)
-                for message in messages
+                isinstance(message, AIMessage) and bool(message.content) for message in messages
             )
             rendered = "\n".join(str(message.content) for message in messages)
             self.observations.append(
@@ -263,9 +264,7 @@ class GoalSandboxModel(BaseChatModel):
                     "role": self.role,
                     "iteration": self.iteration,
                     "prior_ai_outputs": prior_ai_outputs,
-                    "typed_handoff_present": (
-                        self.iteration == 1 or "goal-handoff:" in rendered
-                    ),
+                    "typed_handoff_present": (self.iteration == 1 or "goal-handoff:" in rendered),
                 }
             )
             if self.role == "executor" and self.iteration == 1:
@@ -337,12 +336,8 @@ class Bindings:
 class FamilyAdmissions:
     async def execute_family_admission(self, command: object, mutation: object):
         return SimpleNamespace(
-            command_result=SimpleNamespace(
-                resulting_run_version=command.expected_run_version + 1
-            ),
-            family_receipt=SimpleNamespace(
-                family_version=mutation.expected_family_version + 1
-            ),
+            command_result=SimpleNamespace(resulting_run_version=command.expected_run_version + 1),
+            family_receipt=SimpleNamespace(family_version=mutation.expected_family_version + 1),
         )
 
 
@@ -511,6 +506,8 @@ class SandboxRolloverActivities:
             self.reconcile,
             self.lifecycle,
         ]
+
+
 @pytest.mark.asyncio
 async def test_temporal_goal_rollover_uses_fresh_deep_agent_typed_handoff_and_sandbox(
     tmp_path: Path,

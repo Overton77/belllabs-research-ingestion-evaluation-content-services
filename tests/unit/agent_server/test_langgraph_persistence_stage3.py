@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 
 import pytest
 
-from app.integrations.langgraph_persistence import (
+from mission_control.adapters.deep_agents.persistence import (
     StandalonePersistence,
     StandalonePersistenceLifespan,
 )

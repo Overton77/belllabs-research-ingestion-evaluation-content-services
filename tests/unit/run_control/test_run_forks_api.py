@@ -8,11 +8,14 @@ from typing import Any
 import httpx
 import pytest
 
-from app.api.control_plane import ControlPlanePrincipal, get_control_plane_principal
-from app.api.run_forks import RunForkServices, get_run_fork_services
-from app.application.runtime.run_forks import ForkPatchPolicyRegistry
-from app.domain.run_control.contracts import ReserveBudgetAction
-from app.server import api
+from mission_control.application.recovery.run_forks import ForkPatchPolicyRegistry
+from mission_control.bootstrap.technical_api import api
+from mission_control.domain.policies.contracts import ReserveBudgetAction
+from mission_control.interfaces.http.control_plane import (
+    ControlPlanePrincipal,
+    get_control_plane_principal,
+)
+from mission_control.interfaces.http.run_forks import RunForkServices, get_run_fork_services
 from tests.fixtures.checkpoint_recovery import recovery_harness, stage_recovery_unit
 from tests.fixtures.run_forks import (
     FakeForkSourceReader,

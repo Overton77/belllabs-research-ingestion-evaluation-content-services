@@ -6,9 +6,12 @@ import json
 import asyncpg
 import pytest
 
-from app.application.run_control.postgres_run_control_repository import PostgresRunControlRepository
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.run_control.contracts import (
+from mission_control.adapters.postgres.connections import apply_application_migrations
+from mission_control.adapters.postgres.run_control.run_control_repository import (
+    PostgresRunControlRepository,
+)
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.policies.contracts import (
     ApplyAuthorityBatchAction,
     BudgetState,
     ClaimEffectAction,
@@ -18,9 +21,12 @@ from app.domain.run_control.contracts import (
     SettlePendingUsageAction,
     StartAction,
 )
-from app.domain.run_control.errors import CommandRejected, IdempotencyConflict, RunControlNotFound
-from app.domain.run_control.family_admission import FamilyAdmissionReceipt
-from app.integrations.postgres import apply_application_migrations
+from mission_control.domain.policies.errors import (
+    CommandRejected,
+    IdempotencyConflict,
+    RunControlNotFound,
+)
+from mission_control.domain.policies.family_admission import FamilyAdmissionReceipt
 from tests.unit.run_control.test_atomic_family_admission import (
     authority_batch,
     family_mutation,
@@ -54,9 +60,7 @@ async def test_postgres_stale_rejection_is_not_persisted(
                 await self.resume_command_read.wait()
             return await super().get_effects(request_scope, run_id)
 
-    pool = await asyncpg.create_pool(
-        dsn=test_application_postgres_dsn, min_size=1, max_size=8
-    )
+    pool = await asyncpg.create_pool(dsn=test_application_postgres_dsn, min_size=1, max_size=8)
     family_writer_pool = await asyncpg.create_pool(
         dsn=test_application_postgres_dsn, min_size=1, max_size=8
     )
@@ -145,8 +149,7 @@ async def test_postgres_stale_rejection_is_not_persisted(
         assert stored_status == CommandStatus.ACCEPTED.value
         if combined:
             assert (
-                await run_service.execute_family_admission(lifecycle, mutation)
-                == result_or_receipt
+                await run_service.execute_family_admission(lifecycle, mutation) == result_or_receipt
             )
         else:
             assert await run_service.execute(lifecycle) == result
@@ -180,9 +183,7 @@ async def test_postgres_parent_rollup_cannot_be_overwritten_by_family_admission(
                 await self.resume_family_read.wait()
             return await super().get_effects(request_scope, run_id)
 
-    pool = await asyncpg.create_pool(
-        dsn=test_application_postgres_dsn, min_size=1, max_size=8
-    )
+    pool = await asyncpg.create_pool(dsn=test_application_postgres_dsn, min_size=1, max_size=8)
     family_writer_pool = await asyncpg.create_pool(
         dsn=test_application_postgres_dsn, min_size=1, max_size=8
     )
@@ -236,9 +237,7 @@ async def test_postgres_parent_rollup_cannot_be_overwritten_by_family_admission(
         assert receipt.command_result.status == CommandStatus.ACCEPTED
         final_budget = await run_service.get_budget("tenant-1", parent_run_id)
         assert final_budget.reserved["tokens.total"] == 50
-        assert final_budget.reservations["postgres-authority-family"] == {
-            "tokens.total": 10
-        }
+        assert final_budget.reservations["postgres-authority-family"] == {"tokens.total": 10}
 
         pausing_repository.paused = False
         pausing_repository.stale_budget_read = asyncio.Event()
@@ -268,9 +267,7 @@ async def test_postgres_parent_rollup_cannot_be_overwritten_by_family_admission(
         assert plain_result.status == CommandStatus.ACCEPTED
         final_budget = await run_service.get_budget("tenant-1", parent_run_id)
         assert final_budget.reserved["tokens.total"] == 80
-        assert final_budget.reservations["postgres-authority-plain"] == {
-            "tokens.total": 10
-        }
+        assert final_budget.reservations["postgres-authority-plain"] == {"tokens.total": 10}
     finally:
         async with pool.acquire() as connection:
             await connection.execute("DROP SCHEMA IF EXISTS belllabs_control CASCADE")
@@ -282,9 +279,7 @@ async def test_postgres_parent_rollup_cannot_be_overwritten_by_family_admission(
 async def test_postgres_atomic_family_admission_contract(
     test_application_postgres_dsn: str,
 ) -> None:
-    pool = await asyncpg.create_pool(
-        dsn=test_application_postgres_dsn, min_size=1, max_size=8
-    )
+    pool = await asyncpg.create_pool(dsn=test_application_postgres_dsn, min_size=1, max_size=8)
     family_writer_pool = await asyncpg.create_pool(
         dsn=test_application_postgres_dsn, min_size=1, max_size=8
     )
@@ -326,9 +321,7 @@ async def test_postgres_atomic_family_admission_contract(
             )
         assert (await run_service.get_run("tenant-1", run_id)).version == 1
         with pytest.raises(RunControlNotFound):
-            await repository.get_family_admission_receipt(
-                "tenant-2", run_id, "operator", "missing"
-            )
+            await repository.get_family_admission_receipt("tenant-2", run_id, "operator", "missing")
         with pytest.raises(RunControlNotFound):
             await repository.get_family_head(
                 "tenant-2", run_id, "test_family", type(family_mutation(run_id))
@@ -338,6 +331,7 @@ async def test_postgres_atomic_family_admission_contract(
             "family_admission.after_run_control",
             "family_admission.after_family",
         ):
+
             async def fail(observed: str, expected: str = boundary) -> None:
                 if observed == expected:
                     raise RuntimeError(f"injected {expected}")
@@ -392,9 +386,7 @@ async def test_postgres_atomic_family_admission_contract(
             ),
         )
         accepted_receipts = [
-            item
-            for item in outcomes
-            if item.command_result.status == CommandStatus.ACCEPTED
+            item for item in outcomes if item.command_result.status == CommandStatus.ACCEPTED
         ]
         stale_receipts = [
             item for item in outcomes if item.command_result.status == CommandStatus.STALE
@@ -502,12 +494,15 @@ async def test_postgres_atomic_family_admission_contract(
                     "'belllabs_control_runtime', $1, 'UPDATE')",
                     f"belllabs_control.{table}",
                 )
-            assert await connection.fetchval(
-                "SELECT to_regprocedure("
-                "'belllabs_control.commit_family_admission("
-                "text,text,text,bigint,text,text,text,jsonb,timestamptz,"
-                "text,text,text,jsonb,timestamptz,boolean)')"
-            ) is None
+            assert (
+                await connection.fetchval(
+                    "SELECT to_regprocedure("
+                    "'belllabs_control.commit_family_admission("
+                    "text,text,text,bigint,text,text,text,jsonb,timestamptz,"
+                    "text,text,text,jsonb,timestamptz,boolean)')"
+                )
+                is None
+            )
             assert not await connection.fetchval(
                 "SELECT pg_has_role("
                 "'belllabs_control_runtime', "
@@ -587,9 +582,7 @@ async def test_postgres_atomic_family_admission_contract(
 async def test_postgres_authority_batch_is_atomic_and_preserves_outbox_finality(
     test_application_postgres_dsn: str,
 ) -> None:
-    pool = await asyncpg.create_pool(
-        dsn=test_application_postgres_dsn, min_size=1, max_size=8
-    )
+    pool = await asyncpg.create_pool(dsn=test_application_postgres_dsn, min_size=1, max_size=8)
     family_writer_pool = await asyncpg.create_pool(
         dsn=test_application_postgres_dsn, min_size=1, max_size=8
     )
@@ -616,9 +609,7 @@ async def test_postgres_authority_batch_is_atomic_and_preserves_outbox_finality(
                         amounts={"tokens.total": 1},
                     ),
                 ),
-                family_mutation(run_id).model_copy(
-                    update={"candidate_ref": "x" * 70_000}
-                ),
+                family_mutation(run_id).model_copy(update={"candidate_ref": "x" * 70_000}),
             )
         await run_service.execute(
             command(
@@ -719,6 +710,7 @@ async def test_postgres_authority_batch_is_atomic_and_preserves_outbox_finality(
             "family_admission.after_run_control",
             "family_admission.after_family",
         ):
+
             async def fail(observed: str, expected: str = boundary) -> None:
                 if observed == expected:
                     raise RuntimeError("injected PostgreSQL authority batch failure")
@@ -748,9 +740,9 @@ async def test_postgres_authority_batch_is_atomic_and_preserves_outbox_finality(
                 )
             assert (await run_service.get_run("tenant-1", run_id)).version == 3
             assert (await run_service.get_budget("tenant-1", run_id)).consumed == {}
-            assert (
-                await run_service.get_effects("tenant-1", run_id)
-            ).claims["effect-1"].settlement is None
+            assert (await run_service.get_effects("tenant-1", run_id)).claims[
+                "effect-1"
+            ].settlement is None
 
         invalid_batch = authority_batch().model_copy(
             update={
@@ -772,9 +764,9 @@ async def test_postgres_authority_batch_is_atomic_and_preserves_outbox_finality(
         assert rejected.command_result.status == CommandStatus.REJECTED
         assert (await run_service.get_run("tenant-1", run_id)).version == 3
         assert (await run_service.get_budget("tenant-1", run_id)).consumed == {}
-        assert (
-            await run_service.get_effects("tenant-1", run_id)
-        ).claims["effect-1"].settlement is None
+        assert (await run_service.get_effects("tenant-1", run_id)).claims[
+            "effect-1"
+        ].settlement is None
 
         lifecycle = command(run_id, 3, "postgres-authority-batch", authority_batch())
         mutation = family_mutation(run_id, mutation_id="postgres-authority-batch")
@@ -847,9 +839,7 @@ async def test_postgres_authority_batch_is_atomic_and_preserves_outbox_finality(
 async def test_postgres_usage_settlement_provenance_is_exact_and_replayable(
     test_application_postgres_dsn: str,
 ) -> None:
-    pool = await asyncpg.create_pool(
-        dsn=test_application_postgres_dsn, min_size=1, max_size=8
-    )
+    pool = await asyncpg.create_pool(dsn=test_application_postgres_dsn, min_size=1, max_size=8)
     family_writer_pool = await asyncpg.create_pool(
         dsn=test_application_postgres_dsn, min_size=1, max_size=8
     )
@@ -862,9 +852,7 @@ async def test_postgres_usage_settlement_provenance_is_exact_and_replayable(
             family_writer_pool=family_writer_pool,
         )
         run_service, _ = family_service(repository)  # type: ignore[arg-type]
-        admitted = await run_service.admit(
-            request(request_id="postgres-usage-provenance")
-        )
+        admitted = await run_service.admit(request(request_id="postgres-usage-provenance"))
         assert admitted.run_id is not None
         run_id = admitted.run_id
         await run_service.execute(
@@ -923,8 +911,10 @@ async def test_postgres_usage_settlement_provenance_is_exact_and_replayable(
                 authority_batch().actions[2],
             )
         )
-        forged_action = authority_batch().actions[3].model_copy(
-            update={"usage_settlement_ref": "unrelated-usage"}
+        forged_action = (
+            authority_batch()
+            .actions[3]
+            .model_copy(update={"usage_settlement_ref": "unrelated-usage"})
         )
         forged = await run_service.execute(
             command(
@@ -954,9 +944,9 @@ async def test_postgres_usage_settlement_provenance_is_exact_and_replayable(
                 run_id,
                 wrong_authority_usage.resulting_run_version,
                 "postgres-provenance-wrong-authority-effect",
-                authority_batch().actions[3].model_copy(
-                    update={"usage_settlement_ref": "wrong-authority-usage"}
-                ),
+                authority_batch()
+                .actions[3]
+                .model_copy(update={"usage_settlement_ref": "wrong-authority-usage"}),
             )
         )
         assert wrong_authority.status == CommandStatus.REJECTED
@@ -1034,9 +1024,9 @@ async def test_postgres_usage_settlement_provenance_is_exact_and_replayable(
             run_id,
             settled_usage.resulting_run_version,
             "postgres-provenance-effect-settlement",
-            authority_batch().actions[3].model_copy(
-                update={"usage_settlement_ref": "correct-settlement"}
-            ),
+            authority_batch()
+            .actions[3]
+            .model_copy(update={"usage_settlement_ref": "correct-settlement"}),
         )
         settled_effect = await run_service.execute(settle_effect_command)
         assert settled_effect.status == CommandStatus.ACCEPTED
@@ -1065,19 +1055,13 @@ async def test_postgres_authority_cas_ignores_set_and_map_construction_order(
             return state.model_copy(
                 update={
                     "usage_ids": frozenset(reversed(sorted(state.usage_ids))),
-                    "settlement_ids": frozenset(
-                        reversed(sorted(state.settlement_ids))
-                    ),
+                    "settlement_ids": frozenset(reversed(sorted(state.settlement_ids))),
                     "usage_records": dict(reversed(tuple(state.usage_records.items()))),
-                    "usage_settlements": dict(
-                        reversed(tuple(state.usage_settlements.items()))
-                    ),
+                    "usage_settlements": dict(reversed(tuple(state.usage_settlements.items()))),
                 }
             )
 
-    pool = await asyncpg.create_pool(
-        dsn=test_application_postgres_dsn, min_size=1, max_size=8
-    )
+    pool = await asyncpg.create_pool(dsn=test_application_postgres_dsn, min_size=1, max_size=8)
     family_writer_pool = await asyncpg.create_pool(
         dsn=test_application_postgres_dsn, min_size=1, max_size=8
     )

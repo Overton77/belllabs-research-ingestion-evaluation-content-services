@@ -1,0 +1,86 @@
+{
+  "schema_version": "mc.skill_operations.v1",
+  "operations": [
+    {
+      "name": "run.admit",
+      "method": "POST",
+      "path": "/run-requests"
+    },
+    {
+      "name": "run.start",
+      "method": "POST",
+      "path": "/runs/{run_id}/launch"
+    },
+    {
+      "name": "run.inspect",
+      "method": "GET",
+      "path": "/runs/{run_id}/inspection"
+    },
+    {
+      "name": "command.send",
+      "method": "POST",
+      "path": "/runs/{run_id}/commands"
+    },
+    {
+      "name": "command.list",
+      "method": "GET",
+      "path": "/runs/{run_id}/commands"
+    },
+    {
+      "name": "run.snapshot",
+      "method": "POST",
+      "path": "/runs/{run_id}/snapshots"
+    },
+    {
+      "name": "run.fork",
+      "method": "POST",
+      "path": "/runs/{run_id}/forks"
+    },
+    {
+      "name": "run.reconcile",
+      "method": "POST",
+      "path": "/runs/{run_id}/reconcile-unit"
+    },
+    {
+      "name": "catalog.list",
+      "method": "GET",
+      "path": "/catalog/definitions"
+    },
+    {
+      "name": "catalog.resolve",
+      "method": "POST",
+      "path": "/catalog/resolve"
+    },
+    {
+      "name": "catalog.search",
+      "method": "POST",
+      "path": "/catalog/search"
+    },
+    {
+      "name": "catalog.discover",
+      "method": "POST",
+      "path": "/catalog/discover"
+    },
+    {
+      "name": "catalog.inspect",
+      "method": "POST",
+      "path": "/catalog/inspect"
+    },
+    {
+      "name": "catalog.components",
+      "method": "POST",
+      "path": "/catalog/components/search"
+    }
+  ],
+  "supported_controls": [
+    "pause",
+    "resume",
+    "cancel",
+    "satisfy_wait"
+  ],
+  "unqualified_controls": [
+    "queue_instruction",
+    "interrupt_and_inject",
+    "immediate_cancel"
+  ]
+}

@@ -3,17 +3,17 @@ from __future__ import annotations
 import asyncpg
 import pytest
 
-from app.application.run_control.postgres_run_control_repository import (
+from mission_control.adapters.postgres.connections import apply_application_migrations
+from mission_control.adapters.postgres.run_control.run_control_repository import (
     PostgresRunControlRepository,
 )
-from app.application.workspaces.postgres_artifact_repository import (
+from mission_control.adapters.postgres.workspaces.artifact_repository import (
     PostgresArtifactDurableReferenceRepository,
 )
-from app.domain.operation_execution.contracts import (
+from mission_control.domain.execution.contracts import (
     ArtifactMetadataRevision,
     ArtifactPromotionState,
 )
-from app.integrations.postgres import apply_application_migrations
 from tests.unit.run_control.test_run_control import request as run_request
 from tests.unit.run_control.test_run_control import service as run_control_service
 from tests.unit.workspaces.test_artifact_promotion import CONTENT_DIGEST, NOW, OWNER

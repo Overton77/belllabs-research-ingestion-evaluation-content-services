@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.application.runtime.runtime_reconciliation import (
+from mission_control.application.recovery.runtime_reconciliation import (
     RuntimeIncidentDecision,
     RuntimeIncidentObservation,
     RuntimeIncidentReconciler,

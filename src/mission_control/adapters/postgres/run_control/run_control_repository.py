@@ -1,0 +1,1429 @@
+from __future__ import annotations
+
+import inspect
+import json
+from collections.abc import Awaitable, Callable
+from datetime import datetime
+from typing import Any, TypeVar
+
+import asyncpg
+
+from mission_control.application.execution.run_control_repository import (
+    AdmissionMutation,
+    CommandMutation,
+    FamilyAdmissionCommit,
+    _was_accepted,
+    append_receipt,
+    authority_state_digest,
+)
+from mission_control.domain.policies.budget import roll_up_child_budget
+from mission_control.domain.policies.contracts import (
+    CANCEL_SEQUENCE_SPACE,
+    EXECUTION_SEQUENCE_SPACE,
+    AdmissionDecision,
+    BoundaryCommandReceipt,
+    BoundaryCommandRecord,
+    BoundaryCommandStatus,
+    BudgetLedgerEntry,
+    BudgetState,
+    CommandResult,
+    CommandStatus,
+    ConsumerApplyResult,
+    ConsumerApplyStatus,
+    ConsumerCursor,
+    DomainEventEnvelope,
+    EffectLedgerEntry,
+    EffectLedgerState,
+    LifecycleTransitionRecord,
+    OutboxCursor,
+    OutboxRecord,
+    RunProjection,
+)
+from mission_control.domain.policies.errors import (
+    IdempotencyConflict,
+    RunControlNotFound,
+    RunVersionConflict,
+)
+from mission_control.domain.policies.family_admission import (
+    AtomicFamilyMutation,
+    AuthorityStateConflict,
+    FamilyAdmissionReceipt,
+    FamilyVersionConflict,
+)
+
+FailureHook = Callable[[str], Awaitable[None] | None]
+M = TypeVar("M", bound=AtomicFamilyMutation)
+
+
+class PostgresRunControlRepository:
+    """Single-transaction PostgreSQL authority for run-control mutations."""
+
+    def __init__(
+        self,
+        pool: asyncpg.Pool,
+        *,
+        family_writer_pool: asyncpg.Pool | None = None,
+        before_commit: FailureHook | None = None,
+    ) -> None:
+        if family_writer_pool is pool:
+            raise ValueError("family writer pool must be distinct from the normal application pool")
+        self._pool = pool
+        self._family_writer_pool = family_writer_pool
+        self._before_commit = before_commit
+
+    async def get_admission_decision(
+        self, request_scope: str, idempotency_issuer: str, request_id: str
+    ) -> AdmissionDecision | None:
+        async with self._pool.acquire() as connection, connection.transaction():
+            await _set_scope(connection, request_scope)
+            row = await connection.fetchrow(
+                """
+                SELECT decision
+                FROM belllabs_control.run_request_decisions
+                WHERE request_scope = $1 AND idempotency_issuer = $2
+                  AND request_id = $3
+                """,
+                request_scope,
+                idempotency_issuer,
+                request_id,
+            )
+        return AdmissionDecision.model_validate(_json(row["decision"])) if row else None
+
+    async def commit_admission(self, mutation: AdmissionMutation) -> AdmissionDecision:
+        decision = mutation.decision
+        lock_key = (
+            f"admission:{decision.request_scope}:"
+            f"{decision.idempotency_issuer}:{decision.request_id}"
+        )
+        async with self._pool.acquire() as connection, connection.transaction():
+            await _set_scope(connection, decision.request_scope)
+            await _advisory_lock(connection, lock_key)
+            prior = await connection.fetchrow(
+                """
+                SELECT request_fingerprint, decision
+                FROM belllabs_control.run_request_decisions
+                WHERE request_scope = $1 AND idempotency_issuer = $2
+                  AND request_id = $3
+                """,
+                decision.request_scope,
+                decision.idempotency_issuer,
+                decision.request_id,
+            )
+            if prior:
+                if prior["request_fingerprint"] != decision.request_fingerprint:
+                    raise IdempotencyConflict(
+                        "run request identity was reused with a conflicting payload"
+                    )
+                return AdmissionDecision.model_validate(_json(prior["decision"]))
+            await connection.execute(
+                """
+                INSERT INTO belllabs_control.run_request_decisions
+                    (request_scope, idempotency_issuer, request_id,
+                     request_fingerprint, decision, recorded_at)
+                VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+                """,
+                decision.request_scope,
+                decision.idempotency_issuer,
+                decision.request_id,
+                decision.request_fingerprint,
+                _dump(decision),
+                decision.recorded_at,
+            )
+            if mutation.projection is not None:
+                if (
+                    mutation.budget is None
+                    or mutation.effects is None
+                    or mutation.transition is None
+                    or not mutation.events
+                ):
+                    raise ValueError("accepted admission is missing transactional effects")
+                await self._insert_run(connection, mutation.projection)
+                await self._apply_parent_rollup(
+                    connection,
+                    None,
+                    mutation.budget,
+                    idempotency_id=f"admission:{decision.request_id}",
+                    occurred_at=decision.recorded_at,
+                )
+                await self._insert_budget(connection, mutation.budget, decision.recorded_at)
+                await self._insert_effects(connection, mutation.effects, decision.recorded_at)
+                await self._insert_transition(connection, mutation.transition)
+                await self._insert_ledger(connection, mutation.ledger_entries)
+                await self._insert_effect_ledger(connection, mutation.effect_entries)
+                await self._insert_events(connection, mutation.events)
+            await self._inject("admission")
+            return decision
+
+    async def get_command_result(
+        self,
+        request_scope: str,
+        run_id: str,
+        idempotency_issuer: str,
+        command_id: str,
+    ) -> CommandResult | None:
+        async with self._pool.acquire() as connection, connection.transaction():
+            await _set_scope(connection, request_scope)
+            combined = await connection.fetchval(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM belllabs_control.family_admission_results
+                    WHERE request_scope = $1 AND run_id = $2
+                      AND idempotency_issuer = $3 AND command_id = $4
+                )
+                """,
+                request_scope,
+                run_id,
+                idempotency_issuer,
+                command_id,
+            )
+            if combined:
+                raise IdempotencyConflict(
+                    "combined family command identity cannot be replayed as a plain command"
+                )
+            row = await connection.fetchrow(
+                """
+                SELECT result
+                FROM belllabs_control.lifecycle_command_results
+                WHERE run_id = $1 AND idempotency_issuer = $2
+                  AND command_id = $3
+                """,
+                run_id,
+                idempotency_issuer,
+                command_id,
+            )
+        return CommandResult.model_validate(_json(row["result"])) if row else None
+
+    async def get_run(self, request_scope: str, run_id: str) -> RunProjection:
+        async with self._pool.acquire() as connection, connection.transaction():
+            await _set_scope(connection, request_scope)
+            row = await connection.fetchrow(
+                """
+                SELECT projection FROM belllabs_control.workflow_runs
+                WHERE run_id = $1 AND request_scope = $2
+                """,
+                run_id,
+                request_scope,
+            )
+        if row is None:
+            raise RunControlNotFound(f"workflow run not found: {run_id}")
+        return RunProjection.model_validate(_json(row["projection"]))
+
+    async def get_budget(self, request_scope: str, run_id: str) -> BudgetState:
+        async with self._pool.acquire() as connection, connection.transaction():
+            await _set_scope(connection, request_scope)
+            row = await connection.fetchrow(
+                """
+                SELECT account.state
+                FROM belllabs_control.budget_accounts account
+                JOIN belllabs_control.workflow_runs run USING (run_id)
+                WHERE account.run_id = $1 AND run.request_scope = $2
+                """,
+                run_id,
+                request_scope,
+            )
+        if row is None:
+            raise RunControlNotFound(f"budget account not found for run: {run_id}")
+        return BudgetState.model_validate(_json(row["state"]))
+
+    async def get_effects(self, request_scope: str, run_id: str) -> EffectLedgerState:
+        async with self._pool.acquire() as connection, connection.transaction():
+            await _set_scope(connection, request_scope)
+            row = await connection.fetchrow(
+                """
+                SELECT effects.state
+                FROM belllabs_control.effect_ledgers effects
+                JOIN belllabs_control.workflow_runs run USING (run_id)
+                WHERE effects.run_id = $1 AND run.request_scope = $2
+                """,
+                run_id,
+                request_scope,
+            )
+        if row is None:
+            raise RunControlNotFound(f"effect ledger not found for run: {run_id}")
+        return EffectLedgerState.model_validate(_json(row["state"]))
+
+    async def commit_command(self, mutation: CommandMutation) -> CommandResult:
+        result = mutation.result
+        async with self._pool.acquire() as connection, connection.transaction():
+            await _set_scope(connection, mutation.request_scope)
+            await _advisory_lock(connection, f"run:{result.run_id}")
+            prior = await connection.fetchrow(
+                """
+                SELECT command_fingerprint, result
+                FROM belllabs_control.lifecycle_command_results
+                WHERE run_id = $1 AND idempotency_issuer = $2
+                  AND command_id = $3
+                """,
+                result.run_id,
+                result.idempotency_issuer,
+                result.command_id,
+            )
+            if prior:
+                combined = await connection.fetchval(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1 FROM belllabs_control.family_admission_results
+                        WHERE request_scope = $1 AND run_id = $2
+                          AND idempotency_issuer = $3 AND command_id = $4
+                    )
+                    """,
+                    mutation.request_scope,
+                    result.run_id,
+                    result.idempotency_issuer,
+                    result.command_id,
+                )
+                if combined:
+                    raise IdempotencyConflict(
+                        "combined family command identity cannot be replayed as a plain command"
+                    )
+                if prior["command_fingerprint"] != result.command_fingerprint:
+                    raise IdempotencyConflict(
+                        "lifecycle command identity was reused with a conflicting payload"
+                    )
+                return CommandResult.model_validate(_json(prior["result"]))
+            current = await connection.fetchrow(
+                """
+                SELECT version, projection
+                FROM belllabs_control.workflow_runs
+                WHERE run_id = $1
+                FOR UPDATE
+                """,
+                result.run_id,
+            )
+            if current is None:
+                raise RunControlNotFound(f"workflow run not found: {result.run_id}")
+            current_projection = RunProjection.model_validate(_json(current["projection"]))
+            current_version = current_projection.version
+            prior_budget_raw = await connection.fetchval(
+                """
+                SELECT state FROM belllabs_control.budget_accounts
+                WHERE run_id = $1 FOR UPDATE
+                """,
+                result.run_id,
+            )
+            prior_budget = BudgetState.model_validate(_json(prior_budget_raw))
+            prior_effects_raw = await connection.fetchval(
+                """
+                SELECT state FROM belllabs_control.effect_ledgers
+                WHERE run_id = $1 FOR UPDATE
+                """,
+                result.run_id,
+            )
+            prior_effects = EffectLedgerState.model_validate(_json(prior_effects_raw))
+            if mutation.expected_budget_digest != authority_state_digest(
+                prior_budget
+            ) or mutation.expected_effects_digest != authority_state_digest(prior_effects):
+                raise AuthorityStateConflict(
+                    "budget or effect authority changed while the command was being decided"
+                )
+            if mutation.projection is None:
+                raced = current_version != mutation.expected_version
+                if raced and mutation.boundary_commands and result.status == CommandStatus.ACCEPTED:
+                    # A pending boundary acceptance binds the exact version it was validated
+                    # against; the service re-decides it against the current projection.
+                    raise RunVersionConflict(
+                        f"expected version {mutation.expected_version}, "
+                        f"current version is {current_version}"
+                    )
+                result = result.model_copy(
+                    update={
+                        "status": (
+                            CommandStatus.STALE
+                            if raced and result.status == CommandStatus.REJECTED
+                            else result.status
+                        ),
+                        "resulting_run_version": current_projection.version,
+                        "phase": current_projection.phase,
+                        "terminal_outcome": current_projection.terminal_outcome,
+                        "reason_code": (
+                            "stale_run_version"
+                            if raced and result.status == CommandStatus.REJECTED
+                            else result.reason_code
+                        ),
+                        "reason": (
+                            "run advanced while the rejected command was being decided"
+                            if raced and result.status == CommandStatus.REJECTED
+                            else result.reason
+                        ),
+                    }
+                )
+            if current_version != mutation.expected_version:
+                if mutation.projection is None:
+                    mutation = CommandMutation(
+                        result=result,
+                        request_scope=mutation.request_scope,
+                        expected_version=current_version,
+                        expected_budget_digest=mutation.expected_budget_digest,
+                        expected_effects_digest=mutation.expected_effects_digest,
+                        boundary_commands=mutation.boundary_commands,
+                        boundary_receipts=mutation.boundary_receipts,
+                    )
+                else:
+                    raise RunVersionConflict(
+                        f"expected version {mutation.expected_version}, current version is "
+                        f"{current_version}"
+                    )
+            await connection.execute(
+                """
+                INSERT INTO belllabs_control.lifecycle_command_results
+                    (run_id, idempotency_issuer, command_id,
+                     command_fingerprint, result, recorded_at)
+                VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+                """,
+                result.run_id,
+                result.idempotency_issuer,
+                result.command_id,
+                result.command_fingerprint,
+                _dump(result),
+                result.recorded_at,
+            )
+            if mutation.projection is not None:
+                if (
+                    mutation.budget is None
+                    or mutation.effects is None
+                    or mutation.transition is None
+                    or not mutation.events
+                ):
+                    raise ValueError("accepted command is missing transactional effects")
+                await connection.execute(
+                    """
+                    UPDATE belllabs_control.workflow_runs
+                    SET version = $2, phase = $3, projection = $4::jsonb, updated_at = $5
+                    WHERE run_id = $1
+                    """,
+                    mutation.projection.run_id,
+                    mutation.projection.version,
+                    mutation.projection.phase.value,
+                    _dump(mutation.projection),
+                    mutation.projection.updated_at,
+                )
+                await self._apply_parent_rollup(
+                    connection,
+                    prior_budget,
+                    mutation.budget,
+                    idempotency_id=f"command:{result.command_id}",
+                    occurred_at=result.recorded_at,
+                )
+                await connection.execute(
+                    """
+                    UPDATE belllabs_control.budget_accounts
+                    SET state = $2::jsonb, updated_at = $3
+                    WHERE run_id = $1
+                    """,
+                    mutation.projection.run_id,
+                    _dump(mutation.budget),
+                    mutation.projection.updated_at,
+                )
+                await connection.execute(
+                    """
+                    UPDATE belllabs_control.effect_ledgers
+                    SET state = $2::jsonb, updated_at = $3
+                    WHERE run_id = $1
+                    """,
+                    mutation.projection.run_id,
+                    _dump(mutation.effects),
+                    mutation.projection.updated_at,
+                )
+                await self._insert_transition(connection, mutation.transition)
+                await self._insert_ledger(connection, mutation.ledger_entries)
+                await self._insert_effect_ledger(connection, mutation.effect_entries)
+                await self._insert_events(connection, mutation.events)
+            await self._record_boundary_commands(connection, mutation)
+            await self._inject("command")
+            return result
+
+    # --- Boundary commands and receipts (RRM-007) -------------------------------------------
+
+    async def get_boundary_command(
+        self, request_scope: str, run_id: str, idempotency_issuer: str, command_id: str
+    ) -> BoundaryCommandStatus | None:
+        async with self._pool.acquire() as connection, connection.transaction():
+            await _set_scope(connection, request_scope)
+            if not await _run_exists_on(connection, request_scope, run_id):
+                raise RunControlNotFound(f"workflow run not found: {run_id}")
+            return await _boundary_command(
+                connection, request_scope, run_id, idempotency_issuer, command_id
+            )
+
+    async def list_boundary_commands(
+        self, request_scope: str, run_id: str
+    ) -> tuple[BoundaryCommandStatus, ...]:
+        async with self._pool.acquire() as connection, connection.transaction():
+            await _set_scope(connection, request_scope)
+            if not await _run_exists_on(connection, request_scope, run_id):
+                raise RunControlNotFound(f"workflow run not found: {run_id}")
+            rows = await connection.fetch(
+                """
+                SELECT idempotency_issuer, command_id
+                FROM belllabs_control.boundary_commands
+                WHERE request_scope = $1 AND run_id = $2
+                ORDER BY sequence_space, target_sequence, recorded_at, idempotency_issuer,
+                         command_id
+                """,
+                request_scope,
+                run_id,
+            )
+            statuses = [
+                await _boundary_command(
+                    connection, request_scope, run_id, row["idempotency_issuer"], row["command_id"]
+                )
+                for row in rows
+            ]
+        return tuple(status for status in statuses if status is not None)
+
+    async def runs_with_pending_boundary_commands(
+        self, request_scope: str, *, limit: int = 100
+    ) -> tuple[str, ...]:
+        # The latest receipt of an operator family command in the root's `execution`
+        # sequence space, or of a cancel in its own `cancel` space (RRM-008), is still
+        # `accepted`: inline delivery failed or never ran (`pending_delivery`); the relay
+        # re-drives those runs in acceptance order.
+        async with self._pool.acquire() as connection, connection.transaction():
+            await _set_scope(connection, request_scope)
+            rows = await connection.fetch(
+                """
+                SELECT c.run_id, min(c.recorded_at) AS first_accepted
+                FROM belllabs_control.boundary_commands c
+                JOIN LATERAL (
+                    SELECT r.state
+                    FROM belllabs_control.boundary_command_receipts r
+                    WHERE r.request_scope = c.request_scope AND r.run_id = c.run_id
+                      AND r.idempotency_issuer = c.idempotency_issuer
+                      AND r.command_id = c.command_id
+                    ORDER BY r.ordinal DESC
+                    LIMIT 1
+                ) latest ON TRUE
+                WHERE c.request_scope = $1
+                  AND latest.state = 'accepted'
+                  AND c.target_kind IN ('root', 'family')
+                  AND (
+                    (c.kind IN ('pause', 'resume', 'satisfy_wait') AND c.sequence_space = $2)
+                    OR (c.kind = 'cancel' AND c.sequence_space = $4)
+                  )
+                GROUP BY c.run_id
+                ORDER BY first_accepted
+                LIMIT $3
+                """,
+                request_scope,
+                EXECUTION_SEQUENCE_SPACE,
+                limit,
+                CANCEL_SEQUENCE_SPACE,
+            )
+        return tuple(str(row["run_id"]) for row in rows)
+
+    async def record_boundary_receipt(
+        self,
+        request_scope: str,
+        receipt: BoundaryCommandReceipt,
+    ) -> BoundaryCommandStatus:
+        async with self._pool.acquire() as connection, connection.transaction():
+            await _set_scope(connection, request_scope)
+            await _advisory_lock(connection, f"run:{receipt.run_id}")
+            status = await _boundary_command(
+                connection,
+                request_scope,
+                receipt.run_id,
+                receipt.idempotency_issuer,
+                receipt.command_id,
+            )
+            if status is None:
+                raise RunControlNotFound(f"boundary command not found: {receipt.command_id}")
+            updated = append_receipt(status, receipt)
+            if len(updated.receipts) > len(status.receipts):
+                await _insert_receipt(connection, updated.receipts[-1])
+            return updated
+
+    async def _record_boundary_commands(
+        self, connection: asyncpg.Connection, mutation: CommandMutation
+    ) -> None:
+        run_id = mutation.result.run_id
+        scope = mutation.request_scope
+        new_ids = {
+            (record.idempotency_issuer, record.command_id) for record in mutation.boundary_commands
+        }
+        for record in mutation.boundary_commands:
+            if (
+                await _boundary_command(
+                    connection, scope, run_id, record.idempotency_issuer, record.command_id
+                )
+                is not None
+            ):
+                raise IdempotencyConflict(f"boundary command already recorded: {record.command_id}")
+            own = tuple(
+                item
+                for item in mutation.boundary_receipts
+                if (item.idempotency_issuer, item.command_id)
+                == (record.idempotency_issuer, record.command_id)
+            )
+            sequence = record.target_sequence
+            if sequence == 0 and record.target.kind != "run_control" and _was_accepted(own):
+                sequence = await connection.fetchval(
+                    """
+                    SELECT coalesce(max(target_sequence), 0) + 1
+                    FROM belllabs_control.boundary_commands
+                    WHERE request_scope = $1 AND run_id = $2 AND sequence_space = $3
+                    """,
+                    scope,
+                    run_id,
+                    record.target.sequence_space,
+                )
+            sequenced = record.model_copy(update={"target_sequence": sequence})
+            await connection.execute(
+                """
+                INSERT INTO belllabs_control.boundary_commands
+                    (request_scope, run_id, command_id, idempotency_issuer, kind,
+                     target_kind, target_ref, sequence_space, target_sequence,
+                     execution_epoch, execution_generation, accepted_run_version,
+                     payload_digest, command, recorded_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb, $15)
+                """,
+                scope,
+                run_id,
+                sequenced.command_id,
+                sequenced.idempotency_issuer,
+                sequenced.kind,
+                sequenced.target.kind,
+                sequenced.target.target_ref,
+                sequenced.target.sequence_space,
+                sequence,
+                sequenced.target.execution_epoch,
+                sequenced.target.execution_generation,
+                sequenced.accepted_run_version,
+                sequenced.payload_digest,
+                _dump(sequenced),
+                sequenced.recorded_at,
+            )
+            # Validate the chain before writing it; the contract enforces the state machine.
+            BoundaryCommandStatus(command=sequenced, receipts=own)
+            for item in own:
+                await _insert_receipt(connection, item)
+        for item in mutation.boundary_receipts:
+            if (item.idempotency_issuer, item.command_id) in new_ids:
+                continue
+            status = await _boundary_command(
+                connection, scope, run_id, item.idempotency_issuer, item.command_id
+            )
+            if status is None:
+                raise RunControlNotFound(f"boundary command not found: {item.command_id}")
+            updated = append_receipt(status, item)
+            if len(updated.receipts) > len(status.receipts):
+                await _insert_receipt(connection, updated.receipts[-1])
+
+    async def get_family_admission_receipt(
+        self,
+        request_scope: str,
+        run_id: str,
+        idempotency_issuer: str,
+        command_id: str,
+    ) -> FamilyAdmissionReceipt | None:
+        async with self._pool.acquire() as connection, connection.transaction():
+            await _set_scope(connection, request_scope)
+            if not await _run_exists_on(connection, request_scope, run_id):
+                raise RunControlNotFound(f"workflow run not found: {run_id}")
+            raw = await connection.fetchval(
+                """
+                SELECT receipt
+                FROM belllabs_control.family_admission_results
+                WHERE request_scope = $1 AND run_id = $2
+                  AND idempotency_issuer = $3 AND command_id = $4
+                """,
+                request_scope,
+                run_id,
+                idempotency_issuer,
+                command_id,
+            )
+        return FamilyAdmissionReceipt.model_validate(_json(raw)) if raw is not None else None
+
+    async def get_family_head(
+        self,
+        request_scope: str,
+        run_id: str,
+        family_kind: str,
+        mutation_type: type[M],
+    ) -> M | None:
+        async with self._pool.acquire() as connection, connection.transaction():
+            await _set_scope(connection, request_scope)
+            if not await _run_exists_on(connection, request_scope, run_id):
+                raise RunControlNotFound(f"workflow run not found: {run_id}")
+            raw = await connection.fetchval(
+                """
+                SELECT mutation
+                FROM belllabs_control.family_admission_heads
+                WHERE request_scope = $1 AND run_id = $2 AND family_kind = $3
+                """,
+                request_scope,
+                run_id,
+                family_kind,
+            )
+        return mutation_type.model_validate(_json(raw)) if raw is not None else None
+
+    async def commit_family_admission(
+        self, commit: FamilyAdmissionCommit
+    ) -> FamilyAdmissionReceipt:
+        commit.__post_init__()
+        if self._family_writer_pool is None:
+            raise RuntimeError(
+                "atomic family admission requires a distinct family repository writer pool"
+            )
+        mutation = commit.family_mutation
+        command = commit.command
+        result = command.result
+        async with self._family_writer_pool.acquire() as connection, connection.transaction():
+            await _set_scope(connection, mutation.request_scope)
+            await _advisory_lock(connection, f"run:{mutation.run_id}")
+            prior = await connection.fetchrow(
+                """
+                SELECT command_fingerprint, family_mutation_fingerprint, receipt
+                FROM belllabs_control.family_admission_results
+                WHERE request_scope = $1 AND run_id = $2
+                  AND idempotency_issuer = $3 AND command_id = $4
+                """,
+                mutation.request_scope,
+                mutation.run_id,
+                result.idempotency_issuer,
+                result.command_id,
+            )
+            if prior:
+                if (
+                    prior["command_fingerprint"] != result.command_fingerprint
+                    or prior["family_mutation_fingerprint"] != commit.family_mutation_fingerprint
+                ):
+                    raise IdempotencyConflict(
+                        "family admission identity was reused with conflicting content"
+                    )
+                return FamilyAdmissionReceipt.model_validate(_json(prior["receipt"]))
+            plain = await connection.fetchval(
+                """
+                SELECT command_fingerprint
+                FROM belllabs_control.lifecycle_command_results
+                WHERE run_id = $1 AND idempotency_issuer = $2 AND command_id = $3
+                """,
+                mutation.run_id,
+                result.idempotency_issuer,
+                result.command_id,
+            )
+            if plain is not None:
+                raise IdempotencyConflict(
+                    "plain lifecycle command identity cannot acquire a family mutation"
+                )
+            current_raw = await connection.fetchval(
+                """
+                SELECT projection FROM belllabs_control.workflow_runs
+                WHERE run_id = $1 AND request_scope = $2 FOR UPDATE
+                """,
+                mutation.run_id,
+                mutation.request_scope,
+            )
+            if current_raw is None:
+                raise RunControlNotFound(f"workflow run not found: {mutation.run_id}")
+            current_projection = RunProjection.model_validate(_json(current_raw))
+            current_version = current_projection.version
+            prior_budget_raw = await connection.fetchval(
+                "SELECT state FROM belllabs_control.budget_accounts WHERE run_id = $1 FOR UPDATE",
+                mutation.run_id,
+            )
+            prior_budget = BudgetState.model_validate(_json(prior_budget_raw))
+            prior_effects_raw = await connection.fetchval(
+                "SELECT state FROM belllabs_control.effect_ledgers WHERE run_id = $1 FOR UPDATE",
+                mutation.run_id,
+            )
+            prior_effects = EffectLedgerState.model_validate(_json(prior_effects_raw))
+            if command.expected_budget_digest != authority_state_digest(
+                prior_budget
+            ) or command.expected_effects_digest != authority_state_digest(prior_effects):
+                raise AuthorityStateConflict(
+                    "budget or effect authority changed while the command was being decided"
+                )
+            if command.projection is None:
+                raced = current_version != command.expected_version
+                result = result.model_copy(
+                    update={
+                        "status": (
+                            CommandStatus.STALE
+                            if raced and result.status == CommandStatus.REJECTED
+                            else result.status
+                        ),
+                        "resulting_run_version": current_version,
+                        "phase": current_projection.phase,
+                        "terminal_outcome": current_projection.terminal_outcome,
+                        "reason_code": (
+                            "stale_run_version"
+                            if raced and result.status == CommandStatus.REJECTED
+                            else result.reason_code
+                        ),
+                    }
+                )
+                if result != commit.receipt.command_result:
+                    raise RunVersionConflict("combined command result changed while committing")
+            elif current_version != command.expected_version:
+                raise RunVersionConflict(
+                    f"expected version {command.expected_version}, current version is "
+                    f"{current_version}"
+                )
+
+            accepted = commit.receipt.family_receipt is not None
+            if accepted:
+                collision = await connection.fetchrow(
+                    """
+                    SELECT mutation_fingerprint
+                    FROM belllabs_control.family_admission_journal
+                    WHERE request_scope = $1 AND run_id = $2
+                      AND family_kind = $3 AND mutation_id = $4
+                    """,
+                    mutation.request_scope,
+                    mutation.run_id,
+                    mutation.family_kind,
+                    mutation.mutation_id,
+                )
+                if collision is not None:
+                    if collision["mutation_fingerprint"] == commit.family_mutation_fingerprint:
+                        raise IdempotencyConflict(
+                            "family mutation identity was reused by another command"
+                        )
+                    raise IdempotencyConflict(
+                        "family mutation identity was reused with conflicting content"
+                    )
+                prior_head = await connection.fetchrow(
+                    """
+                    SELECT family_version
+                    FROM belllabs_control.family_admission_heads
+                    WHERE request_scope = $1 AND run_id = $2 AND family_kind = $3
+                    FOR UPDATE
+                    """,
+                    mutation.request_scope,
+                    mutation.run_id,
+                    mutation.family_kind,
+                )
+                current_family_version = prior_head["family_version"] if prior_head else 0
+                if mutation.expected_family_version != current_family_version:
+                    raise FamilyVersionConflict(
+                        f"expected family version {mutation.expected_family_version}, "
+                        f"current version is {current_family_version}"
+                    )
+
+            await connection.execute(
+                """
+                INSERT INTO belllabs_control.lifecycle_command_results
+                    (run_id, idempotency_issuer, command_id,
+                     command_fingerprint, result, recorded_at)
+                VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+                """,
+                result.run_id,
+                result.idempotency_issuer,
+                result.command_id,
+                result.command_fingerprint,
+                _dump(result),
+                result.recorded_at,
+            )
+            if command.projection is not None:
+                if (
+                    command.budget is None
+                    or command.effects is None
+                    or command.transition is None
+                    or not command.events
+                ):
+                    raise ValueError("accepted command is missing transactional effects")
+                await connection.execute(
+                    """
+                    UPDATE belllabs_control.workflow_runs
+                    SET version = $2, phase = $3, projection = $4::jsonb, updated_at = $5
+                    WHERE run_id = $1
+                    """,
+                    command.projection.run_id,
+                    command.projection.version,
+                    command.projection.phase.value,
+                    _dump(command.projection),
+                    command.projection.updated_at,
+                )
+                await self._apply_parent_rollup(
+                    connection,
+                    prior_budget,
+                    command.budget,
+                    idempotency_id=f"command:{result.command_id}",
+                    occurred_at=result.recorded_at,
+                )
+                await connection.execute(
+                    "UPDATE belllabs_control.budget_accounts "
+                    "SET state = $2::jsonb, updated_at = $3 WHERE run_id = $1",
+                    command.projection.run_id,
+                    _dump(command.budget),
+                    command.projection.updated_at,
+                )
+                await connection.execute(
+                    "UPDATE belllabs_control.effect_ledgers "
+                    "SET state = $2::jsonb, updated_at = $3 WHERE run_id = $1",
+                    command.projection.run_id,
+                    _dump(command.effects),
+                    command.projection.updated_at,
+                )
+                await self._insert_transition(connection, command.transition)
+                await self._insert_ledger(connection, command.ledger_entries)
+                await self._insert_effect_ledger(connection, command.effect_entries)
+                await self._insert_events(connection, command.events)
+            # The terminal receipts of a family-admitted terminalization (migration 0026).
+            await self._record_boundary_commands(connection, command)
+            await self._inject("family_admission.after_run_control")
+            if accepted:
+                await connection.execute(
+                    """
+                    INSERT INTO belllabs_control.family_admission_journal
+                        (request_scope, run_id, family_kind, family_version,
+                         mutation_kind, mutation_id, mutation_fingerprint,
+                         mutation, decided_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
+                    """,
+                    mutation.request_scope,
+                    mutation.run_id,
+                    mutation.family_kind,
+                    mutation.expected_family_version + 1,
+                    mutation.mutation_kind,
+                    mutation.mutation_id,
+                    commit.family_mutation_fingerprint,
+                    _dump(mutation),
+                    mutation.decided_at,
+                )
+                await connection.execute(
+                    """
+                    INSERT INTO belllabs_control.family_admission_heads
+                        (request_scope, run_id, family_kind, family_version,
+                         mutation_fingerprint, mutation, updated_at)
+                    VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
+                    ON CONFLICT (request_scope, run_id, family_kind)
+                    DO UPDATE SET family_version = EXCLUDED.family_version,
+                                  mutation_fingerprint = EXCLUDED.mutation_fingerprint,
+                                  mutation = EXCLUDED.mutation,
+                                  updated_at = EXCLUDED.updated_at
+                    """,
+                    mutation.request_scope,
+                    mutation.run_id,
+                    mutation.family_kind,
+                    mutation.expected_family_version + 1,
+                    commit.family_mutation_fingerprint,
+                    _dump(mutation),
+                    mutation.decided_at,
+                )
+            await connection.execute(
+                """
+                INSERT INTO belllabs_control.family_admission_results
+                    (request_scope, run_id, idempotency_issuer, command_id,
+                     command_fingerprint, family_mutation_fingerprint,
+                     receipt, recorded_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
+                """,
+                mutation.request_scope,
+                mutation.run_id,
+                result.idempotency_issuer,
+                result.command_id,
+                result.command_fingerprint,
+                commit.family_mutation_fingerprint,
+                _dump(commit.receipt),
+                result.recorded_at,
+            )
+            await self._inject("family_admission.after_family")
+            return commit.receipt
+
+    async def list_transitions(
+        self, request_scope: str, run_id: str
+    ) -> tuple[LifecycleTransitionRecord, ...]:
+        async with self._pool.acquire() as connection, connection.transaction():
+            await _set_scope(connection, request_scope)
+            rows = await connection.fetch(
+                """
+                SELECT transition
+                FROM belllabs_control.lifecycle_transitions
+                WHERE run_id = $1
+                ORDER BY resulting_version
+                """,
+                run_id,
+            )
+        if not rows and not await self._run_exists(request_scope, run_id):
+            raise RunControlNotFound(f"workflow run not found: {run_id}")
+        return tuple(
+            LifecycleTransitionRecord.model_validate(_json(row["transition"])) for row in rows
+        )
+
+    async def list_budget_ledger(
+        self, request_scope: str, run_id: str
+    ) -> tuple[BudgetLedgerEntry, ...]:
+        async with self._pool.acquire() as connection, connection.transaction():
+            await _set_scope(connection, request_scope)
+            rows = await connection.fetch(
+                """
+                SELECT entry
+                FROM belllabs_control.budget_ledger
+                WHERE run_id = $1
+                ORDER BY occurred_at, entry_id
+                """,
+                run_id,
+            )
+        if not rows and not await self._run_exists(request_scope, run_id):
+            raise RunControlNotFound(f"workflow run not found: {run_id}")
+        return tuple(BudgetLedgerEntry.model_validate(_json(row["entry"])) for row in rows)
+
+    async def list_effect_ledger(
+        self, request_scope: str, run_id: str
+    ) -> tuple[EffectLedgerEntry, ...]:
+        async with self._pool.acquire() as connection, connection.transaction():
+            await _set_scope(connection, request_scope)
+            rows = await connection.fetch(
+                """
+                SELECT entry
+                FROM belllabs_control.effect_ledger_entries
+                WHERE run_id = $1
+                ORDER BY occurred_at, entry_id
+                """,
+                run_id,
+            )
+        if not rows and not await self._run_exists(request_scope, run_id):
+            raise RunControlNotFound(f"workflow run not found: {run_id}")
+        return tuple(EffectLedgerEntry.model_validate(_json(row["entry"])) for row in rows)
+
+    async def list_outbox(
+        self,
+        request_scope: str,
+        *,
+        after: OutboxCursor | None = None,
+        limit: int = 100,
+    ) -> tuple[OutboxRecord, ...]:
+        async with self._pool.acquire() as connection, connection.transaction():
+            await _set_scope(connection, request_scope)
+            rows = await connection.fetch(
+                """
+                SELECT position, envelope, delivery_attempts, delivered_at
+                FROM belllabs_control.outbox
+                WHERE delivered_at IS NULL
+                  AND ($1::bigint IS NULL OR position > $1)
+                ORDER BY position
+                LIMIT $2
+                """,
+                after.position if after else None,
+                limit,
+            )
+        return tuple(_outbox_record(row) for row in rows)
+
+    async def mark_outbox_delivered(
+        self, request_scope: str, event_id: str, delivered_at: datetime
+    ) -> None:
+        async with self._pool.acquire() as connection, connection.transaction():
+            await _set_scope(connection, request_scope)
+            result = await connection.execute(
+                """
+                UPDATE belllabs_control.outbox
+                SET delivery_attempts = delivery_attempts + 1, delivered_at = $2
+                WHERE event_id = $1
+                """,
+                event_id,
+                delivered_at,
+            )
+        if result == "UPDATE 0":
+            raise RunControlNotFound(f"outbox event not found: {event_id}")
+
+    async def apply_consumer_event(
+        self, request_scope: str, consumer_id: str, envelope: DomainEventEnvelope
+    ) -> ConsumerApplyResult:
+        async with self._pool.acquire() as connection, connection.transaction():
+            await _set_scope(connection, request_scope)
+            await _advisory_lock(connection, f"consumer:{consumer_id}:{envelope.aggregate_id}")
+            authoritative = await connection.fetchval(
+                "SELECT envelope FROM belllabs_control.outbox WHERE event_id = $1",
+                envelope.event_id,
+            )
+            if (
+                authoritative is None
+                or DomainEventEnvelope.model_validate(_json(authoritative)) != envelope
+            ):
+                raise RunControlNotFound(
+                    f"authoritative outbox event not found: {envelope.event_id}"
+                )
+            raw = await connection.fetchval(
+                """
+                SELECT cursor
+                FROM belllabs_control.consumer_cursors
+                WHERE consumer_id = $1 AND aggregate_id = $2
+                FOR UPDATE
+                """,
+                consumer_id,
+                envelope.aggregate_id,
+            )
+            cursor = (
+                ConsumerCursor.model_validate(_json(raw))
+                if raw is not None
+                else ConsumerCursor(
+                    consumer_id=consumer_id,
+                    aggregate_id=envelope.aggregate_id,
+                    last_aggregate_version=0,
+                )
+            )
+            same_version_next_sequence = (
+                envelope.aggregate_version == cursor.last_aggregate_version
+                and not cursor.last_version_final
+                and envelope.sequence == cursor.last_sequence + 1
+            )
+            next_version_first_sequence = (
+                envelope.aggregate_version == cursor.last_aggregate_version + 1
+                and (cursor.last_aggregate_version == 0 or cursor.last_version_final)
+                and envelope.sequence == 1
+            )
+            expected = (
+                cursor.last_aggregate_version
+                if same_version_next_sequence
+                else cursor.last_aggregate_version + 1
+            )
+            already_applied = envelope.aggregate_version < cursor.last_aggregate_version or (
+                envelope.aggregate_version == cursor.last_aggregate_version
+                and envelope.sequence <= cursor.last_sequence
+            )
+            if already_applied:
+                status = ConsumerApplyStatus.DUPLICATE
+                next_cursor = cursor
+            elif not (same_version_next_sequence or next_version_first_sequence):
+                status = ConsumerApplyStatus.GAP
+                next_cursor = cursor
+            else:
+                status = ConsumerApplyStatus.APPLIED
+                next_cursor = cursor.model_copy(
+                    update={
+                        "last_aggregate_version": envelope.aggregate_version,
+                        "last_sequence": envelope.sequence,
+                        "last_version_final": envelope.is_version_final,
+                    }
+                )
+                await connection.execute(
+                    """
+                    INSERT INTO belllabs_control.consumer_cursors
+                        (consumer_id, aggregate_id, cursor)
+                    VALUES ($1, $2, $3::jsonb)
+                    ON CONFLICT (consumer_id, aggregate_id)
+                    DO UPDATE SET cursor = EXCLUDED.cursor, updated_at = clock_timestamp()
+                    """,
+                    consumer_id,
+                    envelope.aggregate_id,
+                    _dump(next_cursor),
+                )
+            return ConsumerApplyResult(
+                status=status,
+                cursor=next_cursor,
+                expected_version=expected,
+                observed_version=envelope.aggregate_version,
+            )
+
+    async def _insert_run(self, connection: asyncpg.Connection, projection: RunProjection) -> None:
+        await connection.execute(
+            """
+            INSERT INTO belllabs_control.workflow_runs
+                (run_id, request_scope, idempotency_issuer, request_id,
+                 version, phase, projection, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
+            """,
+            projection.run_id,
+            projection.request_scope,
+            projection.idempotency_issuer,
+            projection.request_id,
+            projection.version,
+            projection.phase.value,
+            _dump(projection),
+            projection.updated_at,
+        )
+
+    async def _apply_parent_rollup(
+        self,
+        connection: asyncpg.Connection,
+        prior_child: BudgetState | None,
+        child: BudgetState,
+        *,
+        idempotency_id: str,
+        occurred_at: datetime,
+    ) -> None:
+        if child.parent_account_id is None:
+            return
+        raw_parent = await connection.fetchval(
+            """
+            SELECT state FROM belllabs_control.budget_accounts
+            WHERE account_id = $1
+            FOR UPDATE
+            """,
+            child.parent_account_id,
+        )
+        if raw_parent is None:
+            raise RunControlNotFound(f"parent budget account not found: {child.parent_account_id}")
+        parent = BudgetState.model_validate(_json(raw_parent))
+        updated, entries = roll_up_child_budget(
+            parent,
+            prior_child,
+            child,
+            idempotency_id=idempotency_id,
+            occurred_at=occurred_at,
+        )
+        await self._apply_parent_rollup(
+            connection,
+            parent,
+            updated,
+            idempotency_id=idempotency_id,
+            occurred_at=occurred_at,
+        )
+        await connection.execute(
+            """
+            UPDATE belllabs_control.budget_accounts
+            SET state = $2::jsonb, updated_at = $3
+            WHERE account_id = $1
+            """,
+            parent.account_id,
+            _dump(updated),
+            occurred_at,
+        )
+        await self._insert_ledger(connection, entries)
+
+    async def _insert_budget(
+        self, connection: asyncpg.Connection, budget: BudgetState, recorded_at: datetime
+    ) -> None:
+        await connection.execute(
+            """
+            INSERT INTO belllabs_control.budget_accounts
+                (account_id, run_id, parent_account_id, state, updated_at)
+            VALUES ($1, $2, $3, $4::jsonb, $5)
+            """,
+            budget.account_id,
+            budget.run_id,
+            budget.parent_account_id,
+            _dump(budget),
+            recorded_at,
+        )
+
+    async def _insert_effects(
+        self,
+        connection: asyncpg.Connection,
+        effects: EffectLedgerState,
+        recorded_at: datetime,
+    ) -> None:
+        await connection.execute(
+            """
+            INSERT INTO belllabs_control.effect_ledgers (run_id, state, updated_at)
+            VALUES ($1, $2::jsonb, $3)
+            """,
+            effects.run_id,
+            _dump(effects),
+            recorded_at,
+        )
+
+    async def _insert_transition(
+        self, connection: asyncpg.Connection, transition: LifecycleTransitionRecord
+    ) -> None:
+        await connection.execute(
+            """
+            INSERT INTO belllabs_control.lifecycle_transitions
+                (transition_id, run_id, command_id, prior_version, resulting_version,
+                 transition, occurred_at)
+            VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
+            """,
+            transition.transition_id,
+            transition.run_id,
+            transition.command_id,
+            transition.prior_version,
+            transition.resulting_version,
+            _dump(transition),
+            transition.occurred_at,
+        )
+
+    async def _insert_ledger(
+        self,
+        connection: asyncpg.Connection,
+        entries: tuple[BudgetLedgerEntry, ...],
+    ) -> None:
+        for entry in entries:
+            await connection.execute(
+                """
+                INSERT INTO belllabs_control.budget_ledger
+                    (entry_id, account_id, run_id, idempotency_id, kind, entry, occurred_at)
+                VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
+                """,
+                entry.entry_id,
+                entry.account_id,
+                entry.run_id,
+                entry.idempotency_id,
+                entry.kind.value,
+                _dump(entry),
+                entry.occurred_at,
+            )
+
+    async def _insert_effect_ledger(
+        self,
+        connection: asyncpg.Connection,
+        entries: tuple[EffectLedgerEntry, ...],
+    ) -> None:
+        for entry in entries:
+            await connection.execute(
+                """
+                INSERT INTO belllabs_control.effect_ledger_entries
+                    (entry_id, run_id, effect_id, kind, idempotency_id, entry, occurred_at)
+                VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
+                """,
+                entry.entry_id,
+                entry.run_id,
+                entry.effect_id,
+                entry.kind,
+                entry.idempotency_id,
+                _dump(entry),
+                entry.occurred_at,
+            )
+
+    async def _insert_events(
+        self,
+        connection: asyncpg.Connection,
+        events: tuple[DomainEventEnvelope, ...],
+    ) -> None:
+        if not events:
+            return
+        for event in events:
+            await connection.execute(
+                """
+                INSERT INTO belllabs_control.outbox
+                    (event_id, aggregate_id, aggregate_version, sequence, event_type,
+                     envelope, recorded_at)
+                VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
+                """,
+                event.event_id,
+                event.aggregate_id,
+                event.aggregate_version,
+                event.sequence,
+                event.event_type,
+                _dump(event),
+                event.recorded_at,
+            )
+
+    async def _run_exists(self, request_scope: str, run_id: str) -> bool:
+        async with self._pool.acquire() as connection, connection.transaction():
+            await _set_scope(connection, request_scope)
+            return bool(
+                await connection.fetchval(
+                    "SELECT EXISTS (SELECT 1 FROM belllabs_control.workflow_runs "
+                    "WHERE run_id = $1 AND request_scope = $2)",
+                    run_id,
+                    request_scope,
+                )
+            )
+
+    async def _inject(self, boundary: str) -> None:
+        if self._before_commit is None:
+            return
+        result = self._before_commit(boundary)
+        if inspect.isawaitable(result):
+            await result
+
+
+async def _boundary_command(
+    connection: asyncpg.Connection,
+    request_scope: str,
+    run_id: str,
+    idempotency_issuer: str,
+    command_id: str,
+) -> BoundaryCommandStatus | None:
+    raw = await connection.fetchval(
+        """
+        SELECT command FROM belllabs_control.boundary_commands
+        WHERE request_scope = $1 AND run_id = $2 AND idempotency_issuer = $3
+          AND command_id = $4
+        """,
+        request_scope,
+        run_id,
+        idempotency_issuer,
+        command_id,
+    )
+    if raw is None:
+        return None
+    rows = await connection.fetch(
+        """
+        SELECT receipt FROM belllabs_control.boundary_command_receipts
+        WHERE request_scope = $1 AND run_id = $2 AND idempotency_issuer = $3
+          AND command_id = $4
+        ORDER BY ordinal
+        """,
+        request_scope,
+        run_id,
+        idempotency_issuer,
+        command_id,
+    )
+    return BoundaryCommandStatus(
+        command=BoundaryCommandRecord.model_validate(_json(raw)),
+        receipts=tuple(
+            BoundaryCommandReceipt.model_validate(_json(row["receipt"])) for row in rows
+        ),
+    )
+
+
+async def _insert_receipt(connection: asyncpg.Connection, receipt: BoundaryCommandReceipt) -> None:
+    await connection.execute(
+        """
+        INSERT INTO belllabs_control.boundary_command_receipts
+            (request_scope, run_id, idempotency_issuer, command_id, ordinal, state,
+             rejection_reason, recorded_by, transport_ref, applied_run_version, receipt,
+             recorded_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12)
+        """,
+        receipt.request_scope,
+        receipt.run_id,
+        receipt.idempotency_issuer,
+        receipt.command_id,
+        receipt.ordinal,
+        receipt.state.value,
+        receipt.rejection_reason,
+        receipt.recorded_by,
+        receipt.transport_ref,
+        receipt.applied_run_version,
+        _dump(receipt),
+        receipt.recorded_at,
+    )
+
+
+async def _advisory_lock(connection: asyncpg.Connection, key: str) -> None:
+    await connection.execute(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        key,
+    )
+
+
+async def _set_scope(connection: asyncpg.Connection, request_scope: str) -> None:
+    await connection.execute(
+        "SELECT set_config('belllabs.request_scope', $1, true)",
+        request_scope,
+    )
+
+
+async def _run_exists_on(
+    connection: asyncpg.Connection,
+    request_scope: str,
+    run_id: str,
+) -> bool:
+    return bool(
+        await connection.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM belllabs_control.workflow_runs "
+            "WHERE run_id = $1 AND request_scope = $2)",
+            run_id,
+            request_scope,
+        )
+    )
+
+
+def _dump(model: object) -> str:
+    if not hasattr(model, "model_dump_json"):
+        raise TypeError("PostgreSQL documents must be Pydantic contracts")
+    return model.model_dump_json()
+
+
+def _json(value: Any) -> object:
+    return json.loads(value) if isinstance(value, str) else value
+
+
+def _outbox_record(row: asyncpg.Record) -> OutboxRecord:
+    envelope = DomainEventEnvelope.model_validate(_json(row["envelope"]))
+    return OutboxRecord(
+        envelope=envelope,
+        cursor=OutboxCursor(
+            position=row["position"],
+            recorded_at=envelope.recorded_at,
+            aggregate_id=envelope.aggregate_id,
+            aggregate_version=envelope.aggregate_version,
+            sequence=envelope.sequence,
+        ),
+        delivery_attempts=row["delivery_attempts"],
+        delivered_at=row["delivered_at"],
+    )

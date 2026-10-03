@@ -14,16 +14,21 @@ from __future__ import annotations
 import asyncpg
 import pytest
 
-from app.application.operations.journaled_operation_execution import (
-    _claim_authority_command_id,
-)
-from app.application.operations.operation_journal import OperationJournalMutation
-from app.application.operations.postgres_operation_journal import (
+from mission_control.adapters.postgres.connections import MIGRATIONS_ROOT
+from mission_control.adapters.postgres.operations.operation_journal import (
     PostgresAtomicOperationJournalRepository,
 )
-from app.application.run_control.postgres_run_control_repository import PostgresRunControlRepository
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.run_control.contracts import (
+from mission_control.adapters.postgres.run_control.run_control_repository import (
+    PostgresRunControlRepository,
+)
+from mission_control.application.execution.operations.journaled_operation_execution import (
+    _claim_authority_command_id,
+)
+from mission_control.application.execution.operations.operation_journal import (
+    OperationJournalMutation,
+)
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.policies.contracts import (
     CANCEL_SEQUENCE_SPACE,
     CancelAction,
     ClaimEffectAction,
@@ -31,7 +36,6 @@ from app.domain.run_control.contracts import (
     RunPhase,
     StartAction,
 )
-from app.integrations.postgres import MIGRATIONS_ROOT
 from tests.integration.postgres.test_checkpoint_lineage_postgres import (
     require_disposable_postgres,
     reset_application_schema,

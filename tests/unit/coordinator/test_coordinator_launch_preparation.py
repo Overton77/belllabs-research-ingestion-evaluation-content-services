@@ -4,22 +4,29 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
+from biotech_mission_adapters.domain.schema_grounding.definitions import (
+    register_schema_grounding_extensions,
+    schema_grounding_definitions,
+)
 
-from app.application.control_plane.control_plane_repository import InMemoryDefinitionRepository
-from app.application.control_plane.service import ControlPlaneService
-from app.application.coordinator.coordinator_composition import CoordinatorLaunchProductionInputs
-from app.application.coordinator.coordinator_launch import (
+from mission_control.adapters.storage.control_plane_payloads import InMemoryPayloadStore
+from mission_control.application.authoring.control_plane_repository import (
+    InMemoryDefinitionRepository,
+)
+from mission_control.application.authoring.service import ControlPlaneService
+from mission_control.application.coordinator.coordinator_launch import (
     CoordinatorLaunchPreparationService,
     CoordinatorWorkflowLaunchService,
     InMemoryLaunchTicketRepository,
     RuntimePlanPreparation,
 )
-from app.application.coordinator.coordinator_results import (
+from mission_control.application.coordinator.coordinator_results import (
     CoordinatorResultService,
     InMemoryWorkflowResultRepository,
 )
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.contracts import (
+from mission_control.bootstrap.coordinator_composition import CoordinatorLaunchProductionInputs
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.authoring.contracts import (
     CompilationContext,
     CompileInvocation,
     DefinitionKind,
@@ -32,8 +39,8 @@ from app.domain.control_plane.contracts import (
     StageGraphBlueprint,
     WorkflowImplementationBindingDefinition,
 )
-from app.domain.control_plane.extensions import ExtensionRegistry
-from app.domain.coordinator.launch import (
+from mission_control.domain.authoring.extensions import ExtensionRegistry
+from mission_control.domain.coordinator.launch import (
     AdmissionPreviewDecision,
     BlueprintFamily,
     LaunchRequestContext,
@@ -45,21 +52,14 @@ from app.domain.coordinator.launch import (
     WorkflowLaunchProposal,
     WorkflowResultRecord,
 )
-from app.domain.graph_runtime.definitions import (
+from mission_control.domain.graph_runtime.definitions import (
     ContentAddressedRef,
     GraphAssemblySpecV2,
     RunPlanV3,
     RuntimeDefinitionKind,
     UnavailableStageSurface,
 )
-from app.domain.orchestration.bindings import (
-    GoalOperationHandlerBinding,
-    RunSemanticInputBinding,
-    SemanticHandlerBinding,
-    SemanticInputPayload,
-    StageHandlerBinding,
-)
-from app.domain.run_control.contracts import (
+from mission_control.domain.policies.contracts import (
     ActorContext,
     BudgetApplicability,
     BudgetDimensionLimit,
@@ -67,11 +67,13 @@ from app.domain.run_control.contracts import (
     RunOutcome,
     RunPhase,
 )
-from app.domain.schema_grounding.definitions import (
-    register_schema_grounding_extensions,
-    schema_grounding_definitions,
+from mission_control.domain.programs.bindings import (
+    GoalOperationHandlerBinding,
+    RunSemanticInputBinding,
+    SemanticHandlerBinding,
+    SemanticInputPayload,
+    StageHandlerBinding,
 )
-from app.integrations.control_plane_payloads import InMemoryPayloadStore
 
 NOW = datetime(2026, 7, 25, 16, 0, tzinfo=UTC)
 POLICY = sha256_digest("policy-v1")
@@ -134,9 +136,7 @@ class FixtureSemanticBindingProvider:
         if ticket.blueprint_family == BlueprintFamily.STAGE_GRAPH:
             return RunSemanticInputBinding.create(
                 **values,
-                stage_handlers=(
-                    StageHandlerBinding(stage_id="fixture", handler=handler),
-                ),
+                stage_handlers=(StageHandlerBinding(stage_id="fixture", handler=handler),),
             )
         return RunSemanticInputBinding.create(
             **values,
@@ -196,9 +196,7 @@ async def launch_fixture(
     else:
         workflow = published["supporting-graph-reconciliation"]
         blueprint = published["supporting-graph-reconciliation-goal-directed-v1"]
-        control = published[
-            "supporting-graph-reconciliation-goal-directed-control-v1"
-        ]
+        control = published["supporting-graph-reconciliation-goal-directed-control-v1"]
         runtime = published["supporting-graph-reconciliation-runtime-v1"]
         workspace = published["supporting-graph-reconciliation-workspace-v1"]
         evaluation = published["supporting-graph-reconciliation-evaluation-v1"]
@@ -360,13 +358,8 @@ async def test_stagegraph_rejects_initial_goal_and_public_ticket_redacts_private
         public.effective_configuration_digest
     )
     assert private.semantic_binding_plan is not None
-    assert private.semantic_binding_plan.plan_digest == (
-        public.semantic_binding_plan_digest
-    )
-    assert (
-        PreparedLaunchTicket.model_validate(private.model_dump(mode="json"))
-        == private
-    )
+    assert private.semantic_binding_plan.plan_digest == (public.semantic_binding_plan_digest)
+    assert PreparedLaunchTicket.model_validate(private.model_dump(mode="json")) == private
 
 
 @pytest.mark.asyncio

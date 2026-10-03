@@ -1,0 +1,17 @@
+{
+  "from": "src/mission_control/qualification",
+  "to": "experiments",
+  "changed": [
+    "tests\\experiments\\test_dynamic_research_swarm.py",
+    "tests\\experiments\\test_langgraph_temporal_stagegraph.py",
+    "tests\\unit\\control_plane\\test_digest_set_order_guard.py",
+    "experiments\\dynamic_research_swarm\\config.py",
+    "experiments\\dynamic_research_swarm\\graph.py",
+    "experiments\\dynamic_research_swarm\\inspect_run.py",
+    "experiments\\dynamic_research_swarm\\repository.py",
+    "experiments\\dynamic_research_swarm\\run_experiment.py",
+    "experiments\\dynamic_research_swarm\\temporal_activities.py",
+    "experiments\\dynamic_research_swarm\\temporal_workflows.py",
+    "experiments\\dynamic_research_swarm\\wake_dispatcher.py"
+  ]
+}

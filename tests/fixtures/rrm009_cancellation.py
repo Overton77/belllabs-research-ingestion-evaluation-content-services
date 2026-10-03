@@ -2,7 +2,7 @@
 
 Reusable drills over `open_production_stack` (the deployment's API, its workers built by
 `ProductionWorkerActivityCompositionFactory`, a persistent `start_local` namespace, the
-disposable PostgreSQL and MongoDB). A StageGraph run is admitted and launched through the
+disposable PostgreSQL). A StageGraph run is admitted and launched through the
 facade; its `draft` unit's Deep Agent is held at a chosen point; the cancel enters through
 `POST /run-control/v1/runs/{run_id}/commands`, is journaled first, delivered root-first in
 the `cancel` space, reaches the running Activity through its heartbeat and is reconciled by
@@ -15,8 +15,9 @@ Windows:
 * `completion_wait`: an async child is running and the parent's cognition has finished; the
   operation boundary is waiting for the child (`AsyncChildCompletion`).
 
-The async windows need the RRM-009 Agent Server (signed scope claims) and a live opt-in; the
-child model is real. RRM-010's combined smoke reuses `run_cancellation_drill`.
+The async windows need a real Agent Server with signed scope claims. Historical RRM-009
+uses an opt-in provider model; Mission Control also qualifies the same protocol with a
+distinct deterministic hosted model. RRM-010 reuses `run_cancellation_drill`.
 """
 
 from __future__ import annotations
@@ -39,25 +40,37 @@ from langgraph_sdk import get_client
 from langgraph_sdk.errors import NotFoundError
 from temporalio.api.enums.v1 import EventType
 
-from app.agent_server.async_subagents.auth import mint_scope_claim
-from app.agent_server.async_subagents.bindings import technical_child_definition
-from app.api.control_plane import get_control_plane_principal
-from app.application.async_subagents.mongo_async_subagent_repository import (
-    MongoAsyncSubagentDetailRepository,
+from mission_control.adapters.agent_server.async_subagents.auth import mint_scope_claim
+from mission_control.adapters.agent_server.async_subagents.bindings import (
+    technical_child_definition,
 )
-from app.application.async_subagents.parent_effects import (
+from mission_control.adapters.deep_agents.async_subagents import (
+    PROVIDER_USAGE_STATE_KEY,
+    REQUEST_SCOPE_HEADER,
+    SPAWN_KEY_METADATA,
+    attribute_usage,
+)
+from mission_control.adapters.postgres.async_subagents.async_subagent_detail_repository import (
+    PostgresAsyncSubagentDetailRepository,
+)
+from mission_control.adapters.postgres.async_subagents.async_subagents import (
+    PostgresAsyncSubagentAuthority,
+)
+from mission_control.adapters.postgres.orchestration.stagegraph_repository import (
+    PostgresStageGraphOperationTemplateRepository,
+)
+from mission_control.adapters.temporal.deployment_composition import DeploymentCapabilityComponents
+from mission_control.adapters.temporal.worker import create_production_workers
+from mission_control.application.subordinates.parent_effects import (
     async_child_effect_id,
     async_child_usage_id,
 )
-from app.application.async_subagents.postgres_async_subagents import PostgresAsyncSubagentAuthority
-from app.application.orchestration.mongo_stagegraph_repository import (
-    MongoStageGraphOperationTemplateRepository,
-)
-from app.domain.control_plane.contracts import SecretRef
-from app.domain.operation_execution.async_subagent_reconciliation import (
+from mission_control.bootstrap.technical_api import api
+from mission_control.domain.authoring.contracts import SecretRef
+from mission_control.domain.execution.async_subagent_reconciliation import (
     ASYNC_CHILD_RECONCILE_PERMISSION,
 )
-from app.domain.operation_execution.contracts import (
+from mission_control.domain.execution.contracts import (
     AsyncSubagentContract,
     AsyncSubagentDependencyClass,
     AsyncSubagentLifecycle,
@@ -65,16 +78,8 @@ from app.domain.operation_execution.contracts import (
     DeepAgentExecutionBinding,
     OperationExecutionRequest,
 )
-from app.domain.run_control.contracts import ActorContext, CancelAction
-from app.integrations.agents.deep_agents.async_subagents import (
-    PROVIDER_USAGE_STATE_KEY,
-    REQUEST_SCOPE_HEADER,
-    SPAWN_KEY_METADATA,
-    attribute_usage,
-)
-from app.server import api
-from app.temporal.deployment_composition import DeploymentCapabilityComponents
-from app.temporal.worker import create_production_workers
+from mission_control.domain.policies.contracts import ActorContext, CancelAction
+from mission_control.interfaces.http.control_plane import get_control_plane_principal
 from tests.fixtures.rrm009_production_harness import (
     PRINCIPAL,
     ProductionStack,
@@ -479,7 +484,7 @@ async def launch_stagegraph(
         ]
     if async_children:
         templates = {key: _with_token(value) for key, value in templates.items()}
-    await MongoStageGraphOperationTemplateRepository().persist_templates(
+    await PostgresStageGraphOperationTemplateRepository(stack.worker_pool).persist_templates(
         request_scope=SCOPE,
         semantic_input_binding_ref=binding_ref,
         templates=templates,
@@ -675,7 +680,7 @@ async def run_cancellation_drill(
     await _wait_for(stack, run_id, delivered, 60)
     if async_children:
         assert child_id is not None and provider_run_id is not None
-        details = MongoAsyncSubagentDetailRepository()
+        details = PostgresAsyncSubagentDetailRepository(stack.worker_pool)
 
         async def child_settled_by_the_parent() -> bool:
             link = await details.get_link(SCOPE, child_id)

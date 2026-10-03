@@ -15,22 +15,22 @@ from typing import Any
 
 import pytest
 
-from app.application.operations.operation_execution import (
+from mission_control.application.artifacts.artifact_promotion import ArtifactPayloadAddress
+from mission_control.application.execution.operations.operation_execution import (
     ForkMaterializationPending,
     OperationExecutionInProgress,
 )
-from app.application.runtime.run_forks import (
+from mission_control.application.recovery.run_forks import (
     ForkOfRun,
     ForkPatchPolicyRegistry,
     ForkReuseResolver,
     InMemoryForkMaterializationStore,
     reuse_compatibility_digest,
 )
-from app.application.workspaces.artifact_promotion import ArtifactPayloadAddress
-from app.domain.operation_execution.checkpoint_lineage import cognitive_session_namespace
-from app.domain.operation_execution.contracts import OperationSettlement
-from app.domain.run_control.contracts import CommandStatus, StartAction
-from app.domain.run_control.forks import ForkRejected, derived_unit_identity
+from mission_control.domain.execution.checkpoint_lineage import cognitive_session_namespace
+from mission_control.domain.execution.contracts import OperationSettlement
+from mission_control.domain.policies.contracts import CommandStatus, StartAction
+from mission_control.domain.policies.forks import ForkRejected, derived_unit_identity
 from tests.fixtures.checkpoint_recovery import recovery_harness, stage_recovery_unit
 from tests.fixtures.run_forks import (
     FakeForkSourceReader,
@@ -216,7 +216,9 @@ async def test_reuse_resolver_fails_closed_on_every_inconsistency() -> None:
     )
     harness.run_id = receipt.target_run_id
     request = await harness.request(derived_unit_identity(source_draft, receipt.target_run_id))
-    from app.application.operations.operation_execution import bind_operation_execution_request
+    from mission_control.application.execution.operations.operation_execution import (
+        bind_operation_execution_request,
+    )
 
     binding = bind_operation_execution_request(request)
     source_binding = await harness.bindings.get_binding_by_id(

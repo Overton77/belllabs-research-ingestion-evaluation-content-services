@@ -1,3 +1,8 @@
+> **Historical reference.** This document describes the earlier BellLabs architecture.
+> Current Mission Control authority and navigation are in the repository root
+> `AGENTS.md`, `docs/knowledge/index.md`, and the sibling general specification.
+> Old package paths, Mongo assignments and work-package gates are not current instructions.
+
 # Current codebase and domain-workflow guide
 
 > **Status — current/as-built reference.** This guide preserves a description of the executable

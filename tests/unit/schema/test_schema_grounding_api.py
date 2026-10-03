@@ -2,21 +2,41 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
-from app.api.control_plane import ControlPlanePrincipal, get_control_plane_principal
-from app.api.schema_grounding import (
+from biotech_mission_adapters.application.schema.schema_grounding_repository import (
+    InMemorySchemaGroundingRecordRepository,
+    schema_grounding_record,
+)
+from biotech_mission_adapters.interfaces.http.schema_grounding import (
     get_schema_grounding_repository,
     router,
 )
-from app.application.schema.schema_grounding_repository import (
-    InMemorySchemaGroundingRecordRepository,
-    schema_grounding_record,
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from mission_control.interfaces.http.control_plane import (
+    ControlPlanePrincipal,
+    get_control_plane_principal,
 )
 from tests.schema_context_helpers import accepted, catalog
 
 NOW = datetime(2026, 7, 24, 16, 0, tzinfo=UTC)
+
+
+def test_unmounted_domain_repository_reports_unavailable_without_implicit_database() -> None:
+    application = FastAPI()
+    application.include_router(router)
+    application.dependency_overrides[get_control_plane_principal] = lambda: ControlPlanePrincipal(
+        actor_id="auditor-1",
+        roles=frozenset({"auditor"}),
+        tenant_scopes=frozenset({"tenant-1"}),
+    )
+    with TestClient(application) as client:
+        response = client.get(
+            "/schema-grounding/v1/catalog-builds/unknown",
+            params={"request_scope": "tenant-1"},
+        )
+    assert response.status_code == 503
+    assert "not mounted" in response.json()["detail"]
 
 
 def test_schema_grounding_query_surface_is_typed_authenticated_and_tenant_scoped() -> None:
@@ -25,12 +45,10 @@ def test_schema_grounding_query_surface_is_typed_authenticated_and_tenant_scoped
     records = InMemorySchemaGroundingRecordRepository()
     value = accepted(catalog())
     application.dependency_overrides[get_schema_grounding_repository] = lambda: records
-    application.dependency_overrides[get_control_plane_principal] = lambda: (
-        ControlPlanePrincipal(
-            actor_id="auditor-1",
-            roles=frozenset({"auditor"}),
-            tenant_scopes=frozenset({"tenant-1"}),
-        )
+    application.dependency_overrides[get_control_plane_principal] = lambda: ControlPlanePrincipal(
+        actor_id="auditor-1",
+        roles=frozenset({"auditor"}),
+        tenant_scopes=frozenset({"tenant-1"}),
     )
 
     async def seed() -> None:

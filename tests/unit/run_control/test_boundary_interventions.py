@@ -13,14 +13,17 @@ from typing import Any
 
 import pytest
 
-from app.application.run_control.boundary_interventions import (
+from mission_control.adapters.temporal.boundary_commands import (
+    BoundaryDeliveryGap,
+    TemporalBoundaryCommandTransport,
+)
+from mission_control.application.execution.boundary_interventions import (
     BoundaryCommandApplicationService,
     BoundaryCommandDeliveryService,
     BoundaryDeliveryResult,
     BoundaryInterventionService,
 )
-from app.domain.orchestration.contracts import BoundaryCommandAck, WorkflowMessageReceipt
-from app.domain.run_control.contracts import (
+from mission_control.domain.policies.contracts import (
     ActorContext,
     BoundaryCommandStatus,
     CancelAction,
@@ -33,10 +36,7 @@ from app.domain.run_control.contracts import (
     TerminalizationProposal,
     TerminalizeAction,
 )
-from app.integrations.temporal_boundary_commands import (
-    BoundaryDeliveryGap,
-    TemporalBoundaryCommandTransport,
-)
+from mission_control.domain.programs.contracts import BoundaryCommandAck, WorkflowMessageReceipt
 from tests.unit.run_control.test_boundary_commands import (
     BOUNDARY_PERMISSIONS,
     FAMILY_WORKFLOW_ID,
@@ -225,9 +225,10 @@ async def test_application_service_binds_the_current_version_and_replays_idempot
     )
     assert replayed == applied
     assert (await run_service.get_run("tenant-1", run_id)).version == 4
-    assert await application.boundary_receipt_state(
-        "tenant-1", run_id, "operator", "pause"
-    ) == ("applied", 1)
+    assert await application.boundary_receipt_state("tenant-1", run_id, "operator", "pause") == (
+        "applied",
+        1,
+    )
 
 
 async def _status(run_service, run_id: str, command_id: str) -> BoundaryCommandStatus:  # type: ignore[no-untyped-def]
@@ -446,8 +447,8 @@ def test_root_receipt_cache_keeps_the_status_and_never_caches_a_gap() -> None:
     """F7 at the root: a gap is decided again once the missing message arrives; a duplicate
     of a stale message reports the cached stale status."""
 
-    from app.domain.orchestration.contracts import WorkflowMessage
-    from app.temporal.workflows.belllabs_run import BellLabsRunWorkflow
+    from mission_control.adapters.temporal.workflows.belllabs_run import BellLabsRunWorkflow
+    from mission_control.domain.programs.contracts import WorkflowMessage
 
     root = BellLabsRunWorkflow()
     gap = root._accept_message(WorkflowMessage("m2", 2, "control", "ref:2"))  # noqa: SLF001

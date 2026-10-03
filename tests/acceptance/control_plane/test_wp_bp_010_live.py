@@ -16,44 +16,55 @@ from temporalio.api.enums.v1 import EventType
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
-from app.api.control_plane import ControlPlanePrincipal, get_control_plane_principal
-from app.api.run_control import get_run_control_service, router
-from app.application.operations.checkpoint_lineage import (
+from mission_control.adapters.deep_agents import (
+    DeepAgentRuntimeAdapter,
+    ExactComponentRegistry,
+    ExactDeepAgentMaterializer,
+    OpenAIExactModelFactory,
+    StateSandboxFactory,
+)
+from mission_control.adapters.temporal.orchestration_activities import StageGraphActivities
+from mission_control.adapters.temporal.workflow_sandbox import coordinator_workflow_runner
+from mission_control.adapters.temporal.workflows.belllabs_run import BellLabsRunWorkflow
+from mission_control.adapters.temporal.workflows.operation import OperationWorkflow
+from mission_control.adapters.temporal.workflows.stagegraph import StageGraphWorkflow
+from mission_control.application.execution.operations.checkpoint_lineage import (
     CheckpointLineageService,
     InMemoryCheckpointLineageRepository,
 )
-from app.application.operations.operation_execution import (
+from mission_control.application.execution.operations.operation_execution import (
     InMemoryOperationBindingRepository,
     RunControlOperationBudgetAuthority,
     bind_operation_execution_request,
 )
-from app.application.orchestration.service import (
+from mission_control.application.execution.run_control_repository import (
+    InMemoryRunControlRepository,
+)
+from mission_control.application.execution.service import (
+    AdmissionPolicyRegistry,
+    FamilyAdmissionRegistry,
+    RunControlService,
+)
+from mission_control.application.programs.service import (
     StageGraphDecisionService,
     StageGraphOperationPreparationService,
     StaticStageGraphOperationTemplateProvider,
     orchestration_lifecycle_actor,
     register_stagegraph_family_mutations,
 )
-from app.application.run_control.run_control_repository import InMemoryRunControlRepository
-from app.application.run_control.service import (
-    AdmissionPolicyRegistry,
-    FamilyAdmissionRegistry,
-    RunControlService,
-)
-from app.config import Settings
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.contracts import (
+from mission_control.bootstrap.settings import Settings
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.authoring.contracts import (
     CompletionObligationRef,
     ObligationMatrixRow,
     StageGraphBlueprint,
     WorkflowObligationSlot,
 )
-from app.domain.operation_execution.checkpoint_lineage import OperationActivityAttempt
-from app.domain.operation_execution.contracts import (
+from mission_control.domain.execution.checkpoint_lineage import OperationActivityAttempt
+from mission_control.domain.execution.contracts import (
     OperationExecutionRequest,
 )
-from app.domain.orchestration.contracts import BellLabsRunInput, StageGraphRunInput
-from app.domain.run_control.contracts import (
+from mission_control.domain.policies.contracts import (
     BudgetApplicability,
     BudgetDimensionLimit,
     BudgetEnvelope,
@@ -61,18 +72,12 @@ from app.domain.run_control.contracts import (
     RunPhase,
     VerifiedRunConfiguration,
 )
-from app.integrations.agents.deep_agents import (
-    DeepAgentRuntimeAdapter,
-    ExactComponentRegistry,
-    ExactDeepAgentMaterializer,
-    OpenAIExactModelFactory,
-    StateSandboxFactory,
+from mission_control.domain.programs.contracts import BellLabsRunInput, StageGraphRunInput
+from mission_control.interfaces.http.control_plane import (
+    ControlPlanePrincipal,
+    get_control_plane_principal,
 )
-from app.temporal.orchestration_activities import StageGraphActivities
-from app.temporal.workflow_sandbox import coordinator_workflow_runner
-from app.temporal.workflows.belllabs_run import BellLabsRunWorkflow
-from app.temporal.workflows.operation import OperationWorkflow
-from app.temporal.workflows.stagegraph import StageGraphWorkflow
+from mission_control.interfaces.http.run_control import get_run_control_service, router
 from tests.acceptance.control_plane.test_wp_cp_040 import exact_fixture
 from tests.fixtures.checkpoint_lineage import (
     execute_with_checkpoint_lineage,
@@ -129,9 +134,7 @@ class LiveDeepAgentActivity:
         request = OperationExecutionRequest.model_validate(payload)
         operation_id = request.identity.operation_id
         stage_id = next(
-            stage
-            for stage in ("fast", "slow", "downstream")
-            if f":stage:{stage}:" in operation_id
+            stage for stage in ("fast", "slow", "downstream") if f":stage:{stage}:" in operation_id
         )
         if stage_id == "downstream":
             self.downstream_started.set()
@@ -262,9 +265,8 @@ def _child_history_order(history: Any) -> tuple[int, int]:
             if ":stage:downstream:" in workflow_id:
                 downstream_started = index
         if event.event_type == EventType.EVENT_TYPE_CHILD_WORKFLOW_EXECUTION_COMPLETED:
-            workflow_id = (
-                event.child_workflow_execution_completed_event_attributes.workflow_execution.workflow_id
-            )
+            attrs = event.child_workflow_execution_completed_event_attributes
+            workflow_id = attrs.workflow_execution.workflow_id
             if ":stage:slow:" in workflow_id:
                 slow_completed = index
     return downstream_started, slow_completed
@@ -326,7 +328,7 @@ async def test_live_api_root_stagegraph_incremental_deep_agents_vertical() -> No
         },
         sandbox_backend="state",
     )
-    from app.domain.control_plane.contracts import SecretRef as BoundSecretRef
+    from mission_control.domain.authoring.contracts import SecretRef as BoundSecretRef
 
     templates: dict[str, OperationExecutionRequest] = {}
     for stage_id in ("fast", "slow", "downstream"):
@@ -342,9 +344,7 @@ async def test_live_api_root_stagegraph_incremental_deep_agents_vertical() -> No
                 "execution_runtime": "deep_agent",
                 "native_placement": None,
                 "deep_agent_binding": deep_binding,
-                "secret_refs": (
-                    BoundSecretRef(provider="environment", key="OPENAI_API_KEY"),
-                ),
+                "secret_refs": (BoundSecretRef(provider="environment", key="OPENAI_API_KEY"),),
             }
         )
     bindings = InMemoryOperationBindingRepository()
@@ -429,9 +429,7 @@ async def test_live_api_root_stagegraph_incremental_deep_agents_vertical() -> No
             assert not cognitive.slow_returned.is_set()
             cognitive.slow_release.set()
             result = await root_handle.result()
-            family_handle = environment.client.get_workflow_handle(
-                root_input.family_workflow_id
-            )
+            family_handle = environment.client.get_workflow_handle(root_input.family_workflow_id)
             history = await family_handle.fetch_history()
 
     downstream_started, slow_completed = _child_history_order(history)
@@ -439,9 +437,7 @@ async def test_live_api_root_stagegraph_incremental_deep_agents_vertical() -> No
     assert set(cognitive.real_model_stages) == {"fast", "slow", "downstream"}
     run = await run_control.get_run("tenant-1", run_id)
     assert run.phase == RunPhase.TERMINAL
-    assert OBLIGATION_REF in {
-        item.obligation_ref for item in run.accepted_obligation_evidence
-    }
+    assert OBLIGATION_REF in {item.obligation_ref for item in run.accepted_obligation_evidence}
     assert {
         "artifact:wp-bp-010-live:fast",
         "artifact:wp-bp-010-live:downstream",

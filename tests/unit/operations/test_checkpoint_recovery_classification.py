@@ -18,14 +18,18 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import CheckpointTuple
 from langgraph.checkpoint.base.id import uuid6
 
-from app.application.operations.journaled_operation_execution import _effect_claim_id
-from app.application.operations.operation_execution import (
+from mission_control.application.execution.operations.journaled_operation_execution import (
+    _effect_claim_id,
+)
+from mission_control.application.execution.operations.operation_execution import (
     OperationExecutionInProgress,
     OperationLeaseExpired,
     bind_operation_execution_request,
 )
-from app.application.operations.unit_reconciliation import UnitReconciliationRejected
-from app.domain.operation_execution.checkpoint_lineage import (
+from mission_control.application.execution.operations.unit_reconciliation import (
+    UnitReconciliationRejected,
+)
+from mission_control.domain.execution.checkpoint_lineage import (
     STAMP_INVOCATION_ID,
     CheckpointClassification,
     CheckpointLineageConflict,
@@ -34,8 +38,8 @@ from app.domain.operation_execution.checkpoint_lineage import (
     submission_invocation_id,
     unit_result_observation_id,
 )
-from app.domain.operation_execution.contracts import OperationExecutionRequest
-from app.domain.run_control.contracts import (
+from mission_control.domain.execution.contracts import OperationExecutionRequest
+from mission_control.domain.policies.contracts import (
     ClaimEffectAction,
     CommandStatus,
     EffectDisposition,
@@ -262,9 +266,7 @@ async def _fork_stamped_sibling(harness: RecoveryHarness, namespace: str, leaf_i
     leaf = await harness.saver.aget_tuple(_root(namespace, leaf_id))
     assert leaf is not None and leaf.parent_config is not None
     sibling = {**leaf.checkpoint, "id": str(uuid6())}
-    written = await harness.saver.aput(
-        leaf.parent_config, sibling, leaf.metadata, {}
-    )
+    written = await harness.saver.aput(leaf.parent_config, sibling, leaf.metadata, {})
     return str(written["configurable"]["checkpoint_id"])
 
 
@@ -546,9 +548,12 @@ async def test_provider_failure_without_terminal_result_or_open_effects_settles_
     assert result.status == "failed"
     assert result.failure_code == "runtime_failed"
     assert result.failure_message == "ValueError at governed operation boundary"
-    assert await harness.lineage.get_incident("tenant-1", stage_recovery_unit(
-        harness.run_id
-    ).unit_key, 1) is None
+    assert (
+        await harness.lineage.get_incident(
+            "tenant-1", stage_recovery_unit(harness.run_id).unit_key, 1
+        )
+        is None
+    )
 
 
 @pytest.mark.asyncio
@@ -595,7 +600,7 @@ async def test_failure_after_a_terminal_checkpoint_is_in_doubt_then_reconstructe
     """A failure after the terminal checkpoint must not settle `failed` (a terminal result
     exists): it is `in_doubt`; accepting the terminal leaf reconstructs without a model call."""
 
-    import app.integrations.agents.deep_agents.adapter as adapter_module
+    import mission_control.adapters.deep_agents.adapter as adapter_module
 
     baseline = await _baseline_digest()
     harness = await recovery_harness()
@@ -642,7 +647,7 @@ async def test_failure_after_a_terminal_checkpoint_is_in_doubt_then_reconstructe
 
 
 def _key(harness: RecoveryHarness, request: OperationExecutionRequest, item: CheckpointTuple):  # type: ignore[no-untyped-def]
-    from app.domain.graph_runtime.identities import QualifiedCheckpointKey
+    from mission_control.domain.graph_runtime.identities import QualifiedCheckpointKey
 
     assert request.deep_agent_binding is not None
     assert item.parent_config is not None
@@ -668,9 +673,9 @@ async def test_lost_worker_lease_is_honored_until_it_expires() -> None:
     with pytest.raises(OperationExecutionInProgress):
         await harness.run(request)
     assert len(harness.model.calls) == 1
-    attempts = await harness.lineage.list_attempts("tenant-1", stage_recovery_unit(
-        harness.run_id
-    ).unit_key)
+    attempts = await harness.lineage.list_attempts(
+        "tenant-1", stage_recovery_unit(harness.run_id).unit_key
+    )
     assert [(item.attempt.attempt, item.dispatching) for item in attempts] == [
         (1, True),
         (2, False),
@@ -998,12 +1003,12 @@ async def test_an_attempt_captures_only_its_own_tip_descending_from_its_pin() ->
     from langgraph.checkpoint.base import empty_checkpoint
     from langgraph.checkpoint.memory import InMemorySaver
 
-    from app.domain.operation_execution.checkpoint_lineage import (
+    from mission_control.adapters.deep_agents.adapter import _Classified, _own_result_config
+    from mission_control.domain.execution.checkpoint_lineage import (
         STAMP_ATTEMPT_REF,
         CheckpointInvocationPlan,
         CheckpointLineageInDoubt,
     )
-    from app.integrations.agents.deep_agents.adapter import _Classified, _own_result_config
 
     saver = InMemorySaver()
     namespace = "belllabs/stage/fixture/gen/1"
@@ -1060,15 +1065,19 @@ async def test_lost_wake_up_hint_is_recovered_by_resending_the_same_decision() -
     from temporalio.testing import WorkflowEnvironment
     from temporalio.worker import Worker
 
-    from app.application.operations.unit_reconciliation import UnitReconciliationService
-    from app.domain.operation_execution.contracts import OperationWorkflowRequest
-    from app.integrations.temporal_unit_reconciliation import TemporalUnitReconciliationNudge
-    from app.temporal.operation_activities import (
+    from mission_control.adapters.temporal.operation_activities import (
         OperationExecutionActivities,
         parse_operation_result,
     )
-    from app.temporal.workflow_sandbox import coordinator_workflow_runner
-    from app.temporal.workflows.operation import OperationWorkflow
+    from mission_control.adapters.temporal.unit_reconciliation import (
+        TemporalUnitReconciliationNudge,
+    )
+    from mission_control.adapters.temporal.workflow_sandbox import coordinator_workflow_runner
+    from mission_control.adapters.temporal.workflows.operation import OperationWorkflow
+    from mission_control.application.execution.operations.unit_reconciliation import (
+        UnitReconciliationService,
+    )
+    from mission_control.domain.execution.contracts import OperationWorkflowRequest
 
     harness = await recovery_harness()
     unit = stage_recovery_unit(harness.run_id)
@@ -1175,9 +1184,7 @@ async def test_lost_wake_up_hint_is_recovered_by_resending_the_same_decision() -
     assert nudge.calls == 2
     assert len(harness.model.calls) == 1, "abandon never invokes the model"
     run = await harness.run_control.get_run("tenant-1", harness.run_id)
-    assert [item.decision_id for item in run.unit_reconciliations] == [
-        "reconcile-abandon-resend"
-    ]
+    assert [item.decision_id for item in run.unit_reconciliations] == ["reconcile-abandon-resend"]
     # RRM-007: the governed `reconcile_unit` receipts. Acceptance by run control, delivery
     # once the hint reached the parked operation (the resend), application when the
     # operation boundary acted on the decision; the lost first hint left no receipt.

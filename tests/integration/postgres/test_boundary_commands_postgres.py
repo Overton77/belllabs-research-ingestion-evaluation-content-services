@@ -16,16 +16,18 @@ import asyncio
 import asyncpg
 import pytest
 
-from app.application.run_control.postgres_run_control_repository import PostgresRunControlRepository
-from app.domain.run_control.contracts import (
+from mission_control.adapters.postgres.connections import apply_application_migrations
+from mission_control.adapters.postgres.run_control.run_control_repository import (
+    PostgresRunControlRepository,
+)
+from mission_control.domain.policies.contracts import (
     CommandStatus,
     ReceiptState,
     RunPhase,
     SatisfyWaitAction,
     SetWaitAction,
 )
-from app.domain.run_control.errors import ReceiptTransitionRejected
-from app.integrations.postgres import apply_application_migrations
+from mission_control.domain.policies.errors import ReceiptTransitionRejected
 from tests.unit.run_control.test_boundary_commands import (
     TARGET,
     apply,
@@ -107,9 +109,10 @@ async def test_receipts_are_durable_scoped_and_role_bounded(
             "tenant-1", delivered(pause_status)
         )
         assert states(delivered_status) == ["accepted", "delivered"]
-        assert await run_service.record_boundary_receipt(
-            "tenant-1", delivered(pause_status)
-        ) == delivered_status
+        assert (
+            await run_service.record_boundary_receipt("tenant-1", delivered(pause_status))
+            == delivered_status
+        )
         applied = await run_service.execute(
             boundary_command(run_id, 3, "apply:pause", apply("pause", pause()))
         )
@@ -195,9 +198,7 @@ async def test_receipts_are_durable_scoped_and_role_bounded(
                 "SELECT set_config('belllabs.request_scope', 'tenant-1', true)"
             )
             assert (
-                await connection.fetchval(
-                    "SELECT count(*) FROM belllabs_control.boundary_commands"
-                )
+                await connection.fetchval("SELECT count(*) FROM belllabs_control.boundary_commands")
                 == 5
             )
             assert (
@@ -210,9 +211,7 @@ async def test_receipts_are_durable_scoped_and_role_bounded(
                 "SELECT set_config('belllabs.request_scope', 'tenant-2', true)"
             )
             assert (
-                await connection.fetchval(
-                    "SELECT count(*) FROM belllabs_control.boundary_commands"
-                )
+                await connection.fetchval("SELECT count(*) FROM belllabs_control.boundary_commands")
                 == 0
             )
             privileges = {

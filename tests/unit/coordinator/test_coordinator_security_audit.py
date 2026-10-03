@@ -9,27 +9,41 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from pydantic import SecretStr, ValidationError
-
-from app.application.coordinator.coordinator_facade import CoordinatorAuditEvent
-from app.application.coordinator.postgres_coordinator_audit_repository import (
-    PostgresCoordinatorAuditSink,
+from biotech_mission_adapters.adapters.infrastructure.web_research_runtime import (
+    AgentBrowserSubprocessAdapter,
 )
-from app.application.operations.semantic_operation_bindings import (
-    SemanticOperationBindingTemplates,
-)
-from app.application.orchestration.orchestration_routing import SemanticRoutingError
-from app.application.web_research.external_capability_discovery import (
-    ExternalDiscoveryCandidate,
-    ExternalDiscoverySource,
-)
-from app.application.web_research.web_research_semantic_binding import (
+from biotech_mission_adapters.application.web_research.web_research_semantic_binding import (
     WebResearchBindingPlanInput,
     WebResearchSemanticBindingProvider,
 )
-from app.config import get_settings
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.contracts import (
+from biotech_mission_adapters.domain.coordinator.web_capability_fixtures import (
+    web_capability_definitions,
+)
+from biotech_mission_adapters.domain.coordinator.web_research_runtime import (
+    GovernedBrowserVerificationRequest,
+    WebResearchGoal,
+)
+from pydantic import SecretStr, ValidationError
+
+from mission_control.adapters.capabilities.capability_embeddings import (
+    CapabilityEmbeddingDependencyError,
+    OpenAICapabilityEmbeddingAdapter,
+)
+from mission_control.adapters.postgres.coordinator.coordinator_audit_repository import (
+    PostgresCoordinatorAuditSink,
+)
+from mission_control.application.capabilities.external_capability_discovery import (
+    ExternalDiscoveryCandidate,
+    ExternalDiscoverySource,
+)
+from mission_control.application.coordinator.coordinator_facade import CoordinatorAuditEvent
+from mission_control.application.execution.operations.semantic_operation_bindings import (
+    SemanticOperationBindingTemplates,
+)
+from mission_control.application.programs.orchestration_routing import SemanticRoutingError
+from mission_control.bootstrap.settings import get_settings
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.authoring.contracts import (
     AgentProfileDefinition,
     ExactDefinitionRef,
     MCPToolDefinition,
@@ -39,27 +53,15 @@ from app.domain.control_plane.contracts import (
     StageGraphBlueprint,
     WorkspaceTemplateDefinition,
 )
-from app.domain.coordinator.contracts import (
+from mission_control.domain.coordinator.contracts import (
     AuthorizationState,
     CapabilitySearchHit,
     CapabilitySearchRequest,
     PolicyReason,
     PolicyReasonCode,
 )
-from app.domain.coordinator.errors import CoordinatorDomainError
-from app.domain.coordinator.web_capability_fixtures import (
-    web_capability_definitions,
-)
-from app.domain.coordinator.web_research_runtime import (
-    GovernedBrowserVerificationRequest,
-    WebResearchGoal,
-)
-from app.integrations.capability_embeddings import (
-    CapabilityEmbeddingDependencyError,
-    OpenAICapabilityEmbeddingAdapter,
-)
-from app.integrations.web_research_runtime import AgentBrowserSubprocessAdapter
-from app.mcp.coordinator_server import CoordinatorPrincipal
+from mission_control.domain.coordinator.errors import CoordinatorDomainError
+from mission_control.interfaces.mcp.coordinator_server import CoordinatorPrincipal
 from tests.unit.coordinator.test_coordinator_facade import concrete_facade
 from tests.unit.operations.test_operation_execution import operation_request
 from tests.unit.web_research.test_web_research_live_adapters import (
@@ -235,11 +237,7 @@ class _EmbeddingEndpoint:
         self.calls.append(kwargs)
         if self.fail:
             raise RuntimeError(f"provider included {SENTINEL}")
-        return SimpleNamespace(
-            data=(
-                SimpleNamespace(index=0, embedding=(0.1, 0.2, 0.3)),
-            )
-        )
+        return SimpleNamespace(data=(SimpleNamespace(index=0, embedding=(0.1, 0.2, 0.3)),))
 
 
 class _EmbeddingClient:
@@ -366,8 +364,7 @@ def _published_web_records_without_grant(
         if (
             missing_capability == "browser.process"
             and isinstance(definition, RuntimeProfileDefinition)
-            and definition.logical_id
-            == "web-research-browser-verification-runtime-v1"
+            and definition.logical_id == "web-research-browser-verification-runtime-v1"
         ):
             definitions[index] = definition.model_copy(
                 update={
@@ -379,8 +376,7 @@ def _published_web_records_without_grant(
         elif (
             missing_capability == "network.web"
             and isinstance(definition, AgentProfileDefinition)
-            and definition.logical_id
-            == "agent-profile.web-research-browser-verification"
+            and definition.logical_id == "agent-profile.web-research-browser-verification"
         ):
             definitions[index] = definition.model_copy(
                 update={
@@ -397,11 +393,9 @@ def _published_web_records_without_grant(
                 }
             )
         elif (
-            missing_capability
-            in {"workspace.browser.write", "artifact.browser-evidence.write"}
+            missing_capability in {"workspace.browser.write", "artifact.browser-evidence.write"}
             and isinstance(definition, WorkspaceTemplateDefinition)
-            and definition.logical_id
-            == "web-research-browser-verification-workspace-v1"
+            and definition.logical_id == "web-research-browser-verification-workspace-v1"
         ):
             definitions[index] = definition.model_copy(
                 update={
@@ -441,37 +435,33 @@ def _published_web_records_with_injected_text(
                 "description": injection,
                 "x-untrusted-resource": {"content": injection},
             }
-            replacements[(definition.kind.value, definition.logical_id)] = (
-                definition.model_copy(
-                    update={
-                        "description": injection,
-                        "input_schema": injected_schema,
-                        "schema_digest": sha256_digest(
-                            {
-                                "tool_name": definition.tool_name,
-                                "input_schema": injected_schema,
-                                "output_schema": definition.output_schema,
-                                "annotations": definition.annotations,
-                            }
-                        ),
-                    }
-                )
+            replacements[(definition.kind.value, definition.logical_id)] = definition.model_copy(
+                update={
+                    "description": injection,
+                    "input_schema": injected_schema,
+                    "schema_digest": sha256_digest(
+                        {
+                            "tool_name": definition.tool_name,
+                            "input_schema": injected_schema,
+                            "output_schema": definition.output_schema,
+                            "annotations": definition.annotations,
+                        }
+                    ),
+                }
             )
         elif (
             isinstance(definition, SkillDefinition)
             and definition.logical_id == "skill.agent-browser"
         ):
-            replacements[(definition.kind.value, definition.logical_id)] = (
-                definition.model_copy(
-                    update={
+            replacements[(definition.kind.value, definition.logical_id)] = definition.model_copy(
+                update={
+                    "description": injection,
+                    "body_summary": injection,
+                    "frontmatter": {
+                        **definition.frontmatter,
                         "description": injection,
-                        "body_summary": injection,
-                        "frontmatter": {
-                            **definition.frontmatter,
-                            "description": injection,
-                        },
-                    }
-                )
+                    },
+                }
             )
     definitions = [
         replacements.get((definition.kind.value, definition.logical_id), definition)
@@ -492,12 +482,10 @@ def _published_web_records_with_injected_text(
         definitions[index] = definition.model_copy(
             update={
                 "skill_refs": frozenset(
-                    ref_by_identity[(ref.kind, ref.logical_id)]
-                    for ref in definition.skill_refs
+                    ref_by_identity[(ref.kind, ref.logical_id)] for ref in definition.skill_refs
                 ),
                 "tool_refs": frozenset(
-                    ref_by_identity[(ref.kind, ref.logical_id)]
-                    for ref in definition.tool_refs
+                    ref_by_identity[(ref.kind, ref.logical_id)] for ref in definition.tool_refs
                 ),
             }
         )
@@ -574,14 +562,12 @@ async def test_candidate_tool_schema_resource_and_skill_injection_remain_data() 
     runtime_ref = next(
         record.ref
         for record in records
-        if record.ref.logical_id
-        == "web-research-browser-verification-runtime-v1"
+        if record.ref.logical_id == "web-research-browser-verification-runtime-v1"
     )
     workspace_ref = next(
         record.ref
         for record in records
-        if record.ref.logical_id
-        == "web-research-browser-verification-workspace-v1"
+        if record.ref.logical_id == "web-research-browser-verification-workspace-v1"
     )
     provider = WebResearchSemanticBindingProvider(
         catalog_records=records,
@@ -602,9 +588,7 @@ async def test_candidate_tool_schema_resource_and_skill_injection_remain_data() 
         admission=SimpleNamespace(requested_at=NOW),
     )
     configuration = SimpleNamespace(
-        workflow_type=SimpleNamespace(
-            logical_id="web-research-browser-verification"
-        ),
+        workflow_type=SimpleNamespace(logical_id="web-research-browser-verification"),
         selected_blueprint=blueprint,
         source_refs=(runtime_ref, workspace_ref),
     )
@@ -614,9 +598,7 @@ async def test_candidate_tool_schema_resource_and_skill_injection_remain_data() 
         configuration,
     )
     frozen = WebResearchBindingPlanInput.model_validate(plan.payload)
-    assert {hit.exact_ref for hit in frozen.selected_hits} == {
-        hit.exact_ref for hit in hits
-    }
+    assert {hit.exact_ref for hit in frozen.selected_hits} == {hit.exact_ref for hit in hits}
     assert all(hit.candidate_id is None for hit in frozen.selected_hits)
     firecrawl_hit = next(
         hit
@@ -626,8 +608,7 @@ async def test_candidate_tool_schema_resource_and_skill_injection_remain_data() 
     )
     assert injection in firecrawl_hit.summary
     assert all(
-        "firecrawl_scrape" not in ref
-        and "firecrawl_interact" not in ref
+        "firecrawl_scrape" not in ref and "firecrawl_interact" not in ref
         for ref in plan.exact_input_refs
     )
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
@@ -681,9 +662,7 @@ async def test_missing_agent_browser_grant_fails_launch_preparation(
         idempotency_key="security-test",
     )
     configuration = SimpleNamespace(
-        workflow_type=SimpleNamespace(
-            logical_id="web-research-browser-verification"
-        ),
+        workflow_type=SimpleNamespace(logical_id="web-research-browser-verification"),
         selected_blueprint=blueprint,
     )
 

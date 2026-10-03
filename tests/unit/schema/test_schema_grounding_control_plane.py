@@ -3,10 +3,17 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+from biotech_mission_adapters.domain.schema_grounding.definitions import (
+    register_schema_grounding_extensions,
+    schema_grounding_definitions,
+)
 
-from app.application.control_plane.control_plane_repository import InMemoryDefinitionRepository
-from app.application.control_plane.service import ControlPlaneService
-from app.domain.control_plane.contracts import (
+from mission_control.adapters.storage.control_plane_payloads import InMemoryPayloadStore
+from mission_control.application.authoring.control_plane_repository import (
+    InMemoryDefinitionRepository,
+)
+from mission_control.application.authoring.service import ControlPlaneService
+from mission_control.domain.authoring.contracts import (
     AliasRef,
     CompilationContext,
     CompileInvocation,
@@ -19,12 +26,7 @@ from app.domain.control_plane.contracts import (
     WorkflowImplementationBindingDefinition,
     WorkflowTypeDefinition,
 )
-from app.domain.control_plane.extensions import ExtensionRegistry
-from app.domain.schema_grounding.definitions import (
-    register_schema_grounding_extensions,
-    schema_grounding_definitions,
-)
-from app.integrations.control_plane_payloads import InMemoryPayloadStore
+from mission_control.domain.authoring.extensions import ExtensionRegistry
 
 NOW = datetime(2026, 7, 24, 15, 0, tzinfo=UTC)
 
@@ -64,12 +66,8 @@ async def test_schema_grounding_definitions_publish_and_compile_exact_selection_
 
     erc = await service.compile(
         CompileInvocation(
-            workflow_type=DefinitionSelector(
-                exact=published["schema-context-selection"].ref
-            ),
-            blueprint=DefinitionSelector(
-                exact=published["schema-context-selection-v1"].ref
-            ),
+            workflow_type=DefinitionSelector(exact=published["schema-context-selection"].ref),
+            blueprint=DefinitionSelector(exact=published["schema-context-selection-v1"].ref),
             control_profile=DefinitionSelector(
                 exact=published["schema-context-selection-control-v1"].ref
             ),
@@ -92,12 +90,8 @@ async def test_schema_grounding_definitions_publish_and_compile_exact_selection_
             ),
             caller_authority=selection.authority_ceiling,
             environment=EnvironmentAvailability(
-                capabilities=frozenset(
-                    {"schema.catalog.read", "operation.execute.agent"}
-                ),
-                runtime_bindings=frozenset(
-                    {"temporal-stagegraph+operation-execution"}
-                ),
+                capabilities=frozenset({"schema.catalog.read", "operation.execute.agent"}),
+                runtime_bindings=frozenset({"temporal-stagegraph+operation-execution"}),
             ),
             context=CompilationContext(
                 compilation_id="schema-selection-compilation-1",
@@ -112,12 +106,12 @@ async def test_schema_grounding_definitions_publish_and_compile_exact_selection_
     assert erc.workflow_type.logical_id == "schema-context-selection"
     assert erc.selected_blueprint.logical_id == "schema-context-selection-v1"
     assert erc.workflow_specific_configuration is not None
-    assert erc.workflow_specific_configuration.extensions[0].payload[
-        "catalog_generator_version"
-    ] == "typed-schema-catalog-v1"
+    assert (
+        erc.workflow_specific_configuration.extensions[0].payload["catalog_generator_version"]
+        == "typed-schema-catalog-v1"
+    )
     assert any(
-        ref.kind == DefinitionKind.WORKFLOW_TYPE
-        and ref.logical_id == "schema-context-selection"
+        ref.kind == DefinitionKind.WORKFLOW_TYPE and ref.logical_id == "schema-context-selection"
         for ref in erc.source_refs
     )
 
@@ -126,9 +120,7 @@ async def test_schema_grounding_definitions_publish_and_compile_exact_selection_
             workflow_type=DefinitionSelector(
                 exact=published["supporting-graph-reconciliation"].ref
             ),
-            blueprint=DefinitionSelector(
-                exact=published["supporting-graph-reconciliation-v1"].ref
-            ),
+            blueprint=DefinitionSelector(exact=published["supporting-graph-reconciliation-v1"].ref),
             control_profile=DefinitionSelector(
                 exact=published["supporting-graph-reconciliation-control-v1"].ref
             ),
@@ -142,9 +134,7 @@ async def test_schema_grounding_definitions_publish_and_compile_exact_selection_
                 exact=published["supporting-graph-reconciliation-evaluation-v1"].ref
             ),
             workflow_configuration=DefinitionSelector(
-                exact=published[
-                    "supporting-graph-reconciliation-official-v1"
-                ].ref
+                exact=published["supporting-graph-reconciliation-official-v1"].ref
             ),
             input_manifest=RunInputManifestRef(
                 manifest_id="schema-reconciliation-input-1",
@@ -164,9 +154,7 @@ async def test_schema_grounding_definitions_publish_and_compile_exact_selection_
                     }
                 ),
                 runtime_bindings=frozenset(
-                    {
-                        "temporal-stagegraph+operation-execution+neo4j-bounded-read"
-                    }
+                    {"temporal-stagegraph+operation-execution+neo4j-bounded-read"}
                 ),
             ),
             context=CompilationContext(
@@ -179,35 +167,29 @@ async def test_schema_grounding_definitions_publish_and_compile_exact_selection_
         )
     )
 
-    assert (
-        reconciliation_erc.workflow_type.logical_id
-        == "supporting-graph-reconciliation"
-    )
+    assert reconciliation_erc.workflow_type.logical_id == "supporting-graph-reconciliation"
     assert reconciliation_erc.workflow_specific_configuration is not None
     assert (
         "schema:bounded-query-plan:v1"
-        in reconciliation_erc.workflow_specific_configuration.extensions[
-            0
-        ].payload["output_schema_refs"]
+        in reconciliation_erc.workflow_specific_configuration.extensions[0].payload[
+            "output_schema_refs"
+        ]
     )
 
     selection_implementation = next(
         record
         for record in implementation_records
-        if record.definition.workflow_type_ref
-        == published["schema-context-selection"].ref
+        if record.definition.workflow_type_ref == published["schema-context-selection"].ref
     )
     reconciliation_implementations = [
         record
         for record in implementation_records
-        if record.definition.workflow_type_ref
-        == published["supporting-graph-reconciliation"].ref
+        if record.definition.workflow_type_ref == published["supporting-graph-reconciliation"].ref
     ]
     staged_reconciliation = next(
         record
         for record in reconciliation_implementations
-        if record.definition.blueprint_ref
-        == published["supporting-graph-reconciliation-v1"].ref
+        if record.definition.blueprint_ref == published["supporting-graph-reconciliation-v1"].ref
     )
     goal_reconciliation = next(
         record
@@ -255,9 +237,7 @@ async def test_schema_grounding_definitions_publish_and_compile_exact_selection_
             environment=EnvironmentAvailability(
                 capabilities=reconciliation.authority_ceiling.capabilities,
                 runtime_bindings=frozenset(
-                    {
-                        "temporal-stagegraph+operation-execution+neo4j-bounded-read"
-                    }
+                    {"temporal-stagegraph+operation-execution+neo4j-bounded-read"}
                 ),
             ),
             context=CompilationContext(
@@ -294,9 +274,7 @@ async def test_schema_grounding_definitions_publish_and_compile_exact_selection_
             environment=EnvironmentAvailability(
                 capabilities=reconciliation.authority_ceiling.capabilities,
                 runtime_bindings=frozenset(
-                    {
-                        "temporal-stagegraph+operation-execution+neo4j-bounded-read"
-                    }
+                    {"temporal-stagegraph+operation-execution+neo4j-bounded-read"}
                 ),
             ),
             context=CompilationContext(

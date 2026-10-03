@@ -1,3 +1,5 @@
+# Retain the existing local volume namespace after the source-directory rename.
+# Change only with an explicit volume migration; this is not the product/package name.
 name: biotech-research-ingestion-evaluation-system
 
 # Temporal persistence and application authority are intentionally separate PostgreSQL services.
@@ -20,29 +22,6 @@ services:
     volumes:
       - application-postgres-data:/var/lib/postgresql/data
       - ./infra/application-postgres/init:/docker-entrypoint-initdb.d:ro
-    restart: unless-stopped
-
-  application-mongodb:
-    # Isolated local semantic-definition and backfill source for integration tests only.
-    image: mongo:8.0
-    entrypoint:
-      - /bin/bash
-      - -lc
-      - >-
-        mongod --replSet rs0 --bind_ip_all &
-        mongo_pid=$$!;
-        until mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok' >/dev/null 2>&1; do sleep 1; done;
-        mongosh --quiet --eval 'try { rs.status() } catch (_) { rs.initiate({_id: "rs0", members: [{ _id: 0, host: "localhost:27017" }]}) }';
-        wait $$mongo_pid
-    healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 }).ok"]
-      interval: 5s
-      timeout: 5s
-      retries: 30
-    ports:
-      - "127.0.0.1:${APPLICATION_MONGODB_PORT:-27017}:27017"
-    volumes:
-      - application-mongodb-data:/data/db
     restart: unless-stopped
 
   redis:
@@ -160,6 +139,5 @@ services:
 
 volumes:
   application-postgres-data:
-  application-mongodb-data:
   redis-data:
   temporal-postgres-data:

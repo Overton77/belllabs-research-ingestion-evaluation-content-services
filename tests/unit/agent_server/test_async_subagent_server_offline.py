@@ -23,21 +23,24 @@ from langgraph_cli.cli import prepare_args_and_stdin
 from langgraph_cli.config import validate_config_file
 from langgraph_cli.docker import DockerCapabilities
 
-from app.agent_server.async_subagents import auth as auth_module
-from app.agent_server.async_subagents.bindings import (
+from mission_control.adapters.agent_server.async_subagents import auth as auth_module
+from mission_control.adapters.agent_server.async_subagents.bindings import (
     TECHNICAL_CHILD_GRAPH_ID,
     hosted_definitions,
     served_graph_identities,
     technical_child_definition,
 )
-from app.agent_server.async_subagents.graph import build_hosted_graph, hosting_registry
-from app.agent_server.async_subagents.http_app import app as identity_app
-from app.integrations.agents.deep_agents.materializer import ExactComponentRegistry
+from mission_control.adapters.agent_server.async_subagents.graph import (
+    build_hosted_graph,
+    hosting_registry,
+)
+from mission_control.adapters.agent_server.http_app import app as identity_app
+from mission_control.adapters.deep_agents.materializer import ExactComponentRegistry
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-ROOT_LANGGRAPH = PROJECT_ROOT / "langgraph.json"
-ASYNC_CONFIG = PROJECT_ROOT / "langgraph.async_subagents.json"
-ASYNC_ENV_FILE = PROJECT_ROOT / "langgraph.async_subagents.env"
+ROOT_LANGGRAPH = PROJECT_ROOT / "agent_server" / "langgraph.json"
+ASYNC_CONFIG = ROOT_LANGGRAPH
+ASYNC_ENV_FILE = PROJECT_ROOT / "agent_server" / "runtime.env"
 
 
 class ScriptedChildModel(BaseChatModel):
@@ -68,26 +71,18 @@ class ScriptedChildModel(BaseChatModel):
         )
 
 
-def test_dedicated_config_lists_only_bound_async_graphs_and_root_stays_graph_free() -> None:
+def test_canonical_config_preserves_bounded_graphs_and_uses_one_auth_surface() -> None:
     config = json.loads(ASYNC_CONFIG.read_text(encoding="utf-8"))
-    assert set(config["graphs"]) == {definition.graph_id for definition in hosted_definitions()}
+    assert {definition.graph_id for definition in hosted_definitions()} <= set(config["graphs"])
     assert config["graphs"][TECHNICAL_CHILD_GRAPH_ID] == (
-        "app.agent_server.async_subagents.graph:graph"
+        "mission_control.adapters.agent_server.entrypoints:child"
     )
-    assert config["dependencies"] == ["."]
-    assert config["env"] == "langgraph.async_subagents.env"
-    assert config["auth"]["path"] == "app.agent_server.async_subagents.auth:auth"
-    assert config["http"]["app"] == "app.agent_server.async_subagents.http_app:app"
+    assert config["dependencies"] == [".."]
+    assert config["env"] == "runtime.env"
+    assert config["auth"]["path"] == "mission_control.adapters.agent_server.deployment_auth:auth"
+    assert config["http"]["app"] == "mission_control.adapters.agent_server.http_app:app"
     assert config["api_version"] == "0.12.0"
-    assert "block_c" not in json.dumps(config)
-    for graph_path in config["graphs"].values():
-        assert graph_path.startswith("app.agent_server.async_subagents.")
-    root = json.loads(ROOT_LANGGRAPH.read_text(encoding="utf-8"))
-    assert root["graphs"] == {}
-    assert "async_subagents" not in json.dumps(root)
-    # Variable references only: no secret value lives in the tracked env file.
-    env_text = ASYNC_ENV_FILE.read_text(encoding="utf-8")
-    for line in env_text.strip().splitlines():
+    for line in ASYNC_ENV_FILE.read_text(encoding="utf-8").strip().splitlines():
         name, _, value = line.partition("=")
         assert value.startswith("${") and value.endswith("}"), name
 
@@ -114,7 +109,7 @@ def test_compose_generation_uses_external_postgres_and_env_file_references() -> 
     assert "langgraph-api" in parsed["services"]
     assert "langgraph-redis" in parsed["services"]
     assert "langgraph-postgres" not in parsed["services"]
-    assert "env_file: langgraph.async_subagents.env" in stdin
+    assert "env_file: runtime.env" in stdin
     assert "FROM langchain/langgraph-api:0.12.0-py3.12" in stdin
     assert "LANGSMITH_API_KEY:" not in stdin
 
@@ -239,12 +234,12 @@ def test_identity_route_requires_the_deployment_credential(
 def test_hosted_context_defaults_copy_mutable_values_and_order_required_fields_first() -> None:
     """RRM-013 review N9: defaults use factories; partially defaulted schemas still build."""
 
-    from app.domain.operation_execution.contracts import (
+    from mission_control.adapters.deep_agents.materializer import _context_type
+    from mission_control.domain.execution.contracts import (
         CognitiveRuntimeContextPack,
         CognitiveRuntimeField,
     )
-    from app.domain.operation_execution.materialization import compose_cognitive_context_schema
-    from app.integrations.agents.deep_agents.materializer import _context_type
+    from mission_control.domain.execution.materialization import compose_cognitive_context_schema
 
     pack = CognitiveRuntimeContextPack.create(
         logical_id="pack.rrm013.context",

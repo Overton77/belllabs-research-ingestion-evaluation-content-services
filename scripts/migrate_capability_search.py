@@ -3,11 +3,11 @@ from __future__ import annotations
 import asyncio
 import json
 
-from app.config import Settings
-from app.integrations.postgres import (
+from mission_control.adapters.postgres.connections import (
     apply_capability_search_migrations,
     create_postgres_pool,
 )
+from mission_control.bootstrap.settings import Settings
 
 
 async def _run() -> dict[str, object]:

@@ -8,28 +8,30 @@ from statistics import median
 from time import perf_counter
 from typing import Any, TypedDict
 
-from app.application.capability.capability_search import (
+from mission_control.adapters.capabilities.capability_embeddings import (
+    OpenAICapabilityEmbeddingAdapter,
+)
+from mission_control.adapters.postgres.capability.capability_search_repository import (
+    PostgresCatalogSearchRepository,
+)
+from mission_control.adapters.postgres.connections import create_postgres_pool
+from mission_control.adapters.postgres.control_plane.definition_repository import (
+    PostgresDefinitionRepository,
+)
+from mission_control.application.capabilities.capability_search import (
     CapabilitySearchResponse,
     CapabilitySearchService,
 )
-from app.application.capability.postgres_capability_search_repository import (
-    PostgresCatalogSearchRepository,
-)
-from app.application.control_plane.control_plane_repository import BeanieDefinitionRepository
-from app.config import Settings
-from app.domain.control_plane.contracts import DefinitionKind
-from app.domain.coordinator.contracts import (
+from mission_control.bootstrap.catalog_scope import configured_catalog_scope
+from mission_control.bootstrap.settings import Settings
+from mission_control.domain.authoring.contracts import DefinitionKind
+from mission_control.domain.coordinator.contracts import (
     CapabilitySearchHit,
     CapabilitySearchRequest,
 )
-from app.integrations.capability_embeddings import OpenAICapabilityEmbeddingAdapter
-from app.integrations.mongodb import create_mongodb
-from app.integrations.postgres import create_postgres_pool
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_DATASET = (
-    PROJECT_ROOT / "tests" / "fixtures" / "coordinator_retrieval_evaluation.json"
-)
+DEFAULT_DATASET = PROJECT_ROOT / "tests" / "fixtures" / "coordinator_retrieval_evaluation.json"
 
 
 class AggregatedTokenMetric(TypedDict):
@@ -57,12 +59,12 @@ async def _evaluate(
     limit: int,
 ) -> dict[str, Any]:
     settings = Settings()
-    mongo_client, _database = await create_mongodb(settings)
+    scope = configured_catalog_scope(settings, requested=tenant)
     postgres_pool = await create_postgres_pool(settings)
     try:
         service = CapabilitySearchService(
             search=PostgresCatalogSearchRepository(postgres_pool),
-            definitions=BeanieDefinitionRepository(),
+            definitions=PostgresDefinitionRepository(postgres_pool, catalog_scope=scope),
             embeddings=OpenAICapabilityEmbeddingAdapter(settings),
             embedding_model_id=settings.capability_embedding_model,
             embedding_dimensions=settings.capability_embedding_dimensions,
@@ -80,9 +82,7 @@ async def _evaluate(
                 continue
             started = perf_counter()
             expected_workflow = case.get("expected_workflow_type")
-            expected_assets = {
-                str(item) for item in case.get("expected_capability_assets", [])
-            }
+            expected_assets = {str(item) for item in case.get("expected_capability_assets", [])}
             responses: list[CapabilitySearchResponse] = []
             workflow_response = await service.search(
                 CapabilitySearchRequest(
@@ -97,8 +97,7 @@ async def _evaluate(
                 (
                     hit.exact_ref
                     for hit in workflow_response.hits
-                    if hit.exact_ref is not None
-                    and hit.exact_ref.logical_id == expected_workflow
+                    if hit.exact_ref is not None and hit.exact_ref.logical_id == expected_workflow
                 ),
                 None,
             )
@@ -123,21 +122,14 @@ async def _evaluate(
             elapsed_ms = (perf_counter() - started) * 1_000
             latencies.append(elapsed_ms)
             hits = _unique_hits(responses)
-            hit_ids = [
-                hit.exact_ref.logical_id
-                for hit in hits
-                if hit.exact_ref is not None
-            ]
+            hit_ids = [hit.exact_ref.logical_id for hit in hits if hit.exact_ref is not None]
             workflow_rank = None
             workflow_hit_ids = [
                 hit.exact_ref.logical_id
                 for hit in workflow_response.hits
                 if hit.exact_ref is not None
             ]
-            if (
-                isinstance(expected_workflow, str)
-                and expected_workflow in workflow_hit_ids
-            ):
+            if isinstance(expected_workflow, str) and expected_workflow in workflow_hit_ids:
                 workflow_rank = workflow_hit_ids.index(expected_workflow) + 1
                 workflow_hits += 1
                 workflow_reciprocal_ranks.append(1 / workflow_rank)
@@ -192,16 +184,13 @@ async def _evaluate(
                     if workflow_reciprocal_ranks
                     else 0.0
                 ),
-                "median_search_latency_ms": (
-                    round(median(latencies), 3) if latencies else 0.0
-                ),
+                "median_search_latency_ms": (round(median(latencies), 3) if latencies else 0.0),
                 "catalog_tokens_loaded": loaded_tokens,
             },
             "cases": results,
         }
     finally:
         await postgres_pool.close()
-        await mongo_client.close()
 
 
 def _unique_hits(
@@ -241,9 +230,7 @@ def _aggregate_token_metrics(
                     "method": measurement.method,
                 },
             )
-            current["character_count"] = current["character_count"] + (
-                measurement.character_count
-            )
+            current["character_count"] = current["character_count"] + (measurement.character_count)
             current["estimated_tokens"] = current["estimated_tokens"] + (
                 measurement.estimated_tokens
             )

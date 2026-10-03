@@ -11,18 +11,21 @@ from temporalio import activity
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
 
-from app.application.orchestration.goal_directed import (
+from mission_control.adapters.temporal.workflow_sandbox import coordinator_workflow_runner
+from mission_control.adapters.temporal.workflows.goal_directed import GoalDirectedWorkflow
+from mission_control.adapters.temporal.workflows.operation import OperationWorkflow
+from mission_control.application.programs.goal_directed import (
     GoalDirectedOperationPreparationService,
     GoalDirectedOperationResultService,
 )
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.contracts import (
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.authoring.contracts import (
     DefinitionKind,
     ExactDefinitionRef,
     GoalDirectedBlueprint,
 )
-from app.domain.control_plane.fixtures import GENERIC_GOAL_DIRECTED
-from app.domain.operation_execution.contracts import (
+from mission_control.domain.authoring.fixtures import GENERIC_GOAL_DIRECTED
+from mission_control.domain.execution.contracts import (
     CapabilityGrant,
     ModelPolicy,
     NativeOperationExecutionPlacement,
@@ -37,7 +40,8 @@ from app.domain.operation_execution.contracts import (
     StructuredOutputBinding,
     WorkspaceContract,
 )
-from app.domain.orchestration.contracts import (
+from mission_control.domain.policies.contracts import ActorContext, RunOutcome
+from mission_control.domain.programs.contracts import (
     GoalDirectedRunInput,
     GoalExecutionResult,
     GoalRevision,
@@ -45,18 +49,14 @@ from app.domain.orchestration.contracts import (
     LifecycleCommandOutcome,
     LifecycleCommandRequest,
 )
-from app.domain.orchestration.goal_directed import GoalDirectedInterpreter
-from app.domain.orchestration.goal_directed_runtime import (
+from mission_control.domain.programs.goal_directed import GoalDirectedInterpreter
+from mission_control.domain.programs.goal_directed_runtime import (
     GoalOperationDispatch,
     GoalOperationPreparationRequest,
     GoalOperationReconciliationRequest,
     GoalOperationReconciliationResult,
     GoalOperationSettlement,
 )
-from app.domain.run_control.contracts import ActorContext, RunOutcome
-from app.temporal.workflow_sandbox import coordinator_workflow_runner
-from app.temporal.workflows.goal_directed import GoalDirectedWorkflow
-from app.temporal.workflows.operation import OperationWorkflow
 from tests.fixtures.goal_directed_journaled import goal_template_workspace
 from tests.fixtures.operation_activities import sleep_heartbeating
 
@@ -172,9 +172,7 @@ def _operation(request: GoalOperationPreparationRequest) -> OperationExecutionRe
         sensitive_data_policy_ref="sensitive:test@1",
         snapshot_policy_ref="snapshot:test@1",
         requested_at=NOW,
-        idempotency_key=(
-            f"goal:{identity.semantic_key}:generation:{request.execution_generation}"
-        ),
+        idempotency_key=(f"goal:{identity.semantic_key}:generation:{request.execution_generation}"),
     )
 
 
@@ -216,9 +214,7 @@ class FakeGoalDirectedActivities:
         self._complete_at_iteration = complete_at_iteration
         self._scope_expansion_route = scope_expansion_route
 
-    async def _prepare(
-        self, request: GoalOperationPreparationRequest
-    ) -> GoalOperationDispatch:
+    async def _prepare(self, request: GoalOperationPreparationRequest) -> GoalOperationDispatch:
         self.prepared_roles.append(request.operation_role)
         operation = _operation(request)
         workflow_request = OperationWorkflowRequest(
@@ -315,9 +311,7 @@ class FakeGoalDirectedActivities:
             "executor_identity": request.claim.identity,
             "verifier_operation_identity": operation.identity.semantic_key,
             "verifier_binding_ref": request.operation_binding_ref,
-            "verifier_policy_binding_ref": (
-                GENERIC_GOAL_DIRECTED.verifier_policy.binding_ref
-            ),
+            "verifier_policy_binding_ref": (GENERIC_GOAL_DIRECTED.verifier_policy.binding_ref),
             "verifier_session_id": operation.session_id or "",
             "verifier_workspace_id": operation.workspace.workspace_id,
             "verifier_writable_paths": operation.workspace.exclusive_write_paths,
@@ -343,9 +337,7 @@ class FakeGoalDirectedActivities:
             "irrecoverable_failure_ref": "",
             "proposed_revision": None,
             "scope_expansion_route": self._scope_expansion_route,
-            "route_ref": (
-                "route:governed-expansion" if self._scope_expansion_route else ""
-            ),
+            "route_ref": ("route:governed-expansion" if self._scope_expansion_route else ""),
             "actual_usage": {"goal.iterations": 1},
             "effect_refs": (),
             "output_contract_ref": "fixture-output",
@@ -365,9 +357,7 @@ class FakeGoalDirectedActivities:
         )
 
     @activity.defn(name="goaldirected.apply_lifecycle_command")
-    async def lifecycle(
-        self, request: LifecycleCommandRequest
-    ) -> LifecycleCommandOutcome:
+    async def lifecycle(self, request: LifecycleCommandRequest) -> LifecycleCommandOutcome:
         kind = str(request.action["kind"])
         self.lifecycle_kinds.append(kind)
         return LifecycleCommandOutcome(

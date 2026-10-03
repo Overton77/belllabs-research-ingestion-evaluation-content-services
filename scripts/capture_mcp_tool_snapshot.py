@@ -10,7 +10,7 @@ from typing import Any
 from fastmcp import Client
 from fastmcp.client.transports import StdioTransport
 
-from app.config import Settings
+from mission_control.bootstrap.settings import Settings
 
 
 def _arguments() -> argparse.Namespace:

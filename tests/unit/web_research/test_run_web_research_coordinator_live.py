@@ -10,13 +10,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
-from app.application.orchestration.service import (
-    ORCHESTRATION_AUTHORITY_REF,
-    orchestration_lifecycle_actor,
+from biotech_mission_adapters.application.web_research.web_research_semantic_binding import (
+    REQUIRED_SELECTED_IDENTITIES,
 )
-from app.application.run_control.service import ACTION_PERMISSIONS
-from app.application.runners.web_research_coordinator_live import (
+from biotech_mission_adapters.bootstrap.runners.web_research_coordinator_live import (
     EXTERNAL_MCP_DISCOVERY_QUERY,
     EXTERNAL_SKILL_DISCOVERY_QUERY,
     SEARCH_PLAN,
@@ -26,12 +23,16 @@ from app.application.runners.web_research_coordinator_live import (
     _profile_derived_selection,
     _retrieve_exact_capabilities,
 )
-from app.application.web_research.web_research_semantic_binding import (
-    REQUIRED_SELECTED_IDENTITIES,
+from biotech_mission_adapters.bootstrap.scripts.run_web_research_coordinator_live import parse_args
+
+from mission_control.application.artifacts.artifact_promotion import ArtifactPayloadAddress
+from mission_control.application.execution.service import ACTION_PERMISSIONS
+from mission_control.application.programs.service import (
+    ORCHESTRATION_AUTHORITY_REF,
+    orchestration_lifecycle_actor,
 )
-from app.application.workspaces.artifact_promotion import ArtifactPayloadAddress
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.contracts import (
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.authoring.contracts import (
     AgentProfileDefinition,
     AuthorityCeiling,
     DefinitionKind,
@@ -39,9 +40,8 @@ from app.domain.control_plane.contracts import (
     ModelPolicy,
     PublishedDefinition,
 )
-from app.domain.coordinator.contracts import AuthorizationState
-from app.domain.run_control.contracts import ActorContext
-from scripts.run_web_research_coordinator_live import parse_args
+from mission_control.domain.coordinator.contracts import AuthorizationState
+from mission_control.domain.policies.contracts import ActorContext
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / "scripts" / "run_web_research_coordinator_live.py"
@@ -166,8 +166,7 @@ def _selection_catalog(
     if replacement_skill is not None:
         skill_ids[skill_ids.index("skill.agent-browser")] = replacement_skill
     skill_refs = frozenset(
-        add(DefinitionKind.SKILL, logical_id, {"fixture": logical_id})
-        for logical_id in skill_ids
+        add(DefinitionKind.SKILL, logical_id, {"fixture": logical_id}) for logical_id in skill_ids
     )
     profile = AgentProfileDefinition(
         logical_id="agent-profile.web-research-browser-verification",
@@ -185,7 +184,12 @@ def _selection_catalog(
 
 def test_help_is_side_effect_free() -> None:
     completed = subprocess.run(
-        [sys.executable, str(SCRIPT), "--help"],
+        [
+            sys.executable,
+            "-m",
+            "biotech_mission_adapters.bootstrap.scripts.run_web_research_coordinator_live",
+            "--help",
+        ],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -259,8 +263,7 @@ def test_external_discovery_queries_are_provider_name_free_and_intent_derived() 
     assert "research" in EXTERNAL_SKILL_DISCOVERY_QUERY.casefold()
     assert "browser" in EXTERNAL_SKILL_DISCOVERY_QUERY.casefold()
     assert all(
-        provider not in normalized
-        for provider in ("firecrawl", "tavily", "vercel", "skills.sh")
+        provider not in normalized for provider in ("firecrawl", "tavily", "vercel", "skills.sh")
     )
 
 
@@ -276,10 +279,7 @@ async def test_internal_search_selects_only_exact_evidence_and_quarantines_candi
     )
 
     assert selection.workflow_hit.exact_ref is not None
-    assert (
-        selection.workflow_hit.exact_ref.logical_id
-        == "web-research-browser-verification"
-    )
+    assert selection.workflow_hit.exact_ref.logical_id == "web-research-browser-verification"
     assert selection.workflow_hit.exact_ref.revision == 3
     assert {
         (hit.exact_ref.kind, hit.exact_ref.logical_id)
@@ -326,9 +326,7 @@ def test_agent_profile_refs_drive_selection_and_missing_retrieval_fails_closed()
         hit.exact_ref.logical_id for hit in selected if hit.exact_ref is not None
     }
     missing_replacement = tuple(
-        hit
-        for hit in hits
-        if hit.exact_ref is None or hit.exact_ref.logical_id != replacement
+        hit for hit in hits if hit.exact_ref is None or hit.exact_ref.logical_id != replacement
     )
     with pytest.raises(RuntimeError, match="derived from the selected Agent Profile"):
         _profile_derived_selection(
@@ -418,8 +416,6 @@ async def test_screenshot_store_requires_s3_and_verifies_retrieval(
 
     assert ref.startswith("s3://")
     assert store.refs[ref]["retrieval_verified"] is True
-    assert await asyncio.to_thread(
-        Path(str(store.refs[ref]["local_qa_mirror"])).read_bytes
-    ) == (
+    assert await asyncio.to_thread(Path(str(store.refs[ref]["local_qa_mirror"])).read_bytes) == (
         b"\x89PNG\r\n\x1a\nacceptance-proof"
     )

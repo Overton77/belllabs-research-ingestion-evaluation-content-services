@@ -3,11 +3,11 @@ from __future__ import annotations
 import asyncio
 import json
 
-from app.config import Settings
-from app.integrations.postgres import (
+from mission_control.adapters.postgres.connections import (
     apply_application_migrations,
     create_application_migration_pool,
 )
+from mission_control.bootstrap.settings import Settings
 
 
 async def _run() -> dict[str, object]:
@@ -44,9 +44,7 @@ async def _run() -> dict[str, object]:
         versions = tuple(row["version"] for row in rows)
         return {
             "applied_versions": versions,
-            "migration_0010_applied": (
-                "0010_coordinator_audit_events.sql" in versions
-            ),
+            "migration_0010_applied": ("0010_coordinator_audit_events.sql" in versions),
             "audit_policy_count": audit_policy_count,
             "audit_force_rls": audit_force_rls,
         }

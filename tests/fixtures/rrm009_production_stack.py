@@ -1,9 +1,6 @@
 """RRM-009 production-shaped stack: the real API composition plus the deployment worker factory.
 
-Nothing here replaces a production component with a fake. The API is `app.server.api`
-composed by `initialize_run_control_resources` and `compose_runtime_control`; the workers are
-`create_production_workers` over `ProductionWorkerActivityCompositionFactory`; the catalog is
-published through the real `ControlPlaneService` into the disposable MongoDB and compiled into
+The catalog is published through the real `ControlPlaneService` into PostgreSQL and compiled into
 an Effective Run Configuration the real admission verifier and operation authority read. Only
 the model is deterministic: a technical model registered under the exact fixture model
 digest, exactly as a deployment registers a provider factory.
@@ -22,19 +19,19 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
 from typing import Any, Literal
-from urllib.parse import quote
 
-import asyncpg
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import BaseTool
 
-from app.application.control_plane.control_plane_repository import BeanieDefinitionRepository
-from app.application.control_plane.service import ControlPlaneService
-from app.application.run_control.service import AdmissionPolicyRegistry
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.contracts import (
+from mission_control.adapters.deep_agents.materializer import ResolvedSkillBundle
+from mission_control.adapters.temporal.deployment_composition import DeploymentCapabilityComponents
+from mission_control.adapters.temporal.registration.task_queues import BellLabsTaskQueues
+from mission_control.application.authoring.service import ControlPlaneService
+from mission_control.application.execution.service import AdmissionPolicyRegistry
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.authoring.contracts import (
     AllowedOperationVariant,
     AuthorityCeiling,
     BudgetCeiling,
@@ -68,8 +65,8 @@ from app.domain.control_plane.contracts import (
     WorkspaceSlot,
     WorkspaceTemplateDefinition,
 )
-from app.domain.control_plane.fixtures import GENERIC_GOAL_DIRECTED
-from app.domain.operation_execution.contracts import (
+from mission_control.domain.authoring.fixtures import GENERIC_GOAL_DIRECTED
+from mission_control.domain.execution.contracts import (
     DeepAgentExecutionBinding,
     DeepAgentModelComponent,
     OperationExecutionRequest,
@@ -82,21 +79,17 @@ from app.domain.operation_execution.contracts import (
     WorkspaceOwnerKind,
     WorkspaceSlotBinding,
 )
-from app.domain.orchestration.contracts import (
-    GoalDirectedRunInput,
-    GoalRevision,
-    StageGraphRunInput,
-)
-from app.domain.run_control.contracts import (
+from mission_control.domain.policies.contracts import (
     BudgetApplicability,
     BudgetDimensionLimit,
     BudgetEnvelope,
     RunRequest,
 )
-from app.integrations.agents.deep_agents.materializer import ResolvedSkillBundle
-from app.integrations.control_plane_payloads import InMemoryPayloadStore
-from app.temporal.deployment_composition import DeploymentCapabilityComponents
-from app.temporal.registration.task_queues import BellLabsTaskQueues
+from mission_control.domain.programs.contracts import (
+    GoalDirectedRunInput,
+    GoalRevision,
+    StageGraphRunInput,
+)
 from tests.acceptance.control_plane.test_wp_cp_040 import exact, exact_fixture
 from tests.unit.operations.test_operation_execution import operation_request
 from tests.unit.run_control.test_run_control import request as run_request
@@ -139,78 +132,6 @@ CAPABILITIES = frozenset(
 )
 
 
-def _login_dsn(owner_dsn: str, login: str, password: str) -> str:
-    """The same server and database as the owner DSN, under a least-privilege login."""
-
-    host_and_db = owner_dsn.split("@", 1)[1]
-    return f"postgresql://{login}:{quote(password)}@{host_and_db}"
-
-
-async def prepare_disposable_identities(owner_dsn: str) -> None:
-    """The dedicated family-writer login the production worker requires (migration 0017)."""
-
-    connection = await asyncpg.connect(owner_dsn)
-    try:
-        await connection.execute(
-            f"""
-            DO $$
-            BEGIN
-                IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{FAMILY_WRITER_LOGIN}') THEN
-                    CREATE ROLE {FAMILY_WRITER_LOGIN} LOGIN PASSWORD '{FAMILY_WRITER_PASSWORD}'
-                        NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOBYPASSRLS;
-                END IF;
-            END
-            $$;
-            GRANT belllabs_family_repository_writer TO {FAMILY_WRITER_LOGIN};
-            GRANT USAGE ON SCHEMA belllabs_control TO {FAMILY_WRITER_LOGIN};
-            GRANT belllabs_control_runtime TO {APP_LOGIN};
-            DROP SCHEMA IF EXISTS {LANGGRAPH_SCHEMA} CASCADE;
-            CREATE SCHEMA {LANGGRAPH_SCHEMA};
-            """
-        )
-    finally:
-        await connection.close()
-
-
-def runtime_environment(
-    *,
-    owner_dsn: str,
-    mongo_uri: str,
-    mongo_database: str,
-    temporal_address: str,
-    task_queue: str,
-    payload_root: Path,
-    workspace_root: Path,
-) -> dict[str, str]:
-    """The deployment's environment: the exact names the runbook documents."""
-
-    return {
-        "APPLICATION_DATABASE_DIRECT": _login_dsn(owner_dsn, APP_LOGIN, APP_PASSWORD),
-        "APPLICATION_MIGRATION_DATABASE_DIRECT": owner_dsn,
-        "APPLICATION_FAMILY_WRITER_DATABASE_DIRECT": _login_dsn(
-            owner_dsn, FAMILY_WRITER_LOGIN, FAMILY_WRITER_PASSWORD
-        ),
-        "LANGGRAPH_CHECKPOINT_DATABASE_DIRECT": owner_dsn,
-        "LANGGRAPH_CHECKPOINT_SCHEMA": LANGGRAPH_SCHEMA,
-        "LANGGRAPH_CHECKPOINT_SETUP": "1",
-        "MONGODB_URI": mongo_uri,
-        "MONGODB_DATABASE": mongo_database,
-        "TEMPORAL_ADDRESS": temporal_address,
-        "TEMPORAL_NAMESPACE": "default",
-        "TEMPORAL_TASK_QUEUE": task_queue,
-        "RUN_CONTROL_TEMPORAL_ENABLED": "1",
-        "COORDINATOR_LAUNCH_ENABLED": "1",
-        "BOUNDARY_RELAY_REQUEST_SCOPES": json.dumps([SCOPE]),
-        "BOUNDARY_RELAY_INTERVAL_SECONDS": "1",
-        "ARTIFACT_PAYLOAD_ROOT": str(payload_root),
-        "DEEP_AGENT_SANDBOX_WORKSPACE_ROOT": str(workspace_root),
-        "OPERATION_JOURNAL_CLAIMED_BY": "operation-runtime:rrm-009",
-        "ASYNC_SUBAGENT_SUBMITTER_IDENTITY": "belllabs-async-submitter:rrm-009",
-        "WEB_RESEARCH_AGENT_BROWSER_NODE": str(NODE_EXECUTABLE),
-        "LANGSMITH_TRACING": "false",
-    }
-
-
 # --- Catalog ---------------------------------------------------------------------------------
 
 
@@ -225,14 +146,6 @@ class TechnicalCatalog:
     @property
     def blueprint_digest(self) -> str:
         return sha256_digest(self.blueprint)
-
-
-def technical_control_plane() -> ControlPlaneService:
-    from app.domain.control_plane.extensions import ExtensionRegistry
-
-    return ControlPlaneService(
-        BeanieDefinitionRepository(), ExtensionRegistry(), InMemoryPayloadStore()
-    )
 
 
 def _stage_slot() -> StageOperationSlot:

@@ -2,40 +2,39 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass
-from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
 from temporalio.client import Client
 from temporalio.testing import WorkflowEnvironment
 
-from app.application.orchestration.goal_directed import (
-    GoalDirectedOperationPreparationService,
-    GoalDirectedOperationResultService,
-    InMemoryGoalOperationTemplateRepository,
-)
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.fixtures import GENERIC_GOAL_DIRECTED, GENERIC_STAGE_GRAPH
-from app.domain.coordinator.launch import BlueprintFamily
-from app.domain.orchestration.contracts import (
-    StageOperationRequest,
-    StageOperationResult,
-    WorkflowEvaluationRequest,
-    WorkflowEvaluationResult,
-)
-from app.domain.run_control.contracts import ActorContext
-from app.integrations.temporal_workflow_submission import TemporalWorkflowSubmitter
-from app.temporal import worker as production_worker
-from app.temporal.activities.goal_directed import GoalDirectedActivities
-from app.temporal.coordinator_runtime import (
+from mission_control.adapters.temporal import worker as production_worker
+from mission_control.adapters.temporal.activities.goal_directed import GoalDirectedActivities
+from mission_control.adapters.temporal.coordinator_runtime import (
     CoordinatorWorkerActivities,
     coordinator_task_queues,
     coordinator_worker_readiness,
     create_coordinator_workers,
 )
-from app.temporal.orchestration_activities import StageGraphActivities
-from app.temporal.workflows.goal_directed import GoalDirectedWorkflow
-from app.temporal.workflows.stagegraph import StageGraphWorkflow
+from mission_control.adapters.temporal.orchestration_activities import StageGraphActivities
+from mission_control.adapters.temporal.submission import TemporalWorkflowSubmitter
+from mission_control.adapters.temporal.workflows.goal_directed import GoalDirectedWorkflow
+from mission_control.adapters.temporal.workflows.stagegraph import StageGraphWorkflow
+from mission_control.application.programs.goal_directed import (
+    GoalDirectedOperationPreparationService,
+    GoalDirectedOperationResultService,
+    InMemoryGoalOperationTemplateRepository,
+)
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.authoring.fixtures import GENERIC_GOAL_DIRECTED, GENERIC_STAGE_GRAPH
+from mission_control.domain.coordinator.launch import BlueprintFamily
+from mission_control.domain.policies.contracts import ActorContext
+from mission_control.domain.programs.contracts import (
+    StageOperationRequest,
+    StageOperationResult,
+    WorkflowEvaluationRequest,
+    WorkflowEvaluationResult,
+)
 
 DIGEST = "sha256:" + "a" * 64
 
@@ -69,8 +68,8 @@ class UnusedCompletion:
 
 class AcceptingLifecycle:
     async def execute(self, request):
-        from app.domain.orchestration.contracts import LifecycleCommandOutcome
-        from app.domain.run_control.contracts import RunOutcome
+        from mission_control.domain.policies.contracts import RunOutcome
+        from mission_control.domain.programs.contracts import LifecycleCommandOutcome
 
         return LifecycleCommandOutcome(
             accepted=True,
@@ -112,23 +111,24 @@ async def test_fastmcp_first_all_application_worker_factories_validate() -> None
     import importlib
 
     importlib.import_module("fastmcp")
-    importlib.import_module("app.mcp.coordinator_server")
+    importlib.import_module("mission_control.interfaces.mcp.coordinator_server")
 
-    from app.temporal.artifact_activities import (
+    from biotech_mission_adapters.adapters.temporal.schema_grounding_activities import (
+        SchemaGroundingActivities,
+        create_schema_grounding_activity_worker,
+    )
+
+    from mission_control.adapters.temporal.artifact_activities import (
         ArtifactPromotionActivities,
         create_generic_artifact_worker,
     )
-    from app.temporal.linked_run_activities import (
+    from mission_control.adapters.temporal.linked_run_activities import (
         LinkedRunActivities,
         create_linked_run_worker,
     )
-    from app.temporal.operation_activities import (
+    from mission_control.adapters.temporal.operation_activities import (
         OperationExecutionActivities,
         create_agent_cognitive_worker,
-    )
-    from app.temporal.schema_grounding_activities import (
-        SchemaGroundingActivities,
-        create_schema_grounding_activity_worker,
     )
 
     try:
@@ -200,7 +200,7 @@ async def test_submitter_rejects_family_input_mismatch_before_temporal_call() ->
         stagegraph_task_queue="stagegraph",
         goal_directed_task_queue="goal-directed",
     )
-    from app.domain.orchestration.contracts import StageGraphRunInput
+    from mission_control.domain.programs.contracts import StageGraphRunInput
 
     stage_input = StageGraphRunInput(
         run_id="run-coordinator-stagegraph",
@@ -267,37 +267,10 @@ async def test_worker_readiness_requires_actual_pollers_for_each_exact_queue() -
 async def test_production_worker_fails_closed_before_startup_without_real_adapters(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """RRM-009: with launch enabled the worker composes the deployment factory itself and
-    verifies the namespace's Search Attributes at readiness (never mutating them). A
-    namespace without them stops the worker before any store is opened or any worker is
-    advertised."""
+    """The compatibility entrypoint delegates to explicit installation-bound startup."""
+    from mission_control.application.installations.registry import InstallationUnavailable
 
-    from app.temporal.search_attributes import SearchAttributeRegistrationError
-
-    settings = SimpleNamespace(
-        coordinator_launch_enabled=True,
-        temporal_namespace="unregistered",
-        langsmith_tracing=False,
-        langsmith_api_key=None,
-        langsmith_project="",
-        langsmith_endpoint="",
-        langsmith_workspace_id=None,
-    )
-    monkeypatch.setattr(production_worker, "get_settings", lambda: settings)
-    monkeypatch.setattr(production_worker, "configure_langsmith_tracing", lambda _settings: False)
-
-    async def connect(_settings: Any) -> object:
-        return object()
-
-    async def verify(_client: Any, namespace: str) -> None:
-        raise SearchAttributeRegistrationError(f"BellLabsRunId is not registered in {namespace}")
-
-    async def never(*_args: Any, **_kwargs: Any) -> None:
-        raise AssertionError("no store is opened before readiness verification passes")
-
-    monkeypatch.setattr(production_worker, "create_temporal_client", connect)
-    monkeypatch.setattr(production_worker, "verify_belllabs_search_attributes", verify)
-    monkeypatch.setattr(production_worker, "create_mongodb", never)
-    monkeypatch.setattr(production_worker, "create_application_postgres_pool", never)
-    with pytest.raises(SearchAttributeRegistrationError, match="unregistered"):
+    monkeypatch.delenv("MISSION_CONTROL_WORKER_APPLICATION_ID", raising=False)
+    monkeypatch.delenv("MISSION_CONTROL_WORKER_BINDING_DIGEST", raising=False)
+    with pytest.raises(InstallationUnavailable, match="selection and binding digest"):
         await production_worker.main()

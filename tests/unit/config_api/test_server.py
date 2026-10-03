@@ -1,18 +1,20 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.control_plane import (
+from mission_control.adapters.storage.control_plane_payloads import InMemoryPayloadStore
+from mission_control.application.authoring.control_plane_repository import (
+    InMemoryDefinitionRepository,
+)
+from mission_control.application.authoring.service import ControlPlaneService
+from mission_control.bootstrap.technical_api import api
+from mission_control.domain.authoring.extensions import ExtensionRegistry
+from mission_control.domain.authoring.fixtures import GENERIC_GOAL_DIRECTED
+from mission_control.interfaces.http.control_plane import (
     ControlPlanePrincipal,
     get_control_plane_principal,
     get_control_plane_service,
 )
-from app.api.run_control import get_run_control_service
-from app.application.control_plane.control_plane_repository import InMemoryDefinitionRepository
-from app.application.control_plane.service import ControlPlaneService
-from app.domain.control_plane.extensions import ExtensionRegistry
-from app.domain.control_plane.fixtures import GENERIC_GOAL_DIRECTED
-from app.integrations.control_plane_payloads import InMemoryPayloadStore
-from app.server import api
+from mission_control.interfaces.http.run_control import get_run_control_service
 from tests.unit.run_control.test_run_control import request as run_request
 from tests.unit.run_control.test_run_control import service as run_control_service
 
@@ -22,7 +24,9 @@ def disable_external_run_control_startup(monkeypatch: pytest.MonkeyPatch) -> Non
     async def noop(_application: object) -> None:
         return None
 
-    monkeypatch.setattr("app.server.initialize_run_control_resources", noop)
+    monkeypatch.setattr(
+        "mission_control.bootstrap.technical_api.initialize_run_control_resources", noop
+    )
 
 
 def _test_service() -> ControlPlaneService:

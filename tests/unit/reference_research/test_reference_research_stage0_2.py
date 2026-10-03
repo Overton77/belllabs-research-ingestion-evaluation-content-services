@@ -4,24 +4,10 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
-
-from app.agent_server.graphs import GRAPH_REGISTRY
-from app.agent_server.operations.reference_research import ReferenceLangGraphCanaryExecutor
-from app.api.reference_research_schemas import reference_research_contract_schemas
-from app.application.control_plane.control_plane_repository import InMemoryDefinitionRepository
-from app.application.control_plane.service import ControlPlaneService
-from app.application.operations.operation_executor import (
-    CancellationContext,
-    ExactStageExecutionBinding,
-    OperationExecutorConformanceHarness,
-    StageOperationRequest,
+from biotech_mission_adapters.adapters.agent_server.operations.reference_research import (
+    ReferenceLangGraphCanaryExecutor,
 )
-from app.application.operations.operation_journal import (
-    InMemoryAtomicOperationJournalRepository,
-    OperationJournalService,
-)
-from app.application.reference_research.service import (
+from biotech_mission_adapters.application.reference_research.service import (
     ImmutableManifestStore,
     classify_reference_fixture,
     execute_reference_fixture,
@@ -29,15 +15,7 @@ from app.application.reference_research.service import (
     prepare_reference_implementation,
     reconstruct_typed_result_from_journal,
 )
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.extensions import ExtensionRegistry
-from app.domain.graph_runtime.kernel import (
-    ResourceKind,
-    ResourceLeaseRecord,
-    ResourceLeaseRequest,
-    ResourceLeaseStatus,
-)
-from app.domain.reference_research.contracts import (
+from biotech_mission_adapters.domain.reference_research.contracts import (
     DAVE_FAMILY_ID,
     QUALIA_FAMILY_ID,
     CompanyRelationshipClass,
@@ -46,7 +24,35 @@ from app.domain.reference_research.contracts import (
     QualiaCatalogResult,
     QualiaFixtureInput,
 )
-from app.integrations.control_plane_payloads import InMemoryPayloadStore
+from biotech_mission_adapters.interfaces.http.reference_research_schemas import (
+    reference_research_contract_schemas,
+)
+from pydantic import ValidationError
+
+from mission_control.adapters.agent_server.graphs import GRAPH_REGISTRY
+from mission_control.adapters.storage.control_plane_payloads import InMemoryPayloadStore
+from mission_control.application.authoring.control_plane_repository import (
+    InMemoryDefinitionRepository,
+)
+from mission_control.application.authoring.service import ControlPlaneService
+from mission_control.application.execution.operations.operation_executor import (
+    CancellationContext,
+    ExactStageExecutionBinding,
+    OperationExecutorConformanceHarness,
+    StageOperationRequest,
+)
+from mission_control.application.execution.operations.operation_journal import (
+    InMemoryAtomicOperationJournalRepository,
+    OperationJournalService,
+)
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.authoring.extensions import ExtensionRegistry
+from mission_control.domain.graph_runtime.kernel import (
+    ResourceKind,
+    ResourceLeaseRecord,
+    ResourceLeaseRequest,
+    ResourceLeaseStatus,
+)
 
 NOW = datetime(2026, 1, 15, 12, 0, tzinfo=UTC)
 FIXTURES = Path(__file__).parents[2] / "fixtures" / "reference_blueprints"

@@ -23,44 +23,46 @@ from typing import Any
 
 import pytest
 
-from app.application.async_subagents.parent_effects import (
+from mission_control.application.execution.operations.journaled_operation_execution import (
+    _effect_claim_id,
+)
+from mission_control.application.execution.operations.operation_execution import (
+    bind_operation_execution_request,
+)
+from mission_control.application.execution.operations.operation_progress import CURRENT_CANCEL_PROBE
+from mission_control.application.subordinates.parent_effects import (
     RunControlAsyncChildEffects,
     async_child_effect_id,
     async_child_usage_id,
 )
-from app.application.async_subagents.service import (
+from mission_control.application.subordinates.service import (
     AsyncSubagentService,
     AsyncSubagentSpawnRequest,
     InMemoryAsyncSubagentAuthority,
     InMemoryAsyncSubagentDetailRepository,
 )
-from app.application.operations.journaled_operation_execution import _effect_claim_id
-from app.application.operations.operation_execution import (
-    bind_operation_execution_request,
-)
-from app.application.operations.operation_progress import CURRENT_CANCEL_PROBE
-from app.domain.operation_execution.async_subagent_reconciliation import (
+from mission_control.domain.execution.async_subagent_reconciliation import (
     ASYNC_CHILD_RECONCILE_PERMISSION,
 )
-from app.domain.operation_execution.checkpoint_lineage import (
+from mission_control.domain.execution.checkpoint_lineage import (
     STAMP_INVOCATION_ID,
     CheckpointClassification,
     CheckpointLineageConflict,
     submission_invocation_id,
 )
-from app.domain.operation_execution.contracts import (
+from mission_control.domain.execution.contracts import (
     AsyncSubagentDependencyClass,
     AsyncSubagentLifecycle,
     AsyncSubagentUsage,
     OperationExecutionRequest,
 )
-from app.domain.orchestration.goal_directed import GoalDirectedInterpreter
-from app.domain.run_control.contracts import (
+from mission_control.domain.policies.contracts import (
     CancelAction,
     ClaimEffectAction,
     CommandStatus,
     ReconcileUnitAction,
 )
+from mission_control.domain.programs.goal_directed import GoalDirectedInterpreter
 from tests.acceptance.control_plane.test_wp_cp_045 import DeterministicProvider
 from tests.fixtures.checkpoint_recovery import (
     CrashingSaver,
@@ -587,7 +589,7 @@ async def test_cancel_during_async_work_cancels_the_child_and_leaves_its_usage_p
     its own effect (REQ-CP-RUN-009), which blocks the run's terminal settlement until a
     privileged `reconcile_usage`; the parent unit settles `cancelled` once."""
 
-    from app.domain.operation_execution.contracts import AsyncSubagentContract as Contract
+    from mission_control.domain.execution.contracts import AsyncSubagentContract as Contract
     from tests.acceptance.control_plane.test_wp_cp_045 import contract as base_contract
 
     harness = await recovery_harness()
@@ -737,7 +739,7 @@ async def test_child_result_decision_is_crash_safe_and_idempotent(after_write: b
     after that write leaves the authority and the link undecided; the retry completes the
     same decision once, and a repeated decision changes nothing."""
 
-    from app.domain.operation_execution.contracts import AsyncSubagentContract as Contract
+    from mission_control.domain.execution.contracts import AsyncSubagentContract as Contract
     from tests.acceptance.control_plane.test_wp_cp_045 import contract as base_contract
 
     harness = await recovery_harness()

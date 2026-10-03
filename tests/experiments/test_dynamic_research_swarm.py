@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.experiments.dynamic_research_swarm.contracts import (
+from experiments.dynamic_research_swarm.contracts import (
     AgentClaim,
     MissionPlan,
     ResearchUnitResult,
@@ -13,8 +13,8 @@ from app.experiments.dynamic_research_swarm.contracts import (
     UnitAnalysis,
     sha256_text,
 )
-from app.experiments.dynamic_research_swarm.evaluators import evaluate_unit
-from app.experiments.dynamic_research_swarm.temporal_activities import _repair_mojibake
+from experiments.dynamic_research_swarm.evaluators import evaluate_unit
+from experiments.dynamic_research_swarm.temporal_activities import _repair_mojibake
 
 
 def _source(text: str, *, digest: str | None = None) -> SourceSnapshot:

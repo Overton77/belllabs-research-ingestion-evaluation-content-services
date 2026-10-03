@@ -68,9 +68,7 @@ def test_acceptance_metrics_reject_missing_numeric_integrity() -> None:
     with pytest.raises(ValueError, match="finite and non-negative"):
         _validate_metrics({**valid, "median_prepare_latency_ms": float("nan")})
     with pytest.raises(ValueError, match="at most 1"):
-        _validate_metrics(
-            {**valid, next(iter(RATE_METRICS)): 1.01}
-        )
+        _validate_metrics({**valid, next(iter(RATE_METRICS)): 1.01})
 
 
 def test_live_scenario_contract_requires_authoritative_evidence_fields() -> None:

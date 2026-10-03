@@ -5,10 +5,13 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
-from app.application.control_plane.control_plane_repository import InMemoryDefinitionRepository
-from app.application.control_plane.service import ControlPlaneService
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.contracts import (
+from mission_control.adapters.storage.control_plane_payloads import InMemoryPayloadStore
+from mission_control.application.authoring.control_plane_repository import (
+    InMemoryDefinitionRepository,
+)
+from mission_control.application.authoring.service import ControlPlaneService
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.authoring.contracts import (
     AgentProfileDefinition,
     AuthorityCeiling,
     BudgetCeiling,
@@ -30,9 +33,8 @@ from app.domain.control_plane.contracts import (
     SkillFileManifestEntry,
     SourceProvenance,
 )
-from app.domain.control_plane.errors import CompilationRejected
-from app.domain.control_plane.extensions import ExtensionRegistry
-from app.integrations.control_plane_payloads import InMemoryPayloadStore
+from mission_control.domain.authoring.errors import CompilationRejected
+from mission_control.domain.authoring.extensions import ExtensionRegistry
 
 NOW = datetime(2026, 7, 25, tzinfo=UTC)
 FAKE_DIGEST = "sha256:" + "1" * 64
@@ -157,9 +159,7 @@ def test_all_agentic_asset_definitions_round_trip_through_union() -> None:
         description="Reviewed web-research prompt.",
         format="markdown",
         template_engine="jinja2",
-        variables=(
-            PromptVariable(name="question", description="Research question"),
-        ),
+        variables=(PromptVariable(name="question", description="Research question"),),
         body="Research {{ question }} using exact bound capabilities.",
         trust_class="privileged",
         eval_refs=frozenset({"eval.citation-integrity"}),
@@ -334,9 +334,7 @@ async def test_skill_manifest_digest_is_verified_at_publication() -> None:
     with pytest.raises(CompilationRejected, match="manifest digest"):
         await publish(
             control_plane,
-            skill_definition().model_copy(
-                update={"manifest_digest": "sha256:" + "8" * 64}
-            ),
+            skill_definition().model_copy(update={"manifest_digest": "sha256:" + "8" * 64}),
         )
 
 

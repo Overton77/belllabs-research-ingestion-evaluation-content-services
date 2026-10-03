@@ -7,16 +7,19 @@ from urllib.parse import urlparse
 import asyncpg
 import pytest
 
-from app.application.run_control.postgres_run_control_repository import PostgresRunControlRepository
-from app.application.runtime.postgres_run_forks import PostgresRunSnapshotRepository
-from app.application.runtime.postgres_runtime_authority import (
+from mission_control.adapters.postgres.connections import apply_application_migrations
+from mission_control.adapters.postgres.run_control.run_control_repository import (
+    PostgresRunControlRepository,
+)
+from mission_control.adapters.postgres.runtime.run_forks import PostgresRunSnapshotRepository
+from mission_control.adapters.postgres.runtime.runtime_authority import (
     PostgresBootstrapAuthority,
     PostgresBootstrapDecisionBridge,
 )
-from app.application.runtime.postgres_runtime_execution_repository import (
+from mission_control.adapters.postgres.runtime.runtime_execution_repository import (
     PostgresRuntimeCoordinationRepository,
 )
-from app.application.runtime.postgres_stage3_kernel_repository import (
+from mission_control.adapters.postgres.runtime.stage3_kernel_repository import (
     RETENTION_DAYS,
     PostgresDecisionRepository,
     PostgresExecutionLineageRepository,
@@ -25,33 +28,36 @@ from app.application.runtime.postgres_stage3_kernel_repository import (
     PostgresRuntimeIncidentRepository,
     PostgresStage3RetentionRepository,
 )
-from app.application.runtime.runtime_bootstrap import BootstrapRequest
-from app.application.runtime.runtime_lineage import PersistedExecutionLineage
-from app.application.runtime.runtime_reconciliation import (
+from mission_control.application.recovery.runtime_bootstrap import BootstrapRequest
+from mission_control.application.recovery.runtime_lineage import PersistedExecutionLineage
+from mission_control.application.recovery.runtime_reconciliation import (
     RuntimeIncidentDecision,
     RuntimeIncidentObservation,
     RuntimeIncidentType,
     RuntimeRepairAuditRecord,
 )
-from app.application.runtime.runtime_recovery import ForkAdmission
-from app.application.runtime.runtime_resources import ResourceCapacity, ResourceExhausted
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.graph_runtime.contracts import (
+from mission_control.application.recovery.runtime_recovery import ForkAdmission
+from mission_control.application.recovery.runtime_resources import (
+    ResourceCapacity,
+    ResourceExhausted,
+)
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.graph_runtime.contracts import (
     ActorRef,
     Correlation,
     GraphExecutionSubmission,
     RuntimeExecutionBinding,
     RuntimeExecutionStatus,
 )
-from app.domain.graph_runtime.definitions import (
+from mission_control.domain.graph_runtime.definitions import (
     ContentAddressedRef,
     ExecutionLineageEnvelope,
     RuntimeDefinitionKind,
 )
-from app.domain.graph_runtime.identities import (
+from mission_control.domain.graph_runtime.identities import (
     ExecutionEpochKey,
 )
-from app.domain.graph_runtime.kernel import (
+from mission_control.domain.graph_runtime.kernel import (
     DecisionRequest,
     DecisionResponse,
     LineageKind,
@@ -61,15 +67,14 @@ from app.domain.graph_runtime.kernel import (
     ResourceLeaseRequest,
     ResourceLeaseStatus,
 )
-from app.domain.run_control.errors import IdempotencyConflict
-from app.domain.run_control.forks import (
+from mission_control.domain.policies.errors import IdempotencyConflict
+from mission_control.domain.policies.forks import (
     RunForkPatch,
     RunForkReceipt,
     RunForkRequest,
     admission_request_ref,
     lineage_for,
 )
-from app.integrations.postgres import apply_application_migrations
 from tests.fixtures.run_forks import technical_snapshot
 from tests.unit.run_control.test_run_control import request as run_request
 from tests.unit.run_control.test_run_control import service as run_control_service
@@ -90,8 +95,7 @@ class AllowRetention:
         return (
             request_scope == "tenant-1"
             and actor_id == "operator:retention"
-            and record_class
-            in {"checkpoint", "event", "incident", "lineage", "decision", "fork"}
+            and record_class in {"checkpoint", "event", "incident", "lineage", "decision", "fork"}
         )
 
 
@@ -373,14 +377,12 @@ async def test_stage3_kernel_postgres_persistence_slice(
             graph_assembly_digest=binding.graph_assembly_digest,
             state_schema_digest=binding.state_schema_digest,
         )
-        bootstrap_decision_id = (
-            await PostgresBootstrapDecisionBridge(
-                pool
-            ).persist_reconciliation_decision(
-                bootstrap_request,
-                bootstrap_projection,
-                "checkpoint_route_incompatible",
-            )
+        bootstrap_decision_id = await PostgresBootstrapDecisionBridge(
+            pool
+        ).persist_reconciliation_decision(
+            bootstrap_request,
+            bootstrap_projection,
+            "checkpoint_route_incompatible",
         )
         assert bootstrap_decision_id.startswith("decision-")
         # RRM-006: the versioned fork saga state (snapshot, patch, derived run).
@@ -423,10 +425,7 @@ async def test_stage3_kernel_postgres_persistence_slice(
             budget_reservation_ref="budget:fork-1",
             admitted_effective_configuration_digest=fork_target.effective_configuration_digest,
         )
-        assert (
-            await fork_repo.record_admission(fork_request, fork_admission)
-            == fork_admission
-        )
+        assert await fork_repo.record_admission(fork_request, fork_admission) == fork_admission
         assert await fork_repo.claim_copy(fork_request) is True
         assert await fork_repo.claim_copy(fork_request) is False
         fork_receipt = RunForkReceipt(
@@ -576,14 +575,17 @@ async def test_stage3_kernel_postgres_persistence_slice(
             ),
             now=NOW,
         )
-        assert await leases.acquire(
-            _lease_request(
-                "worker-1",
-                "operation:1",
-                (ResourceKind.TENANT, ResourceKind.OPERATION_WORKER),
-            ),
-            now=NOW,
-        ) == worker
+        assert (
+            await leases.acquire(
+                _lease_request(
+                    "worker-1",
+                    "operation:1",
+                    (ResourceKind.TENANT, ResourceKind.OPERATION_WORKER),
+                ),
+                now=NOW,
+            )
+            == worker
+        )
         with pytest.raises(IdempotencyConflict, match="different envelope"):
             await leases.acquire(
                 _lease_request(

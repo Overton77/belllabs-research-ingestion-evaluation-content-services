@@ -15,15 +15,15 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from app.application.runtime.run_forks import (
+from mission_control.application.recovery.run_forks import (
     ForkPatchPolicyRegistry,
     ForkSnapshotNotFound,
     LineageAsyncChildForkClassifier,
     LinkedRunRecord,
 )
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.graph_runtime.identities import RuntimeUnitIdentity
-from app.domain.run_control.contracts import (
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.graph_runtime.identities import RuntimeUnitIdentity
+from mission_control.domain.policies.contracts import (
     CancelAction,
     ClaimEffectAction,
     CommandStatus,
@@ -32,8 +32,8 @@ from app.domain.run_control.contracts import (
     RunRequest,
     StartAction,
 )
-from app.domain.run_control.errors import IdempotencyConflict
-from app.domain.run_control.forks import (
+from mission_control.domain.policies.errors import IdempotencyConflict
+from mission_control.domain.policies.forks import (
     INVALIDATE_ALL,
     ForkPatchChange,
     ForkPatchPolicy,
@@ -49,7 +49,7 @@ from app.domain.run_control.forks import (
     required_invalidation_frontier,
     run_snapshot_digest,
 )
-from app.domain.run_control.inspection import AsyncChildInspection
+from mission_control.domain.policies.inspection import AsyncChildInspection
 from tests.fixtures.checkpoint_lineage import goal_unit, in_doubt_incident
 from tests.fixtures.checkpoint_recovery import (
     RecoveryHarness,
@@ -269,12 +269,12 @@ async def test_unsettled_or_in_doubt_units_are_not_quiescent_and_never_reusable(
 def _child_service(details: Any) -> Any:
     from datetime import timedelta as delta
 
-    from app.application.async_subagents.service import (
+    from mission_control.adapters.deep_agents.async_subagents import (
+        DeepAgentsAsyncSubagentAdapter,
+    )
+    from mission_control.application.subordinates.service import (
         AsyncSubagentService,
         InMemoryAsyncSubagentAuthority,
-    )
-    from app.integrations.agents.deep_agents.async_subagents import (
-        DeepAgentsAsyncSubagentAdapter,
     )
     from tests.acceptance.control_plane.test_wp_cp_045 import NOW as CHILD_NOW
 
@@ -980,8 +980,8 @@ def test_fork_request_binds_scope_snapshot_patch_and_admission() -> None:
 def test_fork_root_parent_run_is_carried_on_the_root_only() -> None:
     from dataclasses import asdict
 
-    from app.domain.orchestration.contracts import BellLabsRunInput
-    from app.temporal.workflows.belllabs_run import BellLabsRunWorkflow
+    from mission_control.adapters.temporal.workflows.belllabs_run import BellLabsRunWorkflow
+    from mission_control.domain.programs.contracts import BellLabsRunInput
 
     values: dict[str, Any] = {
         "schema_version": "belllabs.temporal-root.v1",

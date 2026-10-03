@@ -21,21 +21,28 @@ from temporalio.client import WorkflowHandle
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
 
-from app.application.operations.journaled_operation_execution import _effect_claim_id
-from app.application.operations.operation_execution import bind_operation_execution_request
-from app.domain.operation_execution.checkpoint_lineage import CheckpointClassification
-from app.domain.operation_execution.contracts import (
-    OperationExecutionRequest,
-    OperationWorkflowRequest,
+from mission_control.adapters.temporal.operation_activities import (
+    OperationExecutionActivities,
+    parse_operation_result,
 )
-from app.domain.run_control.contracts import CommandStatus, ReconcileUnitAction
-from app.temporal.operation_activities import OperationExecutionActivities, parse_operation_result
-from app.temporal.workflow_sandbox import coordinator_workflow_runner
-from app.temporal.workflows.operation import (
+from mission_control.adapters.temporal.workflow_sandbox import coordinator_workflow_runner
+from mission_control.adapters.temporal.workflows.operation import (
     CANCELLATION_SAGA_PATCH,
     NUDGE_SNAPSHOT_PATCH,
     OperationWorkflow,
 )
+from mission_control.application.execution.operations.journaled_operation_execution import (
+    _effect_claim_id,
+)
+from mission_control.application.execution.operations.operation_execution import (
+    bind_operation_execution_request,
+)
+from mission_control.domain.execution.checkpoint_lineage import CheckpointClassification
+from mission_control.domain.execution.contracts import (
+    OperationExecutionRequest,
+    OperationWorkflowRequest,
+)
+from mission_control.domain.policies.contracts import CommandStatus, ReconcileUnitAction
 from tests.fixtures.checkpoint_recovery import (
     RecoveryHarness,
     recovery_harness,

@@ -6,19 +6,17 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from app.api.graph_runtime_schemas import graph_runtime_contract_schemas
-from app.application.operations.mongo_operation_authority_migration import select_authority_version
-from app.application.runtime.runtime_run_plan import compile_structural_graph_assembly
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.stagegraph_builder import (
+from mission_control.application.recovery.runtime_run_plan import compile_structural_graph_assembly
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.authoring.stagegraph_builder import (
     StageGraphStageSpec,
     build_stagegraph_v2,
 )
-from app.domain.graph_runtime.contracts import (
+from mission_control.domain.graph_runtime.contracts import (
     ProviderNeutralAttemptMetadata,
     RuntimeCapabilityReadiness,
 )
-from app.domain.graph_runtime.definitions import (
+from mission_control.domain.graph_runtime.definitions import (
     CapabilityManifestDefinition,
     CapabilityMaturityRecord,
     ContentAddressedRef,
@@ -32,16 +30,17 @@ from app.domain.graph_runtime.definitions import (
     StageCapabilityRequirement,
     StageExecutionBinding,
 )
-from app.domain.graph_runtime.governance import (
+from mission_control.domain.graph_runtime.governance import (
     build_field_governance,
     validate_field_governance,
 )
-from app.domain.graph_runtime.identities import (
+from mission_control.domain.graph_runtime.identities import (
     AgentThreadKey,
     ExecutionEpochKey,
     RuntimeTransportAttemptKey,
     SemanticOperationAttemptKey,
 )
+from mission_control.interfaces.http.graph_runtime_schemas import graph_runtime_contract_schemas
 
 DIGEST = "sha256:" + "a" * 64
 NOW = datetime(2026, 8, 5, 20, 0, tzinfo=UTC)
@@ -186,12 +185,8 @@ def test_graph_assembly_digest_field_governance_and_schema_export() -> None:
         "execution_environment_ref": ref(
             RuntimeDefinitionKind.EXECUTION_ENVIRONMENT, "environment"
         ),
-        "evaluation_profile_ref": ref(
-            RuntimeDefinitionKind.EVALUATION_PROFILE, "evaluation"
-        ),
-        "capability_manifest_ref": ref(
-            RuntimeDefinitionKind.CAPABILITY_MANIFEST, "capabilities"
-        ),
+        "evaluation_profile_ref": ref(RuntimeDefinitionKind.EVALUATION_PROFILE, "evaluation"),
+        "capability_manifest_ref": ref(RuntimeDefinitionKind.CAPABILITY_MANIFEST, "capabilities"),
         "checkpoint_compatibility_key": "stagegraph-state-v1",
         "prohibited_state_fields": frozenset(
             {"secrets", "credentials", "checkpoint_body", "raw_private_corpus"}
@@ -231,31 +226,6 @@ def test_provider_neutral_attempt_prevents_exactly_once_illusion() -> None:
             idempotency_supported=False,
             consequential=True,
             retry_class="safe",
-        )
-
-
-def test_mongo_authority_dual_read_and_rollback_window_are_explicit() -> None:
-    assert (
-        select_authority_version(
-            requested_schema_version=None,
-            v2_available=True,
-            rollback_window_open=True,
-        )
-        == "v2"
-    )
-    assert (
-        select_authority_version(
-            requested_schema_version="1",
-            v2_available=True,
-            rollback_window_open=True,
-        )
-        == "legacy"
-    )
-    with pytest.raises(ValueError, match="rollback window"):
-        select_authority_version(
-            requested_schema_version="1",
-            v2_available=True,
-            rollback_window_open=False,
         )
 
 
@@ -434,9 +404,7 @@ def test_structural_compiler_intersects_exact_manifest_authority_and_readiness()
         reason="qualified",
         fallback="reject",
     )
-    erc = SimpleNamespace(
-        effective_authority=SimpleNamespace(capabilities=frozenset())
-    )
+    erc = SimpleNamespace(effective_authority=SimpleNamespace(capabilities=frozenset()))
     _compiled, unavailable = compile_structural_graph_assembly(
         blueprint=blueprint,
         effective_configuration=erc,

@@ -33,26 +33,34 @@ from temporalio.client import Client
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
-from app.api.control_plane import ControlPlanePrincipal, get_control_plane_principal
-from app.api.run_control import (
-    get_boundary_intervention_service,
-    get_run_control_service,
+from mission_control.adapters.postgres.run_control.run_control_repository import (
+    PostgresRunControlRepository,
 )
-from app.application.run_control.boundary_interventions import (
+from mission_control.adapters.temporal.boundary_commands import TemporalBoundaryCommandTransport
+from mission_control.adapters.temporal.submission import TemporalWorkflowSubmitter
+from mission_control.adapters.temporal.workflow_sandbox import coordinator_workflow_runner
+from mission_control.adapters.temporal.workflows.belllabs_run import BellLabsRunWorkflow
+from mission_control.adapters.temporal.workflows.goal_directed import GoalDirectedWorkflow
+from mission_control.adapters.temporal.workflows.operation import OperationWorkflow
+from mission_control.adapters.temporal.workflows.stagegraph import (
+    StageGraphWorkflow,
+    wait_condition_id,
+)
+from mission_control.application.execution.boundary_interventions import (
     BoundaryCommandDeliveryService,
     BoundaryInterventionService,
 )
-from app.application.run_control.postgres_run_control_repository import PostgresRunControlRepository
-from app.domain.coordinator.launch import BlueprintFamily
-from app.domain.run_control.contracts import RunPhase, SatisfyWaitAction
-from app.integrations.temporal_boundary_commands import TemporalBoundaryCommandTransport
-from app.integrations.temporal_workflow_submission import TemporalWorkflowSubmitter
-from app.server import api
-from app.temporal.workflow_sandbox import coordinator_workflow_runner
-from app.temporal.workflows.belllabs_run import BellLabsRunWorkflow
-from app.temporal.workflows.goal_directed import GoalDirectedWorkflow
-from app.temporal.workflows.operation import OperationWorkflow
-from app.temporal.workflows.stagegraph import StageGraphWorkflow, wait_condition_id
+from mission_control.bootstrap.technical_api import api
+from mission_control.domain.coordinator.launch import BlueprintFamily
+from mission_control.domain.policies.contracts import RunPhase, SatisfyWaitAction
+from mission_control.interfaces.http.control_plane import (
+    ControlPlanePrincipal,
+    get_control_plane_principal,
+)
+from mission_control.interfaces.http.run_control import (
+    get_boundary_intervention_service,
+    get_run_control_service,
+)
 from tests.integration.postgres.test_checkpoint_lineage_postgres import (
     require_disposable_postgres,
     reset_application_schema,
@@ -89,9 +97,7 @@ class Facade:
 
     async def __aenter__(self) -> Facade:
         api.dependency_overrides[get_run_control_service] = lambda: self.authority.run_control
-        api.dependency_overrides[get_boundary_intervention_service] = (
-            lambda: self.authority.facade
-        )
+        api.dependency_overrides[get_boundary_intervention_service] = lambda: self.authority.facade
         api.dependency_overrides[get_control_plane_principal] = lambda: ControlPlanePrincipal(
             actor_id="operator",
             roles=frozenset({"operator", "relay"}),
@@ -276,9 +282,7 @@ async def _stagegraph_demo(
 
 
 async def _family_recorded_pause(client: Any, family_id: str) -> bool:
-    state = await client.get_workflow_handle(family_id).query(
-        GoalDirectedWorkflow.boundary_state
-    )
+    state = await client.get_workflow_handle(family_id).query(GoalDirectedWorkflow.boundary_state)
     return state["paused"] is not None
 
 

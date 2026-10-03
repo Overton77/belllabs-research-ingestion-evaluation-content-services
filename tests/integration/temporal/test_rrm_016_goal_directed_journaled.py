@@ -28,20 +28,31 @@ from temporalio.client import WorkflowFailureError, WorkflowHistory
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
 
-from app.application.operations.checkpoint_lineage import (
+from mission_control.adapters.storage.artifact_payloads import InMemoryArtifactPayloadStore
+from mission_control.adapters.temporal.operation_activities import OperationExecutionActivities
+from mission_control.adapters.temporal.registration.activities import (
+    agent_cognitive_activities,
+    coordinator_activities,
+)
+from mission_control.adapters.temporal.workflow_sandbox import coordinator_workflow_runner
+from mission_control.adapters.temporal.workflows.goal_directed import (
+    CANCELLATION_SAGA_PATCH,
+    JOURNALED_SETTLEMENT_PATCH,
+    STALE_VERSION_RETRY_PATCH,
+    VERIFIED_TERMINAL_OUTPUTS_PATCH,
+    GoalDirectedWorkflow,
+)
+from mission_control.adapters.temporal.workflows.operation import OperationWorkflow
+from mission_control.application.execution.operations.checkpoint_lineage import (
     CheckpointLineageService,
     InMemoryCheckpointLineageRepository,
 )
-from app.application.operations.operation_execution import (
+from mission_control.application.execution.operations.operation_execution import (
     InMemoryOperationBindingRepository,
     operation_settlement_id,
 )
-from app.domain.operation_execution.contracts import OperationExecutionResult
-from app.domain.orchestration.goal_directed_runtime import (
-    GoalOperationReconciliationRequest,
-    GoalOperationReconciliationResult,
-)
-from app.domain.run_control.contracts import (
+from mission_control.domain.execution.contracts import OperationExecutionResult
+from mission_control.domain.policies.contracts import (
     CancelAction,
     CommandStatus,
     EffectDisposition,
@@ -50,21 +61,10 @@ from app.domain.run_control.contracts import (
     RunOutcome,
     RunPhase,
 )
-from app.integrations.artifact_payloads import InMemoryArtifactPayloadStore
-from app.temporal.operation_activities import OperationExecutionActivities
-from app.temporal.registration.activities import (
-    agent_cognitive_activities,
-    coordinator_activities,
+from mission_control.domain.programs.goal_directed_runtime import (
+    GoalOperationReconciliationRequest,
+    GoalOperationReconciliationResult,
 )
-from app.temporal.workflow_sandbox import coordinator_workflow_runner
-from app.temporal.workflows.goal_directed import (
-    CANCELLATION_SAGA_PATCH,
-    JOURNALED_SETTLEMENT_PATCH,
-    STALE_VERSION_RETRY_PATCH,
-    VERIFIED_TERMINAL_OUTPUTS_PATCH,
-    GoalDirectedWorkflow,
-)
-from app.temporal.workflows.operation import OperationWorkflow
 from tests.fixtures.checkpoint_recovery import MemoryOperationJournal
 from tests.fixtures.goal_directed_journaled import (
     SCOPE,
@@ -213,9 +213,9 @@ async def test_journaled_goal_directed_run_settles_each_operation_once_through_a
         assert await authority.states(run_id, "resume") == ["accepted", "delivered", "applied"]
 
         # Every executor and verifier operation: one claim, one settlement, one usage record.
-        bindings = [
-            item.operation_binding_ref for item in composition.documents.iterations
-        ] + [item.verifier_binding_ref for item in composition.documents.verifications]
+        bindings = [item.operation_binding_ref for item in composition.documents.iterations] + [
+            item.verifier_binding_ref for item in composition.documents.verifications
+        ]
         assert len(set(bindings)) == 4
         budget = await run_control.get_budget(SCOPE, run_id)
         effects = await run_control.get_effects(SCOPE, run_id)
@@ -358,9 +358,9 @@ async def test_post_change_goal_directed_history_replays_on_the_journaled_path()
         "family/rrm-016-post-change/1", _read_history(POST_CHANGE / POST_CHANGE_HISTORY)
     )
     assert JOURNALED_SETTLEMENT_PATCH in patch_ids(history)
-    assert [
-        item for item in lifecycle_command_ids(history) if item.startswith("goal:usage:")
-    ] == ["goal:usage:baseline"]
+    assert [item for item in lifecycle_command_ids(history) if item.startswith("goal:usage:")] == [
+        "goal:usage:baseline"
+    ]
     assert [
         item["operation_role"]
         for name in ("goaldirected.prepare_executor", "goaldirected.prepare_verifier")
@@ -409,9 +409,7 @@ async def test_iterations_with_distinct_output_refs_terminalize() -> None:
         assert result.terminalization_proposal.output_refs == ("artifact:rrm016:2",)
         run = await run_control.get_run(SCOPE, run_id)
         assert run.terminal_outcome == RunOutcome.COMPLETED
-        assert [item.output_ref for item in run.accepted_output_evidence] == [
-            "artifact:rrm016:2"
-        ]
+        assert [item.output_ref for item in run.accepted_output_evidence] == ["artifact:rrm016:2"]
         assert [item for item in lifecycle_command_ids(history) if item.startswith("goal:output:")]
         assert all(
             item.startswith("goal:output:artifact:rrm016:2:")

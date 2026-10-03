@@ -6,8 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-
-from app.application.capability.reviewed_capability_promotion import (
+from biotech_mission_adapters.application.capabilities.reviewed_capability_promotion import (
     AGENT_BROWSER_COMMIT,
     FIRECRAWL_COMMIT,
     FIRECRAWL_SKILL_NAMES,
@@ -22,10 +21,18 @@ from app.application.capability.reviewed_capability_promotion import (
     build_reviewed_capability_bundle,
     promote_reviewed_capabilities,
 )
-from app.application.control_plane.control_plane_repository import InMemoryDefinitionRepository
-from app.application.control_plane.service import ControlPlaneService
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.contracts import (
+from biotech_mission_adapters.domain.coordinator.web_capability_fixtures import (
+    SEARCH_TOOL_LOGICAL_IDS,
+    web_capability_definitions,
+)
+
+from mission_control.adapters.storage.control_plane_payloads import InMemoryPayloadStore
+from mission_control.application.authoring.control_plane_repository import (
+    InMemoryDefinitionRepository,
+)
+from mission_control.application.authoring.service import ControlPlaneService
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.authoring.contracts import (
     AgentProfileDefinition,
     AliasRef,
     DefinitionKind,
@@ -37,16 +44,12 @@ from app.domain.control_plane.contracts import (
     RetireRequest,
     SkillDefinition,
 )
-from app.domain.control_plane.extensions import ExtensionRegistry
-from app.domain.coordinator.web_capability_fixtures import (
-    SEARCH_TOOL_LOGICAL_IDS,
-    web_capability_definitions,
-)
-from app.integrations.control_plane_payloads import InMemoryPayloadStore
+from mission_control.domain.authoring.extensions import ExtensionRegistry
 
 NOW = datetime(2026, 7, 26, 14, 0, tzinfo=UTC)
 PAYLOADS = (
-    Path(__file__).resolve().parents[3] / "app" / "domain" / "coordinator" / "reviewed_payloads"
+    Path(__file__).resolve().parents[3]
+    / "integrations/biotech/src/biotech_mission_adapters/resources/reviewed_payloads"
 )
 WORKSPACE_AGENT_BROWSER = (
     Path(__file__).resolve().parents[4] / ".agents" / "skills" / "agent-browser"

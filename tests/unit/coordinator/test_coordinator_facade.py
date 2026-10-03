@@ -4,24 +4,29 @@ from datetime import UTC, datetime
 from hashlib import sha256
 
 import pytest
+from biotech_mission_adapters.domain.coordinator.web_capability_fixtures import (
+    web_capability_definitions,
+)
 from fastmcp import Client, Context, FastMCP
 from fastmcp.server.auth import AccessToken
 
-from app.application.capability.capability_search import CapabilitySearchService
-from app.application.capability.capability_search_repository import (
+from mission_control.application.authoring.control_plane_repository import (
+    InMemoryDefinitionRepository,
+)
+from mission_control.application.capabilities.capability_search import CapabilitySearchService
+from mission_control.application.capabilities.capability_search_repository import (
     CapabilityEmbedding,
     InMemoryCatalogSearchRepository,
 )
-from app.application.capability.catalog_projection import CatalogProjector
-from app.application.control_plane.control_plane_repository import InMemoryDefinitionRepository
-from app.application.coordinator.coordinator_facade import (
+from mission_control.application.capabilities.catalog_projection import CatalogProjector
+from mission_control.application.coordinator.coordinator_facade import (
     BlueprintRuntimeStatus,
     CoordinatorFeatureFlags,
     InMemoryCoordinatorAuditSink,
     ProductionCoordinatorFacade,
 )
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.contracts import (
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.authoring.contracts import (
     CatalogPayloadRef,
     DefinitionSelector,
     PromptDefinition,
@@ -33,12 +38,9 @@ from app.domain.control_plane.contracts import (
     StageGraphBlueprint,
     WorkflowTypeDefinition,
 )
-from app.domain.coordinator.launch import BlueprintFamily
-from app.domain.coordinator.web_capability_fixtures import (
-    web_capability_definitions,
-)
-from app.mcp.coordinator_auth import VerifiedAccessTokenPrincipalResolver
-from app.mcp.coordinator_server import (
+from mission_control.domain.coordinator.launch import BlueprintFamily
+from mission_control.interfaces.mcp.coordinator_auth import VerifiedAccessTokenPrincipalResolver
+from mission_control.interfaces.mcp.coordinator_server import (
     CoordinatorPrincipal,
     create_coordinator_server,
 )
@@ -101,14 +103,14 @@ def coordinator_skill() -> SkillDefinition:
         size_bytes=512,
     )
     return SkillDefinition(
-        logical_id="skill.belllabs-workflow-coordinator",
+        logical_id="skill.mission-control-coordinator",
         title="BellLabs Workflow Coordinator",
         description="Search exact governed capabilities and prepare admitted workflows.",
-        skill_name="belllabs-workflow-coordinator",
-        frontmatter={"name": "belllabs-workflow-coordinator"},
+        skill_name="mission-control-coordinator",
+        frontmatter={"name": "mission-control-coordinator"},
         body_summary="Use the coordinator MCP surface progressively.",
         bundle_ref=CatalogPayloadRef(
-            uri="s3://catalog/skills/belllabs-workflow-coordinator.tar",
+            uri="s3://catalog/skills/mission-control-coordinator.tar",
             digest=DIGEST,
             media_type="application/x-tar",
             size_bytes=1_024,
@@ -118,8 +120,8 @@ def coordinator_skill() -> SkillDefinition:
         compatibility=SkillCompatibility(runtimes=frozenset({"codex"})),
         source_provenance=SourceProvenance(
             source="belllabs",
-            locator="catalog://skills/belllabs-workflow-coordinator",
-            upstream_identity="belllabs-workflow-coordinator",
+            locator="catalog://skills/mission-control-coordinator",
+            upstream_identity="mission-control-coordinator",
             upstream_version="1",
         ),
         review_status="approved",
@@ -257,7 +259,7 @@ async def test_concrete_facade_through_in_memory_fastmcp() -> None:
         ]
         assert (
             bootstrap.data["data"]["coordinator_skill_ref"]["logical_id"]
-            == "skill.belllabs-workflow-coordinator"
+            == "skill.mission-control-coordinator"
         )
         assert bootstrap.data["data"]["root_tools"] == [
             "coordinator_bootstrap",
@@ -271,12 +273,9 @@ async def test_concrete_facade_through_in_memory_fastmcp() -> None:
         prompts = {prompt.name for prompt in await client.list_prompts()}
         assert prompts == {"propose_workflow"}
         resource_templates = {
-            str(resource.uriTemplate)
-            for resource in await client.list_resource_templates()
+            str(resource.uriTemplate) for resource in await client.list_resource_templates()
         }
-        assert resource_templates == set(
-            bootstrap.data["data"]["resource_templates"]
-        )
+        assert resource_templates == set(bootstrap.data["data"]["resource_templates"])
 
         search = await client.call_tool(
             "search_capabilities",
@@ -289,23 +288,20 @@ async def test_concrete_facade_through_in_memory_fastmcp() -> None:
         assert search.data["ok"] is True
         hits = search.data["data"]["hits"]
         assert any(
-            hit["exact_ref"]["logical_id"] == "web-research-browser-verification"
-            for hit in hits
+            hit["exact_ref"]["logical_id"] == "web-research-browser-verification" for hit in hits
         )
-        assert {
-            measurement["metric_kind"]
-            for measurement in search.data["data"]["token_use"]
-        } == {"search_query", "search_results"}
+        assert {measurement["metric_kind"] for measurement in search.data["data"]["token_use"]} == {
+            "search_query",
+            "search_results",
+        }
         assert all(
-            measurement["estimated_tokens"] > 0
-            for measurement in search.data["data"]["token_use"]
+            measurement["estimated_tokens"] > 0 for measurement in search.data["data"]["token_use"]
         )
 
         workflow_hit = next(
             hit
             for hit in hits
-            if hit["exact_ref"]["logical_id"]
-            == "web-research-browser-verification"
+            if hit["exact_ref"]["logical_id"] == "web-research-browser-verification"
         )
         detail = await client.call_tool(
             "get_capability",
@@ -313,9 +309,7 @@ async def test_concrete_facade_through_in_memory_fastmcp() -> None:
         )
         assert detail.data["ok"] is True
         assert detail.data["data"]["definition"]["purpose"]
-        assert detail.data["data"]["token_use"][0]["metric_kind"] == (
-            "catalog_definition"
-        )
+        assert detail.data["data"]["token_use"][0]["metric_kind"] == ("catalog_definition")
 
         tool_search = await client.call_tool(
             "search_capabilities",
@@ -328,16 +322,14 @@ async def test_concrete_facade_through_in_memory_fastmcp() -> None:
         tool_hit = next(
             hit
             for hit in tool_search.data["data"]["hits"]
-            if hit["exact_ref"]["logical_id"]
-            == "mcp.firecrawl:firecrawl_search"
+            if hit["exact_ref"]["logical_id"] == "mcp.firecrawl:firecrawl_search"
         )
         tool_detail = await client.call_tool(
             "get_capability",
             {"exact_ref": tool_hit["exact_ref"]},
         )
         assert {
-            measurement["metric_kind"]
-            for measurement in tool_detail.data["data"]["token_use"]
+            measurement["metric_kind"] for measurement in tool_detail.data["data"]["token_use"]
         } == {"catalog_definition", "tool_schema"}
 
         resources = await client.read_resource(
@@ -407,9 +399,7 @@ async def test_service_layer_rechecks_permissions_and_tenant_scope() -> None:
 async def test_design_validation_never_turns_a_draft_into_launch_authority() -> None:
     facade, _audit = await concrete_facade()
     fixture = web_capability_definitions()
-    workflow_type = next(
-        item for item in fixture if isinstance(item, WorkflowTypeDefinition)
-    )
+    workflow_type = next(item for item in fixture if isinstance(item, WorkflowTypeDefinition))
     blueprint = next(item for item in fixture if isinstance(item, StageGraphBlueprint))
     principal = CoordinatorPrincipal(
         actor_id="operator-1",
@@ -436,12 +426,8 @@ async def test_design_validation_never_turns_a_draft_into_launch_authority() -> 
                     "purpose": "candidate-only browser procedure",
                 }
             ],
-            "requested_authority": workflow_type.authority_ceiling.model_dump(
-                mode="json"
-            ),
-            "workspace_requirements": workflow_type.workspace_contract.model_dump(
-                mode="json"
-            ),
+            "requested_authority": workflow_type.authority_ceiling.model_dump(mode="json"),
+            "workspace_requirements": workflow_type.workspace_contract.model_dump(mode="json"),
             "budgets": workflow_type.authority_ceiling.budgets.model_dump(mode="json"),
             "rationale": "Exercise draft validation without publication.",
         },

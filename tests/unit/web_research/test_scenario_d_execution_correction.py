@@ -3,17 +3,24 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-
-from app.application.capability.reviewed_capability_promotion import (
+from biotech_mission_adapters.application.capabilities.reviewed_capability_promotion import (
     build_scenario_d_execution_correction,
     publish_scenario_d_execution_correction,
 )
-from app.application.control_plane.control_plane_repository import InMemoryDefinitionRepository
-from app.application.control_plane.service import ControlPlaneService
-from app.application.web_research.web_research_semantic_handlers import (
+from biotech_mission_adapters.application.web_research.web_research_semantic_handlers import (
     resolve_web_research_run_authority,
 )
-from app.domain.control_plane.contracts import (
+from biotech_mission_adapters.domain.coordinator.web_capability_fixtures import (
+    web_capability_definitions,
+)
+from biotech_mission_adapters.domain.coordinator.web_research_runtime import WebResearchGoal
+
+from mission_control.adapters.storage.control_plane_payloads import InMemoryPayloadStore
+from mission_control.application.authoring.control_plane_repository import (
+    InMemoryDefinitionRepository,
+)
+from mission_control.application.authoring.service import ControlPlaneService
+from mission_control.domain.authoring.contracts import (
     ControlProfileDefinition,
     DefinitionKind,
     PublishedDefinition,
@@ -22,12 +29,7 @@ from app.domain.control_plane.contracts import (
     WorkflowImplementationBindingDefinition,
     WorkflowTypeDefinition,
 )
-from app.domain.control_plane.extensions import ExtensionRegistry
-from app.domain.coordinator.web_capability_fixtures import (
-    web_capability_definitions,
-)
-from app.domain.coordinator.web_research_runtime import WebResearchGoal
-from app.integrations.control_plane_payloads import InMemoryPayloadStore
+from mission_control.domain.authoring.extensions import ExtensionRegistry
 from tests.unit.web_research.test_web_research_semantic_handlers import (
     BROWSER_RUNTIME,
     FIRECRAWL_RUNTIME,
@@ -77,9 +79,7 @@ async def test_corrective_bundle_advances_exact_transitive_chain_and_preserves_r
         for stage in original_blueprint.definition.stages
         if stage.stage_id == "admit_public_goal"
     )
-    assert original_admission.operation_slots[0].reservation == {
-        "operation.attempts": 1
-    }
+    assert original_admission.operation_slots[0].reservation == {"operation.attempts": 1}
 
     bundle = build_scenario_d_execution_correction(catalog_records=records)
     blueprint, control, workflow, implementation = bundle.definitions

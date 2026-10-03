@@ -3,53 +3,59 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytest
+from biotech_mission_adapters.application.schema.schema_catalog import CATALOG_GENERATOR_VERSION
+from biotech_mission_adapters.application.schema.schema_context_stage_handlers import (
+    SchemaContextBindingPlanInput,
+    SchemaContextSemanticBindingProvider,
+)
+from biotech_mission_adapters.application.schema.schema_grounding_semantic_handlers import (
+    SupportingGraphBindingPlanInput,
+    SupportingGraphSemanticBindingProvider,
+)
+from biotech_mission_adapters.application.web_research.web_research_semantic_binding import (
+    SemanticServiceWebResearchOperationBindingAuthor,
+    WebResearchOperationBindingRequest,
+)
+from biotech_mission_adapters.domain.schema_context.contracts import SchemaContextSelectionRequest
+from biotech_mission_adapters.domain.schema_grounding.contracts import (
+    DurableObjectRef,
+    SchemaCatalogBuildRequest,
+)
 
-from app.application.coordinator.coordinator_launch import CoordinatorWorkflowLaunchService
-from app.application.coordinator.coordinator_semantic_bindings import (
+from mission_control.application.coordinator.coordinator_launch import (
+    CoordinatorWorkflowLaunchService,
+)
+from mission_control.application.coordinator.coordinator_semantic_bindings import (
     WorkflowSemanticBindingProviderRouter,
 )
-from app.application.operations.operation_execution import InMemoryOperationBindingRepository
-from app.application.operations.semantic_operation_bindings import (
+from mission_control.application.execution.operations.operation_execution import (
+    InMemoryOperationBindingRepository,
+)
+from mission_control.application.execution.operations.semantic_operation_bindings import (
     SemanticOperationBindingTemplates,
     SemanticOperationExecutionBindingService,
 )
-from app.application.orchestration.goal_directed import InMemoryGoalOperationTemplateRepository
-from app.application.orchestration.orchestration_binding_repository import (
+from mission_control.application.programs.goal_directed import (
+    InMemoryGoalOperationTemplateRepository,
+)
+from mission_control.application.programs.orchestration_binding_repository import (
     InMemoryRunSemanticInputBindingRepository,
     RunSemanticInputBindingService,
 )
-from app.application.orchestration.orchestration_routing import (
+from mission_control.application.programs.orchestration_routing import (
     BoundStageOperationExecutor,
     SemanticHandlerRegistry,
     SemanticRoutingError,
 )
-from app.application.schema.schema_catalog import CATALOG_GENERATOR_VERSION
-from app.application.schema.schema_context_stage_handlers import (
-    SchemaContextBindingPlanInput,
-    SchemaContextSemanticBindingProvider,
-)
-from app.application.schema.schema_grounding_semantic_handlers import (
-    SupportingGraphBindingPlanInput,
-    SupportingGraphSemanticBindingProvider,
-)
-from app.application.web_research.web_research_semantic_binding import (
-    SemanticServiceWebResearchOperationBindingAuthor,
-    WebResearchOperationBindingRequest,
-)
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.contracts import DefinitionKind, ExactDefinitionRef
-from app.domain.operation_execution.contracts import OperationAttemptIdentity
-from app.domain.orchestration.contracts import (
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.authoring.contracts import DefinitionKind, ExactDefinitionRef
+from mission_control.domain.execution.contracts import OperationAttemptIdentity
+from mission_control.domain.policies.contracts import AdmissionDecision, DecisionStatus
+from mission_control.domain.programs.contracts import (
     StageCandidateIdentity,
     StageExecutionIdentity,
     StageOperationRequest,
     StageOperationResult,
-)
-from app.domain.run_control.contracts import AdmissionDecision, DecisionStatus
-from app.domain.schema_context.contracts import SchemaContextSelectionRequest
-from app.domain.schema_grounding.contracts import (
-    DurableObjectRef,
-    SchemaCatalogBuildRequest,
 )
 from tests.unit.coordinator.test_coordinator_launch_preparation import (
     NOW,

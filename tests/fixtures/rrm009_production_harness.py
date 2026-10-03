@@ -1,8 +1,6 @@
-"""RRM-009 production stack harness: the API, workers, Temporal dev server and facade helpers.
+"""Shared inspection and control helpers for PostgreSQL production qualifications.
 
-The BellLabs API (`app.server.api`) is composed exactly as a deployment composes it and the
-workers are the deployment factory's, over the disposable application PostgreSQL, MongoDB and a
-persistent Temporal dev server. The RRM-009 qualifications (composition, live capabilities,
+The RRM-009 qualifications (composition, live capabilities,
 object store, cancellation drill) share this harness; the technical models, catalog and
 templates it runs are in `tests.fixtures.rrm009_production_stack`.
 """
@@ -11,11 +9,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
-from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import AsyncExitStack, asynccontextmanager
+from collections.abc import Awaitable, Callable
+from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -29,24 +26,30 @@ from temporalio.client import Client
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer
 
-from app.api.control_plane import ControlPlanePrincipal, get_control_plane_principal
-from app.api.run_control import (
-    close_run_control_resources,
-    initialize_run_control_resources,
+from mission_control.adapters.operations.runtime_ports import (
+    FilesystemArtifactPayloadStore,
 )
-from app.api.runtime_composition import compose_runtime_control
-from app.application.control_plane.control_plane_repository import BeanieDefinitionRepository
-from app.application.control_plane.service import ControlPlaneService
-from app.application.run_control.postgres_run_control_repository import PostgresRunControlRepository
-from app.application.run_control.service import F1RunConfigurationVerifier
-from app.application.runtime.run_forks import ForkPatchPolicyRegistry
-from app.application.workspaces.artifact_promotion import (
+from mission_control.adapters.temporal.deployment_composition import (
+    ProductionWorkerActivityCompositionFactory,
+)
+from mission_control.adapters.temporal.worker import (
+    WorkerActivityComposition,
+)
+from mission_control.adapters.temporal.workflow_sandbox import coordinator_workflow_runner
+from mission_control.adapters.temporal.workflows.belllabs_run import BellLabsRunWorkflow
+from mission_control.adapters.temporal.workflows.goal_directed import GoalDirectedWorkflow
+from mission_control.adapters.temporal.workflows.operation import OperationWorkflow
+from mission_control.adapters.temporal.workflows.stagegraph import (
+    StageGraphWorkflow,
+    wait_condition_id,
+)
+from mission_control.application.artifacts.artifact_promotion import (
     ArtifactPayloadAddress,
-    StaticArtifactValidationAuthority,
 )
-from app.config import Settings, get_settings
-from app.domain.control_plane.extensions import ExtensionRegistry
-from app.domain.operation_execution.contracts import (
+from mission_control.application.authoring.service import ControlPlaneService
+from mission_control.bootstrap.settings import Settings
+from mission_control.bootstrap.technical_api import api
+from mission_control.domain.execution.contracts import (
     ArtifactPromotionPlan,
     GenericArtifactWorkflowRequest,
     OperationAttemptIdentity,
@@ -54,62 +57,28 @@ from app.domain.operation_execution.contracts import (
     WorkspaceOwner,
     WorkspaceOwnerKind,
 )
-from app.domain.run_control.contracts import (
+from mission_control.domain.policies.contracts import (
     ActorContext,
     LifecycleCommand,
     ReserveBudgetAction,
     SatisfyWaitAction,
     StartAction,
 )
-from app.integrations.control_plane_payloads import UnavailablePayloadStore
-from app.integrations.mongodb import create_mongodb
-from app.integrations.operation_runtime_ports import FilesystemArtifactPayloadStore
-from app.integrations.postgres import (
-    create_application_family_writer_pool,
-    create_application_postgres_pool,
+from mission_control.interfaces.http.control_plane import (
+    ControlPlanePrincipal,
 )
-from app.server import api
-from app.temporal.deployment_composition import (
-    DeploymentCapabilityComponents,
-    ProductionWorkerActivityCompositionFactory,
-)
-from app.temporal.search_attributes import (
-    BELLLABS_SEARCH_ATTRIBUTE_KEYS,
-    SearchAttributeRegistrationError,
-    register_belllabs_search_attributes,
-)
-from app.temporal.worker import (
-    WorkerActivityComposition,
-    compose_worker_run_control_service,
-    create_production_workers,
-)
-from app.temporal.workflow_sandbox import coordinator_workflow_runner
-from app.temporal.workflows.belllabs_run import BellLabsRunWorkflow
-from app.temporal.workflows.goal_directed import GoalDirectedWorkflow
-from app.temporal.workflows.operation import OperationWorkflow
-from app.temporal.workflows.stagegraph import StageGraphWorkflow, wait_condition_id
 from tests.fixtures.checkpoint_lineage import bind_unit, stage_unit
-from tests.fixtures.mongo_database import disposable_mongo_database
 from tests.fixtures.rrm009_production_stack import (
     LANGGRAPH_SCHEMA,
-    NODE_EXECUTABLE,
     OPERATOR,
     REPORT_PATH,
     SCOPE,
-    TASK_QUEUE,
     WAIT_ID,
     TechnicalBinding,
     TechnicalCatalog,
     admission_request,
-    prepare_disposable_identities,
     publish_technical_catalog,
-    runtime_environment,
     stage_templates,
-    technical_admission_policies,
-)
-from tests.integration.postgres.test_checkpoint_lineage_postgres import (
-    require_disposable_postgres,
-    reset_application_schema,
 )
 
 TEMPORAL_PORT = 7341
@@ -131,7 +100,6 @@ API_STATE_ATTRIBUTES = (
     "admission_policy_registry",
     "run_control_family_admission_registry",
     "control_plane_service",
-    "control_plane_mongodb_client",
     "run_launch_service",
     "generic_artifact_submitter",
     "runtime_control",
@@ -193,151 +161,6 @@ def _reset_api_state() -> None:
     for name in API_STATE_ATTRIBUTES:
         if hasattr(api.state, name):
             delattr(api.state, name)
-
-
-mongo_database = disposable_mongo_database("rrm009")
-
-
-@asynccontextmanager
-async def open_production_stack(
-    *,
-    dsn: str,
-    mongo_uri: str,
-    mongo_database: str,
-    root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    technical: TechnicalBinding,
-    components: DeploymentCapabilityComponents | None,
-    model_log: list[dict[str, Any]],
-    extra_environment: dict[str, str] | None = None,
-) -> AsyncIterator[ProductionStack]:
-    """The deployment's API and workers over the disposable stores and a persistent namespace.
-
-    `components` are the exact components the deployment registers beside its pins (the
-    deterministic qualification models); `None` serves the pinned catalog only (live).
-    """
-
-    require_disposable_postgres(dsn)
-    if not NODE_EXECUTABLE.exists():
-        pytest.skip(f"pinned agent-browser tool requires node at {NODE_EXECUTABLE}")
-    payload_root = root / "payloads"
-    workspace_root = root / "workspaces"
-    temporal_db = root / "temporal.sqlite"
-    environment = runtime_environment(
-        owner_dsn=dsn,
-        mongo_uri=mongo_uri,
-        mongo_database=mongo_database,
-        temporal_address=f"127.0.0.1:{TEMPORAL_PORT}",
-        task_queue=TASK_QUEUE,
-        payload_root=payload_root,
-        workspace_root=workspace_root,
-    )
-    for name, value in {**environment, **(extra_environment or {})}.items():
-        monkeypatch.setenv(name, value)
-    get_settings.cache_clear()
-    settings = get_settings()
-    owner_pool = await asyncpg.create_pool(dsn=dsn, min_size=1, max_size=3)
-    await reset_application_schema(owner_pool)
-    await prepare_disposable_identities(dsn)
-    mongo_client, _database = await create_mongodb(settings)
-    env = await _start_local(temporal_db)
-    _reset_api_state()
-    api.state.admission_policy_registry = technical_admission_policies()
-    api.dependency_overrides[get_control_plane_principal] = lambda: PRINCIPAL
-    production: ProductionStack | None = None
-    try:
-        async with AsyncExitStack() as resources:
-            await initialize_run_control_resources(api)
-            policies = ForkPatchPolicyRegistry()
-            # Readiness only verifies: before the administrative registration the API refuses to
-            # compose, and registration is idempotent.
-            with pytest.raises(SearchAttributeRegistrationError):
-                await compose_runtime_control(
-                    api, settings, client=env.client, stack=resources, fork_patch_policies=policies
-                )
-            assert set(
-                await register_belllabs_search_attributes(env.client, settings.temporal_namespace)
-            ) == {key.name for key in BELLLABS_SEARCH_ATTRIBUTE_KEYS}
-            assert (
-                await register_belllabs_search_attributes(env.client, settings.temporal_namespace)
-                == ()
-            )
-            await compose_runtime_control(
-                api, settings, client=env.client, stack=resources, fork_patch_policies=policies
-            )
-            worker_pool = await create_application_postgres_pool(settings)
-            writer_pool = await create_application_family_writer_pool(settings)
-            control_plane = ControlPlaneService(
-                BeanieDefinitionRepository(),
-                ExtensionRegistry(),
-                UnavailablePayloadStore(),
-                externalize_above_bytes=15_000_000,
-            )
-            run_control = compose_worker_run_control_service(
-                PostgresRunControlRepository(worker_pool, family_writer_pool=writer_pool),
-                F1RunConfigurationVerifier(control_plane),
-                technical_admission_policies(),
-            )
-            factory = ProductionWorkerActivityCompositionFactory(
-                env.client,
-                additional_components=components,
-                artifact_validation=StaticArtifactValidationAuthority(
-                    permission_outcomes={
-                        ("operation:sandbox-agent@1", "permission:rrm009"): "allowed"
-                    },
-                    check_outcomes={},
-                    required_check_ids={},
-                ),
-                worker_identity=f"rrm009-worker:{os.getpid()}",
-                claim_lease=timedelta(seconds=90),
-            )
-            composition = await factory.build(
-                settings=settings,
-                control_plane=control_plane,
-                run_control=run_control,
-                postgres_pool=worker_pool,
-            )
-            assert composition.resources is not None
-            resources.push_async_callback(composition.resources.aclose)
-            workers = create_production_workers(env.client, settings, composition)
-            http = httpx.AsyncClient(
-                transport=httpx.ASGITransport(app=api), base_url="http://belllabs"
-            )
-            production = ProductionStack(
-                settings=settings,
-                env=env,
-                client=env.client,
-                owner_pool=owner_pool,
-                worker_pool=worker_pool,
-                control_plane=control_plane,
-                technical=technical,
-                composition=composition,
-                factory=factory,
-                http=http,
-                payload_root=payload_root,
-                temporal_db=temporal_db,
-                model_log=model_log,
-                worker_queues=tuple(worker.task_queue for worker in workers.workers),
-            )
-            try:
-                async with production.worker_stack:
-                    for worker in workers.workers:
-                        await production.worker_stack.enter_async_context(worker)
-                    yield production
-            finally:
-                await http.aclose()
-                await writer_pool.close()
-                await worker_pool.close()
-    finally:
-        # Always torn down, also when the qualification fails: the dev server, the API
-        # state and the pools never leak into the next run.
-        await close_run_control_resources(api)
-        api.dependency_overrides.pop(get_control_plane_principal, None)
-        _reset_api_state()
-        await mongo_client.close()
-        await owner_pool.close()
-        await (production.env if production is not None else env).shutdown()
-        get_settings.cache_clear()
 
 
 # --- Facade helpers --------------------------------------------------------------------------

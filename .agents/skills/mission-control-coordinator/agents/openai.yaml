@@ -1,0 +1,4 @@
+interface:
+  display_name: "BellLabs Workflow Coordinator"
+  short_description: "Find, validate, and launch governed workflows"
+  default_prompt: "Use $mission-control-coordinator to find and launch an exact governed workflow for my research goal."

@@ -10,10 +10,13 @@ from temporalio.client import Client
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
-from app.domain.run_control.contracts import SatisfyWaitAction
-from app.temporal.workflow_sandbox import coordinator_workflow_runner
-from app.temporal.workflows.operation import OperationWorkflow
-from app.temporal.workflows.stagegraph import StageGraphWorkflow, wait_condition_id
+from mission_control.adapters.temporal.workflow_sandbox import coordinator_workflow_runner
+from mission_control.adapters.temporal.workflows.operation import OperationWorkflow
+from mission_control.adapters.temporal.workflows.stagegraph import (
+    StageGraphWorkflow,
+    wait_condition_id,
+)
+from mission_control.domain.policies.contracts import SatisfyWaitAction
 from tests.integration.temporal.test_rrm_007_boundary_interventions import (
     Authority,
     GovernedStageGraphActivities,
@@ -109,9 +112,7 @@ async def test_declared_wait_survives_worker_loss_and_resumes_from_signal() -> N
                 ),
             )
             await until(lambda: _state_is(authority, run_id, "release", "applied"))
-            assert "release-workflow" in await handle.query(
-                StageGraphWorkflow.satisfied_waits
-            )
+            assert "release-workflow" in await handle.query(StageGraphWorkflow.satisfied_waits)
             try:
                 await asyncio.wait_for(activities.downstream_started.wait(), timeout=30)
             except TimeoutError:

@@ -23,9 +23,17 @@ from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
-from app.application.orchestration.service import StageGraphDecisionService
-from app.domain.coordinator.launch import BlueprintFamily
-from app.domain.orchestration.contracts import (
+from mission_control.adapters.temporal.workflow_sandbox import coordinator_workflow_runner
+from mission_control.adapters.temporal.workflows.operation import OperationWorkflow
+from mission_control.adapters.temporal.workflows.stagegraph import (
+    RELEASE_BASELINE_ON_BLOCKED_PATCH,
+    SETTLE_BASELINE_PATCH,
+    StageGraphWorkflow,
+)
+from mission_control.application.programs.service import StageGraphDecisionService
+from mission_control.domain.coordinator.launch import BlueprintFamily
+from mission_control.domain.policies.contracts import RunOutcome, RunPhase
+from mission_control.domain.programs.contracts import (
     DependencyDisposition,
     StageGraphBaselineSettlementRequest,
     StageGraphBaselineSettlementResult,
@@ -33,14 +41,6 @@ from app.domain.orchestration.contracts import (
     StageGraphCompletionActivityResult,
     StageGraphResultActivityRequest,
     StageGraphResultActivityResult,
-)
-from app.domain.run_control.contracts import RunOutcome, RunPhase
-from app.temporal.workflow_sandbox import coordinator_workflow_runner
-from app.temporal.workflows.operation import OperationWorkflow
-from app.temporal.workflows.stagegraph import (
-    RELEASE_BASELINE_ON_BLOCKED_PATCH,
-    SETTLE_BASELINE_PATCH,
-    StageGraphWorkflow,
 )
 from tests.fixtures.temporal_history import patch_ids
 from tests.integration.temporal.test_rrm_007_boundary_interventions import (

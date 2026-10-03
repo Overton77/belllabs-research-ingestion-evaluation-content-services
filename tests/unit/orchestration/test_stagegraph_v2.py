@@ -5,8 +5,8 @@ from itertools import product
 import pytest
 from pydantic import ValidationError
 
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.contracts import (
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.authoring.contracts import (
     AllowedOperationVariant,
     CapacityCeiling,
     CompletionObligationRef,
@@ -27,8 +27,8 @@ from app.domain.control_plane.contracts import (
     WorkflowCyclePolicy,
     WorkflowObligationSlot,
 )
-from app.domain.operation_execution.contracts import OperationAttemptIdentity
-from app.domain.orchestration.contracts import (
+from mission_control.domain.execution.contracts import OperationAttemptIdentity
+from mission_control.domain.programs.contracts import (
     DependencyDisposition,
     DependencyProjection,
     ExecutionIdentity,
@@ -39,7 +39,7 @@ from app.domain.orchestration.contracts import (
     StageExecutionIdentity,
     StageResultObservation,
 )
-from app.domain.orchestration.interpreter import StageGraphInterpreter
+from mission_control.domain.programs.interpreter import StageGraphInterpreter
 
 
 def operation_slot(slot_id: str = "execute", *, priority: int = 0) -> StageOperationSlot:
@@ -260,10 +260,7 @@ def test_complete_dependency_truth_table(
     disposition: DependencyDisposition,
     expected: bool | None,
 ) -> None:
-    assert (
-        StageGraphInterpreter.dependency_satisfies(dependency_class, disposition)
-        is expected
-    )
+    assert StageGraphInterpreter.dependency_satisfies(dependency_class, disposition) is expected
 
 
 @pytest.mark.parametrize(
@@ -297,9 +294,7 @@ def test_join_satisfied_pending_impossible_truth_table(
                     dependency_id=dependency.dependency_id,
                     disposition=DependencyDisposition(disposition),
                 )
-                for dependency, disposition in zip(
-                    graph.dependencies, dispositions, strict=True
-                )
+                for dependency, disposition in zip(graph.dependencies, dispositions, strict=True)
             },
         }
     )
@@ -316,9 +311,7 @@ def test_incremental_any_release_does_not_wait_for_slow_sibling() -> None:
         disposition=DependencyDisposition.FULFILLED,
         evidence_refs=("artifact:fast",),
     )
-    projection = projection.__class__(
-        **{**projection.__dict__, "dependencies": dependencies}
-    )
+    projection = projection.__class__(**{**projection.__dict__, "dependencies": dependencies})
 
     frontier = kernel.frontier(projection, available_concurrency=3)
 
@@ -356,9 +349,7 @@ def test_weighted_ring_is_deterministic_resumes_and_skips_blocked_candidates() -
 
 def test_stage_attempt_identity_is_exactly_operation_workflow_compatible() -> None:
     graph = blueprint()
-    admission = interpreter(graph).frontier(
-        projection_for(graph), available_concurrency=1
-    )[0]
+    admission = interpreter(graph).frontier(projection_for(graph), available_concurrency=1)[0]
     operation_identity = OperationAttemptIdentity(
         run_id=admission.identity.run_id,
         operation_id=admission.identity.operation_id,
@@ -387,28 +378,27 @@ def test_technical_retry_stage_cycle_and_workflow_cycle_identities_are_distinct(
     stage_cycle = StageExecutionIdentity(
         run_id="run-1",
         execution_epoch=1,
-        candidate=base.__class__(
-            **{**base.__dict__, "stage_cycle_ordinal": 1}
-        ),
+        candidate=base.__class__(**{**base.__dict__, "stage_cycle_ordinal": 1}),
         semantic_attempt=1,
     )
     workflow_cycle = StageExecutionIdentity(
         run_id="run-1",
         execution_epoch=1,
-        candidate=base.__class__(
-            **{**base.__dict__, "workflow_cycle_ordinal": 1}
-        ),
+        candidate=base.__class__(**{**base.__dict__, "workflow_cycle_ordinal": 1}),
         semantic_attempt=1,
     )
 
     assert technical_retry.semantic_key == semantic_attempt.semantic_key
-    assert len(
-        {
-            semantic_attempt.semantic_key,
-            stage_cycle.semantic_key,
-            workflow_cycle.semantic_key,
-        }
-    ) == 3
+    assert (
+        len(
+            {
+                semantic_attempt.semantic_key,
+                stage_cycle.semantic_key,
+                workflow_cycle.semantic_key,
+            }
+        )
+        == 3
+    )
 
 
 def test_running_concurrency_uses_authored_slots_not_child_count() -> None:
@@ -626,8 +616,7 @@ def test_minimal_invalidation_reuses_unaffected_output_references() -> None:
     )
     assert cycled.workflow_cycle_ordinal == 1
     assert any(
-        item.candidate.stage_id == "producer-0"
-        and item.candidate.workflow_cycle_ordinal == 1
+        item.candidate.stage_id == "producer-0" and item.candidate.workflow_cycle_ordinal == 1
         for item in cycled.stages.values()
     )
     assert any(
@@ -656,9 +645,7 @@ def test_stage_cycle_is_bounded_and_binds_new_objective_and_prior_lineage() -> N
         else stage
         for stage in base.stages
     )
-    graph = StageGraphBlueprint.model_validate(
-        {**base.model_dump(mode="python"), "stages": stages}
-    )
+    graph = StageGraphBlueprint.model_validate({**base.model_dump(mode="python"), "stages": stages})
     kernel = interpreter(graph)
     projection = kernel.initial_projection(ExecutionIdentity("run-stage-cycle"), run_version=1)
     projection = projection.__class__(
@@ -677,9 +664,7 @@ def test_stage_cycle_is_bounded_and_binds_new_objective_and_prior_lineage() -> N
     )
 
     with pytest.raises(ValueError, match="new typed objective"):
-        kernel.stage_invalidation(
-            projection, stage_id="producer-0", next_objective=""
-        )
+        kernel.stage_invalidation(projection, stage_id="producer-0", next_objective="")
     proposal = kernel.stage_invalidation(
         projection,
         stage_id="producer-0",
@@ -695,8 +680,7 @@ def test_stage_cycle_is_bounded_and_binds_new_objective_and_prior_lineage() -> N
     repaired = next(
         item
         for item in cycled.stages.values()
-        if item.candidate.stage_id == "producer-0"
-        and item.candidate.stage_cycle_ordinal == 1
+        if item.candidate.stage_id == "producer-0" and item.candidate.stage_cycle_ordinal == 1
     )
     assert repaired.objective_override == "Repair the rejected producer evidence."
     assert proposal.prior_result_refs == ("artifact:producer-0",)

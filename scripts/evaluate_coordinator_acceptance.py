@@ -12,9 +12,7 @@ from time import perf_counter
 from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_DATASET = (
-    PROJECT_ROOT / "tests" / "fixtures" / "coordinator_retrieval_evaluation.json"
-)
+DEFAULT_DATASET = PROJECT_ROOT / "tests" / "fixtures" / "coordinator_retrieval_evaluation.json"
 
 REQUIRED_METRICS = frozenset(
     {
@@ -193,16 +191,11 @@ def _retrieval_case_result(
             "failure": "retrieval report omitted this query case",
         }
     expected_workflow = case.get("expected_workflow_type")
-    expected_capabilities = {
-        str(item) for item in case.get("expected_capability_assets", ())
-    }
-    found_capabilities = {
-        str(item) for item in result.get("found_capabilities", ())
-    }
+    expected_capabilities = {str(item) for item in case.get("expected_capability_assets", ())}
+    found_capabilities = {str(item) for item in result.get("found_capabilities", ())}
     passed = (
-        (not expected_workflow or result.get("workflow_rank") is not None)
-        and expected_capabilities.issubset(found_capabilities)
-    )
+        not expected_workflow or result.get("workflow_rank") is not None
+    ) and expected_capabilities.issubset(found_capabilities)
     return {
         "case_id": case_id,
         "kind": "retrieval",
@@ -218,9 +211,7 @@ def _evaluate(
     live_evidence: Mapping[str, Any],
     basetemp: Path,
 ) -> dict[str, Any]:
-    retrieval_by_id = {
-        str(item["case_id"]): item for item in retrieval_report.get("cases", ())
-    }
+    retrieval_by_id = {str(item["case_id"]): item for item in retrieval_report.get("cases", ())}
     evidence_modules = sorted(
         {
             str(case["evidence_test"])
@@ -258,17 +249,14 @@ def _evaluate(
     metrics = {**retrieval_metrics, **live_metrics}
     missing_metrics = sorted(REQUIRED_METRICS.difference(metrics))
     unexpected_metrics = sorted(
-        set(metrics).difference(REQUIRED_METRICS).difference(
-            {"median_search_latency"}
-        )
+        set(metrics).difference(REQUIRED_METRICS).difference({"median_search_latency"})
     )
     if "median_search_latency" in metrics and "median_search_latency_ms" not in metrics:
         metrics["median_search_latency_ms"] = metrics.pop("median_search_latency")
         missing_metrics = sorted(REQUIRED_METRICS.difference(metrics))
     if unexpected_metrics:
         raise ValueError(
-            "live/retrieval evidence contains unknown metrics: "
-            + ", ".join(unexpected_metrics)
+            "live/retrieval evidence contains unknown metrics: " + ", ".join(unexpected_metrics)
         )
     _validate_metrics(metrics)
 
@@ -284,8 +272,7 @@ def _evaluate(
     )
     if invalid_scenario_types:
         raise ValueError(
-            "live scenario evidence must be objects: "
-            + ", ".join(invalid_scenario_types)
+            "live scenario evidence must be objects: " + ", ".join(invalid_scenario_types)
         )
     incomplete_scenarios = sorted(
         name
@@ -293,9 +280,7 @@ def _evaluate(
         if not bool(live_scenarios[name].get("passed"))
     )
     missing_scenario_fields = {
-        name: sorted(
-            SCENARIO_REQUIRED_FIELDS[name].difference(live_scenarios[name])
-        )
+        name: sorted(SCENARIO_REQUIRED_FIELDS[name].difference(live_scenarios[name]))
         for name in required_scenarios.intersection(live_scenarios)
         if isinstance(live_scenarios[name], Mapping)
         and SCENARIO_REQUIRED_FIELDS[name].difference(live_scenarios[name])
@@ -310,15 +295,12 @@ def _evaluate(
         for name in required_scenarios.intersection(live_scenarios)
         if isinstance(live_scenarios[name], Mapping)
         and any(
-            field in live_scenarios[name]
-            and _is_empty_evidence_value(live_scenarios[name][field])
+            field in live_scenarios[name] and _is_empty_evidence_value(live_scenarios[name][field])
             for field in SCENARIO_REQUIRED_FIELDS[name]
         )
     }
 
-    executed_evidence_count = sum(
-        1 for item in cases if item["kind"] == "executed_pytest_evidence"
-    )
+    executed_evidence_count = sum(1 for item in cases if item["kind"] == "executed_pytest_evidence")
     passed = (
         not missing_metrics
         and not missing_scenarios
@@ -351,9 +333,7 @@ def _evaluate(
         "timing": {
             "median_evidence_module_latency_ms": (
                 round(
-                    median(
-                        float(item["elapsed_ms"]) for item in module_results.values()
-                    ),
+                    median(float(item["elapsed_ms"]) for item in module_results.values()),
                     3,
                 )
                 if module_results
@@ -369,9 +349,7 @@ def _validate_metrics(metrics: Mapping[str, Any]) -> None:
         if isinstance(value, bool) or not isinstance(value, int | float):
             raise ValueError(f"acceptance metric {name} must be numeric")
         if not math.isfinite(value) or value < 0:
-            raise ValueError(
-                f"acceptance metric {name} must be finite and non-negative"
-            )
+            raise ValueError(f"acceptance metric {name} must be finite and non-negative")
         if name in RATE_METRICS and value > 1:
             raise ValueError(f"acceptance rate metric {name} must be at most 1")
 
@@ -392,9 +370,7 @@ def main() -> None:
     retrieval_report = json.loads(
         args.retrieval_report.resolve(strict=True).read_text(encoding="utf-8")
     )
-    live_evidence = json.loads(
-        args.live_evidence.resolve(strict=True).read_text(encoding="utf-8")
-    )
+    live_evidence = json.loads(args.live_evidence.resolve(strict=True).read_text(encoding="utf-8"))
     report = _evaluate(
         dataset=dataset,
         retrieval_report=retrieval_report,

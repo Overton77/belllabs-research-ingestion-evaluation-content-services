@@ -1,27 +1,14 @@
 ---
+description: Framework-neutral contracts and bounded cognition
 alwaysApply: false
 ---
 
-# Agent framework coexistence
+# Framework boundaries
 
-BellLabs is both a biotech research/ingestion/evaluation service and a frontier agent-framework/model evaluation service.
+Contracts, policies, budgets and settlement remain framework-neutral. Temporal
+is the sole macro runtime; Deep Agents is bounded cognition. SDK objects stay in
+adapters. Checkpoints, traces and provider responses are evidence, not authority.
 
-- Keep BellLabs shared contracts, domain invariants, provenance, budgets, approvals, ingestion gates, and durable lifecycle state authoritative and framework-neutral.
-- Treat agent frameworks and model providers as execution adapters, not domain authorities. Do not leak provider SDK objects or ambiguous provider IDs into shared contracts.
-- Use LangChain/LangGraph/Deep Agents/LangSmith behind BellLabs ports and exact run bindings for the
-  accepted target. `WP-CP-040` removed the OpenAI Agents SDK runtime and dependency; do not
-  reintroduce it, a compatibility path, or a provider fallback without a new accepted package and
-  qualification. Direct model APIs remain eligible only through explicitly accepted adapters.
-- Do not force a least-common-denominator runtime. Model shared semantics in the core contracts and express special capabilities through explicit, provider-qualified capability profiles and adapters.
-- Current delivery priority: Temporal is the sole macro runtime and Deep Agents is bounded
-  operation cognition. Agent Server may host bounded operation, qualification, development, and
-  shared assets; it is not a production family scheduler.
-- Comparable provider-native runtimes are future architecture/evaluation work, not current
-  implementation authority.
-- Treat the hypothesis that provider-native models perform better with provider-native agent tooling as something to measure, not assume.
-- Compare quality, citation fidelity, ingestion correctness, safety, latency, cost, durability, observability, intervention, and recovery using frozen inputs, budgets, outputs, and evaluator versions.
-- Select a runtime per exact Workflow Implementation or operation binding; never create multiple authorities for one BellLabs run or allow runtime state to bypass admission and settlement.
-- Preserve the distinction between researched evidence and approved ingestion. No framework may write canonical knowledge without BellLabs validation, provenance, policy, and review gates.
-
-Detailed intent:
-`docs/interview_and_research_result_documentation/AGENT_FRAMEWORK_COEXISTENCE_STRATEGY.md`.
+Use exact admitted bindings. Unknown capabilities fail explicitly. Do not add
+silent provider fallbacks or competing schedulers. Validate library behavior
+against pinned official dependencies. Paid experiments need finite spending approval.

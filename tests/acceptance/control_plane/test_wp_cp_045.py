@@ -4,7 +4,10 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.application.async_subagents.service import (
+from mission_control.adapters.deep_agents.async_subagents import (
+    DeepAgentsAsyncSubagentAdapter,
+)
+from mission_control.application.subordinates.service import (
     AsyncSubagentError,
     AsyncSubagentService,
     AsyncSubagentSpawnRequest,
@@ -12,14 +15,14 @@ from app.application.async_subagents.service import (
     InMemoryAsyncSubagentDetailRepository,
     ProviderAsyncObservation,
 )
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.operation_execution.async_subagent_reconciliation import (
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.execution.async_subagent_reconciliation import (
     AsyncProviderRunObservation,
     AsyncProviderRunRecord,
     AsyncServedGraphIdentity,
     AsyncSpawnKeyObservation,
 )
-from app.domain.operation_execution.contracts import (
+from mission_control.domain.execution.contracts import (
     AsyncProviderCheckpointKey,
     AsyncSubagentContract,
     AsyncSubagentDependencyClass,
@@ -29,12 +32,9 @@ from app.domain.operation_execution.contracts import (
     AsyncSubagentUsage,
     CapabilityGrant,
 )
-from app.domain.operation_execution.delegation import (
+from mission_control.domain.execution.delegation import (
     AsyncDelegationBoundary,
     classify_async_delegation,
-)
-from app.integrations.agents.deep_agents.async_subagents import (
-    DeepAgentsAsyncSubagentAdapter,
 )
 from tests.fixtures.fake_agent_protocol import FakeAgentProtocolClient, install
 
@@ -217,7 +217,7 @@ class OrderedDetails(InMemoryAsyncSubagentDetailRepository):
         self._events = events
 
     async def create_before_submit(self, *args: object, **kwargs: object) -> AsyncSubagentExecution:
-        self._events.append("mongo.contract-link-execution")
+        self._events.append("postgres.contract-link-execution")
         return await super().create_before_submit(*args, **kwargs)  # type: ignore[arg-type]
 
 
@@ -261,7 +261,7 @@ async def test_spawn_persists_contract_link_and_reservation_before_provider_subm
     execution = await service.spawn(spawn)
 
     assert provider.events[:4] == [
-        "mongo.contract-link-execution",
+        "postgres.contract-link-execution",
         "postgres.reservation-link-admission",
         "provider.verify",
         "provider.start",
@@ -317,7 +317,7 @@ def test_four_frozen_dependency_classes(
     link = fixture_service(dependency)[1].links
     assert not link
     base = request(dependency)
-    from app.domain.operation_execution.contracts import ParentAsyncSubagentLink
+    from mission_control.domain.execution.contracts import ParentAsyncSubagentLink
 
     value = ParentAsyncSubagentLink(
         link_id="link",

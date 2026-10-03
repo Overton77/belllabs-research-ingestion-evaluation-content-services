@@ -13,21 +13,16 @@ from typing import Any, Literal
 
 import pytest
 
-from app.application.operations.checkpoint_lineage import (
+from mission_control.application.execution.operations.checkpoint_lineage import (
     CheckpointLineageRepository,
     CheckpointLineageService,
     lease_holder_id,
 )
-from app.application.operations.operation_execution import bind_operation_execution_request
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.graph_runtime.identities import (
-    NO_MAPPED_INSTANCE,
-    GoalDirectedUnitLocation,
-    QualifiedCheckpointKey,
-    RuntimeUnitIdentity,
-    StageGraphUnitLocation,
+from mission_control.application.execution.operations.operation_execution import (
+    bind_operation_execution_request,
 )
-from app.domain.operation_execution.checkpoint_lineage import (
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.execution.checkpoint_lineage import (
     AttemptAdmission,
     CheckpointClassification,
     CheckpointLineageConflict,
@@ -47,14 +42,21 @@ from app.domain.operation_execution.checkpoint_lineage import (
     unit_incident_id,
     unit_result_observation_id,
 )
-from app.domain.operation_execution.contracts import (
+from mission_control.domain.execution.contracts import (
     DeepAgentExecutionBinding,
     MaterializedWorkspace,
     OperationExecutionRequest,
     RuntimeInvocation,
     RuntimeResult,
 )
-from app.domain.run_control.contracts import UnitReconciliationDecision
+from mission_control.domain.graph_runtime.identities import (
+    NO_MAPPED_INSTANCE,
+    GoalDirectedUnitLocation,
+    QualifiedCheckpointKey,
+    RuntimeUnitIdentity,
+    StageGraphUnitLocation,
+)
+from mission_control.domain.policies.contracts import UnitReconciliationDecision
 
 
 def stage_unit(
@@ -452,9 +454,7 @@ def reconciliation(
         execution_generation=incident.execution_generation,
         incident_id=incident.incident_id,
         decision=decision,
-        accepted_checkpoint=(
-            incident.candidates[0] if decision == "accept_descendant" else None
-        ),
+        accepted_checkpoint=(incident.candidates[0] if decision == "accept_descendant" else None),
         actor_id="operator",
         decided_at=LINEAGE_NOW,
     )
@@ -581,9 +581,10 @@ async def assert_checkpoint_recovery_repository_contract(
     await leased(doubtful, 1, at=timedelta(0))
     incident = in_doubt_incident(doubtful)
     assert await repository.open_incident(incident) == incident
-    assert await repository.open_incident(
-        in_doubt_incident(doubtful, reason="foreign_descendant")
-    ) == incident, "the first incident of a unit generation is kept"
+    assert (
+        await repository.open_incident(in_doubt_incident(doubtful, reason="foreign_descendant"))
+        == incident
+    ), "the first incident of a unit generation is kept"
     assert await repository.get_incident(request_scope, doubtful.unit_key, 1) == incident
     seen = await leased(doubtful, 2, at=timedelta(minutes=6))
     assert seen.incident == incident
@@ -614,9 +615,7 @@ async def assert_checkpoint_recovery_repository_contract(
     revision_two = in_doubt_incident(doubtful, revision=2)
     assert await repository.open_incident(revision_two) == revision_two
     assert await repository.open_incident(in_doubt_incident(doubtful)) == revision_two
-    assert await repository.open_incident(in_doubt_incident(doubtful, revision=3)) == (
-        revision_two
-    )
+    assert await repository.open_incident(in_doubt_incident(doubtful, revision=3)) == (revision_two)
     assert await repository.get_incident(request_scope, doubtful.unit_key, 1) == revision_two
 
     # `start_new_generation` fences the generation (EXEC-005): its attempts and late
@@ -631,12 +630,9 @@ async def assert_checkpoint_recovery_repository_contract(
     with pytest.raises(StaleClaimFence):
         await leased(superseded, 2, at=timedelta(minutes=6))
     with pytest.raises(StaleClaimFence):
-        await repository.record_result(
-            unit_result(superseded, fence=old.observation.claim_fence)
-        )
+        await repository.record_result(unit_result(superseded, fence=old.observation.claim_fence))
     reasons = [
-        item.reason
-        for item in await repository.list_rejections(request_scope, superseded.unit_key)
+        item.reason for item in await repository.list_rejections(request_scope, superseded.unit_key)
     ]
     assert reasons == ["stale_execution_generation"]
     assert await repository.get_result(request_scope, superseded.unit_key, 1) is None

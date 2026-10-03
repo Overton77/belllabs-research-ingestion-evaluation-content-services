@@ -5,8 +5,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-
-from app.application.schema.schema_artifact_cleanup import (
+from biotech_mission_adapters.application.schema.schema_artifact_cleanup import (
     TARGET_CONSTRAINTS,
     TARGET_INDEXES,
     TARGET_LABELS,
@@ -14,13 +13,17 @@ from app.application.schema.schema_artifact_cleanup import (
     plan_zero_count_schema_artifact_cleanup,
     verify_schema_artifact_cleanup_postcondition,
 )
-from app.domain.schema_grounding.authority import live_neo4j_schema_snapshot_digest
-from app.domain.schema_grounding.contracts import (
+from biotech_mission_adapters.bootstrap.scripts import (
+    reconcile_zero_count_schema_artifacts as cleanup_cli,
+)
+from biotech_mission_adapters.domain.schema_grounding.authority import (
+    live_neo4j_schema_snapshot_digest,
+)
+from biotech_mission_adapters.domain.schema_grounding.contracts import (
     LiveNeo4jSchemaSnapshot,
     Neo4jIndexDescriptor,
 )
-from app.domain.schema_grounding.errors import SchemaDeploymentMismatch
-from scripts import reconcile_zero_count_schema_artifacts as cleanup_cli
+from biotech_mission_adapters.domain.schema_grounding.errors import SchemaDeploymentMismatch
 
 NOW = datetime(2026, 7, 26, 22, 0, tzinfo=UTC)
 

@@ -12,19 +12,19 @@ from langchain_core.tools import BaseTool
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.store.memory import InMemoryStore
 
-from app.application.operations.checkpoint_lineage import (
-    CheckpointLineageService,
-    InMemoryCheckpointLineageRepository,
-)
-from app.domain.operation_execution.contracts import (
-    WorkspaceMount,
-    workspace_durable_reference,
-)
-from app.integrations.agents.deep_agents import (
+from mission_control.adapters.deep_agents import (
     DeepAgentRuntimeAdapter,
     DockerSandboxFactory,
     ExactComponentRegistry,
     ExactDeepAgentMaterializer,
+)
+from mission_control.application.execution.operations.checkpoint_lineage import (
+    CheckpointLineageService,
+    InMemoryCheckpointLineageRepository,
+)
+from mission_control.domain.execution.contracts import (
+    WorkspaceMount,
+    workspace_durable_reference,
 )
 from tests.acceptance.control_plane.test_wp_cp_040 import (
     exact_fixture,
@@ -93,31 +93,25 @@ async def test_real_deep_agent_executes_inside_ephemeral_docker_sandbox(
     tmp_path: Path,
 ) -> None:
     binding, _profile, bundle = exact_fixture(sandbox_backend="docker")
-    model = SandboxedFileModel(
-        workspace_path=binding.workspace.exclusive_write_paths[0]
-    )
+    model = SandboxedFileModel(workspace_path=binding.workspace.exclusive_write_paths[0])
     registry = ExactComponentRegistry(
         model_factories={binding.model.ref.digest: lambda _binding, _secrets: model},
         skill_bundles={bundle.bundle_digest: bundle},
         sandbox_factories={
-            binding.sandbox.ref.digest: DockerSandboxFactory(
-                workspace_root=tmp_path / "workspaces"
-            )
+            binding.sandbox.ref.digest: DockerSandboxFactory(workspace_root=tmp_path / "workspaces")
         },
         checkpointers={binding.checkpointer_ref.digest: InMemorySaver()},
         stores={binding.store_ref.digest: InMemoryStore()},
     )
     lineage = CheckpointLineageService(InMemoryCheckpointLineageRepository())
-    result = await DeepAgentRuntimeAdapter(
-        ExactDeepAgentMaterializer(registry)
-    ).execute(await planned_invocation(unit_bound(binding), lineage), {})
+    result = await DeepAgentRuntimeAdapter(ExactDeepAgentMaterializer(registry)).execute(
+        await planned_invocation(unit_bound(binding), lineage), {}
+    )
 
     assert "sandboxed-deep-agent" in result.output_text
     inspection = result.event_payloads[0]
     assert inspection["sandbox_execute_called"] is True
-    assert inspection["authority_enforcement"] == (
-        "immutable_host_binding_executable_sandbox"
-    )
+    assert inspection["authority_enforcement"] == ("immutable_host_binding_executable_sandbox")
     assert model.calls == 2
 
 
@@ -134,8 +128,7 @@ async def test_docker_sandbox_enforces_isolation_and_persists_bound_workspace(
         assert first.execute("touch /outside-workspace").exit_code != 0
         assert (
             first.execute(
-                "python3 -c \"import socket; "
-                "socket.create_connection(('1.1.1.1', 53), 1)\""
+                "python3 -c \"import socket; socket.create_connection(('1.1.1.1', 53), 1)\""
             ).exit_code
             != 0
         )

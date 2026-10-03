@@ -3,20 +3,20 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-from langgraph.types import Overwrite
 
-from app.application.runtime.runtime_interventions import (
+from mission_control.application.recovery.runtime_interventions import (
     ExactRuntimeInterventionRouter,
     PrivilegedRepairAuthorization,
     RuntimeInterventionAuthorization,
     RuntimeInterventionService,
 )
-from app.application.runtime.runtime_repairs import (
+from mission_control.application.recovery.runtime_repairs import (
     PrivilegedRepairObservation,
     PrivilegedRuntimeRepairService,
+    RuntimeOverwrite,
 )
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.graph_runtime.contracts import (
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.graph_runtime.contracts import (
     ActorRef,
     CancelRunIntervention,
     Correlation,
@@ -24,7 +24,7 @@ from app.domain.graph_runtime.contracts import (
     PrivilegedOperatorReconcileIntervention,
     RuntimeExecutionBinding,
 )
-from app.domain.graph_runtime.identities import (
+from mission_control.domain.graph_runtime.identities import (
     AgentThreadKey,
     DeploymentIdentity,
     ExecutionEpochKey,
@@ -307,7 +307,7 @@ class RepairDeniedAuthority(RepairAuthority):
 
 class RepairClient:
     def __init__(self) -> None:
-        self.overwrite: Overwrite | None = None
+        self.overwrite: RuntimeOverwrite | None = None
 
     async def apply_overwrite(self, _intervention, _binding, overwrite):  # type: ignore[no-untyped-def]
         self.overwrite = overwrite
@@ -348,7 +348,7 @@ async def test_privileged_repair_requires_authority_then_overwrites_and_audits()
     receipt = await service.apply(repair())
 
     assert receipt.reason_code == "privileged_repair_applied_and_audited"
-    assert isinstance(repair_client.overwrite, Overwrite)
+    assert isinstance(repair_client.overwrite, RuntimeOverwrite)
     assert repair_client.overwrite.value["command_id"] == "repair-1"
     assert audit.records[0].expected_checkpoint_id == "checkpoint-1"
     assert provider.calls == 0
@@ -374,3 +374,42 @@ async def test_privileged_repair_denial_happens_before_overwrite_or_audit() -> N
 
     assert repair_client.overwrite is None
     assert audit.records == []
+
+
+@pytest.mark.asyncio
+async def test_sdk_repair_adapter_materializes_native_overwrite_only_at_boundary():
+    from types import SimpleNamespace
+
+    from langgraph.types import Overwrite
+
+    from mission_control.adapters.agent_server.client import (
+        AgentServerRuntimeConfig,
+        LangGraphAgentServerRepairClient,
+    )
+
+    route = binding()
+    writes = []
+
+    class Threads:
+        async def get_state(self, *_args, **_kwargs):
+            return {"values": {"checkpoint": "current"}}
+
+        async def update_state(self, thread_id, values, **kwargs):
+            writes.append((thread_id, values, kwargs))
+
+    client = LangGraphAgentServerRepairClient(
+        client=SimpleNamespace(threads=Threads()),
+        config=AgentServerRuntimeConfig(deployment=route.deployment, graph_id=route.graph_id),
+    )
+    command = repair()
+    replacement = RuntimeOverwrite(
+        command_id=command.command_id,
+        reconciliation_action=command.reconciliation_action,
+        evidence_refs=tuple(command.evidence_refs),
+    )
+    observation = await client.apply_overwrite(command, route, replacement)
+    _thread, values, kwargs = writes[0]
+    assert isinstance(values["runtime_reconciliation"], Overwrite)
+    assert values["runtime_reconciliation"].value["command_id"] == command.command_id
+    assert values["runtime_reconciliation"].value["before_digest"] == observation.before_digest
+    assert kwargs["checkpoint_id"] == command.expected_checkpoint.langgraph_checkpoint_id

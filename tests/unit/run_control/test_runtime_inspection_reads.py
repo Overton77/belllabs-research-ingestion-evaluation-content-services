@@ -19,29 +19,44 @@ import pytest
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import InMemorySaver
 
-from app.api.control_plane import ControlPlanePrincipal, get_control_plane_principal
-from app.api.runtime_inspection import get_runtime_inspection_service
-from app.application.operations.checkpoint_lineage import InMemoryCheckpointLineageRepository
-from app.application.run_control.inspection import (
+from mission_control.adapters.deep_agents.checkpoint_history import (
+    LangGraphCheckpointHistoryReader,
+)
+from mission_control.application.execution.inspection import (
     InMemoryInspectionReadRepository,
     InspectionCursorCodec,
     RuntimeInspectionService,
     RuntimeSourceUnavailable,
 )
-from app.application.run_control.run_control_repository import InMemoryRunControlRepository
-from app.application.run_control.service import RunControlService
-from app.domain.graph_runtime.identities import QualifiedCheckpointKey, RuntimeUnitIdentity
-from app.domain.operation_execution.checkpoint_lineage import (
+from mission_control.application.execution.operations.checkpoint_lineage import (
+    InMemoryCheckpointLineageRepository,
+)
+from mission_control.application.execution.run_control_repository import (
+    InMemoryRunControlRepository,
+)
+from mission_control.application.execution.service import RunControlService
+from mission_control.bootstrap.technical_api import api
+from mission_control.domain.execution.checkpoint_lineage import (
     STAMP_STATE_SCHEMA_DIGEST,
     cognitive_session_namespace,
 )
-from app.domain.operation_execution.contracts import OperationWorkflowRequest
-from app.domain.orchestration.contracts import (
+from mission_control.domain.execution.contracts import OperationWorkflowRequest
+from mission_control.domain.graph_runtime.identities import (
+    QualifiedCheckpointKey,
+    RuntimeUnitIdentity,
+)
+from mission_control.domain.policies.inspection import (
+    AsyncChildInspection,
+    CheckpointObservation,
+    TemporalExecution,
+    summarize_channel_values,
+)
+from mission_control.domain.programs.contracts import (
     BellLabsRunInput,
     GoalDirectedRunInput,
     StageGraphRunInput,
 )
-from app.domain.orchestration.search_attributes import (
+from mission_control.domain.programs.search_attributes import (
     SearchAttributePolicyError,
     operation_search_attributes,
     require_production_search_attribute_policy,
@@ -49,16 +64,11 @@ from app.domain.orchestration.search_attributes import (
     search_attribute_scope_hash,
     visibility_run_query,
 )
-from app.domain.run_control.inspection import (
-    AsyncChildInspection,
-    CheckpointObservation,
-    TemporalExecution,
-    summarize_channel_values,
+from mission_control.interfaces.http.control_plane import (
+    ControlPlanePrincipal,
+    get_control_plane_principal,
 )
-from app.integrations.agents.deep_agents.checkpoint_history import (
-    LangGraphCheckpointHistoryReader,
-)
-from app.server import api
+from mission_control.interfaces.http.runtime_inspection import get_runtime_inspection_service
 from tests.fixtures.checkpoint_lineage import (
     BINDING,
     CHECKPOINTER,
@@ -169,7 +179,9 @@ def client_for(monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
     async def noop(_application: object) -> None:
         return None
 
-    monkeypatch.setattr("app.server.initialize_run_control_resources", noop)
+    monkeypatch.setattr(
+        "mission_control.bootstrap.technical_api.initialize_run_control_resources", noop
+    )
 
     def make(inspection: RuntimeInspectionService, who: ControlPlanePrincipal) -> TestClient:
         api.dependency_overrides[get_runtime_inspection_service] = lambda: inspection
@@ -807,7 +819,7 @@ def test_search_attribute_policy_defaults_to_disabled_and_production_requires_it
 
 @pytest.mark.asyncio
 async def test_production_submitter_rejects_disabled_search_attributes() -> None:
-    from app.integrations.temporal_workflow_submission import TemporalWorkflowSubmitter
+    from mission_control.adapters.temporal.submission import TemporalWorkflowSubmitter
 
     with pytest.raises(SearchAttributePolicyError):
         TemporalWorkflowSubmitter.for_production(
@@ -821,7 +833,13 @@ async def test_production_submitter_rejects_disabled_search_attributes() -> None
 def test_application_code_never_addresses_temporal_persistence() -> None:
     """REQ-CP-EXEC-015 static check: no Temporal persistence DSN or table access in app/."""
 
-    from app.config import PROJECT_ROOT
+    from pathlib import Path
+
+    import mission_control
+
+    source_root = Path(mission_control.__file__).resolve().parent
+    sources = [path for path in source_root.rglob("*") if path.suffix in {".py", ".sql"}]
+    assert sources, "Temporal persistence guard found no installed runtime source"
 
     forbidden = (
         "executions_visibility",
@@ -831,9 +849,8 @@ def test_application_code_never_addresses_temporal_persistence() -> None:
         "current_executions",
     )
     offenders = [
-        f"{path.relative_to(PROJECT_ROOT)}:{needle}"
-        for path in (PROJECT_ROOT / "app").rglob("*")
-        if path.suffix in {".py", ".sql"}
+        f"{path.relative_to(source_root)}:{needle}"
+        for path in sources
         for needle in forbidden
         if needle in path.read_text(encoding="utf-8")
     ]
@@ -847,7 +864,7 @@ async def test_delta_channel_counts_are_folded_from_the_saver_history_without_co
     from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
     from langgraph.checkpoint.base import empty_checkpoint
 
-    from app.domain.operation_execution.checkpoint_lineage import ROOT_CHECKPOINT_NS
+    from mission_control.domain.execution.checkpoint_lineage import ROOT_CHECKPOINT_NS
 
     saver = InMemorySaver()
     namespace = "belllabs/stage/delta-fixture/gen/1"

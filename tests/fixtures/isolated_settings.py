@@ -11,18 +11,13 @@ from typing import Any
 
 from pydantic import SecretStr
 
-from app.config import Settings
+from mission_control.bootstrap.settings import Settings
 
 _REQUIRED: dict[str, Any] = {
     "supabase_url": "https://settings.invalid",
     "supabase_publishable_key": SecretStr("publishable"),
     "supabase_secret_key": SecretStr("secret"),
     "openai_api_key": SecretStr("sk-test"),
-    "mongodb_uri": SecretStr("mongodb://settings.invalid:27017"),
-    # `neo4j_uri` is declared with a validation alias, so it is supplied by that alias.
-    "NEO4J_URI": "neo4j://settings.invalid:7687",
-    "neo4j_aura_username": "neo4j",
-    "neo4j_aura_password": SecretStr("password"),
 }
 
 

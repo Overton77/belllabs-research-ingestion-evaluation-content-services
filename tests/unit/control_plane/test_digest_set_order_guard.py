@@ -2,7 +2,7 @@
 
 `model_dump(mode="json")` lists `set`/`frozenset` members in per-process iteration order, so
 `sha256_digest(contract.model_dump(mode="json"))` is not an identity. Use
-`app.domain.control_plane.canonical.stable_json_digest` / `stable_json_dump` (set-sorted and
+`mission_control.domain.authoring.canonical.stable_json_digest` / `stable_json_dump` (set-sorted and
 value-identical to the JSON dump for set-free contracts) or `sha256_digest(contract)` directly.
 
 The scan (`tests/fixtures/digest_sites.py`) finds every JSON-mode dump in `app/` that flows into
@@ -25,13 +25,13 @@ from pydantic import BaseModel
 from tests.fixtures.digest_sites import scan_digest_sites, scan_unverifiable_dumps
 from tests.fixtures.set_order import model_holds_set
 
-CD = "app.domain.control_plane.contracts"
-GR = "app.domain.graph_runtime"
-OE = "app.domain.operation_execution"
-RC = "app.domain.run_control"
-SC = "app.domain.schema_context.contracts"
-SG = "app.domain.schema_grounding.contracts"
-SW = "app.experiments.dynamic_research_swarm.contracts"
+CD = "mission_control.domain.authoring.contracts"
+GR = "mission_control.domain.graph_runtime"
+OE = "mission_control.domain.execution"
+RC = "mission_control.domain.policies"
+SC = "biotech_mission_adapters.domain.schema_context.contracts"
+SG = "biotech_mission_adapters.domain.schema_grounding.contracts"
+SW = "experiments.dynamic_research_swarm.contracts"
 
 
 @dataclass(frozen=True)
@@ -49,56 +49,56 @@ ANY_PAYLOAD = (
 
 _AUDIT: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...], str], ...] = (
     (
-        "app/application/coordinator/postgres_workflow_result_repository.py",
+        "src/mission_control/adapters/postgres/coordinator/workflow_result_repository.py",
         "PostgresWorkflowResultRepository.save",
         ("result.model_dump(mode='json')",),
-        ("app.domain.coordinator.launch.WorkflowResultRecord",),
+        ("mission_control.domain.coordinator.launch.WorkflowResultRecord",),
         ANY_PAYLOAD,
     ),
     (
-        "app/application/operations/journaled_operation_execution.py",
+        "src/mission_control/application/execution/operations/journaled_operation_execution.py",
         "JournaledOperationExecutionCoordinator.acquire",
         ("claim.model_dump(mode='json')",),
         (f"{OE}.journal.OperationEffectClaim",),
         NO_SET,
     ),
     (
-        "app/application/operations/operation_journal.py",
+        "src/mission_control/application/execution/operations/operation_journal.py",
         "OperationJournalMutation.validate",
         ("self.claim.model_dump(mode='json')",),
         (f"{OE}.journal.OperationEffectClaim",),
         NO_SET,
     ),
     (
-        "app/application/operations/operation_execution.py",
+        "src/mission_control/application/execution/operations/operation_execution.py",
         "RunControlOperationAuthority._verify_bound_authority",
         ("configuration.workflow_workspace_contract.model_dump(mode='json')",),
         (f"{CD}.WorkflowWorkspaceContract",),
         NO_SET,
     ),
     (
-        "app/application/orchestration/goal_directed.py",
+        "src/mission_control/application/programs/goal_directed.py",
         "GoalDirectedOperationResultService.reconcile",
         ("observed.model_dump(mode='json')",),
         (f"{OE}.contracts.OperationWorkflowResult",),
         ANY_PAYLOAD,
     ),
     (
-        "app/application/orchestration/service.py",
+        "src/mission_control/application/programs/service.py",
         "RunControlLifecycleGateway.execute",
         ("item.model_dump(mode='json')",),
         (f"{RC}.contracts.AcceptedObligationEvidence",),
         NO_SET,
     ),
     (
-        "app/application/orchestration/service.py",
+        "src/mission_control/application/programs/service.py",
         "StageGraphDecisionService.complete",
         ("item.model_dump(mode='json')",),
         (f"{RC}.contracts.AcceptedObligationEvidence",),
         NO_SET,
     ),
     (
-        "app/domain/run_control/reducer.py",
+        "src/mission_control/domain/policies/reducer.py",
         "_evidence_frontier",
         ("item.model_dump(mode='json')",),
         (
@@ -108,145 +108,145 @@ _AUDIT: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...], str], ...] = (
         NO_SET,
     ),
     (
-        "app/domain/run_control/reducer.py",
+        "src/mission_control/domain/policies/reducer.py",
         "_terminal_outcome",
         ("item.model_dump(mode='json')",),
         (f"{RC}.contracts.AcceptedObligationEvidence",),
         NO_SET,
     ),
     (
-        "app/application/reference_research/service.py",
+        "integrations/biotech/src/biotech_mission_adapters/application/reference_research/service.py",
         "execute_reference_fixture",
         ("fixture.model_dump(mode='json')",),
         (
-            "app.domain.reference_research.contracts.QualiaFixtureInput",
-            "app.domain.reference_research.contracts.DaveFixtureInput",
+            "biotech_mission_adapters.domain.reference_research.contracts.QualiaFixtureInput",
+            "biotech_mission_adapters.domain.reference_research.contracts.DaveFixtureInput",
         ),
         NO_SET,
     ),
     (
-        "app/application/reference_research/service.py",
+        "integrations/biotech/src/biotech_mission_adapters/application/reference_research/service.py",
         "execute_reference_fixture",
         ("lease_request.model_dump(mode='json')",),
         (f"{GR}.kernel.ResourceLeaseRequest",),
         NO_SET,
     ),
     (
-        "app/application/reference_research/service.py",
+        "integrations/biotech/src/biotech_mission_adapters/application/reference_research/service.py",
         "prepare_reference_implementation",
         ("resources.model_dump(mode='json')",),
         (f"{GR}.definitions.ExecutionResourceEnvelopeV2",),
         NO_SET,
     ),
     (
-        "app/application/run_control/run_control_repository.py",
+        "src/mission_control/application/execution/run_control_repository.py",
         "FamilyAdmissionCommit.__post_init__",
         ("mutation.model_dump(mode='json', exclude={'decided_at'})",),
         (f"{RC}.family_admission.AtomicFamilyMutation",),
         NO_SET,
     ),
     (
-        "app/application/runners/web_research_coordinator_live.py",
+        "integrations/biotech/src/biotech_mission_adapters/bootstrap/runners/web_research_coordinator_live.py",
         "_launch_proposal",
         ("ref.model_dump(mode='json')",),
         (f"{CD}.ExactDefinitionRef",),
         NO_SET,
     ),
     (
-        "app/application/runners/web_research_coordinator_live.py",
+        "integrations/biotech/src/biotech_mission_adapters/bootstrap/runners/web_research_coordinator_live.py",
         "_run_mounted_mcp_planning",
         ("tool.model_dump(mode='json', exclude_none=True)",),
         (),
         THIRD_PARTY,
     ),
     (
-        "app/integrations/web_research_runtime.py",
+        "integrations/biotech/src/biotech_mission_adapters/adapters/infrastructure/web_research_runtime.py",
         "_tools_snapshot_digest",
         ("tool.model_dump(mode='json', exclude_none=True)",),
         (),
         THIRD_PARTY,
     ),
     (
-        "app/application/runtime/runtime_decisions.py",
+        "src/mission_control/application/recovery/runtime_decisions.py",
         "DurableDecisionService.create_request",
         ("request.model_dump(mode='json', exclude={'request_digest'})",),
         (f"{GR}.kernel.DecisionRequest",),
         NO_SET,
     ),
     (
-        "app/application/runtime/runtime_lineage.py",
+        "src/mission_control/application/recovery/runtime_lineage.py",
         "PersistedExecutionLineage.lineage_is_canonical_and_scope_bound",
         (
             "self.model_dump(mode='json', exclude={'lineage_digest', 'recorded_at', 'retain_until'})",
         ),
-        ("app.application.runtime.runtime_lineage.PersistedExecutionLineage",),
+        ("mission_control.application.recovery.runtime_lineage.PersistedExecutionLineage",),
         NO_SET,
     ),
     (
-        "app/application/runtime/runtime_run_plan.py",
+        "src/mission_control/application/recovery/runtime_run_plan.py",
         "compile_run_plan",
         ("item.model_dump(mode='json')",),
         (f"{CD}.AliasBinding",),
         NO_SET,
     ),
     (
-        "app/application/runtime/runtime_run_plan.py",
+        "src/mission_control/application/recovery/runtime_run_plan.py",
         "compile_run_plan_v3",
         ("item.model_dump(mode='json')",),
         (f"{CD}.AliasBinding",),
         NO_SET,
     ),
     (
-        "app/application/runtime/runtime_run_plan.py",
+        "src/mission_control/application/recovery/runtime_run_plan.py",
         "compile_run_plan_v4",
         ("item.model_dump(mode='json')",),
         (f"{CD}.AliasBinding",),
         NO_SET,
     ),
     (
-        "app/application/schema/graph_query.py",
+        "integrations/biotech/src/biotech_mission_adapters/application/schema/graph_query.py",
         "intent_digest",
         ("intent.model_dump(mode='json')",),
         (f"{SC}.QueryExecutionIntent",),
         ANY_PAYLOAD,
     ),
     (
-        "app/application/schema/schema_grounding_semantic_handlers.py",
+        "integrations/biotech/src/biotech_mission_adapters/application/schema/schema_grounding_semantic_handlers.py",
         "SupportingGraphSemanticBindingProvider.prepare",
         ("intent.model_dump(mode='json')",),
         (f"{SC}.QueryExecutionIntent",),
         ANY_PAYLOAD,
     ),
     (
-        "app/application/schema/supporting_graph_reconciliation.py",
+        "integrations/biotech/src/biotech_mission_adapters/application/schema/supporting_graph_reconciliation.py",
         "SupportingGraphReconciliationWorkflow.run",
         ("intent.model_dump(mode='json')",),
         (f"{SC}.QueryExecutionIntent",),
         ANY_PAYLOAD,
     ),
     (
-        "app/application/schema/supporting_graph_reconciliation.py",
+        "integrations/biotech/src/biotech_mission_adapters/application/schema/supporting_graph_reconciliation.py",
         "_terminal_result",
         ("intent.model_dump(mode='json')",),
         (f"{SC}.QueryExecutionIntent",),
         ANY_PAYLOAD,
     ),
     (
-        "app/application/schema/supporting_graph_reconciliation.py",
+        "integrations/biotech/src/biotech_mission_adapters/application/schema/supporting_graph_reconciliation.py",
         "_reconciliation_request_digest",
         ("evidence.model_dump(mode='json')",),
         (f"{SC}.GraphReconciliationEvidence",),
         NO_SET,
     ),
     (
-        "app/application/schema/schema_catalog_build.py",
+        "integrations/biotech/src/biotech_mission_adapters/application/schema/schema_catalog_build.py",
         "_request_fingerprint",
         ("request.model_dump(mode='json', exclude={'requested_at'})",),
         (f"{SG}.SchemaCatalogBuildRequest",),
         NO_SET,
     ),
     (
-        "app/application/web_research/web_research_semantic_binding.py",
+        "integrations/biotech/src/biotech_mission_adapters/application/web_research/web_research_semantic_binding.py",
         "verify_web_research_operation_binding",
         (
             "profile_ref.model_dump(mode='json')",
@@ -257,7 +257,7 @@ _AUDIT: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...], str], ...] = (
         NO_SET,
     ),
     (
-        "app/application/workspaces/workspace_materialization.py",
+        "src/mission_control/application/artifacts/workspace_materialization.py",
         "WorkspaceMaterializationService._append_revision",
         (
             "current.template_ref.model_dump(mode='json')",
@@ -268,7 +268,7 @@ _AUDIT: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...], str], ...] = (
         NO_SET,
     ),
     (
-        "app/application/workspaces/workspace_materialization.py",
+        "src/mission_control/application/artifacts/workspace_materialization.py",
         "WorkspaceMaterializationService._initial_manifest",
         (
             "entry.model_dump(mode='json')",
@@ -279,7 +279,7 @@ _AUDIT: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...], str], ...] = (
         NO_SET,
     ),
     (
-        "app/domain/operation_execution/materialization.py",
+        "src/mission_control/domain/execution/materialization.py",
         "workspace_manifest_digest",
         (
             "entry.model_dump(mode='json')",
@@ -290,42 +290,42 @@ _AUDIT: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...], str], ...] = (
         NO_SET,
     ),
     (
-        "app/domain/coordinator/launch.py",
+        "src/mission_control/domain/coordinator/launch.py",
         "SemanticBindingPlan.plan_content_matches_digest",
         ("self.model_dump(mode='json', exclude={'plan_digest'})",),
-        ("app.domain.coordinator.launch.SemanticBindingPlan",),
+        ("mission_control.domain.coordinator.launch.SemanticBindingPlan",),
         ANY_PAYLOAD,
     ),
     (
-        "app/domain/graph_runtime/contracts.py",
+        "src/mission_control/domain/graph_runtime/contracts.py",
         "GraphExecutionSubmission.submission_digest_matches_intent",
         ("self.model_dump(mode='json', exclude={'request_digest'})",),
         (f"{GR}.contracts.GraphExecutionSubmission",),
         NO_SET,
     ),
     (
-        "app/domain/graph_runtime/contracts.py",
+        "src/mission_control/domain/graph_runtime/contracts.py",
         "InterventionBase.intervention_digest_matches_intent",
         ("self.model_dump(mode='json', exclude={'request_digest'})",),
         (f"{GR}.contracts.InterventionBase",),
         NO_SET,
     ),
     (
-        "app/domain/operation_execution/checkpoint_lineage.py",
+        "src/mission_control/domain/execution/checkpoint_lineage.py",
         "CheckpointTransitionObservation.content_digest",
         ("self.model_dump(mode='json', exclude={'observed_at'})",),
         (f"{OE}.checkpoint_lineage.CheckpointTransitionObservation",),
         NO_SET,
     ),
     (
-        "app/domain/operation_execution/journal.py",
+        "src/mission_control/domain/execution/journal.py",
         "OperationJournalSettlement.create",
         ("draft.model_dump(mode='json', exclude={'settlement_digest'})",),
         (f"{OE}.journal.OperationJournalSettlement",),
         ANY_PAYLOAD,
     ),
     (
-        "app/domain/operation_execution/journal.py",
+        "src/mission_control/domain/execution/journal.py",
         "OperationJournalSettlement.terminal_shape_is_consistent",
         (
             "self.model_dump(mode='json', exclude={'settlement_digest', 'digest_version', 'released_usage'})",
@@ -335,14 +335,14 @@ _AUDIT: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...], str], ...] = (
         ANY_PAYLOAD,
     ),
     (
-        "app/domain/schema_catalog/parser.py",
+        "integrations/biotech/src/biotech_mission_adapters/domain/schema_catalog/parser.py",
         "parse_physical_schema",
         ("value.model_dump(mode='json')",),
-        ("app.domain.schema_catalog.models.PhysicalSchemaCatalog",),
+        ("biotech_mission_adapters.domain.schema_catalog.models.PhysicalSchemaCatalog",),
         NO_SET,
     ),
     (
-        "app/domain/schema_context/validation.py",
+        "integrations/biotech/src/biotech_mission_adapters/domain/schema_context/validation.py",
         "accept_selection",
         (
             "review.model_dump(mode='json')",
@@ -355,21 +355,21 @@ _AUDIT: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...], str], ...] = (
         NO_SET,
     ),
     (
-        "app/experiments/dynamic_research_swarm/evaluators.py",
+        "experiments/dynamic_research_swarm/evaluators.py",
         "evaluate_claim",
         ("gate.model_dump(mode='json')",),
         (f"{SW}.GateResult",),
         NO_SET,
     ),
     (
-        "app/experiments/dynamic_research_swarm/repository.py",
+        "experiments/dynamic_research_swarm/repository.py",
         "SwarmEvidenceRepository.save_plan",
         ("plan.model_dump_json()",),
         (f"{SW}.MissionPlan",),
         NO_SET,
     ),
     (
-        "app/experiments/dynamic_research_swarm/temporal_activities.py",
+        "experiments/dynamic_research_swarm/temporal_activities.py",
         "execute_swarm_stage",
         ("output.model_dump_json()",),
         (
@@ -381,7 +381,7 @@ _AUDIT: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...], str], ...] = (
         NO_SET,
     ),
     (
-        "app/integrations/conformance_operation_runtime.py",
+        "src/mission_control/adapters/operations/conformance.py",
         "ConformanceSandbox.materialize",
         ("mount.model_dump(mode='json')",),
         (f"{OE}.contracts.WorkspaceMount",),
@@ -417,7 +417,7 @@ def test_no_unaudited_json_dump_digest_sites() -> None:
     assert not unaudited, (
         "A JSON-mode dump of a contract feeds a digest. `model_dump(mode='json')` lists sets in "
         "per-process iteration order, so the digest is not an identity. Use "
-        "`app.domain.control_plane.canonical.stable_json_digest(model)` (or `stable_json_dump`), "
+        "`mission_control.domain.authoring.canonical.stable_json_digest(model)` (or `stable_json_dump`), "
         "or audit the site into AUDITED_NOT_AFFECTED with proof that no set is reachable:\n"
         + "\n".join(unaudited)
     )
@@ -456,7 +456,7 @@ def test_scanner_detects_the_banned_patterns(tmp_path: Path) -> None:
     (root / "sample.py").write_text(
         textwrap.dedent(
             """
-            from app.domain.control_plane.canonical import sha256_digest, stable_json_digest
+            from mission_control.domain.authoring.canonical import sha256_digest, stable_json_digest
 
             def direct(x):
                 return sha256_digest(x.model_dump(mode="json"))
@@ -532,13 +532,16 @@ def test_no_unverifiable_json_dumps_in_app() -> None:
 def _all_app_models() -> list[type[BaseModel]]:
     import pkgutil
 
-    import app
-
-    for module in pkgutil.walk_packages(app.__path__, "app."):
-        try:
-            importlib.import_module(module.name)
-        except Exception:  # noqa: S112 - modules needing live settings are not contracts
-            continue
+    packages = ("mission_control", "biotech_mission_adapters", "experiments")
+    for name in packages:
+        package = importlib.import_module(name)
+        for module in pkgutil.walk_packages(package.__path__, name + "."):
+            if module.name.endswith(".__main__"):
+                continue  # executable CLI modules parse arguments when executed
+            try:
+                importlib.import_module(module.name)
+            except Exception:  # noqa: S112 - modules needing live settings are not contracts
+                continue
     found: list[type[BaseModel]] = []
 
     def collect(model: type[BaseModel]) -> None:
@@ -547,7 +550,9 @@ def _all_app_models() -> list[type[BaseModel]]:
             collect(subclass)
 
     collect(BaseModel)
-    return [model for model in found if model.__module__.startswith("app")]
+    models = [model for model in found if model.__module__.startswith(packages)]
+    assert models, "Digest guard found no project-owned contract models"
+    return models
 
 
 def _declared_models(annotation: object) -> list[type[BaseModel]]:
@@ -558,7 +563,7 @@ def _declared_models(annotation: object) -> list[type[BaseModel]]:
     return [model for arg in typing.get_args(annotation) for model in _declared_models(arg)]
 
 
-# Runtime-key hierarchy (`app.domain.graph_runtime.identities`): fields declared as a base key whose
+# Runtime-key hierarchy (`mission_control.domain.graph_runtime.identities`): fields declared as a base key whose
 # subclasses add fields. `stable_json_dump` follows pydantic's declared-type rule for them; the
 # runtime-type walk of `_normalize`/`contract_fingerprint` would include the subclass fields. None
 # of these contracts is an input of `contract_fingerprint` or `stable_json_dump` today.

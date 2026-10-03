@@ -2,10 +2,25 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from app.application.control_plane.control_plane_repository import InMemoryDefinitionRepository
-from app.application.control_plane.service import ControlPlaneService
-from app.domain.control_plane.canonical import canonical_json, sha256_digest
-from app.domain.control_plane.contracts import (
+from biotech_mission_adapters.domain.coordinator.web_capability_fixtures import (
+    BROWSER_CAPABILITIES,
+    FIRECRAWL_SKILL_NAMES,
+    FIRECRAWL_TOOL_NAMES,
+    REQUIRED_TOOL_NAMES,
+    SEARCH_TOOL_LOGICAL_IDS,
+    TAVILY_SKILL_NAMES,
+    TAVILY_TOOL_NAMES,
+    WEB_RESEARCH_CAPABILITIES,
+    web_capability_definitions,
+)
+
+from mission_control.adapters.storage.control_plane_payloads import InMemoryPayloadStore
+from mission_control.application.authoring.control_plane_repository import (
+    InMemoryDefinitionRepository,
+)
+from mission_control.application.authoring.service import ControlPlaneService
+from mission_control.domain.authoring.canonical import canonical_json, sha256_digest
+from mission_control.domain.authoring.contracts import (
     AgentProfileDefinition,
     ControlProfileDefinition,
     DefinitionKind,
@@ -20,19 +35,7 @@ from app.domain.control_plane.contracts import (
     WorkflowTypeDefinition,
     WorkspaceTemplateDefinition,
 )
-from app.domain.control_plane.extensions import ExtensionRegistry
-from app.domain.coordinator.web_capability_fixtures import (
-    BROWSER_CAPABILITIES,
-    FIRECRAWL_SKILL_NAMES,
-    FIRECRAWL_TOOL_NAMES,
-    REQUIRED_TOOL_NAMES,
-    SEARCH_TOOL_LOGICAL_IDS,
-    TAVILY_SKILL_NAMES,
-    TAVILY_TOOL_NAMES,
-    WEB_RESEARCH_CAPABILITIES,
-    web_capability_definitions,
-)
-from app.integrations.control_plane_payloads import InMemoryPayloadStore
+from mission_control.domain.authoring.extensions import ExtensionRegistry
 
 NOW = datetime(2026, 7, 25, 19, 0, tzinfo=UTC)
 
@@ -44,15 +47,9 @@ def test_web_fixture_has_complete_deterministic_inventory() -> None:
     assert canonical_json(first) == canonical_json(second)
     assert sha256_digest(first) == sha256_digest(second)
 
-    servers = [
-        definition for definition in first if isinstance(definition, MCPServerDefinition)
-    ]
-    tools = [
-        definition for definition in first if isinstance(definition, MCPToolDefinition)
-    ]
-    skills = [
-        definition for definition in first if isinstance(definition, SkillDefinition)
-    ]
+    servers = [definition for definition in first if isinstance(definition, MCPServerDefinition)]
+    tools = [definition for definition in first if isinstance(definition, MCPToolDefinition)]
+    skills = [definition for definition in first if isinstance(definition, SkillDefinition)]
     profiles = [
         definition for definition in first if isinstance(definition, AgentProfileDefinition)
     ]
@@ -74,10 +71,7 @@ def test_web_fixture_has_complete_deterministic_inventory() -> None:
     assert sum(isinstance(item, WorkspaceTemplateDefinition) for item in first) == 1
     assert sum(isinstance(item, EvaluationProfileDefinition) for item in first) == 1
     assert sum(isinstance(item, WorkflowTypeDefinition) for item in first) == 1
-    assert (
-        sum(isinstance(item, WorkflowImplementationBindingDefinition) for item in first)
-        == 1
-    )
+    assert sum(isinstance(item, WorkflowImplementationBindingDefinition) for item in first) == 1
 
 
 def test_mcp_servers_freeze_provider_identity_and_separate_exact_tool_rows() -> None:
@@ -93,21 +87,14 @@ def test_mcp_servers_freeze_provider_identity_and_separate_exact_tool_rows() -> 
     assert servers["mcp.tavily"].allowed_tools == frozenset(TAVILY_TOOL_NAMES)
     assert servers["mcp.firecrawl"].approval_policy["firecrawl_interact"] == "always"
     assert servers["mcp.firecrawl"].source_provenance.upstream_identity == "firecrawl"
-    assert (
-        servers["mcp.tavily"].source_provenance.upstream_identity
-        == "tavily-remote-mcp"
-    )
+    assert servers["mcp.tavily"].source_provenance.upstream_identity == "tavily-remote-mcp"
     assert servers["mcp.tavily"].endpoint == "https://mcp.tavily.com/mcp/"
     assert all(
-        server.schema_digest == server.schema_snapshot_ref.digest
-        for server in servers.values()
+        server.schema_digest == server.schema_snapshot_ref.digest for server in servers.values()
     )
     assert all(server.credential_refs for server in servers.values())
 
-    parent_by_tool = {
-        tool.tool_name: tool.server_ref.logical_id
-        for tool in tools
-    }
+    parent_by_tool = {tool.tool_name: tool.server_ref.logical_id for tool in tools}
     assert parent_by_tool == {
         **{name: "mcp.firecrawl" for name in FIRECRAWL_TOOL_NAMES},
         **{name: "mcp.tavily" for name in TAVILY_TOOL_NAMES},
@@ -118,24 +105,14 @@ def test_mcp_servers_freeze_provider_identity_and_separate_exact_tool_rows() -> 
 
 def test_profile_selects_only_search_tools_and_has_explicit_browser_authority() -> None:
     definitions = web_capability_definitions()
-    tools = {
-        tool.logical_id: tool
-        for tool in definitions
-        if isinstance(tool, MCPToolDefinition)
-    }
+    tools = {tool.logical_id: tool for tool in definitions if isinstance(tool, MCPToolDefinition)}
     skills = {
-        skill.logical_id: skill
-        for skill in definitions
-        if isinstance(skill, SkillDefinition)
+        skill.logical_id: skill for skill in definitions if isinstance(skill, SkillDefinition)
     }
     profile = next(
-        definition
-        for definition in definitions
-        if isinstance(definition, AgentProfileDefinition)
+        definition for definition in definitions if isinstance(definition, AgentProfileDefinition)
     )
-    selected_tool_ids = {
-        ref.logical_id for ref in profile.tool_refs
-    }
+    selected_tool_ids = {ref.logical_id for ref in profile.tool_refs}
     assert selected_tool_ids == SEARCH_TOOL_LOGICAL_IDS
     assert {tools[logical_id].tool_name for logical_id in selected_tool_ids} == {
         "firecrawl_search",
@@ -145,16 +122,12 @@ def test_profile_selects_only_search_tools_and_has_explicit_browser_authority() 
         {
             next(
                 ref
-                for ref in (
-                    tool.server_ref for tool in tools.values()
-                )
+                for ref in (tool.server_ref for tool in tools.values())
                 if ref.logical_id == "mcp.firecrawl"
             ),
             next(
                 ref
-                for ref in (
-                    tool.server_ref for tool in tools.values()
-                )
+                for ref in (tool.server_ref for tool in tools.values())
                 if ref.logical_id == "mcp.tavily"
             ),
         }
@@ -229,9 +202,7 @@ def test_workflow_fixture_freezes_browser_runtime_workspace_and_artifact_contrac
     producers: dict[str, set[str]] = {}
     for dependency in blueprint.dependencies:
         assert dependency.dependency_class == "required"
-        producers.setdefault(dependency.consumer_stage_id, set()).add(
-            dependency.producer_stage_id
-        )
+        producers.setdefault(dependency.consumer_stage_id, set()).add(dependency.producer_stage_id)
     assert producers["search_firecrawl"] == {"admit_public_goal"}
     assert producers["search_tavily"] == {"admit_public_goal"}
     assert producers["synthesize_citations"] == {"search_firecrawl", "search_tavily"}
@@ -280,8 +251,7 @@ def test_publication_order_places_every_exact_dependency_before_its_consumer() -
                 }
             )
         assert all(
-            positions[(reference.kind, reference.logical_id)] < index
-            for reference in references
+            positions[(reference.kind, reference.logical_id)] < index for reference in references
         )
 
 

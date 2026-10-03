@@ -5,31 +5,31 @@ from hashlib import sha256
 
 import pytest
 
-from app.application.workspaces.workspace_materialization import (
+from mission_control.adapters.storage.filesystem_workspace import (
+    FilesystemWorkspaceProvisioner,
+    is_read_only,
+)
+from mission_control.application.artifacts.workspace_materialization import (
     InMemoryDurableWorkspaceInputs,
     InMemoryWorkspaceManifestRepository,
     WorkspaceMaterializationService,
 )
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.contracts import DefinitionKind, ExactDefinitionRef
-from app.domain.operation_execution.contracts import (
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.authoring.contracts import DefinitionKind, ExactDefinitionRef
+from mission_control.domain.execution.contracts import (
     MaterializedWorkspace,
     WorkspaceMaterializationRequest,
     WorkspaceOwner,
     WorkspaceOwnerKind,
     WorkspaceSlotBinding,
 )
-from app.domain.operation_execution.errors import (
+from mission_control.domain.execution.errors import (
     UndeclaredWorkspacePath,
     WorkspaceDigestMismatch,
     WorkspaceSlotConflict,
 )
-from app.domain.operation_execution.materialization import (
+from mission_control.domain.execution.materialization import (
     verify_workspace_manifest,
-)
-from app.integrations.filesystem_workspace import (
-    FilesystemWorkspaceProvisioner,
-    is_read_only,
 )
 
 INPUT = b"immutable governed input"

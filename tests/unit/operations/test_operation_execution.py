@@ -13,15 +13,31 @@ from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
 
-from app.application.operations.checkpoint_lineage import (
+from mission_control.adapters.operations.conformance import (
+    ConformanceAssetVerifier,
+    ConformanceAuthority,
+    ConformanceBudgetAuthority,
+    ConformanceEventSink,
+    ConformanceRuntime,
+    ConformanceSandbox,
+    ConformanceSecretResolver,
+)
+from mission_control.adapters.temporal.operation_activities import (
+    OperationExecutionActivities,
+    parse_operation_result,
+)
+from mission_control.adapters.temporal.workflow_sandbox import coordinator_workflow_runner
+from mission_control.adapters.temporal.workflows.operation import OperationWorkflow
+from mission_control.application.artifacts.artifact_promotion import ArtifactPayloadAddress
+from mission_control.application.execution.operations.checkpoint_lineage import (
     CheckpointLineageService,
     InMemoryCheckpointLineageRepository,
 )
-from app.application.operations.journaled_operation_execution import (
+from mission_control.application.execution.operations.journaled_operation_execution import (
     JournaledOperationExecutionCoordinator,
     output_payload,
 )
-from app.application.operations.operation_execution import (
+from mission_control.application.execution.operations.operation_execution import (
     InMemoryOperationBindingRepository,
     OperationBudgetReconciliationInProgress,
     OperationExecutionInProgress,
@@ -31,23 +47,19 @@ from app.application.operations.operation_execution import (
     RunControlOperationBudgetAuthority,
     settlement_result_manifest,
 )
-from app.application.operations.operation_journal import OperationJournalMutation
-from app.application.workspaces.artifact_promotion import ArtifactPayloadAddress
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.contracts import (
+from mission_control.application.execution.operations.operation_journal import (
+    OperationJournalMutation,
+)
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.authoring.contracts import (
     DefinitionKind,
     ExactDefinitionRef,
     SecretRef,
     WorkflowWorkspaceContract,
     WorkspaceSlot,
 )
-from app.domain.graph_runtime.identities import (
-    NO_MAPPED_INSTANCE,
-    RuntimeUnitIdentity,
-    StageGraphUnitLocation,
-)
-from app.domain.operation_execution.checkpoint_lineage import OperationActivityAttempt
-from app.domain.operation_execution.contracts import (
+from mission_control.domain.execution.checkpoint_lineage import OperationActivityAttempt
+from mission_control.domain.execution.contracts import (
     CapabilityGrant,
     ImmutableAssetBinding,
     MCPServerBinding,
@@ -66,8 +78,13 @@ from app.domain.operation_execution.contracts import (
     WorkspaceOwnerKind,
     WorkspaceSlotBinding,
 )
-from app.domain.operation_execution.journal import OperationClaimResult, OperationEffectClaim
-from app.domain.run_control.contracts import (
+from mission_control.domain.execution.journal import OperationClaimResult, OperationEffectClaim
+from mission_control.domain.graph_runtime.identities import (
+    NO_MAPPED_INSTANCE,
+    RuntimeUnitIdentity,
+    StageGraphUnitLocation,
+)
+from mission_control.domain.policies.contracts import (
     AcceptedOutputEvidence,
     ActorContext,
     CommandResult,
@@ -80,22 +97,7 @@ from app.domain.run_control.contracts import (
     TerminalizationProposal,
     TerminalizeAction,
 )
-from app.domain.run_control.errors import IdempotencyConflict
-from app.integrations.conformance_operation_runtime import (
-    ConformanceAssetVerifier,
-    ConformanceAuthority,
-    ConformanceBudgetAuthority,
-    ConformanceEventSink,
-    ConformanceRuntime,
-    ConformanceSandbox,
-    ConformanceSecretResolver,
-)
-from app.temporal.operation_activities import (
-    OperationExecutionActivities,
-    parse_operation_result,
-)
-from app.temporal.workflow_sandbox import coordinator_workflow_runner
-from app.temporal.workflows.operation import OperationWorkflow
+from mission_control.domain.policies.errors import IdempotencyConflict
 from tests.fixtures.operation_activities import RecordingOperationCancel, wait_heartbeating
 from tests.unit.run_control.test_run_control import actor, command, request, service
 
@@ -332,9 +334,7 @@ def test_operation_workflow_wrapper_rejects_oversized_identifiers_and_counts() -
 
 def test_operation_workflow_rejects_aggregate_2_1mb_effect_frontier() -> None:
     operation = operation_request()
-    effect_frontier = tuple(
-        f"{index:04d}-" + "e" * 2_043 for index in range(1_024)
-    )
+    effect_frontier = tuple(f"{index:04d}-" + "e" * 2_043 for index in range(1_024))
     assert sum(len(item.encode("utf-8")) for item in effect_frontier) == 2_097_152
 
     with pytest.raises(ValueError, match="payload exceeds 2,000,000 bytes"):
@@ -421,7 +421,7 @@ def test_operation_workflow_v2_rejects_deprecated_family_kinds(
 def test_agent_cognitive_worker_registers_operation_activity_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from app.temporal import operation_activities as operation_module
+    from mission_control.adapters.temporal import operation_activities as operation_module
 
     captured: dict[str, object] = {}
 
@@ -1001,19 +1001,12 @@ async def test_journaled_operation_settles_usage_effect_and_terminalizes(
 
         async def commit(self, mutation: OperationJournalMutation) -> OperationClaimResult:
             self.mutations.append(mutation)
-            if (
-                crash_after_authority
-                and mutation.settlement is None
-                and not self.claim_failed
-            ):
+            if crash_after_authority and mutation.settlement is None and not self.claim_failed:
                 self.claim_failed = True
                 raise RuntimeError("crash after run-control claim authority")
             if mutation.settlement is not None:
                 revision = mutation.settlement.settlement_revision
-                if (
-                    crash_after_authority
-                    and revision not in self.failed_revisions
-                ):
+                if crash_after_authority and revision not in self.failed_revisions:
                     self.failed_revisions.add(revision)
                     raise RuntimeError("crash after run-control authority commit")
                 self.settlement = mutation.settlement
@@ -1023,9 +1016,7 @@ async def test_journaled_operation_settles_usage_effect_and_terminalizes(
                 reason="operation authority recorded",
             )
 
-        async def get_settlement(
-            self, request_scope: str, effect_claim_id: str
-        ):  # type: ignore[no-untyped-def]
+        async def get_settlement(self, request_scope: str, effect_claim_id: str):  # type: ignore[no-untyped-def]
             if (
                 self.settlement is not None
                 and self.settlement.request_scope == request_scope
@@ -1143,9 +1134,7 @@ async def test_journaled_operation_settles_usage_effect_and_terminalizes(
         output_text="done",
         usage=RuntimeUsage(
             amounts={"tokens.total": 5},
-            pending_external_amounts=(
-                {"tokens.total": 5} if pending_external else {}
-            ),
+            pending_external_amounts=({"tokens.total": 5} if pending_external else {}),
         ),
         provider_run_id="provider:journal-operation",
         # RRM-009: the runtime's event payloads (inspection, capability lineage) are kept in
@@ -1172,24 +1161,30 @@ async def test_journaled_operation_settles_usage_effect_and_terminalizes(
     # RRM-004: the settlement now carries its digest-bound output payload address, and a
     # settled replay restores the excluded output from it unchanged.
     assert result.output_payload_digest is not None
-    assert result.model_copy(
-        update={
-            "output_payload_ref": None,
-            "output_payload_digest": None,
-            "output_payload_size_bytes": None,
-        }
-    ) == settlement
+    assert (
+        result.model_copy(
+            update={
+                "output_payload_ref": None,
+                "output_payload_digest": None,
+                "output_payload_size_bytes": None,
+            }
+        )
+        == settlement
+    )
     assert await coordinator.get_settlement(binding) == result
     assert json.loads(output_payload(settlement))["event_payloads"] == [
         {"kind": "deep_agent.capability_lineage.v1", "invocations": []}
     ]
     assert "event_payloads" not in json.loads(settlement_result_manifest(result))
     # A settlement without event payloads keeps the earlier output payload bytes.
-    assert output_payload(settlement.model_copy(update={"event_payloads": ()})) == json.dumps(
-        {"output_text": "done", "structured_output": None},
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode()
+    assert (
+        output_payload(settlement.model_copy(update={"event_payloads": ()}))
+        == json.dumps(
+            {"output_text": "done", "structured_output": None},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    )
     if pending_external:
         effects = await run_service.get_effects("tenant-1", run_id)
         assert effects.claims[acquired.claim.effect_claim_id].settlement is None
@@ -1241,9 +1236,7 @@ async def test_journaled_operation_settles_usage_effect_and_terminalizes(
                     proposing_execution_binding_ref=binding.binding_id,
                     required_obligations_accepted=True,
                     valid_output_refs=(
-                        ("output:advance-after-claim-authority",)
-                        if crash_after_authority
-                        else ()
+                        ("output:advance-after-claim-authority",) if crash_after_authority else ()
                     ),
                     budget_settled=True,
                     effects_settled=True,
@@ -1304,9 +1297,7 @@ async def test_operation_workflow_routes_bound_execution_to_exact_cross_queue_ac
         for event in history.events
         if event.HasField("activity_task_scheduled_event_attributes")
     ]
-    assert [event.task_queue.name for event in scheduled] == [
-        "operation-execution-conformance"
-    ]
+    assert [event.task_queue.name for event in scheduled] == ["operation-execution-conformance"]
 
 
 @pytest.mark.asyncio

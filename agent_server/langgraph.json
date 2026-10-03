@@ -1,0 +1,21 @@
+{
+  "$schema": "https://langgra.ph/schema.json",
+  "api_version": "0.12.0",
+  "dependencies": [".."],
+  "graphs": {
+    "belllabs_async_technical_child": "mission_control.adapters.agent_server.entrypoints:child",
+    "block_c_qualification": "mission_control.adapters.agent_server.entrypoints:qualification",
+    "block_c_qualification_n1": "mission_control.adapters.agent_server.entrypoints:qualification_n1",
+    "block_c_wait": "mission_control.adapters.agent_server.entrypoints:wait"
+  },
+  "env": "runtime.env",
+  "auth": {
+    "path": "mission_control.adapters.agent_server.deployment_auth:auth",
+    "disable_studio_auth": true
+  },
+  "http": {
+    "app": "mission_control.adapters.agent_server.http_app:app",
+    "middleware_order": "auth_first"
+  },
+  "python_version": "3.12"
+}

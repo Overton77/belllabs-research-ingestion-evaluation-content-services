@@ -2,16 +2,9 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from app.api.control_plane import (
-    ControlPlanePrincipal,
-    get_control_plane_principal,
-)
-from app.api.run_control import (
-    get_generic_artifact_submitter,
-    get_run_control_service,
-)
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.operation_execution.contracts import (
+from mission_control.bootstrap.technical_api import api
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.execution.contracts import (
     ArtifactPromotionPlan,
     GenericArtifactWorkflowRequest,
     GenericArtifactWorkflowResult,
@@ -21,8 +14,15 @@ from app.domain.operation_execution.contracts import (
     WorkspaceOwnerKind,
     WorkspaceSlotBinding,
 )
-from app.domain.run_control.contracts import ReserveBudgetAction, StartAction
-from app.server import api
+from mission_control.domain.policies.contracts import ReserveBudgetAction, StartAction
+from mission_control.interfaces.http.control_plane import (
+    ControlPlanePrincipal,
+    get_control_plane_principal,
+)
+from mission_control.interfaces.http.run_control import (
+    get_generic_artifact_submitter,
+    get_run_control_service,
+)
 from tests.unit.operations.test_operation_execution import operation_request
 from tests.unit.run_control.test_run_control import command
 from tests.unit.run_control.test_run_control import request as run_request
@@ -62,7 +62,9 @@ async def test_run_control_api_submits_only_active_reserved_operation(
     async def noop(_application: object) -> None:
         return None
 
-    monkeypatch.setattr("app.server.initialize_run_control_resources", noop)
+    monkeypatch.setattr(
+        "mission_control.bootstrap.technical_api.initialize_run_control_resources", noop
+    )
     service, _ = run_control_service()
     admitted = await service.admit(run_request())
     assert admitted.run_id is not None

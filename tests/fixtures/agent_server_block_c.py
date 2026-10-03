@@ -1,75 +1,16 @@
-"""Fixtures and helpers for pre-Stage-3 Block C persistent Agent Server drills.
+"""Fixtures for native interrupt/resume, checkpoint and compatibility drills.
 
-Environment variables (names only; never commit values):
-- ``AGENT_SERVER_ENDPOINT`` — N assembly base URL (default ``http://127.0.0.1:8133``)
-- ``AGENT_SERVER_ENDPOINT_N1`` — N+1 assembly base URL (default ``http://127.0.0.1:8134``)
-- ``BELL_LABS_AGENT_AUTH_ISSUER`` — JWT issuer embedded in minted tokens
-- ``BELL_LABS_AGENT_AUTH_PUBLIC_KEY_B64`` — ASCII PEM as standard base64 (preferred)
-- ``BELL_LABS_AGENT_AUTH_PUBLIC_KEY`` — PEM public key (tests only; avoid in Compose)
-- ``BELL_LABS_AGENT_AUTH_PRIVATE_KEY`` — PEM private key (test mint only)
-- ``BELL_LABS_AGENT_AUTH_AUDIENCE`` — optional, default ``authenticated``
-- ``BELL_LABS_REQUIRE_STAGE3_ENTRY_SERVICES`` — ``1`` fails closed if missing
-- ``BLOCK_C_POSTGRES_URI`` — shared disposable Postgres URI for both assemblies
-- ``BLOCK_C_RUN_RESTART_PHASE`` — ``prepare`` | ``resume`` for restart drill
-- ``BLOCK_C_RESTART_STATE_PATH`` — JSON path for restart handoff state
-- ``BLOCK_C_RUN_NN1_PHASE`` — ``1`` enables same-server unsafe N→N1 fail-open evidence
-- ``BLOCK_C_RUN_NN1_DEPLOYMENT`` — ``1`` enables two-endpoint N/N+1 deployment drills
+Use the one agent_server/langgraph.json with MISSION_CONTROL_AGENT_SERVER_PROFILE:
+qualification registers the N/N1/wait execution profile; qualification_n1 only
+permits N1 execution. Both instances may share a disposable native PostgreSQL
+backend. Disabled graph access now returns a profile denial rather than relying
+on absence from another configuration file. Guarded cross-version resume remains
+strict and must select the exact compatible assembly and endpoint.
 
-Mint a throwaway local RSA pair (do not commit):
-
-```bash
-uv run python - <<'PY'
-from joserfc.jwk import RSAKey
-key = RSAKey.generate_key(2048)
-print(key.as_pem(private=True).decode())
-print(key.as_pem(private=False).decode())
-PY
-```
-
-Two qualification deployments share one disposable Postgres DB and use distinct
-Compose projects (each gets its own Redis/API container). Auth comes from the
-tracked variable-reference file ``langgraph.block_c.env`` (no secret values).
-
-Boundary (qualification topology only — not Stage 3 / production):
-- N config ``langgraph.block_c.json`` registers ``block_c_qualification``,
-  ``block_c_qualification_n1``, and ``block_c_wait``.
-- N+1 config ``langgraph.block_c_n1.json`` registers only ``block_c_qualification_n1``.
-- ``guarded_deployment_runs_wait`` may observe a thread id from N+1 (shared Postgres)
-  but always resumes an N checkpoint on the exact N endpoint/assistant.
-- Separate N+1 deployment fail-closes ``threads.get_state`` / incompatible resume for
-  N graphs (``Graph 'block_c_qualification' not found``). That is accepted evidence,
-  not a test failure. Same-server fail-open remains under ``BLOCK_C_RUN_NN1_PHASE=1``.
-
-```bash
-# Phase A — N assembly (8133)
-export COMPOSE_PROJECT_NAME=belllabs-block-c-qualification
-uv run langgraph up \\
-  --config langgraph.block_c.json \\
-  --postgres-uri \"$BLOCK_C_POSTGRES_URI\" \\
-  --port 8133 --wait --verbose --no-pull
-
-# Phase B — N+1 assembly (8134), same Postgres URI, distinct Compose project/Redis
-export COMPOSE_PROJECT_NAME=belllabs-block-c-qualification-n1
-uv run langgraph up \\
-  --config langgraph.block_c_n1.json \\
-  --postgres-uri \"$BLOCK_C_POSTGRES_URI\" \\
-  --port 8134 --wait --verbose --no-pull
-```
-
-Use disposable DB ``belllabs_langgraph_stage3`` only (never primary).
-
-
-Restart phase (after ``BLOCK_C_RUN_RESTART_PHASE=prepare`` test wrote state):
-
-```bash
-docker restart belllabs-block-c-qualification-langgraph-api-1
-# wait healthy, then:
-BLOCK_C_RUN_RESTART_PHASE=resume \\
-BLOCK_C_RESTART_STATE_PATH=/path/to/state.json \\
-AGENT_SERVER_ENDPOINT=http://127.0.0.1:8133 \\
-BELL_LABS_REQUIRE_STAGE3_ENTRY_SERVICES=1 \\
-uv run pytest -q tests/test_agent_server_block_c_persistent.py -m block_c_restart
-```
+JWT setup uses BELL_LABS_AGENT_AUTH_ISSUER, PUBLIC_KEY_B64, AUDIENCE and ALGORITHM
+(with the common BELL_LABS_AGENT_AUTH_ prefix). Test minting additionally requires
+BELL_LABS_AGENT_AUTH_PRIVATE_KEY; never persist those values. Provider-backed
+restart/deployment drills require explicitly provisioned disposable native storage.
 """
 
 from __future__ import annotations
@@ -92,16 +33,16 @@ from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import APIStatusError
 
-from app.agent_server.block_c_qualification.compat import (
+from mission_control.adapters.agent_server.block_c_qualification.compat import (
     GRAPH_ID_N,
     GRAPH_ID_N1,
     GRAPH_ID_WAIT,
 )
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-BLOCK_C_CONFIG = _PROJECT_ROOT / "langgraph.block_c.json"
-BLOCK_C_N1_CONFIG = _PROJECT_ROOT / "langgraph.block_c_n1.json"
-BLOCK_C_ENV_FILE = _PROJECT_ROOT / "langgraph.block_c.env"
+BLOCK_C_CONFIG = _PROJECT_ROOT / "agent_server" / "langgraph.json"
+BLOCK_C_N1_CONFIG = BLOCK_C_CONFIG
+BLOCK_C_ENV_FILE = _PROJECT_ROOT / "agent_server" / "runtime.env"
 
 
 def _require_env(name: str) -> str:
@@ -208,9 +149,7 @@ async def capture_tenant_introspection_snapshot(
     history = await client.threads.get_history(thread_id, limit=50)
     runs = await client.runs.list(thread_id, limit=50)
     values = dict(state.get("values") or {})
-    run_pairs = tuple(
-        sorted((str(item["run_id"]), str(item.get("status") or "")) for item in runs)
-    )
+    run_pairs = tuple(sorted((str(item["run_id"]), str(item.get("status") or "")) for item in runs))
     history_checkpoint_refs = tuple(_checkpoint_ref(item) for item in history)
     store_denied = False
     store_item_count = 0
@@ -231,9 +170,7 @@ async def capture_tenant_introspection_snapshot(
         "thread_status": str(thread.get("status") or ""),
         "thread_metadata": dict(thread.get("metadata") or {}),
         "state_checkpoint_ref": _checkpoint_ref(state),
-        "state_values_digest": _stable_digest(
-            [json.dumps(values, sort_keys=True, default=str)]
-        ),
+        "state_values_digest": _stable_digest([json.dumps(values, sort_keys=True, default=str)]),
         "state_value_keys": tuple(sorted(values)),
         "history_count": len(history),
         "history_checkpoint_digest": _stable_digest(history_checkpoint_refs),
@@ -387,10 +324,12 @@ async def lookup_assistant_id(client: LangGraphClient, graph_id: str) -> str:
 
 
 def is_missing_n_graph_on_n1_error(error: BaseException) -> bool:
-    """True when N+1 assembly fail-closes because the N graph is not registered."""
+    """True when N+1 rejects the disabled N graph or an older absent graph."""
 
     text = str(error)
     lowered = text.lower()
+    if GRAPH_ID_N in text and "disabled by agent server profile" in lowered:
+        return True
     return (
         GRAPH_ID_N in text
         and GRAPH_ID_N1 in text

@@ -12,11 +12,11 @@ from __future__ import annotations
 
 import pytest
 
-from app.domain.run_control.boundary_commands import (
+from mission_control.domain.policies.boundary_commands import (
     boundary_command_record,
     run_control_boundary_receipts,
 )
-from app.domain.run_control.contracts import (
+from mission_control.domain.policies.contracts import (
     ApplyBoundaryCommandAction,
     BoundaryCommandReceipt,
     BoundaryCommandStatus,
@@ -42,7 +42,7 @@ from app.domain.run_control.contracts import (
     TerminalizeAction,
     WaitCondition,
 )
-from app.domain.run_control.errors import ReceiptTransitionRejected
+from mission_control.domain.policies.errors import ReceiptTransitionRejected
 from tests.unit.run_control.test_run_control import (
     ALL_PERMISSIONS,
     EMPTY_EVIDENCE_DIGEST,

@@ -3,12 +3,13 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from neo4j import READ_ACCESS
-
-from app.domain.schema_grounding.authority import live_neo4j_schema_snapshot_digest
-from app.integrations.neo4j_schema_deployment import (
+from biotech_mission_adapters.adapters.infrastructure.neo4j_schema_deployment import (
     Neo4jLiveSchemaDeploymentReader,
 )
+from biotech_mission_adapters.domain.schema_grounding.authority import (
+    live_neo4j_schema_snapshot_digest,
+)
+from neo4j import READ_ACCESS
 
 
 class _Cursor:
@@ -63,12 +64,8 @@ class _Driver:
 async def test_reader_separates_token_catalog_from_active_usage_and_hashes_descriptors() -> None:
     session = _Session(
         {
-            "CALL db.labels()": [
-                {"values": ["Organization", "OrganizationState"]}
-            ],
-            "CALL db.relationshipTypes()": [
-                {"values": ["USES_PLATFORM", "LEGACY_REL"]}
-            ],
+            "CALL db.labels()": [{"values": ["Organization", "OrganizationState"]}],
+            "CALL db.relationshipTypes()": [{"values": ["USES_PLATFORM", "LEGACY_REL"]}],
             "MATCH (n) UNWIND labels(n)": [{"values": ["Organization"]}],
             "MATCH ()-[r]->()": [{"values": ["USES_PLATFORM"]}],
             "SHOW INDEXES": [
@@ -96,18 +93,12 @@ async def test_reader_separates_token_catalog_from_active_usage_and_hashes_descr
     )
     driver = _Driver(session)
 
-    snapshot = await Neo4jLiveSchemaDeploymentReader(driver).read_schema_snapshot(
-        database="neo4j"
-    )
+    snapshot = await Neo4jLiveSchemaDeploymentReader(driver).read_schema_snapshot(database="neo4j")
 
     assert driver.session_calls == [("neo4j", READ_ACCESS)]
-    assert snapshot.token_catalog_node_labels == frozenset(
-        {"Organization", "OrganizationState"}
-    )
+    assert snapshot.token_catalog_node_labels == frozenset({"Organization", "OrganizationState"})
     assert snapshot.active_node_labels == frozenset({"Organization"})
-    assert snapshot.token_catalog_relationship_types == frozenset(
-        {"USES_PLATFORM", "LEGACY_REL"}
-    )
+    assert snapshot.token_catalog_relationship_types == frozenset({"USES_PLATFORM", "LEGACY_REL"})
     assert snapshot.active_relationship_types == frozenset({"USES_PLATFORM"})
     assert snapshot.indexes[0].properties == ("name",)
     assert snapshot.constraints[0].owned_index == "OrganizationId"

@@ -7,17 +7,17 @@ from typing import Any
 
 import pytest
 
-from app.application.run_control.run_launch import (
+from mission_control.application.execution.run_launch import (
     RunLaunchRejected,
     RunLaunchRequest,
     RunLaunchService,
     fork_semantic_input_binding_ref,
 )
-from app.application.runtime.run_forks import ForkOfRun
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.coordinator.launch import BlueprintFamily, WorkflowSubmission
-from app.domain.orchestration.contracts import StageGraphRunInput
-from app.domain.run_control.contracts import ActorContext
+from mission_control.application.recovery.run_forks import ForkOfRun
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.coordinator.launch import BlueprintFamily, WorkflowSubmission
+from mission_control.domain.policies.contracts import ActorContext
+from mission_control.domain.programs.contracts import StageGraphRunInput
 from tests.fixtures.rrm009_production_stack import stage_blueprint
 from tests.unit.run_control.test_run_control import (
     DIGEST,

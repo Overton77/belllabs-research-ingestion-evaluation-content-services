@@ -12,19 +12,13 @@ from typing import Any
 import httpx
 import pytest
 
-from app.api.control_plane import ControlPlanePrincipal, get_control_plane_principal
-from app.api.run_control import (
-    ROLE_PERMISSIONS,
-    get_boundary_intervention_service,
-    get_run_control_service,
-    get_unit_reconciliation_service,
-)
-from app.application.run_control.boundary_interventions import (
+from mission_control.application.execution.boundary_interventions import (
     BoundaryCommandDeliveryService,
     BoundaryDeliveryResult,
     BoundaryInterventionService,
 )
-from app.domain.run_control.contracts import (
+from mission_control.bootstrap.technical_api import api
+from mission_control.domain.policies.contracts import (
     BoundaryCommandStatus,
     CommandResult,
     CommandStatus,
@@ -32,7 +26,16 @@ from app.domain.run_control.contracts import (
     RunPhase,
     StartAction,
 )
-from app.server import api
+from mission_control.interfaces.http.control_plane import (
+    ControlPlanePrincipal,
+    get_control_plane_principal,
+)
+from mission_control.interfaces.http.run_control import (
+    ROLE_PERMISSIONS,
+    get_boundary_intervention_service,
+    get_run_control_service,
+    get_unit_reconciliation_service,
+)
 from tests.unit.run_control.test_boundary_commands import TARGET, pause
 from tests.unit.run_control.test_run_control import (
     ALL_PERMISSIONS,
@@ -177,9 +180,7 @@ async def test_reconcile_unit_route_requires_the_reconciliation_operator_role() 
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=api), base_url="http://run-control"
         ) as client:
-            api.dependency_overrides[get_control_plane_principal] = lambda: _principal(
-                {"operator"}
-            )
+            api.dependency_overrides[get_control_plane_principal] = lambda: _principal({"operator"})
             forbidden = await client.post(
                 f"/run-control/v1/runs/{run_id}/reconcile-unit", json=body
             )
@@ -189,9 +190,7 @@ async def test_reconcile_unit_route_requires_the_reconciliation_operator_role() 
             api.dependency_overrides[get_control_plane_principal] = lambda: _principal(
                 {"reconciliation_operator"}
             )
-            decided = await client.post(
-                f"/run-control/v1/runs/{run_id}/reconcile-unit", json=body
-            )
+            decided = await client.post(f"/run-control/v1/runs/{run_id}/reconcile-unit", json=body)
             assert decided.status_code == 200, decided.text
             assert decided.json()["status"] == "accepted"
             [delivered] = reconciliation.commands

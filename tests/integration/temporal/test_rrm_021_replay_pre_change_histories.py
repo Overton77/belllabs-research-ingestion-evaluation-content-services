@@ -17,9 +17,12 @@ import pytest
 from temporalio.client import WorkflowHistory
 from temporalio.worker import Replayer
 
-from app.temporal.workflow_sandbox import coordinator_workflow_runner
-from app.temporal.workflows.operation import OperationWorkflow
-from app.temporal.workflows.stagegraph import SETTLE_BASELINE_PATCH, StageGraphWorkflow
+from mission_control.adapters.temporal.workflow_sandbox import coordinator_workflow_runner
+from mission_control.adapters.temporal.workflows.operation import OperationWorkflow
+from mission_control.adapters.temporal.workflows.stagegraph import (
+    SETTLE_BASELINE_PATCH,
+    StageGraphWorkflow,
+)
 from tests.fixtures.temporal_history import patch_ids, scheduled_activity_inputs
 
 HISTORIES = Path(__file__).resolve().parents[2] / "fixtures" / "histories" / "rrm021_pre_change"

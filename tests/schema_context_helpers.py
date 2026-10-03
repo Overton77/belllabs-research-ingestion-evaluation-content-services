@@ -2,15 +2,21 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from app.application.schema.schema_catalog import SchemaCatalog, parse_schema_catalog
-from app.domain.schema_context.contracts import (
+from biotech_mission_adapters.application.schema.schema_catalog import (
+    SchemaCatalog,
+    parse_schema_catalog,
+)
+from biotech_mission_adapters.domain.schema_context.contracts import (
     AcceptedSchemaContextSelection,
     PropertyIntentHint,
     SchemaContextSelection,
     SchemaContextSelectionRequest,
     SchemaSelectionReview,
 )
-from app.domain.schema_context.validation import accept_selection, validate_selection
+from biotech_mission_adapters.domain.schema_context.validation import (
+    accept_selection,
+    validate_selection,
+)
 
 SDL = b"""directive @node on OBJECT
 directive @id on FIELD_DEFINITION

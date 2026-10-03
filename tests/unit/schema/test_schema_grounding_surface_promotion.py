@@ -3,17 +3,19 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-
-from app.application.control_plane.control_plane_repository import InMemoryDefinitionRepository
-from app.application.control_plane.service import ControlPlaneService
-from app.domain.control_plane.contracts import PublishRequest
-from app.domain.control_plane.extensions import ExtensionRegistry
-from app.domain.schema_grounding.definitions import (
+from biotech_mission_adapters.bootstrap.scripts.promote_schema_grounding_surface import _plan
+from biotech_mission_adapters.domain.schema_grounding.definitions import (
     register_schema_grounding_extensions,
     schema_grounding_definitions,
 )
-from app.integrations.control_plane_payloads import InMemoryPayloadStore
-from scripts.promote_schema_grounding_surface import _plan
+
+from mission_control.adapters.storage.control_plane_payloads import InMemoryPayloadStore
+from mission_control.application.authoring.control_plane_repository import (
+    InMemoryDefinitionRepository,
+)
+from mission_control.application.authoring.service import ControlPlaneService
+from mission_control.domain.authoring.contracts import PublishRequest
+from mission_control.domain.authoring.extensions import ExtensionRegistry
 
 NOW = datetime(2026, 7, 26, 15, 30, tzinfo=UTC)
 

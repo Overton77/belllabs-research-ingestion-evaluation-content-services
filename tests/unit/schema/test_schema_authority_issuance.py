@@ -5,25 +5,28 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from neo4j import READ_ACCESS, WRITE_ACCESS
-
-from app.application.schema.schema_authority_issuance import (
+from biotech_mission_adapters.adapters.infrastructure.neo4j_schema_deployment import (
+    Neo4jLiveSchemaDeploymentReader,
+    deployment_evidence_query,
+)
+from biotech_mission_adapters.application.schema.schema_authority_issuance import (
     SchemaAuthorityIssuanceService,
     SchemaDeploymentEvidenceProvisioningService,
     deployment_audit_record_id,
 )
-from app.application.schema.schema_grounding_repository import (
+from biotech_mission_adapters.application.schema.schema_grounding_repository import (
     InMemorySchemaGroundingRecordRepository,
 )
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.schema_catalog.parser import parse_physical_schema
-from app.domain.schema_context.canonicalization import sha256_digest as content_sha256_digest
-from app.domain.schema_grounding.authority import (
+from biotech_mission_adapters.domain.schema_catalog.parser import parse_physical_schema
+from biotech_mission_adapters.domain.schema_context.canonicalization import (
+    sha256_digest as content_sha256_digest,
+)
+from biotech_mission_adapters.domain.schema_grounding.authority import (
     live_neo4j_schema_snapshot_digest,
     live_schema_compatibility_diff,
     live_schema_evidence_digest,
 )
-from app.domain.schema_grounding.contracts import (
+from biotech_mission_adapters.domain.schema_grounding.contracts import (
     LiveNeo4jSchemaSnapshot,
     LiveSchemaDeploymentEvidence,
     Neo4jIndexDescriptor,
@@ -31,15 +34,14 @@ from app.domain.schema_grounding.contracts import (
     SchemaAuthorityIssuerIdentities,
     SchemaDeploymentEvidenceProvisioningRequest,
 )
-from app.domain.schema_grounding.errors import (
+from biotech_mission_adapters.domain.schema_grounding.errors import (
     CatalogPublicationConflict,
     GraphCapabilityDenied,
     SchemaDeploymentMismatch,
 )
-from app.integrations.neo4j_schema_deployment import (
-    Neo4jLiveSchemaDeploymentReader,
-    deployment_evidence_query,
-)
+from neo4j import READ_ACCESS, WRITE_ACCESS
+
+from mission_control.domain.authoring.canonical import sha256_digest
 
 NOW = datetime(2026, 7, 26, 18, 0, tzinfo=UTC)
 SCHEMA_DIGEST = "sha256:" + "1" * 64
@@ -155,9 +157,7 @@ def _snapshot(**updates: object) -> LiveNeo4jSchemaSnapshot:
     values: dict[str, object] = {
         "database": "neo4j",
         "server_agent": "Neo4j/2026.07",
-        "token_catalog_node_labels": frozenset(
-            {"Organization", "TechnologyPlatform"}
-        ),
+        "token_catalog_node_labels": frozenset({"Organization", "TechnologyPlatform"}),
         "token_catalog_relationship_types": frozenset({"USES_PLATFORM"}),
         "active_node_labels": frozenset({"Organization", "TechnologyPlatform"}),
         "active_relationship_types": frozenset({"USES_PLATFORM"}),
@@ -252,10 +252,7 @@ async def test_issue_persists_distinct_content_addressed_authorities() -> None:
         "deployment_evidence",
         deployment_audit_record_id("evidence", _evidence().evidence_id),
     )
-    assert (
-        evidence_record.payload["event_kind"]
-        == "current_schema_verification_attestation"
-    )
+    assert evidence_record.payload["event_kind"] == "current_schema_verification_attestation"
     assert first.deployment_manifest.issuer_authority_ref == (
         IDENTITIES.deployment_issuer_authority_ref
     )
@@ -322,14 +319,14 @@ async def test_deployment_audit_is_reused_across_distinct_consumer_runs() -> Non
     assert evidence_record.run_id is None
     assert manifest_record.run_id is None
     assert evidence_record.payload == evidence.model_dump(mode="json")
-    assert {
-        record.record_type
-        for record in await records.list_for_run("tenant-1", "run-c-1")
-    } == {"workspace_binding", "graph_capability"}
-    assert {
-        record.record_type
-        for record in await records.list_for_run("tenant-1", "run-c-2")
-    } == {"workspace_binding", "graph_capability"}
+    assert {record.record_type for record in await records.list_for_run("tenant-1", "run-c-1")} == {
+        "workspace_binding",
+        "graph_capability",
+    }
+    assert {record.record_type for record in await records.list_for_run("tenant-1", "run-c-2")} == {
+        "workspace_binding",
+        "graph_capability",
+    }
 
 
 @pytest.mark.asyncio
@@ -453,12 +450,8 @@ async def test_operator_provisioning_rejects_incompatible_live_snapshot() -> Non
             token_catalog_node_labels=frozenset(
                 {"Organization", "TechnologyPlatform", "LegacyNode"}
             ),
-            token_catalog_relationship_types=frozenset(
-                {"USES_PLATFORM", "LEGACY_REL"}
-            ),
-            active_node_labels=frozenset(
-                {"Organization", "TechnologyPlatform", "LegacyNode"}
-            ),
+            token_catalog_relationship_types=frozenset({"USES_PLATFORM", "LEGACY_REL"}),
+            active_node_labels=frozenset({"Organization", "TechnologyPlatform", "LegacyNode"}),
             active_relationship_types=frozenset({"USES_PLATFORM", "LEGACY_REL"}),
             indexes=(),
         )
@@ -507,21 +500,13 @@ def test_live_schema_compatibility_diff_reports_exact_expected_and_observed_sets
 
     diff = live_schema_compatibility_diff(_provision_request(), snapshot)
 
-    assert diff.expected_node_labels == frozenset(
-        {"Organization", "TechnologyPlatform"}
-    )
+    assert diff.expected_node_labels == frozenset({"Organization", "TechnologyPlatform"})
     assert diff.observed_node_labels == snapshot.node_labels
-    assert diff.expected_but_unobserved_node_labels == frozenset(
-        {"TechnologyPlatform"}
-    )
+    assert diff.expected_but_unobserved_node_labels == frozenset({"TechnologyPlatform"})
     assert diff.unexpected_node_labels == frozenset({"LegacyNode"})
-    assert diff.operational_node_labels == frozenset(
-        {"BellLabsSchemaDeploymentEvidence"}
-    )
+    assert diff.operational_node_labels == frozenset({"BellLabsSchemaDeploymentEvidence"})
     assert diff.expected_relationship_types == frozenset({"USES_PLATFORM"})
-    assert diff.expected_but_unobserved_relationship_types == frozenset(
-        {"USES_PLATFORM"}
-    )
+    assert diff.expected_but_unobserved_relationship_types == frozenset({"USES_PLATFORM"})
     assert diff.unexpected_relationship_types == frozenset({"LEGACY_REL"})
     assert diff.expected_index_names == frozenset({"OrganizationName"})
     assert diff.missing_index_names == frozenset({"OrganizationName"})
@@ -533,12 +518,8 @@ def test_live_schema_compatibility_diff_reports_exact_expected_and_observed_sets
 
 def test_zero_count_persistent_tokens_are_informational_without_schema_artifacts() -> None:
     snapshot = _snapshot(
-        token_catalog_node_labels=frozenset(
-            {"Organization", "TechnologyPlatform", "LegacyNode"}
-        ),
-        token_catalog_relationship_types=frozenset(
-            {"USES_PLATFORM", "LEGACY_REL"}
-        ),
+        token_catalog_node_labels=frozenset({"Organization", "TechnologyPlatform", "LegacyNode"}),
+        token_catalog_relationship_types=frozenset({"USES_PLATFORM", "LEGACY_REL"}),
     )
 
     diff = live_schema_compatibility_diff(_provision_request(), snapshot)
@@ -588,9 +569,7 @@ def test_exact_index_descriptors_resolve_aliased_physical_properties() -> None:
 
 
 def test_canonical_schema_exact_comparison_is_compatible_without_stale_artifacts() -> None:
-    schema_path = (
-        Path(__file__).resolve().parents[4] / "biotech-kg" / "typedefs.graphql"
-    )
+    schema_path = Path(__file__).resolve().parents[4] / "biotech-kg" / "typedefs.graphql"
     canonical_sdl = schema_path.read_text(encoding="utf-8")
     schema_ref = "schema-definition:canonical-alias-regression"
     physical = parse_physical_schema(canonical_sdl.encode(), schema_ref)

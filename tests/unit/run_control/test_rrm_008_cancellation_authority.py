@@ -12,13 +12,16 @@ from __future__ import annotations
 
 import pytest
 
-from app.application.run_control.boundary_interventions import (
+from mission_control.adapters.temporal.boundary_commands import (
+    CANCEL_DELIVERY_UPDATE,
+    TemporalBoundaryCommandTransport,
+)
+from mission_control.application.execution.boundary_interventions import (
     BoundaryCommandDeliveryService,
     BoundaryInterventionService,
 )
-from app.application.run_control.run_control_repository import pending_delivery
-from app.domain.orchestration.contracts import CancelAck, CancelDelivery
-from app.domain.run_control.contracts import (
+from mission_control.application.execution.run_control_repository import pending_delivery
+from mission_control.domain.policies.contracts import (
     CancelAction,
     CommandStatus,
     RecordUsageAction,
@@ -29,10 +32,7 @@ from app.domain.run_control.contracts import (
     TerminalizationProposal,
     TerminalizeAction,
 )
-from app.integrations.temporal_boundary_commands import (
-    CANCEL_DELIVERY_UPDATE,
-    TemporalBoundaryCommandTransport,
-)
+from mission_control.domain.programs.contracts import CancelAck, CancelDelivery
 from tests.unit.run_control.test_boundary_commands import (
     FAMILY_WORKFLOW_ID,
     ROOT_WORKFLOW_ID,

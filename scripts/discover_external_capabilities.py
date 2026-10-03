@@ -7,19 +7,23 @@ import os
 from pathlib import Path
 from typing import Any
 
-from app.application.web_research.external_candidate_repository import (
-    BeanieExternalCandidateRepository,
+from mission_control.adapters.capabilities.mcp_registry import (
+    HttpxMCPRegistryRunner,
+    MCPRegistryAdapter,
 )
-from app.application.web_research.external_capability_discovery import (
-    ExternalCapabilityDiscoveryService,
-)
-from app.config import Settings
-from app.integrations.mcp_registry import HttpxMCPRegistryRunner, MCPRegistryAdapter
-from app.integrations.mongodb import create_mongodb
-from app.integrations.npx_skills_discovery import (
+from mission_control.adapters.capabilities.npx_skills_discovery import (
     AsyncioSkillDiscoverySubprocessRunner,
     NpxSkillsDiscoveryAdapter,
 )
+from mission_control.adapters.postgres.capability.external_candidates import (
+    PostgresExternalCandidateRepository,
+)
+from mission_control.adapters.postgres.connections import create_postgres_pool
+from mission_control.application.capabilities.external_capability_discovery import (
+    ExternalCapabilityDiscoveryService,
+)
+from mission_control.bootstrap.catalog_scope import configured_catalog_scope
+from mission_control.bootstrap.settings import Settings
 
 
 def _arguments() -> argparse.Namespace:
@@ -45,10 +49,9 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
     settings = Settings()
     if args.node_bin:
         node_bin: Path = args.node_bin
-        os.environ["PATH"] = (
-            f"{node_bin}{os.pathsep}{os.environ.get('PATH', '')}"
-        )
-    mongo_client, _ = await create_mongodb(settings)
+        os.environ["PATH"] = f"{node_bin}{os.pathsep}{os.environ.get('PATH', '')}"
+    scope = configured_catalog_scope(settings, requested=getattr(args, "tenant", None))
+    postgres_pool = await create_postgres_pool(settings)
     try:
         service = ExternalCapabilityDiscoveryService(
             enabled=True,
@@ -68,7 +71,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
                 timeout_seconds=settings.external_discovery_command_timeout_seconds,
                 max_output_bytes=settings.external_discovery_max_output_bytes,
             ),
-            candidates=BeanieExternalCandidateRepository(),
+            candidates=PostgresExternalCandidateRepository(postgres_pool, catalog_scope=scope),
             max_results=settings.external_discovery_max_results,
         )
         if args.source == "mcp":
@@ -84,7 +87,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
             )
         return batch.model_dump(mode="json")
     finally:
-        await mongo_client.close()
+        await postgres_pool.close()
 
 
 def main() -> None:

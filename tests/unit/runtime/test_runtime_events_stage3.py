@@ -5,12 +5,12 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from app.application.runtime.runtime_events import (
+from mission_control.application.recovery.runtime_events import (
     OperatorDebugAuthorization,
     RuntimeEventTranslator,
 )
-from app.domain.graph_runtime.identities import ExecutionEpochKey
-from app.domain.run_control.contracts import (
+from mission_control.domain.graph_runtime.identities import ExecutionEpochKey
+from mission_control.domain.policies.contracts import (
     ActorContext,
     DomainEventEnvelope,
     OutboxCursor,

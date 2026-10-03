@@ -7,25 +7,28 @@ import asyncpg
 import pytest
 from pydantic import ValidationError
 
-from app.application.operations.journaled_operation_execution import (
+from mission_control.adapters.postgres.connections import apply_application_migrations
+from mission_control.adapters.postgres.operations.operation_journal import (
+    PostgresAtomicOperationJournalRepository,
+)
+from mission_control.adapters.postgres.run_control.run_control_repository import (
+    PostgresRunControlRepository,
+)
+from mission_control.application.execution.operations.journaled_operation_execution import (
     _claim_authority_command_id,
 )
-from app.application.operations.operation_journal import (
+from mission_control.application.execution.operations.operation_journal import (
     InMemoryAtomicOperationJournalRepository,
     OperationJournalMutation,
     OperationJournalService,
 )
-from app.application.operations.postgres_operation_journal import (
-    PostgresAtomicOperationJournalRepository,
-)
-from app.application.run_control.postgres_run_control_repository import PostgresRunControlRepository
-from app.domain.control_plane.canonical import contract_fingerprint, sha256_digest
-from app.domain.operation_execution.journal import (
+from mission_control.domain.authoring.canonical import contract_fingerprint, sha256_digest
+from mission_control.domain.execution.journal import (
     OperationEffectClaim,
     OperationJournalSettlement,
     OperationTechnicalAttempt,
 )
-from app.domain.run_control.contracts import (
+from mission_control.domain.policies.contracts import (
     AcceptedOperationSettlementEvidence,
     ActorContext,
     ApplyAuthorityBatchAction,
@@ -44,8 +47,7 @@ from app.domain.run_control.contracts import (
     SettleEffectAction,
     SettlePendingUsageAction,
 )
-from app.domain.run_control.errors import IdempotencyConflict, RunVersionConflict
-from app.integrations.postgres import apply_application_migrations
+from mission_control.domain.policies.errors import IdempotencyConflict, RunVersionConflict
 from tests.unit.run_control.test_run_control import actor, command, request, service
 
 NOW = datetime(2026, 8, 5, 20, 0, tzinfo=UTC)
@@ -60,7 +62,7 @@ def claim(*, run_id: str = "run-1", request_digest: str = DIGEST) -> OperationEf
         operation_contract_digest=DIGEST,
         idempotency_key="effect-key-1",
         request_digest=request_digest,
-        semantic_binding_id="mongo-binding-1",
+        semantic_binding_id="immutable-binding-1",
         semantic_binding_digest=DIGEST,
         semantic_attempt_key=f"{run_id}:operation:search:semantic-attempt:1",
         claimed_by="operation-worker",
@@ -167,13 +169,10 @@ def authority_result(
         resulting_version=version,
     )
     return CommandResult(
-        command_id=(
-            f"operation-authority-settlement:{settlement_id}:revision:{revision}"
-        ),
+        command_id=(f"operation-authority-settlement:{settlement_id}:revision:{revision}"),
         idempotency_issuer="operation-journal",
         run_id=run_id,
-        command_fingerprint=fingerprint
-        or contract_fingerprint(command, exclude={"occurred_at"}),
+        command_fingerprint=fingerprint or contract_fingerprint(command, exclude={"occurred_at"}),
         status=CommandStatus.ACCEPTED,
         resulting_run_version=version,
         phase=RunPhase.ACTIVE,
@@ -191,9 +190,7 @@ def authority_command(
     resulting_version: int = 2,
 ) -> LifecycleCommand:
     return LifecycleCommand(
-        command_id=(
-            f"operation-authority-settlement:{settlement_id}:revision:{revision}"
-        ),
+        command_id=(f"operation-authority-settlement:{settlement_id}:revision:{revision}"),
         idempotency_issuer="operation-journal",
         request_scope="tenant-1",
         run_id=run_id,
@@ -207,7 +204,7 @@ def authority_command(
             actions=(
                 RecordUsageAction(
                     usage_id=settlement_id,
-                    authority_ref="mongo-binding-1",
+                    authority_ref="immutable-binding-1",
                     reservation_id="reservation-1",
                     actual_amounts={"tokens.total": 7},
                 ),
@@ -223,13 +220,13 @@ def authority_command(
                     evidence=AcceptedOperationSettlementEvidence(
                         settlement_id=settlement_id,
                         settlement_payload_digest=settlement().settlement_digest,
-                        accepted_by_authority_ref="mongo-binding-1",
+                        accepted_by_authority_ref="immutable-binding-1",
                     )
                 ),
             )
         ),
         reason="test authority settlement",
-        evidence_refs=("mongo-binding-1", "artifact:settlement-1"),
+        evidence_refs=("immutable-binding-1", "artifact:settlement-1"),
         occurred_at=NOW,
         correlation_id="operation:test",
         causation_id="claim-1",
@@ -294,7 +291,7 @@ def pending_authority_command(
             actions=(
                 RecordUsageAction(
                     usage_id="pending-settlement",
-                    authority_ref="mongo-binding-1",
+                    authority_ref="immutable-binding-1",
                     reservation_id="reservation-1",
                     actual_amounts={"tokens.total": 2},
                     pending_external_amounts={"tokens.total": 5},
@@ -302,10 +299,8 @@ def pending_authority_command(
                 RecordOperationSettlementEvidenceAction(
                     evidence=AcceptedOperationSettlementEvidence(
                         settlement_id="pending-settlement",
-                        settlement_payload_digest=pending_settlement(
-                            revision
-                        ).settlement_digest,
-                        accepted_by_authority_ref="mongo-binding-1",
+                        settlement_payload_digest=pending_settlement(revision).settlement_digest,
+                        accepted_by_authority_ref="immutable-binding-1",
                     )
                 ),
             )
@@ -329,31 +324,27 @@ def pending_authority_command(
                 RecordOperationSettlementEvidenceAction(
                     evidence=AcceptedOperationSettlementEvidence(
                         settlement_id="pending-settlement",
-                        settlement_payload_digest=pending_settlement(
-                            revision
-                        ).settlement_digest,
-                        accepted_by_authority_ref="mongo-binding-1",
+                        settlement_payload_digest=pending_settlement(revision).settlement_digest,
+                        accepted_by_authority_ref="immutable-binding-1",
                     )
                 ),
             )
         )
     )
     return LifecycleCommand(
-        command_id=(
-            f"operation-authority-settlement:pending-settlement:revision:{revision}"
-        ),
+        command_id=(f"operation-authority-settlement:pending-settlement:revision:{revision}"),
         idempotency_issuer="operation-journal",
         request_scope="tenant-1",
         run_id=run_id,
         expected_run_version=revision,
         actor=ActorContext(
             actor_id="operation-journal",
-            authority_refs=frozenset({"mongo-binding-1"}),
+            authority_refs=frozenset({"immutable-binding-1"}),
             permissions=frozenset(),
         ),
         action=action,
         reason="pending authority settlement",
-        evidence_refs=("mongo-binding-1", "artifact:pending-settlement"),
+        evidence_refs=("immutable-binding-1", "artifact:pending-settlement"),
         occurred_at=NOW,
         correlation_id="operation:test",
         causation_id="claim-1",
@@ -395,7 +386,7 @@ def claim_authority_command(
         action=ClaimEffectAction(
             effect_id=claim_value.effect_claim_id,
             effect_kind="operation.runtime",
-            operation_ref="mongo-binding-1",
+            operation_ref="immutable-binding-1",
             provider_idempotency_key="effect-key-1",
             reservation_id="reservation-1",
             claim_payload_digest=sha256_digest(claim_value.model_dump(mode="json")),
@@ -403,7 +394,7 @@ def claim_authority_command(
         reason="claim operation effect",
         occurred_at=NOW,
         correlation_id="operation:test",
-        causation_id="mongo-binding-1",
+        causation_id="immutable-binding-1",
     )
 
 
@@ -434,9 +425,7 @@ async def test_claim_attempt_usage_and_settlement_are_idempotent_but_conflicts_d
 
     assert first.status == "acquired"
     assert replay.status == "existing"
-    assert (await repository.get_settlement("tenant-1", "claim-1")).usage == {
-        "tokens.total": 7
-    }
+    assert (await repository.get_settlement("tenant-1", "claim-1")).usage == {"tokens.total": 7}
     with pytest.raises(IdempotencyConflict, match="conflicting request"):
         await journal.commit(
             OperationJournalMutation(
@@ -576,9 +565,7 @@ async def test_concurrent_claim_key_collision_mutates_run_authority_once() -> No
     assert admitted.run_id is not None
     run_id = admitted.run_id
     first_claim = claim(run_id=run_id)
-    second_claim = first_claim.model_copy(
-        update={"effect_claim_id": "regenerated-claim-id"}
-    )
+    second_claim = first_claim.model_copy(update={"effect_claim_id": "regenerated-claim-id"})
 
     def executable(claim_value: OperationEffectClaim) -> LifecycleCommand:
         draft = claim_authority_command(
@@ -588,9 +575,7 @@ async def test_concurrent_claim_key_collision_mutates_run_authority_once() -> No
         return draft.model_copy(
             update={
                 "actor": actor(),
-                "action": draft.action.model_copy(
-                    update={"reservation_id": "baseline"}
-                ),
+                "action": draft.action.model_copy(update={"reservation_id": "baseline"}),
             }
         )
 
@@ -617,13 +602,10 @@ async def test_concurrent_claim_key_collision_mutates_run_authority_once() -> No
 
     winner_command = (
         first_command
-        if accepted[0].command_fingerprint
-        == result_for_command(first_command).command_fingerprint
+        if accepted[0].command_fingerprint == result_for_command(first_command).command_fingerprint
         else second_command
     )
-    winner_claim = (
-        first_claim if winner_command is first_command else second_claim
-    )
+    winner_claim = first_claim if winner_command is first_command else second_claim
     winner_event = next(
         record.envelope
         for record in await run_service.pending_outbox("tenant-1")
@@ -887,9 +869,7 @@ async def test_in_memory_settlement_revision_chain_matches_postgres_rules() -> N
             belllabs_run_id=run_id,
             expected_run_version=3,
             claim=operation_claim,
-            settlement=second_settlement.model_copy(
-                update={"settlement_revision": 3}
-            ),
+            settlement=second_settlement.model_copy(update={"settlement_revision": 3}),
             prior_settlement=first_settlement,
             authority_command=second_command,
             authority_result=second_result,
@@ -933,9 +913,7 @@ async def test_postgres_journal_crash_rolls_back_claim_attempt_and_settlement(
                   AND contype = 'p'
                 """
             )
-        assert primary_key == (
-            "PRIMARY KEY (request_scope, settlement_id, settlement_revision)"
-        )
+        assert primary_key == ("PRIMARY KEY (request_scope, settlement_id, settlement_revision)")
         run_service, _ = service(PostgresRunControlRepository(pool))  # type: ignore[arg-type]
         admitted = await run_service.admit(request())
         assert admitted.run_id is not None
@@ -947,12 +925,10 @@ async def test_postgres_journal_crash_rolls_back_claim_attempt_and_settlement(
             ClaimEffectAction(
                 effect_id="claim-1",
                 effect_kind="operation.runtime",
-                operation_ref="mongo-binding-1",
+                operation_ref="immutable-binding-1",
                 provider_idempotency_key="effect-key-1",
                 reservation_id="baseline",
-                claim_payload_digest=sha256_digest(
-                    operation_claim.model_dump(mode="json")
-                ),
+                claim_payload_digest=sha256_digest(operation_claim.model_dump(mode="json")),
             ),
         )
         claimed = await run_service.execute(claim_command)
@@ -998,13 +974,13 @@ async def test_postgres_journal_crash_rolls_back_claim_attempt_and_settlement(
             expected_run_version=observed.resulting_run_version,
             # Production settles as the operation actor extended with the exact binding.
             actor=actor().model_copy(
-                update={"authority_refs": actor().authority_refs | {"mongo-binding-1"}}
+                update={"authority_refs": actor().authority_refs | {"immutable-binding-1"}}
             ),
             action=ApplyAuthorityBatchAction(
                 actions=(
                     RecordUsageAction(
                         usage_id="settlement-1",
-                        authority_ref="mongo-binding-1",
+                        authority_ref="immutable-binding-1",
                         reservation_id="baseline",
                         actual_amounts={"tokens.total": 7},
                     ),
@@ -1020,13 +996,13 @@ async def test_postgres_journal_crash_rolls_back_claim_attempt_and_settlement(
                         evidence=AcceptedOperationSettlementEvidence(
                             settlement_id="settlement-1",
                             settlement_payload_digest=settlement().settlement_digest,
-                            accepted_by_authority_ref="mongo-binding-1",
+                            accepted_by_authority_ref="immutable-binding-1",
                         )
                     ),
                 )
             ),
             reason="postgres journal authority",
-            evidence_refs=("mongo-binding-1", "artifact:settlement-1"),
+            evidence_refs=("immutable-binding-1", "artifact:settlement-1"),
             occurred_at=NOW,
             correlation_id="operation:test",
             causation_id="claim-1",
@@ -1081,9 +1057,7 @@ async def test_postgres_journal_crash_rolls_back_claim_attempt_and_settlement(
         assert await repository.get_settlement("tenant-1", "claim-1") == persisted
         # The authority-bound claim mutation already owns `claim:claim-1`, so a conflicting
         # claim is rejected at the mutation-identity check before the claim-row comparison.
-        with pytest.raises(
-            IdempotencyConflict, match="mutation identity has conflicting intent"
-        ):
+        with pytest.raises(IdempotencyConflict, match="mutation identity has conflicting intent"):
             await repository.commit(
                 OperationJournalMutation(
                     request_scope="tenant-1",
@@ -1146,7 +1120,7 @@ async def test_postgres_journal_crash_rolls_back_claim_attempt_and_settlement(
 def test_journal_pending_settlement_rejects_overage_amounts() -> None:
     """RRM-013 re-review N-A: a journal batch cannot inflate `consumed` through overage."""
 
-    from app.domain.control_plane.canonical import contract_fingerprint
+    from mission_control.domain.authoring.canonical import contract_fingerprint
 
     command_value = pending_authority_command(run_id="run-1", revision=2)
     result_value = result_for_command(command_value)

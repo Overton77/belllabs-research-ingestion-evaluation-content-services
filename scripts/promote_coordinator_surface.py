@@ -7,23 +7,23 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from app.application.control_plane.control_plane_repository import BeanieDefinitionRepository
-from app.application.control_plane.service import ControlPlaneService
-from app.application.coordinator.coordinator_surface_promotion import (
+from mission_control.adapters.postgres.connections import create_postgres_pool
+from mission_control.adapters.postgres.control_plane.definition_repository import (
+    PostgresDefinitionRepository,
+)
+from mission_control.adapters.storage.control_plane_payloads import InMemoryPayloadStore
+from mission_control.application.authoring.service import ControlPlaneService
+from mission_control.application.coordinator.coordinator_surface_promotion import (
     build_coordinator_surface,
     plan_coordinator_surface_promotion,
     publish_coordinator_surface,
 )
-from app.config import Settings
-from app.domain.control_plane.extensions import ExtensionRegistry
-from app.integrations.catalog_projection_admin import list_published_definition_refs
-from app.integrations.control_plane_payloads import InMemoryPayloadStore
-from app.integrations.mongodb import create_mongodb
+from mission_control.bootstrap.catalog_scope import configured_catalog_scope
+from mission_control.bootstrap.settings import Settings
+from mission_control.domain.authoring.extensions import ExtensionRegistry
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_SKILL_ROOT = (
-    PROJECT_ROOT / ".agents" / "skills" / "belllabs-workflow-coordinator"
-)
+DEFAULT_SKILL_ROOT = PROJECT_ROOT / ".agents" / "skills" / "mission-control-coordinator"
 
 
 def _arguments() -> argparse.Namespace:
@@ -39,10 +39,11 @@ def _arguments() -> argparse.Namespace:
 async def _run(args: argparse.Namespace) -> dict[str, Any]:
     definitions = build_coordinator_surface(args.skill_root)
     settings = Settings()
-    mongo_client, _database = await create_mongodb(settings)
+    scope = configured_catalog_scope(settings, requested=getattr(args, "tenant", None))
+    postgres_pool = await create_postgres_pool(settings)
     try:
-        repository = BeanieDefinitionRepository()
-        refs = await list_published_definition_refs()
+        repository = PostgresDefinitionRepository(postgres_pool, catalog_scope=scope)
+        refs = await repository.list_published_definition_refs()
         records = tuple([await repository.get(ref) for ref in refs])
         plan = plan_coordinator_surface_promotion(definitions, records)
         if not args.apply:
@@ -69,7 +70,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
             "reused": [ref.model_dump(mode="json") for ref in plan.reused],
         }
     finally:
-        await mongo_client.close()
+        await postgres_pool.close()
 
 
 def main() -> None:

@@ -6,10 +6,12 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from app.application.run_control.run_control_repository import InMemoryRunControlRepository
-from app.application.run_control.service import RunControlOutboxRelay
-from app.domain.control_plane.canonical import canonical_json, sha256_digest
-from app.domain.run_control.contracts import (
+from mission_control.application.execution.run_control_repository import (
+    InMemoryRunControlRepository,
+)
+from mission_control.application.execution.service import RunControlOutboxRelay
+from mission_control.domain.authoring.canonical import canonical_json, sha256_digest
+from mission_control.domain.policies.contracts import (
     AsyncChildDecisionOutcome,
     AsyncChildDependencyClass,
     ClaimEffectAction,
@@ -289,14 +291,19 @@ async def test_outbox_publish_ack_ambiguity_redelivers_stable_event_identity() -
 
 def test_domain_owner_has_no_runtime_or_persistence_authority_imports() -> None:
     root = Path(__file__).resolve().parents[3]
-    domain_source = "\n".join(
-        path.read_text(encoding="utf-8")
-        for path in sorted((root / "app" / "domain" / "run_control").glob("*.py"))
-    )
+    files = sorted((root / "src" / "mission_control" / "domain" / "policies").glob("*.py"))
+    assert files, "Domain SDK import guard found no policy source files"
+    domain_source = "\n".join(path.read_text(encoding="utf-8") for path in files)
     forbidden = ("temporalio", "asyncpg", "beanie", "langgraph", "deepagents")
     assert not any(name in domain_source for name in forbidden)
     journaled_operation = (
-        root / "app" / "application" / "operations" / "journaled_operation_execution.py"
+        root
+        / "src"
+        / "mission_control"
+        / "application"
+        / "execution"
+        / "operations"
+        / "journaled_operation_execution.py"
     ).read_text(encoding="utf-8")
     assert "reduce_lifecycle" not in journaled_operation
     assert all(
@@ -312,9 +319,7 @@ def test_run_control_contracts_are_strict_canonical_and_secret_free() -> None:
     )
     assert sha256_digest(state) == sha256_digest(state.model_dump(mode="python"))
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-        EffectLedgerState.model_validate(
-            {"run_id": "run:canonical", "claims": {}, "unknown": True}
-        )
+        EffectLedgerState.model_validate({"run_id": "run:canonical", "claims": {}, "unknown": True})
     with pytest.raises(ValidationError, match="raw secrets, PHI, or content"):
         EffectLedgerState.model_validate(
             {

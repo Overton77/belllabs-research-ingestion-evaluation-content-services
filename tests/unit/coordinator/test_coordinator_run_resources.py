@@ -4,8 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.application.coordinator.coordinator_run_resources import CoordinatorRunResourceService
-from app.application.orchestration.orchestration_binding_repository import (
+from mission_control.application.coordinator.coordinator_run_resources import (
+    CoordinatorRunResourceService,
+)
+from mission_control.application.programs.orchestration_binding_repository import (
     SemanticInputBindingNotFound,
 )
 

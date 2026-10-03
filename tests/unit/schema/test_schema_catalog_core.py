@@ -5,9 +5,11 @@ from hashlib import sha256
 from pathlib import Path
 
 import pytest
-
-from app.application.schema.schema_catalog import DEFAULT_SEMANTIC_OVERLAY, parse_schema_catalog
-from app.domain.schema_catalog import (
+from biotech_mission_adapters.application.schema.schema_catalog import (
+    DEFAULT_SEMANTIC_OVERLAY,
+    parse_schema_catalog,
+)
+from biotech_mission_adapters.domain.schema_catalog import (
     CatalogValidationError,
     derive_catalog,
     load_semantic_overlay,
@@ -126,7 +128,7 @@ def test_published_schema_reference_matches_authoritative_source() -> None:
     project_root = Path(__file__).resolve().parents[3]
     authoritative_sdl = project_root.parent / "biotech-kg/src/schema/neo4jbiotechschema.graphql"
     reference = json.loads(
-        (project_root / "schema-catalog/source-reference.v1.json").read_text(encoding="utf-8")
+        (DEFAULT_SEMANTIC_OVERLAY.parent / "source-reference.v1.json").read_text(encoding="utf-8")
     )
     source = authoritative_sdl.read_bytes()
 

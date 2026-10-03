@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.domain.schema_context.canonicalization import write_json
-from app.experiments.schema_context_selection.comparison import (
+from biotech_mission_adapters.domain.schema_context.canonicalization import write_json
+from biotech_mission_adapters.qualification.schema_context_selection.comparison import (
     compare_schema_context_runs,
     comparison_markdown,
 )

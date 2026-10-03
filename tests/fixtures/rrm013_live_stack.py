@@ -1,23 +1,11 @@
-"""RRM-013 live stack: a parent operation whose Deep Agent spawns a real async child.
-
-The parent runs in-process (or in the crash-window worker process) over the disposable
-application PostgreSQL (run control, operation journal, checkpoint lineage), a real
-`AsyncPostgresSaver`, the production Mongo detail repositories, and the PostgreSQL async child
-authority. Its cognition is a real `create_deep_agent` graph with a deterministic scripted
-parent model whose only tool call is `start_async_task`; the child is the hosted technical
-child on the real Agent Server named by `AGENT_SERVER_ENDPOINT`, which calls the real model.
-
-Environment (names only; never commit values): `AGENT_SERVER_ENDPOINT`,
-`BELLABS_ASYNC_SUBAGENT_SERVER_TOKEN`, `TEST_APPLICATION_POSTGRES_DSN`, `TEST_MONGODB_URI`.
-"""
+"""Deterministic async-subagent cognition and reconciliation qualification helpers."""
 
 from __future__ import annotations
 
 import asyncio
 import json
 import os
-from collections.abc import AsyncIterator, Sequence
-from contextlib import asynccontextmanager
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -25,49 +13,40 @@ from typing import Any
 from urllib.parse import quote
 
 import asyncpg
-from beanie import init_beanie
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from langgraph.store.memory import InMemoryStore
-from pymongo import AsyncMongoClient
 
-from app.agent_server.async_subagents.bindings import technical_child_definition
-from app.application.async_subagents.mongo_async_subagent_repository import (
-    MongoAsyncSubagentDetailRepository,
+from mission_control.adapters.agent_server.async_subagents.bindings import (
+    technical_child_definition,
 )
-from app.application.async_subagents.parent_effects import RunControlAsyncChildEffects
-from app.application.async_subagents.postgres_async_subagents import PostgresAsyncSubagentAuthority
-from app.application.async_subagents.service import (
+from mission_control.adapters.deep_agents import (
+    DeepAgentsAsyncSubagentAdapter,
+)
+from mission_control.adapters.deep_agents.async_subagents import BellLabsAsyncSubagentMiddleware
+from mission_control.adapters.postgres.async_subagents.async_subagents import (
+    PostgresAsyncSubagentAuthority,
+)
+from mission_control.application.execution.operations.operation_execution import (
+    OperationExecutionService,
+)
+from mission_control.application.execution.service import RunControlService
+from mission_control.application.subordinates.service import (
     AsyncSubagentService,
     AsyncSubagentSpawnRequest,
     ProviderAsyncObservation,
 )
-from app.application.operations.journaled_operation_execution import (
-    JournaledOperationExecutionCoordinator,
-)
-from app.application.operations.mongo_operation_execution_repository import (
-    MongoOperationBindingRepository,
-)
-from app.application.operations.operation_execution import OperationExecutionService
-from app.application.operations.operation_journal import OperationJournalService
-from app.application.operations.operation_recovery_composition import (
+from mission_control.bootstrap.operation_recovery_composition import (
     OperationRecoveryComposition,
-    compose_postgres_operation_recovery,
 )
-from app.application.operations.postgres_operation_journal import (
-    PostgresAtomicOperationJournalRepository,
-)
-from app.application.run_control.postgres_run_control_repository import PostgresRunControlRepository
-from app.application.run_control.service import RunControlService
-from app.domain.control_plane.contracts import SecretRef
-from app.domain.operation_execution.async_subagent_reconciliation import (
+from mission_control.domain.authoring.contracts import SecretRef
+from mission_control.domain.execution.async_subagent_reconciliation import (
     ASYNC_CHILD_RECONCILE_PERMISSION,
 )
-from app.domain.operation_execution.checkpoint_lineage import OperationActivityAttempt
-from app.domain.operation_execution.contracts import (
+from mission_control.domain.execution.checkpoint_lineage import OperationActivityAttempt
+from mission_control.domain.execution.contracts import (
     AsyncSubagentContract,
     AsyncSubagentDependencyClass,
     AsyncSubagentExecution,
@@ -76,35 +55,16 @@ from app.domain.operation_execution.contracts import (
     OperationExecutionBinding,
     OperationExecutionRequest,
 )
-from app.domain.run_control.contracts import (
+from mission_control.domain.policies.contracts import (
     ActorContext,
     CommandStatus,
     ReserveBudgetAction,
     StartAction,
 )
-from app.integrations.agents.deep_agents import (
-    DeepAgentRuntimeAdapter,
-    DeepAgentsAsyncSubagentAdapter,
-    ExactComponentRegistry,
-    ExactDeepAgentMaterializer,
-    StateSandboxFactory,
-)
-from app.integrations.agents.deep_agents.async_subagents import BellLabsAsyncSubagentMiddleware
-from app.integrations.conformance_operation_runtime import (
-    ConformanceAssetVerifier,
-    ConformanceBudgetAuthority,
-    ConformanceEventSink,
-    ConformanceSandbox,
-    ConformanceSecretResolver,
-)
-from app.integrations.mongodb import BEANIE_MODELS
 from tests.fixtures.checkpoint_lineage import bind_unit, stage_unit
-from tests.fixtures.checkpoint_recovery import governed_workspace, run_control_authority
-from tests.fixtures.rrm004_persistent_stack import FileArtifactPayloadStore
-from tests.unit.operations.test_operation_execution import MCP_DIGEST, SKILL_DIGEST
+from tests.fixtures.checkpoint_recovery import governed_workspace
 from tests.unit.run_control.test_run_control import actor, command
 from tests.unit.run_control.test_run_control import request as run_request
-from tests.unit.run_control.test_run_control import service as run_control_service
 
 SAVER_SCHEMA = "rrm013_live_saver"
 CLAIMED_BY = "operation-runtime:rrm-013"
@@ -113,22 +73,6 @@ TOKEN_REF = f"environment:{TOKEN_ENV}"
 SCOPE = "tenant-1"
 CHILD_NAME = "technical-child"
 PARENT_SPAWN_TOOL_CALL_ID = "rrm013-start-async-task"
-
-
-def live_opt_in() -> tuple[bool, str]:
-    """Whether the live RRM-013 gate is opted in, and why not otherwise."""
-
-    if os.getenv("BELLABS_RUN_RRM_013_LIVE") != "1":
-        return False, "BELLABS_RUN_RRM_013_LIVE=1 is required for the live Agent Server gate"
-    for name in (
-        "AGENT_SERVER_ENDPOINT",
-        TOKEN_ENV,
-        "TEST_APPLICATION_POSTGRES_DSN",
-        "TEST_MONGODB_URI",
-    ):
-        if not os.getenv(name, "").strip():
-            return False, f"{name} is required for the live Agent Server gate"
-    return True, ""
 
 
 class ParentSpawnModel(BaseChatModel):
@@ -279,117 +223,6 @@ def live_contract(endpoint: str) -> AsyncSubagentContract:
     )
 
 
-@asynccontextmanager
-async def open_live_stack(
-    dsn: str,
-    *,
-    mongo_uri: str,
-    mongo_database: str,
-    endpoint: str,
-    objective: str = "Reply with exactly the word PONG.",
-    crash_window: str | None = None,
-    crash_marker: Path | None = None,
-    model_log: Path | None = None,
-    submitter_identity: str | None = None,
-    submission_lease: timedelta = timedelta(seconds=20),
-) -> AsyncIterator[LiveStack]:
-    from tests.acceptance.control_plane.test_wp_cp_040 import exact_fixture
-
-    token = os.environ[TOKEN_ENV]
-    pool = await asyncpg.create_pool(dsn=dsn, min_size=1, max_size=8)
-    mongo: AsyncMongoClient[Any] = AsyncMongoClient(
-        mongo_uri, serverSelectionTimeoutMS=5_000, tz_aware=True, tzinfo=UTC
-    )
-    try:
-        await init_beanie(database=mongo[mongo_database], document_models=BEANIE_MODELS)
-        run_control, _ = run_control_service(PostgresRunControlRepository(pool))  # type: ignore[arg-type]
-        async with AsyncPostgresSaver.from_conn_string(saver_dsn(dsn)) as saver:
-            contract = live_contract(endpoint)
-            base, _profile, bundle = exact_fixture()
-            binding = DeepAgentExecutionBinding.create(
-                **{
-                    **base.model_dump(mode="python", exclude={"binding_digest", "async_subagents"}),
-                    "async_subagents": (contract,),
-                }
-            )
-            model = ParentSpawnModel(
-                objective=objective, log_path=str(model_log) if model_log else None
-            )
-            stack_ref: dict[str, LiveStack] = {}
-            adapter = DeepAgentRuntimeAdapter(
-                ExactDeepAgentMaterializer(
-                    ExactComponentRegistry(
-                        model_factories={binding.model.ref.digest: lambda _b, _s: model},
-                        skill_bundles={bundle.bundle_digest: bundle},
-                        sandbox_factories={binding.sandbox.ref.digest: StateSandboxFactory()},
-                        checkpointers={binding.checkpointer_ref.digest: saver},
-                        stores={binding.store_ref.digest: InMemoryStore()},
-                    )
-                ),
-                async_subagents=_MiddlewareFactory(stack_ref),
-            )
-            provider = DeepAgentsAsyncSubagentAdapter(
-                secrets={TOKEN_REF: token}, request_scope=SCOPE
-            )
-            provider_port: Any = CrashWindowProvider(
-                provider, window=crash_window, marker=crash_marker
-            )
-            authority = PostgresAsyncSubagentAuthority(pool)
-            async_service = AsyncSubagentService(
-                MongoAsyncSubagentDetailRepository(),
-                authority,
-                provider_port,
-                parent_effects=RunControlAsyncChildEffects(run_control, actor=actor()),
-                allow_new_spawns=True,
-                submitter_identity=submitter_identity or f"rrm013-submitter:{os.getpid()}",
-                submission_lease=submission_lease,
-            )
-            recovery = compose_postgres_operation_recovery(pool, run_control=run_control)
-            assets = ConformanceAssetVerifier(
-                mcp_schema_digests={"fixture-mcp": MCP_DIGEST},
-                asset_manifest_digests={"skill:fixture.skill:1": SKILL_DIGEST},
-            )
-            service = OperationExecutionService(
-                authority=run_control_authority(run_control),
-                bindings=MongoOperationBindingRepository(),
-                runtime=adapter,
-                sandbox=ConformanceSandbox(),
-                assets=assets,
-                mcp=assets,
-                secrets=ConformanceSecretResolver(
-                    {"environment:OPENAI_API_KEY": "unused-by-the-parent", TOKEN_REF: token}
-                ),
-                events=ConformanceEventSink(),
-                budget=ConformanceBudgetAuthority(),
-                journal=JournaledOperationExecutionCoordinator(
-                    journal=OperationJournalService(PostgresAtomicOperationJournalRepository(pool)),
-                    run_control=run_control,
-                    results=FileArtifactPayloadStore(Path(os.environ["RRM013_RESULTS"])),
-                    actor=actor(),
-                ),
-                journal_claimed_by=CLAIMED_BY,
-                lineage=recovery.lineage,
-            )
-            stack = LiveStack(
-                pool=pool,
-                saver=saver,
-                run_control=run_control,
-                recovery=recovery,
-                service=service,
-                async_subagents=async_service,
-                provider=provider,
-                authority=authority,
-                binding=binding,
-                contract=contract,
-                model=model,
-            )
-            stack_ref["stack"] = stack
-            yield stack
-    finally:
-        await mongo.close()
-        await pool.close()
-
-
 async def admit_parent_run(stack: LiveStack, request_id: str) -> str:
     """Admit a parent run with a unique request identity.
 
@@ -495,7 +328,7 @@ def spawn_request_for(
 ) -> AsyncSubagentSpawnRequest:
     """A direct spawn request (the service path) for drills that need no parent cognition."""
 
-    from app.domain.control_plane.canonical import sha256_digest
+    from mission_control.domain.authoring.canonical import sha256_digest
 
     return AsyncSubagentSpawnRequest(
         request_scope=SCOPE,

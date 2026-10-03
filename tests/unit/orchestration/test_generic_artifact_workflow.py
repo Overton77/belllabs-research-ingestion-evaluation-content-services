@@ -5,8 +5,8 @@ from temporalio import activity
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
-from app.temporal.artifact_workflow import GenericArtifactWorkflow
-from app.temporal.workflow_sandbox import coordinator_workflow_runner
+from mission_control.adapters.temporal.artifact_workflow import GenericArtifactWorkflow
+from mission_control.adapters.temporal.workflow_sandbox import coordinator_workflow_runner
 
 
 @activity.defn(name="operation.execute")

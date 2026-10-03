@@ -1,0 +1,14 @@
+{
+  "mission_control.adapters.infrastructure.artifact_payloads": "mission_control.adapters.storage.artifact_payloads",
+  "mission_control.adapters.infrastructure.control_plane_payloads": "mission_control.adapters.storage.control_plane_payloads",
+  "mission_control.adapters.infrastructure.filesystem_workspace": "mission_control.adapters.storage.filesystem_workspace",
+  "mission_control.adapters.infrastructure.s3": "mission_control.adapters.storage.s3",
+  "mission_control.adapters.infrastructure.snapshot_payloads": "mission_control.adapters.storage.snapshot_payloads",
+  "mission_control.adapters.infrastructure.browser_subprocess": "mission_control.adapters.capabilities.browser_subprocess",
+  "mission_control.adapters.infrastructure.mission_auth": "mission_control.adapters.auth.jwt",
+  "mission_control.adapters.infrastructure.langgraph_agent_server": "mission_control.adapters.agent_server.client",
+  "mission_control.adapters.infrastructure.langgraph_persistence": "mission_control.adapters.deep_agents.persistence",
+  "mission_control.adapters.infrastructure.runtime_realtime": "mission_control.adapters.realtime.postgres_redis",
+  "mission_control.adapters.infrastructure.operation_runtime_ports": "mission_control.adapters.operations.runtime_ports",
+  "mission_control.adapters.infrastructure.conformance_operation_runtime": "mission_control.adapters.operations.conformance"
+}

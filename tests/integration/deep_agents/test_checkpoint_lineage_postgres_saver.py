@@ -21,51 +21,61 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.store.memory import InMemoryStore
 
-from app.application.operations.checkpoint_lineage import CheckpointLineageService
-from app.application.operations.journaled_operation_execution import (
-    JournaledOperationExecutionCoordinator,
-    _effect_claim_id,
-)
-from app.application.operations.operation_execution import (
-    InMemoryOperationBindingRepository,
-    OperationExecutionService,
-    bind_operation_execution_request,
-)
-from app.application.operations.operation_journal import OperationJournalService
-from app.application.operations.postgres_checkpoint_lineage import (
-    PostgresCheckpointLineageRepository,
-)
-from app.application.operations.postgres_operation_journal import (
-    PostgresAtomicOperationJournalRepository,
-)
-from app.application.run_control.postgres_run_control_repository import PostgresRunControlRepository
-from app.application.run_control.service import RunControlService
-from app.domain.graph_runtime.identities import RuntimeUnitIdentity
-from app.domain.operation_execution.checkpoint_lineage import (
-    STAMP_INVOCATION_ID,
-    STAMP_STATE_SCHEMA_DIGEST,
-    STAMP_UNIT_KEY,
-    OperationActivityAttempt,
-)
-from app.domain.operation_execution.contracts import (
-    DeepAgentExecutionBinding,
-    OperationAttemptIdentity,
-    OperationExecutionRequest,
-)
-from app.domain.run_control.contracts import CommandStatus, ReserveBudgetAction, StartAction
-from app.integrations.agents.deep_agents import (
+from mission_control.adapters.deep_agents import (
     DeepAgentRuntimeAdapter,
     ExactComponentRegistry,
     ExactDeepAgentMaterializer,
     StateSandboxFactory,
 )
-from app.integrations.artifact_payloads import InMemoryArtifactPayloadStore
-from app.integrations.conformance_operation_runtime import (
+from mission_control.adapters.operations.conformance import (
     ConformanceAssetVerifier,
     ConformanceBudgetAuthority,
     ConformanceEventSink,
     ConformanceSandbox,
     ConformanceSecretResolver,
+)
+from mission_control.adapters.postgres.operations.checkpoint_lineage import (
+    PostgresCheckpointLineageRepository,
+)
+from mission_control.adapters.postgres.operations.operation_journal import (
+    PostgresAtomicOperationJournalRepository,
+)
+from mission_control.adapters.postgres.run_control.run_control_repository import (
+    PostgresRunControlRepository,
+)
+from mission_control.adapters.storage.artifact_payloads import InMemoryArtifactPayloadStore
+from mission_control.application.execution.operations.checkpoint_lineage import (
+    CheckpointLineageService,
+)
+from mission_control.application.execution.operations.journaled_operation_execution import (
+    JournaledOperationExecutionCoordinator,
+    _effect_claim_id,
+)
+from mission_control.application.execution.operations.operation_execution import (
+    InMemoryOperationBindingRepository,
+    OperationExecutionService,
+    bind_operation_execution_request,
+)
+from mission_control.application.execution.operations.operation_journal import (
+    OperationJournalService,
+)
+from mission_control.application.execution.service import RunControlService
+from mission_control.domain.execution.checkpoint_lineage import (
+    STAMP_INVOCATION_ID,
+    STAMP_STATE_SCHEMA_DIGEST,
+    STAMP_UNIT_KEY,
+    OperationActivityAttempt,
+)
+from mission_control.domain.execution.contracts import (
+    DeepAgentExecutionBinding,
+    OperationAttemptIdentity,
+    OperationExecutionRequest,
+)
+from mission_control.domain.graph_runtime.identities import RuntimeUnitIdentity
+from mission_control.domain.policies.contracts import (
+    CommandStatus,
+    ReserveBudgetAction,
+    StartAction,
 )
 from tests.acceptance.control_plane.test_wp_cp_040 import SessionProbeModel, exact_fixture
 from tests.fixtures.checkpoint_lineage import bind_unit, goal_unit, stage_unit

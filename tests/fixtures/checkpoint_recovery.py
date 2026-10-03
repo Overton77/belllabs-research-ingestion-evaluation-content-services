@@ -30,35 +30,54 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.store.memory import InMemoryStore
 from pydantic import PrivateAttr
 
-from app.application.operations.checkpoint_lineage import (
+from mission_control.adapters.deep_agents import (
+    DeepAgentRuntimeAdapter,
+    ExactComponentRegistry,
+    ExactDeepAgentMaterializer,
+    ResolvedSkillBundle,
+    StateSandboxFactory,
+)
+from mission_control.adapters.deep_agents.checkpoint_verifier import (
+    LangGraphCheckpointDescendantVerifier,
+)
+from mission_control.adapters.operations.conformance import (
+    ConformanceAssetVerifier,
+    ConformanceBudgetAuthority,
+    ConformanceEventSink,
+    ConformanceSandbox,
+    ConformanceSecretResolver,
+)
+from mission_control.adapters.storage.artifact_payloads import InMemoryArtifactPayloadStore
+from mission_control.application.execution.operations.checkpoint_lineage import (
     CheckpointLineageService,
     InMemoryCheckpointLineageRepository,
 )
-from app.application.operations.journaled_operation_execution import (
+from mission_control.application.execution.operations.journaled_operation_execution import (
     JournaledOperationExecutionCoordinator,
 )
-from app.application.operations.operation_execution import (
+from mission_control.application.execution.operations.operation_execution import (
     InMemoryOperationBindingRepository,
     OperationExecutionService,
     RunControlOperationAuthority,
     RuntimePort,
 )
-from app.application.operations.operation_journal import (
+from mission_control.application.execution.operations.operation_journal import (
     OperationJournalMutation,
     OperationJournalService,
 )
-from app.application.operations.unit_reconciliation import UnitReconciliationService
-from app.application.run_control.service import RunControlService
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.contracts import (
+from mission_control.application.execution.operations.unit_reconciliation import (
+    UnitReconciliationService,
+)
+from mission_control.application.execution.service import RunControlService
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.authoring.contracts import (
     DefinitionKind,
     ExactDefinitionRef,
     WorkflowWorkspaceContract,
     WorkspaceSlot,
 )
-from app.domain.graph_runtime.identities import RuntimeUnitIdentity
-from app.domain.operation_execution.checkpoint_lineage import OperationActivityAttempt
-from app.domain.operation_execution.contracts import (
+from mission_control.domain.execution.checkpoint_lineage import OperationActivityAttempt
+from mission_control.domain.execution.contracts import (
     DeepAgentExecutionBinding,
     OperationAttemptIdentity,
     OperationExecutionRequest,
@@ -70,12 +89,13 @@ from app.domain.operation_execution.contracts import (
     WorkspaceOwnerKind,
     WorkspaceSlotBinding,
 )
-from app.domain.operation_execution.journal import (
+from mission_control.domain.execution.journal import (
     OperationClaimResult,
     OperationEffectClaim,
     OperationJournalSettlement,
 )
-from app.domain.run_control.contracts import (
+from mission_control.domain.graph_runtime.identities import RuntimeUnitIdentity
+from mission_control.domain.policies.contracts import (
     CommandResult,
     CommandStatus,
     LifecycleCommand,
@@ -84,25 +104,7 @@ from app.domain.run_control.contracts import (
     ReserveBudgetAction,
     StartAction,
 )
-from app.domain.run_control.errors import IdempotencyConflict
-from app.integrations.agents.deep_agents import (
-    DeepAgentRuntimeAdapter,
-    ExactComponentRegistry,
-    ExactDeepAgentMaterializer,
-    ResolvedSkillBundle,
-    StateSandboxFactory,
-)
-from app.integrations.agents.deep_agents.checkpoint_verifier import (
-    LangGraphCheckpointDescendantVerifier,
-)
-from app.integrations.artifact_payloads import InMemoryArtifactPayloadStore
-from app.integrations.conformance_operation_runtime import (
-    ConformanceAssetVerifier,
-    ConformanceBudgetAuthority,
-    ConformanceEventSink,
-    ConformanceSandbox,
-    ConformanceSecretResolver,
-)
+from mission_control.domain.policies.errors import IdempotencyConflict
 from tests.fixtures.checkpoint_lineage import bind_unit, stage_unit
 from tests.unit.operations.test_operation_execution import (
     MCP_DIGEST,
@@ -426,9 +428,7 @@ class FixtureControlPlane:
         del digest
         request = self._request
         return SimpleNamespace(
-            effective_authority=SimpleNamespace(
-                capabilities=request.capability_grant.capabilities
-            ),
+            effective_authority=SimpleNamespace(capabilities=request.capability_grant.capabilities),
             source_refs=(
                 request.workspace.template_ref,
                 ExactDefinitionRef(
@@ -550,9 +550,7 @@ class RecoveryHarness:
             lease_expires_at=self.clock() + lease if lease is not None else None,
         )
 
-    async def crash(
-        self, request: OperationExecutionRequest
-    ) -> OperationActivityAttempt:
+    async def crash(self, request: OperationExecutionRequest) -> OperationActivityAttempt:
         """Run one attempt that is lost to an injected crash; then let its lease expire."""
 
         attempt = self.attempt(request)
@@ -600,9 +598,7 @@ async def recovery_harness(
         run_control, repository = run_control_service()
     admitted = await run_control.admit(run_request(request_id="rrm-004-recovery"))
     assert admitted.run_id is not None
-    started = await run_control.execute(
-        command(admitted.run_id, 1, "rrm-004-start", StartAction())
-    )
+    started = await run_control.execute(command(admitted.run_id, 1, "rrm-004-start", StartAction()))
     assert started.status == CommandStatus.ACCEPTED
     binding, _profile, bundle = exact_fixture()
     model = model or ScriptedRecoveryModel()
@@ -629,9 +625,7 @@ async def recovery_harness(
     )
     bindings = InMemoryOperationBindingRepository()
     service = OperationExecutionService(
-        authority=(
-            run_control_authority(run_control) if real_authority else AcceptingAuthority()
-        ),
+        authority=(run_control_authority(run_control) if real_authority else AcceptingAuthority()),
         bindings=bindings,
         runtime=runtime,
         sandbox=ConformanceSandbox(),

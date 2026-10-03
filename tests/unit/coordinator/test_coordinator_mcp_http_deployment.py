@@ -7,13 +7,13 @@ import pytest
 from fastapi import FastAPI
 from mcp.types import LATEST_PROTOCOL_VERSION
 
-from app.config import get_settings
-from app.mcp.coordinator_bootstrap import (
+from mission_control.bootstrap.settings import get_settings
+from mission_control.interfaces.mcp.coordinator_bootstrap import (
     create_coordinator_http_deployment,
     mount_coordinator_http,
 )
-from app.mcp.coordinator_http_client import mounted_coordinator_client
-from app.mcp.coordinator_server import (
+from mission_control.interfaces.mcp.coordinator_http_client import mounted_coordinator_client
+from mission_control.interfaces.mcp.coordinator_server import (
     CoordinatorPrincipal,
     StaticPrincipalResolver,
 )
@@ -22,9 +22,7 @@ from tests.unit.coordinator.test_coordinator_mcp_read_surface import FakeFacade
 
 @pytest.mark.asyncio
 async def test_streamable_http_mount_bootstraps_through_fastapi() -> None:
-    settings = get_settings().model_copy(
-        update={"coordinator_mcp_enabled": True}
-    )
+    settings = get_settings().model_copy(update={"coordinator_mcp_enabled": True})
     principal = CoordinatorPrincipal(
         actor_id="http-operator",
         tenant_scope="tenant-a",

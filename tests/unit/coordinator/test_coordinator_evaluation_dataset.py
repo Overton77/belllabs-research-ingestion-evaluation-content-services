@@ -3,11 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-DATASET = (
-    Path(__file__).resolve().parents[2]
-    / "fixtures"
-    / "coordinator_retrieval_evaluation.json"
-)
+DATASET = Path(__file__).resolve().parents[2] / "fixtures" / "coordinator_retrieval_evaluation.json"
 
 
 def test_coordinator_evaluation_dataset_covers_required_adversarial_cases() -> None:
@@ -32,7 +28,6 @@ def test_coordinator_evaluation_dataset_covers_required_adversarial_cases() -> N
     web_case = cases["web-natural-language-no-provider-names"]
     normalized_query = web_case["query"].casefold()
     assert all(
-        term.casefold() not in normalized_query
-        for term in web_case["forbidden_query_terms"]
+        term.casefold() not in normalized_query for term in web_case["forbidden_query_terms"]
     )
     assert len(web_case["expected_capability_assets"]) == 7

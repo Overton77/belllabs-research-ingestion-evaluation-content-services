@@ -1,5 +1,6 @@
-from app.domain.schema_context.expansion import expand_selection
-from app.domain.schema_context.projection import build_operation_projection
+from biotech_mission_adapters.domain.schema_context.expansion import expand_selection
+from biotech_mission_adapters.domain.schema_context.projection import build_operation_projection
+
 from tests.schema_context_helpers import accepted, catalog
 
 

@@ -10,12 +10,15 @@ from temporalio import activity
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
 
-from app.application.orchestration.service import (
+from mission_control.adapters.temporal.workflow_sandbox import coordinator_workflow_runner
+from mission_control.adapters.temporal.workflows.operation import OperationWorkflow
+from mission_control.adapters.temporal.workflows.stagegraph import StageGraphWorkflow
+from mission_control.application.programs.service import (
     StageGraphOperationPreparationService,
     StaticStageGraphOperationTemplateProvider,
 )
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.contracts import (
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.authoring.contracts import (
     AllowedOperationVariant,
     DefinitionKind,
     ExactDefinitionRef,
@@ -34,7 +37,7 @@ from app.domain.control_plane.contracts import (
     StageOutputSlot,
     WorkflowCyclePolicy,
 )
-from app.domain.operation_execution.contracts import (
+from mission_control.domain.execution.contracts import (
     CapabilityGrant,
     ModelPolicy,
     NativeOperationExecutionPlacement,
@@ -45,7 +48,8 @@ from app.domain.operation_execution.contracts import (
     PromptTrustClass,
     WorkspaceContract,
 )
-from app.domain.orchestration.contracts import (
+from mission_control.domain.policies.contracts import RunOutcome
+from mission_control.domain.programs.contracts import (
     ExecutionIdentity,
     StageGraphAdmissionActivityRequest,
     StageGraphAdmissionActivityResult,
@@ -59,11 +63,7 @@ from app.domain.orchestration.contracts import (
     StageGraphResultActivityResult,
     StageGraphRunInput,
 )
-from app.domain.orchestration.interpreter import StageGraphInterpreter
-from app.domain.run_control.contracts import RunOutcome
-from app.temporal.workflow_sandbox import coordinator_workflow_runner
-from app.temporal.workflows.operation import OperationWorkflow
-from app.temporal.workflows.stagegraph import StageGraphWorkflow
+from mission_control.domain.programs.interpreter import StageGraphInterpreter
 from tests.fixtures.operation_activities import cancelled_operation_result, wait_heartbeating
 
 DIGEST = "sha256:" + "a" * 64
@@ -173,9 +173,7 @@ def _blueprint(
                 dependency_ids=tuple(item.dependency_id for item in dependencies),
                 slow_sibling_policy=SlowSiblingPolicy(
                     triggers=("join_released",),
-                    execution_action=(
-                        "request_cancel" if cancel_slow_sibling else "continue"
-                    ),
+                    execution_action=("request_cancel" if cancel_slow_sibling else "continue"),
                     arrival_route="evaluate_late_result",
                 ),
             ),
@@ -290,9 +288,7 @@ SIBLING_CANCEL_HEARTBEAT_SECONDS = 5
 
 
 class FakeStageGraphActivities:
-    def __init__(
-        self, *, cycle_once: bool = False, cycle_scope: str = "workflow"
-    ) -> None:
+    def __init__(self, *, cycle_once: bool = False, cycle_scope: str = "workflow") -> None:
         self.slow_started = asyncio.Event()
         self.initialized = asyncio.Event()
         self.slow_release = asyncio.Event()
@@ -654,9 +650,7 @@ async def test_incremental_any_join_runs_downstream_before_slow_sibling_and_repl
             workflow_runner=coordinator_workflow_runner(),
         ).replay_workflow(history)
 
-    assert activities.admission_order.index("downstream") < len(
-        activities.admission_order
-    )
+    assert activities.admission_order.index("downstream") < len(activities.admission_order)
     assert result.output_refs["downstream"] == ("artifact:downstream",)
     assert result.completion_proposal.can_terminalize
 

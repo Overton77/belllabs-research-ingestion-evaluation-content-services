@@ -5,23 +5,25 @@ from pathlib import Path
 
 import pytest
 
-from app.application.control_plane.control_plane_repository import InMemoryDefinitionRepository
-from app.application.control_plane.service import ControlPlaneService
-from app.application.coordinator.coordinator_surface_promotion import (
+from mission_control.adapters.storage.control_plane_payloads import InMemoryPayloadStore
+from mission_control.application.authoring.control_plane_repository import (
+    InMemoryDefinitionRepository,
+)
+from mission_control.application.authoring.service import ControlPlaneService
+from mission_control.application.coordinator.coordinator_surface_promotion import (
     build_coordinator_surface,
     plan_coordinator_surface_promotion,
     publish_coordinator_surface,
 )
-from app.domain.control_plane.contracts import (
+from mission_control.domain.authoring.contracts import (
     DefinitionKind,
     PromptDefinition,
     SkillDefinition,
 )
-from app.domain.control_plane.extensions import ExtensionRegistry
-from app.integrations.control_plane_payloads import InMemoryPayloadStore
+from mission_control.domain.authoring.extensions import ExtensionRegistry
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-SKILL_ROOT = PROJECT_ROOT / ".agents" / "skills" / "belllabs-workflow-coordinator"
+SKILL_ROOT = PROJECT_ROOT / ".agents" / "skills" / "mission-control-coordinator"
 
 
 @pytest.mark.asyncio
@@ -30,7 +32,7 @@ async def test_coordinator_surface_is_content_addressed_and_resumable() -> None:
     skill = next(item for item in definitions if isinstance(item, SkillDefinition))
     prompt = next(item for item in definitions if isinstance(item, PromptDefinition))
 
-    assert skill.logical_id == "skill.belllabs-workflow-coordinator"
+    assert skill.logical_id == "skill.mission-control-coordinator"
     assert skill.manifest_digest == skill.bundle_ref.digest
     assert {item.path for item in skill.file_manifest} >= {
         "SKILL.md",

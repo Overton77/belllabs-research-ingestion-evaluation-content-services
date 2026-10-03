@@ -4,15 +4,15 @@ import json
 from pathlib import Path
 
 import pytest
-
-from app.application.schema.schema_catalog import parse_schema_catalog
-from app.application.schema.schema_workspace import (
+from biotech_mission_adapters.application.schema.schema_catalog import parse_schema_catalog
+from biotech_mission_adapters.application.schema.schema_workspace import (
     TIER0_MAX_BYTES,
     build_tier0,
     materialize_schema_workspace,
     select_workspace_candidates,
     workspace_profile_paths,
 )
+
 from tests.schema_context_helpers import SDL
 
 
@@ -58,7 +58,7 @@ def test_authoritative_schema_tier0_is_bounded_and_workload_candidates_are_prese
 
 
 def test_tier0_exposes_governed_ontological_categories() -> None:
-    from app.application.schema.schema_catalog import DEFAULT_SEMANTIC_OVERLAY
+    from biotech_mission_adapters.application.schema.schema_catalog import DEFAULT_SEMANTIC_OVERLAY
 
     workspace = Path(__file__).resolve().parents[4]
     schema_path = workspace / "biotech-kg/src/schema/neo4jbiotechschema.graphql"

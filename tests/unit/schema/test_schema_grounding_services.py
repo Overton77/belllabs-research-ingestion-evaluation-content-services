@@ -6,23 +6,28 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-
-from app.application.schema.schema_catalog import CATALOG_GENERATOR_VERSION
-from app.application.schema.schema_catalog_build import SchemaCatalogBuildService
-from app.application.schema.schema_context_derivation import SchemaContextDerivationService
-from app.application.schema.schema_grounding_repository import (
+from biotech_mission_adapters.application.schema.schema_catalog import CATALOG_GENERATOR_VERSION
+from biotech_mission_adapters.application.schema.schema_catalog_build import (
+    SchemaCatalogBuildService,
+)
+from biotech_mission_adapters.application.schema.schema_context_derivation import (
+    SchemaContextDerivationService,
+)
+from biotech_mission_adapters.application.schema.schema_grounding_repository import (
     InMemorySchemaGroundingRecordRepository,
 )
-from app.application.schema.schema_workspace_binding import SchemaGraphAdmissionService
-from app.application.schema.supporting_graph_reconciliation import (
+from biotech_mission_adapters.application.schema.schema_workspace_binding import (
+    SchemaGraphAdmissionService,
+)
+from biotech_mission_adapters.application.schema.supporting_graph_reconciliation import (
     SupportingGraphReconciliationWorkflow,
 )
-from app.domain.schema_context.canonicalization import sha256_digest
-from app.domain.schema_context.contracts import (
+from biotech_mission_adapters.domain.schema_context.canonicalization import sha256_digest
+from biotech_mission_adapters.domain.schema_context.contracts import (
     QueryExecutionIntent,
     QueryExecutionResult,
 )
-from app.domain.schema_grounding.contracts import (
+from biotech_mission_adapters.domain.schema_grounding.contracts import (
     GraphAdmissionRequest,
     GraphCapabilityGrant,
     SchemaCatalogBuildRequest,
@@ -30,8 +35,9 @@ from app.domain.schema_grounding.contracts import (
     SchemaWorkspaceBindingRef,
     SupportingGraphReconciliationRequest,
 )
-from app.domain.schema_grounding.errors import SchemaSourceDigestMismatch
-from app.integrations.control_plane_payloads import InMemoryPayloadStore
+from biotech_mission_adapters.domain.schema_grounding.errors import SchemaSourceDigestMismatch
+
+from mission_control.adapters.storage.control_plane_payloads import InMemoryPayloadStore
 from tests.schema_context_helpers import SDL, accepted, catalog
 
 NOW = datetime(2026, 7, 24, 12, 0, tzinfo=UTC)
@@ -138,9 +144,7 @@ async def test_catalog_physical_and_logical_digests_ignore_source_location() -> 
         _build_request(
             build_id="catalog-build-a",
             source_ref="s3://one/schema.graphql",
-        ).model_copy(
-            update={"candidate_seed_ref": None, "candidate_seed_digest": None}
-        ),
+        ).model_copy(update={"candidate_seed_ref": None, "candidate_seed_digest": None}),
         schema_definition=SDL,
         semantic_overlay=EMPTY_OVERLAY,
     )
@@ -148,9 +152,7 @@ async def test_catalog_physical_and_logical_digests_ignore_source_location() -> 
         _build_request(
             build_id="catalog-build-b",
             source_ref="s3://two/schema.graphql",
-        ).model_copy(
-            update={"candidate_seed_ref": None, "candidate_seed_digest": None}
-        ),
+        ).model_copy(update={"candidate_seed_ref": None, "candidate_seed_digest": None}),
         schema_definition=SDL,
         semantic_overlay=EMPTY_OVERLAY,
     )
@@ -477,11 +479,3 @@ async def test_supporting_reconciliation_persists_exact_intent_result_evidence()
         "reconciliation",
         "evaluation",
     } <= record_types
-
-
-@pytest.mark.asyncio
-async def test_goal_semantic_handlers_execute_and_independently_rehydrate_reconciliation() -> None:
-    pytest.skip(
-        "direct BoundGoal*/register_supporting_graph_goal_handlers path deleted by "
-        "WP-BP-020 atomic switch; Scenario C now uses OperationWorkflow templates"
-    )

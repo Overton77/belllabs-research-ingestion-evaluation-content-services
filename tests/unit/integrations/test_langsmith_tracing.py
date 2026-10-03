@@ -6,8 +6,7 @@ from types import SimpleNamespace
 import pytest
 from pydantic import SecretStr
 
-from app.config import Settings
-from app.integrations.langsmith_tracing import (
+from mission_control.adapters.langsmith.tracing import (
     configure_langsmith_tracing,
     create_traced_async_openai,
     process_embedding_inputs,
@@ -15,6 +14,7 @@ from app.integrations.langsmith_tracing import (
     process_runtime_execute_outputs,
     runtime_execute_metadata,
 )
+from mission_control.bootstrap.settings import Settings
 from tests.fixtures.isolated_settings import isolated_settings
 
 _LANGSMITH_ENV = (
@@ -49,7 +49,7 @@ def test_settings_expose_langsmith_contract() -> None:
 
 
 def test_configure_langsmith_tracing_exports_env() -> None:
-    import app.integrations.langsmith_tracing as tracing
+    import mission_control.adapters.langsmith.tracing as tracing
 
     settings = isolated_settings(
         langsmith_api_key=SecretStr("lsv2_pt_test_key"),
@@ -82,9 +82,7 @@ def test_runtime_execute_redaction_drops_secrets_and_prompt_bodies() -> None:
             effective_configuration_digest="sha256:abc",
         ),
         resolved_secret_names=("environment:OPENAI_API_KEY",),
-        prompt_segments=(
-            SimpleNamespace(content="SECRET PROMPT SYNTHETIC-PHI-000-00-0000"),
-        ),
+        prompt_segments=(SimpleNamespace(content="SECRET PROMPT SYNTHETIC-PHI-000-00-0000"),),
         workspace=SimpleNamespace(workspace_id="ws-1"),
     )
     redacted = process_runtime_execute_inputs(

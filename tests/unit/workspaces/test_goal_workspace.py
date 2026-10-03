@@ -7,13 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from app.application.workspaces.goal_workspace import (
+from mission_control.application.artifacts.goal_workspace import (
     GoalScopeViolation,
     GoalWorkspaceService,
     GoalWorkspaceSpec,
 )
-from app.domain.operation_execution.errors import WorkspaceSlotConflict
-from app.domain.run_control.errors import IdempotencyConflict
+from mission_control.domain.execution.errors import WorkspaceSlotConflict
+from mission_control.domain.policies.errors import IdempotencyConflict
 
 
 def digest(value: str) -> str:

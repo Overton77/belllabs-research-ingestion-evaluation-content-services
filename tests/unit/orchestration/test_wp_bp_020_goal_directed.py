@@ -4,16 +4,16 @@ from dataclasses import asdict, replace
 
 import pytest
 
-from app.application.orchestration.goal_directed import _recover_handoff_compaction
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.contracts import (
+from mission_control.application.programs.goal_directed import _recover_handoff_compaction
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.authoring.contracts import (
     GoalDirectedBlueprint,
     GoalSessionRolloverPolicy,
 )
-from app.domain.control_plane.fixtures import GENERIC_GOAL_DIRECTED
-from app.domain.operation_execution.checkpoint_lineage import cognitive_session_namespace
-from app.domain.operation_execution.delegation import AsyncDelegationBoundary
-from app.domain.orchestration.contracts import (
+from mission_control.domain.authoring.fixtures import GENERIC_GOAL_DIRECTED
+from mission_control.domain.execution.checkpoint_lineage import cognitive_session_namespace
+from mission_control.domain.execution.delegation import AsyncDelegationBoundary
+from mission_control.domain.programs.contracts import (
     GoalContinuationState,
     GoalConvergenceFacts,
     GoalDirectedExecutionState,
@@ -24,12 +24,12 @@ from app.domain.orchestration.contracts import (
     GoalRevision,
     GoalVerificationResult,
 )
-from app.domain.orchestration.goal_directed import (
+from mission_control.domain.programs.goal_directed import (
     GoalDirectedExecutionError,
     GoalDirectedInterpreter,
 )
-from app.domain.orchestration.goal_directed_runtime import route_goal_async_subgoal
-from app.domain.orchestration.runtime_units import goal_runtime_unit
+from mission_control.domain.programs.goal_directed_runtime import route_goal_async_subgoal
+from mission_control.domain.programs.runtime_units import goal_runtime_unit
 
 ENVELOPE_DIGEST = sha256_digest("wp-bp-020-envelope")
 STALE_FRONTIER_DIGEST = sha256_digest("wp-bp-020-stale-frontier")
@@ -550,9 +550,7 @@ def test_failed_compaction_applies_the_frozen_failure_action(
         max_rollovers=1,
         compaction_failure_action=action,  # type: ignore[arg-type]
     )
-    interpreter, state, claim = _claim(
-        _blueprint(max_iterations=2, session_policy=session_policy)
-    )
+    interpreter, state, claim = _claim(_blueprint(max_iterations=2, session_policy=session_policy))
     state = interpreter.apply_execution_result(
         state,
         _execution(claim, tokens=1, handoff=_failed_handoff(claim)),

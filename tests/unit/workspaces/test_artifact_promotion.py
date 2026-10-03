@@ -5,19 +5,20 @@ from hashlib import sha256
 
 import pytest
 
-from app.application.workspaces.artifact_promotion import (
+from mission_control.adapters.storage.artifact_payloads import InMemoryArtifactPayloadStore
+from mission_control.application.artifacts.artifact_promotion import (
     ArtifactPromotionService,
     InMemoryArtifactDurableReferences,
     InMemoryArtifactMetadataRepository,
     StaticArtifactValidationAuthority,
 )
-from app.application.workspaces.workspace_materialization import (
+from mission_control.application.artifacts.workspace_materialization import (
     InMemoryDurableWorkspaceInputs,
     InMemoryWorkspaceManifestRepository,
     WorkspaceMaterializationService,
 )
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.operation_execution.contracts import (
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.execution.contracts import (
     ArtifactCheckEvidence,
     ArtifactPromotionRequest,
     ArtifactPromotionState,
@@ -26,8 +27,7 @@ from app.domain.operation_execution.contracts import (
     WorkspaceOwnerKind,
     WorkspaceSlotBinding,
 )
-from app.domain.run_control.errors import IdempotencyConflict
-from app.integrations.artifact_payloads import InMemoryArtifactPayloadStore
+from mission_control.domain.policies.errors import IdempotencyConflict
 from tests.unit.operations.test_operation_execution import operation_request, service_fixture
 from tests.unit.workspaces.test_workspace_materialization import RecordingProvisioner
 

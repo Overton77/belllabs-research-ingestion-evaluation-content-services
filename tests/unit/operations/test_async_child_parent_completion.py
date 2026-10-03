@@ -14,21 +14,21 @@ from typing import Any, cast
 
 import pytest
 
-from app.application.async_subagents.parent_completion import (
+from mission_control.application.subordinates.parent_completion import (
     AsyncChildCompletion,
     admit_typed_manifest,
 )
-from app.application.async_subagents.parent_effects import (
+from mission_control.application.subordinates.parent_effects import (
     RunControlAsyncChildEffects,
     async_child_effect_id,
 )
-from app.application.async_subagents.service import (
+from mission_control.application.subordinates.service import (
     AsyncSubagentService,
     InMemoryAsyncSubagentAuthority,
     InMemoryAsyncSubagentDetailRepository,
 )
-from app.domain.operation_execution.contracts import OperationExecutionBinding
-from app.domain.run_control.contracts import EffectDisposition
+from mission_control.domain.execution.contracts import OperationExecutionBinding
+from mission_control.domain.policies.contracts import EffectDisposition
 from tests.acceptance.control_plane.test_wp_cp_045 import DeterministicProvider
 from tests.unit.operations.test_async_child_parent_budget import admitted_parent, spawn
 from tests.unit.run_control.test_run_control import actor
@@ -165,9 +165,9 @@ def test_completion_bounds_are_validated() -> None:
 async def test_deployment_runtime_completes_children_after_cognition_and_delegates_the_rest(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import app.temporal.deployment_composition as composition
-    from app.domain.operation_execution.contracts import RuntimeResult
-    from app.integrations.agents.deep_agents.browser_tool import GRANTED_NETWORK_HOSTS
+    import mission_control.adapters.temporal.deployment_composition as composition
+    from mission_control.adapters.deep_agents.browser_tool import GRANTED_NETWORK_HOSTS
+    from mission_control.domain.execution.contracts import RuntimeResult
 
     calls: list[str] = []
 

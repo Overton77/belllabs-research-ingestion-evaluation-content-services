@@ -6,13 +6,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
-from app.integrations.control_plane_payloads import ContentAddress
-from app.integrations.schema_grounding_payloads import (
+from biotech_mission_adapters.adapters.infrastructure.schema_grounding_payloads import (
     SchemaGroundingInputKind,
     schema_grounding_input_uri,
 )
-from scripts import stage_schema_grounding_live_inputs
+from biotech_mission_adapters.bootstrap.scripts import stage_schema_grounding_live_inputs
+
+from mission_control.application.ports.payloads import ContentAddress
 
 
 class _Store:

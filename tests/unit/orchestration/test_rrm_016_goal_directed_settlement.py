@@ -22,21 +22,22 @@ from typing import Any
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
-from app.application.operations.checkpoint_lineage import (
+from mission_control.adapters.storage.artifact_payloads import InMemoryArtifactPayloadStore
+from mission_control.application.execution.operations.checkpoint_lineage import (
     CheckpointLineageService,
     InMemoryCheckpointLineageRepository,
 )
-from app.application.operations.operation_execution import (
+from mission_control.application.execution.operations.operation_execution import (
     InMemoryOperationBindingRepository,
     OperationExecutionService,
     bind_operation_execution_request,
     operation_settlement_id,
 )
-from app.application.orchestration.goal_directed import (
+from mission_control.application.programs.goal_directed import (
     GoalDirectedOperationResultService,
     GoalOperationSettlementUnavailable,
 )
-from app.domain.operation_execution.contracts import (
+from mission_control.domain.execution.contracts import (
     DeepAgentExecutionBinding,
     OperationExecutionRequest,
     OperationExecutionResult,
@@ -44,16 +45,7 @@ from app.domain.operation_execution.contracts import (
     PromptTrustClass,
     WorkspaceOwnerKind,
 )
-from app.domain.orchestration.contracts import GoalExecutionResult
-from app.domain.orchestration.goal_directed import GoalDirectedInterpreter
-from app.domain.orchestration.goal_directed_runtime import (
-    GoalOperationDispatch,
-    GoalOperationPreparationRequest,
-    GoalOperationReconciliationRequest,
-    GoalOperationReconciliationResult,
-)
-from app.domain.orchestration.runtime_units import goal_runtime_unit
-from app.domain.run_control.contracts import (
+from mission_control.domain.policies.contracts import (
     CommandStatus,
     EffectDisposition,
     ExecutionTarget,
@@ -61,7 +53,15 @@ from app.domain.run_control.contracts import (
     RecordUsageAction,
     StartAction,
 )
-from app.integrations.artifact_payloads import InMemoryArtifactPayloadStore
+from mission_control.domain.programs.contracts import GoalExecutionResult
+from mission_control.domain.programs.goal_directed import GoalDirectedInterpreter
+from mission_control.domain.programs.goal_directed_runtime import (
+    GoalOperationDispatch,
+    GoalOperationPreparationRequest,
+    GoalOperationReconciliationRequest,
+    GoalOperationReconciliationResult,
+)
+from mission_control.domain.programs.runtime_units import goal_runtime_unit
 from tests.fixtures.checkpoint_lineage import activity_attempt, bind_unit, stage_unit
 from tests.fixtures.checkpoint_recovery import AcceptingAuthority, MemoryOperationJournal
 from tests.fixtures.goal_directed_journaled import (
@@ -203,24 +203,16 @@ def _reconciliation(
             None if verifier else blueprint.session_policy.context_compaction_policy_ref
         ),
         workspace_ref_class=(
-            None
-            if verifier
-            else sorted(blueprint.handoff_policy.allowed_workspace_ref_classes)[0]
+            None if verifier else sorted(blueprint.handoff_policy.allowed_workspace_ref_classes)[0]
         ),
         compaction_failure_action=(
             None if verifier else blueprint.session_policy.compaction_failure_action
         ),
-        verifier_policy_binding_ref=(
-            blueprint.verifier_policy.binding_ref if verifier else None
-        ),
+        verifier_policy_binding_ref=(blueprint.verifier_policy.binding_ref if verifier else None),
         verifier_rubric_ref=blueprint.verifier_policy.rubric_ref if verifier else None,
-        verifier_rubric_version=(
-            blueprint.verifier_policy.rubric_version if verifier else None
-        ),
+        verifier_rubric_version=(blueprint.verifier_policy.rubric_version if verifier else None),
         acceptance_contract_ref=blueprint.acceptance_contract if verifier else None,
-        acceptance_version=(
-            blueprint.verifier_policy.acceptance_version if verifier else None
-        ),
+        acceptance_version=(blueprint.verifier_policy.acceptance_version if verifier else None),
         recorded_at=_now(),
     )
 
@@ -233,9 +225,7 @@ async def _claim(run_id: str) -> Any:
     return claim
 
 
-async def _run_iteration_one(
-    composition: GoalComposition, run_id: str
-) -> dict[str, Any]:
+async def _run_iteration_one(composition: GoalComposition, run_id: str) -> dict[str, Any]:
     """Executor then verifier of iteration 1, each reconciled by the family service."""
 
     claim = await _claim(run_id)
@@ -327,8 +317,9 @@ async def test_preparation_binds_the_admission_revision_role_slots_and_untrusted
 
 
 @pytest.mark.asyncio
-async def test_real_authority_admits_goal_operations_and_rejects_privileged_or_foreign_shapes(
-) -> None:
+async def test_real_authority_admits_goal_operations_and_rejects_privileged_or_foreign_shapes() -> (
+    None
+):
     composition, run_id = await _composition()
     claim = await _claim(run_id)
     dispatch = await composition.family.execute_iteration(
@@ -426,9 +417,7 @@ async def test_operations_settle_once_and_the_family_consumes_the_settlement() -
     assert sorted(item.operation_ref for item in effects.claims.values()) == sorted(
         [executor_binding, verifier_binding]
     )
-    assert {item.disposition for item in effects.claims.values()} == {
-        EffectDisposition.SUCCEEDED
-    }
+    assert {item.disposition for item in effects.claims.values()} == {EffectDisposition.SUCCEEDED}
     assert {
         (item.settlement_id, item.accepted_by_authority_ref)
         for item in run.accepted_operation_settlement_evidence

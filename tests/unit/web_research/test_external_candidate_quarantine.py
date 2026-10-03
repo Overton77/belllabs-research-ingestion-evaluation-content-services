@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from app.application.web_research.external_candidate_inspection import (
+from mission_control.application.capabilities.external_candidate_inspection import (
     ExternalCandidateInspectionRequest,
     ExternalCandidateInspectionService,
     InMemoryExternalCandidateInspectionRepository,
@@ -21,11 +21,11 @@ from app.application.web_research.external_candidate_inspection import (
     QuarantineInspectionExecution,
     QuarantineInspectionObservations,
 )
-from app.application.web_research.external_candidate_repository import (
+from mission_control.application.capabilities.external_candidate_repository import (
     ExternalCandidatePersistenceError,
     InMemoryExternalCandidateRepository,
 )
-from app.application.web_research.external_capability_discovery import (
+from mission_control.application.capabilities.external_capability_discovery import (
     ExternalDiscoveryBatch,
     ExternalDiscoveryCandidate,
     ExternalDiscoveryEvidence,
@@ -71,9 +71,7 @@ def discovery_batch(
     evidence = ExternalDiscoveryEvidence(
         source=source,
         source_version=(
-            "v0.1"
-            if source == ExternalDiscoverySource.MCP_REGISTRY
-            else "skills@1.5.20"
+            "v0.1" if source == ExternalDiscoverySource.MCP_REGISTRY else "skills@1.5.20"
         ),
         query="missing capability",
         retrieved_at=NOW,
@@ -132,9 +130,7 @@ def safe_observations() -> QuarantineInspectionObservations:
         immutable_content_digest=CONTENT_DIGEST,
         license_evidence=("Apache-2.0",),
         secret_requirement_names=frozenset({"EXAMPLE_API_KEY"}),
-        network_requirement_hosts=frozenset(
-            {"registry.modelcontextprotocol.io"}
-        ),
+        network_requirement_hosts=frozenset({"registry.modelcontextprotocol.io"}),
         network_hosts_contacted=frozenset({"registry.modelcontextprotocol.io"}),
         requested_capabilities=frozenset({"search"}),
         tools=(
@@ -269,9 +265,7 @@ async def test_skill_candidate_cannot_request_tools_list_or_execution() -> None:
 @pytest.mark.asyncio
 async def test_bound_violation_forces_failed_non_promotable_report() -> None:
     candidates, candidate = await stored_candidates()
-    inspector = RecordingInspector(
-        safe_observations().model_copy(update={"network_requests": 21})
-    )
+    inspector = RecordingInspector(safe_observations().model_copy(update={"network_requests": 21}))
     service = ExternalCandidateInspectionService(
         candidates=candidates,
         runner=inspector,

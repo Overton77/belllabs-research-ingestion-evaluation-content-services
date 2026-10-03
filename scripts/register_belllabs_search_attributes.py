@@ -12,12 +12,12 @@ from __future__ import annotations
 import asyncio
 import json
 
-from app.config import get_settings
-from app.integrations.temporal import create_temporal_client
-from app.temporal.search_attributes import (
+from mission_control.adapters.temporal.client import create_temporal_client
+from mission_control.adapters.temporal.search_attributes import (
     register_belllabs_search_attributes,
     verify_belllabs_search_attributes,
 )
+from mission_control.bootstrap.settings import get_settings
 
 
 async def main() -> int:

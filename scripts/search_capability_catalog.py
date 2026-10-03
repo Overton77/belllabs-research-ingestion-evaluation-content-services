@@ -5,23 +5,26 @@ import asyncio
 import json
 from typing import Any
 
-from app.application.capability.capability_search import CapabilitySearchService
-from app.application.capability.postgres_capability_search_repository import (
+from mission_control.adapters.capabilities.capability_embeddings import (
+    OpenAICapabilityEmbeddingAdapter,
+)
+from mission_control.adapters.postgres.capability.capability_search_repository import (
     PostgresCatalogSearchRepository,
 )
-from app.application.control_plane.control_plane_repository import BeanieDefinitionRepository
-from app.config import Settings
-from app.domain.control_plane.contracts import DefinitionKind
-from app.domain.coordinator.contracts import CapabilitySearchRequest
-from app.integrations.capability_embeddings import OpenAICapabilityEmbeddingAdapter
-from app.integrations.catalog_projection_admin import list_published_definition_refs
-from app.integrations.mongodb import create_mongodb
-from app.integrations.postgres import create_postgres_pool
+from mission_control.adapters.postgres.connections import create_postgres_pool
+from mission_control.adapters.postgres.control_plane.definition_repository import (
+    PostgresDefinitionRepository,
+)
+from mission_control.application.capabilities.capability_search import CapabilitySearchService
+from mission_control.bootstrap.catalog_scope import configured_catalog_scope
+from mission_control.bootstrap.settings import Settings
+from mission_control.domain.authoring.contracts import DefinitionKind
+from mission_control.domain.coordinator.contracts import CapabilitySearchRequest
 
 
 def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Hybrid-search the capability catalog and rehydrate exact MongoDB refs."
+        description="Hybrid-search the capability catalog and rehydrate exact PostgreSQL refs."
     )
     parser.add_argument("--tenant", required=True)
     parser.add_argument("--query", required=True)
@@ -41,18 +44,17 @@ def _arguments() -> argparse.Namespace:
 
 async def _run(args: argparse.Namespace) -> dict[str, Any]:
     settings = Settings()
-    mongo_client, _ = await create_mongodb(settings)
+    scope = configured_catalog_scope(settings, requested=getattr(args, "tenant", None))
     postgres_pool = await create_postgres_pool(settings)
     try:
-        definitions = BeanieDefinitionRepository()
-        refs = await list_published_definition_refs()
+        definitions = PostgresDefinitionRepository(postgres_pool, catalog_scope=scope)
+        refs = await definitions.list_published_definition_refs()
         workflow_ref = None
         if args.workflow_type:
             matches = [
                 ref
                 for ref in refs
-                if ref.kind == DefinitionKind.WORKFLOW_TYPE
-                and ref.logical_id == args.workflow_type
+                if ref.kind == DefinitionKind.WORKFLOW_TYPE and ref.logical_id == args.workflow_type
             ]
             if not matches:
                 raise ValueError("requested Workflow Type is not published")
@@ -79,7 +81,6 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
         return response.model_dump(mode="json")
     finally:
         await postgres_pool.close()
-        await mongo_client.close()
 
 
 def main() -> None:

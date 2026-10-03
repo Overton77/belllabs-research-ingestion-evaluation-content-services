@@ -1,24 +1,16 @@
 from __future__ import annotations
 
-import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
 import asyncpg
 import pytest
 
-from app.application.operations.operation_journal_backfill import (
-    CLAIMS_COLLECTION,
-    BackfillBatch,
-    QuarantineAdmission,
-    SourceSnapshot,
+from mission_control.adapters.postgres import connections as postgres_integration
+from mission_control.adapters.postgres.connections import (
+    MIGRATIONS_ROOT,
+    apply_application_migrations,
 )
-from app.application.operations.postgres_operation_journal_backfill import (
-    PostgresOperationJournalBackfillRepository,
-)
-from app.domain.run_control.errors import IdempotencyConflict
-from app.integrations import postgres as postgres_integration
-from app.integrations.postgres import MIGRATIONS_ROOT, apply_application_migrations
 
 DIGEST = "sha256:" + "a" * 64
 NOW = datetime(2026, 8, 8, 20, 0, tzinfo=UTC)
@@ -192,9 +184,12 @@ async def test_upgrade_from_0011_applies_rls_and_least_privilege_role_matrix(
             await connection.execute("DROP SCHEMA IF EXISTS belllabs_control CASCADE")
         await _apply_through_0011(pool)
         async with pool.acquire() as connection:
-            assert await connection.fetchval(
-                "SELECT to_regclass('belllabs_control.operation_effect_claims')"
-            ) is None
+            assert (
+                await connection.fetchval(
+                    "SELECT to_regclass('belllabs_control.operation_effect_claims')"
+                )
+                is None
+            )
 
         isolated_migrations = tmp_path / "migrations"
         isolated_migrations.mkdir()
@@ -239,9 +234,7 @@ async def test_upgrade_from_0011_applies_rls_and_least_privilege_role_matrix(
             )
             assert {row["relname"] for row in rls_rows} == set(RLS_TABLES)
             assert all(
-                row["relrowsecurity"]
-                and row["relforcerowsecurity"]
-                and row["policy_count"] == 1
+                row["relrowsecurity"] and row["relforcerowsecurity"] and row["policy_count"] == 1
                 for row in rls_rows
             )
 
@@ -324,69 +317,7 @@ async def test_upgrade_from_0011_applies_rls_and_least_privilege_role_matrix(
                         "belllabs_control.runtime_execution_attempts_attempt_id_seq",
                         privilege,
                     )
-                    assert actual is (
-                        expected_sequence and privilege in {"USAGE", "SELECT"}
-                    )
-    finally:
-        async with pool.acquire() as connection:
-            await connection.execute("DROP SCHEMA IF EXISTS belllabs_control CASCADE")
-        await pool.close()
-
-
-def _backfill_batch(*, reason_code: str = "missing_or_invalid_binding") -> BackfillBatch:
-    snapshot = SourceSnapshot(
-        request_scope="tenant-a",
-        claim_high_watermark="claim-doc-1",
-        settlement_high_watermark=None,
-        record_count=1,
-        aggregate_digest=DIGEST,
-        captured_at=NOW,
-    )
-    return BackfillBatch(
-        run_id="authority-proof-run",
-        request_scope="tenant-a",
-        previous_cursor=None,
-        cursor=f"{CLAIMS_COLLECTION}:claim-doc-1",
-        source_snapshot=snapshot,
-        quarantines=(
-            QuarantineAdmission(
-                quarantine_id="quarantine-1",
-                migration_stream="legacy-mongo-operation-journal-v1",
-                source_collection=CLAIMS_COLLECTION,
-                source_document_id="claim-doc-1",
-                reason_code=reason_code,
-                observed_digest=DIGEST,
-                expected_digest=None,
-                observed_request_scope="tenant-a",
-                quarantined_at=NOW,
-            ),
-        ),
-    )
-
-
-@pytest.mark.asyncio
-async def test_postgres_backfill_batch_concurrent_replay_is_idempotent_and_conflicts_fail(
-    test_application_postgres_dsn: str,
-) -> None:
-    pool = await asyncpg.create_pool(dsn=test_application_postgres_dsn, min_size=1, max_size=4)
-    try:
-        async with pool.acquire() as connection:
-            await connection.execute("DROP SCHEMA IF EXISTS belllabs_control CASCADE")
-        await apply_application_migrations(pool)
-        repository = PostgresOperationJournalBackfillRepository(pool)
-        batch = _backfill_batch()
-
-        await asyncio.gather(repository.apply_batch(batch), repository.apply_batch(batch))
-        progress = await repository.load_progress(
-            request_scope=batch.request_scope,
-            run_id=batch.run_id,
-        )
-        assert progress is not None
-        assert progress.cursor == batch.cursor
-        assert progress.quarantine_count == 1
-
-        with pytest.raises(IdempotencyConflict, match="conflicting content"):
-            await repository.apply_batch(_backfill_batch(reason_code="invalid_digest"))
+                    assert actual is (expected_sequence and privilege in {"USAGE", "SELECT"})
     finally:
         async with pool.acquire() as connection:
             await connection.execute("DROP SCHEMA IF EXISTS belllabs_control CASCADE")

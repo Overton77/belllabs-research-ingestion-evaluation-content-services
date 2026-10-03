@@ -14,8 +14,10 @@ from typing import Any
 
 import pytest
 
-from app.application.operations.operation_execution import operation_settlement_id
-from app.domain.run_control.contracts import CommandStatus, EffectDisposition
+from mission_control.application.execution.operations.operation_execution import (
+    operation_settlement_id,
+)
+from mission_control.domain.policies.contracts import CommandStatus, EffectDisposition
 from tests.fixtures.checkpoint_recovery import (
     SimulatedWorkerCrash,
     governed_workspace,
@@ -116,9 +118,7 @@ async def test_goal_directed_unit_crash_windows_converge_to_one_settlement(
     assert result.status == "completed"
     assert result.usage.amounts == {"tokens.total": TOKENS_PER_OPERATION}
     assert result.structured_output is not None
-    assert result.structured_output["schema_version"] == (
-        "belllabs.goal-executor-observation.v1"
-    )
+    assert result.structured_output["schema_version"] == ("belllabs.goal-executor-observation.v1")
 
     # Two model calls in total, each seeing the operation's input exactly once.
     assert harness.model.calls == [(1, 0), (1, 1)]

@@ -4,14 +4,14 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.application.runtime.runtime_decisions import (
+from mission_control.application.recovery.runtime_decisions import (
     DecisionResponseAuthorization,
     DurableDecisionService,
     InMemoryDecisionRepository,
 )
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.graph_runtime.kernel import DecisionRequest, DecisionResponse
-from app.domain.run_control.errors import IdempotencyConflict
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.graph_runtime.kernel import DecisionRequest, DecisionResponse
+from mission_control.domain.policies.errors import IdempotencyConflict
 
 DIGEST = "sha256:" + "a" * 64
 NOW = datetime(2026, 8, 6, 20, 0, tzinfo=UTC)

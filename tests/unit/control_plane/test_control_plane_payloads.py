@@ -5,14 +5,14 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import pytest
-
-from app.config import Settings
-from app.integrations import control_plane_payloads
-from app.integrations.control_plane_payloads import S3PayloadStore
-from app.integrations.schema_grounding_payloads import (
+from biotech_mission_adapters.adapters.infrastructure.schema_grounding_payloads import (
     SchemaGroundingInputKind,
     schema_grounding_input_store,
 )
+
+from mission_control.adapters.storage import control_plane_payloads
+from mission_control.adapters.storage.control_plane_payloads import S3PayloadStore
+from mission_control.bootstrap.settings import Settings
 
 
 class _Body:
@@ -64,9 +64,7 @@ async def test_s3_payload_store_preserves_json_defaults_and_raw_digest(
     assert address.uri.endswith(".json")
     assert address.version_id == "version-1"
     assert client.puts[0]["ContentType"] == "application/json"
-    assert client.puts[0]["Metadata"]["sha256"] == address.digest.removeprefix(
-        "sha256:"
-    )
+    assert client.puts[0]["Metadata"]["sha256"] == address.digest.removeprefix("sha256:")
 
 
 @pytest.mark.asyncio

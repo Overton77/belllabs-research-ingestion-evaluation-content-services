@@ -26,32 +26,51 @@ from temporalio.client import WorkflowHandle
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
-from app.application.operations.checkpoint_lineage import (
+from mission_control.adapters.storage.artifact_payloads import InMemoryArtifactPayloadStore
+from mission_control.adapters.temporal.operation_activities import OperationExecutionActivities
+from mission_control.adapters.temporal.registration.activities import (
+    agent_cognitive_activities,
+    coordinator_activities,
+)
+from mission_control.adapters.temporal.workflow_sandbox import coordinator_workflow_runner
+from mission_control.adapters.temporal.workflows.belllabs_run import (
+    GOVERNED_CANCEL_PATCH,
+    BellLabsRunWorkflow,
+)
+from mission_control.adapters.temporal.workflows.goal_directed import (
+    CANCELLATION_SAGA_PATCH as GOAL_CANCELLATION_PATCH,
+)
+from mission_control.adapters.temporal.workflows.goal_directed import (
+    SETTLE_SUPERSEDED_PATCH as GOAL_SETTLE_SUPERSEDED_PATCH,
+)
+from mission_control.adapters.temporal.workflows.goal_directed import GoalDirectedWorkflow
+from mission_control.adapters.temporal.workflows.operation import OperationWorkflow
+from mission_control.adapters.temporal.workflows.stagegraph import (
+    CANCELLATION_SAGA_PATCH as STAGEGRAPH_CANCELLATION_PATCH,
+)
+from mission_control.adapters.temporal.workflows.stagegraph import (
+    SETTLE_SUPERSEDED_PATCH as STAGEGRAPH_SETTLE_SUPERSEDED_PATCH,
+)
+from mission_control.adapters.temporal.workflows.stagegraph import (
+    StageGraphWorkflow,
+    wait_condition_id,
+)
+from mission_control.application.execution.operations.checkpoint_lineage import (
     CheckpointLineageService,
     InMemoryCheckpointLineageRepository,
 )
-from app.application.operations.operation_execution import (
+from mission_control.application.execution.operations.operation_execution import (
     InMemoryOperationBindingRepository,
     operation_settlement_id,
 )
-from app.application.orchestration.service import (
+from mission_control.application.programs.service import (
     RunControlLifecycleGateway,
     orchestration_lifecycle_actor,
 )
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.contracts import GoalDirectedBlueprint
-from app.domain.coordinator.launch import BlueprintFamily
-from app.domain.orchestration.contracts import (
-    LifecycleCommandOutcome,
-    LifecycleCommandRequest,
-    StageGraphCompletionActivityRequest,
-    StageGraphCompletionActivityResult,
-)
-from app.domain.orchestration.goal_directed_runtime import (
-    GoalOperationReconciliationRequest,
-    GoalOperationReconciliationResult,
-)
-from app.domain.run_control.contracts import (
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.authoring.contracts import GoalDirectedBlueprint
+from mission_control.domain.coordinator.launch import BlueprintFamily
+from mission_control.domain.policies.contracts import (
     CancelAction,
     CommandStatus,
     EffectDisposition,
@@ -63,29 +82,16 @@ from app.domain.run_control.contracts import (
     TerminalizationProposal,
     TerminalizeAction,
 )
-from app.integrations.artifact_payloads import InMemoryArtifactPayloadStore
-from app.temporal.operation_activities import OperationExecutionActivities
-from app.temporal.registration.activities import (
-    agent_cognitive_activities,
-    coordinator_activities,
+from mission_control.domain.programs.contracts import (
+    LifecycleCommandOutcome,
+    LifecycleCommandRequest,
+    StageGraphCompletionActivityRequest,
+    StageGraphCompletionActivityResult,
 )
-from app.temporal.workflow_sandbox import coordinator_workflow_runner
-from app.temporal.workflows.belllabs_run import GOVERNED_CANCEL_PATCH, BellLabsRunWorkflow
-from app.temporal.workflows.goal_directed import (
-    CANCELLATION_SAGA_PATCH as GOAL_CANCELLATION_PATCH,
+from mission_control.domain.programs.goal_directed_runtime import (
+    GoalOperationReconciliationRequest,
+    GoalOperationReconciliationResult,
 )
-from app.temporal.workflows.goal_directed import (
-    SETTLE_SUPERSEDED_PATCH as GOAL_SETTLE_SUPERSEDED_PATCH,
-)
-from app.temporal.workflows.goal_directed import GoalDirectedWorkflow
-from app.temporal.workflows.operation import OperationWorkflow
-from app.temporal.workflows.stagegraph import (
-    CANCELLATION_SAGA_PATCH as STAGEGRAPH_CANCELLATION_PATCH,
-)
-from app.temporal.workflows.stagegraph import (
-    SETTLE_SUPERSEDED_PATCH as STAGEGRAPH_SETTLE_SUPERSEDED_PATCH,
-)
-from app.temporal.workflows.stagegraph import StageGraphWorkflow, wait_condition_id
 from tests.fixtures.checkpoint_recovery import MemoryOperationJournal
 from tests.fixtures.goal_directed_journaled import (
     SCOPE,

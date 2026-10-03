@@ -15,9 +15,11 @@ from typing import Any
 
 import pytest
 
-from app.application.run_control.run_control_repository import InMemoryRunControlRepository
-from app.application.run_control.service import FamilyAdmissionRegistry, RunControlService
-from app.domain.run_control.contracts import (
+from mission_control.application.execution.run_control_repository import (
+    InMemoryRunControlRepository,
+)
+from mission_control.application.execution.service import FamilyAdmissionRegistry, RunControlService
+from mission_control.domain.policies.contracts import (
     CancelAction,
     CommandStatus,
     RecordUsageAction,

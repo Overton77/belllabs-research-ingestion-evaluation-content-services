@@ -159,8 +159,10 @@ app/.cursor/raw_maps/
 # Pydantic/migration cache
 alembic/
 migrations/
-!app/migrations/
-!app/migrations/*.sql
+!src/mission_control/adapters/postgres/migrations/
+!src/mission_control/adapters/postgres/migrations/*.sql
+!integrations/biotech/src/biotech_mission_adapters/migrations/
+!integrations/biotech/src/biotech_mission_adapters/migrations/*.sql
 
 # VSCode
 .vscode/
@@ -201,3 +203,7 @@ app/personal_code
 
 
 internal_hidden_docs/
+
+# Disposable local qualification output (retained for diagnostics).
+/pytest-of-Pinda/
+/.tmp-worker-startup-*/

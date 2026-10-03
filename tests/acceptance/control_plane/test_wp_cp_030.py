@@ -4,17 +4,17 @@ import inspect
 
 import pytest
 
-from app.domain.operation_execution.contracts import OperationWorkflowRequest
-from app.domain.orchestration.contracts import (
+from mission_control.adapters.temporal.registration.task_queues import BellLabsTaskQueues
+from mission_control.adapters.temporal.registration.workflows import registered_workflows
+from mission_control.adapters.temporal.workflows.belllabs_run import BellLabsRunWorkflow
+from mission_control.adapters.temporal.workflows.operation import OperationWorkflow
+from mission_control.domain.execution.contracts import OperationWorkflowRequest
+from mission_control.domain.programs.contracts import (
     RunContinuityState,
     SemanticForkRequest,
     WorkflowMessage,
     create_semantic_fork,
 )
-from app.temporal.registration.task_queues import BellLabsTaskQueues
-from app.temporal.registration.workflows import registered_workflows
-from app.temporal.workflows.belllabs_run import BellLabsRunWorkflow
-from app.temporal.workflows.operation import OperationWorkflow
 
 DIGEST = "sha256:" + "a" * 64
 

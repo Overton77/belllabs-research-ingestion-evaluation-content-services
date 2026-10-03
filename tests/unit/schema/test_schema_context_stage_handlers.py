@@ -6,50 +6,57 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-
-from app.application.orchestration.goal_directed import InMemoryGoalOperationTemplateRepository
-from app.application.orchestration.orchestration_binding_repository import (
-    InMemoryRunSemanticInputBindingRepository,
+from biotech_mission_adapters.adapters.temporal.coordinator_runtime import (
+    SchemaGroundingCoordinatorRuntimeDependencies,
+    create_schema_grounding_coordinator_runtime,
 )
-from app.application.orchestration.orchestration_routing import (
-    BoundStageOperationExecutor,
-    BoundWorkflowEvaluator,
-    SemanticHandlerRegistry,
+from biotech_mission_adapters.application.schema.schema_catalog import CATALOG_GENERATOR_VERSION
+from biotech_mission_adapters.application.schema.schema_catalog_build import (
+    SchemaCatalogBuildService,
 )
-from app.application.schema.schema_catalog import CATALOG_GENERATOR_VERSION
-from app.application.schema.schema_catalog_build import SchemaCatalogBuildService
-from app.application.schema.schema_context_selection import AgentRunOutput
-from app.application.schema.schema_context_stage_handlers import (
+from biotech_mission_adapters.application.schema.schema_context_selection import AgentRunOutput
+from biotech_mission_adapters.application.schema.schema_context_stage_handlers import (
     build_schema_context_selection_run_binding,
     parse_schema_grounding_record_ref,
     register_schema_context_stage_handlers,
 )
-from app.application.schema.schema_grounding_repository import (
+from biotech_mission_adapters.application.schema.schema_grounding_repository import (
     InMemorySchemaGroundingRecordRepository,
 )
-from app.domain.orchestration.contracts import (
-    StageCandidateIdentity,
-    StageExecutionIdentity,
-    StageOperationRequest,
-    WorkflowEvaluationRequest,
-)
-from app.domain.run_control.contracts import ActorContext
-from app.domain.schema_context.contracts import (
+from biotech_mission_adapters.domain.schema_context.contracts import (
     PropertyIntentHint,
     SchemaContextSelection,
     SchemaContextSelectionRequest,
     SchemaSelectionReview,
 )
-from app.domain.schema_grounding.contracts import (
+from biotech_mission_adapters.domain.schema_grounding.contracts import (
     DurableObjectRef,
     SchemaCatalogBuildRequest,
 )
-from app.integrations.control_plane_payloads import ContentAddress, InMemoryPayloadStore
-from app.temporal.coordinator_runtime import (
+
+from mission_control.adapters.storage.control_plane_payloads import InMemoryPayloadStore
+from mission_control.adapters.temporal.coordinator_runtime import (
     GoalDirectedCoordinatorDependencies,
-    SchemaGroundingCoordinatorRuntimeDependencies,
     StageGraphCoordinatorDependencies,
-    create_schema_grounding_coordinator_runtime,
+)
+from mission_control.application.ports.payloads import ContentAddress
+from mission_control.application.programs.goal_directed import (
+    InMemoryGoalOperationTemplateRepository,
+)
+from mission_control.application.programs.orchestration_binding_repository import (
+    InMemoryRunSemanticInputBindingRepository,
+)
+from mission_control.application.programs.orchestration_routing import (
+    BoundStageOperationExecutor,
+    BoundWorkflowEvaluator,
+    SemanticHandlerRegistry,
+)
+from mission_control.domain.policies.contracts import ActorContext
+from mission_control.domain.programs.contracts import (
+    StageCandidateIdentity,
+    StageExecutionIdentity,
+    StageOperationRequest,
+    WorkflowEvaluationRequest,
 )
 from tests.schema_context_helpers import SDL
 
@@ -284,16 +291,12 @@ async def test_real_schema_context_handlers_execute_all_five_stages() -> None:
         "independent_reviewer",
         "accept_selection",
     ):
-        result = await executor.execute(
-            _stage_request(binding.binding_id, stage_id, prior)
-        )
+        result = await executor.execute(_stage_request(binding.binding_id, stage_id, prior))
         assert result.disposition == "completed"
         outputs[stage_id] = result.output_refs
         prior = result.output_refs
 
-    accepted_ref = parse_schema_grounding_record_ref(
-        outputs["accept_selection"][0]
-    )
+    accepted_ref = parse_schema_grounding_record_ref(outputs["accept_selection"][0])
     assert accepted_ref is not None
     assert accepted_ref[0] == "accepted_selection"
     assert selector.calls == 1

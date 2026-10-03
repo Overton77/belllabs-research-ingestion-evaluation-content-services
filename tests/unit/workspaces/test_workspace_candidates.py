@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from hashlib import sha256
 
-from app.application.workspaces.workspace_candidates import (
+from mission_control.application.artifacts.workspace_candidates import (
     FilesystemWorkspaceCandidateContents,
 )
-from app.domain.operation_execution.contracts import (
+from mission_control.domain.execution.contracts import (
     CapturedWorkspaceCandidate,
     WorkspaceOwner,
     WorkspaceOwnerKind,

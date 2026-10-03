@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from app.domain.control_plane.canonical import canonical_json, sha256_digest
-from app.domain.control_plane.contracts import (
+from mission_control.domain.authoring.canonical import canonical_json, sha256_digest
+from mission_control.domain.authoring.contracts import (
     AgentProfileDefinition,
     AvailableCapability,
     CapabilityDefinition,
@@ -22,7 +22,7 @@ from app.domain.control_plane.contracts import (
     ProfileComponent,
     PromptDefinition,
 )
-from app.domain.control_plane.errors import CompilationRejected
+from mission_control.domain.authoring.errors import CompilationRejected
 from tests.unit.control_plane.test_agentic_asset_definitions import (
     server_definition,
     skill_definition,
@@ -485,7 +485,7 @@ def test_canonical_bytes_preserve_unicode_order_and_reject_nonfinite_numbers() -
 
 
 def test_compiler_has_database_network_clock_and_environment_drift_guards() -> None:
-    source = Path("app/domain/control_plane/compiler.py").read_text(encoding="utf-8")
+    source = Path("src/mission_control/domain/authoring/compiler.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
     forbidden_imports = {
         "beanie",

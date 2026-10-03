@@ -5,22 +5,31 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.application.operations.operation_execution import bind_operation_execution_request
-from app.application.runtime.graph_runtime_dispatch import (
+from mission_control.application.execution.operations.operation_execution import (
+    bind_operation_execution_request,
+)
+from mission_control.application.recovery.graph_runtime_dispatch import (
     ExactRuntimeSelector,
     GraphRuntimeDispatchService,
 )
-from app.application.runtime.runtime_execution_bindings import (
+from mission_control.application.recovery.runtime_execution_bindings import (
     InMemoryRuntimeCoordinationRepository,
 )
-from app.application.runtime.runtime_interventions import (
+from mission_control.application.recovery.runtime_interventions import (
     RuntimeInterventionAuthorization,
     RuntimeInterventionService,
 )
-from app.application.runtime.runtime_neutral_operations import RuntimeNeutralOperationDispatcher
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.contracts import DefinitionKind, ExactDefinitionRef
-from app.domain.graph_runtime.contracts import (
+from mission_control.application.recovery.runtime_neutral_operations import (
+    RuntimeNeutralOperationDispatcher,
+)
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.authoring.contracts import DefinitionKind, ExactDefinitionRef
+from mission_control.domain.execution.contracts import (
+    MaterializedWorkspace,
+    RuntimeInvocation,
+    RuntimeResult,
+)
+from mission_control.domain.graph_runtime.contracts import (
     ActorRef,
     CancelRunIntervention,
     Correlation,
@@ -28,18 +37,13 @@ from app.domain.graph_runtime.contracts import (
     GraphExecutionSubmission,
     RuntimeExecutionStatus,
 )
-from app.domain.graph_runtime.definitions import (
+from mission_control.domain.graph_runtime.definitions import (
     ContentAddressedRef,
     GraphAssemblySpec,
     RunPlan,
     RuntimeDefinitionKind,
 )
-from app.domain.graph_runtime.identities import ExecutionEpochKey
-from app.domain.operation_execution.contracts import (
-    MaterializedWorkspace,
-    RuntimeInvocation,
-    RuntimeResult,
-)
+from mission_control.domain.graph_runtime.identities import ExecutionEpochKey
 from tests.unit.operations.test_operation_execution import operation_request
 
 NOW = datetime(2026, 8, 5, 20, 0, tzinfo=UTC)
@@ -84,12 +88,8 @@ def run_plan() -> RunPlan:
         "workflow_implementation_ref": implementation_ref(),
         "graph_assembly": graph,
         "harness_ref": runtime_ref(RuntimeDefinitionKind.AGENT_HARNESS, "harness"),
-        "delegation_policy_ref": runtime_ref(
-            RuntimeDefinitionKind.DELEGATION_POLICY, "delegation"
-        ),
-        "context_assembly_ref": runtime_ref(
-            RuntimeDefinitionKind.CONTEXT_ASSEMBLY, "context"
-        ),
+        "delegation_policy_ref": runtime_ref(RuntimeDefinitionKind.DELEGATION_POLICY, "delegation"),
+        "context_assembly_ref": runtime_ref(RuntimeDefinitionKind.CONTEXT_ASSEMBLY, "context"),
         "execution_environment_ref": runtime_ref(
             RuntimeDefinitionKind.EXECUTION_ENVIRONMENT, "environment"
         ),
@@ -384,19 +384,13 @@ async def test_intervention_is_reserved_before_ambiguous_provider_effect() -> No
         async def current_version(self, _scope, _run):  # type: ignore[no-untyped-def]
             return 2
 
-        async def current_checkpoint(
-            self, _scope, _run, _epoch
-        ):  # type: ignore[no-untyped-def]
+        async def current_checkpoint(self, _scope, _run, _epoch):  # type: ignore[no-untyped-def]
             return None
 
-        async def authorize_privileged_repair(
-            self, _intervention
-        ):  # type: ignore[no-untyped-def]
+        async def authorize_privileged_repair(self, _intervention):  # type: ignore[no-untyped-def]
             return None
 
-        async def authorize_intervention(
-            self, intervention
-        ):  # type: ignore[no-untyped-def]
+        async def authorize_intervention(self, intervention):  # type: ignore[no-untyped-def]
             return RuntimeInterventionAuthorization(
                 command_id=intervention.command_id,
                 request_scope=intervention.epoch.request_scope,

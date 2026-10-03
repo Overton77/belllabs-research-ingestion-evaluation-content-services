@@ -1,10 +1,7 @@
-# Rule-writing briefings (drafting context)
+# Historical rule-writing briefings
 
-Structured context used to author the Cursor rules in the parent directory. Not agent-facing rules themselves — do not `@`-apply these as project rules.
-
-| Briefing | Produced rule |
-|----------|----------------|
-| `01-api-runbook-briefing.md` | `../api-runbook.mdc` |
-| `02-codebase-organization-briefing.md` | `../codebase-organization.mdc` |
-| `03-biotech-meta-briefing.md` | `../biotech-meta-reference.mdc` |
-| `04-workflows-domain-contracts-briefing.md` | `../workflows-domain-contracts.mdc` |
+These files preserve drafting context for the superseded BellLabs rules.
+They are not agent-facing authority and must not be applied as project rules.
+Current rules live in the parent directory and point to root/scoped AGENTS.md
+and docs/knowledge. Old app paths, Mongo assignments and package gates here are
+historical only.

@@ -5,16 +5,18 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.application.run_control.run_control_repository import InMemoryRunControlRepository
-from app.application.run_control.service import AdmissionPolicyRegistry, RunControlService
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.control_plane.contracts import (
+from mission_control.application.execution.run_control_repository import (
+    InMemoryRunControlRepository,
+)
+from mission_control.application.execution.service import AdmissionPolicyRegistry, RunControlService
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.authoring.contracts import (
     DefinitionKind,
     ExactDefinitionRef,
     RunInputManifestRef,
 )
-from app.domain.graph_runtime.identities import QualifiedCheckpointKey
-from app.domain.run_control.contracts import (
+from mission_control.domain.graph_runtime.identities import QualifiedCheckpointKey
+from mission_control.domain.policies.contracts import (
     AcceptedObligationEvidence,
     AcceptedOutputEvidence,
     AcceptFinalizationPlanAction,
@@ -50,7 +52,7 @@ from app.domain.run_control.contracts import (
     WaitCondition,
     operator_reconciliation_condition_id,
 )
-from app.domain.run_control.errors import CommandRejected, IdempotencyConflict
+from mission_control.domain.policies.errors import CommandRejected, IdempotencyConflict
 from tests.fixtures.set_order import equal_sets_with_different_iteration_order
 
 NOW = datetime(2026, 7, 19, 18, 0, tzinfo=UTC)
@@ -796,6 +798,8 @@ def reconciler_command(
     return command(run_id, version, command_id, action).model_copy(
         update={"actor": actor().model_copy(update={"permissions": RECONCILE_PERMISSIONS})}
     )
+
+
 INCIDENT_ID = "unit-in-doubt:fixture"
 
 
@@ -851,9 +855,7 @@ async def test_in_doubt_unit_keeps_the_run_phase_until_reconcile_unit_decides() 
 
     run_service, _repository = service()
     run_id = await _started_run(run_service, "reconcile-unit")
-    parked = await run_service.execute(
-        set_wait(run_id, 2, "park", operator_wait(), runnable=False)
-    )
+    parked = await run_service.execute(set_wait(run_id, 2, "park", operator_wait(), runnable=False))
     assert parked.status == CommandStatus.ACCEPTED
     assert parked.phase == RunPhase.ACTIVE, "an in_doubt unit does not change the run phase"
 
@@ -878,9 +880,7 @@ async def test_in_doubt_unit_keeps_the_run_phase_until_reconcile_unit_decides() 
         assert rejected.status == CommandStatus.REJECTED
         assert rejected.reason_code == "reconciliation_not_pending"
 
-    stale = await run_service.execute(
-        reconciler_command(run_id, 2, "reconcile-stale", reconcile())
-    )
+    stale = await run_service.execute(reconciler_command(run_id, 2, "reconcile-stale", reconcile()))
     assert stale.status == CommandStatus.STALE
 
     # The ordinary operator fixture lacks the privileged permission.
@@ -900,9 +900,7 @@ async def test_in_doubt_unit_keeps_the_run_phase_until_reconcile_unit_decides() 
         for item in projection.unit_reconciliations
     ] == [("reconcile-abandon", UNIT_KEY, 1, "abandon_unit")]
 
-    again = await run_service.execute(
-        reconciler_command(run_id, 4, "reconcile-again", reconcile())
-    )
+    again = await run_service.execute(reconciler_command(run_id, 4, "reconcile-again", reconcile()))
     assert again.status == CommandStatus.REJECTED
     assert again.reason_code == "reconciliation_not_pending"
     replayed = await run_service.execute(
@@ -945,9 +943,7 @@ async def test_operator_wait_preserves_cancelling_and_waiting_phases() -> None:
         set_wait(waiting_run, 3, "park", operator_wait(), runnable=True)
     )
     assert parked.phase == RunPhase.WAITING
-    decided = await run_service.execute(
-        reconciler_command(waiting_run, 4, "decide", reconcile())
-    )
+    decided = await run_service.execute(reconciler_command(waiting_run, 4, "decide", reconcile()))
     assert decided.phase == RunPhase.WAITING
     projection = await run_service.get_run("tenant-1", waiting_run)
     assert [item.condition_id for item in projection.active_waits] == ["dependency:other"]
@@ -982,7 +978,7 @@ async def test_command_fingerprint_is_independent_of_set_iteration_order() -> No
     authority result conflicts with exact replay command"). Fingerprints now sort sets.
     """
 
-    from app.domain.control_plane.canonical import contract_fingerprint
+    from mission_control.domain.authoring.canonical import contract_fingerprint
 
     first_order, second_order = equal_sets_with_different_iteration_order(
         ALL_PERMISSIONS, probe_prefix="workflow_run.fingerprint_probe"

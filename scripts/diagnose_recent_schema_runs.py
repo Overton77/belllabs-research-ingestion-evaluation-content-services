@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 
-from app.config import get_settings
-from app.integrations.postgres import create_application_postgres_pool
+from mission_control.adapters.postgres.connections import create_application_postgres_pool
+from mission_control.bootstrap.settings import get_settings
 
 
 def _json_object(value: object) -> dict[str, object]:
@@ -36,17 +36,19 @@ async def _run() -> list[dict[str, object]]:
         results: list[dict[str, object]] = []
         for row in rows:
             projection = _json_object(row["projection"])
-            results.append({
-                "run_id": row["run_id"],
-                "request_scope": row["request_scope"],
-                "idempotency_issuer": row["idempotency_issuer"],
-                "request_id": row["request_id"],
-                "phase": row["phase"],
-                "version": row["version"],
-                "updated_at": row["updated_at"].isoformat(),
-                "terminal_outcome": projection.get("terminal_outcome"),
-                "terminal_reason": projection.get("terminal_reason"),
-            })
+            results.append(
+                {
+                    "run_id": row["run_id"],
+                    "request_scope": row["request_scope"],
+                    "idempotency_issuer": row["idempotency_issuer"],
+                    "request_id": row["request_id"],
+                    "phase": row["phase"],
+                    "version": row["version"],
+                    "updated_at": row["updated_at"].isoformat(),
+                    "terminal_outcome": projection.get("terminal_outcome"),
+                    "terminal_reason": projection.get("terminal_reason"),
+                }
+            )
         return results
     finally:
         await pool.close()

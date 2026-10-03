@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from fastmcp import Client, Context
 
-from app.mcp.coordinator_server import (
+from mission_control.interfaces.mcp.coordinator_server import (
     CoordinatorPrincipal,
     create_coordinator_server,
 )

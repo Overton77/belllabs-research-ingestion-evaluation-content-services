@@ -6,32 +6,34 @@ from hashlib import sha256
 
 import pytest
 
-from app.application.capability.capability_search_repository import (
+from mission_control.application.authoring.control_plane_repository import (
+    InMemoryDefinitionRepository,
+)
+from mission_control.application.capabilities.capability_search_repository import (
     CapabilityEmbedding,
     InMemoryCatalogSearchRepository,
 )
-from app.application.capability.catalog_projection import (
+from mission_control.application.capabilities.catalog_projection import (
     CatalogProjectionInput,
     CatalogProjector,
 )
-from app.application.capability.catalog_projection_admin import (
+from mission_control.application.capabilities.catalog_projection_admin import (
     rebuild_capability_search_projection,
     verify_capability_search_projection,
 )
-from app.application.capability.catalog_projection_events import (
+from mission_control.application.capabilities.catalog_projection_events import (
     CatalogProjectionEvent,
     CatalogProjectionEventProcessor,
     InMemoryProjectionEventRepository,
     ProjectionEventFailure,
     ProjectionEventState,
 )
-from app.application.capability.catalog_projection_generation import (
+from mission_control.application.capabilities.catalog_projection_generation import (
     InMemoryProjectionGenerationRepository,
     ProjectionGenerationSpec,
     projection_source_set_digest,
 )
-from app.application.control_plane.control_plane_repository import InMemoryDefinitionRepository
-from app.domain.control_plane.contracts import (
+from mission_control.domain.authoring.contracts import (
     DefinitionKind,
     ExactDefinitionRef,
     PromptDefinition,
@@ -66,11 +68,7 @@ class BatchEmbeddings:
 
     @staticmethod
     def _embedding(text: str, *, wrong: bool) -> CapabilityEmbedding:
-        digest = (
-            ZERO_DIGEST
-            if wrong
-            else f"sha256:{sha256(text.encode()).hexdigest()}"
-        )
+        digest = ZERO_DIGEST if wrong else f"sha256:{sha256(text.encode()).hexdigest()}"
         return CapabilityEmbedding(
             vector=(1.0, 0.0, 0.0),
             model_id="text-embedding-3-small",
@@ -161,9 +159,7 @@ async def test_projector_batches_embeddings_and_persists_nothing_on_bad_claim() 
     embeddings = BatchEmbeddings()
     projector = _projector(definitions, search, embeddings, "generation-batch")
 
-    results = await projector.project_many(
-        tuple(CatalogProjectionInput(ref=ref) for ref in refs)
-    )
+    results = await projector.project_many(tuple(CatalogProjectionInput(ref=ref) for ref in refs))
 
     assert len(results) == 3
     assert len(embeddings.batch_calls) == 1
@@ -179,13 +175,8 @@ async def test_projector_batches_embeddings_and_persists_nothing_on_bad_claim() 
         "generation-rejected",
     )
     with pytest.raises(RuntimeError, match="embedding metadata"):
-        await rejected.project_many(
-            tuple(CatalogProjectionInput(ref=ref) for ref in refs)
-        )
-    assert (
-        await rejected_search.list_generation("global", "generation-rejected")
-        == ()
-    )
+        await rejected.project_many(tuple(CatalogProjectionInput(ref=ref) for ref in refs))
+    assert await rejected_search.list_generation("global", "generation-rejected") == ()
 
 
 @pytest.mark.asyncio
@@ -228,10 +219,7 @@ async def test_generation_is_invisible_until_verified_atomic_activation() -> Non
             new_spec,
             activated_at=NOW + timedelta(minutes=2),
         )
-    assert (
-        await generations.active_for_kind("global", DefinitionKind.PROMPT)
-        == "generation-old"
-    )
+    assert await generations.active_for_kind("global", DefinitionKind.PROMPT) == "generation-old"
 
     await _projector(
         definitions,
@@ -243,10 +231,7 @@ async def test_generation_is_invisible_until_verified_atomic_activation() -> Non
         new_spec,
         activated_at=NOW + timedelta(minutes=3),
     )
-    assert (
-        await generations.active_for_kind("global", DefinitionKind.PROMPT)
-        == "generation-new"
-    )
+    assert await generations.active_for_kind("global", DefinitionKind.PROMPT) == "generation-new"
 
 
 @pytest.mark.asyncio
@@ -326,9 +311,7 @@ async def test_rebuild_verifies_digests_before_activation_and_is_idempotent() ->
         selected_kinds=frozenset({DefinitionKind.PROMPT}),
     )
     assert stale.valid is False
-    assert stale.stale_refs == (
-        refs[0].model_copy(update={"digest": ZERO_DIGEST}),
-    )
+    assert stale.stale_refs == (refs[0].model_copy(update={"digest": ZERO_DIGEST}),)
     assert stale.observed_source_set_digest != stale.expected_source_set_digest
 
 

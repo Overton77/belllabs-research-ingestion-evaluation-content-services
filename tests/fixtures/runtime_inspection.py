@@ -15,10 +15,11 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver, empty_checkpoint
 
-from app.application.operations.checkpoint_lineage import CheckpointLineageRepository
-from app.application.run_control.service import RunControlService
-from app.domain.graph_runtime.identities import RuntimeUnitIdentity
-from app.domain.operation_execution.checkpoint_lineage import (
+from mission_control.application.execution.operations.checkpoint_lineage import (
+    CheckpointLineageRepository,
+)
+from mission_control.application.execution.service import RunControlService
+from mission_control.domain.execution.checkpoint_lineage import (
     STAMP_BINDING_DIGEST,
     STAMP_EXECUTION_GENERATION,
     STAMP_INVOCATION_ID,
@@ -27,7 +28,8 @@ from app.domain.operation_execution.checkpoint_lineage import (
     cognitive_session_namespace,
     submission_invocation_id,
 )
-from app.domain.run_control.contracts import (
+from mission_control.domain.graph_runtime.identities import RuntimeUnitIdentity
+from mission_control.domain.policies.contracts import (
     ClaimEffectAction,
     CommandResult,
     CommandStatus,

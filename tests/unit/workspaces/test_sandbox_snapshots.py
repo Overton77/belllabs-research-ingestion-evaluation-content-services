@@ -4,13 +4,13 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.application.workspaces.sandbox_snapshots import (
+from mission_control.application.artifacts.sandbox_snapshots import (
     InMemorySandboxSnapshotRepository,
     InMemorySnapshotPayloadStore,
     SandboxSnapshotService,
 )
-from app.domain.control_plane.canonical import sha256_digest
-from app.domain.operation_execution.contracts import (
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.execution.contracts import (
     MaterializedWorkspace,
     ReacquiredRuntimeResources,
     SandboxSnapshotCapture,
@@ -20,7 +20,7 @@ from app.domain.operation_execution.contracts import (
     SnapshotCreationReason,
     SnapshotRetention,
 )
-from app.domain.operation_execution.errors import (
+from mission_control.domain.execution.errors import (
     SnapshotAuthorityError,
     SnapshotCompatibilityError,
     SnapshotMigrationRequired,
@@ -191,9 +191,7 @@ async def test_restore_twice_creates_distinct_clone_lineage_without_live_resourc
 
     first = await snapshots.clone_restore(clone_request("workspace-clone-1", "clone-1"))
     second = await snapshots.clone_restore(clone_request("workspace-clone-2", "clone-2"))
-    replayed = await snapshots.clone_restore(
-        clone_request("workspace-clone-1", "clone-1")
-    )
+    replayed = await snapshots.clone_restore(clone_request("workspace-clone-1", "clone-1"))
 
     assert replayed == first
     assert first.workspace.workspace_id != second.workspace.workspace_id

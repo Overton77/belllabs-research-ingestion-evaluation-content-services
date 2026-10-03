@@ -25,40 +25,42 @@ from temporalio.client import Client, WorkflowHistory
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
 
-from app.application.operations.checkpoint_lineage import InMemoryCheckpointLineageRepository
-from app.application.run_control.inspection import (
-    InMemoryInspectionReadRepository,
-    RuntimeInspectionService,
-)
-from app.domain.control_plane.contracts import GoalDirectedBlueprint
-from app.domain.control_plane.fixtures import GENERIC_GOAL_DIRECTED
-from app.domain.coordinator.launch import BlueprintFamily
-from app.domain.graph_runtime.identities import RuntimeUnitIdentity
-from app.domain.operation_execution.checkpoint_lineage import OperationActivityAttempt
-from app.domain.operation_execution.contracts import OperationWorkflowRequest
-from app.domain.orchestration.contracts import (
-    StageGraphAdmissionActivityRequest,
-    StageGraphAdmissionActivityResult,
-)
-from app.domain.orchestration.runtime_units import stage_runtime_unit
-from app.domain.orchestration.search_attributes import (
-    BELLLABS_SEARCH_ATTRIBUTES,
-    search_attribute_scope_hash,
-    visibility_run_query,
-)
-from app.integrations.temporal_visibility import TemporalVisibilityInspectionReader
-from app.integrations.temporal_workflow_submission import TemporalWorkflowSubmitter
-from app.temporal.search_attributes import (
+from mission_control.adapters.temporal.search_attributes import (
     BELLLABS_SEARCH_ATTRIBUTE_KEYS,
     SearchAttributeRegistrationError,
     register_belllabs_search_attributes,
     verify_belllabs_search_attributes,
 )
-from app.temporal.workflow_sandbox import coordinator_workflow_runner
-from app.temporal.workflows.belllabs_run import BellLabsRunWorkflow
-from app.temporal.workflows.goal_directed import GoalDirectedWorkflow
-from app.temporal.workflows.operation import OperationWorkflow
-from app.temporal.workflows.stagegraph import StageGraphWorkflow
+from mission_control.adapters.temporal.submission import TemporalWorkflowSubmitter
+from mission_control.adapters.temporal.visibility import TemporalVisibilityInspectionReader
+from mission_control.adapters.temporal.workflow_sandbox import coordinator_workflow_runner
+from mission_control.adapters.temporal.workflows.belllabs_run import BellLabsRunWorkflow
+from mission_control.adapters.temporal.workflows.goal_directed import GoalDirectedWorkflow
+from mission_control.adapters.temporal.workflows.operation import OperationWorkflow
+from mission_control.adapters.temporal.workflows.stagegraph import StageGraphWorkflow
+from mission_control.application.execution.inspection import (
+    InMemoryInspectionReadRepository,
+    RuntimeInspectionService,
+)
+from mission_control.application.execution.operations.checkpoint_lineage import (
+    InMemoryCheckpointLineageRepository,
+)
+from mission_control.domain.authoring.contracts import GoalDirectedBlueprint
+from mission_control.domain.authoring.fixtures import GENERIC_GOAL_DIRECTED
+from mission_control.domain.coordinator.launch import BlueprintFamily
+from mission_control.domain.execution.checkpoint_lineage import OperationActivityAttempt
+from mission_control.domain.execution.contracts import OperationWorkflowRequest
+from mission_control.domain.graph_runtime.identities import RuntimeUnitIdentity
+from mission_control.domain.programs.contracts import (
+    StageGraphAdmissionActivityRequest,
+    StageGraphAdmissionActivityResult,
+)
+from mission_control.domain.programs.runtime_units import stage_runtime_unit
+from mission_control.domain.programs.search_attributes import (
+    BELLLABS_SEARCH_ATTRIBUTES,
+    search_attribute_scope_hash,
+    visibility_run_query,
+)
 from tests.fixtures.checkpoint_lineage import BINDING
 from tests.integration.temporal.test_wp_bp_010_temporal import (
     QUEUE,

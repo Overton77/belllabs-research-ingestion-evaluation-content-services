@@ -8,23 +8,23 @@ from pathlib import Path
 
 import pytest
 
-from app.application.workspaces.artifact_promotion import ArtifactPayloadAddress
-from app.config import PROJECT_ROOT
-from app.domain.control_plane.contracts import SecretRef
-from app.domain.operation_execution.errors import WorkspaceDigestMismatch
-from app.integrations.capability_pins import (
+from mission_control.adapters.capabilities.capability_pins import (
     CapabilityPinError,
     CapabilityPins,
     read_skill_bundle,
     workspace_path,
 )
-from app.integrations.operation_runtime_ports import (
+from mission_control.adapters.operations.runtime_ports import (
     EnvironmentSecretResolver,
     FilesystemArtifactPayloadStore,
     PinnedCapabilityAssetVerifier,
     RecordedOperationEventSink,
     SecretReferenceUnavailable,
 )
+from mission_control.application.artifacts.artifact_promotion import ArtifactPayloadAddress
+from mission_control.bootstrap.settings import PROJECT_ROOT
+from mission_control.domain.authoring.contracts import SecretRef
+from mission_control.domain.execution.errors import WorkspaceDigestMismatch
 from tests.unit.operations.test_operation_execution import (
     MCP_DIGEST,
     SKILL_DIGEST,
@@ -131,7 +131,9 @@ async def test_pinned_verifier_admits_exact_bindings_and_refuses_drift() -> None
     service, bindings, _runtime, _events, _budget = service_fixture()
     del service
     request = operation_request()
-    from app.application.operations.operation_execution import bind_operation_execution_request
+    from mission_control.application.execution.operations.operation_execution import (
+        bind_operation_execution_request,
+    )
 
     binding = bind_operation_execution_request(request)
     await verifier.verify(binding)
@@ -203,8 +205,11 @@ async def test_recorded_events_are_idempotent_by_key() -> None:
 
 
 def test_browser_tool_reaches_public_hosts_by_name_only() -> None:
-    from app.integrations.agents.deep_agents.browser_tool import _public_host
-    from app.integrations.web_research_runtime import WebResearchRuntimeDependencyError
+    from biotech_mission_adapters.adapters.infrastructure.web_research_runtime import (
+        WebResearchRuntimeDependencyError,
+    )
+
+    from mission_control.adapters.deep_agents.browser_tool import _public_host
 
     assert _public_host("https://Example.COM/path?q=1") == "example.com"
     for url in (
@@ -234,11 +239,14 @@ def test_browser_tool_reaches_public_hosts_by_name_only() -> None:
 async def test_browser_tool_opens_only_hosts_the_operation_was_granted(tmp_path: Path) -> None:
     import sys
 
-    from app.integrations.agents.deep_agents.browser_tool import (
+    from biotech_mission_adapters.adapters.infrastructure.web_research_runtime import (
+        WebResearchRuntimeDependencyError,
+    )
+
+    from mission_control.adapters.deep_agents.browser_tool import (
         AgentBrowserPageTool,
         granted_network_hosts,
     )
-    from app.integrations.web_research_runtime import WebResearchRuntimeDependencyError
 
     class NoSubprocess:
         calls = 0
@@ -271,11 +279,14 @@ async def test_browser_tool_refuses_a_granted_name_that_resolves_to_a_private_ad
 ) -> None:
     import sys
 
-    from app.integrations.agents.deep_agents.browser_tool import (
+    from biotech_mission_adapters.adapters.infrastructure.web_research_runtime import (
+        WebResearchRuntimeDependencyError,
+    )
+
+    from mission_control.adapters.deep_agents.browser_tool import (
         AgentBrowserPageTool,
         granted_network_hosts,
     )
-    from app.integrations.web_research_runtime import WebResearchRuntimeDependencyError
 
     answers = {
         "internal.example.com": ("93.184.215.14", "10.0.0.7"),
@@ -318,7 +329,7 @@ def test_worker_launches_only_the_pinned_mcp_module_command_and_arguments(
     import sys
     from types import SimpleNamespace
 
-    import app.integrations.capability_pins as capability_pins
+    import mission_control.adapters.capabilities.capability_pins as capability_pins
 
     monkeypatch.setattr(capability_pins, "workspace_root", lambda: tmp_path)
     package = tmp_path / ".tools" / "fixture-mcp"
@@ -382,7 +393,7 @@ def test_worker_launches_only_the_pinned_mcp_module_command_and_arguments(
     with pytest.raises(ValueError, match="registered component"):
         registered.verify_launch(binding(other_command))  # type: ignore[arg-type]
     # Missing pins fail closed in the production compositions.
-    from app.config import get_settings
+    from mission_control.bootstrap.settings import get_settings
 
     monkeypatch.setenv("CAPABILITY_PINS_PATH", str(tmp_path / "absent.json"))
     get_settings.cache_clear()

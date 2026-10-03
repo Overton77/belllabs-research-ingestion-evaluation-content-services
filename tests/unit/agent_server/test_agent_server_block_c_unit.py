@@ -16,12 +16,12 @@ from langgraph_cli.cli import prepare_args_and_stdin
 from langgraph_cli.config import validate_config_file
 from langgraph_cli.docker import DockerCapabilities
 
-from app.agent_server import block_c_qualification as block_c_pkg
-from app.agent_server.block_c_qualification import graph as graph_mod
-from app.agent_server.block_c_qualification import graph_n1 as n1_mod
-from app.agent_server.block_c_qualification import wait_graph as wait_mod
-from app.agent_server.block_c_qualification.auth import resolve_public_key_pem
-from app.agent_server.block_c_qualification.compat import (
+from mission_control.adapters.agent_server import block_c_qualification as block_c_pkg
+from mission_control.adapters.agent_server.block_c_qualification import graph as graph_mod
+from mission_control.adapters.agent_server.block_c_qualification import graph_n1 as n1_mod
+from mission_control.adapters.agent_server.block_c_qualification import wait_graph as wait_mod
+from mission_control.adapters.agent_server.block_c_qualification.auth import resolve_public_key_pem
+from mission_control.adapters.agent_server.block_c_qualification.compat import (
     ASSEMBLY_N,
     ASSEMBLY_ROLE_N,
     ASSEMBLY_ROLE_N1,
@@ -31,19 +31,22 @@ from app.agent_server.block_c_qualification.compat import (
     GRAPH_ID_N1,
     GRAPH_ID_WAIT,
 )
-from app.agent_server.block_c_qualification.compat_route import (
+from mission_control.adapters.agent_server.block_c_qualification.compat_route import (
     IncompatibleResumeRouteError,
     decide_resume_route,
     require_compatible_resume_route,
 )
-from app.agent_server.block_c_qualification.deployment_route import (
+from mission_control.adapters.agent_server.block_c_qualification.deployment_route import (
     decide_deployment_resume_route,
 )
-from app.agent_server.block_c_qualification.guarded_resume import (
+from mission_control.adapters.agent_server.block_c_qualification.guarded_resume import (
     guarded_deployment_runs_wait,
     guarded_runs_wait,
 )
-from app.agent_server.block_c_qualification.state import QualificationState, WaitState
+from mission_control.adapters.agent_server.block_c_qualification.state import (
+    QualificationState,
+    WaitState,
+)
 from tests.fixtures.agent_server_block_c import (
     BLOCK_C_CONFIG,
     BLOCK_C_N1_CONFIG,
@@ -51,54 +54,19 @@ from tests.fixtures.agent_server_block_c import (
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-ROOT_LANGGRAPH = PROJECT_ROOT / "langgraph.json"
+ROOT_LANGGRAPH = PROJECT_ROOT / "agent_server" / "langgraph.json"
 QUAL_PKG_DIR = Path(block_c_pkg.__file__).resolve().parent
-BLOCK_C_ENV_FILE = PROJECT_ROOT / "langgraph.block_c.env"
+BLOCK_C_ENV_FILE = PROJECT_ROOT / "agent_server" / "runtime.env"
 
 
-def test_root_langgraph_does_not_select_block_c_auth_or_graphs() -> None:
+def test_one_configuration_preserves_all_qualification_graphs() -> None:
     config = json.loads(ROOT_LANGGRAPH.read_text(encoding="utf-8"))
-    assert config["auth"]["path"] == "app.agent_server.auth:auth"
-    assert "block_c_" not in str(config["graphs"])
-    assert "block_c_qualification" not in json.dumps(config)
-    assert BLOCK_C_CONFIG.name != ROOT_LANGGRAPH.name
-
-
-def test_qualification_langgraph_config_registers_importable_module_paths_only() -> None:
-    config = json.loads(BLOCK_C_CONFIG.read_text(encoding="utf-8"))
-    assert set(config["graphs"]) == {
-        "block_c_qualification",
-        "block_c_qualification_n1",
-        "block_c_wait",
-    }
-    assert config["dependencies"] == ["."]
-    # Dict env is broken in langgraph-cli (double-indented Compose YAML).
-    assert config["env"] == "langgraph.block_c.env"
-    assert isinstance(config["env"], str)
-    assert config["auth"]["path"] == "app.agent_server.block_c_qualification.auth:auth"
-    assert config["auth"]["disable_studio_auth"] is True
-    assert config["http"]["app"] == "app.agent_server.block_c_qualification.http_app:app"
-    for graph_path in config["graphs"].values():
-        assert isinstance(graph_path, str)
-        assert ":" in graph_path
-        assert not graph_path.startswith("./")
-        assert graph_path.startswith("app.agent_server.block_c_qualification.")
-
-
-def test_n1_deployment_config_registers_only_n1_graph_and_shared_env() -> None:
-    config = json.loads(BLOCK_C_N1_CONFIG.read_text(encoding="utf-8"))
-    assert config["dependencies"] == ["."]
-    assert config["env"] == "langgraph.block_c.env"
-    assert set(config["graphs"]) == {"block_c_qualification_n1"}
-    assert config["graphs"]["block_c_qualification_n1"].startswith(
-        "app.agent_server.block_c_qualification."
-    )
-    assert config["auth"]["path"] == "app.agent_server.block_c_qualification.auth:auth"
-    assert GRAPH_ID_N not in config["graphs"]
-    assert GRAPH_ID_WAIT not in config["graphs"]
-    # Production root config remains untouched by the N+1 assembly file.
-    root = json.loads(ROOT_LANGGRAPH.read_text(encoding="utf-8"))
-    assert "block_c_" not in str(root["graphs"])
+    assert {GRAPH_ID_N, GRAPH_ID_N1, GRAPH_ID_WAIT} <= set(config["graphs"])
+    assert BLOCK_C_CONFIG == BLOCK_C_N1_CONFIG == ROOT_LANGGRAPH
+    assert config["auth"]["path"] == "mission_control.adapters.agent_server.deployment_auth:auth"
+    assert config["http"]["app"] == "mission_control.adapters.agent_server.http_app:app"
+    assert config["dependencies"] == [".."]
+    assert config["env"] == "runtime.env"
 
 
 def _compose_stdin_for(config_path: Path, *, port: int) -> str:
@@ -116,9 +84,7 @@ def _compose_stdin_for(config_path: Path, *, port: int) -> str:
         docker_compose=None,
         port=port,
         watch=False,
-        postgres_uri=(
-            "postgresql://postgres:postgres@127.0.0.1:5432/belllabs_langgraph_stage3"
-        ),
+        postgres_uri=("postgresql://postgres:postgres@127.0.0.1:5432/belllabs_langgraph_stage3"),
     )
     return stdin
 
@@ -131,7 +97,7 @@ def test_block_c_compose_generation_accepts_env_file_with_dummy_values() -> None
     parsed = yaml.safe_load(stdin)
     assert "services" in parsed
     assert "langgraph-api" in parsed["services"]
-    assert "env_file: langgraph.block_c.env" in stdin
+    assert "env_file: runtime.env" in stdin
     assert "LANGSMITH_API_KEY:" not in stdin
     assert "dockerfile_inline:" in stdin
     # External Postgres URI => no bundled postgres service; Redis remains local.
@@ -144,7 +110,7 @@ def test_block_c_n1_compose_generation_shares_env_and_external_postgres() -> Non
     stdin = _compose_stdin_for(BLOCK_C_N1_CONFIG, port=8134)
     parsed = yaml.safe_load(stdin)
     assert "langgraph-api" in parsed["services"]
-    assert "env_file: langgraph.block_c.env" in stdin
+    assert "env_file: runtime.env" in stdin
     assert '"8134:8000"' in stdin or "8134:8000" in stdin
     assert "langgraph-redis" in parsed["services"]
     assert "langgraph-postgres" not in parsed["services"]
@@ -254,10 +220,7 @@ async def test_guarded_resume_invokes_provider_only_after_n_on_n_allow() -> None
 
 
 def test_missing_n_graph_on_n1_error_classifier_matches_pinned_message() -> None:
-    message = (
-        "Graph 'block_c_qualification' not found. "
-        "Expected ['block_c_qualification_n1']"
-    )
+    message = "Graph 'block_c_qualification' not found. Expected ['block_c_qualification_n1']"
     assert is_missing_n_graph_on_n1_error(Exception(message))
     assert not is_missing_n_graph_on_n1_error(Exception("unrelated failure"))
 
@@ -492,9 +455,7 @@ async def test_wait_graph_cancel_writes_typed_cancelled_cleanup() -> None:
     task = asyncio.create_task(wait_if_not_done(run()))
     for _ in range(50):
         state = await compiled.aget_state(config)
-        if state.values.get("wait_status") == "waiting" and state.values.get(
-            "resource_open"
-        ):
+        if state.values.get("wait_status") == "waiting" and state.values.get("resource_open"):
             break
         await asyncio.sleep(0.05)
     else:

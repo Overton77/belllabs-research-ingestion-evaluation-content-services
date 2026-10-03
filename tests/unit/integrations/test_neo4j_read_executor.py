@@ -4,8 +4,8 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from biotech_mission_adapters.adapters.infrastructure.neo4j_read_executor import Neo4jReadExecutor
 
-from app.integrations.neo4j_read_executor import Neo4jReadExecutor
 from tests.unit.schema.test_graph_query_intents import _intent
 
 
