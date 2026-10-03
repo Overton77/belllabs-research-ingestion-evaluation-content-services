@@ -185,7 +185,7 @@ The unit, Mongo and proof tests above show the post-append retry.
 - **A Mongo reservation token could conflict after a crash: resolved in review (fix 3).** It was observed before review, from reading the code.
 - **`snapshot_mode`** (`on_rollover` by default) and `fresh_from_snapshot` are unaffected. No snapshot is taken or restored by this change.
 
-**Drift checks.** No migration. No Temporal command change. The StageGraph and generic-artifact paths keep the exact-identity rule, which is asserted. The RRM-016 authority rule is unchanged. `slot_ownership_boundary` behaves as before for every role root `goal_unit_workspace_root` renders. A non-canonical segment (`03`, `\u00b2`) now keeps the two-component boundary; before RRM-020 it was treated as a role root, and at `0da4911` `\u00b2` raised `ValueError`. Both are asserted.
+**Drift checks.** No migration. No Temporal command change. The StageGraph and generic-artifact paths keep the exact-identity rule, which is asserted. The RRM-016 authority rule is unchanged. `slot_ownership_boundary` behaves as before for every role root `goal_unit_workspace_root` renders. A non-canonical segment (`03`, `²`) now keeps the two-component boundary; before RRM-020 it was treated as a role root, and at `0da4911` `²` raised `ValueError`. Both are asserted.
 
 **Reusable seams (mission horizon)**
 
