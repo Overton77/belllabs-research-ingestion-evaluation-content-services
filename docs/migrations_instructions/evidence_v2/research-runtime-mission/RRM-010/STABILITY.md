@@ -25,7 +25,7 @@ Branch `wp/rrm-010-stability`, based on integration `5d38f19`. Test-only changes
 
 No failure occurred in any run below, so there is nothing further to diagnose. The hash-seed lesson from RRM-004 was applied by varying `PYTHONHASHSEED` across runs (unset/random, `12345`, `777`).
 
-Gates on the final commit: `ruff check app tests` clean, `mypy app` clean, `git diff --check` clean. `mypy` on the two RRM-007 test files reports the same 11 pre-existing errors as before the change (`list[object]` activities and an optional `.action`); none are new.
+Gates on the final commit: `ruff check app tests` clean, `mypy app` clean, `git diff --check` clean. `mypy` on the two RRM-007 test files reports 11 errors (`list[object]` activities and an optional `.action`) on lines this change did not touch; I did not run mypy on the base commit.
 
 | Run | Scope | Environment | Result |
 |-----|-------|-------------|--------|
