@@ -46,6 +46,7 @@ _PSYCOPG_SELECTOR_MODULES = {
     ("control_plane", "test_rrm_009_object_store.py"),
     ("control_plane", "test_rrm_020_shared_goal_workspace.py"),
     ("control_plane", "test_rrm_008_cancellation_demo.py"),
+    ("control_plane", "test_rrm_010_combined_smoke.py"),
 }
 
 

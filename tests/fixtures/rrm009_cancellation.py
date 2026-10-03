@@ -25,6 +25,7 @@ import asyncio
 import json
 import os
 import time
+from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
@@ -81,6 +82,7 @@ from tests.fixtures.rrm009_production_harness import (
     _command,
     _launch,
     _receipt_states,
+    _release_wait,
     _replay,
     _run,
     _send,
@@ -92,6 +94,7 @@ from tests.fixtures.rrm009_production_stack import (
     SCOPE,
     ChildModel,
     TechnicalBinding,
+    TechnicalCatalog,
     TechnicalModel,
     call_usage,
     publish_technical_catalog,
@@ -354,18 +357,24 @@ async def operation_rows(stack: ProductionStack, run_id: str) -> list[dict[str, 
     ]
 
 
-async def transitions(stack: ProductionStack, run_id: str) -> list[str]:
+async def transitions(
+    stack: ProductionStack, run_id: str, operation: str | None = None
+) -> list[str]:
+    """The run's recorded checkpoint transitions, or only those of one semantic operation."""
+
+    attempt_pattern = f"%:operation:{operation}:attempt:%" if operation is not None else "%"
     async with stack.owner_pool.acquire() as connection:
         rows = await connection.fetch(
             """
             SELECT t.classification FROM belllabs_control.runtime_checkpoint_transitions t
             WHERE t.unit_key IN (
                 SELECT c.unit_key FROM belllabs_control.operation_effect_claims c
-                WHERE c.belllabs_run_id = $1
+                WHERE c.belllabs_run_id = $1 AND c.semantic_attempt_key LIKE $2
             )
             ORDER BY t.observed_at
             """,
             run_id,
+            attempt_pattern,
         )
     return [str(row["classification"]) for row in rows]
 
@@ -437,18 +446,37 @@ async def _json(stack: ProductionStack, path: str) -> dict[str, Any]:
 # --- The drill ------------------------------------------------------------------------------
 
 
-async def launch_stagegraph(
-    stack: ProductionStack, technical: TechnicalBinding, *, async_children: bool
-) -> str:
-    catalog = await publish_technical_catalog(
+async def publish_cancellation_catalog(stack: ProductionStack) -> TechnicalCatalog:
+    """The StageGraph catalog the drills run under; publish it once per stack."""
+
+    return await publish_technical_catalog(
         stack.control_plane,
         family="StageGraph",
         now=datetime.now(UTC),
         ceilings=CANCELLATION_CEILINGS,
     )
+
+
+async def launch_stagegraph(
+    stack: ProductionStack,
+    technical: TechnicalBinding,
+    *,
+    async_children: bool,
+    catalog: TechnicalCatalog | None = None,
+    draft_technical: TechnicalBinding | None = None,
+) -> str:
+    """Admit and launch a StageGraph run; `draft_technical`, when given, binds the `draft`
+    stage instead of `technical` (which then binds `review` only)."""
+
+    if catalog is None:
+        catalog = await publish_cancellation_catalog(stack)
     run_id = await _admit(stack, catalog, f"rrm009-cancel-{uuid4().hex[:12]}")
     binding_ref = f"semantic-input:rrm009-cancel:{run_id}"
     templates = stage_templates(technical, catalog)
+    if draft_technical is not None:
+        templates["draft/execute/default"] = stage_templates(draft_technical, catalog)[
+            "draft/execute/default"
+        ]
     if async_children:
         templates = {key: _with_token(value) for key, value in templates.items()}
     await MongoStageGraphOperationTemplateRepository().persist_templates(
@@ -483,9 +511,13 @@ async def restart_workers(stack: ProductionStack) -> None:
     stack.worker_stack.push_async_callback(replacement.aclose)
 
 
-def _parent_calls(stack: ProductionStack, run_id: str) -> int:
+def _parent_calls(stack: ProductionStack, run_id: str, stage: str) -> int:
+    """The parent model calls of the run's operations whose ID contains `stage`."""
+
     return sum(
-        1 for item in stack.model_log if item["run_id"] == run_id and item["model"] == "parent"
+        1
+        for item in stack.model_log
+        if item["run_id"] == run_id and item["model"] == "parent" and stage in item["operation"]
     )
 
 
@@ -540,20 +572,57 @@ async def reconcile_child_usage(
         api.dependency_overrides[get_control_plane_principal] = lambda: PRINCIPAL
 
 
+BeforeCancel = Callable[[str, str | None, str | None], Awaitable[dict[str, Any]]]
+
+
 async def run_cancellation_drill(
-    stack: ProductionStack, technical: TechnicalBinding, gate: CancellationGate
+    stack: ProductionStack,
+    technical: TechnicalBinding,
+    gate: CancellationGate,
+    *,
+    catalog: TechnicalCatalog | None = None,
+    before_cancel: BeforeCancel | None = None,
+    settled_draft: TechnicalBinding | None = None,
 ) -> dict[str, Any]:
-    """Cancel a launched StageGraph run while its `draft` unit is held at `gate.window`;
-    return the evidence after the run is terminal. Asserts every saga step on the way."""
+    """Cancel a launched StageGraph run while its held unit is held at `gate.window`;
+    return the evidence after the run is terminal. Asserts every saga step on the way.
+
+    The held unit is `draft`. With `settled_draft` (a binding without the held behaviour)
+    the `draft` stage settles first, the run's declared wait is released through the facade
+    and the held unit is `review`, so the run already has an accepted stage while it is held.
+    `catalog` reuses a catalog already published on the stack (a stack publishes each
+    Workflow Type once). `before_cancel(run_id, child_id, provider_run_id)` runs while the
+    unit is held (and an async child is running), just before the cancel is sent; its
+    result is recorded under `evidence["before_cancel"]`."""
 
     async_children = gate.window != "sync_child"
-    run_id = await launch_stagegraph(stack, technical, async_children=async_children)
+    run_id = await launch_stagegraph(
+        stack,
+        technical,
+        async_children=async_children,
+        catalog=catalog,
+        draft_technical=settled_draft,
+    )
+    held_operation = (
+        DRAFT_OPERATION
+        if settled_draft is None
+        else DRAFT_OPERATION.replace(":stage:draft:", ":stage:review:")
+    )
     root_id = f"belllabs-run/{run_id}"
     family_id = f"family/{run_id}/1"
-    operation_id = f"operation/{run_id}:operation:{DRAFT_OPERATION}:attempt:1"
+    operation_id = f"operation/{run_id}:operation:{held_operation}:attempt:1"
+    held_stage = held_operation.split(":slot:")[0]
+    settled_rows = [] if settled_draft is None else [(f"{DRAFT_OPERATION}:attempt:1", "completed")]
     evidence: dict[str, Any] = {"run_id": run_id, "window": gate.window}
     child_id = provider_run_id = None
     refused_at = 0.0
+    if settled_draft is not None:
+        # `draft` settles and the run holds its declared wait; the wait is released through
+        # the facade (`applied`) and `review` is admitted and held.
+        await _release_wait(stack, run_id)
+        evidence["wait_release_receipts"] = await _receipt_states(
+            stack, run_id, f"release:{run_id[:8]}"
+        )
     if gate.window in {"sync_child", "cognition"}:
         await asyncio.wait_for(gate.held.wait(), timeout=180)
     if async_children:
@@ -570,11 +639,13 @@ async def run_cancellation_drill(
         # The retried attempt resumes the interrupted lineage (the held call never completed,
         # so it is asked again) and is held again; nothing was spawned twice.
         async def resumed() -> bool:
-            return _parent_calls(stack, run_id) == 3
+            return _parent_calls(stack, run_id, held_stage) == 3
 
         await _wait_for(stack, run_id, resumed, 180)
         # A worker shutdown is not a cancel of the unit (RRM-008 F1): nothing settled.
-        assert await operation_rows(stack, run_id) == []
+        assert [
+            (row["operation"], row["status"]) for row in await operation_rows(stack, run_id)
+        ] == settled_rows
         assert (await _run(stack, run_id))["phase"] == "active"
         assert child_id is not None and provider_run_id is not None
         children = await PostgresAsyncSubagentAuthority(stack.owner_pool).list_children(
@@ -583,20 +654,19 @@ async def run_cancellation_drill(
         assert [item.child_execution_id for item in children] == [child_id]
         assert await provider_status(child_id, provider_run_id) == "running"
         assert len(await provider_runs(child_id)) == 1
-        evidence["restart"] = {"parent_calls_before_cancel": _parent_calls(stack, run_id)}
+        evidence["restart"] = {
+            "parent_calls_before_cancel": _parent_calls(stack, run_id, held_stage)
+        }
     if gate.window == "completion_wait":
         # The parent's cognition finished (both calls answered); the boundary waits.
         async def cognition_finished() -> bool:
-            calls = [
-                item
-                for item in stack.model_log
-                if item["run_id"] == run_id and item["model"] == "parent"
-            ]
-            return len(calls) == 2
+            return _parent_calls(stack, run_id, held_stage) == 2
 
         await _wait_for(stack, run_id, cognition_finished, 120)
         await asyncio.sleep(1)
         assert (await _run(stack, run_id))["phase"] == "active"
+    if before_cancel is not None:
+        evidence["before_cancel"] = await before_cancel(run_id, child_id, provider_run_id)
     command_id = await cancel_through_the_facade(stack, run_id)
 
     async def delivered() -> bool:
@@ -679,15 +749,23 @@ async def run_cancellation_drill(
     assert receipts == ["accepted", "delivered", "applied"], receipts
     rows = await operation_rows(stack, run_id)
     assert [(row["operation"], row["status"]) for row in rows] == [
-        (f"{DRAFT_OPERATION}:attempt:1", "cancelled")
+        *settled_rows,
+        (f"{held_operation}:attempt:1", "cancelled"),
     ], rows
     # The head advances over the partial lineage by one recorded transition: the held call
     # left the leaf interrupted; a finished cognition left a terminal leaf nobody observed.
-    assert await transitions(stack, run_id) == [EXPECTED_TRANSITION[gate.window]]
+    assert await transitions(stack, run_id, held_operation) == [EXPECTED_TRANSITION[gate.window]]
     effects = await _json(stack, f"/run-control/v1/runs/{run_id}/effects")
     claims = {claim["effect_kind"]: claim for claim in effects["claims"].values()}
-    assert claims["operation.runtime"]["disposition"] == "cancelled", claims
-    assert all(claim["settlement"] is not None for claim in claims.values()), claims
+    runtime_dispositions = sorted(
+        claim["disposition"]
+        for claim in effects["claims"].values()
+        if claim["effect_kind"] == "operation.runtime"
+    )
+    assert runtime_dispositions == (
+        ["cancelled"] if settled_draft is None else ["cancelled", "succeeded"]
+    ), effects["claims"]
+    assert all(claim["settlement"] is not None for claim in effects["claims"].values()), claims
     budget = await _json(stack, f"/run-control/v1/runs/{run_id}/budget")
     assert budget["reservations"] == {}, budget["reservations"]
     assert not any(budget["pending_settlement"].values()), budget["pending_settlement"]
@@ -696,14 +774,21 @@ async def run_cancellation_drill(
     assert names[0] == "operation.execute" and "operation.cancel" in names, scheduled
     expected_heartbeat = 10.0 if async_children else 20.0
     assert {timeout for _, timeout in scheduled} == {expected_heartbeat}, scheduled
+    run_calls = [item for item in stack.model_log if item["run_id"] == run_id]
     parent_calls = [
-        item for item in stack.model_log if item["run_id"] == run_id and item["model"] == "parent"
+        item for item in run_calls if item["model"] == "parent" and held_stage in item["operation"]
     ]
     child_calls = [
-        item for item in stack.model_log if item["run_id"] == run_id and item["model"] == "child"
+        item for item in run_calls if item["model"] == "child" and held_stage in item["operation"]
     ]
-    # Nothing resumed after the cancel and the dependent `review` stage was never admitted.
-    assert all(DRAFT_OPERATION.split(":slot:")[0] in item["operation"] for item in parent_calls)
+    # Nothing resumed after the cancel and no stage after the held one was admitted; a
+    # settled `draft` made its own four parent calls and one sync-child call.
+    other_calls = [item for item in run_calls if held_stage not in item["operation"]]
+    if settled_draft is None:
+        assert other_calls == [], other_calls
+    else:
+        assert all(DRAFT_OPERATION.split(":slot:")[0] in item["operation"] for item in other_calls)
+        assert sorted(item["model"] for item in other_calls) == ["child", *["parent"] * 4]
     # sync_child: the parent's `task` call, then the child's held call; async windows: the
     # spawn call, then the held (cognition) or final (completion_wait) parent call.
     expected_calls = (
@@ -721,8 +806,13 @@ async def run_cancellation_drill(
             "terminal_outcome": run["terminal_outcome"],
             "receipts": receipts,
             "operations": rows,
-            "transitions": await transitions(stack, run_id),
-            "effects": {kind: claim["disposition"] for kind, claim in claims.items()},
+            "transitions": await transitions(stack, run_id, held_operation),
+            "effects": sorted(
+                {
+                    (claim["effect_kind"], claim["disposition"])
+                    for claim in effects["claims"].values()
+                }
+            ),
             "budget_consumed": budget["consumed"],
             "scheduled_activities": scheduled,
             "model_calls": {"parent": len(parent_calls), "child": len(child_calls)},
@@ -734,8 +824,10 @@ async def run_cancellation_drill(
 
 __all__ = [
     "CANCELLATION_ENVIRONMENT",
+    "BeforeCancel",
     "CancellationGate",
     "async_child_binding",
     "cancellation_components",
+    "publish_cancellation_catalog",
     "run_cancellation_drill",
 ]
