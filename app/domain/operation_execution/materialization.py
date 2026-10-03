@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import NAMESPACE_URL, uuid5
 
-from app.domain.control_plane.canonical import sha256_digest
+from app.domain.control_plane.canonical import sha256_digest, stable_json_digest, stable_json_dump
 from app.domain.operation_execution.contracts import (
     CapabilityGrant,
     CognitiveChannelDefinition,
@@ -293,13 +293,13 @@ def workspace_reservation_token(request: WorkspaceMaterializationRequest) -> str
     between its reservation and its manifest must not turn its own retry into a conflict.
     """
 
-    return sha256_digest(request.model_dump(mode="json", exclude={"created_at"}))
+    return stable_json_digest(request, exclude={"created_at"})
 
 
 def legacy_workspace_reservation_token(request: WorkspaceMaterializationRequest) -> str:
     """The pre-RRM-020-review token (with `created_at`), still accepted for stored rows."""
 
-    return sha256_digest(request.model_dump(mode="json"))
+    return stable_json_digest(request)
 
 
 def same_workspace_manifest(
@@ -307,8 +307,8 @@ def same_workspace_manifest(
 ) -> bool:
     """Manifest identity for an idempotent append: everything but `created_at`."""
 
-    return left.model_dump(mode="json", exclude={"created_at"}) == right.model_dump(
-        mode="json", exclude={"created_at"}
+    return stable_json_dump(left, exclude={"created_at"}) == stable_json_dump(
+        right, exclude={"created_at"}
     )
 
 
