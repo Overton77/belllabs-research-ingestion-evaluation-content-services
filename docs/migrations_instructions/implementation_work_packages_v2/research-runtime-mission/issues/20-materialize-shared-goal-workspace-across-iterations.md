@@ -4,7 +4,7 @@
 
 **Blocked by:** None.
 **Blocks:** Any GoalDirected run of two or more iterations with a `shared` workspace on the production composition (RRM-009's `WorkspaceMaterializationService` over Mongo manifests), including the GoalDirected company fixture (RRM-011) unless its blueprint uses `fresh` workspaces. Whether it blocks RRM-010 is the coordinator's decision.
-**Status:** implemented; review `approve_with_fixes` applied, re-check pending (found by RRM-009, 2026-10-02; option 1, tested code head after review `cea2d50`; [evidence](../../../evidence_v2/research-runtime-mission/RRM-020/README.md))
+**Status:** accepted 2026-10-02 (tested head `cea2d50`, integration merge `4bf0010`; [evidence](../../../evidence_v2/research-runtime-mission/RRM-020/README.md))
 **Branch:** `wp/rrm-020-shared-goal-workspace`
 **Authority:** REQ-CP-DA-013 (exact exclusive writable slots), REQ-BP-GD-004 (independent verifier workspace), SPEC-BP-GOAL-DIRECTED workspace continuity (`GoalWorkspaceSnapshotPolicy`: workspace continuity is independent from model-session continuity)
 

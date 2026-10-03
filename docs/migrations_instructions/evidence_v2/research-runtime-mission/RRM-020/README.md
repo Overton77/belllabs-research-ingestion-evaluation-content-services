@@ -1,6 +1,6 @@
 # RRM-020 implementation evidence
 
-Disposition: ready_for_review (independent review `approve_with_fixes`, nothing blocking; the three review fixes are applied and re-gated; re-check pending)
+Disposition: accepted 2026-10-02 (independent review approve_with_fixes; fixes in 9b84ab0 and a176380; tested head `cea2d50`; merged into integration at `4bf0010`)
 Recorded date: 2026-10-02 (America/New_York)
 Qualification identity: RRM-020 materialize a `shared` GoalDirected workspace across iterations. Requirements: REQ-CP-DA-013 (exact exclusive writable slots), REQ-BP-GD-004 (independent verifier workspace), SPEC-BP-GOAL-DIRECTED workspace continuity (`GoalWorkspaceSnapshotPolicy`: "Workspace continuity is independent from model-session continuity"), REQ-CP-DA-014 (candidates registered against the slot that governs them).
 Base revision and head revision: base integration `0d0c184` (everything through RRM-009). Code commit: `0da4911` (implementation and tests), tested before review; documentation `06be4e4`. Review-fix commits: `9b84ab0` (fixes 1 to 3) and `a176380` (order-stable tokens under the RRM-015 guard). Integration `6d38c0b` (`b836c20` with CR-4 merged, plus one docs commit) was merged in at `d931bd7` (no rebase), and `cea2d50` repoints the proof's imports to CR-4's harness module. **Tested code head after review: `cea2d50`** (see Review disposition). The documentation commit recording the review follows it and changes no code. Not merged into integration (the coordinator owns review and merge).
@@ -262,6 +262,19 @@ Deltas against the pre-review gates (`0da4911`):
 - Against the coordinator's baselines (1064/90/3 hermetic, 1118/36/3 DSN), the only xfail removed is RRM-020's.
 - No test was skipped, deselected or weakened, and no marker was added.
 
+## Integration merge gates (coordinator, merge commit `4bf0010`)
+
+Tested head `cea2d50` merged `--no-ff` into `integration/research-runtime-mission` at `4bf0010`.
+
+| Command | Result |
+|---|---|
+| `uv run --no-sync ruff check app tests scripts` | All checks passed |
+| `uv run --no-sync mypy app` | no issues, 383 files |
+| `hermetic full pytest, one process, on c4e8e30 (RRM-020 and RRM-021 and CR-4 merged; DSNs unset, LANGSMITH_TRACING=false)` | 1091 passed, 93 skipped, 2 xfailed, 0 failed |
+| `full pytest with Postgres/Mongo DSNs and --env-file, part 1 (--ignore=tests/acceptance)` | 1085 passed, 27 skipped, 2 xfailed, 0 failed |
+| `same, part 2 (tests/acceptance)` | 63 passed, 9 skipped, 0 failed (total 1148 passed, 36 skipped, 2 xfailed) |
+| `git diff --check` | clean |
+
 ## Final disposition
 
-ready_for_review
+accepted

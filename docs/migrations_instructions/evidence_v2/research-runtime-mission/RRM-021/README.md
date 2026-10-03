@@ -1,6 +1,6 @@
 # RRM-021 implementation evidence
 
-Disposition: implemented; review `approve_with_fixes` fixed (2026-10-02); independent re-check pending
+Disposition: accepted 2026-10-02 (independent review approve_with_fixes; fixes in 45e9b6d (zero-amount filter, bounded stale retry, blocked-path release); tested head `45e9b6d`; merged into integration at `c4e8e30`)
 Recorded date: 2026-10-02 (America/New_York)
 Qualification identity: RRM-021 settles the admitted baseline reservation of a StageGraph run. Requirements: REQ-CP-RUN-006 (reservations are released or settled before terminalization), the reducer's terminalization rule (`budget_not_settled`), REQ-CP-EXEC-008 step 7 (cancellation also terminalizes).
 Base revision and head revision: base integration `0d0c184`; code commit `c30c9f8` (branch `wp/rrm-021-stagegraph-baseline-settlement`). Not merged (the coordinator owns review and merge).
@@ -93,6 +93,19 @@ Verdict `approve_with_fixes`, nothing blocking. Integration `b836c20` (CR-4) was
 | Full DSN `tests/acceptance`, under the lock | 62 passed, 9 skipped |
 | `git diff --check` | clean |
 
+## Integration merge gates (coordinator, merge commit `c4e8e30`)
+
+Tested head `45e9b6d` merged `--no-ff` into `integration/research-runtime-mission` at `c4e8e30`.
+
+| Command | Result |
+|---|---|
+| `uv run --no-sync ruff check app tests scripts` | All checks passed |
+| `uv run --no-sync mypy app` | no issues, 383 files |
+| `hermetic full pytest, one process, on c4e8e30 (RRM-020 and RRM-021 and CR-4 merged; DSNs unset, LANGSMITH_TRACING=false)` | 1091 passed, 93 skipped, 2 xfailed, 0 failed |
+| `full pytest with Postgres/Mongo DSNs and --env-file, part 1 (--ignore=tests/acceptance)` | 1085 passed, 27 skipped, 2 xfailed, 0 failed |
+| `same, part 2 (tests/acceptance)` | 63 passed, 9 skipped, 0 failed (total 1148 passed, 36 skipped, 2 xfailed) |
+| `git diff --check` | clean |
+
 ## Final disposition
 
-Implemented; review fixes applied; independent re-check pending. Nothing merged, pushed or amended.
+accepted
