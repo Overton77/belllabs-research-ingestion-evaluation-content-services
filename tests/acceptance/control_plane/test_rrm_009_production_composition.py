@@ -1204,17 +1204,9 @@ async def promote_generic_artifact(stack: ProductionStack) -> tuple[str, dict[st
             output_contract_ref=operation.operation_contract_ref,
         ),
     )
-    try:
-        response = await stack.http.post(
-            f"/run-control/v1/runs/{run_id}/operations", json=submission.model_dump(mode="json")
-        )
-    except Exception:
-        async for execution in stack.client.list_workflows():
-            history = await stack.client.get_workflow_handle(execution.id).fetch_history()
-            for event in history.events:
-                if event.event_type in (11, 12, 13):
-                    print("DEBUGEVENT", execution.id, str(event)[:6000])
-        raise
+    response = await stack.http.post(
+        f"/run-control/v1/runs/{run_id}/operations", json=submission.model_dump(mode="json")
+    )
     assert response.status_code == 201, response.text
     result = cast(dict[str, Any], response.json())
     assert result["operation"]["status"] == "completed"
