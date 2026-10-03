@@ -31,16 +31,14 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
-from uuid import uuid4
 
 import asyncpg
 import httpx
 import pytest
-from pymongo import AsyncMongoClient
 from temporalio.client import Client
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
@@ -133,6 +131,7 @@ from app.temporal.workflows.operation import OperationWorkflow
 from app.temporal.workflows.stagegraph import StageGraphWorkflow, wait_condition_id
 from tests.acceptance.control_plane.test_wp_bp_020_sandbox_rollover import Documents, Templates
 from tests.fixtures.checkpoint_recovery import governed_workspace
+from tests.fixtures.mongo_database import disposable_mongo_database
 from tests.fixtures.rrm006_fork_stack import (
     SAVER_SCHEMA,
     ForkStack,
@@ -165,15 +164,7 @@ PRINCIPAL = ControlPlanePrincipal(
 )
 
 
-@pytest.fixture
-async def mongo_database(test_mongodb_uri: str) -> AsyncIterator[str]:
-    name = f"rrm006_forks_{uuid4().hex[:12]}"
-    yield name
-    client: AsyncMongoClient[Any] = AsyncMongoClient(test_mongodb_uri)
-    try:
-        await client.drop_database(name)
-    finally:
-        await client.close()
+mongo_database = disposable_mongo_database("rrm006_forks")
 
 
 async def _reset(dsn: str) -> None:

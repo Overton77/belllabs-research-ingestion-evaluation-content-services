@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime
-from uuid import NAMESPACE_URL, uuid5
 
+from app.domain.control_plane.identity import stable_id
 from app.domain.run_control.contracts import (
     BudgetLedgerEntry,
     BudgetLedgerKind,
@@ -105,7 +105,7 @@ def roll_up_child_budget(
         if amounts:
             entries.append(
                 BudgetLedgerEntry(
-                    entry_id=_stable_id(
+                    entry_id=stable_id(
                         "parent-ledger",
                         parent.account_id,
                         kind.value,
@@ -121,7 +121,3 @@ def roll_up_child_budget(
                 )
             )
     return updated, tuple(entries)
-
-
-def _stable_id(*parts: str) -> str:
-    return str(uuid5(NAMESPACE_URL, ":".join(parts)))

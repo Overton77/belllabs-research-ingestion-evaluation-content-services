@@ -177,3 +177,54 @@ The DSN gate for this merge runs together with the RRM-020 and RRM-021 merges.
 
 CR-4's own DSN run (without `LANGSMITH_TRACING=false`) had one order-dependent failure, `test_langsmith_tracing.py::test_settings_expose_langsmith_contract`. That test reads the developer `.env`, and the failure is tracked under the RRM-010 stability item.
 
+## CR-5
+
+Scope: the whole mission diff, `git diff 687c1b7..5d38f19 -- app tests scripts` (291 files). Base `5d38f19`. Branch `cleanup/rrm-cr-5`. Cross-ticket consistency of names, placement and dead code; nothing a ticket-scoped pass could see on its own.
+
+### Findings
+- Names: the same concept is not named two ways across tickets. `runtime_unit` / `unit` are one concept (persisted tables and the `RUNTIME_UNIT_SCHEMA_VERSION` string; `unit` is the prose and Python-symbol form). `execution_epoch` (a run's continue-as-new epoch) and `generation` (a unit's lease generation) are different concepts and are not mixed. `acknowledgement` / `provider_acknowledged` appear only for the provider's reply to a cancel or submit; `receipt` is the ledger record BellLabs issues. No `v2`/`new`/`tmp`/`helper`/`manager`/`util` symbol and no ticket number was added to production code (`app` has no `rrm`/`wp_` class, function or file name; `workflow.patched` IDs carry the ticket and stay).
+- Placement: `app` and `scripts` import nothing from `tests`, and every file added under `tests/` outside `test_*`/`conftest` sits in `tests/fixtures/`. The dependency direction holds for the mission's new modules.
+- Duplication: `_stable_id` was now twelve byte-identical copies (CR-1 counted four) in domain, application and integrations. Seven modules defined the same `mongo_database` fixture, differing only by the database-name prefix.
+- Dead code: a symbol scan of every added or modified app module (definitions whose name occurs once in app, tests, scripts, JSON, SQL and Markdown) found only framework entry points (routes, validators, LangChain middleware hooks), pre-mission symbols and one mission symbol, `CancellableRuntimePort` (see non-changes). All `workflow.patched` legacy branches are reachable from pre-patch histories; none was touched.
+
+### Changes
+1. `refactor:` new `app/domain/control_plane/identity.py` with `stable_id`; the twelve private `_stable_id` copies are deleted and their callers use it (`e36ea35`). The derivation (`uuid5` over `NAMESPACE_URL` and the colon-joined parts) is persisted and unchanged, so every id is identical. Domain, application and integrations already depend inward on `domain/control_plane`, so there is no new edge.
+2. `refactor:` new `tests/fixtures/mongo_database.py` with `disposable_mongo_database(prefix)`, a fixture factory; seven modules (the `rrm005`, `rrm006`, `rrm008` and `rrm016` acceptance tests, the `rrm013` live test, the `rrm004` restart test and the `rrm009` harness) now declare `mongo_database = disposable_mongo_database("<prefix>")` (`96abd29`). Fixture name, scope and database-name prefixes are unchanged. The six MongoDB integration modules that use a different pattern were left.
+
+### Deliberate non-changes
+- `_dump`/`_load`/`_json`/`_set_scope` Postgres helpers (about twelve repositories): they differ per repository (`_dump` stable-order or not, `_json` return shapes, `_set_scope` variants). No shared owner exists, and unifying needs a design choice about JSON normalization, so it is recorded as a seam, not merged.
+- `CancellableRuntimePort` (RRM-008) is unreferenced, but it documents the optional `observe_latest` hook that `OperationExecutionService._observe_latest` finds by `getattr` and that the DeepAgents adapter and deployment composition implement. Kept as the contract for that duck-typed method.
+- Retired graph_runtime intervention contracts, `SemanticOperationAttemptKey`, `LangGraphCheckpointKey` and the legacy Agent Server island: re-checked. `app/api/graph_runtime_schemas.py` and `governance.py` are unchanged since the mission start (still export `ForkRequest`, `RuntimeIntervention` and the others), so CR-3's reasoning stands.
+- `execution_epoch`, `runtime_unit_*`, `provider_acknowledged`, `force_continue_as_new` and the other cross-ticket names above are persisted or payload identities; none renamed.
+- `workflow.patched` legacy branches, Temporal names, payload fields, schema versions, migrations, API paths, graph IDs, claim formats and env var names: untouched.
+- Ticket-named test files, fixtures and captured histories (`rrm007_pre_change`, `rrm016_post_change`, ...) kept; evidence READMEs reference them. No stack-lock or DSN helper exists in `tests/` (three Postgres integration modules only read the env var), so there was nothing to merge there.
+- No file moved, so no path-safety sweep was needed. The three test files owned by the concurrent stability branch (`test_rrm_007_boundary_interventions.py`, `test_rrm_007_interventions.py`, `test_langsmith_tracing.py`) were not touched.
+
+### Commands and results
+- `ruff check app tests scripts`: pass. `mypy app`: pass (384 files).
+- Hermetic pytest (DSNs unset): 1091 passed, 93 skipped, 2 xfailed (equals baseline; no tests added, removed or renamed).
+- Pytest with Postgres and Mongo DSNs plus `--env-file`, two chunks: `--ignore=tests/acceptance` gave 1084 passed, 27 skipped, 2 xfailed, 1 failed; `tests/acceptance` gave 63 passed, 9 skipped. The failure, `test_rrm_007_boundary_interventions.py::test_goal_directed_policy_pause_is_durable_across_forced_continue_as_new`, passes in isolation (6 passed) and sits in a file the concurrent stability branch is fixing. With it passing the chunk equals the 1085/27/2 baseline and the total equals 1148/36/2.
+- `git diff --check`: clean. The shared-stack lock was acquired and released around the runs.
+
+### Candidate generalization seams for the whole mission (not extracted)
+Reusable (family-, company- and provider-neutral):
+- `app/domain/run_control/` (`contracts.py`, `reducer.py`, `budget.py`): admitted-run lifecycle, versioned run state, budget reservation and settlement, transition and outbox events. The only family knowledge is the family-head kinds used by forks.
+- `app/domain/operation_execution/` with `app/application/operations/` (`operation_execution.py`, `checkpoint_lineage.py`, `journaled_operation_execution.py`, `unit_reconciliation.py`): runtime-unit identity, claim, lease, fence and generation, journal and effect ledger, settlement, in-doubt parking and reconciliation. `CheckpointLineageRepository` (in-memory and `postgres_checkpoint_lineage.py`) is a recovery ledger for any resumable provider unit. `operation_progress.py` heartbeat and cancel-request reads are provider-neutral.
+- `app/domain/run_control/forks.py`, `app/application/runtime/postgres_run_forks.py`, `app/api/run_forks.py`: snapshot at a safe boundary, patch policy, reuse frontier and a reserve/claim/settle fork saga over ports. Only `default_patch_policy` and `_FAMILY_BY_HEAD_KIND` name the two families.
+- `app/domain/run_control/boundary_commands.py` with `app/integrations/temporal_boundary_commands.py`: operator-command receipt ledger (per-space sequence, requested vs applied, delivery update); Temporal is the only delivery-specific part.
+- `app/application/run_control/inspection.py`, `inspection_cursor.py`, `app/api/runtime_inspection.py`: multi-source read composition with per-section freshness and a signed expiring cursor.
+- `app/temporal/workflows/` (`operation.py`, `stagegraph.py`, `goal_directed.py`) and the `workflow.patched` convention: deterministic workflow shells that call activities for all I/O; the park-in-doubt and nudge loop in `operation.py` is a reusable operator-decision wake-up.
+- `app/application/async_subagents/service.py` and `app/domain/operation_execution/async_subagent_reconciliation.py`: provider-run adoption with a submission fence and an in-doubt incident.
+- `app/temporal/deployment_composition.py`, `app/api/runtime_composition.py`, `app/application/run_control/run_launch.py`, and the capability pin and grant model in `app/integrations/agents/deep_agents/capability_pins.py`: composition from pins and the launch path.
+- `app/domain/control_plane/identity.py` (new): the one deterministic-id helper.
+- Test harness: `tests/fixtures/rrm009_production_harness.py` and `rrm009_cancellation.py` (qualify any family through the facade; cancel inside a held call, then prove settlement), `rrm004_persistent_stack.py` (restart drill), `tests/fixtures/mongo_database.py`.
+
+Provider-specific (keep behind ports on generalization):
+- `app/integrations/agents/deep_agents/` (`adapter.py`, `checkpoint_reads.py`, `checkpoint_verifier.py`, `browser_tool.py`): DeepAgents and LangGraph checkpoint reads and the browser tool. `app/integrations/langgraph_agent_server.py` and `app/agent_server/` are Agent Server specific.
+- `app/integrations/temporal_boundary_commands.py` and `app/temporal/registration/`: Temporal delivery and worker registration.
+- `app/application/web_research/`, `app/application/runners/web_research_coordinator_live.py`, `app/domain/reference_research/`, `app/domain/schema_*`: company and domain content (web research, schema grounding, coordinator), not part of mission control.
+
+Repeated infrastructure worth one owner when generalized:
+- Postgres helpers (`_set_scope`, JSON dump/load, advisory lock) in about twelve `postgres_*` repositories under `app/application/` (`grep "def _set_scope"`): one `application` infrastructure module with an agreed JSON normalization.
+- Superseded-but-exported contracts (graph_runtime intervention contracts and the two checkpoint keys) and the legacy Agent Server island: remove together once the `/v2/graph-runtime/schemas` export is decided (RRM-001 §3 row 23).
+- In-memory repositories embedded in service modules (`checkpoint_lineage.py`, `inspection.py`): move to a testing module when a second consumer needs the port without the fakes.

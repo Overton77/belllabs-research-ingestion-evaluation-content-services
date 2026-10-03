@@ -5,7 +5,6 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
-from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import BaseModel, ValidationError
 
@@ -19,6 +18,7 @@ from app.application.run_control.run_control_repository import (
 )
 from app.domain.control_plane.canonical import contract_fingerprint, sha256_digest
 from app.domain.control_plane.errors import ControlPlaneError
+from app.domain.control_plane.identity import stable_id
 from app.domain.run_control.boundary_commands import (
     RUN_CONTROL_RECORDER,
     boundary_command_record,
@@ -384,7 +384,7 @@ class RunControlService:
             request.idempotency_issuer,
             request.request_id,
         )
-        account_id = _stable_id("budget-account", run_id)
+        account_id = stable_id("budget-account", run_id)
         projection = RunProjection(
             run_id=run_id,
             request_scope=request.request_scope,
@@ -422,7 +422,7 @@ class RunControlService:
         effects = EffectLedgerState(run_id=run_id)
         ledger = (
             BudgetLedgerEntry(
-                entry_id=_stable_id("ledger", account_id, "baseline"),
+                entry_id=stable_id("ledger", account_id, "baseline"),
                 account_id=account_id,
                 run_id=run_id,
                 kind=BudgetLedgerKind.RESERVATION,
@@ -434,7 +434,7 @@ class RunControlService:
         )
         actor = request.actor
         transition = LifecycleTransitionRecord(
-            transition_id=_stable_id("transition", run_id, "1"),
+            transition_id=stable_id("transition", run_id, "1"),
             run_id=run_id,
             command_id=f"admission:{request.request_id}",
             prior_version=0,
@@ -1427,10 +1427,6 @@ def _require_same_fingerprint(actual: str, expected: str, subject: str) -> None:
         raise IdempotencyConflict(f"{subject} identity was reused with a conflicting payload")
 
 
-def _stable_id(*parts: str) -> str:
-    return str(uuid5(NAMESPACE_URL, ":".join(parts)))
-
-
 def run_identity_for(
     request_scope: str,
     idempotency_issuer: str,
@@ -1440,7 +1436,7 @@ def run_identity_for(
 
     if not request_scope or not idempotency_issuer or not request_id:
         raise ValueError("run identity inputs must be non-empty")
-    return _stable_id("run", request_scope, idempotency_issuer, request_id)
+    return stable_id("run", request_scope, idempotency_issuer, request_id)
 
 
 def _event(
@@ -1457,7 +1453,7 @@ def _event(
     is_version_final: bool = True,
 ) -> DomainEventEnvelope:
     return DomainEventEnvelope(
-        event_id=_stable_id("event", run_id, str(version), str(sequence), event_type),
+        event_id=stable_id("event", run_id, str(version), str(sequence), event_type),
         event_type=event_type,
         aggregate_id=run_id,
         aggregate_version=version,

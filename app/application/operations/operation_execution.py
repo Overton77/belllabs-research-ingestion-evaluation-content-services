@@ -9,7 +9,6 @@ from contextvars import ContextVar
 from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Protocol
-from uuid import NAMESPACE_URL, uuid5
 
 from app.application.control_plane.service import ControlPlaneService
 from app.application.operations.checkpoint_lineage import (
@@ -21,6 +20,7 @@ from app.application.operations.operation_progress import cancel_requested, repo
 from app.application.run_control.service import RunControlService
 from app.domain.control_plane.canonical import contract_fingerprint, sha256_digest
 from app.domain.control_plane.contracts import DefinitionKind, SecretRef
+from app.domain.control_plane.identity import stable_id
 from app.domain.graph_runtime.identities import QualifiedCheckpointKey
 from app.domain.operation_execution.checkpoint_lineage import (
     CheckpointCapture,
@@ -1504,7 +1504,7 @@ class OperationExecutionService:
         source = reused.source_settlement
         settled_at = datetime.now(UTC)
         settlement = OperationSettlement(
-            settlement_id=_stable_id("operation-settlement", binding.binding_id),
+            settlement_id=stable_id("operation-settlement", binding.binding_id),
             binding_id=binding.binding_id,
             status="completed",
             output_text=source.output_text,
@@ -1755,7 +1755,7 @@ def bind_operation_execution_request(
 
 
 def _binding_for(request: OperationExecutionRequest, fingerprint: str) -> OperationExecutionBinding:
-    binding_id = _stable_id(
+    binding_id = stable_id(
         "operation-binding",
         f"{request.request_scope}:{request.identity.semantic_key}",
     )
@@ -1912,10 +1912,6 @@ def _validate_bound_usage(binding: OperationExecutionBinding, usage: RuntimeUsag
         )
 
 
-def _stable_id(*parts: str) -> str:
-    return str(uuid5(NAMESPACE_URL, ":".join(parts)))
-
-
 def operation_settlement_id(binding_id: str) -> str:
     """The one settlement identity of a bound operation attempt (any status).
 
@@ -1923,4 +1919,4 @@ def operation_settlement_id(binding_id: str) -> str:
     so a family that consumes the settlement (RRM-016) can find exactly that record.
     """
 
-    return _stable_id("operation-settlement", binding_id)
+    return stable_id("operation-settlement", binding_id)

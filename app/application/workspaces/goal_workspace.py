@@ -9,8 +9,9 @@ from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
 from typing import Literal
-from uuid import NAMESPACE_URL, uuid4, uuid5
+from uuid import uuid4
 
+from app.domain.control_plane.identity import stable_id
 from app.domain.operation_execution.errors import WorkspaceSlotConflict
 from app.domain.run_control.errors import IdempotencyConflict
 
@@ -158,7 +159,7 @@ class GoalWorkspaceService:
         self._authority_path.mkdir(parents=True, exist_ok=True)
 
     def initialize(self, spec: GoalWorkspaceSpec) -> GoalWorkspace:
-        workspace_id = _stable_id("goal-workspace", spec.namespace_id, spec.run_id)
+        workspace_id = stable_id("goal-workspace", spec.namespace_id, spec.run_id)
         root = self._workspaces_path / workspace_id
         workspace = self._workspace(root, workspace_id, spec)
         authority = _canonical_json_bytes(self._authority_payload(workspace))
@@ -224,7 +225,7 @@ class GoalWorkspaceService:
             owner_id=lease_owner_id,
             agent_run_id=agent_run_id,
         )
-        agent_directory = current.agents_directory / _stable_id(
+        agent_directory = current.agents_directory / stable_id(
             "goal-agent-run", current.workspace_id, agent_run_id
         )
         agent_directory.mkdir(parents=True, exist_ok=True)
@@ -259,7 +260,7 @@ class GoalWorkspaceService:
         if not owner_id or not agent_run_id:
             raise ValueError("writable leases require owner_id and agent_run_id")
         lease = GoalWorkspaceLease(
-            lease_id=_stable_id(
+            lease_id=stable_id(
                 "goal-workspace-lease",
                 workspace.workspace_id,
                 owner_id,
@@ -316,7 +317,7 @@ class GoalWorkspaceService:
         if not agent_run_id or not content or not idempotency_key:
             raise ValueError("checkpoint identity, content, and idempotency key are required")
         checkpoint = GoalCheckpoint(
-            checkpoint_id=_stable_id("goal-checkpoint", workspace.workspace_id, idempotency_key),
+            checkpoint_id=stable_id("goal-checkpoint", workspace.workspace_id, idempotency_key),
             workspace_id=workspace.workspace_id,
             agent_run_id=agent_run_id,
             iteration=iteration,
@@ -388,7 +389,7 @@ class GoalWorkspaceService:
             }
         )
         handoff = GoalHandoff(
-            handoff_id=_stable_id("goal-handoff", workspace.workspace_id, idempotency_key),
+            handoff_id=stable_id("goal-handoff", workspace.workspace_id, idempotency_key),
             workspace_id=workspace.workspace_id,
             from_agent_run_id=from_agent_run_id,
             iteration=iteration,
@@ -601,10 +602,6 @@ def _digest_text(value: str) -> str:
 
 def _digest_bytes(value: bytes) -> str:
     return f"sha256:{sha256(value).hexdigest()}"
-
-
-def _stable_id(*parts: str) -> str:
-    return str(uuid5(NAMESPACE_URL, ":".join(parts)))
 
 
 def _atomic_replace_read_only(path: Path, content: bytes) -> None:

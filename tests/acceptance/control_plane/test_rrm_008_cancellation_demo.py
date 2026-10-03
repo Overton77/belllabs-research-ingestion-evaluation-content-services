@@ -126,6 +126,7 @@ from tests.fixtures.goal_directed_journaled import (
     goal_run_input,
     goal_templates,
 )
+from tests.fixtures.mongo_database import disposable_mongo_database
 from tests.fixtures.rrm004_persistent_stack import FileArtifactPayloadStore
 from tests.fixtures.rrm013_live_stack import TOKEN_ENV, TOKEN_REF, reconciler
 from tests.integration.agent_server.test_rrm_013_async_subagent_live import (
@@ -164,15 +165,7 @@ def _evidence(label: str, payload: dict[str, Any]) -> None:
     print(f"RRM-008 EVIDENCE {label}: {json.dumps(payload, sort_keys=True, default=str)}")
 
 
-@pytest.fixture
-async def mongo_database(test_mongodb_uri: str) -> AsyncIterator[str]:
-    name = f"rrm008_cancel_{uuid4().hex[:12]}"
-    yield name
-    client: AsyncMongoClient[Any] = AsyncMongoClient(test_mongodb_uri)
-    try:
-        await client.drop_database(name)
-    finally:
-        await client.close()
+mongo_database = disposable_mongo_database("rrm008_cancel")
 
 
 async def _reset(dsn: str) -> None:

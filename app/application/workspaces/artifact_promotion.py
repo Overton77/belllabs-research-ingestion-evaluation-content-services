@@ -6,11 +6,11 @@ from copy import deepcopy
 from datetime import datetime
 from hashlib import sha256
 from typing import Protocol
-from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.domain.control_plane.canonical import sha256_digest
+from app.domain.control_plane.identity import stable_id
 from app.domain.operation_execution.contracts import (
     ArtifactMetadataRevision,
     ArtifactPromotionRequest,
@@ -134,7 +134,7 @@ class ArtifactPromotionService:
 
     async def promote(self, request: ArtifactPromotionRequest, content: bytes) -> PromotedArtifact:
         binding = await self._validate_authority(request, content)
-        intent_key = _stable_id(
+        intent_key = stable_id(
             "artifact-intent",
             binding.run_id,
             binding.semantic_attempt_key,
@@ -150,8 +150,8 @@ class ArtifactPromotionService:
                 "content_digest": request.content_digest,
             }
         )
-        artifact_id = _stable_id("artifact", identity)
-        promotion_id = _stable_id("artifact-promotion", intent_key)
+        artifact_id = stable_id("artifact", identity)
+        promotion_id = stable_id("artifact-promotion", intent_key)
         current = await self._metadata.get_by_intent(intent_key)
         if current is not None and current.promotion_identity != identity:
             raise IdempotencyConflict(
@@ -585,10 +585,6 @@ class StaticArtifactValidationAuthority:
 
 def _digest_bytes(value: bytes) -> str:
     return f"sha256:{sha256(value).hexdigest()}"
-
-
-def _stable_id(*parts: str) -> str:
-    return str(uuid5(NAMESPACE_URL, ":".join(parts)))
 
 
 def artifact_durable_reference(request_scope: str, run_id: str, artifact_id: str) -> str:

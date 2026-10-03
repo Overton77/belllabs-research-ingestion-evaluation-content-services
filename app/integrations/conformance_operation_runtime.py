@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from copy import deepcopy
-from uuid import NAMESPACE_URL, uuid5
 
 from app.domain.control_plane.canonical import sha256_digest
 from app.domain.control_plane.contracts import SecretRef
+from app.domain.control_plane.identity import stable_id
 from app.domain.operation_execution.contracts import (
     MaterializedWorkspace,
     OperationExecutionBinding,
@@ -154,7 +154,7 @@ class ConformanceRuntime:
             usage=RuntimeUsage(
                 amounts={"model.turns": 1, "tokens.total": 3},
             ),
-            provider_run_id=_stable_id("conformance-provider-run", side_effect_key),
+            provider_run_id=stable_id("conformance-provider-run", side_effect_key),
             event_payloads=(
                 {
                     "kind": "operation.completed",
@@ -198,7 +198,3 @@ class ConformanceBudgetAuthority:
             if not budget_violation and amount > binding.budget_limits.get(dimension, 0):
                 raise ValueError(f"observed usage exceeds binding limit for {dimension}")
         self.settlements[settlement_id] = value
-
-
-def _stable_id(*parts: str) -> str:
-    return str(uuid5(NAMESPACE_URL, ":".join(parts)))
