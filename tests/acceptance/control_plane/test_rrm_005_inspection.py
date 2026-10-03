@@ -20,15 +20,12 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 import asyncpg
 import httpx
 import pytest
-from pymongo import AsyncMongoClient
 from temporalio.client import Client
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
@@ -56,6 +53,7 @@ from app.temporal.workflow_sandbox import coordinator_workflow_runner
 from app.temporal.workflows.operation import OperationWorkflow
 from tests.fixtures import rrm004_persistent_stack
 from tests.fixtures.checkpoint_recovery import RESULT_MARKER
+from tests.fixtures.mongo_database import disposable_mongo_database
 from tests.fixtures.rrm004_persistent_stack import (
     WORKFLOW_TASK_QUEUE,
     StackPaths,
@@ -74,15 +72,7 @@ SAVER_SCHEMA = "rrm005_inspection_saver"
 PROMPT_MARKERS = ("Return BINDING-OK", "Use only the exact bound capabilities", RESULT_MARKER)
 
 
-@pytest.fixture
-async def mongo_database(test_mongodb_uri: str) -> AsyncIterator[str]:
-    name = f"rrm005_inspection_{uuid4().hex[:12]}"
-    yield name
-    client: AsyncMongoClient[Any] = AsyncMongoClient(test_mongodb_uri)
-    try:
-        await client.drop_database(name)
-    finally:
-        await client.close()
+mongo_database = disposable_mongo_database("rrm005_inspection")
 
 
 async def _visible(client: Client, query: str, expected: int) -> None:

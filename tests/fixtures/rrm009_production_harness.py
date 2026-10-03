@@ -18,12 +18,10 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
-from uuid import uuid4
 
 import asyncpg
 import httpx
 import pytest
-from pymongo import AsyncMongoClient
 from temporalio.api.enums.v1 import TaskQueueType
 from temporalio.api.taskqueue.v1 import TaskQueue
 from temporalio.api.workflowservice.v1 import DescribeTaskQueueRequest
@@ -91,6 +89,7 @@ from app.temporal.workflows.goal_directed import GoalDirectedWorkflow
 from app.temporal.workflows.operation import OperationWorkflow
 from app.temporal.workflows.stagegraph import StageGraphWorkflow, wait_condition_id
 from tests.fixtures.checkpoint_lineage import bind_unit, stage_unit
+from tests.fixtures.mongo_database import disposable_mongo_database
 from tests.fixtures.rrm009_production_stack import (
     LANGGRAPH_SCHEMA,
     NODE_EXECUTABLE,
@@ -196,15 +195,7 @@ def _reset_api_state() -> None:
             delattr(api.state, name)
 
 
-@pytest.fixture
-async def mongo_database(test_mongodb_uri: str) -> AsyncIterator[str]:
-    name = f"rrm009_{uuid4().hex[:12]}"
-    yield name
-    client: AsyncMongoClient[Any] = AsyncMongoClient(test_mongodb_uri)
-    try:
-        await client.drop_database(name)
-    finally:
-        await client.close()
+mongo_database = disposable_mongo_database("rrm009")
 
 
 @asynccontextmanager

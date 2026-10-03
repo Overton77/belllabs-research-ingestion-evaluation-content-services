@@ -35,7 +35,6 @@ from datetime import UTC
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
-from uuid import uuid4
 
 import asyncpg
 import pytest
@@ -105,6 +104,7 @@ from tests.fixtures.goal_directed_journaled import (
     goal_templates,
     turns_by_operation,
 )
+from tests.fixtures.mongo_database import disposable_mongo_database
 from tests.fixtures.rrm004_persistent_stack import FileArtifactPayloadStore
 from tests.fixtures.temporal_history import patch_ids, scheduled_activity_inputs
 from tests.integration.postgres.test_checkpoint_lineage_postgres import (
@@ -128,15 +128,7 @@ BASELINE = {"tokens.total": 20}
 CLAIMED_BY = "operation-runtime:rrm-016"  # deployment-stable, never per worker
 
 
-@pytest.fixture
-async def mongo_database(test_mongodb_uri: str) -> AsyncIterator[str]:
-    name = f"rrm016_goal_{uuid4().hex[:12]}"
-    yield name
-    client: AsyncMongoClient[Any] = AsyncMongoClient(test_mongodb_uri)
-    try:
-        await client.drop_database(name)
-    finally:
-        await client.close()
+mongo_database = disposable_mongo_database("rrm016_goal")
 
 
 def _saver_dsn(dsn: str) -> str:

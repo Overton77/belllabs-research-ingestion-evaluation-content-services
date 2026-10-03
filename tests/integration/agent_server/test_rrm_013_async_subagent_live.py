@@ -20,7 +20,7 @@ import os
 import subprocess
 import sys
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -31,7 +31,6 @@ import pytest
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import NotFoundError
-from pymongo import AsyncMongoClient
 
 from app.agent_server.async_subagents.auth import mint_scope_claim
 from app.application.async_subagents.parent_effects import (
@@ -55,6 +54,7 @@ from app.integrations.agents.deep_agents.async_subagents import (
     SPAWN_KEY_METADATA,
     attribute_usage,
 )
+from tests.fixtures.mongo_database import disposable_mongo_database
 from tests.fixtures.rrm013_live_stack import (
     SAVER_SCHEMA,
     SCOPE,
@@ -92,15 +92,7 @@ def _evidence(label: str, payload: dict[str, Any]) -> None:
     print(f"RRM-013 EVIDENCE {label}: {json.dumps(payload, sort_keys=True, default=str)}")
 
 
-@pytest.fixture
-async def mongo_database(test_mongodb_uri: str) -> AsyncIterator[str]:
-    name = f"rrm013_live_{uuid4().hex[:12]}"
-    yield name
-    client: AsyncMongoClient[Any] = AsyncMongoClient(test_mongodb_uri)
-    try:
-        await client.drop_database(name)
-    finally:
-        await client.close()
+mongo_database = disposable_mongo_database("rrm013_live")
 
 
 @pytest.fixture

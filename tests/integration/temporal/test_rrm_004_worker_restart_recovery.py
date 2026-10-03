@@ -21,15 +21,12 @@ import json
 import os
 import subprocess
 import sys
-from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 import asyncpg
 import pytest
 from langchain_core.runnables import RunnableConfig
-from pymongo import AsyncMongoClient
 from temporalio.client import WorkflowHandle
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
@@ -57,6 +54,7 @@ from tests.fixtures.checkpoint_recovery import (
     governed_workspace,
     stage_recovery_unit,
 )
+from tests.fixtures.mongo_database import disposable_mongo_database
 from tests.fixtures.rrm004_persistent_stack import (
     SAVER_SCHEMA,
     WORKFLOW_TASK_QUEUE,
@@ -78,17 +76,7 @@ HANG_AFTER_CHECKPOINT = 6
 ACTIVITY_TIMEOUT_SECONDS = 15
 
 
-@pytest.fixture
-async def mongo_database(test_mongodb_uri: str) -> AsyncIterator[str]:
-    """A dedicated database in the disposable Mongo for the production OEB binding store."""
-
-    name = f"rrm004_restart_{uuid4().hex[:12]}"
-    yield name
-    client: AsyncMongoClient[Any] = AsyncMongoClient(test_mongodb_uri)
-    try:
-        await client.drop_database(name)
-    finally:
-        await client.close()
+mongo_database = disposable_mongo_database("rrm004_restart")
 
 
 def _root(namespace: str, checkpoint_id: str | None = None) -> RunnableConfig:
