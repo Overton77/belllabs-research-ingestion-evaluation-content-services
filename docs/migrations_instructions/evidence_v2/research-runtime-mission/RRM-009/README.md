@@ -1,6 +1,6 @@
 # RRM-009 implementation evidence
 
-Disposition: ready_for_review (implemented; independent review `approve_with_fixes`, every fix made in new commits, see "Review disposition"; CP-050 is **not** accepted by this ticket, it only qualifies the CP-050 capability prerequisite)
+Disposition: accepted 2026-10-02 (independent review approve_with_fixes (MCP pin verification at the worker, deny-by-default egress, lineage URL sanitization, claim TTL and jti, readiness disclosure, fail-closed pins); integrated with RRM-008; implemented across three implementer sessions (Fable, then Opus); tested head `6990a8d`; merged into integration at `5006770`)
 Recorded date: 2026-10-02 (America/New_York)
 Qualification identity: RRM-009 qualify the CP-050 capability prerequisite: a production-shaped composition. Requirements: DA-001 to DA-015 and the capability-binding requirements, REQ-CP-DA-004 (persistent saver, clarified), REQ-CP-DA-007 (subordinate usage charged to the parent), REQ-CP-DA-016 (`durability="sync"`), REQ-CP-DA-019, REQ-CP-EXEC-015 (Search Attribute registration and verification), REQ-CP-RUN-011/012 (inspection composition), RRM-007 F6 (boundary delivery relay), RRM-013 N8 (scope-bound Agent Server credential) (AMD-RRM-001, accepted meta `main` `a50d833`).
 Base revision and head revision: base `c8221f5` (integration: RRM-016 hardening, RRM-018, RRM-019). Integration `56ffd63` (RRM-008 accepted) was merged in at `dfe33ad` (no rebase). **Tested code head `6990a8d`** (the independent review's fixes; see "Review disposition" for its gates). The integration gates ran on `65bf532`; the earlier gate tables below are history on `6d956e9`. The commit that updates this README, the ticket and the index changes documentation only. Branch `wp/rrm-009-capability-composition`; not merged, not pushed (the coordinator owns review and merge).
@@ -466,6 +466,19 @@ Independent review of RRM-009 (after the RRM-008 integration): verdict **`approv
 
 Spend across RRM-009's fourth session including the review re-run: about 42k hosted-child tokens, under USD 0.20 at the assumed prices.
 
+## Integration merge gates (coordinator, merge commit `5006770`)
+
+Tested head `6990a8d` merged `--no-ff` into `integration/research-runtime-mission` at `5006770`.
+
+| Command | Result |
+|---|---|
+| `uv run --no-sync ruff check app tests scripts` | All checks passed |
+| `uv run --no-sync mypy app` | no issues, 383 files |
+| `hermetic full pytest, one process (DSNs unset)` | 1064 passed, 90 skipped, 3 xfailed, 0 failed (191 s) |
+| `full pytest with Postgres/Mongo DSNs exported and --env-file, part 1 (--ignore=tests/acceptance)` | 1056 passed, 27 skipped, 3 xfailed, 0 failed |
+| `same, part 2 (tests/acceptance)` | 62 passed, 9 skipped, 0 failed (total 1118 passed, 36 skipped, 3 xfailed) |
+| `git diff --check` | clean |
+
 ## Final disposition
 
-ready_for_review
+accepted
