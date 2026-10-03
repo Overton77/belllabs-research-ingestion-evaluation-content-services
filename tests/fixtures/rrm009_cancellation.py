@@ -74,7 +74,7 @@ from app.integrations.agents.deep_agents.async_subagents import (
 from app.server import api
 from app.temporal.deployment_composition import DeploymentCapabilityComponents
 from app.temporal.worker import create_production_workers
-from tests.acceptance.control_plane.test_rrm_009_production_composition import (
+from tests.fixtures.rrm009_production_harness import (
     PRINCIPAL,
     ProductionStack,
     _admit,
@@ -90,10 +90,10 @@ from tests.fixtures.rrm009_production_stack import (
     CHILD_MARKER,
     OPERATOR,
     SCOPE,
-    TOKENS_PER_CALL,
     ChildModel,
     TechnicalBinding,
     TechnicalModel,
+    call_usage,
     publish_technical_catalog,
     stage_input,
     stage_templates,
@@ -153,10 +153,6 @@ def _since_input(messages: list[BaseMessage]) -> list[BaseMessage]:
     return messages[human[-1] :] if human else messages
 
 
-def _usage() -> dict[str, int]:
-    return {"input_tokens": 2, "output_tokens": 3, "total_tokens": TOKENS_PER_CALL}
-
-
 class GatedChildModel(ChildModel):
     """The sync subagent's model call that never returns: the cancel lands inside it."""
 
@@ -207,7 +203,7 @@ class SpawningModel(TechnicalModel):
                         "type": "tool_call",
                     }
                 ],
-                usage_metadata=_usage(),
+                usage_metadata=call_usage(),
             )
             return ChatResult(generations=[ChatGeneration(message=message)])
         if self.gate.window == "cognition":
@@ -218,7 +214,7 @@ class SpawningModel(TechnicalModel):
         return ChatResult(
             generations=[
                 ChatGeneration(
-                    message=AIMessage(content=json.dumps(answer), usage_metadata=_usage())
+                    message=AIMessage(content=json.dumps(answer), usage_metadata=call_usage())
                 )
             ]
         )

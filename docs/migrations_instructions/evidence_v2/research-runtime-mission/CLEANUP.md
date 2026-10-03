@@ -130,3 +130,50 @@ The coordinator checked the diff independently: it deletes four unreferenced sym
 
 The service gate needs the DSNs exported explicitly. The developer `.env` does not supply them, so `--env-file` alone runs the hermetic set.
 
+
+
+## CR-4
+
+Scope: cancellation, heartbeat, composition factory, capability wiring and launch path (RRM-008 and RRM-009). Base `0d0c184`; code located by `git diff 56ffd63^1..0d0c184 --stat -- app tests` plus RRM-008's merge `027cc42` (69 changed files). Branch `cleanup/rrm-cr-4`. GoalDirected and StageGraph files (RRM-020, RRM-021) were not touched.
+
+### Findings
+- Names in scope use the cancel / heartbeat / lease / receipt / composition / pin / grant vocabulary. No `v2`/`new`/`tmp`/`helper`/`manager`/`util` symbols were added (the only `v2`/`new` hits are existing test names that describe the Operation workflow contract and attempt lineage).
+- Production code placement is sound: contracts in `domain/operation_execution` (`heartbeats`), launch and relay in `application/run_control`, pins, ports and the browser tool in `integrations`, composition in `temporal/deployment_composition.py` and `api/runtime_composition.py`. `app` and `scripts` import nothing from `tests`.
+- A symbol scan of every scope module (top-level definitions and methods with no reference elsewhere in app, tests, scripts, JSON, SQL, README) found no dead production code. The only single-reference hits are framework entry points (FastAPI routes and handlers, LangChain middleware hooks, `served_graphs`, `asgi_app`) and `Settings.application_backfill_postgres_dsn`, which is outside this scope (it predates RRM-008).
+- Test placement: `ProductionStack`, `open_production_stack` and ten facade helpers lived inside the test module `test_rrm_009_production_composition.py`, and three other RRM-009 test modules plus the fixture `tests/fixtures/rrm009_cancellation.py` imported them from it. A fixture depended on a test module.
+- Test duplication: `rrm009_cancellation._usage` was byte-identical to `rrm009_production_stack._usage`. A leftover debug branch (`DEBUGEVENT` print over Temporal history) sat in `promote_generic_artifact`.
+
+### Changes
+1. `refactor:` removed the debug branch from `promote_generic_artifact` (`bb9b479`). It only ran on a transport exception and re-raised; the status assertion is the check.
+2. `refactor:` moved the harness (`ProductionStack`, `open_production_stack`, `mongo_database`, `_run`/`_send`/`_admit`/`_command`/`_wait_for` and the other facade helpers, `promote_generic_artifact`) verbatim into `tests/fixtures/rrm009_production_harness.py` (`0a68a39`). The four consumers import from it. The composition test keeps its tests and the `stack` fixture. The same commit makes the cancellation fixture import the public `call_usage` from `rrm009_production_stack` instead of keeping a copy.
+
+### Deliberate non-changes
+- Large modules (`deployment_composition.py` 717 lines, `adapter.py`, `run_launch.py`, `capability_pins.py`, `browser_tool.py`, `rrm009_production_stack.py` 979 lines): each has one responsibility; splitting would be churn.
+- The moved harness keeps its underscore-prefixed helper names (`_run`, `_send`, ...) to keep the move verbatim; promoting them to public names is a follow-up if the harness grows more consumers.
+- Repeated per-test `mongo_database` fixtures (about fifteen modules, each with its own database-name prefix) and `_stable_id` in `run_control/service.py` versus `workspaces/workspace_materialization.py`: the first is repo-wide and not RRM-008/009 specific, the second sits in an RRM-020 file.
+- `_inject` in the in-memory and Postgres run-control repositories: a six-line fault-injection hook, kept per repository.
+- Heartbeat, cancel and supersede paths in `operation_activities.py`, `operation_execution.py` and `worker.py`: reviewed for names and dead code, nothing to change.
+- No persisted or wire identity touched (Temporal names, `workflow.patched` IDs, activity names, payload fields, schema versions, migrations, API paths, graph IDs, `bl1` claims, env var names). `tests/conftest.py` selector-loop keys and README runbook commands name test files that did not move, so the path-safety sweep (`Path(__file__)`, `parents[`, quoted paths, import strings, `langgraph.async_subagents.json`) found nothing to update.
+
+### Commands and results
+- `ruff check app tests scripts`: pass. `mypy app`: pass (383 files).
+- Hermetic pytest (DSNs unset): 1064 passed, 90 skipped, 3 xfailed (equals baseline; no tests added, removed or renamed).
+- Pytest with Postgres and Mongo DSNs exported plus `--env-file`, two chunks: `--ignore=tests/acceptance` 1055 passed, 27 skipped, 3 xfailed, 1 failed; `tests/acceptance` 62 passed, 9 skipped. Total 1117 passed, 36 skipped, 3 xfailed plus one failure, against a baseline of 1118 passed, 36 skipped, 3 xfailed. The failure is `tests/unit/integrations/test_langsmith_tracing.py::test_settings_expose_langsmith_contract`; it passes in isolation (6 passed, with and without `LANGSMITH_TRACING=false`) and no code it covers was touched, so it is an order-dependent environment interaction between the developer `.env` and an earlier test in that chunk (the DSN command in the prompt does not set `LANGSMITH_TRACING=false`). Reported, not fixed.
+- `git diff --check`: clean. The shared-stack lock was acquired and released around each full run (it was held by RRM-020 for a long stretch first).
+
+### Candidate generalization seams (not extracted)
+- The production stack harness (API composed as deployed, worker factory, persistent Temporal dev server, restart drill, facade helpers) is a reusable "qualify any family through the facade" harness; `rrm009_production_stack.py` holds the technical catalog and models it runs.
+- `CancellationGate` and `RecordingOperationCancel` with the cancellation drill (`rrm009_cancellation.py`): a provider-neutral "cancel inside a held call, then prove settlement" drill.
+- A single per-test disposable Mongo database fixture in `tests/conftest.py`, parameterized by prefix, would replace the fifteen copies.
+
+### CR-4 integration
+
+The coordinator checked the diff independently. It changes tests and fixtures only: the production-stack harness moved verbatim into `tests/fixtures/rrm009_production_harness.py`, a debug dump was removed, and a duplicated helper was merged. No `app` file changed. It was merged `--no-ff` at `b836c20`. Merge gates:
+- ruff: clean.
+- mypy: 383 files, no issues.
+- Hermetic pytest: 1064 passed, 90 skipped, 3 xfailed (equal to baseline).
+
+The DSN gate for this merge runs together with the RRM-020 and RRM-021 merges.
+
+CR-4's own DSN run (without `LANGSMITH_TRACING=false`) had one order-dependent failure, `test_langsmith_tracing.py::test_settings_expose_langsmith_contract`. That test reads the developer `.env`, and the failure is tracked under the RRM-010 stability item.
+

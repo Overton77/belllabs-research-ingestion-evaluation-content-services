@@ -29,7 +29,7 @@ from app.integrations.artifact_payloads import S3ArtifactPayloadStore
 from app.integrations.s3 import s3_client
 from app.models import WorkspaceCandidateDocument
 from app.temporal.deployment_composition import artifact_payload_store
-from tests.acceptance.control_plane.test_rrm_009_production_composition import (
+from tests.fixtures.rrm009_production_harness import (
     mongo_database,  # noqa: F401 - the per-test Mongo database fixture
     open_production_stack,
     promote_generic_artifact,
