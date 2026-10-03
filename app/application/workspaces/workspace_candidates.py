@@ -7,9 +7,10 @@ from copy import deepcopy
 from hashlib import sha256
 from pathlib import Path
 from typing import Protocol
-from uuid import NAMESPACE_URL, uuid4, uuid5
+from uuid import uuid4
 
 from app.application.workspaces.workspace_materialization import WorkspaceMaterializationService
+from app.domain.control_plane.identity import stable_id
 from app.domain.operation_execution.contracts import (
     CapturedWorkspaceCandidate,
     OperationExecutionBinding,
@@ -69,7 +70,7 @@ class WorkspaceCandidateCaptureService:
             output_slot=slot.slot_name,
             logical_path=logical_path,
             owner=slot.owner,
-            candidate_id=_stable_id(
+            candidate_id=stable_id(
                 "workspace-candidate",
                 binding.binding_id,
                 slot.slot_name,
@@ -238,10 +239,6 @@ class FilesystemWorkspaceCandidateContents:
             ):
                 return candidate
         return None
-
-
-def _stable_id(*parts: str) -> str:
-    return str(uuid5(NAMESPACE_URL, ":".join(parts)))
 
 
 def _path_within_slot(logical_path: str, slot_path: str) -> bool:

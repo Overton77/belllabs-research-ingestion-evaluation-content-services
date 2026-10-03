@@ -6,9 +6,9 @@ from copy import deepcopy
 from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Protocol
-from uuid import NAMESPACE_URL, uuid5
 
 from app.domain.control_plane.canonical import sha256_digest
+from app.domain.control_plane.identity import stable_id
 from app.domain.operation_execution.contracts import (
     DurableInputManifestEntry,
     LocalCandidateManifestEntry,
@@ -165,7 +165,7 @@ class WorkspaceMaterializationService:
                 raise IdempotencyConflict("candidate identity was reused with conflicting content")
             return current
         entry = LocalCandidateManifestEntry(
-            entry_id=_stable_id("workspace-candidate", workspace_id, candidate_id, content_digest),
+            entry_id=stable_id("workspace-candidate", workspace_id, candidate_id, content_digest),
             slot_name=slot_name,
             logical_path=logical_path,
             owner=owner,
@@ -215,7 +215,7 @@ class WorkspaceMaterializationService:
                 return current
             relinked = existing.model_copy(
                 update={
-                    "entry_id": _stable_id(
+                    "entry_id": stable_id(
                         "workspace-promoted",
                         workspace_id,
                         artifact_id,
@@ -246,7 +246,7 @@ class WorkspaceMaterializationService:
                 "promotion requires the current digest-matched local candidate"
             )
         promoted = PromotedArtifactManifestEntry(
-            entry_id=_stable_id(
+            entry_id=stable_id(
                 "workspace-promoted",
                 workspace_id,
                 artifact_id,
@@ -300,7 +300,7 @@ class WorkspaceMaterializationService:
     ) -> tuple[DurableInputManifestEntry, ...]:
         return tuple(
             DurableInputManifestEntry(
-                entry_id=_stable_id(
+                entry_id=stable_id(
                     "workspace-input",
                     request.workspace_id,
                     slot.slot_name,
@@ -335,7 +335,7 @@ class WorkspaceMaterializationService:
         }
         digest = sha256_digest(payload)
         return WorkspaceMaterializationManifest(
-            manifest_id=_stable_id("workspace-manifest", request.workspace_id, "1", digest),
+            manifest_id=stable_id("workspace-manifest", request.workspace_id, "1", digest),
             namespace_id=request.namespace_id,
             workspace_id=request.workspace_id,
             revision=1,
@@ -370,7 +370,7 @@ class WorkspaceMaterializationService:
         digest = sha256_digest(payload)
         return await self._manifests.append(
             WorkspaceMaterializationManifest(
-                manifest_id=_stable_id(
+                manifest_id=stable_id(
                     "workspace-manifest", current.workspace_id, str(revision), digest
                 ),
                 namespace_id=current.namespace_id,
@@ -492,10 +492,6 @@ class InMemoryDurableWorkspaceInputs:
 
 def _digest_bytes(value: bytes) -> str:
     return f"sha256:{sha256(value).hexdigest()}"
-
-
-def _stable_id(*parts: str) -> str:
-    return str(uuid5(NAMESPACE_URL, ":".join(parts)))
 
 
 def _path_within_slot(logical_path: str, slot_path: str) -> bool:

@@ -4,7 +4,6 @@ import asyncio
 from copy import deepcopy
 from datetime import datetime
 from typing import Protocol
-from uuid import NAMESPACE_URL, uuid5
 
 from app.application.control_plane.service import ControlPlaneService
 from app.application.run_control.service import RunControlService
@@ -24,6 +23,7 @@ from app.domain.composition.contracts import (
 )
 from app.domain.control_plane.canonical import stable_json_digest
 from app.domain.control_plane.contracts import DefinitionKind, DefinitionSelector
+from app.domain.control_plane.identity import stable_id
 from app.domain.run_control.contracts import ActorContext, DecisionStatus, RunPhase, RunRequest
 from app.domain.run_control.errors import AdmissionRejected, IdempotencyConflict
 
@@ -295,7 +295,7 @@ class LinkedRunService:
         )
         return await self._repository.commit_link(
             RunCompositionLink(
-                link_id=_stable_id("run-composition-link", identity),
+                link_id=stable_id("run-composition-link", identity),
                 request_identity=identity,
                 request_fingerprint=fingerprint,
                 request_scope=request.request_scope,
@@ -347,7 +347,7 @@ class LinkedRunService:
             )
         revision_number = len(revisions) + 2
         revision = RunDependencyRevision(
-            revision_id=_stable_id("run-dependency-revision", link_id, str(revision_number)),
+            revision_id=stable_id("run-dependency-revision", link_id, str(revision_number)),
             link_id=link_id,
             revision=revision_number,
             prior_dependency_class=prior_class,
@@ -383,7 +383,7 @@ class LinkedRunService:
         late = parent.phase == RunPhase.TERMINAL
         effective_outcome = "defer" if late else outcome
         decision = LinkedRunResultAdmissionDecision(
-            decision_id=_stable_id("linked-result-decision", link_id, exact_output_ref),
+            decision_id=stable_id("linked-result-decision", link_id, exact_output_ref),
             link_id=link_id,
             parent_run_id=link.parent_run_id,
             child_run_id=link.child_run_id,
@@ -447,7 +447,7 @@ class LinkedRunService:
         self, observation: LinkedChildResultObservation
     ) -> LinkedChildTerminalRecord:
         record = LinkedChildTerminalRecord(
-            terminal_record_id=_stable_id("linked-terminal", observation.link.link_id),
+            terminal_record_id=stable_id("linked-terminal", observation.link.link_id),
             link_id=observation.link.link_id,
             child_run_id=observation.link.child_run_id,
             status=observation.status,
@@ -474,7 +474,7 @@ class LinkedRunService:
             requested = blocking or link.cancellation_policy == "request_cancel"
             results.append(
                 LinkedRunCancellationRequest(
-                    cancellation_request_id=_stable_id(
+                    cancellation_request_id=stable_id(
                         "linked-cancellation", parent_run_id, link.link_id
                     ),
                     link_id=link.link_id,
@@ -491,7 +491,7 @@ class LinkedRunService:
 
     @staticmethod
     def _request_identity(request: LinkedRunRequest) -> str:
-        return _stable_id(
+        return stable_id(
             "linked-run-request",
             request.request_scope,
             request.parent_run_id,
@@ -513,7 +513,3 @@ class LinkedRunService:
                 raise AdmissionRejected(
                     f"child budget for {dimension} exceeds the linked slot ceiling"
                 )
-
-
-def _stable_id(*parts: str) -> str:
-    return str(uuid5(NAMESPACE_URL, ":".join(parts)))

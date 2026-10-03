@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import ValidationError
 
 from app.domain.control_plane.canonical import sha256_digest
+from app.domain.control_plane.identity import stable_id
 from app.domain.run_control.contracts import (
     AcceptedObligationEvidence,
     AcceptedOutputEvidence,
@@ -548,7 +548,7 @@ def reduce_lifecycle(
     )
     next_projection = RunProjection.model_validate(next_projection.model_dump(mode="python"))
     transition = LifecycleTransitionRecord(
-        transition_id=_stable_id("transition", projection.run_id, str(version)),
+        transition_id=stable_id("transition", projection.run_id, str(version)),
         run_id=projection.run_id,
         command_id=command.command_id,
         prior_version=projection.version,
@@ -578,7 +578,7 @@ def reduce_lifecycle(
         recorded_at=command.occurred_at,
     )
     event = DomainEventEnvelope(
-        event_id=_stable_id("event", projection.run_id, str(version), event_type),
+        event_id=stable_id("event", projection.run_id, str(version), event_type),
         event_type=event_type,
         aggregate_id=projection.run_id,
         aggregate_version=version,
@@ -656,7 +656,7 @@ def _reduce_authority_batch(
     )
     final_projection = RunProjection.model_validate(final_projection.model_dump(mode="python"))
     transition = LifecycleTransitionRecord(
-        transition_id=_stable_id("transition", projection.run_id, str(version)),
+        transition_id=stable_id("transition", projection.run_id, str(version)),
         run_id=projection.run_id,
         command_id=command.command_id,
         prior_version=projection.version,
@@ -687,7 +687,7 @@ def _reduce_authority_batch(
     )
     event_type = "workflow_run.apply_authority_batch"
     event = DomainEventEnvelope(
-        event_id=_stable_id("event", projection.run_id, str(version), event_type),
+        event_id=stable_id("event", projection.run_id, str(version), event_type),
         event_type=event_type,
         aggregate_id=projection.run_id,
         aggregate_version=version,
@@ -1232,7 +1232,7 @@ def _claim_effect(
     )
     updated = state.model_copy(update={"claims": {**state.claims, action.effect_id: claim}})
     return updated, EffectLedgerEntry(
-        entry_id=_stable_id("effect-entry", state.run_id, action.effect_id, "claim"),
+        entry_id=stable_id("effect-entry", state.run_id, action.effect_id, "claim"),
         run_id=state.run_id,
         effect_id=action.effect_id,
         kind="claim",
@@ -1275,7 +1275,7 @@ def _observe_effect(
     )
     updated = state.model_copy(update={"claims": {**state.claims, action.effect_id: updated_claim}})
     return updated, EffectLedgerEntry(
-        entry_id=_stable_id(
+        entry_id=stable_id(
             "effect-entry", state.run_id, action.effect_id, "observation", action.observation_id
         ),
         run_id=state.run_id,
@@ -1359,7 +1359,7 @@ def _settle_effect(
         updated,
         updated_budget,
         EffectLedgerEntry(
-            entry_id=_stable_id(
+            entry_id=stable_id(
                 "effect-entry", state.run_id, action.effect_id, "settlement", action.settlement_id
             ),
             run_id=state.run_id,
@@ -1422,7 +1422,7 @@ def _add_soft_limit_proposal(
     }
     if not triggered:
         return proposals
-    proposal_id = _stable_id("continuation", run_id, *sorted(triggered))
+    proposal_id = stable_id("continuation", run_id, *sorted(triggered))
     return proposals + [
         ContinuationProposal(
             proposal_id=proposal_id,
@@ -1564,7 +1564,7 @@ def _ledger_entry(
     command: LifecycleCommand,
 ) -> BudgetLedgerEntry:
     return BudgetLedgerEntry(
-        entry_id=_stable_id("ledger", state.account_id, kind.value, idempotency_id),
+        entry_id=stable_id("ledger", state.account_id, kind.value, idempotency_id),
         account_id=state.account_id,
         run_id=state.run_id,
         kind=kind,
@@ -1573,10 +1573,6 @@ def _ledger_entry(
         occurred_at=command.occurred_at,
         parent_account_id=state.parent_account_id,
     )
-
-
-def _stable_id(*parts: str) -> str:
-    return str(uuid5(NAMESPACE_URL, ":".join(parts)))
 
 
 def _evidence_frontier(

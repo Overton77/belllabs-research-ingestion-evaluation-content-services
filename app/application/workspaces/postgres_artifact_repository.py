@@ -5,11 +5,11 @@ import json
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
-from uuid import NAMESPACE_URL, uuid5
 
 import asyncpg
 
 from app.application.workspaces.artifact_promotion import artifact_durable_reference
+from app.domain.control_plane.identity import stable_id
 from app.domain.operation_execution.contracts import (
     ArtifactMetadataRevision,
     ArtifactPromotionState,
@@ -42,7 +42,7 @@ class PostgresArtifactDurableReferenceRepository:
         durable_reference = artifact_durable_reference(request_scope, run_id, artifact.artifact_id)
         if artifact.durable_reference != durable_reference:
             raise ValueError("admitted metadata carries a conflicting durable reference")
-        event_id = _stable_id("artifact-admitted-event", artifact.artifact_id)
+        event_id = stable_id("artifact-admitted-event", artifact.artifact_id)
         recorded_at = datetime.now(UTC)
         envelope: dict[str, object] = {
             "schema_version": "1",
@@ -185,7 +185,3 @@ async def _set_scope(connection: asyncpg.Connection, request_scope: str) -> None
 def _json(value: Any) -> dict[str, Any]:
     parsed = json.loads(value) if isinstance(value, str) else value
     return dict(parsed)
-
-
-def _stable_id(*parts: str) -> str:
-    return str(uuid5(NAMESPACE_URL, ":".join(parts)))

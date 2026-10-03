@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Protocol
-from uuid import NAMESPACE_URL, uuid5
 
 from app.application.runtime.runtime_execution_bindings import (
     RuntimeBindingConflict,
@@ -10,6 +9,7 @@ from app.application.runtime.runtime_execution_bindings import (
     touch_binding,
 )
 from app.domain.control_plane.contracts import ExactDefinitionRef
+from app.domain.control_plane.identity import stable_id
 from app.domain.graph_runtime.contracts import (
     AttemptDisposition,
     GraphExecutionReceipt,
@@ -118,7 +118,7 @@ class GraphRuntimeDispatchService:
             )
         observed_at = submission.submitted_at
         binding = RuntimeExecutionBinding(
-            binding_id=_stable_id("runtime-binding", submission.epoch.canonical_key),
+            binding_id=stable_id("runtime-binding", submission.epoch.canonical_key),
             epoch=submission.epoch,
             submission_id=submission.submission_id,
             submission_idempotency_key=submission.idempotency_key,
@@ -311,7 +311,3 @@ class GraphRuntimeDispatchService:
                 raise RuntimeBindingConflict(
                     "Agent Server run belongs to a different deployment endpoint"
                 )
-
-
-def _stable_id(*parts: str) -> str:
-    return str(uuid5(NAMESPACE_URL, ":".join(parts)))
