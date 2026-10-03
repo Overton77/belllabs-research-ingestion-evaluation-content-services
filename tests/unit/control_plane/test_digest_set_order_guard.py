@@ -257,20 +257,6 @@ _AUDIT: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...], str], ...] = (
         NO_SET,
     ),
     (
-        "app/application/workspaces/mongo_workspace_repository.py",
-        "MongoWorkspaceManifestRepository.reserve_writable_slots",
-        ("request.model_dump(mode='json')",),
-        (f"{OE}.contracts.WorkspaceMaterializationRequest",),
-        NO_SET,
-    ),
-    (
-        "app/application/workspaces/workspace_materialization.py",
-        "InMemoryWorkspaceManifestRepository.reserve_writable_slots",
-        ("request.model_dump(mode='json')",),
-        (f"{OE}.contracts.WorkspaceMaterializationRequest",),
-        NO_SET,
-    ),
-    (
         "app/application/workspaces/workspace_materialization.py",
         "WorkspaceMaterializationService._append_revision",
         (

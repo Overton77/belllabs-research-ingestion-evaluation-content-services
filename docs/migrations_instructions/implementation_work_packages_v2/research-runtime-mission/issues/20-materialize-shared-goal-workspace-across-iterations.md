@@ -4,7 +4,7 @@
 
 **Blocked by:** None.
 **Blocks:** Any GoalDirected run of two or more iterations with a `shared` workspace on the production composition (RRM-009's `WorkspaceMaterializationService` over Mongo manifests), including the GoalDirected company fixture (RRM-011) unless its blueprint uses `fresh` workspaces. Whether it blocks RRM-010 is the coordinator's decision.
-**Status:** open (found by RRM-009, 2026-10-02)
+**Status:** implemented; review `approve_with_fixes` applied, re-check pending (found by RRM-009, 2026-10-02; option 1, tested code head after review `cea2d50`; [evidence](../../../evidence_v2/research-runtime-mission/RRM-020/README.md))
 **Branch:** `wp/rrm-020-shared-goal-workspace`
 **Authority:** REQ-CP-DA-013 (exact exclusive writable slots), REQ-BP-GD-004 (independent verifier workspace), SPEC-BP-GOAL-DIRECTED workspace continuity (`GoalWorkspaceSnapshotPolicy`: workspace continuity is independent from model-session continuity)
 
@@ -24,6 +24,10 @@
 
 ## Acceptance
 
-- [ ] A two-iteration GoalDirected run with `workspace_mode = "shared"` completes on the production composition (Mongo manifests, `BindingWorkspaceMaterializer`).
-- [ ] The RRM-020 reproduction passes without its marker; a different slot set under one identity outside the declared rule still conflicts.
-- [ ] Executor and verifier writable roots stay disjoint and owned (REQ-BP-GD-004).
+- [x] A two-iteration GoalDirected run with `workspace_mode = "shared"` completes on the production composition (Mongo manifests, `BindingWorkspaceMaterializer`).
+- [x] The RRM-020 reproduction passes without its marker; a different slot set under one identity outside the declared rule still conflicts.
+- [x] Executor and verifier writable roots stay disjoint and owned (REQ-BP-GD-004).
+
+## Decision (RRM-020, 2026-10-02)
+
+Option 1. A `shared` workspace keeps one identity; the next iteration's role-rooted slots join it as one new manifest revision under the declared rule `shared_goal_workspace_slots` (`app/domain/operation_execution/materialization.py`). The rule requires the same role, the next iteration (`n = max + 1`, canonical ASCII), the same compiled slot set and new owners. A retry appends nothing, and every other slot set still raises `IdempotencyConflict`. Options 2 and 3 were rejected: REQ-CP-DA-015 makes a restore a new identity, and option 3 would change RRM-016's authority rule and per-iteration ownership. Rationale, spec citations and gates are in the evidence.

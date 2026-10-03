@@ -18,6 +18,7 @@ from app.domain.operation_execution.contracts import (
     WorkspaceMaterializationManifest,
     WorkspaceMaterializationRequest,
     WorkspaceOwner,
+    WorkspaceSlotBinding,
 )
 from app.domain.operation_execution.errors import (
     UndeclaredWorkspacePath,
@@ -25,8 +26,11 @@ from app.domain.operation_execution.errors import (
     WorkspaceSlotConflict,
 )
 from app.domain.operation_execution.materialization import (
+    same_workspace_manifest,
+    shared_goal_workspace_slots,
     slot_ownership_boundary,
     verify_workspace_manifest,
+    workspace_reservation_token,
 )
 from app.domain.run_control.errors import IdempotencyConflict
 
@@ -72,15 +76,31 @@ class WorkspaceMaterializationService:
         prior = await self._manifests.get_current(request.namespace_id, request.workspace_id)
         if prior is not None:
             verify_workspace_manifest(prior)
+            slots = (
+                prior.slots
+                if prior.slots == request.slots
+                else shared_goal_workspace_slots(prior.slots, request.slots)
+            )
             if (
                 prior.namespace_id != request.namespace_id
                 or prior.workspace_id != request.workspace_id
                 or prior.template_ref != request.template_ref
                 or prior.workflow_contract_digest != request.workflow_contract_digest
-                or prior.slots != request.slots
+                or slots is None
             ):
                 raise IdempotencyConflict(
                     "workspace identity was reused with different materialization"
+                )
+            if slots != prior.slots:
+                # RRM-020: the next iteration of a `shared` GoalDirected workspace. Its role
+                # root is reserved for it, and its slots join the workspace as one new
+                # manifest revision; a retry finds them and appends nothing.
+                await self._manifests.reserve_writable_slots(request)
+                prior = await self._append_revision(
+                    prior,
+                    slots=slots,
+                    entries=prior.entries + self._durable_input_entries(request, by_path=True),
+                    created_at=request.created_at,
                 )
             inputs = await self._load_and_verify_inputs(prior)
             workspace = await self._provisioner.provision(request, prior, inputs)
@@ -107,7 +127,17 @@ class WorkspaceMaterializationService:
         recorded_at: datetime | None = None,
     ) -> WorkspaceMaterializationManifest:
         current = await self._require_current(namespace_id, workspace_id)
-        slot = next((item for item in current.slots if item.slot_name == slot_name), None)
+        # A `shared` GoalDirected workspace holds one slot of each name per iteration
+        # (RRM-020); the slot is the one of that name whose path holds the candidate.
+        slot = next(
+            (
+                item
+                for item in current.slots
+                if item.slot_name == slot_name
+                and _path_within_slot(logical_path, item.logical_path)
+            ),
+            None,
+        )
         if (
             slot is None
             or slot.access != "exclusive_write"
@@ -264,16 +294,20 @@ class WorkspaceMaterializationService:
             values[entry.logical_path] = content
         return values
 
-    def _initial_manifest(
-        self, request: WorkspaceMaterializationRequest
-    ) -> WorkspaceMaterializationManifest:
-        entries = tuple(
+    @staticmethod
+    def _durable_input_entries(
+        request: WorkspaceMaterializationRequest, *, by_path: bool = False
+    ) -> tuple[DurableInputManifestEntry, ...]:
+        return tuple(
             DurableInputManifestEntry(
                 entry_id=_stable_id(
                     "workspace-input",
                     request.workspace_id,
                     slot.slot_name,
                     slot.content_digest or "",
+                    # A later iteration of a shared workspace mounts the same input under its
+                    # own role root; the path keeps the entry identities distinct.
+                    *((slot.logical_path,) if by_path else ()),
                 ),
                 slot_name=slot.slot_name,
                 logical_path=slot.logical_path,
@@ -284,6 +318,11 @@ class WorkspaceMaterializationService:
             for slot in request.slots
             if slot.access == "read_only"
         )
+
+    def _initial_manifest(
+        self, request: WorkspaceMaterializationRequest
+    ) -> WorkspaceMaterializationManifest:
+        entries = self._durable_input_entries(request)
         payload = {
             "namespace_id": request.namespace_id,
             "workspace_id": request.workspace_id,
@@ -314,15 +353,17 @@ class WorkspaceMaterializationService:
         *,
         entries: tuple,
         created_at: datetime,
+        slots: tuple[WorkspaceSlotBinding, ...] | None = None,
     ) -> WorkspaceMaterializationManifest:
         revision = current.revision + 1
+        slots = current.slots if slots is None else slots
         payload = {
             "namespace_id": current.namespace_id,
             "workspace_id": current.workspace_id,
             "revision": revision,
             "template_ref": current.template_ref.model_dump(mode="json"),
             "workflow_contract_digest": current.workflow_contract_digest,
-            "slots": [slot.model_dump(mode="json") for slot in current.slots],
+            "slots": [slot.model_dump(mode="json") for slot in slots],
             "entries": [entry.model_dump(mode="json") for entry in entries],
             "prior_manifest_digest": current.manifest_digest,
         }
@@ -337,7 +378,7 @@ class WorkspaceMaterializationService:
                 revision=revision,
                 template_ref=current.template_ref,
                 workflow_contract_digest=current.workflow_contract_digest,
-                slots=current.slots,
+                slots=slots,
                 entries=entries,
                 prior_manifest_digest=current.manifest_digest,
                 manifest_digest=digest,
@@ -379,7 +420,7 @@ class InMemoryWorkspaceManifestRepository:
 
     async def reserve_writable_slots(self, request: WorkspaceMaterializationRequest) -> None:
         async with self._lock:
-            reservation_token = sha256_digest(request.model_dump(mode="json"))
+            reservation_token = workspace_reservation_token(request)
             requested = [
                 (
                     request.namespace_id,
@@ -424,7 +465,7 @@ class InMemoryWorkspaceManifestRepository:
                     matching = next(
                         (item for item in values if item.revision == manifest.revision), None
                     )
-                    if matching == manifest:
+                    if matching is not None and same_workspace_manifest(matching, manifest):
                         return deepcopy(matching)
                     raise IdempotencyConflict("workspace manifest revision conflict")
                 if (

@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import quote
 
 import asyncpg
@@ -308,7 +308,11 @@ def stage_blueprint() -> StageGraphBlueprint:
     )
 
 
-def goal_blueprint(*, max_iterations: int = 2) -> GoalDirectedBlueprint:
+def goal_blueprint(
+    *,
+    max_iterations: int = 2,
+    workspace_mode: Literal["shared", "fresh"] = "fresh",
+) -> GoalDirectedBlueprint:
     reservation = {"goal.iterations": 1, "tokens.total": 40, "model.turns": 8}
     return GoalDirectedBlueprint.model_validate(
         {
@@ -322,12 +326,12 @@ def goal_blueprint(*, max_iterations: int = 2) -> GoalDirectedBlueprint:
                 "budgets": {"dimensions": reservation},
             },
             "iteration_reservation": reservation,
-            # A fresh workspace per iteration. With the default `shared` mode the second
-            # iteration's executor re-materializes the same workspace identity with its
-            # iteration-rooted slots and the governed materializer refuses it (RRM-020).
+            # RRM-009's technical qualification runs a `fresh` workspace per iteration;
+            # RRM-020's proof runs the default `shared` one, whose next iteration joins the
+            # same workspace identity as a new manifest revision.
             "workspace_policy": {
                 **GENERIC_GOAL_DIRECTED.workspace_policy.model_dump(mode="python"),
-                "workspace_mode": "fresh",
+                "workspace_mode": workspace_mode,
             },
         }
     )
@@ -370,12 +374,15 @@ async def publish_technical_catalog(
     family: str,
     now: datetime,
     ceilings: Mapping[str, int] = TECHNICAL_CEILINGS,
+    goal_workspace_mode: Literal["shared", "fresh"] = "fresh",
 ) -> TechnicalCatalog:
     """Publish one technical Workflow Type per family and compile its ERC through F1."""
 
     tag = "stagegraph" if family == "StageGraph" else "goal-directed"
     blueprint: StageGraphBlueprint | GoalDirectedBlueprint = (
-        stage_blueprint() if family == "StageGraph" else goal_blueprint()
+        stage_blueprint()
+        if family == "StageGraph"
+        else goal_blueprint(workspace_mode=goal_workspace_mode)
     )
     contract = stage_workspace_contract() if family == "StageGraph" else goal_workspace_contract()
 
@@ -876,7 +883,8 @@ class ChildModel(_LoggedModel):
 class TechnicalModel(_LoggedModel):
     """The parent's cognition, by tool-message count since its latest input:
 
-    0: `task` (the in-process sync subagent); 1: `write_file` into the writable slot;
+    0: `task` (the in-process sync subagent); 1: `write_file` into the writable slot (a
+    GoalDirected operation writes into its role root's `/work` slot);
     2: `lookup_binding_marker` (the exact MCP tool); 3: the typed answer. GoalDirected
     operations answer with their role's observation; StageGraph operations with an
     artifact ref derived from their admitted objective.
@@ -904,7 +912,7 @@ class TechnicalModel(_LoggedModel):
             call = {
                 "name": "write_file",
                 "args": {
-                    "file_path": REPORT_PATH,
+                    "file_path": _report_path(self.operation_id),
                     "content": f"# RRM-009 report\n\nobjective-digest: {_digest16(objective)}\n",
                 },
             }
@@ -973,6 +981,15 @@ class TechnicalModel(_LoggedModel):
             "obligation_applicability": [[GOAL_OBLIGATION, True]],
             "output_contract_ref": GOAL_OUTPUT_CONTRACT,
         }
+
+
+def _report_path(operation_id: str) -> str:
+    """The report's path in the operation's governed writable slot."""
+
+    if "goal-iteration/" not in operation_id:
+        return REPORT_PATH
+    iteration, role = operation_id.split("goal-iteration/", 1)[1].split("/")[:2]
+    return f"/goal/{iteration}/{role.split(':', 1)[0]}/work/report.md"
 
 
 def utc_now() -> datetime:
