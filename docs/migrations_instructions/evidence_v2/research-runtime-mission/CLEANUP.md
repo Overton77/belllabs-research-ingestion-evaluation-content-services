@@ -165,3 +165,15 @@ Scope: cancellation, heartbeat, composition factory, capability wiring and launc
 - The production stack harness (API composed as deployed, worker factory, persistent Temporal dev server, restart drill, facade helpers) is a reusable "qualify any family through the facade" harness; `rrm009_production_stack.py` holds the technical catalog and models it runs.
 - `CancellationGate` and `RecordingOperationCancel` with the cancellation drill (`rrm009_cancellation.py`): a provider-neutral "cancel inside a held call, then prove settlement" drill.
 - A single per-test disposable Mongo database fixture in `tests/conftest.py`, parameterized by prefix, would replace the fifteen copies.
+
+### CR-4 integration
+
+The coordinator checked the diff independently. It changes tests and fixtures only: the production-stack harness moved verbatim into `tests/fixtures/rrm009_production_harness.py`, a debug dump was removed, and a duplicated helper was merged. No `app` file changed. It was merged `--no-ff` at `b836c20`. Merge gates:
+- ruff: clean.
+- mypy: 383 files, no issues.
+- Hermetic pytest: 1064 passed, 90 skipped, 3 xfailed (equal to baseline).
+
+The DSN gate for this merge runs together with the RRM-020 and RRM-021 merges.
+
+CR-4's own DSN run (without `LANGSMITH_TRACING=false`) had one order-dependent failure, `test_langsmith_tracing.py::test_settings_expose_langsmith_contract`. That test reads the developer `.env`, and the failure is tracked under the RRM-010 stability item.
+
