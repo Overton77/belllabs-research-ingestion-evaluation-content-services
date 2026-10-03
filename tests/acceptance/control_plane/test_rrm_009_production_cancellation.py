@@ -27,10 +27,6 @@ from typing import Any
 
 import pytest
 
-from tests.acceptance.control_plane.test_rrm_009_production_composition import (
-    mongo_database,  # noqa: F401 - the per-test Mongo database fixture
-    open_production_stack,
-)
 from tests.fixtures.rrm009_cancellation import (
     CANCELLATION_ENVIRONMENT,
     CancellationGate,
@@ -40,6 +36,10 @@ from tests.fixtures.rrm009_cancellation import (
     run_cancellation_drill,
 )
 from tests.fixtures.rrm009_live_capabilities import live_opt_in
+from tests.fixtures.rrm009_production_harness import (
+    mongo_database,  # noqa: F401 - the per-test Mongo database fixture
+    open_production_stack,
+)
 from tests.fixtures.rrm009_production_stack import technical_binding
 
 

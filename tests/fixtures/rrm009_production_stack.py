@@ -799,7 +799,7 @@ def _digest16(text: str) -> str:
     return sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
-def _usage() -> dict[str, int]:
+def call_usage() -> dict[str, int]:
     return {"input_tokens": 2, "output_tokens": 3, "total_tokens": TOKENS_PER_CALL}
 
 
@@ -868,7 +868,7 @@ class ChildModel(_LoggedModel):
         self._record("child", messages)
         return ChatResult(
             generations=[
-                ChatGeneration(message=AIMessage(content=CHILD_MARKER, usage_metadata=_usage()))
+                ChatGeneration(message=AIMessage(content=CHILD_MARKER, usage_metadata=call_usage()))
             ]
         )
 
@@ -916,7 +916,7 @@ class TechnicalModel(_LoggedModel):
                     ChatGeneration(
                         message=AIMessage(
                             content=json.dumps(self._answer(since_input), sort_keys=True),
-                            usage_metadata=_usage(),
+                            usage_metadata=call_usage(),
                         )
                     )
                 ]
@@ -930,7 +930,7 @@ class TechnicalModel(_LoggedModel):
                     "type": "tool_call",
                 }
             ],
-            usage_metadata=_usage(),
+            usage_metadata=call_usage(),
         )
         return ChatResult(generations=[ChatGeneration(message=message)])
 
