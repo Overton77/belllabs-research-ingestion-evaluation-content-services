@@ -1,6 +1,6 @@
 # RRM-021 implementation evidence
 
-Disposition: implemented; independent review pending (2026-10-02)
+Disposition: implemented; review `approve_with_fixes` fixed (2026-10-02); independent re-check pending
 Recorded date: 2026-10-02 (America/New_York)
 Qualification identity: RRM-021 settles the admitted baseline reservation of a StageGraph run. Requirements: REQ-CP-RUN-006 (reservations are released or settled before terminalization), the reducer's terminalization rule (`budget_not_settled`), REQ-CP-EXEC-008 step 7 (cancellation also terminalizes).
 Base revision and head revision: base integration `0d0c184`; code commit `c30c9f8` (branch `wp/rrm-021-stagegraph-baseline-settlement`). Not merged (the coordinator owns review and merge).
@@ -68,11 +68,31 @@ RRM-009 technical StageGraph qualification, under the stack lock, disposable Pos
 ## Unresolved risks and drift checks
 
 - Failed outcome has no dedicated drill (see the map); the code path is shared with the other outcomes.
-- If the family fails before it reaches the terminal proposal (for example `stagegraph_blocked`), no terminalization happens and the baseline is not released; that is a pre-existing non-terminal failure, not changed here.
+- Only the `stagegraph_blocked` failure path releases the baseline before raising (review fix 3). Other family failures (invariant violations, `stagegraph_cancellation_unresolved`) raise without releasing; they are not terminal proposals and were not changed.
 - Settlement uses `release` against zero usage. If a later ticket makes the baseline cover recorded usage, `settle_baseline` is the one place to change.
 - `app/temporal/registration/activities.py` is coordinator-owned; review that one line. CR-4 and RRM-020 may touch neighbouring lines (the StageGraph tuple), so expect a trivial merge conflict at most.
 - The RRM-015 digest guard passes (included in the full runs).
 
+## Review disposition
+
+Verdict `approve_with_fixes`, nothing blocking. Integration `b836c20` (CR-4) was merged into the branch (`bbec4c2`, no rebase); the RRM-009 StageGraph qualification edits were re-applied on the moved harness (`tests/fixtures/rrm009_production_harness.py` helpers `_run`, `_terminal`; the fork baseline, the `budget_mismatch` assertion and `_assert_completed_with_baseline_released` live in the acceptance test). Fix commit `45e9b6d`.
+
+1. **Zero-amount dimension.** `settle_baseline` now filters the request baseline and the remaining reservation to amounts above zero before comparing, so `{"tokens.total": 20, "cost.usd": 0}` no longer fires the mismatch. Tests (`tests/unit/orchestration/test_rrm_021_baseline_settlement.py`): zero dimension on both sides, on one side only, and a genuinely different baseline still refused.
+2. **Repeated stale.** The release retries up to `BASELINE_SETTLEMENT_ATTEMPTS = 4` times, each at the reported version under a new command identity (`...:at-version:{n}`), as GoalDirected does. If still stale it raises a retryable `RuntimeError`, so the Activity retry policy re-reads the run; the release is idempotent. Tests: three stale results then success (four distinct command identities), and four stale results then a retryable error, then exactly one release, then a no-op.
+3. **Failed/blocked path: contained, fixed.** `stagegraph_blocked` is raised with the baseline still reserved. The family now releases it first through the same activity (`_release_baseline`), gated by a separate patch `rrm-021-release-baseline-on-blocked` and only for a non-empty baseline. Test `test_a_blocked_stagegraph_releases_its_baseline_before_it_fails` forces no admissible work (every dependency unresolved after the last stage): the family fails `stagegraph_blocked`, never proposes terminalization, and the budget holds nothing reserved and no `baseline`; the history carries the new patch id only and replays. No RRM-022 is needed. The earlier terminal path is refactored onto the same helper with no behaviour change (the RRM-021 pre-change histories still replay).
+
+### Gates after the review fixes (code head `45e9b6d`)
+
+| Gate | Result |
+|---|---|
+| ruff `app tests scripts`; mypy `app` and the RRM-021 test modules | clean |
+| Owning suites + replay (hermetic, incl. all RRM-021 Temporal and replay tests) | 319 passed, 2 skipped |
+| RRM-009 StageGraph qualification, under the lock | 1 passed (156.9 s) |
+| Full hermetic (DSNs unset, `LANGSMITH_TRACING=false`) | 1075 passed, 90 skipped, 3 xfailed |
+| Full DSN chunk `--ignore=tests/acceptance`, under the lock | 1067 passed, 27 skipped, 3 xfailed |
+| Full DSN `tests/acceptance`, under the lock | 62 passed, 9 skipped |
+| `git diff --check` | clean |
+
 ## Final disposition
 
-Implemented; independent review pending. Nothing merged, pushed or amended.
+Implemented; review fixes applied; independent re-check pending. Nothing merged, pushed or amended.
