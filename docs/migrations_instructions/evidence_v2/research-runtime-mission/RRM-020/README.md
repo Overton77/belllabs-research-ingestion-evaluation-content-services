@@ -1,9 +1,9 @@
 # RRM-020 implementation evidence
 
-Disposition: ready_for_review (implemented; independent review pending)
+Disposition: ready_for_review (independent review `approve_with_fixes`, nothing blocking; the three review fixes are applied and re-gated; re-check pending)
 Recorded date: 2026-10-02 (America/New_York)
 Qualification identity: RRM-020 materialize a `shared` GoalDirected workspace across iterations. Requirements: REQ-CP-DA-013 (exact exclusive writable slots), REQ-BP-GD-004 (independent verifier workspace), SPEC-BP-GOAL-DIRECTED workspace continuity (`GoalWorkspaceSnapshotPolicy`: "Workspace continuity is independent from model-session continuity"), REQ-CP-DA-014 (candidates registered against the slot that governs them).
-Base revision and head revision: base integration `0d0c184` (everything through RRM-009). Code commit: `0da4911` (implementation and tests). **Tested code head: `0da4911`.** The documentation commit that adds this README and updates the ticket follows it and changes no code. Not merged (the coordinator owns review and merge).
+Base revision and head revision: base integration `0d0c184` (everything through RRM-009). Code commit: `0da4911` (implementation and tests), tested before review; documentation `06be4e4`. Review-fix commits: `9b84ab0` (fixes 1 to 3) and `a176380` (order-stable tokens under the RRM-015 guard). Integration `6d38c0b` (`b836c20` with CR-4 merged, plus one docs commit) was merged in at `d931bd7` (no rebase), and `cea2d50` repoints the proof's imports to CR-4's harness module. **Tested code head after review: `cea2d50`** (see Review disposition). The documentation commit recording the review follows it and changes no code. Not merged into integration (the coordinator owns review and merge).
 Framework/package baseline: `uv.lock` unchanged (no dependency change); CPython 3.12.14 (Codex runtime venv); temporalio 1.30.0 (`WorkflowEnvironment.start_local`); uv 0.7.5.
 
 ## Worktree provenance
@@ -30,10 +30,10 @@ The ticket offered three options. Option 1 is the one the spec and code support:
 
 This is the only case where one workspace identity is materialized with another slot set:
 
-- Every requested slot lies under one GoalDirected role root `/goal/{n}/{role}`, and every slot already in the workspace lies under a root of the same role. An executor workspace never takes a verifier root, and the reverse (REQ-BP-GD-004).
+- Every requested slot lies under one GoalDirected role root `/goal/{n}/{role}`, where `n` is a canonical ASCII decimal (review fix 1), and every slot already in the workspace lies under a root of the same role. An executor workspace never takes a verifier root, and the reverse (REQ-BP-GD-004).
 - If iteration `n` is already in the workspace, the request must carry exactly its recorded slots. This is a retry: the current manifest is returned and nothing is appended.
 - Otherwise:
-  - `n` is later than every iteration in the workspace;
+  - `n` is exactly the workspace's latest iteration plus one (review fix 2; it was "later than every iteration" before review);
   - its slots, without the root, are the same compiled slot set (name, relative path, access, owner kind, durable input) as every earlier iteration's;
   - its owners own nothing in the workspace yet.
   - The result is the current slots followed by the requested ones.
@@ -43,7 +43,7 @@ This is the only case where one workspace identity is materialized with another 
 
 - **`materialize`.** When the rule extends the workspace, it:
   1. reserves the new role root through the repository's `reserve_writable_slots(request)`, the same reservation path as a first materialization (Mongo unique `(namespace_id, logical_path)`);
-  2. appends one revision with the extended slots and the current entries, plus any read-only inputs of the new root. Those input entry IDs are qualified by path, because the same input is mounted under each root. `created_at` is the binding's `bound_at`, so a retried append is byte-identical and the repository's idempotent append returns it;
+  2. appends one revision with the extended slots and the current entries, plus any read-only inputs of the new root. Those input entry IDs are qualified by path, because the same input is mounted under each root. `created_at` is the binding's `bound_at`. Since review fix 3, an append is idempotent on everything but `created_at`, so a retry under a re-derived binding returns the stored revision;
   3. provisions from that revision.
   A retry, before or after the append, converges on one revision: before, the append is idempotent; after, the rule finds the iteration and appends nothing.
 - **`register_candidate`.** The slot is now the slot *of that name whose path holds the candidate*. The workspace holds one `work` slot per iteration, and a first-match by name would have bound iteration 2's report to iteration 1's slot. Owner and path checks are unchanged, so iteration 2 cannot register into iteration 1's root.
@@ -75,7 +75,7 @@ This is the only case where one workspace identity is materialized with another 
 **Shared-seam edits (authorized list):**
 - `app/application/workspaces/workspace_materialization.py` (workspace materialization): the extension branch in `materialize`, the slot lookup in `register_candidate`, `_durable_input_entries`, and `slots` on `_append_revision`.
 - `app/domain/operation_execution/materialization.py`: `shared_goal_workspace_slots` (the declared rule) and `_goal_role_root`. `slot_ownership_boundary` now uses `_goal_role_root`, with identical behaviour; its unit test is unchanged and passing.
-- Mongo manifest repository (`app/application/workspaces/mongo_workspace_repository.py`): **not edited.** Its idempotent `append` and `reserve_writable_slots` already serve the extension.
+- Mongo manifest repository (`app/application/workspaces/mongo_workspace_repository.py`): not edited by `0da4911`; **edited in review** (fix 3). The reservation token omits `created_at`, a reservation row with the earlier token is still accepted, and `append` compares manifests without `created_at`.
 - GoalDirected preparer (`app/application/orchestration/goal_directed.py`): **not edited.** It keeps binding exactly the role-rooted compiled slots.
 
 **Tests and fixtures:**
@@ -89,7 +89,7 @@ This is the only case where one workspace identity is materialized with another 
 
 ## Deterministic verification
 
-All runs from the worktree with `unset VIRTUAL_ENV`, one pytest process at a time, on `0da4911` (the full suites) or its working tree just before the commit (the targeted runs). `<DSNs>` = `TEST_APPLICATION_POSTGRES_DSN='postgresql://belllabs:belllabs-local@127.0.0.1:55432/belllabs' TEST_MONGODB_URI='mongodb://127.0.0.1:27017/?directConnection=true'`, exported explicitly; `LIVE=0` = `BELLABS_RUN_WP_BP_010_LIVE=0 BELLABS_RUN_WP_BP_020_LIVE=0 BELLABS_RUN_WP_CP_040_LIVE=0`.
+**Pre-review gates.** The post-review gates on `cea2d50` are in Review disposition. All runs from the worktree with `unset VIRTUAL_ENV`, one pytest process at a time, on `0da4911` (the full suites) or its working tree just before the commit (the targeted runs). `<DSNs>` = `TEST_APPLICATION_POSTGRES_DSN='postgresql://belllabs:belllabs-local@127.0.0.1:55432/belllabs' TEST_MONGODB_URI='mongodb://127.0.0.1:27017/?directConnection=true'`, exported explicitly; `LIVE=0` = `BELLABS_RUN_WP_BP_010_LIVE=0 BELLABS_RUN_WP_BP_020_LIVE=0 BELLABS_RUN_WP_CP_040_LIVE=0`.
 
 | Gate | Command | Result |
 |---|---|---|
@@ -156,7 +156,7 @@ Histories replayed:
 In-run replays also pass in the proof and the RRM-009 regression. No workflow code changed, so no new history was captured and no patch marker was added.
 
 **Recovery.** A retried materialization converges to one revision in both crash windows:
-- before the append: the reservation is re-reserved with the same token, and the append is the same manifest, accepted idempotently;
+- before the append: the reservation is re-reserved with the same token, and the append is the same manifest, accepted idempotently. Since review fix 3 this also holds when the retry is a new operation attempt with another `bound_at`;
 - after the append: the rule finds the recorded iteration.
 
 The unit, Mongo and proof tests above show the post-append retry.
@@ -174,7 +174,7 @@ The unit, Mongo and proof tests above show the post-append retry.
 
 1. **The rule lives in the generic materializer and is keyed on path shape.** The materializer cannot see the blueprint's `workspace_mode`, so the rule recognizes the GoalDirected role-root shape that RRM-016 binds and run control verifies for exactly that unit.
    - Spec text relied on: REQ-CP-DA-013; `GoalWorkspaceSnapshotPolicy` ("Workspace continuity is independent from model-session continuity"); CON-CP-WORKSPACE-MANIFEST-V1 ("logical slots and ownership").
-   - Alternative: an explicit, digest-bound continuation declaration on `WorkspaceContract`. That changes binding digests and Temporal-carried contracts, which is why it was not taken here.
+   - Alternative: an explicit, digest-bound continuation declaration on `WorkspaceContract`. That changes binding digests and Temporal-carried contracts, which is why it was not taken here. Review fix 2 measured this: see Review disposition.
 2. **Continuity is at the workspace and manifest level, not as an agent read grant.**
    - What is shared: one workspace root on the provisioner, which holds both iterations' slots, and one manifest that carries every iteration's candidates and promotions.
    - What is not: iteration 2's binding still grants writes only to its own root and reads only to its declared read mounts. Earlier roots are not readable to the next iteration's agent through the binding; content passes forward through the typed handoff (REQ-BP-GD-005).
@@ -182,16 +182,85 @@ The unit, Mongo and proof tests above show the post-append retry.
 
 **Observations (not changed)**
 
-- **A Mongo reservation token can conflict after a crash.** The token digests the whole request, including `created_at` (the binding's `bound_at`). Suppose a crash falls between the reservation and the first append, and the retry uses a *new* binding (a new `bound_at`); the role-root reservation would then conflict. This is pre-existing for first materializations too, and identical-binding retries are unaffected. The finding is from reading the code; no test exercises it.
+- **A Mongo reservation token could conflict after a crash: resolved in review (fix 3).** It was observed before review, from reading the code.
 - **`snapshot_mode`** (`on_rollover` by default) and `fresh_from_snapshot` are unaffected. No snapshot is taken or restored by this change.
 
-**Drift checks.** No migration. No Temporal command change. The StageGraph and generic-artifact paths keep the exact-identity rule, which is asserted. The RRM-016 authority rule and `slot_ownership_boundary` behaviour are unchanged, which is asserted.
+**Drift checks.** No migration. No Temporal command change. The StageGraph and generic-artifact paths keep the exact-identity rule, which is asserted. The RRM-016 authority rule is unchanged. `slot_ownership_boundary` behaves as before for every role root `goal_unit_workspace_root` renders. A non-canonical segment (`03`, `\u00b2`) now keeps the two-component boundary; before RRM-020 it was treated as a role root, and at `0da4911` `\u00b2` raised `ValueError`. Both are asserted.
 
 **Reusable seams (mission horizon)**
 
 - `shared_goal_workspace_slots`: the declared continuation rule for role-rooted workspaces.
 - `WorkspaceMaterializationService._append_revision(slots=…)`: append a slot-set revision with lineage.
 - `publish_technical_catalog(goal_workspace_mode=…)` / `goal_blueprint(workspace_mode=…)`: qualify either GoalDirected workspace mode on the production stack.
+
+## Review disposition
+
+Independent review verdict: **`approve_with_fixes`**, nothing blocking. Three fixes were requested; all are applied in new commits (no amend).
+
+1. **Non-canonical iteration segments (`9b84ab0`).**
+   - Finding: `"²".isdigit()` is true but `int("²")` raises a bare `ValueError`, so a slot path with such a segment crashed `_goal_role_root`, and through it `slot_ownership_boundary`. `"03"` named iteration 3 under a second root.
+   - Fix: a role root's iteration must be `isascii() and isdigit()` and canonical (`str(int(p)) == p`), the form `goal_unit_workspace_root` renders. Anything else is not a role root, so the declared rule returns `None` and `materialize` raises the typed `IdempotencyConflict`.
+   - Tests:
+     - `test_only_canonical_ascii_iterations_are_role_roots`: `/goal/²/…` → `/goal/²` without raising; `/goal/03/…` → `/goal/03`; `/goal/0/verifier/…` stays a role root.
+     - `test_a_non_ascii_iteration_is_the_typed_conflict_not_a_value_error`: built without validation, because the slot path pattern already refuses `²`. It raises `IdempotencyConflict`, and the workspace stays at revision 1.
+     - The conflict matrix gains `zero-padded iteration`.
+2. **Bind the extension to a contract marker, or make the path rule strict (`9b84ab0`).**
+   - Chosen: **the strict path rule**, because the marker is not safe. Measured on `tests/fixtures/histories/rrm016_post_change/goal_directed_journaled_pause_resume.run1.json`:
+     - a decoded `DeepAgentExecutionBinding` payload verifies against its stored `binding_digest`;
+     - the same dump with one added defaulted field in `workspace` no longer equals it (`False`).
+   - Each of the RRM-016 and RRM-019 GoalDirected histories carries 12 payloads with `binding_digest` and `slot_bindings`.
+   - So a `WorkspaceContract` field breaks:
+     - replay of those histories (the binding validator refuses the digest);
+     - stored OEB bindings, through their request fingerprint (`semantic operation attempt was reused with conflicting execution intent`).
+   - The rule now requires `n == max + 1`. `GoalDirectedWorkflow` runs the executor and then the verifier in every iteration, so each role's workspace sees consecutive iterations. New conflict case: `skipped iteration` (`1 → 2 → 4`).
+   - **Residual (documented):** the rule is keyed on the role-root shape, not on the blueprint's `workspace_mode`. It is bounded by three things:
+     - run control admits a role-rooted slot only for the GoalDirected unit of that iteration and role (RRM-016);
+     - a `fresh` workspace changes identity every iteration, so it never reaches the rule;
+     - the rule requires the same role, the next iteration, the same compiled slot set and new owners.
+   - Making the mode explicit needs a versioned contract change, with its digests excluded when absent and a replay patch. That is a future ticket, not this one.
+3. **Reservation token and append equality include `created_at` (`9b84ab0`, `a176380`).**
+   - **Can a retry get another `bound_at`?** A retry of the *same* attempt cannot:
+     - `OperationExecutionService.execute` reuses the persisted binding for the semantic attempt key;
+     - its fingerprint excludes `requested_at`;
+     - the GoalDirected `requested_at` is the workflow's `decided_at` (`workflow.now()`), which is replay-deterministic.
+   - A *new operation attempt* of the same unit can: it gets a new binding, and so a new `bound_at`, while its workspace id stays `claim.workspace_namespace`. After a crash between its reservation and its manifest, it would have conflicted on its own workspace.
+   - **Fix.** `workspace_reservation_token(request)` omits `created_at`. The Mongo repository still accepts a reservation row stored under the earlier token, `legacy_workspace_reservation_token`, which is byte-equal to the stored rows (checked). Both repositories' `append` compare manifests with `same_workspace_manifest`, which covers everything but `created_at`, and return the stored revision.
+   - **RRM-015 digest guard.** The guard flagged the moved JSON-dump token sites. They now use `stable_json_digest` and `stable_json_dump`, which equal the JSON-mode dump for the set-free `WorkspaceMaterializationRequest`. The two allowlist entries the guard reported as stale (`*.reserve_writable_slots`) are removed. No site is newly allowlisted, so the guard's parametrized allowlist has 2 fewer cases.
+   - **Tests.**
+     - `test_a_crash_between_reservation_and_manifest_does_not_conflict_on_rebinding[1|2]`. Attempt A reserves and dies; attempt B re-binds (`bound_at` + 5 min). B materializes revision `n` once, A's own retry converges on it, and another workspace still conflicts. Covers both the first materialization and the extension.
+     - `test_an_append_differing_only_in_created_at_is_the_same_revision`.
+     - `test_mongodb_rebinding_after_a_crash_between_reservation_and_manifest` (Mongo): the crash window, a legacy-token row accepted, a racing append returning the stored revision, and stored revisions `[1, 2]`.
+
+**Negative check.** With the review's app changes reverted in the worktree (then restored), all 7 new unit cases fail:
+- the two new conflict-matrix cases;
+- the canonical-root test (`ValueError` at `0da4911`);
+- the typed-conflict test;
+- both crash-window cases (`WorkspaceSlotConflict`);
+- the append-race case.
+
+**Integration merge.** Integration `6d38c0b` (`b836c20`, CR-4 merged) was merged in at `d931bd7` without conflicts. CR-4 moved RRM-009's production-stack harness into `tests/fixtures/rrm009_production_harness.py`; `cea2d50` repoints the proof's imports, and no assertion changed.
+
+**Post-review gates on `cea2d50`** (lock held for the Mongo, proof and full runs; one pytest at a time; `LANGSMITH_TRACING=false`):
+
+| Gate | Command | Result |
+|---|---|---|
+| Ruff | `uv run --no-sync ruff check app tests scripts` | All checks passed |
+| Mypy | `uv run --no-sync mypy app` | Success: no issues found in 383 source files |
+| Owning suites (hermetic) | the owning-suite command in Deterministic verification | 376 passed (371 + 7 new − 2 removed guard allowlist cases) |
+| Replay | the replay command in Replay and recovery artifacts | 9 passed (all 8 histories plus the pre-change command check) |
+| Mongo workspace (lock) | `TEST_MONGODB_URI=… pytest -q tests/integration/mongodb/test_workspace_materialization_mongodb_integration.py` | 3 passed |
+| Production proof (lock) | `<DSNs> pytest -q -s tests/acceptance/control_plane/test_rrm_020_shared_goal_workspace.py` | 1 passed (73 s); identical printed record: `completed`, slot revisions `[1, 3]` per role, 4 owned role roots, 137 replayed events |
+| Full hermetic | `env -u … LIVE=0 pytest -q -p no:warnings` | **1080 passed, 93 skipped, 2 xfailed** (214 s) |
+| Full DSN, chunk 1 (lock) | `<DSNs> LIVE=0 pytest -q -p no:warnings --ignore=tests/acceptance` | 1074 passed, 27 skipped, 2 xfailed (329 s) |
+| Full DSN, chunk 2 (lock) | `<DSNs> LIVE=0 pytest -q -p no:warnings tests/acceptance` | 63 passed, 9 skipped (367 s) |
+| Full DSN total | | **1137 passed, 36 skipped, 2 xfailed** |
+| `git diff --check 6d38c0b cea2d50` | | clean |
+
+Deltas against the pre-review gates (`0da4911`):
+- Hermetic 1075/92/2 → 1080/93/2: +7 new unit cases, −2 removed guard allowlist cases, and +1 skipped (the Mongo-gated case).
+- DSN 1131/36/2 → 1137/36/2: the same +5, plus the Mongo case.
+- Against the coordinator's baselines (1064/90/3 hermetic, 1118/36/3 DSN), the only xfail removed is RRM-020's.
+- No test was skipped, deselected or weakened, and no marker was added.
 
 ## Final disposition
 
