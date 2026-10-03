@@ -20,6 +20,7 @@ from app.domain.operation_execution.contracts import (
     SubagentStateSlice,
     WorkspaceContract,
     WorkspaceMaterializationManifest,
+    WorkspaceMaterializationRequest,
     WorkspaceSlotBinding,
 )
 from app.domain.operation_execution.errors import WorkspaceDigestMismatch
@@ -284,6 +285,33 @@ def workspace_manifest_digest(
     )
 
 
+def workspace_reservation_token(request: WorkspaceMaterializationRequest) -> str:
+    """The identity a writable-slot reservation is held under.
+
+    It omits `created_at` (the binding's `bound_at`): a later operation attempt of the same
+    unit re-binds with another `bound_at` but materializes the same workspace, and a crash
+    between its reservation and its manifest must not turn its own retry into a conflict.
+    """
+
+    return sha256_digest(request.model_dump(mode="json", exclude={"created_at"}))
+
+
+def legacy_workspace_reservation_token(request: WorkspaceMaterializationRequest) -> str:
+    """The pre-RRM-020-review token (with `created_at`), still accepted for stored rows."""
+
+    return sha256_digest(request.model_dump(mode="json"))
+
+
+def same_workspace_manifest(
+    left: WorkspaceMaterializationManifest, right: WorkspaceMaterializationManifest
+) -> bool:
+    """Manifest identity for an idempotent append: everything but `created_at`."""
+
+    return left.model_dump(mode="json", exclude={"created_at"}) == right.model_dump(
+        mode="json", exclude={"created_at"}
+    )
+
+
 def verify_workspace_manifest(
     manifest: WorkspaceMaterializationManifest,
 ) -> None:
@@ -312,17 +340,21 @@ def slot_ownership_boundary(logical_path: str) -> str:
 
 
 def _goal_role_root(logical_path: str) -> tuple[int, str] | None:
-    """`(iteration, role)` of a path under a GoalDirected role root `/goal/{n}/{role}`."""
+    """`(iteration, role)` of a path under a GoalDirected role root `/goal/{n}/{role}`.
+
+    `n` must be the canonical ASCII decimal `goal_unit_workspace_root` renders (`str(n)`):
+    `str.isdigit` also accepts non-ASCII digits such as `"\u00b2"`, which `int` refuses, and a
+    zero-padded `"03"` would name iteration 3 under a second root. Any other segment is not a
+    role root, so the declared extension rule refuses it as a conflict (RRM-020 review).
+    """
 
     parts = [part for part in logical_path.split("/") if part]
-    if (
-        len(parts) >= 3
-        and parts[0] == "goal"
-        and parts[1].isdigit()
-        and parts[2] in GOAL_ROLE_SEGMENTS
-    ):
-        return int(parts[1]), parts[2]
-    return None
+    if len(parts) < 3 or parts[0] != "goal" or parts[2] not in GOAL_ROLE_SEGMENTS:
+        return None
+    segment = parts[1]
+    if not (segment.isascii() and segment.isdigit()) or str(int(segment)) != segment:
+        return None
+    return int(segment), parts[2]
 
 
 def _goal_slot_shape(slot: WorkspaceSlotBinding) -> tuple[object, ...]:
@@ -355,12 +387,19 @@ def shared_goal_workspace_slots(
       of the same role, so an executor workspace never takes a verifier root (REQ-BP-GD-004);
     - an iteration already in the workspace is requested again with exactly its slots (a
       retry), which returns `current` unchanged;
-    - otherwise the iteration is later than every iteration in the workspace, its slots are
+    - otherwise the iteration is the workspace's latest iteration plus one, its slots are
       the same compiled slot set (name, relative path, access, owner kind, input) as every
       earlier iteration's, and its owners own nothing in the workspace yet. The result is
       `current` followed by the requested slots, so earlier roots keep their owners.
 
     Anything else returns `None`, and the caller keeps treating the request as a conflict.
+
+    The rule is keyed on the role-root shape, not on a declared `workspace_mode`: the
+    materializer sees only the binding's `WorkspaceContract`, and a new field on it would
+    change every stored Deep Agent binding digest and request fingerprint (RRM-020 review).
+    Run control admits a role-rooted slot only for the GoalDirected unit of that iteration and
+    role (RRM-016), and a `fresh` workspace changes identity every iteration, so it never
+    reaches this rule.
     """
 
     requested_roots = {_goal_role_root(slot.logical_path) for slot in requested}
@@ -376,7 +415,9 @@ def shared_goal_workspace_slots(
         groups.setdefault(root[0], []).append(slot)
     if iteration in groups:
         return current if tuple(groups[iteration]) == requested else None
-    if iteration <= max(groups, default=0):
+    if iteration != max(groups, default=0) + 1:
+        # Iterations run one after another and each runs both roles, so the next root is
+        # always the latest one plus one; a skipped or earlier iteration is a conflict.
         return None
     shape = sorted((_goal_slot_shape(slot) for slot in requested), key=repr)
     if any(

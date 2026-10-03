@@ -26,9 +26,11 @@ from app.domain.operation_execution.errors import (
     WorkspaceSlotConflict,
 )
 from app.domain.operation_execution.materialization import (
+    same_workspace_manifest,
     shared_goal_workspace_slots,
     slot_ownership_boundary,
     verify_workspace_manifest,
+    workspace_reservation_token,
 )
 from app.domain.run_control.errors import IdempotencyConflict
 
@@ -418,7 +420,7 @@ class InMemoryWorkspaceManifestRepository:
 
     async def reserve_writable_slots(self, request: WorkspaceMaterializationRequest) -> None:
         async with self._lock:
-            reservation_token = sha256_digest(request.model_dump(mode="json"))
+            reservation_token = workspace_reservation_token(request)
             requested = [
                 (
                     request.namespace_id,
@@ -463,7 +465,7 @@ class InMemoryWorkspaceManifestRepository:
                     matching = next(
                         (item for item in values if item.revision == manifest.revision), None
                     )
-                    if matching == manifest:
+                    if matching is not None and same_workspace_manifest(matching, manifest):
                         return deepcopy(matching)
                     raise IdempotencyConflict("workspace manifest revision conflict")
                 if (

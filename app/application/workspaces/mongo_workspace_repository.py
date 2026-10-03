@@ -2,15 +2,17 @@ from __future__ import annotations
 
 from pymongo.errors import DuplicateKeyError
 
-from app.domain.control_plane.canonical import sha256_digest
 from app.domain.operation_execution.contracts import (
     WorkspaceMaterializationManifest,
     WorkspaceMaterializationRequest,
 )
 from app.domain.operation_execution.errors import WorkspaceSlotConflict
 from app.domain.operation_execution.materialization import (
+    legacy_workspace_reservation_token,
+    same_workspace_manifest,
     slot_ownership_boundary,
     verify_workspace_manifest,
+    workspace_reservation_token,
 )
 from app.domain.run_control.errors import IdempotencyConflict
 from app.models.workspace_materialization import (
@@ -24,7 +26,9 @@ class MongoWorkspaceManifestRepository:
 
     async def reserve_writable_slots(self, request: WorkspaceMaterializationRequest) -> None:
         inserted: list[WorkspaceSlotReservationDocument] = []
-        reservation_token = sha256_digest(request.model_dump(mode="json"))
+        reservation_token = workspace_reservation_token(request)
+        # A reservation stored before the token omitted `created_at` is still this request's.
+        accepted_tokens = {reservation_token, legacy_workspace_reservation_token(request)}
         try:
             for slot in request.slots:
                 if slot.access != "exclusive_write":
@@ -46,14 +50,11 @@ class MongoWorkspaceManifestRepository:
                         WorkspaceSlotReservationDocument.namespace_id == request.namespace_id,
                         WorkspaceSlotReservationDocument.logical_path == reservation_path,
                     )
-                    if prior is None or (
-                        prior.workspace_id,
-                        prior.owner_id,
-                        prior.reservation_token,
-                    ) != (
-                        request.workspace_id,
-                        slot.owner.owner_id,
-                        reservation_token,
+                    if (
+                        prior is None
+                        or (prior.workspace_id, prior.owner_id)
+                        != (request.workspace_id, slot.owner.owner_id)
+                        or prior.reservation_token not in accepted_tokens
                     ):
                         raise WorkspaceSlotConflict(
                             f"writable slot {slot.logical_path} is owned by another workspace"
@@ -104,7 +105,7 @@ class MongoWorkspaceManifestRepository:
             )
             if matching is not None:
                 prior = WorkspaceMaterializationManifest.model_validate(matching.payload)
-                if prior == manifest:
+                if same_workspace_manifest(prior, manifest):
                     return prior
             raise IdempotencyConflict("workspace manifest lineage conflict")
         if current is None and (
@@ -131,6 +132,6 @@ class MongoWorkspaceManifestRepository:
             if matching is None:
                 raise IdempotencyConflict("workspace manifest identity collision") from None
             prior = WorkspaceMaterializationManifest.model_validate(matching.payload)
-            if prior != manifest:
+            if not same_workspace_manifest(prior, manifest):
                 raise IdempotencyConflict("workspace manifest identity conflict") from None
             return prior

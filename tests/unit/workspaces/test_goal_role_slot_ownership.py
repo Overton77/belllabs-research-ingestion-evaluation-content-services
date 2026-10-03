@@ -9,7 +9,7 @@ is now the ownership boundary; every other overlap still conflicts.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
 
@@ -211,6 +211,9 @@ def _iteration_owner(iteration: int, kind: WorkspaceOwnerKind = WorkspaceOwnerKi
         ("an owner the workspace has", "/goal/3/executor/work", _iteration_owner(2)),
         # Not role-rooted at all.
         ("unrooted slot", "/workspace/output", _iteration_owner(3)),
+        # RRM-020 review: the next root is exactly the latest plus one, in canonical form.
+        ("skipped iteration", "/goal/4/executor/work", _iteration_owner(4)),
+        ("zero-padded iteration", "/goal/03/executor/work", _iteration_owner(3)),
     ],
 )
 async def test_slot_sets_outside_the_declared_rule_still_conflict(
@@ -344,3 +347,86 @@ async def test_a_read_only_input_joins_each_iteration_under_its_own_root() -> No
     # The slot set must be the compiled one: an iteration without the input is outside the rule.
     with pytest.raises(IdempotencyConflict):
         await service.materialize(_goal_request(workspace_id, 3, "executor"))
+
+
+def test_only_canonical_ascii_iterations_are_role_roots() -> None:
+    """RRM-020 review: `"\u00b2".isdigit()` is true but `int` refuses it, and `"03"` would name
+    iteration 3 under a second root. Neither is a role root, and neither raises."""
+
+    assert slot_ownership_boundary("/goal/3/executor/work") == "/goal/3/executor"
+    assert slot_ownership_boundary("/goal/\u00b2/executor/work") == "/goal/\u00b2"
+    assert slot_ownership_boundary("/goal/03/executor/work") == "/goal/03"
+    assert slot_ownership_boundary("/goal/0/verifier/work") == "/goal/0/verifier"
+
+
+@pytest.mark.asyncio
+async def test_a_non_ascii_iteration_is_the_typed_conflict_not_a_value_error() -> None:
+    service = _service()
+    workspace_id = "run/run-1/execution-epoch/1/goal/workspace/1"
+    await service.materialize(_goal_request(workspace_id, 1, "executor"))
+    next_request = _goal_request(workspace_id, 2, "executor")
+    # The slot contract's path pattern refuses the character on validation, so the request is
+    # built without it: the rule itself must refuse it with the typed conflict.
+    superscript = next_request.model_copy(
+        update={
+            "slots": (
+                next_request.slots[0].model_copy(
+                    update={"logical_path": "/goal/\u00b2/executor/work"}
+                ),
+            )
+        }
+    )
+    with pytest.raises(IdempotencyConflict, match="different materialization"):
+        await service.materialize(superscript)
+    assert (await service.current_manifest(NAMESPACE, workspace_id)).revision == 1
+
+
+def _rebound(
+    request: WorkspaceMaterializationRequest, minutes: int = 5
+) -> WorkspaceMaterializationRequest:
+    """The same materialization under a later operation attempt's binding (`bound_at`)."""
+
+    return request.model_copy(
+        update={"created_at": request.created_at + timedelta(minutes=minutes)}
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("iteration", [1, 2])
+async def test_a_crash_between_reservation_and_manifest_does_not_conflict_on_rebinding(
+    iteration: int,
+) -> None:
+    """RRM-020 review: attempt A reserves its role root and crashes before its manifest;
+    attempt B re-binds the same unit (another `bound_at`) and materializes the same workspace.
+    Its own reservation is not a conflict, and exactly one revision is written."""
+
+    manifests = InMemoryWorkspaceManifestRepository()
+    service = _service(manifests)
+    workspace_id = "run/run-1/execution-epoch/1/goal/workspace/1"
+    if iteration == 2:
+        await service.materialize(_goal_request(workspace_id, 1, "executor"))
+    attempt_a = _goal_request(workspace_id, iteration, "executor")
+    await manifests.reserve_writable_slots(attempt_a)  # then the worker dies
+
+    materialized = await service.materialize(_rebound(attempt_a))
+    assert materialized.manifest_revision == iteration
+    assert len(manifests._manifests[(NAMESPACE, workspace_id)]) == iteration
+    # Attempt A's own retry after B converges on the same revision.
+    again = await service.materialize(attempt_a)
+    assert again.materialization_manifest == materialized.materialization_manifest
+    # A different workspace still cannot take the root.
+    with pytest.raises(WorkspaceSlotConflict):
+        await service.materialize(_rebound(_goal_request("workspace/other", iteration, "executor")))
+
+
+@pytest.mark.asyncio
+async def test_an_append_differing_only_in_created_at_is_the_same_revision() -> None:
+    manifests = InMemoryWorkspaceManifestRepository()
+    service = _service(manifests)
+    workspace_id = "run/run-1/execution-epoch/1/goal/workspace/1"
+    await service.materialize(_goal_request(workspace_id, 1, "executor"))
+    stored = await service.current_manifest(NAMESPACE, workspace_id)
+    raced = stored.model_copy(update={"created_at": stored.created_at + timedelta(minutes=5)})
+    assert await manifests.append(raced) == stored
+    with pytest.raises(IdempotencyConflict):
+        await manifests.append(stored.model_copy(update={"manifest_digest": "sha256:" + "0" * 64}))
