@@ -491,6 +491,20 @@ async def _terminal(stack: ProductionStack, run_id: str) -> bool:
     return (await _run(stack, run_id))["phase"] == "terminal"
 
 
+async def _assert_completed_with_baseline_released(stack: ProductionStack, run_id: str) -> None:
+    """RRM-021: a run admitted with a non-empty baseline completed, with nothing reserved."""
+
+    run = await _run(stack, run_id)
+    assert run["terminal_outcome"] == "completed", run
+    budget = await stack.http.get(
+        f"/run-control/v1/runs/{run_id}/budget", params={"request_scope": SCOPE}
+    )
+    assert budget.status_code == 200, budget.text
+    body = budget.json()
+    assert not any(body["reserved"].values()), body
+    assert "baseline" not in body["reservations"], body
+
+
 def _command(run_id: str, version: int, command_id: str, action: Any, permission: str) -> dict:
     return LifecycleCommand(
         command_id=command_id,
@@ -781,7 +795,7 @@ async def test_stagegraph_runs_through_the_production_composition_with_fork_rela
             "snapshot_digest": manifest["snapshot_digest"],
             "changes": [{"path": stage_objective_path("review"), "value": STAGE_OBJECTIVE}],
             "invalidation_frontier": ["review"],
-            "baseline_reservations": {},
+            "baseline_reservations": {"tokens.total": 20},
             "sponsorship_ref": "sponsorship:test",
             "approval_refs": ["approval:test"],
             "reason": "RRM-009 technical fork",
@@ -792,6 +806,23 @@ async def test_stagegraph_runs_through_the_production_composition_with_fork_rela
     fork_request_id = fork.json()["request_id"]
     derived_binding = fork_semantic_input_binding_ref(fork_request_id)
     # The governed launch of the derived run: parent from the receipt, patched templates.
+    # RRM-021: the governed launch still refuses a family input whose baseline differs from
+    # the admitted one (RRM-009), now that the StageGraph settles the baseline it carries.
+    wrong_baseline = await stack.http.post(
+        f"/run-control/v1/runs/{derived_run}/launch",
+        json={
+            "request_scope": SCOPE,
+            "run_id": derived_run,
+            "family": "StageGraph",
+            "stagegraph": {
+                **asdict(stage_input(catalog, derived_run, derived_binding, 1)),
+                "baseline_reservation": {"tokens.total": 21},
+            },
+            "source_semantic_input_binding_ref": source_binding,
+        },
+    )
+    assert wrong_baseline.status_code == 422, wrong_baseline.text
+    assert wrong_baseline.json()["detail"]["code"] == "budget_mismatch"
     wrong_binding = await stack.http.post(
         f"/run-control/v1/runs/{derived_run}/launch",
         json={
@@ -834,6 +865,7 @@ async def test_stagegraph_runs_through_the_production_composition_with_fork_rela
     assert await _visible(stack.client, f"BellLabsParentRunId = '{source_run}'", 1) == 1
     await _release_wait(stack, derived_run)
     await _wait_for(stack, derived_run, lambda: _terminal(stack, derived_run), 240)
+    await _assert_completed_with_baseline_released(stack, derived_run)
 
     # RRM-007 relay drill on a persistent namespace: the pause is accepted while the Temporal
     # transport is down, and delivered and applied once the server is back and the relay runs.
@@ -905,6 +937,7 @@ async def test_stagegraph_runs_through_the_production_composition_with_fork_rela
     await _until(resumed)
     await _release_wait(stack, source_run)
     await _wait_for(stack, source_run, lambda: _terminal(stack, source_run), 240)
+    await _assert_completed_with_baseline_released(stack, source_run)
 
     # Visibility (REQ-CP-EXEC-015) on the persistent namespace: root, family and operations.
     assert await _visible(stack.client, f"BellLabsRunId = '{source_run}'", 4) == 4

@@ -27,6 +27,8 @@ from app.domain.orchestration.contracts import (
     LifecycleCommandRequest,
     StageGraphAdmissionActivityRequest,
     StageGraphAdmissionActivityResult,
+    StageGraphBaselineSettlementRequest,
+    StageGraphBaselineSettlementResult,
     StageGraphCompletionActivityRequest,
     StageGraphCompletionActivityResult,
     StageGraphCycleActivityRequest,
@@ -101,6 +103,14 @@ class StageGraphActivities:
         self, request: StageGraphCompletionActivityRequest
     ) -> StageGraphCompletionActivityResult:
         return await self._canonical_decisions().complete(request)
+
+    @activity.defn(name="stagegraph.settle_baseline")
+    async def settle_baseline(
+        self, request: StageGraphBaselineSettlementRequest
+    ) -> StageGraphBaselineSettlementResult:
+        """RRM-021: release the admitted baseline reservation before terminalization."""
+
+        return await self._canonical_decisions().settle_baseline(request)
 
     @activity.defn(name="stagegraph.apply_lifecycle_command")
     async def apply_lifecycle_command(
