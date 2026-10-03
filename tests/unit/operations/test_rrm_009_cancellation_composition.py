@@ -30,7 +30,6 @@ from app.application.run_control.liability_hints import (
     LIABILITY_DECISION_KINDS,
     FamilyLiabilityHints,
 )
-from app.config import get_settings
 from app.domain.control_plane.contracts import SecretRef
 from app.domain.operation_execution.heartbeats import (
     DEFAULT_OPERATION_HEARTBEATS,
@@ -41,6 +40,7 @@ from app.domain.operation_execution.heartbeats import (
 from app.domain.run_control.contracts import CancelAction, RunPhase
 from app.temporal.artifact_activities import generic_artifact_activities
 from app.temporal.worker import operation_heartbeat_policy
+from tests.fixtures.isolated_settings import isolated_settings
 from tests.unit.operations.test_operation_execution import operation_request
 from tests.unit.run_control.test_boundary_commands import FAMILY_WORKFLOW_ID, TARGET, started
 from tests.unit.run_control.test_run_control import command, service
@@ -96,29 +96,21 @@ def test_worker_drain_must_be_shorter_than_every_heartbeat_timeout() -> None:
         policy.verify_graceful_shutdown(-1)
 
 
-def test_deployment_settings_compose_the_policy_and_its_drain(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    get_settings.cache_clear()
-    try:
-        defaults = get_settings()
-        policy = operation_heartbeat_policy(defaults)
-        assert policy.timeouts() == {
-            "deep_agent": 30,
-            "deep_agent_async_children": 15,
-            "bound": 30,
-        }
-        assert defaults.worker_graceful_shutdown_seconds == 10
-        policy.verify_graceful_shutdown(defaults.worker_graceful_shutdown_seconds)
-        monkeypatch.setenv("OPERATION_ASYNC_CHILDREN_HEARTBEAT_TIMEOUT_SECONDS", "8")
-        get_settings.cache_clear()
-        tightened = get_settings()
-        with pytest.raises(ValueError, match="shorter than the shortest"):
-            operation_heartbeat_policy(tightened).verify_graceful_shutdown(
-                tightened.worker_graceful_shutdown_seconds
-            )
-    finally:
-        get_settings.cache_clear()
+def test_deployment_settings_compose_the_policy_and_its_drain() -> None:
+    defaults = isolated_settings()
+    policy = operation_heartbeat_policy(defaults)
+    assert policy.timeouts() == {
+        "deep_agent": 30,
+        "deep_agent_async_children": 15,
+        "bound": 30,
+    }
+    assert defaults.worker_graceful_shutdown_seconds == 10
+    policy.verify_graceful_shutdown(defaults.worker_graceful_shutdown_seconds)
+    tightened = isolated_settings(operation_async_children_heartbeat_timeout_seconds=8)
+    with pytest.raises(ValueError, match="shorter than the shortest"):
+        operation_heartbeat_policy(tightened).verify_graceful_shutdown(
+            tightened.worker_graceful_shutdown_seconds
+        )
 
 
 # --- Worker surfaces -----------------------------------------------------------------------
@@ -573,21 +565,16 @@ async def test_composition_resources_are_closed_when_build_or_worker_start_fails
     events.clear()
     resources = AsyncExitStack()
     resources.push_async_callback(lambda: _record(events, "resources closed"))
-    get_settings.cache_clear()
-    monkeypatch.setenv("WORKER_GRACEFUL_SHUTDOWN_SECONDS", "60")
-    try:
-        with pytest.raises(ValueError, match="shorter than the shortest"):
-            await production_workers_or_close(
-                cast(Any, object()),
-                get_settings(),
-                WorkerActivityComposition(
-                    coordinator=cast(Any, object()),
-                    operation=cast(Any, object()),
-                    resources=resources,
-                ),
-            )
-    finally:
-        get_settings.cache_clear()
+    with pytest.raises(ValueError, match="shorter than the shortest"):
+        await production_workers_or_close(
+            cast(Any, object()),
+            isolated_settings(worker_graceful_shutdown_seconds=60),
+            WorkerActivityComposition(
+                coordinator=cast(Any, object()),
+                operation=cast(Any, object()),
+                resources=resources,
+            ),
+        )
     assert events == ["resources closed"]
 
 

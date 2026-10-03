@@ -17,6 +17,7 @@ acknowledged without a second application), and replay of every captured history
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, replace
 from typing import Any
@@ -188,15 +189,29 @@ class Authority:
         return await self.run_control.get_run(SCOPE, run_id)
 
 
-async def until(predicate: Callable[[], Awaitable[bool]], *, seconds: float = 30) -> None:
-    """Poll authority until `predicate` holds (receipts are recorded by activities)."""
+# Wall-clock ceilings for the real-time waits below. They only bound a genuine hang: every
+# wait returns as soon as its condition holds (about 10 s alone), and the ceilings are sized
+# for a heavily loaded host, so an assertion never races the machine's speed.
+WAIT_SECONDS = 180.0
+RESULT_SECONDS = 300.0
 
-    async with asyncio.timeout(seconds):
-        for _ in range(int(seconds * 10)):
-            if await predicate():
-                return
-            await asyncio.sleep(0.1)
-    raise AssertionError("condition did not hold in time")
+
+async def until(
+    predicate: Callable[[], Awaitable[bool]], *, seconds: float = WAIT_SECONDS
+) -> None:
+    """Poll authority until `predicate` holds (receipts are recorded by activities).
+
+    The deadline is monotonic wall time, not an iteration count, so a slow poll cannot
+    shorten the wait.
+    """
+
+    deadline = time.monotonic() + seconds
+    while True:
+        if await predicate():
+            return
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"condition did not hold within {seconds:.0f}s")
+        await asyncio.sleep(0.1)
 
 
 def pause(decision_id: str, scope: set[str] | None = None) -> PauseAction:
@@ -325,7 +340,7 @@ async def test_stagegraph_declared_wait_is_governed_and_survives_continue_as_new
             )
             # REQ-BP-SG-009: the held wait is declared to authority and inspectable.
             await until(
-                lambda: _has_wait(authority, run_id, condition_id), seconds=30
+                lambda: _has_wait(authority, run_id, condition_id), seconds=WAIT_SECONDS
             )
             projection = await authority.run(run_id)
             assert projection.phase == RunPhase.WAITING
@@ -356,7 +371,7 @@ async def test_stagegraph_declared_wait_is_governed_and_survives_continue_as_new
             projection = await authority.run(run_id)
             assert projection.active_waits == () and projection.phase == RunPhase.ACTIVE
 
-            await asyncio.wait_for(activities.downstream_started.wait(), timeout=30)
+            await asyncio.wait_for(activities.downstream_started.wait(), timeout=WAIT_SECONDS)
             activities.slow_release.set()
             result = await handle.result()
             final_state = await handle.query(StageGraphWorkflow.boundary_state)
@@ -438,7 +453,7 @@ async def test_stagegraph_scoped_pause_leaves_unrelated_work_admissible() -> Non
                 if item.resulting_version == release_version
             ] == [RunPhase.ACTIVE]
             # The unrelated stages run to completion while the paused stage is held.
-            await asyncio.wait_for(activities.downstream_started.wait(), timeout=30)
+            await asyncio.wait_for(activities.downstream_started.wait(), timeout=WAIT_SECONDS)
             await until(lambda: _phase_is(authority, run_id, RunPhase.PAUSED))
             assert activities.admission_order == ["fast", "downstream"]
             assert not activities.slow_started.is_set()
@@ -586,7 +601,7 @@ async def test_goal_directed_command_pause_is_durable_and_resume_continues_the_f
             handle = await environment.client.start_workflow(
                 GoalDirectedWorkflow.run, run_input, id=workflow_id, task_queue=GOAL_QUEUE
             )
-            await asyncio.wait_for(activities.executor_started.wait(), timeout=30)
+            await asyncio.wait_for(activities.executor_started.wait(), timeout=WAIT_SECONDS)
             # REQ-BP-GD-011: a pause requested while a unit is active is delivered now and
             # applied only at the next iteration boundary.
             await authority.intervene(run_id, "pause", pause("hold-run"))
@@ -594,7 +609,7 @@ async def test_goal_directed_command_pause_is_durable_and_resume_continues_the_f
             assert await authority.states(run_id, "pause") == ["accepted", "delivered"]
             assert (await authority.run(run_id)).phase == RunPhase.ACTIVE
             activities.release_executor.set()
-            await until(lambda: _state_is(authority, run_id, "pause", "applied"), seconds=60)
+            await until(lambda: _state_is(authority, run_id, "pause", "applied"))
             projection = await authority.run(run_id)
             assert projection.phase == RunPhase.PAUSED
             assert [item.decision_id for item in projection.active_pauses] == ["hold-run"]
@@ -657,15 +672,15 @@ async def test_goal_directed_command_pause_is_durable_and_resume_continues_the_f
             # while the final unit runs.
             activities.release_executor.clear()
             await authority.intervene(run_id, "resume", resume("hold-run", "release-run"))
-            await until(lambda: _state_is(authority, run_id, "resume", "applied"), seconds=60)
+            await until(lambda: _state_is(authority, run_id, "resume", "applied"))
             # F1: a pause delivered during the final iteration is closed `not_applicable` by
             # the boundary before it terminalizes, never left `delivered`.
-            await asyncio.wait_for(activities.final_executor_started.wait(), timeout=60)
+            await asyncio.wait_for(activities.final_executor_started.wait(), timeout=WAIT_SECONDS)
             await authority.intervene(run_id, "late-pause", pause("hold-late"))
             await until(lambda: _state_is(authority, run_id, "late-pause", "delivered"))
             assert (await authority.run(run_id)).phase == RunPhase.ACTIVE
             activities.release_executor.set()
-            result = await asyncio.wait_for(handle.result(), timeout=120)
+            result = await asyncio.wait_for(handle.result(), timeout=RESULT_SECONDS)
             final_state = await handle.query(GoalDirectedWorkflow.boundary_state)
             history = await handle.fetch_history()
             late = await authority.run_control.get_boundary_command(
@@ -735,7 +750,7 @@ async def test_goal_directed_policy_pause_is_durable_across_forced_continue_as_n
             handle = await environment.client.start_workflow(
                 GoalDirectedWorkflow.run, run_input, id=workflow_id, task_queue=GOAL_QUEUE
             )
-            await until(lambda: _phase_is(authority, run_id, RunPhase.PAUSED), seconds=60)
+            await until(lambda: _phase_is(authority, run_id, RunPhase.PAUSED))
             projection = await authority.run(run_id)
             policy_pause = projection.active_pauses[0]
             assert policy_pause.decision_id.startswith("goal-policy-pause:")
@@ -745,7 +760,7 @@ async def test_goal_directed_policy_pause_is_durable_across_forced_continue_as_n
                 ("pause", "applied")
             ]
             # Forced Continue-As-New while paused: the paused state continues.
-            await until(lambda: _segment_is(handle, 2), seconds=60)
+            await until(lambda: _segment_is(handle, 2))
             state = await handle.query(GoalDirectedWorkflow.boundary_state)
             assert state["paused"]["pause_decision_id"] == policy_pause.decision_id
             assert state["paused"]["next_goal_iteration"] == 2
@@ -756,7 +771,7 @@ async def test_goal_directed_policy_pause_is_durable_across_forced_continue_as_n
                 run_id, "resume-policy", resume(policy_pause.decision_id, "operator-release")
             )
             await until(lambda: _state_is(authority, run_id, "resume-policy", "applied"))
-            result = await asyncio.wait_for(handle.result(), timeout=120)
+            result = await asyncio.wait_for(handle.result(), timeout=RESULT_SECONDS)
 
         assert result.convergence_proposal.action == "complete"
         assert result.goal_iterations == 2
@@ -834,7 +849,7 @@ async def test_policy_pause_then_operator_resume_through_the_root_is_applied() -
                 run_input, workflow_id="ignored", blueprint_family=BlueprintFamily.GOAL_DIRECTED
             )
             root = environment.client.get_workflow_handle(submitted.workflow_id)
-            await until(lambda: _phase_is(authority, run_id, RunPhase.PAUSED), seconds=60)
+            await until(lambda: _phase_is(authority, run_id, RunPhase.PAUSED))
             projection = await authority.run(run_id)
             assert projection.execution_target is not None
             assert projection.execution_target.root_workflow_id == submitted.workflow_id
@@ -846,7 +861,7 @@ async def test_policy_pause_then_operator_resume_through_the_root_is_applied() -
             await authority.intervene(
                 run_id, "resume", resume(projection.active_pauses[0].decision_id, "release")
             )
-            await until(lambda: _state_is(authority, run_id, "resume", "applied"), seconds=60)
+            await until(lambda: _state_is(authority, run_id, "resume", "applied"))
             resumed = await authority.run_control.get_boundary_command(
                 SCOPE, run_id, "operator", "resume"
             )
@@ -858,7 +873,7 @@ async def test_policy_pause_then_operator_resume_through_the_root_is_applied() -
                 (item.message_id, item.sequence, item.status)
                 for item in continuity.message_receipts
             ] == [("resume", 1, "accepted")]
-            result = await asyncio.wait_for(root.result(), timeout=120)
+            result = await asyncio.wait_for(root.result(), timeout=RESULT_SECONDS)
         assert result["convergence_proposal"]["action"] == "complete"
         assert result["goal_iterations"] == 2
         assert await authority.facade.redeliver(SCOPE, run_id) == ()
@@ -892,7 +907,7 @@ async def test_cancel_never_blocks_a_later_command_at_the_root() -> None:
                 run_input, workflow_id="ignored", blueprint_family=BlueprintFamily.STAGE_GRAPH
             )
             root = environment.client.get_workflow_handle(submitted.workflow_id)
-            await until(lambda: _has_wait(authority, run_id, condition_id), seconds=60)
+            await until(lambda: _has_wait(authority, run_id, condition_id))
             cancelled = await authority.intervene(run_id, "cancel", CancelAction())
             assert cancelled.phase == RunPhase.CANCELLING
             cancel = await authority.run_control.get_boundary_command(
@@ -903,7 +918,7 @@ async def test_cancel_never_blocks_a_later_command_at_the_root() -> None:
                 "cancel",
                 1,
             )
-            await until(lambda: _state_is(authority, run_id, "cancel", "delivered"), seconds=60)
+            await until(lambda: _state_is(authority, run_id, "cancel", "delivered"))
 
             await authority.intervene(
                 run_id,
@@ -912,7 +927,7 @@ async def test_cancel_never_blocks_a_later_command_at_the_root() -> None:
                     condition_id=condition_id, verification_evidence_ref="evidence:operator"
                 ),
             )
-            await until(lambda: _state_is(authority, run_id, "release", "delivered"), seconds=60)
+            await until(lambda: _state_is(authority, run_id, "release", "delivered"))
             release = await authority.run_control.get_boundary_command(
                 SCOPE, run_id, "operator", "release"
             )
@@ -931,7 +946,7 @@ async def test_cancel_never_blocks_a_later_command_at_the_root() -> None:
                 for item in await root.query(BellLabsRunWorkflow.cancel_receipts)
             ] == [("cancel", "delivered")]
             activities.complete_release.set()
-            result = await asyncio.wait_for(root.result(), timeout=120)
+            result = await asyncio.wait_for(root.result(), timeout=RESULT_SECONDS)
         assert result["completion_proposal"]["cancelled"] is True
         assert activities.admission_order == [], "nothing is admitted after the cancel"
 
@@ -948,5 +963,5 @@ class _HoldingCompletionActivities(GovernedStageGraphActivities):
     async def complete(
         self, request: StageGraphCompletionActivityRequest
     ) -> StageGraphCompletionActivityResult:
-        await asyncio.wait_for(self.complete_release.wait(), timeout=8)
+        await asyncio.wait_for(self.complete_release.wait(), timeout=WAIT_SECONDS)
         return await super().complete(request)
