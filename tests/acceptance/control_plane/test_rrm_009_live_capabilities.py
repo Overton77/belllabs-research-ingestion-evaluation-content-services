@@ -41,15 +41,6 @@ from app.domain.operation_execution.contracts import (
 from app.domain.run_control.contracts import ReserveBudgetAction, StartAction
 from app.integrations.capability_pins import CapabilityPins
 from app.temporal.deployment_composition import ASYNC_CHILD_COMPLETION_KIND
-from tests.acceptance.control_plane.test_rrm_009_production_composition import (
-    _admit,
-    _command,
-    _operation_payloads,
-    _run,
-    _send,
-    mongo_database,  # noqa: F401 - the per-test Mongo database fixture
-    open_production_stack,
-)
 from tests.fixtures.checkpoint_lineage import bind_unit, stage_unit
 from tests.fixtures.rrm009_live_capabilities import (
     ASYNC_CHILD_MARKER,
@@ -62,6 +53,15 @@ from tests.fixtures.rrm009_live_capabilities import (
     live_binding,
     live_opt_in,
     live_template,
+)
+from tests.fixtures.rrm009_production_harness import (
+    _admit,
+    _command,
+    _operation_payloads,
+    _run,
+    _send,
+    mongo_database,  # noqa: F401 - the per-test Mongo database fixture
+    open_production_stack,
 )
 from tests.fixtures.rrm009_production_stack import (
     REPORT_PATH,
