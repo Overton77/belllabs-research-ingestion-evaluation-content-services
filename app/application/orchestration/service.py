@@ -197,6 +197,8 @@ class StageGraphLaunchService:
 
 # Completion proposals one StageGraph run may make (each rejected one keeps its receipt).
 MAX_COMPLETION_PROPOSALS = 256
+# RRM-021: a baseline release retried at the reported version while outside commands move it.
+BASELINE_SETTLEMENT_ATTEMPTS = 4
 
 
 def producer_effects_settled(
@@ -773,7 +775,12 @@ class StageGraphDecisionService:
         result_version = 0
         reason_code = ""
         accepted = True
-        for attempt in range(2):
+        admitted = {
+            dimension: amount
+            for dimension, amount in request.baseline_reservation.items()
+            if amount > 0
+        }
+        for attempt in range(BASELINE_SETTLEMENT_ATTEMPTS):
             budget = await self._run_control.get_budget(request.request_scope, request.run_id)
             run = await self._run_control.get_run(request.request_scope, request.run_id)
             remaining = {
@@ -785,7 +792,7 @@ class StageGraphDecisionService:
                 return StageGraphBaselineSettlementResult(
                     accepted=True, resulting_run_version=run.version, reason_code=""
                 )
-            if request.baseline_reservation and dict(request.baseline_reservation) != remaining:
+            if admitted and admitted != remaining:
                 raise ValueError("StageGraph baseline differs from the admitted reservation")
             result = await self._run_control.execute(
                 LifecycleCommand(
@@ -816,6 +823,10 @@ class StageGraphDecisionService:
             reason_code = result.reason_code
             if result.status != CommandStatus.STALE:
                 break
+        else:
+            # Still stale after every attempt: retryable, so the Activity retry policy
+            # re-reads the run (the release is idempotent).
+            raise RuntimeError("StageGraph baseline settlement is stale; retrying")
         return StageGraphBaselineSettlementResult(
             accepted=accepted, resulting_run_version=result_version, reason_code=reason_code
         )

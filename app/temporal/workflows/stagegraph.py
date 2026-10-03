@@ -75,6 +75,9 @@ SETTLE_SUPERSEDED_PATCH = "rrm-008-stagegraph-settle-superseded-generation"
 # proposes terminalization (every terminal outcome), so the reducer finds no reservation left.
 # Histories recorded before the patch replay unchanged.
 SETTLE_BASELINE_PATCH = "rrm-021-settle-stagegraph-baseline"
+# RRM-021 review: a family that fails with no admissible work (`stagegraph_blocked`) releases
+# the baseline before the failure is raised.
+RELEASE_BASELINE_ON_BLOCKED_PATCH = "rrm-021-release-baseline-on-blocked"
 LIABILITY_REJECTIONS = frozenset(
     {
         "budget_not_settled",
@@ -921,25 +924,7 @@ class StageGraphWorkflow:
                     and not baseline_settled
                     and workflow.patched(SETTLE_BASELINE_PATCH)
                 ):
-                    settlement = await workflow.execute_activity(
-                        "stagegraph.settle_baseline",
-                        StageGraphBaselineSettlementRequest(
-                            run_id=run_input.run_id,
-                            request_scope=run_input.request_scope,
-                            occurred_at=workflow.now(),
-                            idempotency_issuer=run_input.lifecycle_idempotency_issuer,
-                            correlation_id=run_input.correlation_id,
-                            baseline_reservation=dict(run_input.baseline_reservation),
-                        ),
-                        result_type=StageGraphBaselineSettlementResult,
-                        start_to_close_timeout=timeout,
-                        retry_policy=retry,
-                    )
-                    if not settlement.accepted:
-                        raise ApplicationError(
-                            f"StageGraph baseline settlement rejected: {settlement.reason_code}",
-                            non_retryable=True,
-                        )
+                    await self._release_baseline(run_input, timeout, retry)
                     baseline_settled = True
                 terminal = await workflow.execute_activity(
                     "stagegraph.complete",
@@ -1014,9 +999,43 @@ class StageGraphWorkflow:
                     schedule_trace=tuple(schedule_trace),
                     completion_proposal=completion,
                 )
+            if (
+                run_input.baseline_reservation
+                and not baseline_settled
+                and workflow.patched(RELEASE_BASELINE_ON_BLOCKED_PATCH)
+            ):
+                # The family fails without proposing terminalization: the admitted baseline
+                # must not stay reserved (a later failed terminalization would otherwise be
+                # rejected `budget_not_settled`).
+                await self._release_baseline(run_input, timeout, retry)
             raise ApplicationError(
                 "StageGraph has no admissible work and no terminal completion proposal",
                 type="stagegraph_blocked",
+                non_retryable=True,
+            )
+
+    async def _release_baseline(
+        self, run_input: StageGraphRunInput, activity_timeout: timedelta, retry: RetryPolicy
+    ) -> None:
+        """RRM-021: release the admitted baseline through run control (idempotent)."""
+
+        settlement = await workflow.execute_activity(
+            "stagegraph.settle_baseline",
+            StageGraphBaselineSettlementRequest(
+                run_id=run_input.run_id,
+                request_scope=run_input.request_scope,
+                occurred_at=workflow.now(),
+                idempotency_issuer=run_input.lifecycle_idempotency_issuer,
+                correlation_id=run_input.correlation_id,
+                baseline_reservation=dict(run_input.baseline_reservation),
+            ),
+            result_type=StageGraphBaselineSettlementResult,
+            start_to_close_timeout=activity_timeout,
+            retry_policy=retry,
+        )
+        if not settlement.accepted:
+            raise ApplicationError(
+                f"StageGraph baseline settlement rejected: {settlement.reason_code}",
                 non_retryable=True,
             )
 

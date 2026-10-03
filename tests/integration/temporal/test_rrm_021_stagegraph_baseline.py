@@ -18,21 +18,30 @@ from typing import Any, cast
 
 import pytest
 from temporalio import activity
+from temporalio.client import WorkflowFailureError
+from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
 from app.application.orchestration.service import StageGraphDecisionService
 from app.domain.coordinator.launch import BlueprintFamily
 from app.domain.orchestration.contracts import (
+    DependencyDisposition,
     StageGraphBaselineSettlementRequest,
     StageGraphBaselineSettlementResult,
     StageGraphCompletionActivityRequest,
     StageGraphCompletionActivityResult,
+    StageGraphResultActivityRequest,
+    StageGraphResultActivityResult,
 )
 from app.domain.run_control.contracts import RunOutcome, RunPhase
 from app.temporal.workflow_sandbox import coordinator_workflow_runner
 from app.temporal.workflows.operation import OperationWorkflow
-from app.temporal.workflows.stagegraph import SETTLE_BASELINE_PATCH, StageGraphWorkflow
+from app.temporal.workflows.stagegraph import (
+    RELEASE_BASELINE_ON_BLOCKED_PATCH,
+    SETTLE_BASELINE_PATCH,
+    StageGraphWorkflow,
+)
 from tests.fixtures.temporal_history import patch_ids
 from tests.integration.temporal.test_rrm_007_boundary_interventions import (
     ROOT_WORKFLOWS,
@@ -68,6 +77,25 @@ class BaselineSettlingActivities(CancellableStageGraphActivities):
         self._decisions = StageGraphDecisionService(authority.run_control, authority.repository)
         self.settlements: list[StageGraphBaselineSettlementResult] = []
         self.baseline_at_complete: list[bool] = []
+        self.block_after_downstream = False
+
+    @activity.defn(name="stagegraph.decide_result")
+    async def decide(
+        self, request: StageGraphResultActivityRequest
+    ) -> StageGraphResultActivityResult:
+        result = await super().decide(request)
+        if self.block_after_downstream and request.observation.identity.stage_id == "downstream":
+            # Every required dependency stays unresolved after the last stage: the family has
+            # no admissible work and no terminal completion proposal.
+            projection = replace(
+                result.projection,
+                dependencies={
+                    key: replace(item, disposition=DependencyDisposition.UNRESOLVED)
+                    for key, item in result.projection.dependencies.items()
+                },
+            )
+            return replace(result, projection=projection)
+        return result
 
     @activity.defn(name="stagegraph.settle_baseline")
     async def settle_baseline(
@@ -227,3 +255,46 @@ async def test_a_baseline_that_differs_from_the_admitted_reservation_is_refused(
             )
         budget = await authority.run_control.get_budget(SCOPE, run_id)
         assert budget.reservations == {"baseline": BASELINE}
+
+
+@pytest.mark.asyncio
+async def test_a_blocked_stagegraph_releases_its_baseline_before_it_fails() -> None:
+    """The family fails `stagegraph_blocked` (a required dependency never resolves) without
+    proposing terminalization: the baseline is released first, so nothing stays reserved."""
+
+    async with await _environment() as environment:
+        authority = Authority(environment.client)
+        activities = BaselineSettlingActivities(authority)
+        activities.block_after_downstream = True
+        run_id = await _admitted_with_baseline(authority, "rrm-021-stagegraph-blocked")
+        async with Worker(
+            environment.client,
+            task_queue=QUEUE,
+            workflows=[StageGraphWorkflow, OperationWorkflow],
+            workflow_runner=coordinator_workflow_runner(),
+            activities=cast(Any, activities.functions),
+        ):
+            handle = await environment.client.start_workflow(
+                StageGraphWorkflow.run,
+                _stage_input(run_id),
+                id=f"family/{run_id}/1",
+                task_queue=QUEUE,
+            )
+            activities.fast_release.set()
+            activities.slow_release.set()
+            with pytest.raises(WorkflowFailureError) as failure:
+                await asyncio.wait_for(handle.result(), timeout=120)
+            history = await handle.fetch_history()
+            runs = await replay(handle, [StageGraphWorkflow, OperationWorkflow])
+
+        cause = failure.value.cause
+        assert isinstance(cause, ApplicationError) and cause.type == "stagegraph_blocked"
+        budget = await authority.run_control.get_budget(SCOPE, run_id)
+        assert not any(budget.reserved.values()), budget.reserved
+        assert "baseline" not in budget.reservations
+        assert budget.consumed.get("tokens.total", 0) == 0
+        assert [item.accepted for item in activities.settlements] == [True]
+        assert activities.baseline_at_complete == [], "never proposed terminalization"
+        assert RELEASE_BASELINE_ON_BLOCKED_PATCH in patch_ids(history)
+        assert SETTLE_BASELINE_PATCH not in patch_ids(history)
+        assert runs == 1
