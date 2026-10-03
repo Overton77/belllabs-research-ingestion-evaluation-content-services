@@ -3,7 +3,7 @@
 **What to build:** a reproducible production-shaped composition can execute bounded technical operations with real persistence, frozen search/browser skills and MCP tools, sandbox/workspace, governed subagents, and durable artifacts.
 
 **Blocked by:** RRM-001, RRM-002, RRM-004 and RRM-013.
-**Status:** implemented; integrated with RRM-008 (integration `56ffd63` merged at `dfe33ad`); independent review pending (tested head `65bf532`, 2026-10-02; [evidence](../../../evidence_v2/research-runtime-mission/RRM-009/README.md), disposition `ready_for_review`; CP-050 is not accepted by this ticket)
+**Status:** implemented; integrated with RRM-008 (integration `56ffd63` merged at `dfe33ad`); independent review `approve_with_fixes`, all fixes made (tested head `6990a8d` after the independent review's fixes, 2026-10-02; [evidence](../../../evidence_v2/research-runtime-mission/RRM-009/README.md), disposition `ready_for_review`; CP-050 is not accepted by this ticket)
 **Branch:** `wp/rrm-009-capability-composition`
 **Authority:** accepted CP-010/040/045 and CP-050 authorized slice; DA-001–015 and capability-binding requirements; REQ-CP-DA-004 (persistent saver, clarified), REQ-CP-DA-016 (`durability="sync"`), REQ-CP-DA-019, REQ-CP-EXEC-015 (Search Attribute registration) — AMD-RRM-001 (accepted 2026-10-01 at meta `6c89143`, merged into meta main `a50d833`; see [RRM-001 contract authority](../RRM-001-contract-authority.md) §4)
 **Evidence:** `docs/migrations_instructions/evidence_v2/research-runtime-mission/RRM-009/`; reference later CP-050 aggregate evidence, do not mark CP-050 accepted here
