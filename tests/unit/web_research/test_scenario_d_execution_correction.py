@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+
 from biotech_mission_adapters.application.capabilities.reviewed_capability_promotion import (
     build_scenario_d_execution_correction,
     publish_scenario_d_execution_correction,
@@ -14,7 +15,6 @@ from biotech_mission_adapters.domain.coordinator.web_capability_fixtures import 
     web_capability_definitions,
 )
 from biotech_mission_adapters.domain.coordinator.web_research_runtime import WebResearchGoal
-
 from mission_control.adapters.storage.control_plane_payloads import InMemoryPayloadStore
 from mission_control.application.authoring.control_plane_repository import (
     InMemoryDefinitionRepository,

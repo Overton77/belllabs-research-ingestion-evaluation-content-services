@@ -29,6 +29,15 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.store.memory import InMemoryStore
 from pydantic import PrivateAttr
+from tests.fixtures.checkpoint_lineage import bind_unit, stage_unit
+from tests.unit.operations.test_operation_execution import (
+    MCP_DIGEST,
+    SKILL_DIGEST,
+    operation_request,
+)
+from tests.unit.run_control.test_run_control import actor, command, reconciler_command
+from tests.unit.run_control.test_run_control import request as run_request
+from tests.unit.run_control.test_run_control import service as run_control_service
 
 from mission_control.adapters.deep_agents import (
     DeepAgentRuntimeAdapter,
@@ -105,21 +114,12 @@ from mission_control.domain.policies.contracts import (
     StartAction,
 )
 from mission_control.domain.policies.errors import IdempotencyConflict
-from tests.fixtures.checkpoint_lineage import bind_unit, stage_unit
-from tests.unit.operations.test_operation_execution import (
-    MCP_DIGEST,
-    SKILL_DIGEST,
-    operation_request,
-)
-from tests.unit.run_control.test_run_control import actor, command, reconciler_command
-from tests.unit.run_control.test_run_control import request as run_request
-from tests.unit.run_control.test_run_control import service as run_control_service
 
 RESULT_MARKER = "RRM004-OK"
 TOKENS_PER_CALL = 5
 
 
-class SimulatedWorkerCrash(BaseException):  # noqa: N818 - a crash, not an error
+class SimulatedWorkerCrash(BaseException):
     """A hard worker loss: nothing in the operation boundary handles or reports it."""
 
 
@@ -331,7 +331,7 @@ class MemoryOperationJournal:
 
     async def record_reconciliation_applied(self, binding, decision) -> None:  # type: ignore[no-untyped-def]
         """RRM-007 receipt seam: the in-memory journal keeps no receipt ledger."""
-        return None
+        return
 
     def __init__(self) -> None:
         self.claims: dict[str, OperationEffectClaim] = {}
@@ -485,11 +485,14 @@ class RecoveryHarness:
     repository: Any = None
     results: InMemoryArtifactPayloadStore | None = None
     bindings: InMemoryOperationBindingRepository | None = None
+    # The in-memory suites use the literal scope; a common-database proof passes its
+    # canonical `mc/{installation}/{application}/{tenant}` scope.
+    request_scope: str = "tenant-1"
 
     async def request(self, unit: RuntimeUnitIdentity) -> OperationExecutionRequest:
         """Reserve a budget slice, then bind one Deep Agent unit at the current version."""
 
-        run = await self.run_control.get_run("tenant-1", self.run_id)
+        run = await self.run_control.get_run(self.request_scope, self.run_id)
         reservation_id = f"reservation:{unit.unit_key}"
         reserved = await self.run_control.execute(
             command(
@@ -497,7 +500,7 @@ class RecoveryHarness:
                 run.version,
                 f"reserve:{unit.unit_key}",
                 ReserveBudgetAction(reservation_id=reservation_id, amounts={"tokens.total": 10}),
-            )
+            ).model_copy(update={"request_scope": self.request_scope})
         )
         assert reserved.status == CommandStatus.ACCEPTED
         version = reserved.resulting_run_version
@@ -573,9 +576,11 @@ class RecoveryHarness:
         command_id: str,
         action: ReconcileUnitAction,
     ) -> CommandResult:
-        run = await self.run_control.get_run("tenant-1", self.run_id)
+        run = await self.run_control.get_run(self.request_scope, self.run_id)
         return await self.reconciliation.reconcile_unit(
-            reconciler_command(self.run_id, run.version, command_id, action)
+            reconciler_command(self.run_id, run.version, command_id, action).model_copy(
+                update={"request_scope": self.request_scope}
+            )
         )
 
 
@@ -587,6 +592,7 @@ async def recovery_harness(
     run_control: RunControlService | None = None,
     saver: CrashingSaver | None = None,
     children: Any = None,
+    request_scope: str = "tenant-1",
 ) -> RecoveryHarness:
     """`run_control` (RRM-016) lets a family's admissions be registered on the harness; its
     repository is then not exposed (`RecoveryHarness.repository` stays `None`)."""
@@ -596,9 +602,15 @@ async def recovery_harness(
     repository: Any = None
     if run_control is None:
         run_control, repository = run_control_service()
-    admitted = await run_control.admit(run_request(request_id="rrm-004-recovery"))
+    admitted = await run_control.admit(
+        run_request(request_scope=request_scope, request_id="rrm-004-recovery")
+    )
     assert admitted.run_id is not None
-    started = await run_control.execute(command(admitted.run_id, 1, "rrm-004-start", StartAction()))
+    started = await run_control.execute(
+        command(admitted.run_id, 1, "rrm-004-start", StartAction()).model_copy(
+            update={"request_scope": request_scope}
+        )
+    )
     assert started.status == CommandStatus.ACCEPTED
     binding, _profile, bundle = exact_fixture()
     model = model or ScriptedRecoveryModel()
@@ -664,6 +676,7 @@ async def recovery_harness(
         repository=repository,
         results=results,
         bindings=bindings,
+        request_scope=request_scope,
     )
 
 
@@ -682,9 +695,11 @@ def _registry(
     )
 
 
-def stage_recovery_unit(run_id: str, name: str = "draft") -> RuntimeUnitIdentity:
+def stage_recovery_unit(
+    run_id: str, name: str = "draft", *, request_scope: str = "tenant-1"
+) -> RuntimeUnitIdentity:
     return stage_unit(
-        request_scope="tenant-1",
+        request_scope=request_scope,
         run_id=run_id,
         operation_id=(
             f"execution-epoch:1:stage:{name}:mapped:none:workflow-cycle:0:"

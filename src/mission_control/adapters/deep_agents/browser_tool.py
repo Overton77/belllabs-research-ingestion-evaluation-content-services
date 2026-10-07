@@ -28,7 +28,7 @@ import re
 import socket
 import tempfile
 from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
@@ -182,10 +182,8 @@ class AgentBrowserPageTool(BaseTool):
                     )
                 )
             finally:
-                try:
+                with suppress(BrowserSubprocessError):
                     await self._command(workspace, environment, (*base, "close"))
-                except BrowserSubprocessError:
-                    pass
         return json.dumps(
             {
                 "requested_url": url,
@@ -250,7 +248,7 @@ def numeric_ipv4(host: str) -> ipaddress.IPv4Address | None:
 def _public_host(url: str) -> str:
     parts = urlsplit(url)
     host = (parts.hostname or "").lower().rstrip(".")
-    if parts.scheme not in {"http", "https"} or not host or host in {"localhost"}:
+    if parts.scheme not in {"http", "https"} or not host or host == "localhost":
         raise BrowserSubprocessError("agent_browser_page requires a public http(s) URL")
     # The tool reaches public hosts by DNS name only. Refused: IPv6 literals (the hostname
     # contains ':'), every IPv4 form an inet_aton-style parser accepts (checked with

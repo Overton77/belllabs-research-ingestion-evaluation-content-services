@@ -1,20 +1,19 @@
 """Real SQL authority behind the scoped HTTP facade; no provider/model execution.
 
-Uses additive unique identities and never drops schemas or existing rows. Configure an
-isolated test database via TEST_APPLICATION_POSTGRES_DSN; migrations require its owner.
+Runs on a disposable common mission_control database under a restricted
+`mission_control_runtime` login with forced RLS and canonical scopes.
 """
 
 from uuid import uuid4
 
-import asyncpg
 import httpx
 import pytest
 from fastapi import FastAPI
 
-from mission_control.adapters.postgres.connections import apply_application_migrations
 from mission_control.adapters.postgres.run_control.run_control_repository import (
     PostgresRunControlRepository,
 )
+from mission_control.adapters.postgres.scope import apply_scope
 from mission_control.application.execution.boundary_interventions import (
     BoundaryCommandApplicationService,
     BoundaryCommandDeliveryService,
@@ -39,9 +38,13 @@ from mission_control.interfaces.http.mission_control import (
     get_mission_principal,
     router,
 )
+from tests.fixtures.mission_control_common_db import CommonDatabase
+from tests.integration.postgres.runtime_common import common_db as common_db
 from tests.unit.run_control.test_boundary_commands import TARGET, pause
 from tests.unit.run_control.test_mission_control_facade import pause_request
 from tests.unit.run_control.test_run_control import actor, command, request, service
+
+pytestmark = pytest.mark.common_db
 
 
 class AcknowledgedBoundary:
@@ -53,24 +56,11 @@ class AcknowledgedBoundary:
 
 @pytest.mark.asyncio
 async def test_scoped_http_pause_replay_apply_and_database_rls(
-    test_application_postgres_dsn: str,
+    common_db: CommonDatabase,
 ) -> None:
-    migration_pool = await asyncpg.create_pool(
-        test_application_postgres_dsn, min_size=1, max_size=1
-    )
+    pool = await common_db.pool(max_size=3)
     try:
-        await apply_application_migrations(migration_pool)
-    finally:
-        await migration_pool.close()
-
-    async def assume_runtime(connection: asyncpg.Connection) -> None:
-        await connection.execute("SET ROLE belllabs_control_runtime")
-
-    pool = await asyncpg.create_pool(
-        test_application_postgres_dsn, min_size=1, max_size=3, setup=assume_runtime
-    )
-    try:
-        installation, tenant = uuid4(), uuid4()
+        installation, tenant = common_db.installation_id, common_db.tenants["tenant-1"]
         identity = VerifiedApplicationIdentity(
             issuer="https://parity.invalid/auth/v1",
             audiences=frozenset({"authenticated"}),
@@ -189,21 +179,22 @@ async def test_scoped_http_pause_replay_apply_and_database_rls(
 
             principal = principal.model_copy(update={"application_id": "ai-engineer"})
             assert (await client.get(f"{base}/inspection")).status_code == 403
+        assert scope == common_db.scope("tenant-1")
         async with pool.acquire() as connection, connection.transaction():
-            assert await connection.fetchval("SELECT current_user") == "belllabs_control_runtime"
-            await connection.execute("SELECT set_config('belllabs.request_scope', $1, true)", scope)
+            assert await connection.fetchval(
+                "SELECT pg_has_role(current_user, 'mission_control_runtime', 'MEMBER')"
+            )
+            await apply_scope(connection, scope)
             assert (
                 await connection.fetchval(
-                    "SELECT count(*) FROM belllabs_control.workflow_runs WHERE run_id=$1", run_id
+                    "SELECT count(*) FROM mission_control.mission_run WHERE run_key = $1", run_id
                 )
                 == 1
             )
-            await connection.execute(
-                "SELECT set_config('belllabs.request_scope', 'other-tenant', true)"
-            )
+            await apply_scope(connection, common_db.scope("tenant-2"))
             assert (
                 await connection.fetchval(
-                    "SELECT count(*) FROM belllabs_control.workflow_runs WHERE run_id=$1", run_id
+                    "SELECT count(*) FROM mission_control.mission_run WHERE run_key = $1", run_id
                 )
                 == 0
             )

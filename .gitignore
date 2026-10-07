@@ -163,6 +163,8 @@ migrations/
 !src/mission_control/adapters/postgres/migrations/*.sql
 !integrations/biotech/src/biotech_mission_adapters/migrations/
 !integrations/biotech/src/biotech_mission_adapters/migrations/*.sql
+!packages/mission-control-db-contract/component/migrations/
+!packages/mission-control-db-contract/component/migrations/*.sql
 
 # VSCode
 .vscode/
@@ -207,3 +209,16 @@ internal_hidden_docs/
 # Disposable local qualification output (retained for diagnostics).
 /pytest-of-Pinda/
 /.tmp-worker-startup-*/
+
+# Added 2026-10-07 with the tooling refresh
+.venv-wsl/
+.tmp*/
+.hypothesis/
+.scratch/mission-db/
+
+# mission-control-local-setup skill: tracked core, machine-local ledger
+.agents/skills/mission-control-local-setup/ledger/*
+!.agents/skills/mission-control-local-setup/ledger/README.md
+
+# Machine-local Claude skill links (absolute paths). Canonical copies are .agents/skills.
+.claude/skills/

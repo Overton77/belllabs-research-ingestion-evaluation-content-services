@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+
 from biotech_mission_adapters.application.schema.schema_catalog import parse_schema_catalog
 from biotech_mission_adapters.application.schema.schema_workspace import (
     TIER0_MAX_BYTES,
@@ -12,7 +13,6 @@ from biotech_mission_adapters.application.schema.schema_workspace import (
     select_workspace_candidates,
     workspace_profile_paths,
 )
-
 from tests.schema_context_helpers import SDL
 
 

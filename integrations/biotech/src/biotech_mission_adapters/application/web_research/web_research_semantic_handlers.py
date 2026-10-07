@@ -81,8 +81,8 @@ RESULT_ADAPTER = TypeAdapter(VerifiedWebResearchResult)
 
 _SECRET_PATTERNS = (
     re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{12,}\b"),
-    re.compile(r"\b(?:api[_-]?key|access[_-]?token|password)\s*[:=]\s*\S+", re.I),
-    re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{12,}\b", re.I),
+    re.compile(r"\b(?:api[_-]?key|access[_-]?token|password)\s*[:=]\s*\S+", re.IGNORECASE),
+    re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{12,}\b", re.IGNORECASE),
 )
 _PROHIBITED_GOAL_MARKERS = (
     "log in",

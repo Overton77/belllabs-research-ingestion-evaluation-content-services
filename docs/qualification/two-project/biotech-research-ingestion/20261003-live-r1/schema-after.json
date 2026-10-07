@@ -1,0 +1,12 @@
+{
+  "algorithm": "mc-pg-catalog-v2",
+  "fingerprint": "sha256:ef5a9e71c9c4a4fe23f343a5708c476a757bc1c5a61f9aacae3a76577b209c09",
+  "per_schema": {
+    "mission_control": "sha256:461609218ce65a7a7b75072a65484ac479aed55bb3b42ccb37ef81a2dc1d2d29",
+    "mission_control_search": "sha256:1df2cc3c968448828537bd0dc171b97fde614b00c85c6f8b6c9552ab2c796c89"
+  },
+  "schemas": [
+    "mission_control",
+    "mission_control_search"
+  ]
+}

@@ -1,0 +1,474 @@
+{
+  "excluded_schemas": [
+    "information_schema",
+    "mission_control",
+    "mission_control_runtime",
+    "mission_control_search",
+    "pg_*"
+  ],
+  "extensions": {
+    "plpgsql": {
+      "schema": "pg_catalog",
+      "version": "1.0"
+    },
+    "vector": {
+      "schema": "extensions",
+      "version": "0.8.7"
+    }
+  },
+  "fingerprint_algorithm": "mc-pg-catalog-v2",
+  "format": "mission-control-protected-snapshot/v1",
+  "memberships": {
+    "mcqd_biotech_anon<-mc_migrator": {
+      "admin_option": true,
+      "inherit_option": true,
+      "set_option": true
+    },
+    "mcqd_biotech_authenticated<-mc_migrator": {
+      "admin_option": true,
+      "inherit_option": true,
+      "set_option": true
+    },
+    "mcqd_biotech_service<-mc_migrator": {
+      "admin_option": true,
+      "inherit_option": true,
+      "set_option": true
+    },
+    "pg_read_all_settings<-pg_monitor": {
+      "admin_option": false,
+      "inherit_option": true,
+      "set_option": true
+    },
+    "pg_read_all_stats<-pg_monitor": {
+      "admin_option": false,
+      "inherit_option": true,
+      "set_option": true
+    },
+    "pg_stat_scan_tables<-pg_monitor": {
+      "admin_option": false,
+      "inherit_option": true,
+      "set_option": true
+    }
+  },
+  "roles": {
+    "mc_migrator": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": true,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": true,
+      "rolinherit": true,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "mcqd_biotech_anon": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": false,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "mcqd_biotech_authenticated": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": false,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "mcqd_biotech_service": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": false,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "pg_checkpoint": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "pg_create_subscription": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "pg_database_owner": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "pg_execute_server_program": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "pg_maintain": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "pg_monitor": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "pg_read_all_data": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "pg_read_all_settings": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "pg_read_all_stats": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "pg_read_server_files": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "pg_signal_backend": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "pg_stat_scan_tables": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "pg_use_reserved_connections": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "pg_write_all_data": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "pg_write_server_files": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "postgres": {
+      "has_valid_until": false,
+      "rolbypassrls": true,
+      "rolcanlogin": true,
+      "rolconnlimit": -1,
+      "rolcreatedb": true,
+      "rolcreaterole": true,
+      "rolinherit": true,
+      "rolreplication": true,
+      "rolsuper": true
+    }
+  },
+  "schemas": {
+    "capability_search": {
+      "relations": {
+        "capability_documents": {
+          "chunks": [
+            {
+              "digest": "279fe16f309b39984d2a8d8b81b3d79f6468c7fa899158a76aebba9b5f45257a",
+              "index": 0,
+              "rows": 542
+            }
+          ],
+          "content_digest": "sha256:f3e1919ab88183947a89c65b83144efc6ba277f1c6279665a56e3ad956fbb2f3",
+          "ordering": "primary_key",
+          "rls_may_filter": false,
+          "row_count": 542,
+          "status": "hashed"
+        },
+        "generations": {
+          "chunks": [
+            {
+              "digest": "a298f299c68aeeab0eadcf91b7e60a35bb32b41a546ede2ee9127e729f4a24f7",
+              "index": 0,
+              "rows": 3
+            }
+          ],
+          "content_digest": "sha256:28888a4f83c2c62454969fc1bacc4d790b9def77510df80fb0dbc647d8d706e4",
+          "ordering": "primary_key",
+          "rls_may_filter": false,
+          "row_count": 3,
+          "status": "hashed"
+        }
+      },
+      "sequences": {
+        "capability_documents_document_id_seq": {
+          "is_called": true,
+          "last_value": 542
+        }
+      },
+      "structure": {
+        "columns": "sha256:d21232ec1107dadf91f72fec0aa55cf5ca094f8f19c4ed847f132c6f2ba4350c",
+        "constraints": "sha256:2cf39c57e43ad6b2fccfa2ee01f9fcfef26014509a2dd529c4b6bc9d9bf8a487",
+        "enums": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "functions": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "grants": "sha256:97c3343b128180a6cdb3a7f1c8c856c1774bbc7a509e7ed5f51630460cea289f",
+        "indexes": "sha256:4a6ab58be972bd9e0a0afed56be69fc70aff1680b637ad7da2394603de90856e",
+        "policies": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "present": "sha256:b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b",
+        "relations": "sha256:bb3f10f2aee4c6ed7f5ae6fbc01a97bf6fa98e3e05fdc86dc0b979b7f69801a1",
+        "sequences": "sha256:9f1c5a3e4d28b2c292f79055510a594541953368179ea2573198456a56b4482c",
+        "triggers": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "types": "sha256:cb79b1b5fa7ec4ee0651d15f62701f79f9a6b0bca38b69024fadf1416907ad29",
+        "views": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "structure_digest": "sha256:7d4b64bcf881e0f256f8b2ef7f75cc99a78d5a565e553b749c635eef9b66bd5e"
+    },
+    "extensions": {
+      "relations": {},
+      "sequences": {},
+      "structure": {
+        "columns": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "constraints": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "enums": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "functions": "sha256:a62dd5192f8345ba5fd6992a48bea8ce1aafd3149bbb250c314575d197ba1d8c",
+        "grants": "sha256:05ed0362db07815edbc3c37d04a22ab670b91d843ced39594a6bcabaabf922e2",
+        "indexes": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "policies": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "present": "sha256:b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b",
+        "relations": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "sequences": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "triggers": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "types": "sha256:f23840eefa679db68adf41d429592bcff94f250acaa35df9b73af515ee05157f",
+        "views": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "structure_digest": "sha256:6424f1350b17236337673caaf1f89fe08f024c8b60c6f33069b6538a4dae38d0"
+    },
+    "public": {
+      "relations": {
+        "research_entities": {
+          "chunks": [
+            {
+              "digest": "bd6cffbaa7f5b41922232883221c0d7934824c776e51396d0cba898f59de70c5",
+              "index": 0,
+              "rows": 25
+            }
+          ],
+          "content_digest": "sha256:49b9f3754974867e0effff039e06ac7b235ed368b20e03ecfcd95c7d18ddc11e",
+          "ordering": "primary_key",
+          "rls_may_filter": false,
+          "row_count": 25,
+          "status": "hashed"
+        }
+      },
+      "sequences": {},
+      "structure": {
+        "columns": "sha256:83ca2da4a360b209e7951bfbe3e1cbfc6f294f7b70838ed884eca371ecd2d6ed",
+        "constraints": "sha256:411689193f300374508d7f103ac093f23e74008516ab93faf1cb898bb51d9cce",
+        "enums": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "functions": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "grants": "sha256:ae65410728b4db32a17f7ed4b786d3aef1b5fa42a2f4fc17d0891eccfd6f54e0",
+        "indexes": "sha256:39cd9f6bd41ccf8e6799550ce5cb5010195efaf933c502d6f3ef71b32c8e6e22",
+        "policies": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "present": "sha256:b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b",
+        "relations": "sha256:1620097412ee2f216a16834fb6151303f305be62d996386e9a301e5240efb401",
+        "sequences": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "triggers": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "types": "sha256:80f7c73122cc6a86abe51ef8c5df1b1e3cb2a1f9aee809c33380c1f79b76bc9f",
+        "views": "sha256:326ae46ce7350ae0709004b109a5c793204dfdcd15b346cf735aa3f8199ccb48"
+      },
+      "structure_digest": "sha256:d4aef5b3ae1b6e6aee2c43cd34752a915cc95905deacc33ed23ac6c5b692de45"
+    },
+    "storage": {
+      "relations": {
+        "buckets": {
+          "chunks": [
+            {
+              "digest": "db0a4e396a819283f35af56b57cd5d7c54790e0a3ce9733bb743900ee3a5f294",
+              "index": 0,
+              "rows": 3
+            }
+          ],
+          "content_digest": "sha256:0a10edceadd283eb2b650c6e838cba3ff4cbc62d4c9920a905c29845c1883dab",
+          "ordering": "primary_key",
+          "rls_may_filter": false,
+          "row_count": 3,
+          "status": "hashed"
+        },
+        "objects": {
+          "chunks": [
+            {
+              "digest": "3f365d8eb9d57153753cc8b4cda247db1ccfa821264b3a946b2439ef1494b571",
+              "index": 0,
+              "rows": 90
+            }
+          ],
+          "content_digest": "sha256:d41ca6c4a653666d5902b3f714785f8528930bd1dd6d94bd101a1f436df6266e",
+          "ordering": "primary_key",
+          "rls_may_filter": true,
+          "row_count": 90,
+          "status": "hashed"
+        }
+      },
+      "sequences": {},
+      "structure": {
+        "columns": "sha256:2e0722fdb6961f06f22310efc670a4da54ee39edd727fef5918ec09138adc670",
+        "constraints": "sha256:37cf4b203b621171ff1469c7a045d9dd8906c3b65409c7067244faee306bcea6",
+        "enums": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "functions": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "grants": "sha256:df5e025368da3098c182172900c8f16ff42796119599911e32ec15bbeb046347",
+        "indexes": "sha256:5a36632f19133c231fb9422f109d1870b17059772b3ce8dbaf8e09feb4ffeae8",
+        "policies": "sha256:136f65e9277f69a3adb51c1ea76dffc889632940085a1a3e4994fee545d387f5",
+        "present": "sha256:b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b",
+        "relations": "sha256:abc94538b7231d03b88a85e433fdddefaf2e109ed39678620efa9786fe273d62",
+        "sequences": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "triggers": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "types": "sha256:e13c611c923f7b8a253c16bba1feb69854a16b94944be8e38831df012b21da6c",
+        "views": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "structure_digest": "sha256:ca00ac111ac7109f8cef41971624f1c0ba50d3830a0061bdbc1f74866649e35c"
+    }
+  },
+  "server_version_num": 170011,
+  "snapshot_method": {
+    "chunk_size": 1000,
+    "concurrent_writers": "not attributable; quiesce writers for equality proofs",
+    "isolation": "repeatable_read",
+    "ordering": "primary key, else full row text COLLATE C",
+    "read_only": true,
+    "row_digest": "sha256(string_agg(row_to_json(t)::text, '\\n') per chunk) in-database"
+  },
+  "storage_buckets": {
+    "knowledge-artifacts": {
+      "file_size_limit": null,
+      "name": "knowledge-artifacts",
+      "public": false
+    },
+    "public-assets": {
+      "file_size_limit": 1048576,
+      "name": "public-assets",
+      "public": true
+    },
+    "raw-captures": {
+      "file_size_limit": 52428800,
+      "name": "raw-captures",
+      "public": false
+    }
+  },
+  "target": {
+    "app": "biotech",
+    "application_id": "biotech",
+    "database_host": "127.0.0.1",
+    "database_name": "postgres",
+    "database_port": "55551",
+    "database_user": "mc_migrator",
+    "environment": "disposable",
+    "identity_evidence": "local docker disposable cluster for biotech",
+    "installation_id": "0192a4f0-0000-7000-8000-00000000b10e",
+    "project_label": "disposable-biotech",
+    "project_ref": "mcdisposablebiotech"
+  }
+}

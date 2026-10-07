@@ -1,0 +1,65 @@
+{
+  "format": "mission-control-allowed-differences/v1",
+  "allowed": [
+    {
+      "path": "roles/mission_control_runtime",
+      "change": "added",
+      "reason": "release 0001 / runtime phase creates this restricted NOLOGIN role"
+    },
+    {
+      "path": "roles/mission_control_family_writer",
+      "change": "added",
+      "reason": "release 0001 / runtime phase creates this restricted NOLOGIN role"
+    },
+    {
+      "path": "roles/mission_control_catalog_writer",
+      "change": "added",
+      "reason": "release 0001 / runtime phase creates this restricted NOLOGIN role"
+    },
+    {
+      "path": "roles/mission_control_outbox_worker",
+      "change": "added",
+      "reason": "release 0001 / runtime phase creates this restricted NOLOGIN role"
+    },
+    {
+      "path": "roles/mission_control_readonly",
+      "change": "added",
+      "reason": "release 0001 / runtime phase creates this restricted NOLOGIN role"
+    },
+    {
+      "path": "roles/mission_control_checkpointer",
+      "change": "added",
+      "reason": "release 0001 / runtime phase creates this restricted NOLOGIN role"
+    },
+    {
+      "path": "memberships/mission_control_runtime<-postgres",
+      "change": "added",
+      "reason": "PostgreSQL 16+ grants the CREATEROLE creator (postgres) ADMIN option only (no INHERIT/SET); no capability is gained"
+    },
+    {
+      "path": "memberships/mission_control_family_writer<-postgres",
+      "change": "added",
+      "reason": "PostgreSQL 16+ grants the CREATEROLE creator (postgres) ADMIN option only (no INHERIT/SET); no capability is gained"
+    },
+    {
+      "path": "memberships/mission_control_catalog_writer<-postgres",
+      "change": "added",
+      "reason": "PostgreSQL 16+ grants the CREATEROLE creator (postgres) ADMIN option only (no INHERIT/SET); no capability is gained"
+    },
+    {
+      "path": "memberships/mission_control_outbox_worker<-postgres",
+      "change": "added",
+      "reason": "PostgreSQL 16+ grants the CREATEROLE creator (postgres) ADMIN option only (no INHERIT/SET); no capability is gained"
+    },
+    {
+      "path": "memberships/mission_control_readonly<-postgres",
+      "change": "added",
+      "reason": "PostgreSQL 16+ grants the CREATEROLE creator (postgres) ADMIN option only (no INHERIT/SET); no capability is gained"
+    },
+    {
+      "path": "memberships/mission_control_checkpointer<-postgres",
+      "change": "added",
+      "reason": "PostgreSQL 16+ grants the CREATEROLE creator (postgres) ADMIN option only (no INHERIT/SET); no capability is gained"
+    }
+  ]
+}

@@ -9,7 +9,7 @@ from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontext
 from dataclasses import dataclass, make_dataclass
 from dataclasses import field as dataclass_field
 from pathlib import PurePosixPath
-from typing import Annotated, Any, cast
+from typing import Annotated, Any, ClassVar, cast
 
 from deepagents import DeepAgentState
 from deepagents.backends import LangSmithSandbox, StateBackend
@@ -159,7 +159,7 @@ class StateSandboxFactory:
 class OpenAIExactModelFactory:
     """Construct ChatOpenAI only from an exact component and resolved credential ref."""
 
-    _allowed_settings = {
+    _allowed_settings: ClassVar[set[str]] = {
         "reasoning_effort",
         "verbosity",
         "max_completion_tokens",

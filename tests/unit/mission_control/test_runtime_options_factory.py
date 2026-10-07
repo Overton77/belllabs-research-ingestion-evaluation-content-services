@@ -27,7 +27,7 @@ def deployment(tmp_path):
         database_secret_ref="MC_TEST_DSN",
         accepted_issuers={"https://issuer.invalid"},
         accepted_audiences={"authenticated"},
-        required_component_version="transitional-local-v1",
+        required_component_version="1.0.0",
     )
     auth = ApplicationAuthentication(
         binding=binding,
@@ -36,7 +36,7 @@ def deployment(tmp_path):
         public_jwks_file=tmp_path / "public.json",
     )
     return MissionDeployment(
-        storage_mode="transitional_local",
+        storage_mode="production_common",
         max_request_bytes=1000,
         applications=(ApplicationDeployment(authentication=auth),),
     )

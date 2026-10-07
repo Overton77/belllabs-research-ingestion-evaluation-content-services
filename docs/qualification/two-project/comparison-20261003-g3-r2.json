@@ -1,0 +1,178 @@
+{
+  "common": {
+    "contract_schema_digest": "sha256:dbce50116df01e9a8d814f78e9ff61d91943afdfcc5fcb1a1d2d2001e488ab7f",
+    "per_schema": {
+      "mission_control": "sha256:461609218ce65a7a7b75072a65484ac479aed55bb3b42ccb37ef81a2dc1d2d29",
+      "mission_control_search": "sha256:1df2cc3c968448828537bd0dc171b97fde614b00c85c6f8b6c9552ab2c796c89"
+    },
+    "schema_fingerprint": "sha256:ef5a9e71c9c4a4fe23f343a5708c476a757bc1c5a61f9aacae3a76577b209c09"
+  },
+  "equal": {
+    "contract_schema_digest": true,
+    "manifest_fingerprint": true,
+    "migration_receipts": true,
+    "per_schema": true,
+    "schema_fingerprint": true
+  },
+  "evidence_index": {
+    "disposable-ai-engineer": {
+      "cli-steps.json": "sha256:4712dec4031fbe7522879706b09b92086db335b74cda02cc4aacb61c2c5b19d6",
+      "decision.json": "sha256:86ce097645c6ef1a030a716411fde0c0fbd690fedaa3c7124bf3ce2802e55ae2",
+      "identity.json": "sha256:906b7b52919314575818e790ab2540850d8870e0272e797af630f9e2ee626ddc",
+      "migration-receipts.json": "sha256:cb2af164c0574bd14dc97837a79400211b3e848efd2993b65e45fd163a16df11",
+      "plan.json": "sha256:d533acb99396be325a4427113be74fe7e230f727b838b996b817935f8d5b7993",
+      "protected-after.json": "sha256:6f17634951aff20c6c2c665fe18aee406f147d79837aaf0e82828a4ff279667d",
+      "protected-before.json": "sha256:4bf5a8a9919c25e444d6c1720c8b1896251e5e0cf71537cac991e75d0e28e731",
+      "protected-diff.json": "sha256:15ffe92ebf2aa7c39762246673afd95a8e5be1d4b666baf1b2b1fa088e029f5f",
+      "recovery.json": "sha256:2e5aa2a95dfd0c49860c733f9bd341d938e766af3947b4d8d787120f46e9d36d",
+      "release.json": "sha256:13ce4b4b8122942ec2f2dd2d26e61f55a211604d6ff424e9c6c23d668642996c",
+      "roles.json": "sha256:8918649297e200c8d6b126f8818da3827d5e689f363d81aa07c25c34dcaf5fab",
+      "runtime-receipts.json": "sha256:915e1a09272ca2904069408666af4089fa20c23dc1d6270fc263dbad6d9f6af8",
+      "schema-after.json": "sha256:1e5c9efd8647e67a5f6983b3503ee3d0f7532e88b5f91ba6b4c1fbbb53f54dda",
+      "schema-before.json": "sha256:39011bf2c6ca216617b98a1cfa976ee3b6f11b9cb37f0d846d9b63597d1b355d",
+      "seed-plan.json": "sha256:602388d2227df0b6c31e448520b20f25084601edbecc02b0d2041ece0bf3978a",
+      "seed-receipts.json": "sha256:b270551a0f99e4477cb9b00aae4f453c1ec42b4ea2c620f958504ee64704c9c4",
+      "storage-reconciliation.json": "sha256:9015c97a03c27d5d3b262a34d2aa93e3fc0aba6b169bcee106ed215c313d401c"
+    },
+    "disposable-biotech": {
+      "cli-steps.json": "sha256:4712dec4031fbe7522879706b09b92086db335b74cda02cc4aacb61c2c5b19d6",
+      "decision.json": "sha256:86ce097645c6ef1a030a716411fde0c0fbd690fedaa3c7124bf3ce2802e55ae2",
+      "identity.json": "sha256:7734dae387b3320df26034b48657d1416c2af6637d74372357a0f13de4e6e788",
+      "migration-receipts.json": "sha256:cb2af164c0574bd14dc97837a79400211b3e848efd2993b65e45fd163a16df11",
+      "plan.json": "sha256:658e26fba3026598f2ebdd0da3af10140eae6404fe2f72a9a1f26a34bd252d71",
+      "protected-after.json": "sha256:0a7ee29e3b94527a15b80fecd87effe9dc448bde01655e806d063168cb139141",
+      "protected-before.json": "sha256:8f98d6f4d3c326d2fd0c38db1837d5d83bb521d97ee2a305cf73202b023ec519",
+      "protected-diff.json": "sha256:15ffe92ebf2aa7c39762246673afd95a8e5be1d4b666baf1b2b1fa088e029f5f",
+      "recovery.json": "sha256:2e5aa2a95dfd0c49860c733f9bd341d938e766af3947b4d8d787120f46e9d36d",
+      "release.json": "sha256:76abb1ef835e25f0d054f1bd1e1400ad43be63376ac476ee11bb79d432fde35a",
+      "roles.json": "sha256:8918649297e200c8d6b126f8818da3827d5e689f363d81aa07c25c34dcaf5fab",
+      "runtime-receipts.json": "sha256:a147d0d0f88c91431417d690bd519d9104b0ca71f857a2cfd7aa0f555fc4b695",
+      "schema-after.json": "sha256:1e5c9efd8647e67a5f6983b3503ee3d0f7532e88b5f91ba6b4c1fbbb53f54dda",
+      "schema-before.json": "sha256:39011bf2c6ca216617b98a1cfa976ee3b6f11b9cb37f0d846d9b63597d1b355d",
+      "seed-plan.json": "sha256:eab0c59e6e451d10e5266d6047a5ec23333f5644c8f2f06a623d3a9bf8621aef",
+      "seed-receipts.json": "sha256:688ec232788a79804e9839f78431eb931c11dd3f079dd5f6dce701fa5005b0c0",
+      "storage-reconciliation.json": "sha256:9015c97a03c27d5d3b262a34d2aa93e3fc0aba6b169bcee106ed215c313d401c"
+    }
+  },
+  "kind": "disposable_two_target_comparison",
+  "limits": [
+    "Disposable local clusters, not the live Supabase projects.",
+    "Storage buckets not exercised (no Supabase Storage service locally).",
+    "No concurrent writers existed; protected digests are therefore attributable."
+  ],
+  "migration_count": 18,
+  "not_compared_by_design": [
+    "seeded row ids",
+    "app binding seed contents",
+    "installation ids",
+    "protected domain contents (different fixtures per target)"
+  ],
+  "protected_diff": {
+    "disposable-ai-engineer": "allowed",
+    "disposable-biotech": "allowed"
+  },
+  "release": {
+    "component": "mission_control",
+    "component_version": "1.0.0",
+    "manifest_sha256": "sha256:946bc371a7837ef5f52af8c8a7de4eb85aa8b801dd7cb61dab8512f709498a3e"
+  },
+  "run_id": "20261003-g3-r2",
+  "seeds": {
+    "disposable-ai-engineer": {
+      "apply": [
+        [
+          "mc.catalog.workflow-parity",
+          "applied"
+        ],
+        [
+          "mc.catalog.runtime-profiles",
+          "applied"
+        ],
+        [
+          "mc.catalog.approved-assets",
+          "applied"
+        ],
+        [
+          "mc.app.bindings",
+          "applied"
+        ],
+        [
+          "mc.qualification.parity",
+          "applied"
+        ]
+      ],
+      "replay": [
+        [
+          "mc.catalog.workflow-parity",
+          "replay"
+        ],
+        [
+          "mc.catalog.runtime-profiles",
+          "replay"
+        ],
+        [
+          "mc.catalog.approved-assets",
+          "replay"
+        ],
+        [
+          "mc.app.bindings",
+          "replay"
+        ],
+        [
+          "mc.qualification.parity",
+          "replay"
+        ]
+      ]
+    },
+    "disposable-biotech": {
+      "apply": [
+        [
+          "mc.catalog.workflow-parity",
+          "applied"
+        ],
+        [
+          "mc.catalog.runtime-profiles",
+          "applied"
+        ],
+        [
+          "mc.catalog.approved-assets",
+          "applied"
+        ],
+        [
+          "mc.app.bindings",
+          "applied"
+        ],
+        [
+          "mc.qualification.parity",
+          "applied"
+        ]
+      ],
+      "replay": [
+        [
+          "mc.catalog.workflow-parity",
+          "replay"
+        ],
+        [
+          "mc.catalog.runtime-profiles",
+          "replay"
+        ],
+        [
+          "mc.catalog.approved-assets",
+          "replay"
+        ],
+        [
+          "mc.app.bindings",
+          "replay"
+        ],
+        [
+          "mc.qualification.parity",
+          "replay"
+        ]
+      ]
+    }
+  },
+  "targets": [
+    "disposable-biotech",
+    "disposable-ai-engineer"
+  ]
+}

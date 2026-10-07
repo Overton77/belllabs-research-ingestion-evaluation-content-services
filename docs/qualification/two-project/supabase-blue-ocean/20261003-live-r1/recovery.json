@@ -1,0 +1,7 @@
+{
+  "status": "forward_only",
+  "transactional_phases": "release (one transaction), each seed bundle (one transaction); runtime phase per-step with verified ledger",
+  "rollback_policy": "no DROP-based rollback; corrections ship as a forward release",
+  "recovery_point": "not separately verified before apply; the change was additive-only (new schemas/roles) and the protected comparison shows no change to pre-existing objects",
+  "owner_approval": "project owner, Claude Code session 2026-10-03"
+}

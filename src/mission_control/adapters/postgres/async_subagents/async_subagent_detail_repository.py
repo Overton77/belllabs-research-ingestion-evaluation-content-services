@@ -1,7 +1,9 @@
 """Scoped async child details, atomically persisted before external submission.
 
-Migration 0029 replaces the existing detail port's Mongo storage. It is transitional
-belllabs_control storage, not the unreleased common mission_control component.
+The immutable child contract and the mutable execution and parent-link envelopes are
+support records on mission_control (``subordinate_contract``,
+``subordinate_execution_detail``, ``subordinate_link_detail``) bound to the parent run by
+scoped key, with forced row-level security.
 """
 
 from __future__ import annotations
@@ -11,8 +13,10 @@ from typing import Any
 
 import asyncpg
 
-from mission_control.adapters.postgres.documents import PostgresDocumentStore
+from mission_control.adapters.postgres.run_control import canonical as mc
+from mission_control.adapters.postgres.run_control.canonical import SCOPE
 from mission_control.application.subordinates.service import AsyncSubagentError
+from mission_control.contracts.identities import uuid7
 from mission_control.domain.execution.contracts import (
     AsyncSubagentContract,
     AsyncSubagentExecution,
@@ -83,32 +87,41 @@ class PostgresAsyncSubagentDetailRepository:
         )
         try:
             async with self._pool.acquire() as connection, connection.transaction():
-                await PostgresDocumentStore.set_scope(connection, request_scope)
+                args = await mc.begin(connection, request_scope)
                 await connection.execute(
-                    "INSERT INTO belllabs_control.async_subagent_contract_details "
-                    "(request_scope,contract_id,contract_digest,payload) "
-                    "VALUES ($1,$2,$3,$4::jsonb) "
-                    "ON CONFLICT (request_scope,contract_id) DO NOTHING",
-                    request_scope,
+                    "INSERT INTO mission_control.subordinate_contract "
+                    "(installation_id, application_id, tenant_id, subordinate_contract_id, "
+                    "contract_key, contract_digest, payload, created_at, created_by_actor_ref) "
+                    "VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9) "
+                    "ON CONFLICT (installation_id, application_id, tenant_id, contract_key) "
+                    "DO NOTHING",
+                    *args,
+                    uuid7(),
                     contract.contract_id,
                     contract.contract_digest,
                     contract.model_dump_json(),
+                    execution.created_at,
+                    mc.WRITER_REF,
                 )
                 prior_contract = await connection.fetchval(
-                    "SELECT payload FROM belllabs_control.async_subagent_contract_details "
-                    "WHERE request_scope=$1 AND contract_id=$2",
-                    request_scope,
+                    "SELECT payload FROM mission_control.subordinate_contract "
+                    f"WHERE {SCOPE} AND contract_key = $4",
+                    *args,
                     contract.contract_id,
                 )
                 if AsyncSubagentContract.model_validate(_payload(prior_contract)) != contract:
                     raise AsyncSubagentError("async contract identity collision")
                 await connection.execute(
-                    "INSERT INTO belllabs_control.async_subagent_execution_details "
-                    "(request_scope,child_execution_id,contract_id,contract_digest,parent_run_id,"
-                    "parent_operation_id,execution_generation,payload,updated_at) "
-                    "VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9) "
-                    "ON CONFLICT (request_scope,child_execution_id) DO NOTHING",
-                    request_scope,
+                    "INSERT INTO mission_control.subordinate_execution_detail "
+                    "(installation_id, application_id, tenant_id, subordinate_execution_detail_id,"
+                    " subordinate_key, contract_key, contract_digest, parent_run_key,"
+                    " parent_operation_key, execution_generation, payload, updated_at, created_at,"
+                    " created_by_actor_ref) "
+                    "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $12, $13) "
+                    "ON CONFLICT (installation_id, application_id, tenant_id, subordinate_key) "
+                    "DO NOTHING",
+                    *args,
+                    uuid7(),
                     execution.child_execution_id,
                     execution.contract_id,
                     execution.contract_digest,
@@ -117,29 +130,31 @@ class PostgresAsyncSubagentDetailRepository:
                     execution.execution_generation,
                     execution.model_dump_json(),
                     execution.updated_at,
+                    mc.WRITER_REF,
                 )
-                prior = await self._execution_on(
-                    connection, request_scope, execution.child_execution_id
-                )
+                prior = await self._execution_on(connection, args, execution.child_execution_id)
                 _same_identity(prior, execution, _EXECUTION_IDENTITY)
                 if prior.execution_generation != execution.execution_generation:
                     raise AsyncSubagentError("async child generation collision")
                 await connection.execute(
-                    "INSERT INTO belllabs_control.async_subagent_link_details "
-                    "(request_scope,child_execution_id,link_id,parent_run_id,parent_operation_id,"
-                    "payload,updated_at) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7) "
-                    "ON CONFLICT (request_scope,child_execution_id) DO NOTHING",
-                    request_scope,
+                    "INSERT INTO mission_control.subordinate_link_detail "
+                    "(installation_id, application_id, tenant_id, subordinate_link_detail_id,"
+                    " subordinate_key, link_key, parent_run_key, parent_operation_key, payload,"
+                    " updated_at, created_at, created_by_actor_ref) "
+                    "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $10, $11) "
+                    "ON CONFLICT (installation_id, application_id, tenant_id, subordinate_key) "
+                    "DO NOTHING",
+                    *args,
+                    uuid7(),
                     link.child_execution_id,
                     link.link_id,
                     link.parent_run_id,
                     link.parent_operation_id,
                     link.model_dump_json(),
                     link.updated_at,
+                    mc.WRITER_REF,
                 )
-                stored_link = await self._link_on(
-                    connection, request_scope, link.child_execution_id
-                )
+                stored_link = await self._link_on(connection, args, link.child_execution_id)
                 _same_identity(stored_link, link, _LINK_IDENTITY)
                 return prior
         except asyncpg.UniqueViolationError:
@@ -147,12 +162,12 @@ class PostgresAsyncSubagentDetailRepository:
 
     @staticmethod
     async def _execution_on(
-        connection: asyncpg.Connection, scope: str, child: str, *, lock: bool = False
+        connection: asyncpg.Connection, args: tuple[Any, ...], child: str, *, lock: bool = False
     ) -> AsyncSubagentExecution:
         row = await connection.fetchval(
-            "SELECT payload FROM belllabs_control.async_subagent_execution_details "
-            "WHERE request_scope=$1 AND child_execution_id=$2" + (" FOR UPDATE" if lock else ""),
-            scope,
+            "SELECT payload FROM mission_control.subordinate_execution_detail "
+            f"WHERE {SCOPE} AND subordinate_key = $4" + (" FOR UPDATE" if lock else ""),
+            *args,
             child,
         )
         if row is None:
@@ -161,12 +176,12 @@ class PostgresAsyncSubagentDetailRepository:
 
     @staticmethod
     async def _link_on(
-        connection: asyncpg.Connection, scope: str, child: str, *, lock: bool = False
+        connection: asyncpg.Connection, args: tuple[Any, ...], child: str, *, lock: bool = False
     ) -> ParentAsyncSubagentLink:
         row = await connection.fetchval(
-            "SELECT payload FROM belllabs_control.async_subagent_link_details "
-            "WHERE request_scope=$1 AND child_execution_id=$2" + (" FOR UPDATE" if lock else ""),
-            scope,
+            "SELECT payload FROM mission_control.subordinate_link_detail "
+            f"WHERE {SCOPE} AND subordinate_key = $4" + (" FOR UPDATE" if lock else ""),
+            *args,
             child,
         )
         if row is None:
@@ -177,16 +192,16 @@ class PostgresAsyncSubagentDetailRepository:
         self, request_scope: str, child_execution_id: str
     ) -> AsyncSubagentExecution:
         async with self._pool.acquire() as connection, connection.transaction():
-            await PostgresDocumentStore.set_scope(connection, request_scope)
-            return await self._execution_on(connection, request_scope, child_execution_id)
+            args = await mc.begin(connection, request_scope)
+            return await self._execution_on(connection, args, child_execution_id)
 
     async def get_contract(self, request_scope: str, contract_id: str) -> AsyncSubagentContract:
         async with self._pool.acquire() as connection, connection.transaction():
-            await PostgresDocumentStore.set_scope(connection, request_scope)
+            args = await mc.begin(connection, request_scope)
             row = await connection.fetchval(
-                "SELECT payload FROM belllabs_control.async_subagent_contract_details "
-                "WHERE request_scope=$1 AND contract_id=$2",
-                request_scope,
+                "SELECT payload FROM mission_control.subordinate_contract "
+                f"WHERE {SCOPE} AND contract_key = $4",
+                *args,
                 contract_id,
             )
             if row is None:
@@ -197,15 +212,15 @@ class PostgresAsyncSubagentDetailRepository:
         self, request_scope: str, child_execution_id: str
     ) -> ParentAsyncSubagentLink:
         async with self._pool.acquire() as connection, connection.transaction():
-            await PostgresDocumentStore.set_scope(connection, request_scope)
-            return await self._link_on(connection, request_scope, child_execution_id)
+            args = await mc.begin(connection, request_scope)
+            return await self._link_on(connection, args, child_execution_id)
 
     async def save_execution(self, request_scope: str, execution: AsyncSubagentExecution) -> None:
         execution = AsyncSubagentExecution.model_validate(execution.model_dump())
         async with self._pool.acquire() as connection, connection.transaction():
-            await PostgresDocumentStore.set_scope(connection, request_scope)
+            args = await mc.begin(connection, request_scope)
             prior = await self._execution_on(
-                connection, request_scope, execution.child_execution_id, lock=True
+                connection, args, execution.child_execution_id, lock=True
             )
             _same_identity(prior, execution, (*_EXECUTION_IDENTITY, "created_at"))
             if (
@@ -235,10 +250,10 @@ class PostgresAsyncSubagentDetailRepository:
             ):
                 raise AsyncSubagentError("stale async execution update")
             await connection.execute(
-                "UPDATE belllabs_control.async_subagent_execution_details "
-                "SET payload=$3::jsonb,updated_at=$4,execution_generation=$5 "
-                "WHERE request_scope=$1 AND child_execution_id=$2",
-                request_scope,
+                "UPDATE mission_control.subordinate_execution_detail "
+                "SET payload = $5::jsonb, updated_at = $6, execution_generation = $7 "
+                f"WHERE {SCOPE} AND subordinate_key = $4",
+                *args,
                 execution.child_execution_id,
                 execution.model_dump_json(),
                 execution.updated_at,
@@ -248,10 +263,8 @@ class PostgresAsyncSubagentDetailRepository:
     async def save_link(self, request_scope: str, link: ParentAsyncSubagentLink) -> None:
         link = ParentAsyncSubagentLink.model_validate(link.model_dump())
         async with self._pool.acquire() as connection, connection.transaction():
-            await PostgresDocumentStore.set_scope(connection, request_scope)
-            prior = await self._link_on(
-                connection, request_scope, link.child_execution_id, lock=True
-            )
+            args = await mc.begin(connection, request_scope)
+            prior = await self._link_on(connection, args, link.child_execution_id, lock=True)
             _same_identity(prior, link, (*_LINK_IDENTITY, "created_at", "timeout_at"))
             if (
                 link.updated_at < prior.updated_at
@@ -308,10 +321,10 @@ class PostgresAsyncSubagentDetailRepository:
                 ):
                     raise AsyncSubagentError("stale async message update")
             await connection.execute(
-                "UPDATE belllabs_control.async_subagent_link_details "
-                "SET payload=$3::jsonb,updated_at=$4 "
-                "WHERE request_scope=$1 AND child_execution_id=$2",
-                request_scope,
+                "UPDATE mission_control.subordinate_link_detail "
+                "SET payload = $5::jsonb, updated_at = $6 "
+                f"WHERE {SCOPE} AND subordinate_key = $4",
+                *args,
                 link.child_execution_id,
                 link.model_dump_json(),
                 link.updated_at,

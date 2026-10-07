@@ -39,7 +39,8 @@ def factory(kind: str, events: list[str]):  # type: ignore[no-untyped-def]
 async def test_standalone_persistence_is_one_lifespan_and_setup_is_explicit() -> None:
     events: list[str] = []
     lifespan = StandalonePersistenceLifespan(
-        "postgresql://disposable",
+        # Test-only vendor setup requires an explicit disposable search_path schema.
+        "postgresql://disposable?options=-c%20search_path%3Dstage3_disposable",
         run_setup=True,
         saver_factory=factory("saver", events),
         store_factory=factory("store", events),

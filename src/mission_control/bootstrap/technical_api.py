@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-import asyncio
-import json
 from collections.abc import AsyncIterator
-from contextlib import AsyncExitStack, asynccontextmanager, suppress
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
 
-import asyncpg
 import socketio
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -112,7 +109,6 @@ class SupabaseRuntimeSocketAuthorizer:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await initialize_run_control_resources(app)
-    relay_task: asyncio.Task[None] | None = None
     redis: Redis | None = None
     pool = getattr(app.state, "run_control_postgres_pool", None)
     if pool is not None:
@@ -139,7 +135,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 sio,
                 await create_supabase(settings),
             )
-            relay_task = asyncio.create_task(_relay_runtime_events(redis, pool))
     coordinator_route: BaseRoute | None = None
     try:
         async with AsyncExitStack() as coordinator_stack:
@@ -163,10 +158,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 if coordinator_route is not None:
                     app.router.routes.remove(coordinator_route)
     finally:
-        if relay_task is not None:
-            relay_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await relay_task
         if redis is not None:
             await redis.aclose()
         await close_run_control_resources(app)
@@ -369,47 +360,6 @@ async def answer_runtime_approval(sid: str, data: dict) -> None:
         {"approval_id": approval_id, "decision": decision.decision},
         to=sid,
     )
-
-
-async def _relay_runtime_events(redis: Redis, pool: asyncpg.Pool) -> None:
-    pubsub = redis.pubsub()
-    await pubsub.psubscribe("belllabs:runtime:*")
-    try:
-        async for message in pubsub.listen():
-            if message["type"] not in {"message", "pmessage"}:
-                continue
-            payload = json.loads(message["data"])
-            request_scope = str(payload.get("request_scope", ""))
-            event_id = str(payload.get("event_id", ""))
-            run_id = str(payload.get("run_id", ""))
-            if not request_scope or not event_id or not run_id:
-                continue
-            async with pool.acquire() as connection, connection.transaction():
-                await connection.execute(
-                    "SELECT set_config('belllabs.request_scope', $1, true)",
-                    request_scope,
-                )
-                durable = await connection.fetchval(
-                    """
-                    SELECT envelope
-                    FROM belllabs_control.agent_runtime_events
-                    WHERE request_scope = $1 AND event_id = $2
-                    """,
-                    request_scope,
-                    event_id,
-                )
-            if durable is None:
-                continue
-            durable_payload = json.loads(durable) if isinstance(durable, str) else durable
-            if durable_payload != payload:
-                continue
-            await sio.emit(
-                "runtime_event",
-                payload,
-                room=_runtime_room(request_scope, run_id),
-            )
-    finally:
-        await pubsub.aclose()
 
 
 def _runtime_room(request_scope: str, run_id: str) -> str:

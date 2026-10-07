@@ -24,7 +24,7 @@ A new program is not a new scheduler. Both existing families use the same govern
 operation execution, budgets and settlement. An application-specific capability
 runs behind an admitted interface; the general kernel cannot import Biotech
 implementation. The optional `integrations/biotech/` package is a transition home,
-not completion of the deferred KnowledgeServices generalization audit.
+not completion of the deferred Knowledge Services generalization audit.
 
 Do not move application logic into HTTP dependencies or provider callbacks.
 Definitions and compiled bindings are immutable; runtime state belongs to scoped

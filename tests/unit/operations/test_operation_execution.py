@@ -402,7 +402,7 @@ async def test_operation_run_rejects_combined_request_and_prestart_signal_overfl
 
 @pytest.mark.parametrize(
     "operation_kind",
-    ("stage_operation", "goal_iteration", "goal_verification"),
+    ["stage_operation", "goal_iteration", "goal_verification"],
 )
 def test_operation_workflow_v2_rejects_deprecated_family_kinds(
     operation_kind: str,
@@ -452,7 +452,7 @@ class FakeJournal:
 
     async def record_reconciliation_applied(self, binding, decision) -> None:  # type: ignore[no-untyped-def]
         """RRM-007 receipt seam: the in-memory journal keeps no receipt ledger."""
-        return None
+        return
 
     async def acquire(self, binding, *, claimed_by, at_current_version=False):  # type: ignore[no-untyped-def]
         del at_current_version
@@ -1463,7 +1463,7 @@ async def _run_operation_workflow(
                     id=workflow_id,
                     task_queue="operation-workflow-coordinator",
                 )
-            except Exception as error:  # noqa: BLE001 - the workflow failure is asserted
+            except Exception as error:
                 return error
 
 

@@ -15,6 +15,7 @@ private runtime persistence. Redis is optional wake/fanout. Object storage carri
 digest-bound payloads and directory bundles. External knowledge stays behind
 admitted capability interfaces.
 
-Local qualification uses the explicit transitional schema. Production common
-startup stays blocked until the released common component and adapters qualify.
+The common mission_control component (packages/mission-control-db-contract,
+installer mission-db) is the only storage mode; live installation stays blocked
+until the owner approves each target.
 Runtime connections cannot migrate. See docs/knowledge/persistence.md.

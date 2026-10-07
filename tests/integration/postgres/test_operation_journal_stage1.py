@@ -7,13 +7,13 @@ import asyncpg
 import pytest
 from pydantic import ValidationError
 
-from mission_control.adapters.postgres.connections import apply_application_migrations
 from mission_control.adapters.postgres.operations.operation_journal import (
     PostgresAtomicOperationJournalRepository,
 )
 from mission_control.adapters.postgres.run_control.run_control_repository import (
     PostgresRunControlRepository,
 )
+from mission_control.adapters.postgres.scope import apply_scope
 from mission_control.application.execution.operations.journaled_operation_execution import (
     _claim_authority_command_id,
 )
@@ -48,16 +48,34 @@ from mission_control.domain.policies.contracts import (
     SettlePendingUsageAction,
 )
 from mission_control.domain.policies.errors import IdempotencyConflict, RunVersionConflict
-from tests.unit.run_control.test_run_control import actor, command, request, service
+from tests.fixtures.mission_control_common_db import CommonDatabase
+from tests.integration.postgres.runtime_common import common_db as common_db
+from tests.integration.postgres.runtime_common import owner_rows
+from tests.unit.run_control.test_run_control import actor, service
+from tests.unit.run_control.test_run_control import command as unit_command
+from tests.unit.run_control.test_run_control import request as unit_request
 
 NOW = datetime(2026, 8, 5, 20, 0, tzinfo=UTC)
 DIGEST = "sha256:" + "a" * 64
+# In-memory tests run in the literal "tenant-1" scope; the PostgreSQL test binds the
+# canonical scope of its disposable common database for its duration.
+_SCOPE = ["tenant-1"]
+
+
+def command(run_id: str, version: int, command_id: str, action: object) -> LifecycleCommand:
+    return unit_command(run_id, version, command_id, action).model_copy(
+        update={"request_scope": _SCOPE[0]}
+    )
+
+
+def request(**kwargs: object):  # type: ignore[no-untyped-def]
+    return unit_request(request_scope=_SCOPE[0], **kwargs)  # type: ignore[arg-type]
 
 
 def claim(*, run_id: str = "run-1", request_digest: str = DIGEST) -> OperationEffectClaim:
     return OperationEffectClaim(
         effect_claim_id="claim-1",
-        request_scope="tenant-1",
+        request_scope=_SCOPE[0],
         belllabs_run_id=run_id,
         operation_contract_digest=DIGEST,
         idempotency_key="effect-key-1",
@@ -73,7 +91,7 @@ def claim(*, run_id: str = "run-1", request_digest: str = DIGEST) -> OperationEf
 def attempt() -> OperationTechnicalAttempt:
     return OperationTechnicalAttempt(
         operation_attempt_id="technical-attempt-1",
-        request_scope="tenant-1",
+        request_scope=_SCOPE[0],
         effect_claim_id="claim-1",
         technical_attempt=1,
         provider="fixture-provider",
@@ -90,7 +108,7 @@ def attempt() -> OperationTechnicalAttempt:
 def settlement() -> OperationJournalSettlement:
     values = {
         "settlement_id": "settlement-1",
-        "request_scope": "tenant-1",
+        "request_scope": _SCOPE[0],
         "effect_claim_id": "claim-1",
         "settlement_revision": 1,
         "status": "failed",
@@ -108,7 +126,7 @@ def settlement() -> OperationJournalSettlement:
 def test_legacy_settlement_digest_is_explicit_and_new_writes_cannot_downgrade() -> None:
     legacy_payload = {
         "settlement_id": "legacy-settlement",
-        "request_scope": "tenant-1",
+        "request_scope": _SCOPE[0],
         "effect_claim_id": "claim-1",
         "settlement_revision": 1,
         "status": "reconciliation_required",
@@ -144,7 +162,7 @@ def test_legacy_settlement_digest_is_explicit_and_new_writes_cannot_downgrade() 
         )
     with pytest.raises(ValueError, match="complete-v2"):
         OperationJournalMutation(
-            request_scope="tenant-1",
+            request_scope=_SCOPE[0],
             belllabs_run_id="run-1",
             expected_run_version=2,
             claim=claim(),
@@ -192,7 +210,7 @@ def authority_command(
     return LifecycleCommand(
         command_id=(f"operation-authority-settlement:{settlement_id}:revision:{revision}"),
         idempotency_issuer="operation-journal",
-        request_scope="tenant-1",
+        request_scope=_SCOPE[0],
         run_id=run_id,
         expected_run_version=resulting_version - 1,
         actor=ActorContext(
@@ -266,7 +284,7 @@ def authority_event(
 def pending_settlement(revision: int = 1) -> OperationJournalSettlement:
     return OperationJournalSettlement.create(
         settlement_id="pending-settlement",
-        request_scope="tenant-1",
+        request_scope=_SCOPE[0],
         effect_claim_id="claim-1",
         settlement_revision=revision,
         status="reconciliation_required" if revision == 1 else "failed",
@@ -334,7 +352,7 @@ def pending_authority_command(
     return LifecycleCommand(
         command_id=(f"operation-authority-settlement:pending-settlement:revision:{revision}"),
         idempotency_issuer="operation-journal",
-        request_scope="tenant-1",
+        request_scope=_SCOPE[0],
         run_id=run_id,
         expected_run_version=revision,
         actor=ActorContext(
@@ -375,7 +393,7 @@ def claim_authority_command(
     return LifecycleCommand(
         command_id=_claim_authority_command_id(claim_value),
         idempotency_issuer="operation-journal",
-        request_scope="tenant-1",
+        request_scope=_SCOPE[0],
         run_id=run_id,
         expected_run_version=1,
         actor=ActorContext(
@@ -410,7 +428,7 @@ async def test_claim_attempt_usage_and_settlement_are_idempotent_but_conflicts_d
         authority_event(accepted_command, accepted_result),
     )
     mutation = OperationJournalMutation(
-        request_scope="tenant-1",
+        request_scope=_SCOPE[0],
         belllabs_run_id="run-1",
         expected_run_version=2,
         claim=claim(),
@@ -425,11 +443,11 @@ async def test_claim_attempt_usage_and_settlement_are_idempotent_but_conflicts_d
 
     assert first.status == "acquired"
     assert replay.status == "existing"
-    assert (await repository.get_settlement("tenant-1", "claim-1")).usage == {"tokens.total": 7}
+    assert (await repository.get_settlement(_SCOPE[0], "claim-1")).usage == {"tokens.total": 7}
     with pytest.raises(IdempotencyConflict, match="conflicting request"):
         await journal.commit(
             OperationJournalMutation(
-                request_scope="tenant-1",
+                request_scope=_SCOPE[0],
                 belllabs_run_id="run-1",
                 expected_run_version=1,
                 claim=claim(request_digest="sha256:" + "b" * 64),
@@ -462,7 +480,7 @@ async def test_claim_attempt_usage_and_settlement_are_idempotent_but_conflicts_d
     with pytest.raises(ValueError, match="prior operation settlement"):
         await journal.commit(
             OperationJournalMutation(
-                request_scope="tenant-1",
+                request_scope=_SCOPE[0],
                 belllabs_run_id="run-1",
                 expected_run_version=2,
                 claim=claim(),
@@ -480,7 +498,7 @@ async def test_claim_retry_reuses_persisted_generated_identity() -> None:
     journal = OperationJournalService(repository)
     first = await journal.commit(
         OperationJournalMutation(
-            request_scope="tenant-1",
+            request_scope=_SCOPE[0],
             belllabs_run_id="run-1",
             expected_run_version=1,
             claim=claim(),
@@ -494,7 +512,7 @@ async def test_claim_retry_reuses_persisted_generated_identity() -> None:
     )
     replay = await journal.commit(
         OperationJournalMutation(
-            request_scope="tenant-1",
+            request_scope=_SCOPE[0],
             belllabs_run_id="run-1",
             expected_run_version=1,
             claim=replayed_claim,
@@ -522,7 +540,7 @@ async def test_claim_authority_proof_rejects_regenerated_claim_identity() -> Non
         authority_event(original_command, original_result),
     )
     mutation = OperationJournalMutation(
-        request_scope="tenant-1",
+        request_scope=_SCOPE[0],
         belllabs_run_id="run-1",
         expected_run_version=2,
         claim=original_claim,
@@ -548,7 +566,7 @@ async def test_claim_authority_proof_rejects_regenerated_claim_identity() -> Non
     with pytest.raises(IdempotencyConflict, match="regenerated identity"):
         await repository.commit(
             OperationJournalMutation(
-                request_scope="tenant-1",
+                request_scope=_SCOPE[0],
                 belllabs_run_id="run-1",
                 expected_run_version=2,
                 claim=regenerated_claim,
@@ -595,8 +613,8 @@ async def test_concurrent_claim_key_collision_mutates_run_authority_once() -> No
     conflicts = [item for item in outcomes if isinstance(item, IdempotencyConflict)]
     assert len(accepted) == 1
     assert len(conflicts) == 1
-    projection = await run_service.get_run("tenant-1", run_id)
-    effects = await run_service.get_effects("tenant-1", run_id)
+    projection = await run_service.get_run(_SCOPE[0], run_id)
+    effects = await run_service.get_effects(_SCOPE[0], run_id)
     assert projection.version == 2
     assert len(effects.claims) == 1
 
@@ -608,7 +626,7 @@ async def test_concurrent_claim_key_collision_mutates_run_authority_once() -> No
     winner_claim = first_claim if winner_command is first_command else second_claim
     winner_event = next(
         record.envelope
-        for record in await run_service.pending_outbox("tenant-1")
+        for record in await run_service.pending_outbox(_SCOPE[0])
         if record.envelope.aggregate_version == 2
     )
     journal_repository = InMemoryAtomicOperationJournalRepository()
@@ -618,7 +636,7 @@ async def test_concurrent_claim_key_collision_mutates_run_authority_once() -> No
         winner_event,
     )
     journal_mutation = OperationJournalMutation(
-        request_scope="tenant-1",
+        request_scope=_SCOPE[0],
         belllabs_run_id=run_id,
         expected_run_version=2,
         claim=winner_claim,
@@ -635,12 +653,12 @@ async def test_stale_claim_acquisition_requires_exact_authority_proof() -> None:
     admitted = await run_service.admit(request(request_id="stale-claim-proof"))
     assert admitted.run_id is not None
     run_id = admitted.run_id
-    projection = await run_service.get_run("tenant-1", run_id)
-    budget = await run_service.get_budget("tenant-1", run_id)
+    projection = await run_service.get_run(_SCOPE[0], run_id)
+    budget = await run_service.get_budget(_SCOPE[0], run_id)
     command_value = claim_authority_command(run_id=run_id)
     result_value = result_for_command(command_value)
     mutation = OperationJournalMutation(
-        request_scope="tenant-1",
+        request_scope=_SCOPE[0],
         belllabs_run_id=run_id,
         expected_run_version=result_value.resulting_run_version,
         claim=claim(run_id=run_id),
@@ -661,7 +679,7 @@ async def test_stale_claim_acquisition_requires_exact_authority_proof() -> None:
     with pytest.raises(RunVersionConflict):
         await unproven.commit(
             OperationJournalMutation(
-                request_scope="tenant-1",
+                request_scope=_SCOPE[0],
                 belllabs_run_id=run_id,
                 expected_run_version=2,
                 claim=claim(run_id=run_id),
@@ -675,15 +693,15 @@ async def test_journal_only_settlement_survives_later_run_version_and_binds_auth
     admitted = await run_service.admit(request(request_id="journal-liveness"))
     assert admitted.run_id is not None
     run_id = admitted.run_id
-    projection = await run_service.get_run("tenant-1", run_id)
-    budget = await run_service.get_budget("tenant-1", run_id)
+    projection = await run_service.get_run(_SCOPE[0], run_id)
+    budget = await run_service.get_budget(_SCOPE[0], run_id)
     repository = InMemoryAtomicOperationJournalRepository()
     repository.seed_run(projection, budget)
     journal = OperationJournalService(repository)
     operation_claim = claim(run_id=run_id)
     await journal.commit(
         OperationJournalMutation(
-            request_scope="tenant-1",
+            request_scope=_SCOPE[0],
             belllabs_run_id=run_id,
             expected_run_version=1,
             claim=operation_claim,
@@ -701,7 +719,7 @@ async def test_journal_only_settlement_survives_later_run_version_and_binds_auth
         authority_event(accepted_command, accepted_authority),
     )
     mutation = OperationJournalMutation(
-        request_scope="tenant-1",
+        request_scope=_SCOPE[0],
         belllabs_run_id=run_id,
         expected_run_version=2,
         claim=operation_claim,
@@ -715,7 +733,7 @@ async def test_journal_only_settlement_survives_later_run_version_and_binds_auth
 
     assert committed.status == "existing"
     assert replay.status == "existing"
-    assert await journal.get_settlement("tenant-1", "claim-1") == settlement()
+    assert await journal.get_settlement(_SCOPE[0], "claim-1") == settlement()
     forged_command = authority_command(run_id=run_id).model_copy(
         update={"reason": "forged authority intent"}
     )
@@ -732,7 +750,7 @@ async def test_journal_only_settlement_survives_later_run_version_and_binds_auth
     with pytest.raises(IdempotencyConflict, match="conflicting intent"):
         await journal.commit(
             OperationJournalMutation(
-                request_scope="tenant-1",
+                request_scope=_SCOPE[0],
                 belllabs_run_id=run_id,
                 expected_run_version=2,
                 claim=operation_claim,
@@ -744,7 +762,7 @@ async def test_journal_only_settlement_survives_later_run_version_and_binds_auth
     with pytest.raises(ValueError, match="strict revalidation"):
         await journal.commit(
             OperationJournalMutation(
-                request_scope="tenant-1",
+                request_scope=_SCOPE[0],
                 belllabs_run_id=run_id,
                 expected_run_version=2,
                 claim=operation_claim,
@@ -778,7 +796,7 @@ def test_journal_authority_proof_rejects_every_settlement_payload_substitution()
         substituted = OperationJournalSettlement.create(**values)
         with pytest.raises(ValueError):
             OperationJournalMutation(
-                request_scope="tenant-1",
+                request_scope=_SCOPE[0],
                 belllabs_run_id="run-1",
                 expected_run_version=2,
                 claim=claim(),
@@ -790,7 +808,7 @@ def test_journal_authority_proof_rejects_every_settlement_payload_substitution()
     malformed = base.model_copy(update={"usage": {"tokens.total": -1}})
     with pytest.raises(ValueError, match="strict revalidation"):
         OperationJournalMutation(
-            request_scope="tenant-1",
+            request_scope=_SCOPE[0],
             belllabs_run_id="run-1",
             expected_run_version=2,
             claim=claim(),
@@ -806,15 +824,15 @@ async def test_in_memory_settlement_revision_chain_matches_postgres_rules() -> N
     admitted = await run_service.admit(request(request_id="journal-revision-chain"))
     assert admitted.run_id is not None
     run_id = admitted.run_id
-    projection = await run_service.get_run("tenant-1", run_id)
-    budget = await run_service.get_budget("tenant-1", run_id)
+    projection = await run_service.get_run(_SCOPE[0], run_id)
+    budget = await run_service.get_budget(_SCOPE[0], run_id)
     repository = InMemoryAtomicOperationJournalRepository()
     repository.seed_run(projection, budget)
     journal = OperationJournalService(repository)
     operation_claim = claim(run_id=run_id)
     await journal.commit(
         OperationJournalMutation(
-            request_scope="tenant-1",
+            request_scope=_SCOPE[0],
             belllabs_run_id=run_id,
             expected_run_version=1,
             claim=operation_claim,
@@ -830,7 +848,7 @@ async def test_in_memory_settlement_revision_chain_matches_postgres_rules() -> N
     )
     first_settlement = pending_settlement(1)
     first_mutation = OperationJournalMutation(
-        request_scope="tenant-1",
+        request_scope=_SCOPE[0],
         belllabs_run_id=run_id,
         expected_run_version=2,
         claim=operation_claim,
@@ -851,7 +869,7 @@ async def test_in_memory_settlement_revision_chain_matches_postgres_rules() -> N
     )
     second_settlement = pending_settlement(2)
     second_mutation = OperationJournalMutation(
-        request_scope="tenant-1",
+        request_scope=_SCOPE[0],
         belllabs_run_id=run_id,
         expected_run_version=3,
         claim=operation_claim,
@@ -861,11 +879,11 @@ async def test_in_memory_settlement_revision_chain_matches_postgres_rules() -> N
         authority_result=second_result,
     )
     assert (await journal.commit(second_mutation)).status == "existing"
-    assert await journal.get_settlement("tenant-1", "claim-1") == second_settlement
+    assert await journal.get_settlement(_SCOPE[0], "claim-1") == second_settlement
 
     with pytest.raises(ValueError, match="strict revalidation"):
         OperationJournalMutation(
-            request_scope="tenant-1",
+            request_scope=_SCOPE[0],
             belllabs_run_id=run_id,
             expected_run_version=3,
             claim=operation_claim,
@@ -881,39 +899,36 @@ async def test_shadow_execution_cannot_acquire_consequential_claim() -> None:
     repository = InMemoryAtomicOperationJournalRepository()
     result = await OperationJournalService(repository).commit(
         OperationJournalMutation(
-            request_scope="tenant-1",
+            request_scope=_SCOPE[0],
             belllabs_run_id="run-1",
             expected_run_version=1,
             claim=claim().model_copy(update={"claim_mode": "shadow"}),
         )
     )
     assert result.status == "shadow_denied"
-    assert await repository.get_claim("tenant-1", "claim-1") is None
+    assert await repository.get_claim(_SCOPE[0], "claim-1") is None
 
 
 @pytest.mark.asyncio
+@pytest.mark.common_db
 async def test_postgres_journal_crash_rolls_back_claim_attempt_and_settlement(
-    test_application_postgres_dsn: str,
+    common_db: CommonDatabase,
 ) -> None:
-    pool = await asyncpg.create_pool(
-        dsn=test_application_postgres_dsn,
-        min_size=1,
-        max_size=4,
-    )
+    _SCOPE[0] = common_db.scope("tenant-1")
+    pool = await common_db.pool("mission_control_runtime", max_size=4)
     try:
-        async with pool.acquire() as connection:
-            await connection.execute("DROP SCHEMA IF EXISTS belllabs_control CASCADE")
-        await apply_application_migrations(pool)
-        async with pool.acquire() as connection:
-            primary_key = await connection.fetchval(
-                """
-                SELECT pg_get_constraintdef(oid)
-                FROM pg_constraint
-                WHERE conrelid = 'belllabs_control.operation_settlements'::regclass
-                  AND contype = 'p'
-                """
-            )
-        assert primary_key == ("PRIMARY KEY (request_scope, settlement_id, settlement_revision)")
+        constraints = await owner_rows(
+            common_db,
+            """
+            SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+            WHERE conrelid = 'mission_control.operation_settlement'::regclass
+              AND contype = 'u'
+            """,
+        )
+        assert (
+            "UNIQUE (installation_id, application_id, tenant_id, settlement_key, "
+            "settlement_revision)"
+        ) in {row["definition"] for row in constraints}
         run_service, _ = service(PostgresRunControlRepository(pool))  # type: ignore[arg-type]
         admitted = await run_service.admit(request())
         assert admitted.run_id is not None
@@ -934,7 +949,7 @@ async def test_postgres_journal_crash_rolls_back_claim_attempt_and_settlement(
         claimed = await run_service.execute(claim_command)
         claim_repository = PostgresAtomicOperationJournalRepository(pool)
         claim_mutation = OperationJournalMutation(
-            request_scope="tenant-1",
+            request_scope=_SCOPE[0],
             belllabs_run_id=admitted.run_id,
             expected_run_version=claimed.resulting_run_version,
             claim=operation_claim,
@@ -945,7 +960,7 @@ async def test_postgres_journal_crash_rolls_back_claim_attempt_and_settlement(
         assert (await claim_repository.commit(claim_mutation)).status == "existing"
         with pytest.raises(ValueError, match="claim authority"):
             OperationJournalMutation(
-                request_scope="tenant-1",
+                request_scope=_SCOPE[0],
                 belllabs_run_id=admitted.run_id,
                 expected_run_version=claimed.resulting_run_version,
                 claim=operation_claim.model_copy(
@@ -969,7 +984,7 @@ async def test_postgres_journal_crash_rolls_back_claim_attempt_and_settlement(
         accepted_command = LifecycleCommand(
             command_id="operation-authority-settlement:settlement-1:revision:1",
             idempotency_issuer="operation-journal",
-            request_scope="tenant-1",
+            request_scope=_SCOPE[0],
             run_id=admitted.run_id,
             expected_run_version=observed.resulting_run_version,
             # Production settles as the operation actor extended with the exact binding.
@@ -1010,7 +1025,7 @@ async def test_postgres_journal_crash_rolls_back_claim_attempt_and_settlement(
         accepted_authority = await run_service.execute(accepted_command)
         assert accepted_authority.status == CommandStatus.ACCEPTED
         mutation = OperationJournalMutation(
-            request_scope="tenant-1",
+            request_scope=_SCOPE[0],
             belllabs_run_id=admitted.run_id,
             expected_run_version=accepted_authority.resulting_run_version,
             claim=operation_claim,
@@ -1044,23 +1059,23 @@ async def test_postgres_journal_crash_rolls_back_claim_attempt_and_settlement(
             await failing.commit(mutation)
         # The authority-bound claim was committed earlier; the crash rolls back the
         # attempt and settlement written by this mutation.
-        assert await failing.get_settlement("tenant-1", "claim-1") is None
-        assert await failing.get_claim("tenant-1", "claim-1") == operation_claim
+        assert await failing.get_settlement(_SCOPE[0], "claim-1") is None
+        assert await failing.get_claim(_SCOPE[0], "claim-1") == operation_claim
 
         repository = PostgresAtomicOperationJournalRepository(pool)
         # The claim already exists, so the recovered settlement commit reports "existing"
         # while applying the attempt and settlement; the replay is then a no-op.
         assert (await repository.commit(mutation)).status == "existing"
-        persisted = await repository.get_settlement("tenant-1", "claim-1")
+        persisted = await repository.get_settlement(_SCOPE[0], "claim-1")
         assert persisted == settlement()
         assert (await repository.commit(mutation)).status == "existing"
-        assert await repository.get_settlement("tenant-1", "claim-1") == persisted
+        assert await repository.get_settlement(_SCOPE[0], "claim-1") == persisted
         # The authority-bound claim mutation already owns `claim:claim-1`, so a conflicting
         # claim is rejected at the mutation-identity check before the claim-row comparison.
         with pytest.raises(IdempotencyConflict, match="mutation identity has conflicting intent"):
             await repository.commit(
                 OperationJournalMutation(
-                    request_scope="tenant-1",
+                    request_scope=_SCOPE[0],
                     belllabs_run_id=admitted.run_id,
                     expected_run_version=1,
                     claim=claim(
@@ -1081,7 +1096,7 @@ async def test_postgres_journal_crash_rolls_back_claim_attempt_and_settlement(
         with pytest.raises(ValueError, match="prior operation settlement"):
             await repository.commit(
                 OperationJournalMutation(
-                    request_scope="tenant-1",
+                    request_scope=_SCOPE[0],
                     belllabs_run_id=admitted.run_id,
                     expected_run_version=2,
                     claim=operation_claim,
@@ -1101,19 +1116,48 @@ async def test_postgres_journal_crash_rolls_back_claim_attempt_and_settlement(
             )
 
         async with pool.acquire() as connection, connection.transaction():
-            await connection.execute("SET LOCAL ROLE belllabs_control_runtime")
-            await connection.execute(
-                "SELECT set_config('belllabs.request_scope', 'tenant-2', true)"
-            )
+            await apply_scope(connection, common_db.scope("tenant-2"))
             assert (
-                await connection.fetchval(
-                    "SELECT count(*) FROM belllabs_control.operation_effect_claims"
-                )
+                await connection.fetchval("SELECT count(*) FROM mission_control.operation_claim")
                 == 0
             )
+            assert (
+                await connection.fetchval("SELECT count(*) FROM mission_control.operation_intent")
+                == 0
+            )
+        # Claim before effect: one canonical intent, its support claim, one terminal
+        # receipt for the one terminal settlement, technical attempts as observations.
+        lineage = await owner_rows(
+            common_db,
+            """
+            SELECT intent.state, claim.status, receipt.outcome, settlement.settlement_revision,
+                   (SELECT count(*) FROM mission_control.operation_technical_attempt a
+                    WHERE a.claim_key = claim.claim_key) AS attempts
+            FROM mission_control.operation_claim claim
+            JOIN mission_control.operation_intent intent
+              USING (installation_id, application_id, tenant_id, operation_intent_id)
+            JOIN mission_control.operation_settlement settlement
+              ON settlement.installation_id = claim.installation_id
+             AND settlement.application_id = claim.application_id
+             AND settlement.tenant_id = claim.tenant_id
+             AND settlement.claim_key = claim.claim_key
+            JOIN mission_control.operation_receipt receipt
+              ON receipt.installation_id = settlement.installation_id
+             AND receipt.application_id = settlement.application_id
+             AND receipt.tenant_id = settlement.tenant_id
+             AND receipt.operation_receipt_id = settlement.operation_receipt_id
+            WHERE claim.claim_key = 'claim-1'
+            """,
+        )
+        assert [tuple(row.values()) for row in lineage] == [("settled", "settled", "failed", 1, 1)]
+        async with pool.acquire() as connection, connection.transaction():
+            await apply_scope(connection, _SCOPE[0])
+            with pytest.raises(asyncpg.PostgresError):
+                await connection.execute(
+                    "UPDATE mission_control.operation_settlement SET status = 'completed'"
+                )
     finally:
-        async with pool.acquire() as connection:
-            await connection.execute("DROP SCHEMA IF EXISTS belllabs_control CASCADE")
+        _SCOPE[0] = "tenant-1"
         await pool.close()
 
 
@@ -1125,7 +1169,7 @@ def test_journal_pending_settlement_rejects_overage_amounts() -> None:
     command_value = pending_authority_command(run_id="run-1", revision=2)
     result_value = result_for_command(command_value)
     OperationJournalMutation(
-        request_scope="tenant-1",
+        request_scope=_SCOPE[0],
         belllabs_run_id="run-1",
         expected_run_version=3,
         claim=claim(),
@@ -1150,7 +1194,7 @@ def test_journal_pending_settlement_rejects_overage_amounts() -> None:
     )
     with pytest.raises(ValueError, match="overage"):
         OperationJournalMutation(
-            request_scope="tenant-1",
+            request_scope=_SCOPE[0],
             belllabs_run_id="run-1",
             expected_run_version=3,
             claim=claim(),

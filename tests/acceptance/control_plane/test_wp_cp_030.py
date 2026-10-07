@@ -21,16 +21,10 @@ DIGEST = "sha256:" + "a" * 64
 
 def test_ordered_message_receipts_reject_gaps_duplicates_and_late_generations() -> None:
     root = BellLabsRunWorkflow()
-    accepted = root._accept_message(  # noqa: SLF001 - deterministic contract qualification
-        WorkflowMessage("message-1", 1, "fact", "fact:1")
-    )
-    duplicate = root._accept_message(  # noqa: SLF001
-        WorkflowMessage("message-1", 1, "fact", "fact:1")
-    )
-    gap = root._accept_message(  # noqa: SLF001
-        WorkflowMessage("message-3", 3, "fact", "fact:3")
-    )
-    stale = root._accept_message(  # noqa: SLF001
+    accepted = root._accept_message(WorkflowMessage("message-1", 1, "fact", "fact:1"))
+    duplicate = root._accept_message(WorkflowMessage("message-1", 1, "fact", "fact:1"))
+    gap = root._accept_message(WorkflowMessage("message-3", 3, "fact", "fact:3"))
+    stale = root._accept_message(
         WorkflowMessage("message-2-old", 2, "fact", "fact:2", execution_generation=2)
     )
 

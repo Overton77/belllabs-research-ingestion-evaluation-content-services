@@ -1,9 +1,8 @@
-"""Concrete per-installation PostgreSQL composition, with honest readiness boundaries.
+"""Concrete per-installation PostgreSQL composition over the common component.
 
 This factory never migrates, seeds identity rows, selects secrets, or connects to a
-fallback database. The operator supplies app-bound restricted pools and qualified
-runtime adapters. Current persistence adapters target the transitional schema, so
-production common-schema readiness is deliberately unavailable.
+fallback database. The operator supplies app-bound restricted pools; readiness
+requires the attested common mission_control release for this exact binding.
 """
 
 from __future__ import annotations
@@ -78,36 +77,21 @@ from mission_control.application.recovery.run_forks import (
     SemanticForkService,
 )
 from mission_control.application.recovery.runtime_recovery import RuntimeForkService
+from mission_control.bootstrap.common_installation import (
+    CommonReadiness,
+    inspect_common_installation,
+    verify_pool_role,
+)
 from mission_control.bootstrap.operation_recovery_composition import (
     compose_postgres_operation_recovery,
 )
 from mission_control.domain.authoring.extensions import ExtensionRegistry
 
-TRANSITIONAL_COMPONENT_VERSION = "transitional-local-v1"
-REQUIRED_MIGRATIONS = frozenset(
-    {
-        "0024_run_snapshots_semantic_forks_v1.sql",
-        "0027_immutable_runtime_documents.sql",
-        "0030_definition_catalog.sql",
-        "0034_mission_installation_identity.sql",
-        "0036_mission_identity_family_read.sql",
-    }
-)
-
-
-@dataclass(frozen=True)
-class CompositionReadiness:
-    storage_mode: Literal["transitional_local"]
-    database_name: str
-    applied_migrations: frozenset[str]
-    runtime_role: str
-    production_ready: Literal[False] = False
-
 
 @dataclass(frozen=True)
 class MissionApplicationServices:
     binding: ApplicationBinding
-    readiness: CompositionReadiness
+    readiness: CommonReadiness
     catalog_scope: str
     control_plane: ControlPlaneService
     run_control: RunControlService
@@ -130,7 +114,7 @@ async def compose_application_services(
     admission_policies: AdmissionPolicyRegistry,
     extensions: ExtensionRegistry,
     payload_store: ContentAddressedPayloadStore,
-    storage_mode: Literal["production_common", "transitional_local"] = "production_common",
+    storage_mode: Literal["production_common"] = "production_common",
     registry: ApplicationRegistry | None = None,
     boundary_transport: BoundaryCommandTransport | None = None,
     submitter: RunWorkflowSubmitter | None = None,
@@ -147,20 +131,16 @@ async def compose_application_services(
         binding = ApplicationBinding.model_validate(binding.model_dump(mode="python"))
     except ValueError as error:
         raise InstallationUnavailable("application binding digest or identity mismatch") from error
-    if storage_mode != "transitional_local":
-        raise InstallationUnavailable(
-            "common mission_control schema adapters are not released; "
-            "transitional local qualification cannot enable production"
-        )
+    if storage_mode != "production_common":
+        raise InstallationUnavailable("only the common mission_control component is supported")
     if (
         identity.application_id != binding.application_id
         or identity.installation_id != binding.installation_id
         or identity.issuer not in binding.accepted_issuers
         or not identity.audiences & binding.accepted_audiences
-        or binding.required_component_version != TRANSITIONAL_COMPONENT_VERSION
     ):
-        raise InstallationUnavailable("identity is not bound to this transitional installation")
-    readiness = await inspect_transitional_installation(runtime_pool, binding)
+        raise InstallationUnavailable("identity is not bound to this installation")
+    readiness = await inspect_common_installation(runtime_pool, binding)
     if family_writer_pool is not None:
         await inspect_family_writer_installation(
             family_writer_pool, readiness.database_name, binding
@@ -246,102 +226,31 @@ async def compose_application_services(
                 binding.installation_id,
                 binding.application_id,
                 binding.supabase_project_ref,
-                frozenset({TRANSITIONAL_COMPONENT_VERSION}),
+                frozenset({readiness.component_version}),
             ),
         )
     return result
 
 
-async def inspect_transitional_installation(
-    pool: asyncpg.Pool, binding: ApplicationBinding
-) -> CompositionReadiness:
-    async with pool.acquire() as connection:
-        role = await connection.fetchrow("""
-            SELECT current_user AS name, current_database() AS database_name,
-                   rolsuper, rolbypassrls,
-                   pg_has_role(current_user,'belllabs_control_runtime','member') AS runtime_member,
-                   pg_has_role(current_user,'belllabs_family_repository_writer','member')
-                       AS family_member
-            FROM pg_roles WHERE rolname=current_user
-        """)
-        if (
-            role is None
-            or role["rolsuper"]
-            or role["rolbypassrls"]
-            or not role["runtime_member"]
-            or role["family_member"]
-        ):
-            raise InstallationUnavailable("runtime pool must use the restricted control role")
-        try:
-            rows = await connection.fetch("""
-                SELECT installation_id, application_id, project_ref,
-                       component_version, database_name
-                FROM belllabs_control.mission_installation_identity
-            """)
-            migrations = frozenset(
-                row["version"]
-                for row in await connection.fetch(
-                    "SELECT version FROM belllabs_control.schema_migrations"
-                )
-            )
-        except (asyncpg.UndefinedTableError, asyncpg.InsufficientPrivilegeError) as error:
-            raise InstallationUnavailable(
-                "transitional installation evidence is unavailable"
-            ) from error
-        if len(rows) != 1:
-            raise InstallationUnavailable("exactly one persisted installation identity is required")
-        actual = rows[0]
-        if (
-            actual["installation_id"] != binding.installation_id
-            or actual["application_id"] != binding.application_id
-            or actual["project_ref"] != binding.supabase_project_ref
-            or actual["component_version"] != TRANSITIONAL_COMPONENT_VERSION
-            or actual["database_name"] != role["database_name"]
-            or not REQUIRED_MIGRATIONS <= migrations
-        ):
-            raise InstallationUnavailable(
-                "persisted installation identity or migration release mismatch"
-            )
-        return CompositionReadiness(
-            storage_mode="transitional_local",
-            database_name=role["database_name"],
-            applied_migrations=migrations,
-            runtime_role=role["name"],
-        )
-
-
 async def inspect_family_writer_installation(
     pool: asyncpg.Pool, database_name: str, binding: ApplicationBinding
 ) -> None:
-    async with pool.acquire() as connection:
-        row = await connection.fetchrow("""
-            SELECT current_database() AS database_name, rolsuper, rolbypassrls,
-                   pg_has_role(current_user,'belllabs_family_repository_writer','member')
-                       AS family_member,
-                   pg_has_role(current_user,'belllabs_control_runtime','member') AS runtime_member
-            FROM pg_roles WHERE rolname=current_user
-        """)
-        if (
-            row is None
-            or row["database_name"] != database_name
-            or row["rolsuper"]
-            or row["rolbypassrls"]
-            or not row["family_member"]
-            or row["runtime_member"]
-        ):
-            raise InstallationUnavailable(
-                "family pool must be a distinct restricted writer in this database"
-            )
-        actual = await connection.fetchrow("""
-            SELECT installation_id,application_id,project_ref,component_version,database_name
-            FROM belllabs_control.mission_installation_identity
-        """)
-        if (
-            actual is None
-            or actual["installation_id"] != binding.installation_id
-            or actual["application_id"] != binding.application_id
-            or actual["project_ref"] != binding.supabase_project_ref
-            or actual["component_version"] != TRANSITIONAL_COMPONENT_VERSION
-            or actual["database_name"] != database_name
-        ):
-            raise InstallationUnavailable("family writer points to another installation")
+    """The family writer is a distinct restricted login on the same installation."""
+    async with pool.acquire() as connection, connection.transaction(readonly=True):
+        role = await verify_pool_role(connection, "mission_control_family_writer")
+        actual = await connection.fetch(
+            """
+            SELECT installation_id, application_id, supabase_project_ref,
+                   schema_component_version
+            FROM mission_control.application_installation WHERE state = 'active'
+            """
+        )
+    if (
+        role["database_name"] != database_name
+        or len(actual) != 1
+        or actual[0]["installation_id"] != binding.installation_id
+        or actual[0]["application_id"] != binding.application_id
+        or actual[0]["supabase_project_ref"] != binding.supabase_project_ref
+        or actual[0]["schema_component_version"] != binding.required_component_version
+    ):
+        raise InstallationUnavailable("family writer points to another installation")

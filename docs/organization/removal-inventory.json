@@ -1,0 +1,1378 @@
+{
+  "format": "mission-control-removal-inventory/v1",
+  "recorded_at": "2026-10-03",
+  "head": "f6521c128738b4962f22fb7646882950c0b63d7c",
+  "method": "existence/tracked status re-observed at write time (git ls-files + filesystem); replacements are the G0 inferred equivalents, confirmed to exist now; absence is not test evidence",
+  "mongo_removals": {
+    "count": 54,
+    "all_absent": true,
+    "all_untracked": true,
+    "replacements_missing": [],
+    "entries": [
+      {
+        "path": "src/mission_control/application/programs/mongo_goal_directed_repository.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "src/mission_control/adapters/postgres/orchestration/goal_directed_repository.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:src/mission_control/application/programs/mongo_goal_directed_repository.py"
+      },
+      {
+        "path": "src/mission_control/application/programs/mongo_stagegraph_repository.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "src/mission_control/adapters/postgres/orchestration/stagegraph_repository.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:src/mission_control/application/programs/mongo_stagegraph_repository.py"
+      },
+      {
+        "path": "src/mission_control/application/execution/operations/mongo_operation_execution_repository.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "src/mission_control/adapters/postgres/operations/operation_journal.py",
+            "exists": true,
+            "tracked": true
+          },
+          {
+            "path": "src/mission_control/adapters/postgres/operations/operation_binding_repository.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:src/mission_control/application/execution/operations/mongo_operation_execution_repository.py"
+      },
+      {
+        "path": "src/mission_control/application/execution/operations/mongo_operation_authority_migration.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [],
+        "replacement_kind": "none_expected (backfill/migration/one-shot/mongo-only/live-provider proof retired)",
+        "blob_at_f6521c1": "f6521c1:src/mission_control/application/execution/operations/mongo_operation_authority_migration.py"
+      },
+      {
+        "path": "src/mission_control/application/execution/operations/mongo_operation_journal_backfill.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [],
+        "replacement_kind": "none_expected (backfill/migration/one-shot/mongo-only/live-provider proof retired)",
+        "blob_at_f6521c1": "f6521c1:src/mission_control/application/execution/operations/mongo_operation_journal_backfill.py"
+      },
+      {
+        "path": "src/mission_control/application/execution/operations/operation_journal_backfill.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [],
+        "replacement_kind": "none_expected (backfill/migration/one-shot/mongo-only/live-provider proof retired)",
+        "blob_at_f6521c1": "f6521c1:src/mission_control/application/execution/operations/operation_journal_backfill.py"
+      },
+      {
+        "path": "src/mission_control/application/execution/operations/operation_journal_read_routing.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "src/mission_control/adapters/postgres/operations/operation_journal.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:src/mission_control/application/execution/operations/operation_journal_read_routing.py"
+      },
+      {
+        "path": "src/mission_control/adapters/postgres/operations/operation_journal_backfill.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [],
+        "replacement_kind": "none_expected (backfill/migration/one-shot/mongo-only/live-provider proof retired)",
+        "blob_at_f6521c1": "f6521c1:src/mission_control/adapters/postgres/operations/operation_journal_backfill.py"
+      },
+      {
+        "path": "src/mission_control/application/subordinates/mongo_async_subagent_repository.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "src/mission_control/adapters/postgres/async_subagents/async_subagent_detail_repository.py",
+            "exists": true,
+            "tracked": true
+          },
+          {
+            "path": "src/mission_control/adapters/postgres/async_subagents/async_subagents.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:src/mission_control/application/subordinates/mongo_async_subagent_repository.py"
+      },
+      {
+        "path": "src/mission_control/application/artifacts/mongo_workspace_repository.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "src/mission_control/adapters/postgres/workspaces/workspace_manifest_repository.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:src/mission_control/application/artifacts/mongo_workspace_repository.py"
+      },
+      {
+        "path": "src/mission_control/application/artifacts/mongo_snapshot_repository.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "src/mission_control/adapters/postgres/workspaces/snapshot_repository.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:src/mission_control/application/artifacts/mongo_snapshot_repository.py"
+      },
+      {
+        "path": "src/mission_control/application/artifacts/mongo_artifact_repository.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "src/mission_control/adapters/postgres/workspaces/artifact_repository.py",
+            "exists": true,
+            "tracked": true
+          },
+          {
+            "path": "src/mission_control/adapters/postgres/workspaces/artifact_metadata_repository.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:src/mission_control/application/artifacts/mongo_artifact_repository.py"
+      },
+      {
+        "path": "src/mission_control/adapters/infrastructure/mongodb.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "src/mission_control/adapters/postgres/connections.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:src/mission_control/adapters/infrastructure/mongodb.py"
+      },
+      {
+        "path": "src/mission_control/adapters/infrastructure/workspace_candidate_contents.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "src/mission_control/adapters/postgres/workspace_candidate_contents.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:src/mission_control/adapters/infrastructure/workspace_candidate_contents.py"
+      },
+      {
+        "path": "src/mission_control/adapters/document_models/artifact_promotion.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "src/mission_control/adapters/postgres/workspaces/artifact_repository.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:src/mission_control/adapters/document_models/artifact_promotion.py"
+      },
+      {
+        "path": "src/mission_control/adapters/document_models/control_plane.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "src/mission_control/adapters/postgres/control_plane/definition_repository.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:src/mission_control/adapters/document_models/control_plane.py"
+      },
+      {
+        "path": "src/mission_control/adapters/document_models/goal_directed.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "src/mission_control/adapters/postgres/orchestration/goal_directed_repository.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:src/mission_control/adapters/document_models/goal_directed.py"
+      },
+      {
+        "path": "src/mission_control/adapters/document_models/infrastructure.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "src/mission_control/adapters/postgres/documents.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:src/mission_control/adapters/document_models/infrastructure.py"
+      },
+      {
+        "path": "src/mission_control/adapters/document_models/operation_execution.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "src/mission_control/adapters/postgres/operations/operation_journal.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:src/mission_control/adapters/document_models/operation_execution.py"
+      },
+      {
+        "path": "src/mission_control/adapters/document_models/sandbox_snapshot.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "src/mission_control/adapters/postgres/workspaces/snapshot_repository.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:src/mission_control/adapters/document_models/sandbox_snapshot.py"
+      },
+      {
+        "path": "src/mission_control/adapters/document_models/stagegraph.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "src/mission_control/adapters/postgres/orchestration/stagegraph_repository.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:src/mission_control/adapters/document_models/stagegraph.py"
+      },
+      {
+        "path": "src/mission_control/adapters/document_models/workspace_materialization.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "src/mission_control/adapters/postgres/workspaces/workspace_manifest_repository.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:src/mission_control/adapters/document_models/workspace_materialization.py"
+      },
+      {
+        "path": "tests/integration/temporal/test_rrm_004_worker_restart_recovery.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "tests/acceptance/mission_control/test_postgres_runtime_parity.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:tests/integration/temporal/test_rrm_004_worker_restart_recovery.py"
+      },
+      {
+        "path": "tests/integration/agent_server/test_rrm_013_async_subagent_live.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "tests/integration/postgres/test_async_subagent_postgres_authority.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:tests/integration/agent_server/test_rrm_013_async_subagent_live.py"
+      },
+      {
+        "path": "tests/integration/postgres/test_operation_journal_backfill_integration.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [],
+        "replacement_kind": "none_expected (backfill/migration/one-shot/mongo-only/live-provider proof retired)",
+        "blob_at_f6521c1": "f6521c1:tests/integration/postgres/test_operation_journal_backfill_integration.py"
+      },
+      {
+        "path": "tests/unit/operations/test_operation_journal_backfill.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [],
+        "replacement_kind": "none_expected (backfill/migration/one-shot/mongo-only/live-provider proof retired)",
+        "blob_at_f6521c1": "f6521c1:tests/unit/operations/test_operation_journal_backfill.py"
+      },
+      {
+        "path": "tests/unit/orchestration/test_rrm_018_goal_document_identity.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "tests/integration/temporal/test_rrm_016_goal_directed_journaled.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:tests/unit/orchestration/test_rrm_018_goal_document_identity.py"
+      },
+      {
+        "path": "tests/fixtures/mongo_database.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "tests/fixtures/mission_control_production_stack.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:tests/fixtures/mongo_database.py"
+      },
+      {
+        "path": "tests/fixtures/operation_backfill_worker.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [],
+        "replacement_kind": "none_expected (backfill/migration/one-shot/mongo-only/live-provider proof retired)",
+        "blob_at_f6521c1": "f6521c1:tests/fixtures/operation_backfill_worker.py"
+      },
+      {
+        "path": "tests/fixtures/rrm004_persistent_stack.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "tests/fixtures/mission_control_production_stack.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:tests/fixtures/rrm004_persistent_stack.py"
+      },
+      {
+        "path": "tests/fixtures/rrm004_restart_worker.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "tests/fixtures/mission_control_production_stack.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:tests/fixtures/rrm004_restart_worker.py"
+      },
+      {
+        "path": "tests/fixtures/rrm006_fork_stack.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "tests/fixtures/run_forks.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:tests/fixtures/rrm006_fork_stack.py"
+      },
+      {
+        "path": "tests/fixtures/rrm013_child_worker.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "tests/fixtures/rrm013_live_stack.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:tests/fixtures/rrm013_child_worker.py"
+      },
+      {
+        "path": "tests/fixtures/rrm010_combined_smoke.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "tests/fixtures/mission_control_production_stack.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:tests/fixtures/rrm010_combined_smoke.py"
+      },
+      {
+        "path": "tests/integration/mongodb/test_artifact_promotion_mongodb_integration.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "tests/integration/postgres/test_artifact_promotion_postgres_integration.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:tests/integration/mongodb/test_artifact_promotion_mongodb_integration.py"
+      },
+      {
+        "path": "tests/integration/mongodb/test_control_plane_mongodb_integration.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "tests/integration/postgres/test_definition_catalog.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:tests/integration/mongodb/test_control_plane_mongodb_integration.py"
+      },
+      {
+        "path": "tests/integration/mongodb/test_goal_directed_documents_mongodb.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "tests/integration/postgres/test_immutable_runtime_documents.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:tests/integration/mongodb/test_goal_directed_documents_mongodb.py"
+      },
+      {
+        "path": "tests/integration/mongodb/test_operation_execution_mongodb_integration.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "tests/integration/postgres/test_operation_journal_stage1.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:tests/integration/mongodb/test_operation_execution_mongodb_integration.py"
+      },
+      {
+        "path": "tests/integration/mongodb/test_sandbox_snapshots_mongodb_integration.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "tests/unit/workspaces/test_sandbox_snapshots.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:tests/integration/mongodb/test_sandbox_snapshots_mongodb_integration.py"
+      },
+      {
+        "path": "tests/integration/mongodb/test_workspace_materialization_mongodb_integration.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "tests/integration/postgres/test_workspace_artifact_documents.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:tests/integration/mongodb/test_workspace_materialization_mongodb_integration.py"
+      },
+      {
+        "path": "tests/integration/mongodb/__init__.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [],
+        "replacement_kind": "none_expected (backfill/migration/one-shot/mongo-only/live-provider proof retired)",
+        "blob_at_f6521c1": "f6521c1:tests/integration/mongodb/__init__.py"
+      },
+      {
+        "path": "tests/acceptance/control_plane/test_rrm_005_inspection.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "tests/integration/postgres/test_runtime_inspection_postgres.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:tests/acceptance/control_plane/test_rrm_005_inspection.py"
+      },
+      {
+        "path": "tests/acceptance/control_plane/test_rrm_006_semantic_forks.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "tests/integration/postgres/test_run_forks_postgres.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:tests/acceptance/control_plane/test_rrm_006_semantic_forks.py"
+      },
+      {
+        "path": "tests/acceptance/control_plane/test_rrm_008_cancellation_demo.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "tests/integration/temporal/test_rrm_008_family_cancellation.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:tests/acceptance/control_plane/test_rrm_008_cancellation_demo.py"
+      },
+      {
+        "path": "tests/acceptance/control_plane/test_rrm_009_object_store.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "tests/acceptance/mission_control/test_postgres_children_and_artifacts.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:tests/acceptance/control_plane/test_rrm_009_object_store.py"
+      },
+      {
+        "path": "tests/acceptance/control_plane/test_rrm_009_live_capabilities.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [],
+        "replacement_kind": "none_expected (backfill/migration/one-shot/mongo-only/live-provider proof retired)",
+        "blob_at_f6521c1": "f6521c1:tests/acceptance/control_plane/test_rrm_009_live_capabilities.py"
+      },
+      {
+        "path": "tests/acceptance/control_plane/test_rrm_009_production_composition.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "tests/acceptance/mission_control/test_postgres_runtime_parity.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:tests/acceptance/control_plane/test_rrm_009_production_composition.py"
+      },
+      {
+        "path": "tests/acceptance/control_plane/test_rrm_009_production_cancellation.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "tests/unit/operations/test_rrm_009_cancellation_composition.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:tests/acceptance/control_plane/test_rrm_009_production_cancellation.py"
+      },
+      {
+        "path": "tests/acceptance/control_plane/test_rrm_010_combined_smoke.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "tests/acceptance/mission_control/test_postgres_runtime_parity.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:tests/acceptance/control_plane/test_rrm_010_combined_smoke.py"
+      },
+      {
+        "path": "tests/acceptance/control_plane/test_rrm_016_goal_directed_demo.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "tests/integration/temporal/test_rrm_016_goal_directed_journaled.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:tests/acceptance/control_plane/test_rrm_016_goal_directed_demo.py"
+      },
+      {
+        "path": "tests/acceptance/control_plane/test_rrm_020_shared_goal_workspace.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [
+          {
+            "path": "tests/acceptance/mission_control/test_postgres_children_and_artifacts.py",
+            "exists": true,
+            "tracked": true
+          }
+        ],
+        "replacement_kind": "inferred_postgres_or_parity_equivalent",
+        "blob_at_f6521c1": "f6521c1:tests/acceptance/control_plane/test_rrm_020_shared_goal_workspace.py"
+      },
+      {
+        "path": "tests/fixtures/rrm009_live_capabilities.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [],
+        "replacement_kind": "none_expected (backfill/migration/one-shot/mongo-only/live-provider proof retired)",
+        "blob_at_f6521c1": "f6521c1:tests/fixtures/rrm009_live_capabilities.py"
+      },
+      {
+        "path": "scripts/reorganize_application_packages.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [],
+        "replacement_kind": "none_expected (backfill/migration/one-shot/mongo-only/live-provider proof retired)",
+        "blob_at_f6521c1": "f6521c1:scripts/reorganize_application_packages.py"
+      },
+      {
+        "path": "scripts/reorganize_tests.py",
+        "exists": false,
+        "tracked": false,
+        "replacement": [],
+        "replacement_kind": "none_expected (backfill/migration/one-shot/mongo-only/live-provider proof retired)",
+        "blob_at_f6521c1": "f6521c1:scripts/reorganize_tests.py"
+      }
+    ]
+  },
+  "root_langgraph_configs": [
+    {
+      "path": "langgraph.json",
+      "exists": false,
+      "tracked": false,
+      "replacement": "agent_server/langgraph.json"
+    },
+    {
+      "path": "langgraph.async_subagents.json",
+      "exists": false,
+      "tracked": false,
+      "replacement": "agent_server/langgraph.json"
+    },
+    {
+      "path": "langgraph.block_c.json",
+      "exists": false,
+      "tracked": false,
+      "replacement": "agent_server/langgraph.json"
+    },
+    {
+      "path": "langgraph.block_c_n1.json",
+      "exists": false,
+      "tracked": false,
+      "replacement": "agent_server/langgraph.json"
+    }
+  ],
+  "other_removals": [
+    {
+      "path": "src/mission_control/adapters/agent_server/async_subagents/http_app.py",
+      "exists": false,
+      "tracked": false
+    },
+    {
+      "path": "src/mission_control/adapters/agent_server/block_c_qualification/http_app.py",
+      "exists": false,
+      "tracked": false
+    },
+    {
+      "path": "src/mission_control/bootstrap/legacy_preflight.py",
+      "exists": false,
+      "tracked": false
+    },
+    {
+      "path": "src/mission_control/adapters/capabilities/catalog_projection_admin.py",
+      "exists": false,
+      "tracked": false
+    },
+    {
+      "path": "src/mission_control/adapters/capabilities/catalog_projection_events.py",
+      "exists": false,
+      "tracked": false
+    },
+    {
+      "path": "src/mission_control/adapters/document_models/external_capability.py",
+      "exists": false,
+      "tracked": false
+    }
+  ],
+  "old_app_source_map": {
+    "file_map_entries": 483,
+    "app_sources_present_now": [],
+    "intermediate_destinations_missing_at_g0": 159,
+    "unresolved_at_g0": 0
+  },
+  "pending_owner_doc_deletions": {
+    "count": 85,
+    "still_pending": 85,
+    "entries": [
+      {
+        "path": "docs/interview_and_research_result_documentation/AGENT_FRAMEWORK_COEXISTENCE_STRATEGY.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "6c18ed12d889aff233283adc0855203233b69251"
+      },
+      {
+        "path": "docs/interview_and_research_result_documentation/AGENT_SERVER_CONTRACT_IMPLEMENTATION_STRATEGY.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "8e7c503de6c192c41939902002b5eebe0d8906d2"
+      },
+      {
+        "path": "docs/interview_and_research_result_documentation/BELLLABS_AGENT_WORKFLOW_CONTRACT_ARCHITECTURE.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "d250bdb6d1711e97336fdea84bd68241adceca8e"
+      },
+      {
+        "path": "docs/interview_and_research_result_documentation/BELLLABS_AGENT_WORKFLOW_CONTRACT_ATLAS.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "1ce99825bdb4b2f6f736fc0c8daf0bdd689612f1"
+      },
+      {
+        "path": "docs/interview_and_research_result_documentation/BELLLABS_BACKEND_DEEP_MODULE_CODEBASE_ORGANIZATION.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "d606f0b7d11b5655af508536d8e105f0c09e0135"
+      },
+      {
+        "path": "docs/interview_and_research_result_documentation/CANONICAL_APPLICATION_CODEBASE_ORGANIZATION.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "109d7a80a44aba552efda3929ab9bc117f78292a"
+      },
+      {
+        "path": "docs/interview_and_research_result_documentation/CODEBASE_DOMAIN_WORKFLOW_GUIDE.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "7d515033a155db29ab71a84871efa8a3c512cb75"
+      },
+      {
+        "path": "docs/interview_and_research_result_documentation/SCHEMA_GROUNDING_PIPELINE.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "7c887eafb8b45f25eaac574b1e16b5d9eb5f431f"
+      },
+      {
+        "path": "docs/interview_and_research_result_documentation/SCHEMA_S3_REFERENCE.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "f7c904597566a49819c12605776fd8125edcdeda"
+      },
+      {
+        "path": "docs/interview_and_research_result_documentation/TEMPORAL_LANGSMITH_DEEPAGENTS_BELLLABS_BACKEND_ARCHITECTURE_PROPOSAL.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "ca863308681adbd462d499fb389af9de76464c9b"
+      },
+      {
+        "path": "docs/interview_and_research_result_documentation/WORKFLOW_IMPLEMENTATION_BINDINGS_PROTOTYPE.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "79374af8c1df4d52c51579440462c31b6e47ae62"
+      },
+      {
+        "path": "docs/interview_and_research_result_documentation/architectural_documents/CONTROLLED_RUN_PROOF_OF_REPRESENTATION.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "f836d5a97053203cdb2bc553fb0b59f331888bb1"
+      },
+      {
+        "path": "docs/interview_and_research_result_documentation/architectural_documents/LANGGRAPH_DEEPAGENTS_CONTROL_PLANE_MIGRATION_PLAN.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "14c437182b91ad31d9e2f22702fb9066176e7332"
+      },
+      {
+        "path": "docs/interview_and_research_result_documentation/architectural_documents/LANGGRAPH_DEEPAGENTS_RESEARCH_ROUND_2.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "373e4c6816450ec67e8e5633691d467af9f8502d"
+      },
+      {
+        "path": "docs/interview_and_research_result_documentation/architectural_documents/LANGGRAPH_LANGSMITH_MIGRATION_RECOMMENDATIONS.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "2d2b75d8dc75357e4b52d18bc87357988078b494"
+      },
+      {
+        "path": "docs/interview_and_research_result_documentation/architectural_documents/PROVIDER_NEUTRAL_APPLY_PATCH_DESIGN.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "6f8675458ce89f77471475c2cdb289c8950ecc5b"
+      },
+      {
+        "path": "docs/interview_and_research_result_documentation/langchain-langgraph-deepagents-langsmith/DOCUMENTATION_PROCESS.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "ba4e6ab2e2a19b5a8ba4bf9ea7b1fda370d1fd9a"
+      },
+      {
+        "path": "docs/interview_and_research_result_documentation/langchain-langgraph-deepagents-langsmith/LANGGRAPH_STREAMING.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "58033de5916234b3ada3e5e04b28b9ede5b10282"
+      },
+      {
+        "path": "docs/interview_and_research_result_documentation/langchain-langgraph-deepagents-langsmith/README.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "c585c0de354e0b97837ce6dbbc16ca3c0f26703a"
+      },
+      {
+        "path": "docs/interview_and_research_result_documentation/workflow-control-plane-current-state-and-next-slices.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "59cd48c086be92206d1cc2b1da77104508efb893"
+      },
+      {
+        "path": "docs/migrations_instructions/evidence_v2/research-runtime-mission/CAPABILITY_DIRECTORY_BUNDLES.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "84889efce0dff8863ec3f2de5c7355badaf64c29"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages/00A_REFERENCE_RESEARCH_BLUEPRINTS_AND_INCREMENTAL_PROOFS.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "b1167dfccd7297150a17984684f9b58abac266bf"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages/00_MAIN_GOAL_AND_INDEX.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "889fe0b2f46b4249bb7fa3edb9c98cc5e328bce4"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages/01_GLOBAL_HANDOFF_AND_STAGE_GATE_RULES.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "24871e4c517b2347ff2e3e385bb9a5256ff5a981"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages/02A_OWNER_AMENDMENTS_FOR_STAGES_3_TO_6.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "e8b476f35ba3b9b0768cfb31fc231ac7b71cb39b"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages/02_ARCHITECTURE_TRACEABILITY_MATRIX.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "c9d301b68e63a209819246bb0111e7de7b622ea4"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages/06A_STAGES_3_TO_6_OPERATION_ASSEMBLY_CONCURRENCY_AND_LINEAGE_CONTRACT.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "550a80c7dc5c91c6a4262d16c6eacfd3f0cbabea"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages/06B_STAGE_3_TEMPORAL_WORKFLOW_FOUNDATION.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "b1e58b22f2f8b1dafa21e9b0098c4f1ceefd8288"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages/06C_STAGE_3_COMMUNICATION_AND_INTERVENTION_QUALIFICATION.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "a58e949ae383302cd9056346876b273778deabd9"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages/06_STAGE_3_DURABILITY_HITL_STEERING_AND_RECOVERY.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "0df350edd10db316eab9bee81e24c73839cedc98"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages/07_STAGE_4_STAGEGRAPH_PARITY_VERTICAL_SLICE.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "3df26e9e790b45412ddc3f8ad1e0f58b5db7fcf2"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages/08_STAGE_5_GOAL_DIRECTED_DEEP_AGENTS_HARNESS.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "7aef5080c159b54ecb9242566909db6f5ee0087b"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages/09A_STAGE_6_HETEROGENEOUS_STAGEGRAPH_COMPOSITION_PROOF.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "ea4097f34dc4a61cdac402f1df82ec28467da289"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages/09_STAGE_6_ADVANCED_CAPABILITY_ASSEMBLY.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "362a7abee7d27864d9c7fa3d3df19b60846fdc7f"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages/10_STAGE_7_API_COORDINATOR_OBSERVABILITY_EVALUATION_AND_SECURITY.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "473c9b5ca9e8ae009081f0cdbb4a08a2ccf0b01e"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages/11_STAGE_8_DEPLOYMENT_SHADOW_CANARY_CUTOVER_AND_DECOMMISSION.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "c7220caec57a4ec43024f30791a93587a9987063"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages/AGENTS.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "ba56460228c18f9c19f6c6bd9a8a51f920f75ed1"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages/AGENT_IMPLEMENTATION_SESSION_PROMPT_TEMPLATE.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "fc21f166d86a4a07fabc908f1068448b037076ab"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages/FROZEN_STAGE_SYSTEM.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "bbb60b5aefef4be8d8c66fa309bf3d7090c59353"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages/STAGE_3_EXECUTION_PROMPTS_AND_DIRECTIONS.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "57d8c1a149fbdf6887d49c8536bc6a599c60930e"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages/SUPPLEMENT_APPLICATION_CONTRACT_ENHANCEMENTS.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "8089892afbbc5535cb7d785b654969c49a544136"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages/SUPPLEMENT_CODEBASE_ORGANIZATION.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "cd2271478a282fb2976a51adca0a80fcb68ed2d1"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/AGENTS.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "8df32a171d28d3f6c04b647f0b7ba0f24dcc6c44"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/FOUNDATION_AMENDMENTS_HANDOFF.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "dbb0b1b5ead295cd2f94db8d15664118153a0542"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/IMPLEMENTATION_READINESS.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "8fcc2140b6cd5ad0cdee9509874a823dd3dcf72f"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/PARALLEL_WORKTREE_PROTOCOL.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "c4dff27cc6aefa2114471923358e05a284a5154b"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/README.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "2d9edfd22db765baa911010a2a6f1d5c80c950e1"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/RECOMMENDED_ORDER.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "ff61e98c31a8004bf9fb121598afc847950714c0"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/RESEARCH_RUNTIME_MISSION_TICKETS.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "5b564f2a560ca323de02fced6d67ce8d5e76af7f"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/SUPPLEMENT_CODEBASE_ORGANIZATION.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "14d9de5de12cb9d3df5df2dd28434542d97659cd"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/TRACEABILITY.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "f8201d4c4ae877ccecc9a8b15aa1df9104178355"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/WP-BP-010-stagegraph-runtime.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "025dab92f5a56bbe759a943b8455622057875d43"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/WP-BP-020-goal-directed-runtime.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "7e0942b77f1162bf98a860306ae199fbb5834dcd"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/WP-CP-001-authority-supersession-and-contract-inventory.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "7eed2a315c368f6a54a5d6724b3bd34dd2b4ba3f"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/WP-CP-010-versioned-definitions-and-effective-run-configuration.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "19e00ba7ddaec664c8e4dc0d909ee379935c0682"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/WP-CP-020-transactional-run-control.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "9dca3f0884a7ffe98e1db8e26a2731b5c70d54de"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/WP-CP-030-temporal-root-operation-and-continuity.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "c390ba13b1544c51bdd1d70c4f202397f8cadaf8"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/WP-CP-040-deep-agent-profile-binding-and-materialization.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "4f35bc240b3f017077bc1f1b5e6f850eae974791"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/WP-CP-045-async-subagent-parent-child-lifecycle.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "ba63b3e850b6390c6723c8c3f1fe172bffe7439c"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/WP-CP-050-foundation-capability-materialization-vertical.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "6a91ade9e0360fca4ae8078fc76847323ac7848f"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/handoffs/WP-BP-010.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "2fe2ecad5c6efa8e0a4d8283d3a7ccba6ac83b5a"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/handoffs/WP-BP-020.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "8ea524eb75b18a3eab24938c8c92ea7e498874fe"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/research-runtime-mission/BASELINE_FINDINGS_2026-10-01.txt",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "3d001f125e4fe31fc6c27ed27da219590855a4fa"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/research-runtime-mission/RRM-001-contract-authority.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "a33a03efb6bfaad05fb8c3c4f443eff42047de14"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/research-runtime-mission/issues/01-lifecycle-contract-authority.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "42f42b2aee426c2f74f8f2df4dda23d5eb6ef6b8"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/research-runtime-mission/issues/02-repair-verification-baseline.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "32656d129e670ca38c872f1478288954ee4977fc"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/research-runtime-mission/issues/03-persist-qualified-checkpoint-lineage.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "a3fb22e88bc49d481a3b844d3ccde98cc7513e12"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/research-runtime-mission/issues/04-reconcile-checkpoint-crash-windows.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "e26f66f3b9b8356df4323a35b4018bee6bf705d8"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/research-runtime-mission/issues/05-inspect-runtime-and-checkpoint-history.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "fbfcc7d816274738eed4d514f19cedd4cd50a917"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/research-runtime-mission/issues/06-admit-safe-semantic-forks.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "a4aaed61cbbedd5fba725d87fb276f270417f076"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/research-runtime-mission/issues/07-apply-boundary-interventions.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "da7253addaa7073746de07307a113479e059142c"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/research-runtime-mission/issues/08-reconcile-running-cancellation.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "6803f51255ac8872b0cac8c323c040ba54c3231a"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/research-runtime-mission/issues/09-qualify-production-capability-composition.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "ec9fa789c1a20cbbfbb5fab7e851a3c6f31ec9b0"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/research-runtime-mission/issues/10-merge-prerequisite-readiness-gate.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "e452c3f5fa1e72d8dbd451aaaa996e15538eb40b"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/research-runtime-mission/issues/11-company-fixtures-separate-session.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "5d298c9cdf76315d89fcaea196bbb781d11114b8"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/research-runtime-mission/issues/12-reconcile-reference-research-journal-authority.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "3d76a17ea16342558851cc69783b5633e3d9104d"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/research-runtime-mission/issues/13-qualify-async-subagents-on-agent-server.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "40b4df8aaec76a0ff0f48178fa50754c40ded681"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/research-runtime-mission/issues/14-readmit-unit-at-new-generation.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "da6cd34fa6e8689c47093d6a297a024dbfeafe19"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/research-runtime-mission/issues/15-set-order-stable-contract-digests.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "faab9cf4cb6272297c162cdadb9977cb30e1c5ff"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/research-runtime-mission/issues/16-compose-goal-directed-operations-with-run-control-journal.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "de1c3bcba8ce9e17c2aa6bc97f1225ecc1df649f"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/research-runtime-mission/issues/17-declare-patchable-fork-fields-and-qualify-cognitive-seed.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "54ff90dda88f60d0ad774a18b0ff4e98de291ce1"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/research-runtime-mission/issues/18-persist-unchanged-goal-revision-idempotently.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "6d13b506eb7a96349df943bd5fdd18fc3711bcda"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/research-runtime-mission/issues/19-terminalize-goal-directed-with-the-accepted-output-set.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "6dbd3af4d5ac521505045ced38bc0cd4e3bb0c77"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/research-runtime-mission/issues/20-materialize-shared-goal-workspace-across-iterations.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "44f3742023da09fb5fdc10b3f42c04196a3b168c"
+      },
+      {
+        "path": "docs/migrations_instructions/implementation_work_packages_v2/research-runtime-mission/issues/21-settle-the-stagegraph-baseline-reservation.md",
+        "exists": false,
+        "tracked_at_head": true,
+        "pending_deletion": true,
+        "blob_at_f6521c1": "52c47b742e5e13a294a18b1aa4bd35161b612aab"
+      }
+    ]
+  }
+}

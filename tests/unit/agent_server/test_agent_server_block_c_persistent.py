@@ -340,7 +340,7 @@ async def test_multitask_strategy_reject_and_enqueue(
             input=_wait_input(hold_seconds=1),
             multitask_strategy="reject",
         )
-    except Exception as error:  # noqa: BLE001 - capture provider rejection shape
+    except Exception as error:
         rejected = error
     assert rejected is not None, "reject strategy must deny a second run while one is active"
     active_after_reject = await tenant_a_client.runs.get(reject_thread_id, active_id)

@@ -208,7 +208,6 @@ def test_browser_tool_reaches_public_hosts_by_name_only() -> None:
     from biotech_mission_adapters.adapters.infrastructure.web_research_runtime import (
         WebResearchRuntimeDependencyError,
     )
-
     from mission_control.adapters.deep_agents.browser_tool import _public_host
 
     assert _public_host("https://Example.COM/path?q=1") == "example.com"
@@ -242,7 +241,6 @@ async def test_browser_tool_opens_only_hosts_the_operation_was_granted(tmp_path:
     from biotech_mission_adapters.adapters.infrastructure.web_research_runtime import (
         WebResearchRuntimeDependencyError,
     )
-
     from mission_control.adapters.deep_agents.browser_tool import (
         AgentBrowserPageTool,
         granted_network_hosts,
@@ -282,7 +280,6 @@ async def test_browser_tool_refuses_a_granted_name_that_resolves_to_a_private_ad
     from biotech_mission_adapters.adapters.infrastructure.web_research_runtime import (
         WebResearchRuntimeDependencyError,
     )
-
     from mission_control.adapters.deep_agents.browser_tool import (
         AgentBrowserPageTool,
         granted_network_hosts,

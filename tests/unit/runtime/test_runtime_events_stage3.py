@@ -85,7 +85,7 @@ async def test_reconnect_uses_monotonic_outbox_cursor_and_deduplicates() -> None
 
     assert [item.outbox_position for item in first] == [1, 2]
     assert [item.outbox_position for item in resumed] == [3]
-    assert set(item.event_id for item in first + resumed) == {"event-1", "event-2", "event-3"}
+    assert {item.event_id for item in first + resumed} == {"event-1", "event-2", "event-3"}
 
 
 @pytest.mark.asyncio

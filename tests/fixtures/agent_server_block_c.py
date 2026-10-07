@@ -383,12 +383,12 @@ def tenant_b_token(block_c_auth_material: BlockCAuthMaterial) -> str:
 
 @pytest.fixture
 def tenant_a_client(block_c_endpoint: str, tenant_a_token: str) -> Iterator[LangGraphClient]:
-    yield agent_server_client(block_c_endpoint, tenant_a_token)
+    return agent_server_client(block_c_endpoint, tenant_a_token)
 
 
 @pytest.fixture
 def tenant_b_client(block_c_endpoint: str, tenant_b_token: str) -> Iterator[LangGraphClient]:
-    yield agent_server_client(block_c_endpoint, tenant_b_token)
+    return agent_server_client(block_c_endpoint, tenant_b_token)
 
 
 @pytest.fixture
@@ -396,7 +396,7 @@ def tenant_a_client_n1(
     block_c_endpoint_n1: str,
     tenant_a_token: str,
 ) -> Iterator[LangGraphClient]:
-    yield agent_server_client(block_c_endpoint_n1, tenant_a_token)
+    return agent_server_client(block_c_endpoint_n1, tenant_a_token)
 
 
 @pytest.fixture

@@ -1,13 +1,21 @@
+"""Durable runtime kernel persistence on mission_control (production paths only).
+
+Runtime bindings (canonical execution_binding + support status), bootstrap authority and
+reconciliation decisions (canonical human_task/human_resolution), sealed snapshots and the
+fork saga (canonical continuation_checkpoint, recovery_request and fork_lineage) and the
+immutable execution-lineage journal, all under a restricted `mission_control_runtime` login
+with forced RLS. The tests-only lease journal, incident repair and retention deletion
+repositories were retired with their legacy tables.
+"""
+
 from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-from urllib.parse import urlparse
 
 import asyncpg
 import pytest
 
-from mission_control.adapters.postgres.connections import apply_application_migrations
 from mission_control.adapters.postgres.run_control.run_control_repository import (
     PostgresRunControlRepository,
 )
@@ -22,25 +30,13 @@ from mission_control.adapters.postgres.runtime.runtime_execution_repository impo
 from mission_control.adapters.postgres.runtime.stage3_kernel_repository import (
     RETENTION_DAYS,
     PostgresDecisionRepository,
-    PostgresExecutionLineageRepository,
     PostgresForkRepository,
-    PostgresResourceLeaseJournal,
-    PostgresRuntimeIncidentRepository,
-    PostgresStage3RetentionRepository,
+    append_lineage_in_transaction,
 )
+from mission_control.adapters.postgres.scope import apply_scope
 from mission_control.application.recovery.runtime_bootstrap import BootstrapRequest
 from mission_control.application.recovery.runtime_lineage import PersistedExecutionLineage
-from mission_control.application.recovery.runtime_reconciliation import (
-    RuntimeIncidentDecision,
-    RuntimeIncidentObservation,
-    RuntimeIncidentType,
-    RuntimeRepairAuditRecord,
-)
 from mission_control.application.recovery.runtime_recovery import ForkAdmission
-from mission_control.application.recovery.runtime_resources import (
-    ResourceCapacity,
-    ResourceExhausted,
-)
 from mission_control.domain.authoring.canonical import sha256_digest
 from mission_control.domain.graph_runtime.contracts import (
     ActorRef,
@@ -63,9 +59,6 @@ from mission_control.domain.graph_runtime.kernel import (
     LineageKind,
     LineageParentEdge,
     ProviderQualifiedLineageRecord,
-    ResourceKind,
-    ResourceLeaseRequest,
-    ResourceLeaseStatus,
 )
 from mission_control.domain.policies.errors import IdempotencyConflict
 from mission_control.domain.policies.forks import (
@@ -75,52 +68,22 @@ from mission_control.domain.policies.forks import (
     admission_request_ref,
     lineage_for,
 )
+from tests.fixtures.mission_control_common_db import CommonDatabase
 from tests.fixtures.run_forks import technical_snapshot
-from tests.unit.run_control.test_run_control import request as run_request
+from tests.integration.postgres.runtime_common import common_db as common_db
+from tests.integration.postgres.runtime_common import owner_rows, scoped_request
 from tests.unit.run_control.test_run_control import service as run_control_service
+
+pytestmark = pytest.mark.common_db
 
 DIGEST_A = "sha256:" + "a" * 64
 DIGEST_B = "sha256:" + "b" * 64
 NOW = datetime(2026, 8, 6, 20, 0, tzinfo=UTC)
 
 
-class AllowRetention:
-    async def authorize_deletion(
-        self,
-        *,
-        request_scope: str,
-        actor_id: str,
-        record_class: str,
-    ) -> bool:
-        return (
-            request_scope == "tenant-1"
-            and actor_id == "operator:retention"
-            and record_class in {"checkpoint", "event", "incident", "lineage", "decision", "fork"}
-        )
-
-
-def _require_disposable_postgres(dsn: str) -> None:
-    parsed = urlparse(dsn)
-    if (
-        parsed.hostname not in {"127.0.0.1", "localhost"}
-        or parsed.port != 55432
-        or parsed.path != "/belllabs"
-        or parsed.username != "belllabs"
-    ):
-        raise RuntimeError(
-            "Stage 3 kernel postgres proof requires the disposable local PostgreSQL target"
-        )
-
-
-async def _reset_schema(pool: asyncpg.Pool) -> None:
-    async with pool.acquire() as connection:
-        await connection.execute("DROP SCHEMA IF EXISTS belllabs_control CASCADE")
-    await apply_application_migrations(pool)
-
-
-async def _admit_run(pool: asyncpg.Pool, *, request_scope: str = "tenant-1") -> str:
+async def _admit_run(pool: asyncpg.Pool, db: CommonDatabase, *, tenant: str = "tenant-1") -> str:
     run_service, _ = run_control_service(PostgresRunControlRepository(pool))  # type: ignore[arg-type]
-    decision = await run_service.admit(run_request(request_scope=request_scope))
+    decision = await run_service.admit(scoped_request(db, tenant))
     assert decision.run_id is not None
     return decision.run_id
 
@@ -192,7 +155,7 @@ def _lineage(
     lineage_id: str,
     run_id: str,
     runtime_attempt_id: str,
-    request_scope: str = "tenant-1",
+    request_scope: str,
     parent_lineage_id: str | None = None,
     result_manifest_ref: str | None = None,
     recorded_at: datetime = NOW,
@@ -245,31 +208,10 @@ def _lineage(
     )
 
 
-def _lease_request(
-    lease_id: str,
-    semantic_identity: str,
-    resources: tuple[ResourceKind, ...],
-    *,
-    digest: str = DIGEST_A,
-    ttl_seconds: int = 60,
-    request_scope: str = "tenant-1",
-) -> ResourceLeaseRequest:
-    return ResourceLeaseRequest(
-        lease_id=lease_id,
-        request_scope=request_scope,
-        semantic_identity=semantic_identity,
-        envelope_digest=digest,
-        resources=resources,
-        requested_at=NOW,
-        deadline=NOW + timedelta(minutes=10),
-        ttl_seconds=ttl_seconds,
-    )
-
-
 def _decision_request(
     *,
     binding_id: str,
-    request_scope: str = "tenant-1",
+    request_scope: str,
     decision_id: str = "decision-1",
 ) -> DecisionRequest:
     values = {
@@ -291,7 +233,7 @@ def _decision_request(
 def _decision_response(
     *,
     decision_id: str = "decision-1",
-    request_scope: str = "tenant-1",
+    request_scope: str,
     response_digest: str = DIGEST_A,
 ) -> DecisionResponse:
     return DecisionResponse(
@@ -307,64 +249,17 @@ def _decision_response(
     )
 
 
-def _incident(
-    *,
-    incident_id: str = "incident-1",
-    request_scope: str = "tenant-1",
-    identity_digest: str = DIGEST_A,
-) -> RuntimeIncidentObservation:
-    return RuntimeIncidentObservation(
-        incident_id=incident_id,
-        request_scope=request_scope,
-        binding_id=None,
-        incident_type=RuntimeIncidentType.EXPIRED_RESOURCE_LEASE,
-        identity_digest=identity_digest,
-        observed_version=3,
-        expected_version=3,
-        evidence_refs=("evidence:1",),
-        proposed_action="expire_lease",
-        observed_at=NOW,
-    )
-
-
 @pytest.mark.asyncio
-async def test_stage3_kernel_postgres_persistence_slice(
-    test_application_postgres_dsn: str,
-) -> None:
-    _require_disposable_postgres(test_application_postgres_dsn)
-    pool = await asyncpg.create_pool(dsn=test_application_postgres_dsn, min_size=1, max_size=6)
+async def test_stage3_kernel_postgres_persistence_slice(common_db: CommonDatabase) -> None:
+    db = common_db
+    tenant_1, tenant_2 = db.scope("tenant-1"), db.scope("tenant-2")
+    pool = await db.pool(max_size=6)
     try:
-        await _reset_schema(pool)
-        await apply_application_migrations(pool)
-        async with pool.acquire() as connection:
-            versions = {
-                row["version"]
-                for row in await connection.fetch(
-                    "SELECT version FROM belllabs_control.schema_migrations"
-                )
-            }
-            assert "0014_stage3_durable_runtime_kernel.sql" in versions
-            status_check = await connection.fetchval(
-                """
-                SELECT pg_get_constraintdef(oid)
-                FROM pg_constraint
-                WHERE conrelid = 'belllabs_control.execution_resource_leases'::regclass
-                  AND contype = 'c'
-                  AND pg_get_constraintdef(oid) LIKE '%reconciliation_required%'
-                LIMIT 1
-                """
-            )
-            assert status_check is not None
-            assert "acquired" in status_check
-            assert "requested" in status_check
-            assert "reconciliation_required" in status_check
-            assert "reserved" not in status_check
-
-        run_id = await _admit_run(pool, request_scope="tenant-1")
-        tenant_two_run = await _admit_run(pool, request_scope="tenant-2")
+        run_id = await _admit_run(pool, db)
+        tenant_two_run = await _admit_run(pool, db, tenant="tenant-2")
         binding = await _create_binding(
             pool,
-            request_scope="tenant-1",
+            request_scope=tenant_1,
             run_id=run_id,
             binding_id="binding-1",
         )
@@ -385,14 +280,31 @@ async def test_stage3_kernel_postgres_persistence_slice(
             "checkpoint_route_incompatible",
         )
         assert bootstrap_decision_id.startswith("decision-")
+        # The admitted runtime binding is an immutable canonical execution binding of the run.
+        bindings = await owner_rows(
+            db,
+            """
+            SELECT e.binding_contract, s.status, r.run_key
+            FROM mission_control.runtime_execution_binding s
+            JOIN mission_control.execution_binding e
+              USING (installation_id, application_id, tenant_id, execution_binding_id)
+            JOIN mission_control.mission_run r
+              ON r.installation_id = e.installation_id AND r.application_id = e.application_id
+             AND r.tenant_id = e.tenant_id AND r.run_id = e.run_id
+            WHERE s.binding_key = 'binding-1'
+            """,
+        )
+        assert [tuple(row.values()) for row in bindings] == [
+            ("mc.runtime-execution-binding/1", "submitting", run_id)
+        ]
         # RRM-006: the versioned fork saga state (snapshot, patch, derived run).
-        snapshot = technical_snapshot(run_id)
+        snapshot = technical_snapshot(run_id, request_scope=tenant_1)
         await PostgresRunSnapshotRepository(pool).put(snapshot)
-        fork_target = run_request(request_id="fork-1")
+        fork_target = scoped_request(db, request_id="fork-1")
         fork_request = RunForkRequest(
             request_id="fork-1",
             idempotency_key="fork-1",
-            request_scope="tenant-1",
+            request_scope=tenant_1,
             source_run_id=run_id,
             source_execution_epoch=1,
             snapshot_id=snapshot.snapshot_id,
@@ -411,13 +323,13 @@ async def test_stage3_kernel_postgres_persistence_slice(
         fork_repo = PostgresForkRepository(pool)
         assert await fork_repo.reserve(fork_request) is True
         assert await fork_repo.reserve(fork_request) is False
-        assert await fork_repo.get_request("tenant-1", "fork-1") == fork_request
+        assert await fork_repo.get_request(tenant_1, "fork-1") == fork_request
         assert await fork_repo.claim_admission(fork_request) is True
         assert await fork_repo.claim_admission(fork_request) is False
         fork_admission = ForkAdmission(
             request_id="fork-1",
             target_epoch=ExecutionEpochKey(
-                request_scope="tenant-1",
+                request_scope=tenant_1,
                 belllabs_run_id="run-fork-1",
                 execution_epoch=1,
             ),
@@ -430,7 +342,7 @@ async def test_stage3_kernel_postgres_persistence_slice(
         assert await fork_repo.claim_copy(fork_request) is False
         fork_receipt = RunForkReceipt(
             request_id="fork-1",
-            request_scope="tenant-1",
+            request_scope=tenant_1,
             source_run_id=run_id,
             snapshot_id=snapshot.snapshot_id,
             snapshot_digest=snapshot.snapshot_digest,
@@ -444,7 +356,7 @@ async def test_stage3_kernel_postgres_persistence_slice(
             recorded_at=NOW,
         )
         assert await fork_repo.record(fork_request, fork_receipt) == fork_receipt
-        assert await fork_repo.get("tenant-1", "fork-1") == fork_receipt
+        assert await fork_repo.get(tenant_1, "fork-1") == fork_receipt
         concurrent_fork = fork_request.model_copy(
             update={
                 "request_id": "fork-concurrent",
@@ -457,389 +369,156 @@ async def test_stage3_kernel_postgres_persistence_slice(
             *(fork_repo.claim_admission(concurrent_fork) for _ in range(8))
         )
         assert sum(admission_claims) == 1
+        recovery = await owner_rows(
+            db,
+            """
+            SELECT f.request_key, r.kind, r.state FROM mission_control.fork_request f
+            JOIN mission_control.recovery_request r
+              USING (installation_id, application_id, tenant_id, recovery_id)
+            ORDER BY f.request_key
+            """,
+        )
+        assert [tuple(row.values()) for row in recovery] == [
+            ("fork-1", "fork", "completed"),
+            ("fork-concurrent", "fork", "admitted"),
+        ]
         await _create_binding(
             pool,
-            request_scope="tenant-2",
+            request_scope=tenant_2,
             run_id=tenant_two_run,
             binding_id="binding-2",
         )
-        async with pool.acquire() as connection:
-            await connection.execute(
-                """
-                INSERT INTO belllabs_control.runtime_checkpoint_observations (
-                    observation_id, request_scope, binding_id, deployment_endpoint_id,
-                    agent_server_thread_id, langgraph_checkpoint_id, state_schema_digest,
-                    graph_assembly_digest, status, summary_digest, redacted_summary,
-                    observed_at
-                )
-                VALUES (
-                    'checkpoint-observation-1', 'tenant-1', 'binding-1', 'endpoint-1',
-                    'thread-1', 'checkpoint-1', $1, $1, 'observed', $1, '{}'::jsonb, $2
-                )
-                """,
-                DIGEST_A,
-                NOW,
-            )
 
-        lineage_repo = PostgresExecutionLineageRepository(pool)
-        root = _lineage(lineage_id="lineage-1", run_id=run_id, runtime_attempt_id="runtime-1")
+        root = _lineage(
+            lineage_id="lineage-1",
+            run_id=run_id,
+            runtime_attempt_id="runtime-1",
+            request_scope=tenant_1,
+        )
         child = _lineage(
             lineage_id="lineage-2",
             run_id=run_id,
             runtime_attempt_id="runtime-2",
+            request_scope=tenant_1,
             parent_lineage_id=root.lineage_id,
             result_manifest_ref="result:accepted",
             recorded_at=NOW + timedelta(seconds=1),
         )
-        assert await lineage_repo.append(root) == await lineage_repo.append(root)
+
+        async def append(lineage: PersistedExecutionLineage) -> PersistedExecutionLineage:
+            async with pool.acquire() as connection, connection.transaction():
+                await apply_scope(connection, lineage.envelope.request_scope)
+                return await append_lineage_in_transaction(connection, lineage)
+
+        assert await append(root) == await append(root)
         with pytest.raises(IdempotencyConflict, match="conflicting facts"):
-            await lineage_repo.append(
+            await append(
                 _lineage(
                     lineage_id="lineage-1",
                     run_id=run_id,
                     runtime_attempt_id="runtime-other",
+                    request_scope=tenant_1,
                 )
             )
-        await lineage_repo.append(child)
-        provenance = await lineage_repo.provenance_for_result("tenant-1", "result:accepted")
-        assert [item.lineage_id for item in provenance] == ["lineage-1", "lineage-2"]
+        await append(child)
+        with pytest.raises(ValueError, match="parent must be persisted"):
+            await append(
+                _lineage(
+                    lineage_id="lineage-orphan",
+                    run_id=run_id,
+                    runtime_attempt_id="runtime-orphan",
+                    request_scope=tenant_1,
+                    parent_lineage_id="lineage-missing",
+                )
+            )
 
         async with pool.acquire() as connection, connection.transaction():
-            await connection.execute("SET LOCAL ROLE belllabs_control_runtime")
-            await connection.execute(
-                "SELECT set_config('belllabs.request_scope', 'tenant-1', true)"
-            )
+            await apply_scope(connection, tenant_1)
             assert (
                 await connection.fetchval(
-                    "SELECT count(*) FROM belllabs_control.runtime_lineage_records"
+                    "SELECT count(*) FROM mission_control.execution_lineage_record"
                 )
                 == 2
             )
             assert (
                 await connection.fetchval(
                     """
-                    SELECT count(*)
-                    FROM belllabs_control.runtime_lineage_edges
+                    SELECT count(*) FROM mission_control.execution_lineage_edge
                     WHERE relationship = 'attempt_of'
                     """
                 )
                 == 2
             )
-            await connection.execute(
-                "SELECT set_config('belllabs.request_scope', 'tenant-2', true)"
-            )
+            await apply_scope(connection, tenant_2)
             assert (
                 await connection.fetchval(
-                    "SELECT count(*) FROM belllabs_control.runtime_lineage_records"
+                    "SELECT count(*) FROM mission_control.execution_lineage_record"
                 )
                 == 0
             )
 
         decision_repo = PostgresDecisionRepository(pool)
-        decision = _decision_request(binding_id=binding.binding_id)
+        decision = _decision_request(binding_id=binding.binding_id, request_scope=tenant_1)
         assert await decision_repo.create(decision) == await decision_repo.create(decision)
         with pytest.raises(IdempotencyConflict, match="conflicting intent"):
             conflicting = decision.model_copy(
                 update={"policy_ref": "policy:other:1", "request_digest": DIGEST_B}
             )
             await decision_repo.create(conflicting)
-        answered = await decision_repo.answer(decision, _decision_response())
+        answered = await decision_repo.answer(decision, _decision_response(request_scope=tenant_1))
         assert answered.status == "answered"
-        assert await decision_repo.answer(decision, _decision_response()) == answered
+        assert (
+            await decision_repo.answer(decision, _decision_response(request_scope=tenant_1))
+            == answered
+        )
         with pytest.raises(IdempotencyConflict, match="different response"):
             await decision_repo.answer(
                 decision,
-                _decision_response(response_digest=DIGEST_B),
+                _decision_response(request_scope=tenant_1, response_digest=DIGEST_B),
             )
-        loaded = await decision_repo.get("tenant-1", decision.decision_id)
+        loaded = await decision_repo.get(tenant_1, decision.decision_id)
         assert loaded is not None
         assert loaded.response is not None
         assert loaded.response.response_digest == DIGEST_A
+        tasks = await owner_rows(
+            db,
+            """
+            SELECT t.lifecycle, count(r.resolution_id) AS resolutions
+            FROM mission_control.human_task t
+            LEFT JOIN mission_control.human_resolution r
+              USING (installation_id, application_id, tenant_id, human_task_id)
+            WHERE t.task_key = 'runtime_decision:decision-1'
+            GROUP BY t.lifecycle
+            """,
+        )
+        assert [tuple(row.values()) for row in tasks] == [("resolved", 1)]
 
-        leases = PostgresResourceLeaseJournal(
-            pool,
-            ResourceCapacity(
-                limits={
-                    ResourceKind.TENANT: 4,
-                    ResourceKind.OPERATION_WORKER: 1,
-                    ResourceKind.RESUMPTION: 1,
-                    ResourceKind.MODEL_CALL: 1,
-                }
-            ),
-        )
-        worker = await leases.acquire(
-            _lease_request(
-                "worker-1",
-                "operation:1",
-                (ResourceKind.TENANT, ResourceKind.OPERATION_WORKER),
-            ),
-            now=NOW,
-        )
-        assert (
-            await leases.acquire(
-                _lease_request(
-                    "worker-1",
-                    "operation:1",
-                    (ResourceKind.TENANT, ResourceKind.OPERATION_WORKER),
-                ),
-                now=NOW,
-            )
-            == worker
-        )
-        with pytest.raises(IdempotencyConflict, match="different envelope"):
-            await leases.acquire(
-                _lease_request(
-                    "worker-2",
-                    "operation:1",
-                    (ResourceKind.TENANT, ResourceKind.OPERATION_WORKER),
-                    digest=DIGEST_B,
-                ),
-                now=NOW,
-            )
-        with pytest.raises(ResourceExhausted, match="operation_worker"):
-            await leases.acquire(
-                _lease_request(
-                    "worker-2",
-                    "operation:2",
-                    (ResourceKind.TENANT, ResourceKind.OPERATION_WORKER),
-                ),
-                now=NOW,
-            )
-        resumed = await leases.acquire(
-            _lease_request(
-                "resume-1",
-                "resume:operation:waiting",
-                (ResourceKind.TENANT, ResourceKind.RESUMPTION),
-            ),
-            now=NOW,
-        )
-        assert resumed.status == ResourceLeaseStatus.ACQUIRED
-        model = await leases.acquire(
-            _lease_request(
-                "model-1",
-                "model:1",
-                (ResourceKind.TENANT, ResourceKind.MODEL_CALL),
-            ),
-            now=NOW,
-        )
-        wait = await leases.transition_to_wait(
-            request_scope="tenant-1",
-            wait_binding_ref="wait:1",
-            lease_ids=(worker.request.lease_id, model.request.lease_id),
-            retain=frozenset({model.request.lease_id}),
-            now=NOW,
-        )
-        assert wait.released_reservations == (worker.request.lease_id,)
-        assert wait.retained_reservations == (model.request.lease_id,)
-        replacement = await leases.acquire(
-            _lease_request(
-                "worker-3",
-                "operation:3",
-                (ResourceKind.TENANT, ResourceKind.OPERATION_WORKER),
-                ttl_seconds=1,
-            ),
-            now=NOW,
-        )
-        expired = await leases.expire_due(
-            request_scope="tenant-1",
-            now=NOW + timedelta(seconds=2),
-        )
-        assert any(item.request.lease_id == replacement.request.lease_id for item in expired)
-        reacquired = await leases.acquire(
-            _lease_request(
-                "worker-4",
-                "operation:4",
-                (ResourceKind.TENANT, ResourceKind.OPERATION_WORKER),
-            ),
-            now=NOW + timedelta(seconds=2),
-        )
-        assert reacquired.status == ResourceLeaseStatus.ACQUIRED
-        released = await leases.release(
-            request_scope="tenant-1",
-            lease_id=model.request.lease_id,
-            expected_digest=model.canonical_digest,
-            now=NOW + timedelta(seconds=2),
-        )
-        assert released.status == ResourceLeaseStatus.RELEASED
-
-        incidents = PostgresRuntimeIncidentRepository(pool)
-        observation = _incident()
-        assert await incidents.reserve_incident(observation) is True
-        assert await incidents.reserve_incident(observation) is False
-        decision_record = RuntimeIncidentDecision(
-            incident_id=observation.incident_id,
-            request_scope=observation.request_scope,
-            action="expire_lease",
-            disposition="automatic",
-            before_version=3,
-            after_version=4,
-            actor_ref="service:runtime-reconciler",
-            reason="idempotent version-checked automatic repair",
-            evidence_refs=observation.evidence_refs,
-        )
-        assert (
-            await incidents.record_incident_decision(observation, decision_record)
-            == decision_record
-        )
-        assert (
-            await incidents.record_incident_decision(observation, decision_record)
-            == decision_record
-        )
-        with pytest.raises(ValueError, match="changed its decision"):
-            await incidents.record_incident_decision(
-                observation,
-                decision_record.model_copy(update={"reason": "different"}),
-            )
-        repair_audit = RuntimeRepairAuditRecord(
-            request_scope="tenant-1",
-            audit_id="repair-audit-1",
-            incident_id=observation.incident_id,
-            command_id="repair-command-1",
-            actor_id="operator-1",
-            reason="approved version-checked repair",
-            expected_belllabs_version=3,
-            expected_checkpoint_id="checkpoint-1",
-            before_digest=DIGEST_A,
-            after_digest=DIGEST_B,
-            evidence_refs=("evidence:repair",),
-            recorded_at=NOW,
-        )
-        assert await incidents.record_repair_audit(repair_audit) == repair_audit
-        assert await incidents.record_repair_audit(repair_audit) == repair_audit
-        with pytest.raises(IdempotencyConflict, match="conflicting facts"):
-            await incidents.record_repair_audit(
-                repair_audit.model_copy(update={"reason": "changed repair reason"})
-            )
         async with pool.acquire() as connection, connection.transaction():
-            await connection.execute("SET LOCAL ROLE belllabs_control_runtime")
-            await connection.execute(
-                "SELECT set_config('belllabs.request_scope', 'tenant-2', true)"
-            )
+            await apply_scope(connection, tenant_2)
             scoped_counts = await connection.fetchrow(
                 """
                 SELECT
-                    (SELECT count(*) FROM belllabs_control.runtime_execution_bindings
-                     WHERE binding_id = 'binding-1') AS bindings,
-                    (SELECT count(*) FROM belllabs_control.runtime_checkpoint_observations
-                     WHERE observation_id = 'checkpoint-observation-1') AS checkpoints,
-                    (SELECT count(*) FROM belllabs_control.execution_resource_leases
-                     WHERE lease_id = 'worker-4') AS leases,
-                    (SELECT count(*) FROM belllabs_control.runtime_decision_requests
-                     WHERE decision_id = 'decision-1') AS decisions,
-                    (SELECT count(*) FROM belllabs_control.runtime_reconciliation_incidents
-                     WHERE incident_id = 'incident-1') AS incidents,
-                    (SELECT count(*) FROM belllabs_control.runtime_repair_audit
-                     WHERE audit_id = 'repair-audit-1') AS repairs,
-                    (SELECT count(*) FROM belllabs_control.runtime_fork_requests
-                     WHERE request_id = 'fork-1') AS forks,
-                    (SELECT count(*) FROM belllabs_control.outbox
-                     WHERE aggregate_id = $1) AS events
+                    (SELECT count(*) FROM mission_control.runtime_execution_binding
+                     WHERE binding_key = 'binding-1') AS bindings,
+                    (SELECT count(*) FROM mission_control.human_task) AS decisions,
+                    (SELECT count(*) FROM mission_control.fork_request
+                     WHERE request_key = 'fork-1') AS forks,
+                    (SELECT count(*) FROM mission_control.outbox
+                     WHERE aggregate_key = $1) AS events
                 """,
                 run_id,
             )
             assert scoped_counts is not None
             assert all(value == 0 for value in scoped_counts.values())
-
-        with pytest.raises(PermissionError, match="lacks scoped operator"):
-            await PostgresStage3RetentionRepository(pool).delete_expired(
-                request_scope="tenant-1",
-                record_class="lineage",
-                cutoff_at=NOW,
-                actor_id="operator:retention",
-                reason="unauthorized purge",
-                deletion_id="deletion-denied",
-                recorded_at=NOW,
-            )
-        retention = PostgresStage3RetentionRepository(pool, AllowRetention())
-        async with pool.acquire() as connection:
-            await connection.execute(
-                """
-                UPDATE belllabs_control.outbox
-                SET delivered_at = $2
-                WHERE aggregate_id = $1
-                """,
-                run_id,
-                NOW,
-            )
-        stale_template = _lineage(
-            lineage_id="lineage-stale",
-            run_id=run_id,
-            runtime_attempt_id="runtime-stale",
-        )
-        stale = PersistedExecutionLineage.create(
-            lineage_id=stale_template.lineage_id,
-            envelope=stale_template.envelope,
-            qualified_identities=stale_template.qualified_identities,
-            recorded_at=NOW - timedelta(days=120),
-            retain_until=NOW - timedelta(days=1),
-        )
-        await lineage_repo.append(stale)
-        deleted = await retention.delete_expired(
-            request_scope="tenant-1",
-            record_class="lineage",
-            cutoff_at=NOW,
-            actor_id="operator:retention",
-            reason="90-day audited purge",
-            deletion_id="deletion-lineage-1",
-            recorded_at=NOW,
-        )
-        assert deleted >= 1
-        assert (
-            await retention.delete_expired(
-                request_scope="tenant-1",
-                record_class="lineage",
-                cutoff_at=NOW,
-                actor_id="operator:retention",
-                reason="90-day audited purge",
-                deletion_id="deletion-lineage-1",
-                recorded_at=NOW,
-            )
-            == deleted
-        )
-        for record_class in ("checkpoint", "event", "incident", "decision", "fork"):
-            assert (
-                await retention.delete_expired(
-                    request_scope="tenant-1",
-                    record_class=record_class,
-                    cutoff_at=NOW,
-                    actor_id="operator:retention",
-                    reason="90-day audited purge",
-                    deletion_id=f"deletion-{record_class}-1",
-                    recorded_at=NOW,
-                )
-                == 0
-            )
-        async with pool.acquire() as connection:
-            recent_events = await connection.fetchval(
-                """
-                SELECT count(*) FROM belllabs_control.outbox
-                WHERE aggregate_id = $1
-                """,
-                run_id,
-            )
-            assert recent_events > 0
-            await connection.execute(
-                """
-                UPDATE belllabs_control.outbox
-                SET recorded_at = $2
-                WHERE aggregate_id = $1
-                """,
-                run_id,
-                NOW - timedelta(days=91),
-            )
-        assert (
-            await retention.delete_expired(
-                request_scope="tenant-1",
-                record_class="event",
-                cutoff_at=NOW,
-                actor_id="operator:retention",
-                reason="90-day audited purge",
-                deletion_id="deletion-event-expired",
-                recorded_at=NOW,
-            )
-            == recent_events
-        )
-        with pytest.raises(LookupError, match="no persisted lineage"):
-            await lineage_repo.provenance_for_result("tenant-2", "result:accepted")
+        async with pool.acquire() as connection, connection.transaction():
+            await apply_scope(connection, tenant_1)
+            for statement in (
+                "DELETE FROM mission_control.execution_lineage_record",
+                "DELETE FROM mission_control.human_task",
+                "UPDATE mission_control.human_resolution SET actor_ref = 'x'",
+            ):
+                with pytest.raises(asyncpg.InsufficientPrivilegeError):
+                    async with connection.transaction():
+                        await connection.execute(statement)
     finally:
         await pool.close()

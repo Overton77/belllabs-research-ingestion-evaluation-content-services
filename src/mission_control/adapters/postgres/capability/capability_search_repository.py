@@ -1,13 +1,34 @@
+"""Capability search projection over ``mission_control_search`` (common component).
+
+The projection is installation scoped: every statement runs inside an explicit
+transaction after ``apply_catalog_scope``. The installation is taken from the trusted
+constructor ``catalog_scope`` and/or the Mission Control scope string carried by the
+request (``mc/{installation}/{app}/{tenant|catalog}``); a mismatch fails closed and the
+legacy ``'global'`` visibility value only means "every scope of this installation".
+Search results additionally require the source definition to be an admitted (or, when
+requested, retired) ``mission_control.asset_version``; revoked or unadmitted documents are
+never returned. Embeddings are never invented here.
+"""
+
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
-from typing import Any, Protocol
+from collections.abc import AsyncIterator, Mapping, Sequence
+from contextlib import asynccontextmanager
+from typing import Any, Protocol, cast
+from uuid import UUID
 
+import asyncpg
+
+from mission_control.adapters.postgres.control_plane.catalog_assets import (
+    PUBLISHED_DEFINITION_CONTRACT,
+)
+from mission_control.adapters.postgres.scope import apply_catalog_scope, parse_catalog_scope
 from mission_control.application.capabilities.capability_search_repository import (
     CapabilitySearchDocument,
     RankedCapabilityDocument,
 )
+from mission_control.contracts.identities import parse_request_scope
 from mission_control.domain.authoring.contracts import DefinitionKind, ExactDefinitionRef
 from mission_control.domain.coordinator.contracts import CapabilitySearchRequest
 
@@ -25,6 +46,8 @@ class PostgresConnection(Protocol):
 
     def transaction(self) -> Any: ...
 
+    def is_in_transaction(self) -> bool: ...
+
 
 class PostgresAcquireContext(Protocol):
     async def __aenter__(self) -> PostgresConnection: ...
@@ -41,11 +64,48 @@ class PostgresPool(Protocol):
     def acquire(self) -> PostgresAcquireContext: ...
 
 
+def installation_of(scope: str) -> tuple[UUID, str] | None:
+    """Installation identity named by a Mission Control scope string, if any."""
+    if not scope.startswith("mc/"):
+        return None
+    if scope.endswith("/catalog"):
+        return parse_catalog_scope(scope)
+    parsed = parse_request_scope(scope)
+    return parsed.installation_id, parsed.application_id
+
+
+class InstallationSearchScope:
+    """Resolve and bind the installation partition for projection statements."""
+
+    def __init__(self, pool: PostgresPool, catalog_scope: str | None) -> None:
+        self._pool = pool
+        self._catalog = parse_catalog_scope(catalog_scope) if catalog_scope else None
+
+    def installation(self, scope: str) -> tuple[UUID, str]:
+        named = installation_of(scope)
+        if self._catalog is not None and named is not None and named != self._catalog:
+            raise ValueError("capability search scope crosses the configured installation")
+        resolved = self._catalog or named
+        if resolved is None:
+            raise ValueError("capability search requires an installation-bound scope")
+        return resolved
+
+    @asynccontextmanager
+    async def session(self, scope: str) -> AsyncIterator[tuple[PostgresConnection, UUID, str]]:
+        installation_id, application_id = self.installation(scope)
+        async with self._pool.acquire() as connection, connection.transaction():
+            await apply_catalog_scope(
+                cast(asyncpg.Connection, connection), installation_id, application_id
+            )
+            yield connection, installation_id, application_id
+
+
 class PostgresCatalogSearchRepository:
     """Supabase/PostgreSQL projection adapter; the injected pool owns connectivity."""
 
-    def __init__(self, pool: PostgresPool) -> None:
+    def __init__(self, pool: PostgresPool, *, catalog_scope: str | None = None) -> None:
         self._pool = pool
+        self._scope = InstallationSearchScope(pool, catalog_scope)
 
     async def get(
         self,
@@ -56,18 +116,21 @@ class PostgresCatalogSearchRepository:
         *,
         projection_generation: str | None = None,
     ) -> CapabilitySearchDocument | None:
-        async with self._pool.acquire() as connection:
+        async with self._scope.session(tenant_scope) as (connection, installation, app):
             if projection_generation is None:
                 row = await connection.fetchrow(
                     """
                     SELECT documents.*
-                    FROM capability_search.documents AS documents
-                    JOIN capability_search.active_generations AS active
-                      ON active.tenant_scope = documents.tenant_scope
+                    FROM mission_control_search.search_document AS documents
+                    JOIN mission_control_search.active_generation AS active
+                      ON active.installation_id = documents.installation_id
+                     AND active.application_id = documents.application_id
+                     AND active.tenant_scope = documents.tenant_scope
                      AND active.asset_kind = documents.asset_kind
-                     AND active.projection_generation =
-                         documents.projection_generation
-                    WHERE documents.tenant_scope = $1
+                     AND active.projection_generation = documents.projection_generation
+                    WHERE documents.installation_id = $5
+                      AND documents.application_id = $6
+                      AND documents.tenant_scope = $1
                       AND documents.asset_kind = $2
                       AND documents.logical_id = $3
                       AND documents.revision = $4
@@ -76,13 +139,17 @@ class PostgresCatalogSearchRepository:
                     kind.value,
                     logical_id,
                     revision,
+                    installation,
+                    app,
                 )
             else:
                 row = await connection.fetchrow(
                     """
                     SELECT *
-                    FROM capability_search.documents
-                    WHERE tenant_scope = $1
+                    FROM mission_control_search.search_document
+                    WHERE installation_id = $6
+                      AND application_id = $7
+                      AND tenant_scope = $1
                       AND asset_kind = $2
                       AND logical_id = $3
                       AND revision = $4
@@ -93,17 +160,21 @@ class PostgresCatalogSearchRepository:
                     logical_id,
                     revision,
                     projection_generation,
+                    installation,
+                    app,
                 )
         return _document(row) if row is not None else None
 
     async def upsert(self, document: CapabilitySearchDocument) -> bool:
         parent = document.parent_ref
-        async with self._pool.acquire() as connection:
+        async with self._scope.session(document.tenant_scope) as (connection, installation, app):
             generation = await connection.fetchrow(
                 """
                 SELECT state
-                FROM capability_search.generations
-                WHERE tenant_scope = $1
+                FROM mission_control_search.projection_generation
+                WHERE installation_id = $6
+                  AND application_id = $7
+                  AND tenant_scope = $1
                   AND projection_generation = $2
                   AND state IN ('building', 'active')
                   AND embedding_model_id = $3
@@ -116,12 +187,14 @@ class PostgresCatalogSearchRepository:
                 document.embedding_model_id,
                 document.embedding_dimensions,
                 document.search_document_format_version,
+                installation,
+                app,
             )
             if generation is None:
                 raise RuntimeError("capability projection generation is missing or not writable")
             row = await connection.fetchrow(
                 """
-                INSERT INTO capability_search.documents (
+                INSERT INTO mission_control_search.search_document AS documents (
                     search_document_id,
                     tenant_scope,
                     asset_kind,
@@ -153,15 +226,19 @@ class PostgresCatalogSearchRepository:
                     schema_digest_verified,
                     source_published_at,
                     indexed_at,
-                    projection_generation
+                    projection_generation,
+                    installation_id,
+                    application_id
                 )
                 VALUES (
                     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
                     $12::extensions.vector, $13, $14, $15, $16, $17, $18,
                     $19, $20, $21, $22, $23, $24, $25::jsonb, $26, $27,
-                    $28, $29, $30, $31, $32
+                    $28, $29, $30, $31, $32, $33, $34
                 )
                 ON CONFLICT (
+                    installation_id,
+                    application_id,
                     tenant_scope,
                     asset_kind,
                     logical_id,
@@ -196,9 +273,32 @@ class PostgresCatalogSearchRepository:
                     compatibility_summary = EXCLUDED.compatibility_summary,
                     schema_digest_verified = EXCLUDED.schema_digest_verified,
                     source_published_at = EXCLUDED.source_published_at,
-                    indexed_at = EXCLUDED.indexed_at,
-                    projection_generation = EXCLUDED.projection_generation
-                WHERE documents IS DISTINCT FROM EXCLUDED
+                    indexed_at = EXCLUDED.indexed_at
+                WHERE (documents.search_document_id, documents.source_digest, documents.status,
+                       documents.title, documents.description, documents.search_text,
+                       documents.search_text_digest, documents.embedding::text,
+                       documents.embedding_model_id, documents.embedding_dimensions,
+                       documents.search_document_format_version, documents.parent_kind,
+                       documents.parent_logical_id, documents.parent_revision,
+                       documents.parent_source_digest, documents.mongodb_collection,
+                       documents.mongodb_document_id, documents.tags, documents.domains,
+                       documents.operation_classes, documents.workflow_type_refs,
+                       documents.capability_requirements, documents.compatible_runtimes,
+                       documents.compatibility_summary, documents.schema_digest_verified,
+                       documents.source_published_at, documents.indexed_at)
+                      IS DISTINCT FROM
+                      (EXCLUDED.search_document_id, EXCLUDED.source_digest, EXCLUDED.status,
+                       EXCLUDED.title, EXCLUDED.description, EXCLUDED.search_text,
+                       EXCLUDED.search_text_digest, EXCLUDED.embedding::text,
+                       EXCLUDED.embedding_model_id, EXCLUDED.embedding_dimensions,
+                       EXCLUDED.search_document_format_version, EXCLUDED.parent_kind,
+                       EXCLUDED.parent_logical_id, EXCLUDED.parent_revision,
+                       EXCLUDED.parent_source_digest, EXCLUDED.mongodb_collection,
+                       EXCLUDED.mongodb_document_id, EXCLUDED.tags, EXCLUDED.domains,
+                       EXCLUDED.operation_classes, EXCLUDED.workflow_type_refs,
+                       EXCLUDED.capability_requirements, EXCLUDED.compatible_runtimes,
+                       EXCLUDED.compatibility_summary, EXCLUDED.schema_digest_verified,
+                       EXCLUDED.source_published_at, EXCLUDED.indexed_at)
                 RETURNING search_document_id
                 """,
                 document.search_document_id,
@@ -245,6 +345,8 @@ class PostgresCatalogSearchRepository:
                 document.source_published_at,
                 document.indexed_at,
                 document.projection_generation,
+                installation,
+                app,
             )
         return row is not None
 
@@ -255,12 +357,14 @@ class PostgresCatalogSearchRepository:
         *,
         kinds: frozenset[DefinitionKind] = frozenset(),
     ) -> tuple[CapabilitySearchDocument, ...]:
-        async with self._pool.acquire() as connection:
+        async with self._scope.session(tenant_scope) as (connection, installation, app):
             rows = await connection.fetch(
                 """
                 SELECT *
-                FROM capability_search.documents
-                WHERE tenant_scope = $1
+                FROM mission_control_search.search_document
+                WHERE installation_id = $4
+                  AND application_id = $5
+                  AND tenant_scope = $1
                   AND projection_generation = $2
                   AND (
                       cardinality($3::text[]) = 0
@@ -271,6 +375,8 @@ class PostgresCatalogSearchRepository:
                 tenant_scope,
                 projection_generation,
                 [kind.value for kind in sorted(kinds, key=lambda item: item.value)],
+                installation,
+                app,
             )
         return tuple(_document(row) for row in rows)
 
@@ -280,14 +386,16 @@ class PostgresCatalogSearchRepository:
         *,
         limit: int,
     ) -> tuple[RankedCapabilityDocument, ...]:
+        installation = self._scope.installation(request.tenant_scope)
         query, args = _filtered_query(
             request,
             score_sql=("ts_rank_cd(fts, websearch_to_tsquery('english', $1), 32)"),
             match_sql="fts @@ websearch_to_tsquery('english', $1)",
             order_sql="branch_score DESC, logical_id, revision",
             tail_args=(request.query, limit),
+            installation=installation,
         )
-        async with self._pool.acquire() as connection:
+        async with self._scope.session(request.tenant_scope) as (connection, _, _app):
             rows = await connection.fetch(query, *args)
         return tuple(
             RankedCapabilityDocument(
@@ -304,14 +412,18 @@ class PostgresCatalogSearchRepository:
         *,
         limit: int,
     ) -> tuple[RankedCapabilityDocument, ...]:
+        installation = self._scope.installation(request.tenant_scope)
         query, args = _filtered_query(
             request,
-            score_sql=("1 - (embedding <=> $1::extensions.vector)"),
+            score_sql=("1 - (embedding OPERATOR(extensions.<=>) $1::extensions.vector)"),
             match_sql="TRUE",
-            order_sql="embedding <=> $1::extensions.vector, logical_id, revision",
+            order_sql=(
+                "embedding OPERATOR(extensions.<=>) $1::extensions.vector, logical_id, revision"
+            ),
             tail_args=(_vector_literal(query_embedding), limit),
+            installation=installation,
         )
-        async with self._pool.acquire() as connection:
+        async with self._scope.session(request.tenant_scope) as (connection, _, _app):
             rows = await connection.fetch(query, *args)
         return tuple(
             RankedCapabilityDocument(
@@ -329,8 +441,10 @@ def _filtered_query(
     match_sql: str,
     order_sql: str,
     tail_args: tuple[object, int],
+    installation: tuple[UUID, str] | None = None,
 ) -> tuple[str, tuple[object, ...]]:
-    # $1 is branch-specific input and $9 is the branch limit.
+    # $1 is branch-specific input, $9 the branch limit, $10/$11 the installation and
+    # $12 the published-definition asset contract used by the admission filter.
     workflow_ref = (
         json.dumps(request.workflow_type_ref.model_dump(mode="json"))
         if request.workflow_type_ref is not None
@@ -338,12 +452,16 @@ def _filtered_query(
     )
     query = f"""
         SELECT documents.*, {score_sql} AS branch_score
-        FROM capability_search.documents AS documents
-        JOIN capability_search.active_generations AS active
-          ON active.tenant_scope = documents.tenant_scope
+        FROM mission_control_search.search_document AS documents
+        JOIN mission_control_search.active_generation AS active
+          ON active.installation_id = documents.installation_id
+         AND active.application_id = documents.application_id
+         AND active.tenant_scope = documents.tenant_scope
          AND active.asset_kind = documents.asset_kind
          AND active.projection_generation = documents.projection_generation
         WHERE ({match_sql})
+          AND documents.installation_id = $10
+          AND documents.application_id = $11
           AND documents.tenant_scope IN ('global', $2)
           AND (
               cardinality($3::text[]) = 0
@@ -366,9 +484,25 @@ def _filtered_query(
               $8::jsonb IS NULL
               OR documents.workflow_type_refs @> jsonb_build_array($8::jsonb)
           )
+          AND EXISTS (
+              SELECT 1
+              FROM mission_control.asset_version AS asset
+              WHERE asset.installation_id = documents.installation_id
+                AND asset.application_id = documents.application_id
+                AND asset.asset_id =
+                    'definition:' || documents.asset_kind || ':' || documents.logical_id
+                AND asset.version = documents.revision::text
+                AND asset.contract = $12
+                AND asset.manifest->'ref'->>'digest' = documents.source_digest
+                AND (
+                    asset.status = 'admitted'
+                    OR (asset.status = 'retired' AND 'retired' = ANY($4::text[]))
+                )
+          )
         ORDER BY {order_sql}
         LIMIT $9
     """
+    installation_id, application_id = installation or (None, None)
     return query, (
         tail_args[0],
         request.tenant_scope,
@@ -379,6 +513,9 @@ def _filtered_query(
         request.operation_class,
         workflow_ref,
         tail_args[1],
+        installation_id,
+        application_id,
+        PUBLISHED_DEFINITION_CONTRACT,
     )
 
 

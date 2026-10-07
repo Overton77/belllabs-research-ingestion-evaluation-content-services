@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mission-control-seed/v1",
+  "title": "Mission Control seed bundle",
+  "description": "Enforced by mission_control_db_contract.seeds.validate_bundle (the authoritative validator).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "seed_key", "seed_version", "component_compatibility", "depends_on", "actor_ref", "records"],
+  "properties": {
+    "format": {"const": "mission-control-seed/v1"},
+    "seed_key": {"type": "string", "pattern": "^mc(\\.[a-z0-9-]+)+$"},
+    "seed_version": {"type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"},
+    "component_compatibility": {"type": "string", "pattern": "^((>=|<=|>|<|==)[0-9]+\\.[0-9]+\\.[0-9]+)( (>=|<=|>|<|==)[0-9]+\\.[0-9]+\\.[0-9]+)*$"},
+    "actor_ref": {"type": "string", "minLength": 1},
+    "description": {"type": "string"},
+    "depends_on": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["seed_key", "seed_version"],
+        "properties": {
+          "seed_key": {"type": "string", "pattern": "^mc(\\.[a-z0-9-]+)+$"},
+          "seed_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"}
+        }
+      }
+    },
+    "records": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "logical_key", "fields"],
+        "properties": {
+          "kind": {"enum": ["tenant", "actor_binding", "actor_grant", "asset_version", "asset_decision", "capability_grant"]},
+          "logical_key": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._:/@-]{0,199}$"},
+          "fields": {"type": "object"}
+        },
+        "allOf": [
+          {"if": {"properties": {"kind": {"const": "tenant"}}}, "then": {"properties": {"fields": {"$ref": "#/$defs/tenant"}}}},
+          {"if": {"properties": {"kind": {"const": "actor_binding"}}}, "then": {"properties": {"fields": {"$ref": "#/$defs/actor_binding"}}}},
+          {"if": {"properties": {"kind": {"const": "actor_grant"}}}, "then": {"properties": {"fields": {"$ref": "#/$defs/actor_grant"}}}},
+          {"if": {"properties": {"kind": {"const": "asset_version"}}}, "then": {"properties": {"fields": {"$ref": "#/$defs/asset_version"}}}},
+          {"if": {"properties": {"kind": {"const": "asset_decision"}}}, "then": {"properties": {"fields": {"$ref": "#/$defs/asset_decision"}}}},
+          {"if": {"properties": {"kind": {"const": "capability_grant"}}}, "then": {"properties": {"fields": {"$ref": "#/$defs/capability_grant"}}}}
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "text": {"type": "string", "minLength": 1},
+    "ts": {"type": "string", "format": "date-time"},
+    "texts": {"type": "array", "items": {"type": "string"}},
+    "tenant": {
+      "type": "object", "additionalProperties": false,
+      "required": ["external_tenant_ref", "state"],
+      "properties": {
+        "external_tenant_ref": {"$ref": "#/$defs/text"},
+        "state": {"enum": ["active", "suspended", "retired"]},
+        "qualification_fixture": {"type": "boolean"}
+      }
+    },
+    "actor_binding": {
+      "type": "object", "additionalProperties": false,
+      "required": ["tenant", "issuer", "subject", "actor_ref", "actor_kind", "state"],
+      "properties": {
+        "tenant": {"$ref": "#/$defs/text"}, "issuer": {"$ref": "#/$defs/text"},
+        "subject": {"$ref": "#/$defs/text"}, "actor_ref": {"$ref": "#/$defs/text"},
+        "actor_kind": {"enum": ["human", "service", "agent"]},
+        "state": {"enum": ["active", "revoked"]}
+      }
+    },
+    "actor_grant": {
+      "type": "object", "additionalProperties": false,
+      "required": ["tenant", "actor_binding", "scope", "resource_selector", "policy_ref", "valid_from"],
+      "properties": {
+        "tenant": {"$ref": "#/$defs/text"}, "actor_binding": {"$ref": "#/$defs/text"},
+        "scope": {"$ref": "#/$defs/text"}, "resource_selector": {"$ref": "#/$defs/text"},
+        "policy_ref": {"$ref": "#/$defs/text"}, "valid_from": {"$ref": "#/$defs/ts"},
+        "valid_until": {"$ref": "#/$defs/ts"}, "revocation_reason": {"$ref": "#/$defs/text"}
+      }
+    },
+    "asset_version": {
+      "type": "object", "additionalProperties": false,
+      "required": ["asset_id", "version", "kind", "contract", "manifest_ref", "manifest_digest", "manifest", "required_compatibility", "status"],
+      "properties": {
+        "asset_id": {"$ref": "#/$defs/text"}, "version": {"$ref": "#/$defs/text"},
+        "kind": {"$ref": "#/$defs/text"}, "contract": {"$ref": "#/$defs/text"},
+        "manifest_ref": {"$ref": "#/$defs/text"},
+        "manifest_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "manifest": {"type": "object"}, "required_compatibility": {"$ref": "#/$defs/texts"},
+        "status": {"enum": ["proposed", "admitted"]}
+      }
+    },
+    "asset_decision": {
+      "type": "object", "additionalProperties": false,
+      "required": ["asset_version", "decision", "disposition", "actor_ref", "evidence_refs", "policy_ref", "decided_at"],
+      "properties": {
+        "asset_version": {"$ref": "#/$defs/text"},
+        "decision": {"enum": ["admit", "revoke", "retire", "reject"]},
+        "disposition": {"$ref": "#/$defs/text"}, "actor_ref": {"$ref": "#/$defs/text"},
+        "evidence_refs": {"$ref": "#/$defs/texts"}, "policy_ref": {"$ref": "#/$defs/text"},
+        "decided_at": {"$ref": "#/$defs/ts"}
+      }
+    },
+    "capability_grant": {
+      "type": "object", "additionalProperties": false,
+      "required": ["tenant", "asset_version", "actor_selector", "resource_selector", "allowed_invocation_classes", "allowed_side_effect_classes", "ceilings", "valid_from"],
+      "properties": {
+        "tenant": {"$ref": "#/$defs/text"}, "asset_version": {"$ref": "#/$defs/text"},
+        "actor_selector": {"$ref": "#/$defs/text"}, "resource_selector": {"$ref": "#/$defs/text"},
+        "allowed_invocation_classes": {"$ref": "#/$defs/texts"},
+        "allowed_side_effect_classes": {"$ref": "#/$defs/texts"},
+        "ceilings": {"type": "object"}, "valid_from": {"$ref": "#/$defs/ts"},
+        "valid_until": {"$ref": "#/$defs/ts"}, "revoked": {"type": "boolean"}
+      }
+    }
+  }
+}

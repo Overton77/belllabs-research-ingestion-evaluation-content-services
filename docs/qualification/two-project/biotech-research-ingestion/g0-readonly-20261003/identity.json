@@ -1,0 +1,56 @@
+{
+  "evidence_kind": "g0_readonly_inventory",
+  "observed_at": "2026-10-03",
+  "method": "Supabase management connector: list_projects plus read-only catalog SELECTs (pg_namespace, pg_class, pg_roles, pg_extension, pg_stat_user_tables, storage.buckets). No DDL, DML, role or storage change.",
+  "identity_status": "management_metadata_observed_route_unverified",
+  "limits": [
+    "A project name is not identity proof; the operator must confirm the mapping, environment and approved connection-secret references.",
+    "No direct database route (host/port/login) was exercised; the connector's own route is not the installer's route.",
+    "Row counts come from pg_stat_user_tables (estimates), not a consistent snapshot; they are inventory, not protected-data evidence."
+  ],
+  "expected_label": "biotech-research-ingestion",
+  "expected_application_id": "biotech",
+  "management_metadata": {
+    "project_ref": "bxnetwiimwhtlrjlbtab",
+    "name": "biotech-research-ingestion",
+    "organization_slug": "vercel_icfg_SIEqFciu9zf7npelC0RqFUee",
+    "region": "us-east-1",
+    "status": "ACTIVE_HEALTHY",
+    "database_host": "db.bxnetwiimwhtlrjlbtab.supabase.co",
+    "database_version": "17.6.1.141",
+    "postgres_engine": "17",
+    "created_at": "2026-07-15T01:15:50.88149Z"
+  },
+  "catalog_observation": {
+    "server_version_num": 170006,
+    "schemas": {
+      "auth": {"owner": "supabase_admin", "tables": 27},
+      "capability_search": {"owner": "postgres", "tables": 4},
+      "extensions": {"owner": "postgres", "tables": 0},
+      "graphql": {"owner": "supabase_admin", "tables": 0},
+      "graphql_public": {"owner": "supabase_admin", "tables": 0},
+      "public": {"owner": "pg_database_owner", "tables": 0},
+      "realtime": {"owner": "supabase_admin", "tables": 3},
+      "storage": {"owner": "supabase_admin", "tables": 8},
+      "vault": {"owner": "supabase_admin", "tables": 1}
+    },
+    "legacy_capability_search_live_rows_estimate": {
+      "schema_migrations": 2,
+      "documents": 542,
+      "generations": 10,
+      "active_generations": 13
+    },
+    "extensions": {
+      "pg_stat_statements": "1.11 (extensions)",
+      "pgcrypto": "1.3 (extensions)",
+      "plpgsql": "1.0 (pg_catalog)",
+      "supabase_vault": "0.3.1 (vault)",
+      "uuid-ossp": "1.1 (extensions)",
+      "vector": "0.8.2 (extensions)"
+    },
+    "roles_named_mission_or_belllabs": [],
+    "mission_control_schemas_present": false,
+    "storage_buckets": []
+  },
+  "collision_check": "No mission_control, mission_control_search or mission_control_runtime schema and no mission_*/belllabs_* role exist; the legacy capability_search schema is populated and must remain untouched (not dropped, not migrated)."
+}

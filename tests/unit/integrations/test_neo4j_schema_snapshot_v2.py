@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Self
 
 import pytest
+from neo4j import READ_ACCESS
+
 from biotech_mission_adapters.adapters.infrastructure.neo4j_schema_deployment import (
     Neo4jLiveSchemaDeploymentReader,
 )
 from biotech_mission_adapters.domain.schema_grounding.authority import (
     live_neo4j_schema_snapshot_digest,
 )
-from neo4j import READ_ACCESS
 
 
 class _Cursor:
@@ -25,7 +26,7 @@ class _Session:
         self._rows_by_query_fragment = rows_by_query_fragment
         self.queries: list[str] = []
 
-    async def __aenter__(self) -> _Session:
+    async def __aenter__(self) -> Self:
         return self
 
     async def __aexit__(self, *_args: object) -> None:

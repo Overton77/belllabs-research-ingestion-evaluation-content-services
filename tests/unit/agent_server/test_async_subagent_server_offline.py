@@ -56,7 +56,7 @@ class ScriptedChildModel(BaseChatModel):
 
     def _generate(
         self, messages: list[BaseMessage], stop: Any = None, run_manager: Any = None, **kwargs: Any
-    ) -> ChatResult:  # noqa: E501
+    ) -> ChatResult:
         del messages, stop, run_manager, kwargs
         self.calls += 1
         return ChatResult(

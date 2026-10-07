@@ -451,19 +451,19 @@ def test_root_receipt_cache_keeps_the_status_and_never_caches_a_gap() -> None:
     from mission_control.domain.programs.contracts import WorkflowMessage
 
     root = BellLabsRunWorkflow()
-    gap = root._accept_message(WorkflowMessage("m2", 2, "control", "ref:2"))  # noqa: SLF001
+    gap = root._accept_message(WorkflowMessage("m2", 2, "control", "ref:2"))
     assert gap.status == "gap"
-    first = root._accept_message(WorkflowMessage("m1", 1, "control", "ref:1"))  # noqa: SLF001
+    first = root._accept_message(WorkflowMessage("m1", 1, "control", "ref:1"))
     assert first.status == "accepted"
-    retried = root._accept_message(WorkflowMessage("m2", 2, "control", "ref:2"))  # noqa: SLF001
+    retried = root._accept_message(WorkflowMessage("m2", 2, "control", "ref:2"))
     assert retried.status == "accepted", "the gap was not cached"
-    duplicate = root._accept_message(WorkflowMessage("m2", 2, "control", "ref:2"))  # noqa: SLF001
+    duplicate = root._accept_message(WorkflowMessage("m2", 2, "control", "ref:2"))
     assert (duplicate.status, duplicate.cached_status) == ("duplicate", "accepted")
-    stale = root._accept_message(  # noqa: SLF001
+    stale = root._accept_message(
         WorkflowMessage("m3", 3, "control", "ref:3", execution_generation=2)
     )
     assert stale.status == "stale_generation"
-    again = root._accept_message(  # noqa: SLF001
+    again = root._accept_message(
         WorkflowMessage("m3", 3, "control", "ref:3", execution_generation=2)
     )
     assert (again.status, again.cached_status) == ("duplicate", "stale_generation")

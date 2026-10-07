@@ -2,7 +2,10 @@
 
 A real Deep Agent (deterministic fake chat model) runs through `OperationExecutionService`,
 the PostgreSQL operation journal and run control, and the PostgreSQL checkpoint lineage
-repository. Opt-in through `TEST_APPLICATION_POSTGRES_DSN` (disposable stack only).
+repository, on a fresh database with the common `mission_control` component installed. The
+repositories run as the restricted `mission_control_runtime` login under a canonical scope;
+the saver uses the provisioned `mission_control_runtime` checkpoint schema through the
+checkpointer-only login (never `setup()`, never a business identity).
 """
 
 from __future__ import annotations
@@ -11,7 +14,6 @@ import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import quote
 from uuid import uuid4
 
 import asyncpg
@@ -20,6 +22,22 @@ from deepagents import create_deep_agent
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.store.memory import InMemoryStore
+from tests.acceptance.control_plane.test_wp_cp_040 import SessionProbeModel, exact_fixture
+from tests.fixtures.checkpoint_lineage import bind_unit, goal_unit, stage_unit
+from tests.fixtures.mission_control_common_db import (
+    CommonDatabase,
+    canonical_scope,
+    provision_runtime,
+)
+from tests.integration.postgres.runtime_common import common_db as common_db
+from tests.unit.operations.test_operation_execution import (
+    MCP_DIGEST,
+    SKILL_DIGEST,
+    operation_request,
+)
+from tests.unit.run_control.test_run_control import actor, command
+from tests.unit.run_control.test_run_control import request as run_request
+from tests.unit.run_control.test_run_control import service as run_control_service
 
 from mission_control.adapters.deep_agents import (
     DeepAgentRuntimeAdapter,
@@ -27,6 +45,7 @@ from mission_control.adapters.deep_agents import (
     ExactDeepAgentMaterializer,
     StateSandboxFactory,
 )
+from mission_control.adapters.deep_agents.persistence import runtime_checkpoint_conninfo
 from mission_control.adapters.operations.conformance import (
     ConformanceAssetVerifier,
     ConformanceBudgetAuthority,
@@ -77,23 +96,16 @@ from mission_control.domain.policies.contracts import (
     ReserveBudgetAction,
     StartAction,
 )
-from tests.acceptance.control_plane.test_wp_cp_040 import SessionProbeModel, exact_fixture
-from tests.fixtures.checkpoint_lineage import bind_unit, goal_unit, stage_unit
-from tests.integration.postgres.test_checkpoint_lineage_postgres import (
-    require_disposable_postgres,
-    reset_application_schema,
-)
-from tests.unit.operations.test_operation_execution import (
-    MCP_DIGEST,
-    SKILL_DIGEST,
-    operation_request,
-)
-from tests.unit.run_control.test_run_control import actor, command
-from tests.unit.run_control.test_run_control import request as run_request
-from tests.unit.run_control.test_run_control import service as run_control_service
 
-SAVER_SCHEMA = "rrm003_lineage_saver"
+pytestmark = pytest.mark.common_db
+
+SAVER_SCHEMA = "mission_control_runtime"
 PROMPT = "Return BINDING-OK"
+SCOPE = canonical_scope("tenant-1")
+
+
+def scoped_command(run_id: str, version: int, command_id: str, action: Any) -> Any:
+    return command(run_id, version, command_id, action).model_copy(update={"request_scope": SCOPE})
 
 
 class AcceptingAuthority:
@@ -110,6 +122,7 @@ class AcceptingAuthority:
 @dataclass
 class Stack:
     pool: asyncpg.Pool
+    owner: asyncpg.Pool
     saver: AsyncPostgresSaver
     run_control: RunControlService
     run_id: str
@@ -123,26 +136,24 @@ class Stack:
 
 
 @pytest.fixture
-async def stack(test_application_postgres_dsn: str) -> AsyncIterator[Stack]:
-    require_disposable_postgres(test_application_postgres_dsn)
-    pool = await asyncpg.create_pool(dsn=test_application_postgres_dsn, min_size=1, max_size=4)
+async def stack(common_db: CommonDatabase) -> AsyncIterator[Stack]:
+    assert common_db.scope("tenant-1") == SCOPE
+    checkpoint_dsn = await provision_runtime(common_db)
+    pool = await common_db.pool(max_size=4)
+    owner = await common_db.owner_pool()
     try:
-        await reset_application_schema(pool)
-        async with pool.acquire() as connection:
-            await connection.execute(f"DROP SCHEMA IF EXISTS {SAVER_SCHEMA} CASCADE")
-            await connection.execute(f"CREATE SCHEMA {SAVER_SCHEMA}")
         run_control, _ = run_control_service(PostgresRunControlRepository(pool))  # type: ignore[arg-type]
-        admitted = await run_control.admit(run_request(request_id=f"rrm-003-{uuid4()}"))
+        admitted = await run_control.admit(
+            run_request(request_scope=SCOPE, request_id=f"rrm-003-{uuid4()}")
+        )
         assert admitted.run_id is not None
         started = await run_control.execute(
-            command(admitted.run_id, 1, "rrm-003-start", StartAction())
+            scoped_command(admitted.run_id, 1, "rrm-003-start", StartAction())
         )
         assert started.status == CommandStatus.ACCEPTED
-        saver_dsn = f"{test_application_postgres_dsn}?options=" + quote(
-            f"-c search_path={SAVER_SCHEMA}"
-        )
+        saver_dsn = runtime_checkpoint_conninfo(checkpoint_dsn, SAVER_SCHEMA)
         async with AsyncPostgresSaver.from_conn_string(saver_dsn) as saver:
-            await saver.setup()
+            # The runtime schema is provisioned by the descriptor; never set up at runtime.
             binding, _profile, bundle = exact_fixture()
             drifted_binding, _drifted_profile, _drifted_bundle = exact_fixture(
                 with_child_slices=True
@@ -187,6 +198,7 @@ async def stack(test_application_postgres_dsn: str) -> AsyncIterator[Stack]:
             )
             yield Stack(
                 pool=pool,
+                owner=owner,
                 saver=saver,
                 run_control=run_control,
                 run_id=admitted.run_id,
@@ -200,6 +212,7 @@ async def stack(test_application_postgres_dsn: str) -> AsyncIterator[Stack]:
             )
     finally:
         await pool.close()
+        await owner.close()
 
 
 async def bound_request(
@@ -210,10 +223,10 @@ async def bound_request(
 ) -> OperationExecutionRequest:
     """Reserve a budget slice, then bind one Deep Agent unit at the current run version."""
 
-    run = await stack.run_control.get_run("tenant-1", stack.run_id)
+    run = await stack.run_control.get_run(SCOPE, stack.run_id)
     reservation_id = f"reservation:{unit.unit_key}"
     reserved = await stack.run_control.execute(
-        command(
+        scoped_command(
             stack.run_id,
             run.version,
             f"reserve:{unit.unit_key}",
@@ -231,6 +244,7 @@ async def bound_request(
     return OperationExecutionRequest.model_validate(
         {
             **operation_request().model_dump(mode="python"),
+            "request_scope": SCOPE,
             "identity": OperationAttemptIdentity(
                 run_id=stack.run_id,
                 operation_id=unit.semantic_operation_id,
@@ -288,7 +302,7 @@ async def test_operation_before_after_checkpoints_and_idempotent_duplicate_deliv
     """REQ-CP-EXEC-013/014, REQ-CP-DA-016/017 on the real persistent saver and app DB."""
 
     unit = stage_unit(
-        request_scope="tenant-1",
+        request_scope=SCOPE,
         run_id=stack.run_id,
         operation_id="execution-epoch:1:stage:draft:mapped:none:workflow-cycle:0:"
         "stage-cycle:0:slot:default",
@@ -299,14 +313,14 @@ async def test_operation_before_after_checkpoints_and_idempotent_duplicate_deliv
 
     # Before: no root checkpoint and no namespace head.
     assert await stack.saver.aget_tuple(root(namespace)) is None
-    assert await stack.lineage.get_namespace_head("tenant-1", namespace) is None
+    assert await stack.lineage.get_namespace_head(SCOPE, namespace) is None
 
     result = await stack.service.execute(request, delivery(2, unit))
 
     # After: the captured result checkpoint is the namespace head, linked to the manifest.
-    transition = await stack.lineage.get_transition("tenant-1", unit.unit_key, 1)
+    transition = await stack.lineage.get_transition(SCOPE, unit.unit_key, 1)
     assert transition is not None
-    head = await stack.lineage.get_namespace_head("tenant-1", namespace)
+    head = await stack.lineage.get_namespace_head(SCOPE, namespace)
     latest = await stack.saver.aget_tuple(root(namespace))
     assert latest is not None
     assert head == transition.result_key
@@ -328,9 +342,9 @@ async def test_operation_before_after_checkpoints_and_idempotent_duplicate_deliv
     }
 
     binding = bind_operation_execution_request(request)
-    journal_settlement = await stack.journal.get_settlement("tenant-1", _effect_claim_id(binding))
+    journal_settlement = await stack.journal.get_settlement(SCOPE, _effect_claim_id(binding))
     manifest = await stack.coordinator.get_settlement(binding)
-    claim = await stack.journal.get_claim("tenant-1", _effect_claim_id(binding))
+    claim = await stack.journal.get_claim(SCOPE, _effect_claim_id(binding))
     assert journal_settlement is not None and manifest is not None and claim is not None
     assert journal_settlement.result_manifest_ref == transition.result_manifest_ref
     assert journal_settlement.result_manifest_digest == transition.result_manifest_digest
@@ -338,18 +352,18 @@ async def test_operation_before_after_checkpoints_and_idempotent_duplicate_deliv
     assert manifest.checkpoint_transition_id == transition.transition_id
     assert claim.unit_key == unit.unit_key
 
-    async with stack.pool.acquire() as connection:
+    async with stack.owner.acquire() as connection:
         technical_attempts = await connection.fetch(
-            "SELECT technical_attempt FROM belllabs_control.operation_execution_attempts"
-            " WHERE effect_claim_id = $1",
+            "SELECT technical_attempt FROM mission_control.operation_technical_attempt"
+            " WHERE claim_key = $1",
             _effect_claim_id(binding),
         )
         lineage_rows = await connection.fetchval(
             "SELECT string_agg(transition_payload::text, '') FROM"
-            " belllabs_control.runtime_checkpoint_transitions"
+            " mission_control.checkpoint_transition"
         ) + await connection.fetchval(
             "SELECT string_agg(observation_payload::text, '') FROM"
-            " belllabs_control.runtime_activity_attempt_observations"
+            " mission_control.activity_attempt_observation"
         )
     assert [row["technical_attempt"] for row in technical_attempts] == [2]
     assert PROMPT not in lineage_rows and "unused" not in lineage_rows
@@ -363,8 +377,8 @@ async def test_operation_before_after_checkpoints_and_idempotent_duplicate_deliv
     assert duplicate.output_text == "human-count:1"
     assert stack.model.observed_human_counts == calls_before == [1]
     assert len(await root_lineage(stack.saver, namespace)) == len(chain)
-    assert await stack.lineage.list_transitions("tenant-1", namespace) == (transition,)
-    attempts = await stack.lineage.list_attempts("tenant-1", unit.unit_key)
+    assert await stack.lineage.list_transitions(SCOPE, namespace) == (transition,)
+    attempts = await stack.lineage.list_attempts(SCOPE, unit.unit_key)
     assert [(item.attempt.attempt, item.dispatching) for item in attempts] == [(2, True)]
     assert attempts[0].expected_source is None
     print(
@@ -393,7 +407,7 @@ async def test_goal_session_lineage_is_linear_rollover_is_empty_and_schema_gated
 
     def executor(iteration: int, session_generation: int = 1) -> RuntimeUnitIdentity:
         return goal_unit(
-            request_scope="tenant-1",
+            request_scope=SCOPE,
             run_id=stack.run_id,
             operation_id=f"goal-iteration/{iteration}/executor",
             goal_iteration=iteration,
@@ -402,7 +416,7 @@ async def test_goal_session_lineage_is_linear_rollover_is_empty_and_schema_gated
 
     first, second = executor(1), executor(2)
     verifier = goal_unit(
-        request_scope="tenant-1",
+        request_scope=SCOPE,
         run_id=stack.run_id,
         operation_id="goal-iteration/1/verifier",
         goal_iteration=1,
@@ -414,14 +428,14 @@ async def test_goal_session_lineage_is_linear_rollover_is_empty_and_schema_gated
         assert (await stack.service.execute(request, delivery(1, unit))).status == "completed"
 
     session = f"belllabs/goal/{stack.run_id}/epoch/1/session/1/role/executor"
-    one = await stack.lineage.get_transition("tenant-1", first.unit_key, 1)
-    two = await stack.lineage.get_transition("tenant-1", second.unit_key, 1)
-    rolled = await stack.lineage.get_transition("tenant-1", rollover.unit_key, 1)
-    verified = await stack.lineage.get_transition("tenant-1", verifier.unit_key, 1)
+    one = await stack.lineage.get_transition(SCOPE, first.unit_key, 1)
+    two = await stack.lineage.get_transition(SCOPE, second.unit_key, 1)
+    rolled = await stack.lineage.get_transition(SCOPE, rollover.unit_key, 1)
+    verified = await stack.lineage.get_transition(SCOPE, verifier.unit_key, 1)
     assert one is not None and two is not None and rolled is not None and verified is not None
     assert one.namespace == two.namespace == session
     assert two.source_key == one.result_key
-    assert await stack.lineage.list_transitions("tenant-1", session) == (one, two)
+    assert await stack.lineage.list_transitions(SCOPE, session) == (one, two)
     assert rolled.namespace.endswith("/session/2/role/executor")
     assert rolled.source_key is None
     assert verified.namespace.endswith("/session/1/role/verifier")
@@ -442,11 +456,11 @@ async def test_goal_session_lineage_is_linear_rollover_is_empty_and_schema_gated
     # error; the model is never called and the session head does not move.
     parked = await stack.service.execute(drifted_request, delivery(1, drifted))
     assert parked.status == "in_doubt" and parked.failure_code == "schema_mismatch"
-    incident = await stack.lineage.get_incident("tenant-1", drifted.unit_key, 1)
+    incident = await stack.lineage.get_incident(SCOPE, drifted.unit_key, 1)
     assert incident is not None and incident.reason == "schema_mismatch"
     assert parked.reconciliation_incident_id == incident.incident_id
     assert stack.model.observed_human_counts == [1, 2, 1, 1]
-    assert await stack.lineage.get_namespace_head("tenant-1", session) == two.result_key
+    assert await stack.lineage.get_namespace_head(SCOPE, session) == two.result_key
 
 
 @pytest.mark.asyncio

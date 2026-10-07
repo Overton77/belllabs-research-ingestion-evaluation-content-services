@@ -3,12 +3,12 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import timedelta
-from uuid import uuid4
 
 import asyncpg
 import pytest
+import pytest_asyncio
 
-from mission_control.adapters.postgres.connections import apply_application_migrations
+from mission_control.adapters.postgres.scope import apply_scope
 from mission_control.adapters.postgres.workspaces.artifact_metadata_repository import (
     PostgresArtifactMetadataRepository,
 )
@@ -22,31 +22,21 @@ from mission_control.application.artifacts.workspace_materialization import (
 from mission_control.domain.execution.contracts import ArtifactPromotionState
 from mission_control.domain.execution.errors import WorkspaceSlotConflict
 from mission_control.domain.policies.errors import IdempotencyConflict
+from tests.fixtures.mission_control_common_db import CommonDatabase
+from tests.integration.postgres.catalog_common import catalog_db as catalog_db
+from tests.integration.postgres.catalog_common import runtime_pool as runtime_pool
 from tests.integration.postgres.test_artifact_promotion_postgres_integration import (
     admitted_revision,
 )
 from tests.unit.workspaces.test_goal_role_slot_ownership import _goal_request, _rebound
 from tests.unit.workspaces.test_workspace_materialization import RecordingProvisioner
 
+pytestmark = pytest.mark.common_db
 
-@pytest.fixture
-async def scoped_pool(test_application_postgres_dsn: str):  # type: ignore[no-untyped-def]
-    admin = await asyncpg.create_pool(test_application_postgres_dsn, min_size=1, max_size=2)
-    try:
-        await apply_application_migrations(admin)
-    finally:
-        await admin.close()
 
-    async def runtime_role(connection: asyncpg.Connection) -> None:
-        await connection.execute("SET ROLE belllabs_control_runtime")
-
-    pool = await asyncpg.create_pool(
-        test_application_postgres_dsn, min_size=1, max_size=8, setup=runtime_role
-    )
-    try:
-        yield pool
-    finally:
-        await pool.close()
+@pytest_asyncio.fixture
+async def scoped_pool(runtime_pool: asyncpg.Pool) -> asyncpg.Pool:
+    return runtime_pool
 
 
 def materializer(
@@ -59,8 +49,10 @@ def materializer(
     )
 
 
-async def test_workspace_rebind_lineage_conflicts_and_scope(scoped_pool: asyncpg.Pool) -> None:
-    scope = uuid4().hex
+async def test_workspace_rebind_lineage_conflicts_and_scope(
+    catalog_db: CommonDatabase, scoped_pool: asyncpg.Pool
+) -> None:
+    scope = catalog_db.scope("tenant-1")
     repo = PostgresWorkspaceManifestRepository(scoped_pool, request_scope=scope)
     service = materializer(repo)
     workspace = "workspace/one"
@@ -80,21 +72,25 @@ async def test_workspace_rebind_lineage_conflicts_and_scope(scoped_pool: asyncpg
     assert stored is not None
     rebound = stored.model_copy(update={"created_at": stored.created_at + timedelta(minutes=5)})
     assert await repo.append(rebound) == stored
-    other = PostgresWorkspaceManifestRepository(scoped_pool, request_scope=uuid4().hex)
+    other = PostgresWorkspaceManifestRepository(
+        scoped_pool, request_scope=catalog_db.scope("tenant-2")
+    )
     assert await other.get_current(first_request.namespace_id, workspace) is None
     assert (await materializer(other).materialize(first_request)).manifest_revision == 1
     async with scoped_pool.acquire() as connection, connection.transaction():
-        await connection.execute("SELECT set_config('belllabs.request_scope',$1,true)", scope)
+        await apply_scope(connection, scope)
         assert (
-            await connection.fetchval("SELECT count(*) FROM belllabs_control.workspace_manifests")
+            await connection.fetchval("SELECT count(*) FROM mission_control.workspace_manifest")
             == 2
         )
         with pytest.raises(asyncpg.InsufficientPrivilegeError):
-            await connection.execute("DELETE FROM belllabs_control.workspace_manifests")
+            await connection.execute("DELETE FROM mission_control.workspace_manifest")
 
 
-async def test_concurrent_workspace_claims_have_one_owner(scoped_pool: asyncpg.Pool) -> None:
-    repo = PostgresWorkspaceManifestRepository(scoped_pool, request_scope=uuid4().hex)
+async def test_concurrent_workspace_claims_have_one_owner(
+    catalog_db: CommonDatabase, scoped_pool: asyncpg.Pool
+) -> None:
+    repo = PostgresWorkspaceManifestRepository(scoped_pool, request_scope=catalog_db.scope())
     results = await asyncio.gather(
         repo.reserve_writable_slots(_goal_request("first", 1, "executor")),
         repo.reserve_writable_slots(_goal_request("second", 1, "executor")),
@@ -104,8 +100,10 @@ async def test_concurrent_workspace_claims_have_one_owner(scoped_pool: asyncpg.P
     assert sum(isinstance(result, WorkspaceSlotConflict) for result in results) == 1
 
 
-async def test_slot_batch_rolls_back_when_later_slot_conflicts(scoped_pool: asyncpg.Pool) -> None:
-    repo = PostgresWorkspaceManifestRepository(scoped_pool, request_scope=uuid4().hex)
+async def test_slot_batch_rolls_back_when_later_slot_conflicts(
+    catalog_db: CommonDatabase, scoped_pool: asyncpg.Pool
+) -> None:
+    repo = PostgresWorkspaceManifestRepository(scoped_pool, request_scope=catalog_db.scope())
     occupied = _goal_request("occupied", 2, "executor")
     await repo.reserve_writable_slots(occupied)
     first = _goal_request("contender", 1, "executor")
@@ -117,8 +115,10 @@ async def test_slot_batch_rolls_back_when_later_slot_conflicts(scoped_pool: asyn
     await repo.reserve_writable_slots(_goal_request("new-owner", 1, "executor"))
 
 
-async def test_artifact_revision_replay_reconciliation_and_scope(scoped_pool: asyncpg.Pool) -> None:
-    scope = uuid4().hex
+async def test_artifact_revision_replay_reconciliation_and_scope(
+    catalog_db: CommonDatabase, scoped_pool: asyncpg.Pool
+) -> None:
+    scope = catalog_db.scope("tenant-1")
     repo = PostgresArtifactMetadataRepository(scoped_pool, request_scope=scope)
     candidate = admitted_revision("run:workspace-test").model_copy(
         update={
@@ -156,7 +156,9 @@ async def test_artifact_revision_replay_reconciliation_and_scope(scoped_pool: as
     assert await repo.rejected() == (rejected,)
     assert await repo.get_by_intent(candidate.intent_key) == rejected
     assert await repo.get_by_artifact(candidate.artifact_id) == rejected
-    other = PostgresArtifactMetadataRepository(scoped_pool, request_scope=uuid4().hex)
+    other = PostgresArtifactMetadataRepository(
+        scoped_pool, request_scope=catalog_db.scope("tenant-2")
+    )
     assert await other.get_by_artifact(candidate.artifact_id) is None
     assert await other.rejected() == ()
     with pytest.raises(ValueError, match="scope"):
@@ -164,9 +166,9 @@ async def test_artifact_revision_replay_reconciliation_and_scope(scoped_pool: as
 
 
 async def test_workspace_sql_rejects_missing_null_and_mismatched_identity(
-    scoped_pool: asyncpg.Pool,
+    catalog_db: CommonDatabase, scoped_pool: asyncpg.Pool
 ) -> None:
-    scope = uuid4().hex
+    scope = catalog_db.scope("tenant-1")
     valid = {
         "namespace_id": "namespace",
         "workspace_id": "workspace",
@@ -191,27 +193,29 @@ async def test_workspace_sql_rejects_missing_null_and_mismatched_identity(
     async with scoped_pool.acquire() as connection:
         for payload in malformed:
             async with connection.transaction():
-                await connection.execute(
-                    "SELECT set_config('belllabs.request_scope',$1,true)", scope
-                )
+                await apply_scope(connection, scope)
                 with pytest.raises(asyncpg.CheckViolationError):
                     async with connection.transaction():
                         await connection.execute(
-                            """INSERT INTO belllabs_control.workspace_manifests
-                               (request_scope, namespace_id, workspace_id, revision, manifest_id,
-                                manifest_digest, prior_manifest_digest, payload, created_at)
-                               VALUES ($1,'namespace','workspace',1,'manifest',
-                                       $2,NULL,$3::jsonb,now())""",
-                            scope,
+                            """INSERT INTO mission_control.workspace_manifest
+                               (installation_id, application_id, tenant_id,
+                                workspace_manifest_id, namespace_key, workspace_key, revision,
+                                manifest_key, manifest_digest, prior_manifest_digest, payload,
+                                manifest_created_at, created_at, created_by_actor_ref)
+                               SELECT mission_control.ctx_installation_id(),
+                                      mission_control.ctx_application_id(),
+                                      mission_control.ctx_tenant_id(), gen_random_uuid(),
+                                      'namespace','workspace',1,'manifest',$1,NULL,$2::jsonb,
+                                      now(),now(),'test'""",
                             valid["manifest_digest"],
                             json.dumps(payload),
                         )
 
 
 async def test_artifact_sql_rejects_missing_null_and_mistyped_identity(
-    scoped_pool: asyncpg.Pool,
+    catalog_db: CommonDatabase, scoped_pool: asyncpg.Pool
 ) -> None:
-    scope = uuid4().hex
+    scope = catalog_db.scope("tenant-1")
     valid = {
         "request_scope": scope,
         "artifact_id": "artifact",
@@ -229,17 +233,20 @@ async def test_artifact_sql_rejects_missing_null_and_mistyped_identity(
     async with scoped_pool.acquire() as connection:
         for payload in malformed:
             async with connection.transaction():
-                await connection.execute(
-                    "SELECT set_config('belllabs.request_scope',$1,true)", scope
-                )
+                await apply_scope(connection, scope)
                 with pytest.raises(asyncpg.CheckViolationError):
                     async with connection.transaction():
                         await connection.execute(
-                            """INSERT INTO belllabs_control.artifact_metadata_revisions
-                               (request_scope, artifact_id, intent_key, promotion_id, revision,
-                                state, payload, recorded_at)
-                               VALUES ($1,'artifact','intent','promotion',1,'candidate',
-                                       $2::jsonb,now())""",
+                            """INSERT INTO mission_control.artifact_metadata_revision
+                               (installation_id, application_id, tenant_id,
+                                artifact_metadata_revision_id, request_scope, artifact_key,
+                                intent_key, promotion_key, revision, state, payload,
+                                recorded_at, created_at, created_by_actor_ref)
+                               SELECT mission_control.ctx_installation_id(),
+                                      mission_control.ctx_application_id(),
+                                      mission_control.ctx_tenant_id(), gen_random_uuid(), $1,
+                                      'artifact','intent','promotion',1,'candidate',$2::jsonb,
+                                      now(),now(),'test'""",
                             scope,
                             json.dumps(payload),
                         )

@@ -707,7 +707,7 @@ async def test_unverifiable_accepted_descendant_is_rejected_before_run_control()
     still resolves the unit."""
 
     harness = await recovery_harness()
-    request, namespace, leaf_id, _sibling = await _parked_with_two_leaves(harness)
+    request, _namespace, leaf_id, _sibling = await _parked_with_two_leaves(harness)
     unit = request.runtime_unit
     assert unit is not None
     incident = await harness.lineage.get_incident("tenant-1", unit.unit_key, 1)

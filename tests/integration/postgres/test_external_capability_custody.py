@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
 
 import asyncpg
 import pytest
@@ -16,7 +14,6 @@ from mission_control.adapters.postgres.capability.external_candidates import (
 from mission_control.adapters.postgres.capability.projection_events import (
     PostgresProjectionEventRepository,
 )
-from mission_control.adapters.postgres.connections import apply_application_migrations
 from mission_control.adapters.postgres.control_plane.definition_repository import (
     PostgresDefinitionRepository,
 )
@@ -40,30 +37,20 @@ from mission_control.application.capabilities.external_capability_discovery impo
     ExternalDiscoverySource,
 )
 from mission_control.domain.authoring.contracts import DefinitionKind, ExactDefinitionRef
+from tests.integration.postgres.catalog_common import AI_ENGINEER_CATALOG, BIOTECH_CATALOG
+from tests.integration.postgres.catalog_common import catalog_db as catalog_db
+from tests.integration.postgres.catalog_common import runtime_pool as runtime_pool
 
-NOW = datetime(2026, 10, 3, tzinfo=UTC)
-RAW_DIGEST = "sha256:" + "a" * 64
+pytestmark = pytest.mark.common_db
 
 
 @pytest_asyncio.fixture
-async def pool():
-    dsn = os.environ.get("TEST_APPLICATION_POSTGRES_DSN")
-    if not dsn:
-        pytest.fail("Explicit disposable TEST_APPLICATION_POSTGRES_DSN required")
-    owner = await asyncpg.create_pool(dsn, min_size=1, max_size=2)
-    try:
-        await apply_application_migrations(owner)
-    finally:
-        await owner.close()
+async def pool(runtime_pool: asyncpg.Pool) -> asyncpg.Pool:
+    return runtime_pool
 
-    async def role(conn):
-        await conn.execute("SET ROLE belllabs_control_runtime")
 
-    runtime = await asyncpg.create_pool(dsn, min_size=1, max_size=8, setup=role)
-    try:
-        yield runtime
-    finally:
-        await runtime.close()
+NOW = datetime(2026, 10, 3, tzinfo=UTC)
+RAW_DIGEST = "sha256:" + "a" * 64
 
 
 @pytest.fixture
@@ -87,13 +74,11 @@ def batch():
         query="missing capability",
         raw_response_digest=RAW_DIGEST,
     )
-    batch = ExternalDiscoveryBatch(
+    return ExternalDiscoveryBatch(
         source=ExternalDiscoverySource.MCP_REGISTRY,
         candidates=(candidate,),
         evidence=(evidence,),
     )
-
-    return batch
 
 
 class Inspector:
@@ -107,7 +92,7 @@ class Inspector:
 
 @pytest.mark.asyncio
 async def test_discovery_replay_scope_inspection_immutability(pool, batch):
-    scope = uuid4().hex
+    scope = BIOTECH_CATALOG
     candidates = PostgresExternalCandidateRepository(pool, catalog_scope=scope, clock=lambda: NOW)
     results = await asyncio.gather(*(candidates.record(batch) for _ in range(6)))
     assert all(item == results[0] for item in results)
@@ -115,7 +100,7 @@ async def test_discovery_replay_scope_inspection_immutability(pool, batch):
     assert candidate.candidate.raw_response_ref.startswith("mission-control://")
     assert len(await candidates.list_candidate_records(candidate.candidate.candidate_id)) == 1
     assert (await candidates.get_evidence(candidate.evidence_id)).evidence == batch.evidence[0]
-    other = PostgresExternalCandidateRepository(pool, catalog_scope=uuid4().hex)
+    other = PostgresExternalCandidateRepository(pool, catalog_scope=AI_ENGINEER_CATALOG)
     with pytest.raises(ExternalCandidateNotFound):
         await other.get_candidate_record(candidate.candidate_record_id)
     records = PostgresExternalCandidateInspectionRepository(pool, catalog_scope=scope)
@@ -146,7 +131,7 @@ async def test_discovery_replay_scope_inspection_immutability(pool, batch):
 
 @pytest.mark.asyncio
 async def test_projection_claim_reclaim_fencing_poison_scope(pool):
-    scope = uuid4().hex
+    scope = BIOTECH_CATALOG
     catalog = PostgresDefinitionRepository(pool, catalog_scope=scope)
     ref = ExactDefinitionRef(
         kind=DefinitionKind.SKILL, logical_id="skill.test", revision=1, digest=RAW_DIGEST
@@ -164,7 +149,7 @@ async def test_projection_claim_reclaim_fencing_poison_scope(pool):
     )
     assert sum(map(len, claims)) == 1
     initial = next(item[0] for item in claims if item)
-    other = PostgresProjectionEventRepository(pool, catalog_scope=uuid4().hex)
+    other = PostgresProjectionEventRepository(pool, catalog_scope=AI_ENGINEER_CATALOG)
     assert not await other.claim_batch(
         owner="other", now=NOW, lease_duration=timedelta(seconds=1), limit=1
     )
@@ -207,7 +192,7 @@ async def test_alias_listing_is_scoped_and_tracks_current_exact_target(pool):
     from mission_control.domain.authoring.contracts import AliasRef
     from tests.unit.control_plane.test_agentic_asset_definitions import skill_definition
 
-    scope = uuid4().hex
+    scope = BIOTECH_CATALOG
     catalog = PostgresDefinitionRepository(pool, catalog_scope=scope)
     published = await catalog.publish(
         skill_definition(), actor_id="publisher", published_at=NOW, expected_head_revision=0
@@ -216,6 +201,85 @@ async def test_alias_listing_is_scoped_and_tracks_current_exact_target(pool):
     binding = await catalog.move_alias(alias, published.ref, "publisher", NOW)
     assert await catalog.list_alias_bindings() == (binding,)
     assert (
-        await PostgresDefinitionRepository(pool, catalog_scope=uuid4().hex).list_alias_bindings()
+        await PostgresDefinitionRepository(
+            pool, catalog_scope=AI_ENGINEER_CATALOG
+        ).list_alias_bindings()
         == ()
     )
+
+
+@pytest.mark.asyncio
+async def test_discovery_custody_is_not_admission_and_is_immutable(pool, batch):
+    from mission_control.adapters.postgres.scope import apply_catalog_scope_string
+
+    candidates = PostgresExternalCandidateRepository(
+        pool, catalog_scope=BIOTECH_CATALOG, clock=lambda: NOW
+    )
+    await candidates.record(batch)
+    async with pool.acquire() as connection, connection.transaction():
+        await apply_catalog_scope_string(connection, BIOTECH_CATALOG)
+        assert (
+            await connection.fetchval(
+                "SELECT count(*) FROM mission_control.capability_discovery_record"
+            )
+            == 2
+        )
+        # Discovery never admits, installs or grants anything.
+        for table in ("asset_version", "asset_decision", "capability_bundle_admission"):
+            assert await connection.fetchval(f"SELECT count(*) FROM mission_control.{table}") == 0
+    for sql in (
+        "UPDATE mission_control.capability_discovery_record SET record_key='x'",
+        "DELETE FROM mission_control.capability_discovery_record",
+    ):
+        async with pool.acquire() as connection, connection.transaction():
+            await apply_catalog_scope_string(connection, BIOTECH_CATALOG)
+            with pytest.raises(asyncpg.InsufficientPrivilegeError):
+                await connection.execute(sql)
+    with pytest.raises(ValueError):
+        PostgresExternalCandidateRepository(pool, catalog_scope="not-a-catalog-scope")
+
+
+@pytest.mark.asyncio
+async def test_outbox_worker_role_claims_and_poisons_without_catalog_write(catalog_db, pool):
+    from mission_control.adapters.postgres.scope import apply_catalog_scope_string
+
+    catalog = PostgresDefinitionRepository(pool, catalog_scope=BIOTECH_CATALOG)
+    ref = ExactDefinitionRef(
+        kind=DefinitionKind.SKILL, logical_id="skill.worker", revision=1, digest=RAW_DIGEST
+    )
+    async with catalog._transaction(write=True) as conn:
+        await catalog._event(conn, ref, "upsert", NOW)
+    worker_pool = await catalog_db.pool("mission_control_outbox_worker")
+    try:
+        events = PostgresProjectionEventRepository(worker_pool, catalog_scope=BIOTECH_CATALOG)
+        (claimed,) = await events.claim_batch(
+            owner="worker", now=NOW, lease_duration=timedelta(seconds=5), limit=5
+        )
+        failed = await events.fail(
+            claimed,
+            owner="worker",
+            failed_at=NOW + timedelta(seconds=1),
+            failure=ProjectionEventFailure(error_code="INVALID_CATALOG", retryable=False),
+            max_attempts=3,
+            base_backoff=timedelta(seconds=1),
+            max_backoff=timedelta(seconds=10),
+        )
+        assert failed is not None and failed.state.value == "poison"
+        async with worker_pool.acquire() as connection, connection.transaction():
+            await apply_catalog_scope_string(connection, BIOTECH_CATALOG)
+            assert (
+                await connection.fetchval(
+                    "SELECT count(*) FROM mission_control.catalog_projection_alert"
+                )
+                == 1
+            )
+            with pytest.raises(asyncpg.InsufficientPrivilegeError):
+                await connection.execute(
+                    "INSERT INTO mission_control.catalog_record (installation_id, "
+                    "application_id, catalog_record_id, contract, record_key, payload, "
+                    "payload_digest, created_at, created_by_actor_ref) SELECT installation_id, "
+                    "application_id, gen_random_uuid(), contract, 'x', payload, payload_digest, "
+                    "now(), 'x' FROM mission_control.catalog_record LIMIT 1"
+                )
+    finally:
+        await worker_pool.close()

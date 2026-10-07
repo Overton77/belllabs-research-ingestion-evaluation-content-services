@@ -1,18 +1,17 @@
-"""RRM-006 on PostgreSQL: migration 0024, least privilege, RLS, and fork crash recovery.
+"""RRM-006 on mission_control: least privilege, RLS, and fork crash recovery.
 
-Every fork write runs under `SET ROLE belllabs_control_runtime` (no superuser, no
-`BYPASSRLS`); reads are re-checked under `belllabs_operations_readonly`. The saga is driven
-through run-control admission with injected crashes after the admission commit and after the
-materialization commit: each retry reconciles from PostgreSQL and the fork ends with exactly
-one durable receipt, one admitted derived run, and one set of reuse decisions.
-
-Opt-in through `TEST_APPLICATION_POSTGRES_DSN` (disposable stack).
+Every fork write runs as a restricted login of `mission_control_runtime` (no superuser, no
+`BYPASSRLS`); reads are re-checked under `mission_control_readonly`. Sealed snapshots are
+canonical continuation checkpoints, forks canonical recovery requests (kind 'fork') with a
+fork_lineage once accepted. The saga is driven through run-control admission with injected
+crashes after the admission commit and after the materialization commit: each retry
+reconciles from PostgreSQL and the fork ends with exactly one durable receipt, one admitted
+derived run, and one set of reuse decisions.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from typing import Any
 
@@ -29,8 +28,8 @@ from mission_control.adapters.postgres.runtime.run_forks import (
 )
 from mission_control.adapters.postgres.runtime.stage3_kernel_repository import (
     PostgresForkRepository,
-    PostgresStage3RetentionRepository,
 )
+from mission_control.adapters.postgres.scope import apply_scope, scope_values
 from mission_control.application.recovery.run_forks import (
     ForkPatchPolicyRegistry,
     RecordingForkMaterializer,
@@ -38,6 +37,7 @@ from mission_control.application.recovery.run_forks import (
     SemanticForkService,
 )
 from mission_control.application.recovery.runtime_recovery import RuntimeForkService
+from mission_control.contracts.identities import parse_request_scope
 from mission_control.domain.authoring.canonical import sha256_digest
 from mission_control.domain.policies.contracts import RunPhase, StartAction
 from mission_control.domain.policies.errors import IdempotencyConflict
@@ -48,35 +48,73 @@ from mission_control.domain.policies.forks import (
     derived_unit_identity,
 )
 from tests.fixtures.checkpoint_recovery import stage_recovery_unit
+from tests.fixtures.mission_control_common_db import CommonDatabase
 from tests.fixtures.run_forks import (
     fork_command,
     review_objective_patch,
     stage_policy,
     technical_snapshot,
 )
-from tests.integration.postgres.test_checkpoint_lineage_postgres import (
-    require_disposable_postgres,
-    reset_application_schema,
+from tests.integration.postgres.runtime_common import common_db as common_db
+from tests.integration.postgres.runtime_common import (
+    owner_rows,
+    scoped_command,
+    scoped_request,
 )
-from tests.unit.run_control.test_run_control import NOW, WORKFLOW_DIGEST, command
-from tests.unit.run_control.test_run_control import request as run_request
+from tests.unit.run_control.test_run_control import NOW, WORKFLOW_DIGEST
 from tests.unit.run_control.test_run_control import service as run_control_service
 
-RUNTIME_ROLE = "belllabs_control_runtime"
-READONLY_ROLE = "belllabs_operations_readonly"
-NEW_TABLES = ("run_snapshot_manifests", "run_fork_reuse_decisions")
+pytestmark = pytest.mark.common_db
+
+RUNTIME_ROLE = "mission_control_runtime"
+READONLY_ROLE = "mission_control_readonly"
+NEW_TABLES = ("run_snapshot", "fork_reuse_decision", "fork_request")
+_BOUND: list[CommonDatabase] = []
 
 
-def _assume(role: str) -> Callable[[asyncpg.Connection], Awaitable[None]]:
-    async def setup(connection: asyncpg.Connection) -> None:
-        await connection.execute(f"SET ROLE {role}")
+@pytest.fixture(autouse=True)
+def _bind_database(common_db: CommonDatabase):  # type: ignore[no-untyped-def]
+    _BOUND.append(common_db)
+    yield
+    _BOUND.remove(common_db)
 
-    return setup
+
+def scope(tenant: str = "tenant-1") -> str:
+    return _BOUND[-1].scope(tenant)
 
 
-class AllowRetention:
-    async def authorize_deletion(self, **_kwargs: Any) -> bool:
-        return True
+def recovery_unit(run_id: str, name: str = "draft"):  # type: ignore[no-untyped-def]
+    return stage_recovery_unit(run_id, name, request_scope=scope())
+
+
+def run_request(**kwargs: Any):  # type: ignore[no-untyped-def]
+    return scoped_request(_BOUND[-1], **kwargs)
+
+
+def command(run_id: str, version: int, command_id: str, action: object):  # type: ignore[no-untyped-def]
+    return scoped_command(_BOUND[-1], run_id, version, command_id, action)
+
+
+async def _insert_head(
+    db: CommonDatabase, run_id: str, version: int, fingerprint: str, mutation: str
+) -> None:
+    await owner_rows(
+        db,
+        """
+        INSERT INTO mission_control.family_admission_head (
+            installation_id, application_id, tenant_id, family_admission_head_id, run_key,
+            family_kind, family_version, mutation_fingerprint, mutation_contract, mutation,
+            updated_at, created_at, created_by_actor_ref
+        ) VALUES ($1, $2, $3, gen_random_uuid(), $4, 'stagegraph', $5, $6,
+                  'mc.family-mutation/1', $7::jsonb, $8, $8, 'fixture')
+        """,
+        *scope_values(parse_request_scope(db.scope())),
+        run_id,
+        version,
+        fingerprint,
+        mutation,
+        NOW,
+    )
 
 
 class CrashAfterAdmission:
@@ -120,7 +158,7 @@ class CrashAfterMaterialization:
 
 
 def _candidate(run_id: str, name: str) -> ReuseCandidate:
-    unit = stage_recovery_unit(run_id, name)
+    unit = recovery_unit(run_id, name)
     return ReuseCandidate(
         unit=unit,
         unit_key=unit.unit_key,
@@ -136,83 +174,69 @@ def _candidate(run_id: str, name: str) -> ReuseCandidate:
 
 
 @pytest.mark.asyncio
-async def test_migration_0024_forces_rls_and_least_privilege(
-    test_application_postgres_dsn: str,
+async def test_fork_support_records_force_rls_and_least_privilege(
+    common_db: CommonDatabase,
 ) -> None:
-    require_disposable_postgres(test_application_postgres_dsn)
-    owner = await asyncpg.create_pool(dsn=test_application_postgres_dsn, min_size=1, max_size=2)
-    try:
-        await reset_application_schema(owner)
-        async with owner.acquire() as connection:
-            assert await connection.fetchval(
-                "SELECT 1 FROM belllabs_control.schema_migrations WHERE version = $1",
-                "0024_run_snapshots_semantic_forks_v1.sql",
-            )
-            for table in NEW_TABLES:
-                security = await connection.fetchrow(
-                    """
-                    SELECT relrowsecurity, relforcerowsecurity FROM pg_class
-                    WHERE oid = ('belllabs_control.' || $1)::regclass
-                    """,
-                    table,
-                )
-                assert security is not None and tuple(security) == (True, True)
-                qualified = f"belllabs_control.{table}"
-                privileges = {
-                    (role, action): await connection.fetchval(
-                        "SELECT has_table_privilege($1, $2, $3)", role, qualified, action
+    for table in NEW_TABLES:
+        rows = await owner_rows(
+            common_db,
+            """
+            SELECT relrowsecurity, relforcerowsecurity FROM pg_class
+            WHERE oid = ('mission_control.' || $1)::regclass
+            """,
+            table,
+        )
+        assert tuple(rows[0]) == (True, True)
+        qualified = f"mission_control.{table}"
+        privileges = {}
+        for role in (RUNTIME_ROLE, READONLY_ROLE):
+            for action in ("SELECT", "INSERT", "UPDATE", "DELETE"):
+                privileges[(role, action)] = (
+                    await owner_rows(
+                        common_db,
+                        "SELECT has_table_privilege($1, $2, $3) AS allowed",
+                        role,
+                        qualified,
+                        action,
                     )
-                    for role in (RUNTIME_ROLE, READONLY_ROLE)
-                    for action in ("SELECT", "INSERT", "UPDATE", "DELETE")
-                }
-                assert privileges == {
-                    (RUNTIME_ROLE, "SELECT"): True,
-                    (RUNTIME_ROLE, "INSERT"): True,
-                    (RUNTIME_ROLE, "UPDATE"): False,
-                    (RUNTIME_ROLE, "DELETE"): False,
-                    (READONLY_ROLE, "SELECT"): True,
-                    (READONLY_ROLE, "INSERT"): False,
-                    (READONLY_ROLE, "UPDATE"): False,
-                    (READONLY_ROLE, "DELETE"): False,
-                }
-            relationship = await connection.fetchval(
-                """
-                SELECT pg_get_constraintdef(oid) FROM pg_constraint
-                WHERE conname = 'runtime_lineage_edges_relationship_check'
-                """
-            )
-            for value in ("derived_from", "seeded_from", "reuses", "contains", "claims"):
-                assert f"'{value}'" in relationship
-            shape = await connection.fetchval(
-                """
-                SELECT pg_get_constraintdef(oid) FROM pg_constraint
-                WHERE conname = 'runtime_fork_requests_v2_shape'
-                """
-            )
-            assert "source_snapshot_id IS NOT NULL" in shape
-            assert "source_binding_id IS NULL" in shape
-    finally:
-        await owner.close()
+                )[0]["allowed"]
+        assert privileges == {
+            (RUNTIME_ROLE, "SELECT"): True,
+            (RUNTIME_ROLE, "INSERT"): True,
+            (RUNTIME_ROLE, "UPDATE"): table == "fork_request",
+            (RUNTIME_ROLE, "DELETE"): False,
+            (READONLY_ROLE, "SELECT"): True,
+            (READONLY_ROLE, "INSERT"): False,
+            (READONLY_ROLE, "UPDATE"): False,
+            (READONLY_ROLE, "DELETE"): False,
+        }
+    relationship = (
+        await owner_rows(
+            common_db,
+            """
+            SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+            WHERE conrelid = 'mission_control.execution_lineage_edge'::regclass
+              AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%relationship%'
+            """,
+        )
+    )[0]["definition"]
+    for value in ("derived_from", "seeded_from", "reuses", "contains", "claims"):
+        assert f"'{value}'" in relationship
 
 
 @pytest.mark.asyncio
 async def test_fork_saga_recovers_crashes_under_the_runtime_role_with_one_receipt(
-    test_application_postgres_dsn: str,
+    common_db: CommonDatabase,
 ) -> None:
-    require_disposable_postgres(test_application_postgres_dsn)
-    owner = await asyncpg.create_pool(dsn=test_application_postgres_dsn, min_size=1, max_size=2)
     runtime: asyncpg.Pool | None = None
     readonly: asyncpg.Pool | None = None
     try:
-        await reset_application_schema(owner)
-        runtime = await asyncpg.create_pool(
-            dsn=test_application_postgres_dsn, min_size=1, max_size=6, setup=_assume(RUNTIME_ROLE)
-        )
-        readonly = await asyncpg.create_pool(
-            dsn=test_application_postgres_dsn, min_size=1, max_size=2, setup=_assume(READONLY_ROLE)
-        )
+        runtime = await common_db.pool(max_size=6)
+        readonly = await common_db.pool(READONLY_ROLE, max_size=2)
         async with runtime.acquire() as connection:
-            assert await connection.fetchval("SELECT current_user") == RUNTIME_ROLE
+            assert await connection.fetchval(
+                "SELECT pg_has_role(current_user, $1, 'MEMBER')", RUNTIME_ROLE
+            )
             assert not await connection.fetchval(
                 "SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user"
             )
@@ -224,16 +248,19 @@ async def test_fork_saga_recovers_crashes_under_the_runtime_role_with_one_receip
         await run_control.execute(command(source, 1, "rrm006-source-start", StartAction()))
         snapshot = technical_snapshot(
             source,
+            request_scope=scope(),
             candidates=(_candidate(source, "draft"), _candidate(source, "review")),
         )
         snapshots = PostgresRunSnapshotRepository(runtime)
         assert await snapshots.put(snapshot) == snapshot
         assert await snapshots.put(snapshot) == snapshot  # idempotent
-        conflicting = technical_snapshot(source).model_copy(update={"taken_at": NOW})
+        conflicting = technical_snapshot(source, request_scope=scope()).model_copy(
+            update={"taken_at": NOW}
+        )
         with pytest.raises(ForkRejected) as conflict:
             await snapshots.put(conflicting)
         assert conflict.value.code == "snapshot_digest_conflict"
-        assert await snapshots.get("tenant-2", snapshot.snapshot_id) is None
+        assert await snapshots.get(scope("tenant-2"), snapshot.snapshot_id) is None
 
         store = PostgresForkMaterializationStore(runtime)
         authority = CrashAfterAdmission(RunControlForkAuthority(run_control, repository))
@@ -272,33 +299,39 @@ async def test_fork_saga_recovers_crashes_under_the_runtime_role_with_one_receip
         assert authority.admissions == 1  # reconciled from the recorded admission decision
         assert materializer.materializations == 1  # reconciled from the recorded lineage
         assert receipt.target_execution_epoch == 1
-        derived = await run_control.get_run("tenant-1", receipt.target_run_id)
+        derived = await run_control.get_run(scope(), receipt.target_run_id)
         assert (derived.phase, derived.version) == (RunPhase.PENDING, 1)
         draft_key = derived_unit_identity(
-            stage_recovery_unit(source, "draft"), receipt.target_run_id
+            recovery_unit(source, "draft"), receipt.target_run_id
         ).unit_key
         review_key = derived_unit_identity(
-            stage_recovery_unit(source, "review"), receipt.target_run_id
+            recovery_unit(source, "review"), receipt.target_run_id
         ).unit_key
-        decisions = await store.list_reuse_decisions("tenant-1", receipt.request_id)
+        decisions = await store.list_reuse_decisions(scope(), receipt.request_id)
         assert {(item.derived_unit_key, item.decision) for item in decisions} == {
             (draft_key, "reuse"),
             (review_key, "invalidated"),
         }
         assert receipt.lineage.reused_unit_keys == (draft_key,)
-        assert (await store.fork_of_run("tenant-1", receipt.target_run_id)) is not None
-        reuse = await store.get_reuse_decision("tenant-1", receipt.target_run_id, draft_key)
+        assert (await store.fork_of_run(scope(), receipt.target_run_id)) is not None
+        reuse = await store.get_reuse_decision(scope(), receipt.target_run_id, draft_key)
         assert reuse is not None and reuse.candidate is not None
         assert reuse.candidate.result_manifest_ref == "s3://technical/draft/manifest"
         async with runtime.acquire() as connection, connection.transaction():
-            await connection.execute(
-                "SELECT set_config('belllabs.request_scope', 'tenant-1', true)"
-            )
+            await apply_scope(connection, scope())
             row = await connection.fetchrow(
                 """
-                SELECT status, schema_version, source_run_id, source_snapshot_id,
-                       patch_digest, target_run_id, source_binding_id
-                FROM belllabs_control.runtime_fork_requests WHERE request_id = $1
+                SELECT f.status, f.schema_version, f.source_run_key, f.source_snapshot_key,
+                       f.patch_digest, f.target_run_key, r.kind, r.state,
+                       target.run_key AS recovery_target
+                FROM mission_control.fork_request f
+                JOIN mission_control.recovery_request r
+                  USING (installation_id, application_id, tenant_id, recovery_id)
+                JOIN mission_control.mission_run target
+                  ON target.installation_id = r.installation_id
+                 AND target.application_id = r.application_id
+                 AND target.tenant_id = r.tenant_id AND target.run_id = r.target_run_id
+                WHERE f.request_key = $1
                 """,
                 receipt.request_id,
             )
@@ -306,16 +339,43 @@ async def test_fork_saga_recovers_crashes_under_the_runtime_role_with_one_receip
             assert dict(row) == {
                 "status": "accepted",
                 "schema_version": "belllabs.run-fork-request.v2",
-                "source_run_id": source,
-                "source_snapshot_id": snapshot.snapshot_id,
+                "source_run_key": source,
+                "source_snapshot_key": snapshot.snapshot_id,
                 "patch_digest": receipt.patch_digest,
-                "target_run_id": receipt.target_run_id,
-                "source_binding_id": None,
+                "target_run_key": receipt.target_run_id,
+                "kind": "fork",
+                "state": "completed",
+                "recovery_target": receipt.target_run_id,
+            }
+            lineage = await connection.fetchrow(
+                """
+                SELECT source.run_key AS source_run, target.run_key AS target_run,
+                       l.source_checkpoint_digest, c.checkpoint_key
+                FROM mission_control.fork_lineage l
+                JOIN mission_control.mission_run source
+                  ON source.installation_id = l.installation_id
+                 AND source.application_id = l.application_id
+                 AND source.tenant_id = l.tenant_id AND source.run_id = l.source_run_id
+                JOIN mission_control.mission_run target
+                  ON target.installation_id = l.installation_id
+                 AND target.application_id = l.application_id
+                 AND target.tenant_id = l.tenant_id AND target.run_id = l.target_run_id
+                JOIN mission_control.continuation_checkpoint c
+                  ON c.installation_id = l.installation_id
+                 AND c.application_id = l.application_id
+                 AND c.tenant_id = l.tenant_id AND c.checkpoint_id = l.source_checkpoint_id
+                """
+            )
+            assert lineage is not None and dict(lineage) == {
+                "source_run": source,
+                "target_run": receipt.target_run_id,
+                "source_checkpoint_digest": snapshot.snapshot_digest,
+                "checkpoint_key": snapshot.snapshot_id,
             }
             edges = await connection.fetch(
                 """
-                SELECT relationship FROM belllabs_control.runtime_lineage_edges
-                WHERE lineage_id = $1 ORDER BY relationship
+                SELECT relationship FROM mission_control.execution_lineage_edge
+                WHERE lineage_key = $1 ORDER BY relationship
                 """,
                 f"fork-lineage:{receipt.request_id}",
             )
@@ -325,8 +385,9 @@ async def test_fork_saga_recovers_crashes_under_the_runtime_role_with_one_receip
                 "reuses",
             ]
             for statement in (
-                "UPDATE belllabs_control.run_fork_reuse_decisions SET reason = 'x'",
-                "DELETE FROM belllabs_control.run_snapshot_manifests",
+                "UPDATE mission_control.fork_reuse_decision SET reason = 'x'",
+                "DELETE FROM mission_control.run_snapshot",
+                "UPDATE mission_control.continuation_checkpoint SET manifest_ref = 'x'",
             ):
                 with pytest.raises(asyncpg.InsufficientPrivilegeError):
                     async with connection.transaction():
@@ -334,36 +395,30 @@ async def test_fork_saga_recovers_crashes_under_the_runtime_role_with_one_receip
 
         # The read-only role reads the fork authority in its scope and writes nothing.
         async with readonly.acquire() as connection, connection.transaction():
-            await connection.execute(
-                "SELECT set_config('belllabs.request_scope', 'tenant-1', true)"
-            )
+            await apply_scope(connection, scope())
             counts = await connection.fetchrow(
                 """
                 SELECT
-                  (SELECT count(*) FROM belllabs_control.run_snapshot_manifests) AS snapshots,
-                  (SELECT count(*) FROM belllabs_control.run_fork_reuse_decisions) AS decisions,
-                  (SELECT count(*) FROM belllabs_control.runtime_fork_requests) AS forks
+                  (SELECT count(*) FROM mission_control.run_snapshot) AS snapshots,
+                  (SELECT count(*) FROM mission_control.fork_reuse_decision) AS decisions,
+                  (SELECT count(*) FROM mission_control.fork_request) AS forks
                 """
             )
             assert counts is not None and tuple(counts) == (1, 2, 1)
             with pytest.raises(asyncpg.InsufficientPrivilegeError):
                 async with connection.transaction():
-                    await connection.execute(
-                        "DELETE FROM belllabs_control.run_fork_reuse_decisions"
-                    )
+                    await connection.execute("DELETE FROM mission_control.fork_reuse_decision")
         async with readonly.acquire() as connection, connection.transaction():
-            await connection.execute(
-                "SELECT set_config('belllabs.request_scope', 'tenant-2', true)"
-            )
+            await apply_scope(connection, scope("tenant-2"))
             assert (
                 await connection.fetchval(
-                    "SELECT count(*) FROM belllabs_control.run_fork_reuse_decisions"
+                    "SELECT count(*) FROM mission_control.fork_reuse_decision"
                 )
                 == 0
             )
 
         # A different materialization for the same fork is a conflict, never applied.
-        request = await fork_repository.get_request("tenant-1", receipt.request_id)
+        request = await fork_repository.get_request(scope(), receipt.request_id)
         assert request is not None
         tampered = ForkLineageManifest.create(
             **receipt.lineage.model_dump(mode="python", exclude={"lineage_digest"})
@@ -372,28 +427,15 @@ async def test_fork_saga_recovers_crashes_under_the_runtime_role_with_one_receip
         with pytest.raises(IdempotencyConflict):
             await store.record_materialization(request, tampered, _lineage_stub(request))
 
-        # An audited fork retention purge removes the fork with its decisions.
-        deleted = await PostgresStage3RetentionRepository(runtime, AllowRetention()).delete_expired(
-            request_scope="tenant-1",
-            record_class="fork",
-            cutoff_at=NOW + timedelta(days=365),
-            actor_id="operator:retention",
-            reason="audited fork purge",
-            deletion_id="deletion-fork-1",
-            recorded_at=NOW + timedelta(days=365),
-        )
-        assert deleted == 1
-        assert await store.list_reuse_decisions("tenant-1", receipt.request_id) == ()
-        # The derived run still names its fork in its admission transition: reuse fails
-        # closed (`fork_lineage_missing`) instead of silently re-executing.
-        assert await store.fork_of_run("tenant-1", receipt.target_run_id) is None
-        assert await store.fork_marker("tenant-1", receipt.target_run_id) == receipt.request_id
-        assert await store.fork_marker("tenant-1", source) is None
+        # The retention purge path is retired with its tests-only repository: the fork,
+        # its decisions and its lineage stay; the derived run names its fork in its
+        # admission transition.
+        assert await store.fork_marker(scope(), receipt.target_run_id) == receipt.request_id
+        assert await store.fork_marker(scope(), source) is None
     finally:
         for pool in (runtime, readonly):
             if pool is not None:
                 await pool.close()
-        await owner.close()
 
 
 def _lineage_stub(request: Any) -> Any:
@@ -409,50 +451,56 @@ def _lineage_stub(request: Any) -> Any:
 
 @pytest.mark.asyncio
 async def test_fork_source_reader_reads_family_heads_and_linked_runs(
-    test_application_postgres_dsn: str,
+    common_db: CommonDatabase,
 ) -> None:
-    require_disposable_postgres(test_application_postgres_dsn)
-    owner = await asyncpg.create_pool(dsn=test_application_postgres_dsn, min_size=1, max_size=2)
+    owner = await common_db.pool(max_size=2)
     runtime: asyncpg.Pool | None = None
     try:
-        await reset_application_schema(owner)
         run_control, _ = run_control_service(PostgresRunControlRepository(owner))  # type: ignore[arg-type]
         parent = await run_control.admit(run_request(request_id="rrm006-parent"))
         child = await run_control.admit(run_request(request_id="rrm006-child"))
         assert parent.run_id is not None and child.run_id is not None
-        child_budget = await run_control.get_budget("tenant-1", child.run_id)
+        child_budget = await run_control.get_budget(scope(), child.run_id)
         mutation = {"family_kind": "stagegraph", "mutation_id": "result-head"}
-        async with owner.acquire() as connection:
-            await connection.execute(
-                """
-                INSERT INTO belllabs_control.family_admission_heads (
-                    request_scope, run_id, family_kind, family_version,
-                    mutation_fingerprint, mutation, updated_at
-                ) VALUES ('tenant-1', $1, 'stagegraph', 3, $2, $3::jsonb, $4)
-                """,
-                parent.run_id,
-                sha256_digest(mutation),
-                '{"family_kind": "stagegraph", "mutation_id": "result-head"}',
-                NOW,
-            )
-            await connection.execute(
-                """
-                INSERT INTO belllabs_control.run_composition_links (
-                    link_id, request_identity, request_fingerprint, request_scope,
-                    parent_run_id, child_run_id, linked_budget_account_id, link, created_at
-                ) VALUES ('link-1', 'link-request-1', $1, 'tenant-1', $2, $3, $4, '{}'::jsonb, $5)
-                """,
-                sha256_digest("link"),
-                parent.run_id,
-                child.run_id,
-                child_budget.account_id,
-                NOW,
-            )
-        runtime = await asyncpg.create_pool(
-            dsn=test_application_postgres_dsn, min_size=1, max_size=2, setup=_assume(RUNTIME_ROLE)
+        await _insert_head(
+            common_db,
+            parent.run_id,
+            3,
+            sha256_digest(mutation),
+            '{"family_kind": "stagegraph", "mutation_id": "result-head"}',
         )
+        # The link goes through the linked-run repository (canonical mission_relationship
+        # plus its support record); the reader sees it with no terminal yet.
+        from mission_control.adapters.postgres.orchestration.linked_run_repository import (
+            PostgresLinkedRunRepository,
+        )
+        from mission_control.domain.composition.contracts import (
+            RunCompositionLink,
+            RunDependencyClass,
+        )
+
+        await PostgresLinkedRunRepository(owner).commit_link(
+            RunCompositionLink(
+                link_id="link-1",
+                request_identity="link-request-1",
+                request_fingerprint=sha256_digest("link"),
+                request_scope=scope(),
+                parent_run_id=parent.run_id,
+                child_run_id=child.run_id,
+                slot_id="child_work",
+                request_revision=1,
+                target_workflow_type_ref=run_request().workflow_type_ref,
+                child_effective_configuration_digest=run_request().effective_configuration_digest,
+                dependency_class=RunDependencyClass.REQUIRED_BLOCKING,
+                linked_budget_account_id=child_budget.account_id,
+                result_admission_policy="linked-result:exact@1",
+                cancellation_policy="request_cancel",
+                created_at=NOW,
+            )
+        )
+        runtime = await common_db.pool(max_size=2)
         reader = PostgresForkSourceReader(runtime)
-        facts = await reader.read_fork_source("tenant-1", parent.run_id)
+        facts = await reader.read_fork_source(scope(), parent.run_id)
         assert facts is not None
         assert facts.run_version == 1
         assert [(head.family_kind, head.family_version) for head in facts.family_heads] == [
@@ -463,7 +511,7 @@ async def test_fork_source_reader_reads_family_heads_and_linked_runs(
             ("link-1", None)
         ]
         assert facts.blueprint_digest is None
-        assert await reader.read_fork_source("tenant-2", parent.run_id) is None
+        assert await reader.read_fork_source(scope("tenant-2"), parent.run_id) is None
     finally:
         if runtime is not None:
             await runtime.close()
@@ -471,82 +519,107 @@ async def test_fork_source_reader_reads_family_heads_and_linked_runs(
 
 
 @pytest.mark.asyncio
-async def test_migration_0024_rejects_shape_uniqueness_scope_and_snapshot_updates(
-    test_application_postgres_dsn: str,
+async def test_fork_requests_reject_uniqueness_scope_and_snapshot_updates(
+    common_db: CommonDatabase,
 ) -> None:
-    require_disposable_postgres(test_application_postgres_dsn)
-    owner = await asyncpg.create_pool(dsn=test_application_postgres_dsn, min_size=1, max_size=2)
-    runtime: asyncpg.Pool | None = None
+    owner = await common_db.pool(max_size=2)
     try:
-        await reset_application_schema(owner)
         run_control, _ = run_control_service(PostgresRunControlRepository(owner))  # type: ignore[arg-type]
         admitted = await run_control.admit(run_request(request_id="rrm006-violations"))
         assert admitted.run_id is not None
         source = admitted.run_id
-        snapshot = technical_snapshot(source)
+        snapshot = technical_snapshot(source, request_scope=scope())
         await PostgresRunSnapshotRepository(owner).put(snapshot)
         insert = """
-            INSERT INTO belllabs_control.runtime_fork_requests (
-                request_scope, request_id, idempotency_key, source_binding_id, request_digest,
-                request_payload, status, requested_at, updated_at, retain_until,
-                schema_version, source_run_id, source_snapshot_id, patch_digest, target_run_id
-            ) VALUES ($1, $2, $2, $3, $4, '{}'::jsonb, 'reserved', $5, $5, $6,
-                      'belllabs.run-fork-request.v2', $7, $8, $4, $9)
-        """
-        window = (NOW, NOW + timedelta(days=1), source, snapshot.snapshot_id)
-        async with owner.acquire() as connection:
-            await connection.execute(
-                "SELECT set_config('belllabs.request_scope', 'tenant-1', false)"
-            )
-            # (1) A v2 fork row must not bind the retired runtime binding.
-            with pytest.raises(asyncpg.CheckViolationError, match="v2_shape"):
-                await connection.execute(
-                    insert,
-                    "tenant-1",
-                    "fork-a",
-                    "binding-1",
-                    sha256_digest("a"),
-                    *window,
-                    "derived-a",
+            WITH recovery AS (
+                INSERT INTO mission_control.recovery_request (
+                    installation_id, application_id, tenant_id, recovery_id, source_run_id,
+                    source_checkpoint_id, kind, actor_ref, action, request_key, payload_digest,
+                    state, detail, version, updated_at, created_at, created_by_actor_ref
                 )
-            await connection.execute(
-                insert, "tenant-1", "fork-b", None, sha256_digest("b"), *window, "derived-b"
+                SELECT $1, $2, $3, gen_random_uuid(), run.run_id, NULL, 'fork', 'fixture',
+                       'mc.run.fork', $4, $5, 'admitted', '{}'::jsonb, 1, $6, $6, 'fixture'
+                FROM mission_control.mission_run run WHERE run.run_key = $7
+                RETURNING recovery_id
             )
-            # (2) One fork per derived run.
+            INSERT INTO mission_control.fork_request (
+                installation_id, application_id, tenant_id, fork_request_id, request_key,
+                recovery_id, idempotency_key, schema_version, request_digest, request_payload,
+                status, source_run_key, source_snapshot_key, patch_digest, target_run_key,
+                requested_at, updated_at, retain_until, created_at, created_by_actor_ref
+            )
+            SELECT $1, $2, $3, gen_random_uuid(), $4, recovery_id, $4,
+                   'belllabs.run-fork-request.v2', $5, '{}'::jsonb, 'reserved', $7, $8, $5, $9,
+                   $6, $6, $6 + interval '1 day', $6, 'fixture'
+            FROM recovery
+        """
+        tenant_1 = scope_values(parse_request_scope(scope()))
+        tenant_2 = scope_values(parse_request_scope(scope("tenant-2")))
+        window = (NOW, source, snapshot.snapshot_id)
+        connection = await asyncpg.connect(common_db.owner_dsn)
+        try:
+            await connection.execute(
+                insert,
+                *tenant_1,
+                "fork-b",
+                sha256_digest("b"),
+                window[0],
+                source,
+                snapshot.snapshot_id,
+                "derived-b",
+            )
+            # One fork per derived run.
             with pytest.raises(asyncpg.UniqueViolationError, match="target_run"):
                 await connection.execute(
-                    insert, "tenant-1", "fork-c", None, sha256_digest("c"), *window, "derived-b"
+                    insert,
+                    *tenant_1,
+                    "fork-c",
+                    sha256_digest("c"),
+                    window[0],
+                    source,
+                    snapshot.snapshot_id,
+                    "derived-b",
                 )
-        runtime = await asyncpg.create_pool(
-            dsn=test_application_postgres_dsn, min_size=1, max_size=2, setup=_assume(RUNTIME_ROLE)
-        )
-        async with runtime.acquire() as connection:
-            await connection.execute(
-                "SELECT set_config('belllabs.request_scope', 'tenant-1', false)"
-            )
-            # (3) RLS WITH CHECK: a row for another scope cannot be inserted.
-            with pytest.raises(asyncpg.InsufficientPrivilegeError, match="row-level security"):
-                await connection.execute(
-                    insert, "tenant-2", "fork-d", None, sha256_digest("d"), *window, "derived-d"
+        finally:
+            await connection.close()
+        async with owner.acquire() as connection:
+            async with connection.transaction():
+                await apply_scope(connection, scope())
+                # Forced RLS WITH CHECK: a row for another tenant cannot be inserted.
+                with pytest.raises(asyncpg.InsufficientPrivilegeError, match="row-level security"):
+                    await connection.execute(
+                        "INSERT INTO mission_control.fork_reuse_decision (installation_id,"
+                        " application_id, tenant_id, fork_reuse_decision_id, fork_request_key,"
+                        " derived_run_key, derived_unit_key, source_run_key, source_unit_key,"
+                        " schema_version, decision, reason, decision_digest, decision_payload,"
+                        " recorded_at, created_at, created_by_actor_ref) VALUES ($1, $2, $3,"
+                        " gen_random_uuid(), 'fork-b', 'x', $4, 'y', $4,"
+                        " 'belllabs.fork-reuse-decision.v1', 'excluded', 'r', $5, '{}'::jsonb,"
+                        " now(), now(), 'x')",
+                        *tenant_2,
+                        "bl-unit-v1:" + "0" * 64,
+                        sha256_digest("d"),
+                    )
+            async with connection.transaction():
+                await apply_scope(connection, scope())
+                # Sealed snapshots are immutable for the runtime role.
+                with pytest.raises(asyncpg.InsufficientPrivilegeError):
+                    await connection.execute(
+                        "UPDATE mission_control.continuation_checkpoint SET created_at = created_at"
+                    )
+            async with connection.transaction():
+                await apply_scope(connection, scope())
+                visible = await connection.fetchval(
+                    "SELECT count(*) FROM mission_control.fork_request"
                 )
-            # (4) Snapshots are immutable for the runtime role.
-            with pytest.raises(asyncpg.InsufficientPrivilegeError):
-                await connection.execute(
-                    "UPDATE belllabs_control.run_snapshot_manifests SET taken_at = taken_at"
-                )
-            visible = await connection.fetchval(
-                "SELECT count(*) FROM belllabs_control.runtime_fork_requests"
-            )
-            assert visible == 1
+                assert visible == 1
     finally:
-        if runtime is not None:
-            await runtime.close()
         await owner.close()
 
 
 @pytest.mark.asyncio
 async def test_active_async_child_in_rrm013_authority_blocks_the_snapshot(
-    test_application_postgres_dsn: str,
+    common_db: CommonDatabase,
 ) -> None:
     """The production classifier: RRM-013's `classify_async_children_for_fork` over
     `PostgresAsyncSubagentAuthority.list_children` (0016 authority, 0021 lifecycle)."""
@@ -566,10 +639,8 @@ async def test_active_async_child_in_rrm013_authority_blocks_the_snapshot(
     from tests.acceptance.control_plane.test_wp_cp_045 import request as spawn_request
     from tests.fixtures.run_forks import stagegraph_head
 
-    require_disposable_postgres(test_application_postgres_dsn)
-    owner = await asyncpg.create_pool(dsn=test_application_postgres_dsn, min_size=1, max_size=4)
+    owner = await common_db.pool(max_size=4)
     try:
-        await reset_application_schema(owner)
         run_control, _ = run_control_service(PostgresRunControlRepository(owner))  # type: ignore[arg-type]
         base = run_request(request_id="rrm006-async-child")
         admitted = await run_control.admit(
@@ -585,20 +656,13 @@ async def test_active_async_child_in_rrm013_authority_blocks_the_snapshot(
         run_id = admitted.run_id
         await run_control.execute(command(run_id, 1, "rrm006-async-child-start", StartAction()))
         head = stagegraph_head(stages={"draft": "completed"})
-        async with owner.acquire() as connection:
-            await connection.execute(
-                """
-                INSERT INTO belllabs_control.family_admission_heads (
-                    request_scope, run_id, family_kind, family_version,
-                    mutation_fingerprint, mutation, updated_at
-                ) VALUES ('tenant-1', $1, 'stagegraph', $2, $3, $4::jsonb, $5)
-                """,
-                run_id,
-                head.family_version,
-                head.mutation_fingerprint,
-                json.dumps(dict(head.mutation)),
-                NOW,
-            )
+        await _insert_head(
+            common_db,
+            run_id,
+            head.family_version,
+            head.mutation_fingerprint,
+            json.dumps(dict(head.mutation)),
+        )
         authority = PostgresAsyncSubagentAuthority(owner)
         service = RunSnapshotService(
             reads=PostgresInspectionReadRepository(owner),
@@ -608,23 +672,21 @@ async def test_active_async_child_in_rrm013_authority_blocks_the_snapshot(
             commands=LedgerPendingCommands(run_control),
         )
         await authority.reserve_and_admit(
-            spawn_request().model_copy(
-                update={"request_scope": "tenant-1", "parent_run_id": run_id}
-            ),
+            spawn_request().model_copy(update={"request_scope": scope(), "parent_run_id": run_id}),
             "async-child-admitted",
             "link-admitted",
         )
         with pytest.raises(ForkRejected) as rejected:
-            await service.take("tenant-1", run_id)
+            await service.take(scope(), run_id)
         assert rejected.value.code == "snapshot_not_quiescent"
         assert rejected.value.reasons == ("async_child_active:async-child-admitted",)
 
-        async with owner.acquire() as connection:
-            await connection.execute(
-                "UPDATE belllabs_control.async_subagent_authority SET lifecycle = 'completed'"
-                " WHERE child_execution_id = 'async-child-admitted'"
-            )
-        snapshot = await service.take("tenant-1", run_id)
+        await owner_rows(
+            common_db,
+            "UPDATE mission_control.subordinate_admission SET lifecycle = 'completed'"
+            " WHERE subordinate_key = 'async-child-admitted'",
+        )
+        snapshot = await service.take(scope(), run_id)
         observed = [
             (item.child_execution_id, item.lifecycle, item.disposition)
             for item in snapshot.async_children
@@ -646,28 +708,23 @@ async def test_active_async_child_in_rrm013_authority_blocks_the_snapshot(
         await run_control.execute(
             command(ledger_run, 1, "ledger-start", StartAction(execution_target=TARGET))
         )
-        async with owner.acquire() as connection:
-            await connection.execute(
-                """
-                INSERT INTO belllabs_control.family_admission_heads (
-                    request_scope, run_id, family_kind, family_version,
-                    mutation_fingerprint, mutation, updated_at
-                ) VALUES ('tenant-1', $1, 'stagegraph', $2, $3, $4::jsonb, $5)
-                """,
-                ledger_run,
-                head.family_version,
-                head.mutation_fingerprint,
-                json.dumps(dict(head.mutation)),
-                NOW,
-            )
+        await _insert_head(
+            common_db,
+            ledger_run,
+            head.family_version,
+            head.mutation_fingerprint,
+            json.dumps(dict(head.mutation)),
+        )
         accepted = await run_control.execute(command(ledger_run, 2, "pause", pause()))
         assert accepted.reason_code == "accepted_pending_application"
         with pytest.raises(ForkRejected) as pending:
-            await service.take("tenant-1", ledger_run)
+            await service.take(scope(), ledger_run)
         assert "command_unapplied:operator:pause:accepted" in pending.value.reasons
         await run_control.execute(
-            boundary_command(ledger_run, 2, "apply:pause", apply("pause", pause()))
+            boundary_command(ledger_run, 2, "apply:pause", apply("pause", pause())).model_copy(
+                update={"request_scope": scope()}
+            )
         )
-        assert (await service.take("tenant-1", ledger_run)).pending_commands == ()
+        assert (await service.take(scope(), ledger_run)).pending_commands == ()
     finally:
         await owner.close()

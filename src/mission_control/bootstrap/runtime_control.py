@@ -37,6 +37,9 @@ from mission_control.adapters.deep_agents.checkpoint_verifier import (
     LangGraphCheckpointDescendantVerifier,
 )
 from mission_control.adapters.deep_agents.persistence import StandalonePersistenceLifespan
+from mission_control.adapters.deep_agents.runtime_persistence_verifier import (
+    verify_runtime_persistence,
+)
 from mission_control.adapters.postgres.async_subagents.async_subagent_detail_repository import (
     PostgresAsyncSubagentDetailRepository,
 )
@@ -123,6 +126,15 @@ async def compose_runtime_control(
     except SearchAttributeRegistrationError as error:
         readiness["search_attributes"] = f"missing: {error}"
         raise
+    async with pool.acquire() as connection:
+        database_name = await connection.fetchval("SELECT current_database()")
+    # Same read-only proof as the worker: no fallback schema, no setup at startup.
+    evidence = await verify_runtime_persistence(
+        settings.langgraph_checkpoint_dsn,
+        expected_database=database_name,
+        schema=settings.langgraph_checkpoint_schema,
+    )
+    readiness["runtime_persistence"] = evidence.schema
     persistence = await stack.enter_async_context(
         StandalonePersistenceLifespan(settings.langgraph_checkpoint_dsn)
     )

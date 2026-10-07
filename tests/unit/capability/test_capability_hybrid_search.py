@@ -74,9 +74,11 @@ class FakeEmbeddings:
     async def embed(self, text: str) -> CapabilityEmbedding:
         self.calls.append(text)
         normalized = text.casefold()
-        if text == "up-to-date internet investigation":
-            vector = (1.0, 0.0, 0.0)
-        elif "firecrawl_search" in normalized or "firecrawl search" in normalized:
+        if (
+            text == "up-to-date internet investigation"
+            or "firecrawl_search" in normalized
+            or "firecrawl search" in normalized
+        ):
             vector = (1.0, 0.0, 0.0)
         elif "tavily_search" in normalized or "tavily search" in normalized:
             vector = (0.8, 0.2, 0.0)

@@ -18,7 +18,8 @@ bootstrap wires dependencies. Temporal alone schedules missions; Deep Agents
 performs bounded cognition. Checkpoints cannot decide semantic acceptance.
 
 PostgreSQL owns application persistence; Temporal persistence is separate. Common
-SQL belongs to its released owner; the Biotech installer consumes that release.
+SQL lives only in packages/mission-control-db-contract (mission-db); app targets
+live in deployments/<app>. Legacy schemas are never a fallback.
 Application-specific knowledge services stay outside the general kernel.
 
 Historical BellLabs specs, WPs and old guides are provenance. They cannot restore

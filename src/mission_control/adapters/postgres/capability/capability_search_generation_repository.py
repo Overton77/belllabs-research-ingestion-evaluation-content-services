@@ -4,7 +4,10 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 
-from mission_control.adapters.postgres.capability.capability_search_repository import PostgresPool
+from mission_control.adapters.postgres.capability.capability_search_repository import (
+    InstallationSearchScope,
+    PostgresPool,
+)
 from mission_control.application.capabilities.catalog_projection_generation import (
     ProjectionGenerationActivation,
     ProjectionGenerationRecord,
@@ -15,8 +18,11 @@ from mission_control.domain.authoring.contracts import DefinitionKind
 
 
 class PostgresProjectionGenerationRepository(ProjectionGenerationRepository):
-    def __init__(self, pool: PostgresPool) -> None:
+    """Generations and active pointers in ``mission_control_search`` (installation scoped)."""
+
+    def __init__(self, pool: PostgresPool, *, catalog_scope: str | None = None) -> None:
         self._pool = pool
+        self._scope = InstallationSearchScope(pool, catalog_scope)
 
     async def begin(
         self,
@@ -24,10 +30,12 @@ class PostgresProjectionGenerationRepository(ProjectionGenerationRepository):
         *,
         created_at: datetime,
     ) -> ProjectionGenerationRecord:
-        async with self._pool.acquire() as connection:
+        async with self._scope.session(spec.tenant_scope) as (connection, installation, app):
             row = await connection.fetchrow(
                 """
-                INSERT INTO capability_search.generations (
+                INSERT INTO mission_control_search.projection_generation (
+                    installation_id,
+                    application_id,
                     tenant_scope,
                     projection_generation,
                     embedding_model_id,
@@ -39,8 +47,9 @@ class PostgresProjectionGenerationRepository(ProjectionGenerationRepository):
                     state,
                     created_at
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'building', $9)
-                ON CONFLICT (tenant_scope, projection_generation) DO NOTHING
+                VALUES ($10, $11, $1, $2, $3, $4, $5, $6, $7, $8, 'building', $9)
+                ON CONFLICT (installation_id, application_id, tenant_scope, projection_generation)
+                DO NOTHING
                 RETURNING *
                 """,
                 spec.tenant_scope,
@@ -48,27 +57,27 @@ class PostgresProjectionGenerationRepository(ProjectionGenerationRepository):
                 spec.embedding_model_id,
                 spec.embedding_dimensions,
                 spec.search_document_format_version,
-                [
-                    kind.value
-                    for kind in sorted(
-                        spec.selected_kinds,
-                        key=lambda item: item.value,
-                    )
-                ],
+                [kind.value for kind in sorted(spec.selected_kinds, key=lambda item: item.value)],
                 spec.expected_count,
                 spec.expected_source_set_digest,
                 created_at,
+                installation,
+                app,
             )
             if row is None:
                 row = await connection.fetchrow(
                     """
                     SELECT *
-                    FROM capability_search.generations
-                    WHERE tenant_scope = $1
+                    FROM mission_control_search.projection_generation
+                    WHERE installation_id = $3
+                      AND application_id = $4
+                      AND tenant_scope = $1
                       AND projection_generation = $2
                     """,
                     spec.tenant_scope,
                     spec.projection_generation,
+                    installation,
+                    app,
                 )
         if row is None:
             raise RuntimeError("projection generation could not be created")
@@ -82,16 +91,20 @@ class PostgresProjectionGenerationRepository(ProjectionGenerationRepository):
         tenant_scope: str,
         projection_generation: str,
     ) -> ProjectionGenerationRecord | None:
-        async with self._pool.acquire() as connection:
+        async with self._scope.session(tenant_scope) as (connection, installation, app):
             row = await connection.fetchrow(
                 """
                 SELECT *
-                FROM capability_search.generations
-                WHERE tenant_scope = $1
+                FROM mission_control_search.projection_generation
+                WHERE installation_id = $3
+                  AND application_id = $4
+                  AND tenant_scope = $1
                   AND projection_generation = $2
                 """,
                 tenant_scope,
                 projection_generation,
+                installation,
+                app,
             )
         return _record(row) if row is not None else None
 
@@ -100,16 +113,20 @@ class PostgresProjectionGenerationRepository(ProjectionGenerationRepository):
         tenant_scope: str,
         kind: DefinitionKind,
     ) -> str | None:
-        async with self._pool.acquire() as connection:
+        async with self._scope.session(tenant_scope) as (connection, installation, app):
             row = await connection.fetchrow(
                 """
                 SELECT projection_generation
-                FROM capability_search.active_generations
-                WHERE tenant_scope = $1
+                FROM mission_control_search.active_generation
+                WHERE installation_id = $3
+                  AND application_id = $4
+                  AND tenant_scope = $1
                   AND asset_kind = $2
                 """,
                 tenant_scope,
                 kind.value,
+                installation,
+                app,
             )
         return str(row["projection_generation"]) if row is not None else None
 
@@ -120,11 +137,11 @@ class PostgresProjectionGenerationRepository(ProjectionGenerationRepository):
         activated_at: datetime,
     ) -> ProjectionGenerationActivation:
         del activated_at  # PostgreSQL provides the authoritative commit timestamp.
-        async with self._pool.acquire() as connection:
+        async with self._scope.session(spec.tenant_scope) as (connection, installation, app):
             row = await connection.fetchrow(
                 """
                 SELECT activated_count, activated_source_set_digest
-                FROM capability_search.activate_generation($1, $2, $3, $4)
+                FROM mission_control_search.activate_generation($1, $2, $3, $4)
                 """,
                 spec.tenant_scope,
                 spec.projection_generation,
@@ -134,12 +151,16 @@ class PostgresProjectionGenerationRepository(ProjectionGenerationRepository):
             record = await connection.fetchrow(
                 """
                 SELECT activated_at
-                FROM capability_search.generations
-                WHERE tenant_scope = $1
+                FROM mission_control_search.projection_generation
+                WHERE installation_id = $3
+                  AND application_id = $4
+                  AND tenant_scope = $1
                   AND projection_generation = $2
                 """,
                 spec.tenant_scope,
                 spec.projection_generation,
+                installation,
+                app,
             )
         if row is None or record is None:
             raise RuntimeError("projection generation activation returned no evidence")
@@ -156,18 +177,22 @@ class PostgresProjectionGenerationRepository(ProjectionGenerationRepository):
         tenant_scope: str,
         projection_generation: str,
     ) -> None:
-        async with self._pool.acquire() as connection:
+        async with self._scope.session(tenant_scope) as (connection, installation, app):
             await connection.fetchrow(
                 """
-                UPDATE capability_search.generations
+                UPDATE mission_control_search.projection_generation
                 SET state = 'failed'
-                WHERE tenant_scope = $1
+                WHERE installation_id = $3
+                  AND application_id = $4
+                  AND tenant_scope = $1
                   AND projection_generation = $2
                   AND state = 'building'
                 RETURNING projection_generation
                 """,
                 tenant_scope,
                 projection_generation,
+                installation,
+                app,
             )
 
 

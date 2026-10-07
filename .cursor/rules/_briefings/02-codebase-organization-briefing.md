@@ -13,7 +13,7 @@ When editing application code: know where things live, what each top package doe
 ```yaml
 ---
 description: Compact app/ package map, ownership, and inward dependency direction
-globs: app/**/*.py,tests/**/*.py,docs/interview_and_research_result_documentation/CANONICAL_APPLICATION_CODEBASE_ORGANIZATION.md,docs/migrations_instructions/implementation_work_packages_v2/SUPPLEMENT_CODEBASE_ORGANIZATION.md
+globs: src/mission_control/**/*.py,tests/**/*.py,docs/knowledge/architecture.md
 alwaysApply: false
 ---
 ```
@@ -72,9 +72,11 @@ app/domain  ←  app/application  ←  app/api | app/temporal | app/integrations
 
 ## Canonical docs (point, don't paste)
 
-- `docs/interview_and_research_result_documentation/CANONICAL_APPLICATION_CODEBASE_ORGANIZATION.md`
-- `docs/migrations_instructions/implementation_work_packages_v2/SUPPLEMENT_CODEBASE_ORGANIZATION.md`
-- Active WP + `IMPLEMENTATION_READINESS.md` for exact filenames
+- `AGENTS.md` (root and scoped) and `docs/knowledge/architecture.md` (current authority)
+- `docs/REMOVAL_GUIDE.md` and `docs/organization/` for relocations
+- Historical only (deleted from the working tree; recoverable with `git show f6521c1:<path>`):
+  `docs/interview_and_research_result_documentation/CANONICAL_APPLICATION_CODEBASE_ORGANIZATION.md`,
+  `docs/migrations_instructions/implementation_work_packages_v2/SUPPLEMENT_CODEBASE_ORGANIZATION.md`
 
 ## Defer
 

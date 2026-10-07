@@ -6,16 +6,20 @@ from collections.abc import Mapping
 from typing import Any
 
 from mission_control.adapters.postgres.capability.capability_search_repository import PostgresPool
+from mission_control.adapters.postgres.run_control import canonical as mc
+from mission_control.adapters.postgres.run_control.canonical import SCOPE
+from mission_control.contracts.identities import parse_request_scope, uuid7
 from mission_control.domain.authoring.canonical import sha256_digest
 from mission_control.domain.coordinator.launch import WorkflowResultRecord
 
 _OPENAI_KEY = re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{12,}\b")
-_BEARER_TOKEN = re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{12,}\b", re.I)
+_BEARER_TOKEN = re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{12,}\b", re.IGNORECASE)
 _INLINE_SECRET = re.compile(
     r"\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|password|secret)"
     r"\s*[:=]\s*\S+",
-    re.I,
+    re.IGNORECASE,
 )
+RESULT_CONTRACT = "mc.coordinator-workflow-result/1"
 _SECRET_KEYS = frozenset(
     {
         "api_key",
@@ -42,61 +46,40 @@ class PostgresWorkflowResultRepository:
         payload_json = _dump(payload)
         result_digest = sha256_digest(payload)
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(
+            args = await _set_scope(
                 connection,
                 tenant_scope=result.tenant_scope,
                 request_scope=result.request_scope,
             )
-            run = await connection.fetchrow(
-                """
-                SELECT phase
-                FROM belllabs_control.workflow_runs
-                WHERE run_id = $1 AND request_scope = $2
-                """,
-                result.run_id,
-                result.request_scope,
-            )
+            run = await mc.run_row(connection, args, result.run_id)
             if run is None or str(run["phase"]) != "terminal":
                 raise ValueError("typed Workflow Result requires its terminal Workflow Run")
-            inserted = await connection.fetchrow(
+            row = await connection.fetchrow(
                 """
-                INSERT INTO belllabs_control.coordinator_workflow_results (
-                    run_id,
-                    tenant_scope,
-                    request_scope,
-                    blueprint_family,
-                    terminal_outcome,
-                    completed_at,
-                    result_digest,
-                    result_payload
+                INSERT INTO mission_control.coordinator_workflow_result (
+                    installation_id, application_id, tenant_id, coordinator_workflow_result_id,
+                    run_key, tenant_scope, blueprint_family, terminal_outcome, completed_at,
+                    result_digest, result_contract, result_payload, created_at,
+                    created_by_actor_ref
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
-                ON CONFLICT (run_id) DO NOTHING
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $9, $13)
+                ON CONFLICT (installation_id, application_id, tenant_id, run_key) DO NOTHING
                 RETURNING result_digest, result_payload
                 """,
+                *args,
+                uuid7(),
                 result.run_id,
                 result.tenant_scope,
-                result.request_scope,
                 result.blueprint_family.value,
                 result.terminal_outcome.value,
                 result.completed_at,
                 result_digest,
+                RESULT_CONTRACT,
                 payload_json,
+                mc.WRITER_REF,
             )
-            row = inserted
             if row is None:
-                row = await connection.fetchrow(
-                    """
-                    SELECT result_digest, result_payload
-                    FROM belllabs_control.coordinator_workflow_results
-                    WHERE run_id = $1
-                      AND tenant_scope = $2
-                      AND request_scope = $3
-                    """,
-                    result.run_id,
-                    result.tenant_scope,
-                    result.request_scope,
-                )
+                row = await _result_row(connection, args, result.tenant_scope, result.run_id)
             if row is None:
                 raise ValueError("typed Workflow Result identity conflicts across scopes")
             persisted = _record(
@@ -116,23 +99,12 @@ class PostgresWorkflowResultRepository:
         run_id: str,
     ) -> WorkflowResultRecord | None:
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(
+            args = await _set_scope(
                 connection,
                 tenant_scope=tenant_scope,
                 request_scope=request_scope,
             )
-            row = await connection.fetchrow(
-                """
-                SELECT result_digest, result_payload
-                FROM belllabs_control.coordinator_workflow_results
-                WHERE run_id = $1
-                  AND tenant_scope = $2
-                  AND request_scope = $3
-                """,
-                run_id,
-                tenant_scope,
-                request_scope,
-            )
+            row = await _result_row(connection, args, tenant_scope, run_id)
         if row is None:
             return None
         return _record(
@@ -143,20 +115,31 @@ class PostgresWorkflowResultRepository:
         )
 
 
+async def _result_row(
+    connection: Any, args: tuple[Any, ...], tenant_scope: str, run_id: str
+) -> Any:
+    return await connection.fetchrow(
+        f"""
+        SELECT result_digest, result_payload FROM mission_control.coordinator_workflow_result
+        WHERE {SCOPE} AND run_key = $4 AND tenant_scope = $5
+        """,
+        *args,
+        run_id,
+        tenant_scope,
+    )
+
+
 async def _set_scope(
     connection: Any,
     *,
     tenant_scope: str,
     request_scope: str,
-) -> None:
-    await connection.execute(
-        "SELECT set_config('belllabs.request_scope', $1, true)",
-        request_scope,
-    )
-    await connection.execute(
-        "SELECT set_config('belllabs.tenant_scope', $1, true)",
-        tenant_scope,
-    )
+) -> tuple[Any, ...]:
+    """Both scopes must name the same canonical installation, application and tenant."""
+
+    if parse_request_scope(tenant_scope) != parse_request_scope(request_scope):
+        raise ValueError("workflow result tenant scope must match its request scope")
+    return await mc.begin(connection, request_scope)
 
 
 def _record(

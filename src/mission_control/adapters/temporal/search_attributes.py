@@ -148,7 +148,7 @@ async def register_belllabs_search_attributes(client: Client, namespace: str) ->
             await client.operator_service.add_search_attributes(
                 AddSearchAttributesRequest(namespace=namespace, search_attributes=missing)  # type: ignore[arg-type]
             )
-        except Exception as error:  # noqa: BLE001 - surfaced as a typed registration failure
+        except Exception as error:
             raise SearchAttributeRegistrationError(
                 f"Search Attribute registration failed: {error}"
             ) from error

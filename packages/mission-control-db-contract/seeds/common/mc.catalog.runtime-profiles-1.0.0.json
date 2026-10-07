@@ -1,0 +1,105 @@
+{
+  "actor_ref": "seed:mission-control-catalog",
+  "component_compatibility": ">=1.0.0 <2.0.0",
+  "depends_on": [
+    {
+      "seed_key": "mc.catalog.workflow-parity",
+      "seed_version": "1.0.0"
+    }
+  ],
+  "description": "Pinned runtime persistence descriptor and Agent Server graph pins as present in this repository. Pins only; no provider, model route or credential is seeded.",
+  "format": "mission-control-seed/v1",
+  "records": [
+    {
+      "fields": {
+        "asset_id": "runtime-persistence:langgraph-postgres",
+        "contract": "mission-control.runtime-persistence/1",
+        "kind": "profile",
+        "manifest": {
+          "descriptor_ref": "packages/mission-control-db-contract/runtime/descriptor.json",
+          "descriptor_schema": "mission-control.runtime-descriptor/1",
+          "descriptor_sha256": "sha256:b0330c546284548791dffae3c19452952db008fe5b32d36e8cc1a63488b93cfd",
+          "pins": {
+            "langgraph": "1.2.10",
+            "langgraph-checkpoint": "4.1.1",
+            "langgraph-checkpoint-postgres": "3.1.1",
+            "psycopg": "3.3.4"
+          },
+          "profile": "mission-control.runtime-persistence/1",
+          "role": "mission_control_checkpointer",
+          "schema": "mission_control_runtime"
+        },
+        "manifest_digest": "sha256:e6bb3a84bdb0562984fd0a00e775e58c3b52cde711c615cf448a0aabfe48b65b",
+        "manifest_ref": "repo://packages/mission-control-db-contract/runtime/descriptor.json",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "runtime-persistence:langgraph-postgres/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "runtime-persistence:langgraph-postgres/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/runtime/descriptor.json"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "runtime-persistence:langgraph-postgres/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "agent-server:graph-pins",
+        "contract": "mission-control.agent-server-graphs/1",
+        "kind": "profile",
+        "manifest": {
+          "config_ref": "agent_server/langgraph.json",
+          "config_sha256": "sha256:062570368a131a7afacbf416d95c34e55b4da78b89ce0fa163f1a1bf9a4c871a",
+          "graphs": {
+            "belllabs_async_technical_child": "mission_control.adapters.agent_server.entrypoints:child",
+            "block_c_qualification": "mission_control.adapters.agent_server.entrypoints:qualification",
+            "block_c_qualification_n1": "mission_control.adapters.agent_server.entrypoints:qualification_n1",
+            "block_c_wait": "mission_control.adapters.agent_server.entrypoints:wait"
+          },
+          "production_native_persistence": "unqualified",
+          "profile": "mission-control.agent-server-graphs/1",
+          "python_version": "3.12"
+        },
+        "manifest_digest": "sha256:c469cfd54154ca970e8b31b99440182bf52df96c7096f7e224a79fe4025362d1",
+        "manifest_ref": "repo://agent_server/langgraph.json",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-server:graph-pins/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-server:graph-pins/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "agent_server/langgraph.json"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-server:graph-pins/1:admit"
+    }
+  ],
+  "seed_key": "mc.catalog.runtime-profiles",
+  "seed_version": "1.0.0"
+}

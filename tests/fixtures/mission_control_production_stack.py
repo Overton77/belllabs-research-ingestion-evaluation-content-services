@@ -1,8 +1,14 @@
 """Disposable PostgreSQL-only production API/worker stack; deterministic local cognition.
 
-An explicitly supplied loopback owner DSN authorizes creation of a fresh test database.
-No existing schema is reset. Databases remain available for failure inspection.
-Missing prerequisites fail this proof instead of converting it to a successful skip.
+Every stack runs on a fresh database with the common ``mission_control`` component
+installed (``tests.fixtures.mission_control_common_db``): the API and workers connect as
+restricted ``mission_control_runtime`` / ``mission_control_family_writer`` logins under
+forced row-level security, the LangGraph saver/store use the provisioned
+``mission_control_runtime`` schema through a checkpointer-only login, and every scope is a
+canonical ``mc/{installation}/{application}/{tenant}`` scope. The loopback administrator
+DSN (``MISSION_CONTROL_TEST_ADMIN_DSN``) authorizes creating and dropping it; set
+``MISSION_CONTROL_E2E_KEEP_DATABASE=1`` to keep it for failure inspection. Missing
+prerequisites fail this proof instead of converting it to a successful skip.
 """
 
 from __future__ import annotations
@@ -17,16 +23,34 @@ from datetime import timedelta
 from importlib.metadata import version
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
-from uuid import uuid4
 
 import asyncpg
 import httpx
 import pytest
 from temporalio.testing import WorkflowEnvironment
+from tests.fixtures.mission_control_common_db import (
+    CommonDatabase,
+    catalog_scope,
+    create_common_database,
+    drop_common_database,
+    provision_runtime,
+)
+from tests.fixtures.rrm009_production_harness import (
+    PRINCIPAL,
+    TEMPORAL_PORT,
+    ProductionStack,
+    _reset_api_state,
+)
+from tests.fixtures.rrm009_production_stack import (
+    LANGGRAPH_SCHEMA,
+    SCOPE,
+    TASK_QUEUE,
+    TechnicalBinding,
+    technical_admission_policies,
+    technical_binding,
+)
 
 from mission_control.adapters.postgres.connections import (
-    apply_application_migrations,
     create_application_family_writer_pool,
     create_application_postgres_pool,
 )
@@ -61,20 +85,6 @@ from mission_control.interfaces.http.run_control import (
     close_run_control_resources,
     initialize_run_control_resources,
 )
-from tests.fixtures.rrm009_production_harness import (
-    PRINCIPAL,
-    TEMPORAL_PORT,
-    ProductionStack,
-    _reset_api_state,
-)
-from tests.fixtures.rrm009_production_stack import (
-    LANGGRAPH_SCHEMA,
-    SCOPE,
-    TASK_QUEUE,
-    TechnicalBinding,
-    technical_admission_policies,
-    technical_binding,
-)
 
 
 async def start_local(database: Path, *, port: int = TEMPORAL_PORT) -> WorkflowEnvironment:
@@ -90,46 +100,23 @@ async def start_local(database: Path, *, port: int = TEMPORAL_PORT) -> WorkflowE
         )
 
 
-async def _fresh_database(owner_dsn: str) -> tuple[str, str, str]:
-    parsed = urlsplit(owner_dsn)
-    if parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
-        raise ValueError("runtime parity requires an explicitly disposable loopback PostgreSQL")
-    if parsed.hostname == "localhost":
-        # Docker Desktop's IPv6 localhost can accept then stall libpq negotiation;
-        # select the same loopback container explicitly instead of waiting indefinitely.
-        authority = parsed.netloc.rsplit("@", 1)[0]
-        parsed = parsed._replace(netloc=f"{authority}@127.0.0.1:{parsed.port or 5432}")
-    identity = uuid4().hex[:12]
-    database = f"mission_control_e2e_{identity}"
-    connection = await asyncpg.connect(owner_dsn)
+async def _fresh_database(*, legacy_poison: bool = False) -> tuple[CommonDatabase, str]:
+    """A fresh common-component database and its checkpointer-only runtime DSN."""
+
+    database = await create_common_database(legacy_poison=legacy_poison)
     try:
-        await connection.execute(f'CREATE DATABASE "{database}"')
-    finally:
-        await connection.close()
-    dsn = urlunsplit(parsed._replace(path="/" + database))
-    pool = await asyncpg.create_pool(dsn, min_size=1, max_size=2)
-    runtime_login = f"mc_e2e_runtime_{identity}"
-    writer_login = f"mc_e2e_writer_{identity}"
-    try:
-        await apply_application_migrations(pool)
-        async with pool.acquire() as connection:
-            await connection.execute(
-                f'CREATE ROLE "{runtime_login}" LOGIN NOSUPERUSER NOBYPASSRLS '
-                "IN ROLE belllabs_control_runtime"
-            )
-            await connection.execute(
-                f'CREATE ROLE "{writer_login}" LOGIN NOSUPERUSER NOBYPASSRLS '
-                "IN ROLE belllabs_family_repository_writer"
-            )
-            await connection.execute(f'CREATE SCHEMA "{LANGGRAPH_SCHEMA}"')
-    finally:
-        await pool.close()
-    address = parsed.netloc.split("@", 1)[-1]
-    return (
-        dsn,
-        f"postgresql://{runtime_login}@{address}/{database}",
-        (f"postgresql://{writer_login}@{address}/{database}"),
-    )
+        checkpoint_dsn = await provision_runtime(database)
+    except BaseException:
+        await drop_common_database(database)
+        raise
+    return database, checkpoint_dsn
+
+
+async def _release_database(database: CommonDatabase) -> None:
+    if os.environ.get("MISSION_CONTROL_E2E_KEEP_DATABASE") == "1":
+        print(f"E2E: kept database {database.name} for inspection", flush=True)
+        return
+    await drop_common_database(database)
 
 
 @asynccontextmanager
@@ -141,27 +128,23 @@ async def open_postgres_production_stack(
     components: DeploymentCapabilityComponents | None = None,
     model_log: list[dict[str, Any]] | None = None,
     extra_environment: dict[str, str] | None = None,
+    legacy_poison: bool = False,
 ) -> AsyncIterator[ProductionStack]:
-    configured = os.environ.get("MISSION_CONTROL_E2E_POSTGRES_DSN")
-    if not configured:
-        pytest.fail("set MISSION_CONTROL_E2E_POSTGRES_DSN to a disposable loopback owner DSN")
     node_executable = shutil.which("node")
     if node_executable is None:
         pytest.fail("pinned technical MCP/browser runtime requires an installed Node executable")
-    dsn, runtime_dsn, writer_dsn = await _fresh_database(configured)
-    print("E2E: fresh PostgreSQL database migrated", flush=True)
+    database, checkpoint_dsn = await _fresh_database(legacy_poison=legacy_poison)
+    dsn = database.owner_dsn
+    print(f"E2E: fresh common database {database.name} installed", flush=True)
     payload_root = root / "payloads"
     temporal_db = root / "temporal.sqlite"
     environment = {
-        "APPLICATION_DATABASE_DIRECT": runtime_dsn,
+        "APPLICATION_DATABASE_DIRECT": database.dsn("mission_control_runtime"),
         "APPLICATION_MIGRATION_DATABASE_DIRECT": dsn,
-        "APPLICATION_FAMILY_WRITER_DATABASE_DIRECT": writer_dsn,
-        "MISSION_CONTROL_CATALOG_SCOPE": "mission-control-e2e-catalog",
-        "LANGGRAPH_CHECKPOINT_DATABASE_DIRECT": dsn
-        + ("&" if "?" in dsn else "?")
-        + "connect_timeout=10",
+        "APPLICATION_FAMILY_WRITER_DATABASE_DIRECT": database.dsn("mission_control_family_writer"),
+        "MISSION_CONTROL_CATALOG_SCOPE": catalog_scope(database.application_id),
+        "LANGGRAPH_CHECKPOINT_DATABASE_DIRECT": checkpoint_dsn,
         "LANGGRAPH_CHECKPOINT_SCHEMA": LANGGRAPH_SCHEMA,
-        "LANGGRAPH_CHECKPOINT_SETUP": "1",
         "TEMPORAL_ADDRESS": f"127.0.0.1:{TEMPORAL_PORT}",
         "TEMPORAL_NAMESPACE": "default",
         "TEMPORAL_TASK_QUEUE": TASK_QUEUE,
@@ -180,6 +163,7 @@ async def open_postgres_production_stack(
         "OPENAI_API_KEY": "deterministic-local-model-no-provider-access",
         "S3_BUCKET": "",
     }
+    monkeypatch.delenv("LANGGRAPH_CHECKPOINT_SETUP", raising=False)
     for key, value in {**environment, **(extra_environment or {})}.items():
         monkeypatch.setenv(key, value)
     get_settings.cache_clear()
@@ -191,6 +175,7 @@ async def open_postgres_production_stack(
         env = await start_local(temporal_db)
     except BaseException:
         await owner_pool.close()
+        await _release_database(database)
         get_settings.cache_clear()
         raise
     print("E2E: local Temporal server connected", flush=True)
@@ -272,6 +257,7 @@ async def open_postgres_production_stack(
                 temporal_db=temporal_db,
                 model_log=model_log,
                 worker_queues=tuple(worker.task_queue for worker in workers.workers),
+                database=database,
             )
             async with production.worker_stack:
                 for worker in workers.workers:
@@ -285,3 +271,4 @@ async def open_postgres_production_stack(
         await owner_pool.close()
         await (production.env if production is not None else env).shutdown()
         get_settings.cache_clear()
+        await _release_database(database)

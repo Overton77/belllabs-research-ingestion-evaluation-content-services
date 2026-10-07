@@ -63,11 +63,11 @@ def terminal_family_service(repository: Any) -> RunControlService:
     )
 
 
-async def cancelled_run(run_service: RunControlService) -> str:
+async def cancelled_run(run_service: RunControlService, scope: str = "tenant-1") -> str:
     """A started run with a pending pause; the cancel is accepted (never delivered: no
     transport) and the baseline released, so the run may terminalize `cancelled`."""
 
-    admitted = await run_service.admit(request(request_id="family-terminal"))
+    admitted = await run_service.admit(request(request_scope=scope, request_id="family-terminal"))
     run_id = admitted.run_id
     assert run_id is not None
     for version, command_id, action in (
@@ -85,18 +85,22 @@ async def cancelled_run(run_service: RunControlService) -> str:
             ),
         ),
     ):
-        result = await run_service.execute(command(run_id, version, command_id, action))
+        result = await run_service.execute(
+            command(run_id, version, command_id, action).model_copy(update={"request_scope": scope})
+        )
         assert result.status == CommandStatus.ACCEPTED, result
-    run = await run_service.get_run("tenant-1", run_id)
+    run = await run_service.get_run(scope, run_id)
     assert run.phase == RunPhase.CANCELLING
     return run_id
 
 
-async def terminalize_through_the_family(run_service: RunControlService, run_id: str) -> Any:
+async def terminalize_through_the_family(
+    run_service: RunControlService, run_id: str, scope: str = "tenant-1"
+) -> Any:
     """StageGraph's shape: the completion proposal is admitted atomically with its family
     mutation (`execute_family_admission` with `terminalize`)."""
 
-    run = await run_service.get_run("tenant-1", run_id)
+    run = await run_service.get_run(scope, run_id)
     return await run_service.execute_family_admission(
         command(
             run_id,
@@ -118,12 +122,12 @@ async def terminalize_through_the_family(run_service: RunControlService, run_id:
                     proposed_at=NOW,
                 )
             ),
-        ),
+        ).model_copy(update={"request_scope": scope}),
         TestFamilyMutation(
             family_kind="test_family",
             mutation_kind="completion_proposed",
             mutation_id="family-completion-1",
-            request_scope="tenant-1",
+            request_scope=scope,
             run_id=run_id,
             expected_family_version=0,
             exact_operation_request_ref="operation-request:sha256-test",
@@ -133,12 +137,14 @@ async def terminalize_through_the_family(run_service: RunControlService, run_id:
     )
 
 
-async def assert_ledger_closed(run_service: RunControlService, run_id: str, receipt: Any) -> None:
+async def assert_ledger_closed(
+    run_service: RunControlService, run_id: str, receipt: Any, scope: str = "tenant-1"
+) -> None:
     assert receipt.command_result.status == CommandStatus.ACCEPTED, receipt
     assert receipt.command_result.terminal_outcome == RunOutcome.CANCELLED
     statuses = {
         status.command.command_id: status
-        for status in await run_service.list_boundary_commands("tenant-1", run_id)
+        for status in await run_service.list_boundary_commands(scope, run_id)
     }
     # The cancel is applied by the cancelled outcome (delivered recorded by run control,
     # since no transport ever delivered it); the pause is closed `terminal_run`.
@@ -149,7 +155,7 @@ async def assert_ledger_closed(run_service: RunControlService, run_id: str, rece
     ]
     assert states(statuses["pause"]) == ["accepted", "rejected"]
     assert statuses["pause"].receipts[-1].rejection_reason == "terminal_run"
-    assert await run_service.runs_with_pending_boundary_commands("tenant-1") == ()
+    assert await run_service.runs_with_pending_boundary_commands(scope) == ()
 
 
 @pytest.mark.asyncio

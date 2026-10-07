@@ -218,9 +218,11 @@ def materialize_schema_workspace(
     )
     profiles = {
         "selection-tier0": tier0_paths,
-        "selection-candidates": tier0_paths
-        + ("schema/profiles/selection-candidates.json",)
-        + candidate_paths,
+        "selection-candidates": (
+            *tier0_paths,
+            "schema/profiles/selection-candidates.json",
+            *candidate_paths,
+        ),
     }
     write_json(
         schema_root / "profiles/selection-tier0.json",
@@ -275,5 +277,6 @@ def workspace_profile_paths(run_root: Path, profile: WorkspaceProfile) -> tuple[
             "schema/profiles/selection-tier0.json",
             "schema/profiles/selection-candidates.json",
             "schema/skills/schema-navigation/SKILL.md",
-        ) + base
+            *base,
+        )
     return base

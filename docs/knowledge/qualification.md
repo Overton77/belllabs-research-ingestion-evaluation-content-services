@@ -18,12 +18,16 @@ models. The implementation status records exact selections and dates. Source mov
 require renewed lint, typing, import and acceptance verification; earlier results
 are not automatically proof of the reorganized package.
 
-Remaining gates include the released common schema and compatible production
-adapters, live Supabase/storage policies, operating-system enforced executable
-mounts and provider-specific qualification. These are explicit limits, not default
+The common component is qualified on two local disposable databases with different
+protected domain fixtures (`tests/qualification/two_project/` is the independent
+reviewer suite) and was installed into both Supabase projects on 2026-10-03 with
+identical fingerprints and clean protected-object comparisons. Remaining gates include
+live application traffic (runtime login roles), a verified recovery point, Agent Server
+topology/license, live storage policies, operating-system enforced executable mounts
+and provider-specific qualification. These are explicit limits, not default
 skips hidden behind a green headline.
 
-Broad KnowledgeServices generalization is deferred. Removing a legacy adapter is
+Broad Knowledge Services generalization is deferred (the shared contracts are required scope; see [knowledge-services](knowledge-services.md)). Removing a legacy adapter is
 a clean-break source decision, not a migration of historical data or a claim that
 every future general Mission Control workflow type is implemented.
 
@@ -31,5 +35,6 @@ every future general Mission Control workflow type is implemented.
 
 - [PostgreSQL runtime acceptance](../../tests/acceptance/mission_control/test_postgres_runtime_parity.py).
 - [Authenticated scoped runtime acceptance](../../tests/acceptance/mission_control/test_authenticated_scoped_runtime.py).
+- [Independent two-project qualification](../../tests/qualification/two_project/conftest.py).
 - Exact suite results: `docs/MISSION_CONTROL_IMPLEMENTATION_STATUS.md`.
 - Changed paths, recovery and removals: `docs/REMOVAL_GUIDE.md`.

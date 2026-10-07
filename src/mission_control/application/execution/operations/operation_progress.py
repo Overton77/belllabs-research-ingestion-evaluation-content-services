@@ -50,7 +50,7 @@ class CognitionProgress:
         if reader is not None:
             try:
                 latest = await reader()
-            except Exception:  # noqa: BLE001 - a heartbeat never fails the attempt
+            except Exception:
                 latest = None
             if latest is not None:
                 self.latest_checkpoint = latest
@@ -110,10 +110,10 @@ __all__ = [
     "CURRENT_CANCEL_PROBE",
     "CURRENT_PROGRESS",
     "CancellationProbe",
-    "cancel_requested",
     "CheckpointReader",
     "CognitionPhase",
     "CognitionProgress",
+    "cancel_requested",
     "current_progress",
     "register_checkpoint_reader",
     "report_phase",

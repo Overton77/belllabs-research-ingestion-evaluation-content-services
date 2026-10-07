@@ -1,0 +1,142 @@
+"""Offline structure, closure and provenance checks for the catalog seed bundles."""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import re
+from pathlib import Path
+from types import ModuleType
+
+import pytest
+
+from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.authoring.contracts import PublishedDefinition
+from mission_control_db_contract.errors import ContractError
+from mission_control_db_contract.seeds import load_bundles, order_bundles, validate_bundle
+
+ROOT = Path(__file__).resolve().parents[3]
+SEEDS = ROOT / "packages" / "mission-control-db-contract" / "seeds"
+EXPECTED = {
+    ("mc.catalog.workflow-parity", "1.0.0"),
+    ("mc.catalog.runtime-profiles", "1.0.0"),
+    ("mc.catalog.approved-assets", "1.0.0"),
+    ("mc.qualification.parity", "1.0.0"),
+}
+SECRET_LIKE = re.compile(
+    r"(postgres(ql)?://|password|passwd|secret_value|api[_-]?key|bearer |-----BEGIN)", re.IGNORECASE
+)
+
+
+def _generator() -> ModuleType:
+    spec = importlib.util.spec_from_file_location(
+        "generate_catalog_seeds", SEEDS / "generate_catalog_seeds.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _bundles(*directories: str) -> list[dict]:
+    return load_bundles([SEEDS / directory for directory in directories])
+
+
+def test_committed_bundles_match_their_repository_sources() -> None:
+    generated = _generator().build_bundles()
+    committed = {
+        path.relative_to(SEEDS).as_posix(): json.loads(path.read_bytes())
+        for path in sorted(SEEDS.rglob("*.json"))
+    }
+    assert committed == generated, "regenerate with generate_catalog_seeds.py --write"
+
+
+@pytest.mark.parametrize("app", ["biotech", "ai-engineer"])
+def test_each_app_installation_set_is_valid_and_dependency_closed(app: str) -> None:
+    bundles = _bundles("common", app)
+    ordered = order_bundles(bundles, already_applied=set())
+    keys = [(item["seed_key"], item["seed_version"]) for item in ordered]
+    assert keys == [
+        ("mc.catalog.workflow-parity", "1.0.0"),
+        ("mc.catalog.runtime-profiles", "1.0.0"),
+        ("mc.catalog.approved-assets", "1.0.0"),
+        ("mc.app.bindings", "1.0.0"),
+        ("mc.app.bindings", "1.0.1"),
+    ]
+    frozen, current = (item["records"][0]["fields"] for item in ordered[-2:])
+    assert (frozen["version"], current["version"]) == ("1", "2")
+    binding = current["manifest"]
+    assert binding["application_id"] == app
+    assert binding["approved_tenant_actor_mappings"] == []
+    # The approved target has no unresolved operator fields; 1.0.0 recorded the placeholders.
+    assert binding["unresolved_operator_fields"] == []
+    assert frozen["manifest"]["unresolved_operator_fields"]
+    # Common catalog bytes are one shared copy; only the app binding differs.
+    assert _bundles("common") == [item for item in bundles if item["seed_key"] != "mc.app.bindings"]
+
+
+def test_qualification_bundle_is_opt_in_and_closes_over_common() -> None:
+    with pytest.raises(ContractError, match="neither supplied nor applied"):
+        order_bundles(_bundles("qualification"), already_applied=set())
+    ordered = order_bundles(_bundles("common", "qualification"), already_applied=set())
+    assert {(item["seed_key"], item["seed_version"]) for item in ordered} == EXPECTED
+    qualification = next(item for item in ordered if item["seed_key"] == "mc.qualification.parity")
+    (tenant,) = [record for record in qualification["records"] if record["kind"] == "tenant"]
+    assert tenant["fields"]["qualification_fixture"] is True
+    assert "SYNTHETIC QUALIFICATION FIXTURE" in qualification["description"]
+
+
+def test_bundles_seed_no_fabricated_authority_usage_or_secrets() -> None:
+    for bundle in _bundles("common", "biotech", "ai-engineer", "qualification"):
+        kinds = {record["kind"] for record in bundle["records"]}
+        # No actor bindings, actor grants or capability grants without owner approval.
+        assert kinds <= {"tenant", "asset_version", "asset_decision"}, bundle["seed_key"]
+        if bundle["seed_key"] != "mc.qualification.parity":
+            assert "tenant" not in kinds
+        assets = {r["logical_key"] for r in bundle["records"] if r["kind"] == "asset_version"}
+        decisions = [r for r in bundle["records"] if r["kind"] == "asset_decision"]
+        assert {d["fields"]["asset_version"] for d in decisions} == assets
+        assert all(d["fields"]["decision"] == "admit" for d in decisions)
+        text = json.dumps(bundle)
+        assert not SECRET_LIKE.search(text), bundle["seed_key"]
+        for forbidden in ("embedding", "mission_run", "usage", "receipt"):
+            assert f'"{forbidden}"' not in text
+
+
+def test_published_definition_assets_are_exact_and_repository_readable() -> None:
+    from mission_control.adapters.postgres.control_plane.catalog_assets import (
+        PUBLISHED_DEFINITION_CONTRACT,
+        definition_asset_id,
+    )
+
+    seen = set()
+    for bundle in _bundles("common", "qualification"):
+        for record in bundle["records"]:
+            fields = record["fields"]
+            if record["kind"] != "asset_version":
+                continue
+            if fields["contract"] != PUBLISHED_DEFINITION_CONTRACT:
+                continue
+            published = PublishedDefinition.model_validate(fields["manifest"])
+            assert fields["manifest_digest"] == sha256_digest(fields["manifest"])
+            assert published.ref.digest == sha256_digest(published.definition)
+            assert fields["asset_id"] == definition_asset_id(
+                published.ref.kind, published.ref.logical_id
+            )
+            assert fields["version"] == str(published.ref.revision) == "1"
+            seen.add(published.ref.logical_id)
+    assert seen == {
+        "skill.mission-control-coordinator",
+        "prompt.coordinator.propose-workflow",
+        "fixture.generic-stage-graph",
+        "fixture.generic-goal-directed",
+    }
+
+
+def test_changed_bytes_change_the_seed_digest() -> None:
+    (bundle,) = [b for b in _bundles("common") if b["seed_key"] == "mc.catalog.workflow-parity"]
+    original = {key: value for key, value in bundle.items() if key != "seed_digest"}
+    changed = json.loads(json.dumps(original))
+    changed["records"][0]["fields"]["manifest"]["family"] = "Invented"
+    assert validate_bundle(changed)["seed_digest"] != bundle["seed_digest"]
+    assert validate_bundle(original)["seed_digest"] == bundle["seed_digest"]

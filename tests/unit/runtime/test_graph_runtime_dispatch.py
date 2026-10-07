@@ -413,7 +413,7 @@ async def test_intervention_is_reserved_before_ambiguous_provider_effect() -> No
             binding_id,
         ):  # type: ignore[no-untyped-def]
             del binding_id
-            return None
+            return
 
     client = AmbiguousClient()
     service = RuntimeInterventionService(

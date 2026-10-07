@@ -17,6 +17,25 @@ from pydantic import TypeAdapter
 from temporalio import activity
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
+from tests.acceptance.control_plane.test_wp_bp_020_sandbox_rollover import (
+    Documents,
+    SandboxRolloverActivities,
+    Templates,
+)
+from tests.acceptance.control_plane.test_wp_cp_040 import exact_fixture
+from tests.fixtures.checkpoint_recovery import MemoryOperationJournal
+from tests.fixtures.goal_directed_journaled import (
+    goal_authority,
+    goal_template_workspace,
+    governed_result_service,
+)
+from tests.unit.operations.test_operation_execution import (
+    MCP_DIGEST,
+    SKILL_DIGEST,
+    operation_request,
+)
+from tests.unit.run_control.test_run_control import actor as journal_actor
+from tests.unit.run_control.test_run_control import request as run_request
 
 from mission_control.adapters.deep_agents import (
     DeepAgentRuntimeAdapter,
@@ -101,25 +120,6 @@ from mission_control.interfaces.http.control_plane import (
     get_control_plane_principal,
 )
 from mission_control.interfaces.http.run_control import get_run_control_service, router
-from tests.acceptance.control_plane.test_wp_bp_020_sandbox_rollover import (
-    Documents,
-    SandboxRolloverActivities,
-    Templates,
-)
-from tests.acceptance.control_plane.test_wp_cp_040 import exact_fixture
-from tests.fixtures.checkpoint_recovery import MemoryOperationJournal
-from tests.fixtures.goal_directed_journaled import (
-    goal_authority,
-    goal_template_workspace,
-    governed_result_service,
-)
-from tests.unit.operations.test_operation_execution import (
-    MCP_DIGEST,
-    SKILL_DIGEST,
-    operation_request,
-)
-from tests.unit.run_control.test_run_control import actor as journal_actor
-from tests.unit.run_control.test_run_control import request as run_request
 
 QUEUE = "wp-bp-020-live-family"
 COGNITIVE_QUEUE = "agent-cognitive"

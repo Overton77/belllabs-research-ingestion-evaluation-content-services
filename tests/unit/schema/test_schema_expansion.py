@@ -1,7 +1,7 @@
-from biotech_mission_adapters.application.schema.schema_catalog import parse_schema_catalog
-from biotech_mission_adapters.domain.schema_context.expansion import expand_selection
 from graphql import parse
 
+from biotech_mission_adapters.application.schema.schema_catalog import parse_schema_catalog
+from biotech_mission_adapters.domain.schema_context.expansion import expand_selection
 from tests.schema_context_helpers import accepted, catalog
 
 

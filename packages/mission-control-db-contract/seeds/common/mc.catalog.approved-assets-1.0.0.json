@@ -1,0 +1,302 @@
+{
+  "actor_ref": "seed:mission-control-catalog",
+  "component_compatibility": ">=1.0.0 <2.0.0",
+  "depends_on": [
+    {
+      "seed_key": "mc.catalog.runtime-profiles",
+      "seed_version": "1.0.0"
+    }
+  ],
+  "description": "Reviewed assets that exist in this repository: skill.mission-control-coordinator and prompt.coordinator.propose-workflow (published-definition revision 1) and the canonical skills/mission-control bundle manifest. Skill bytes are not uploaded here; remote byte admission remains a separate capability-bundles registration.",
+  "format": "mission-control-seed/v1",
+  "records": [
+    {
+      "fields": {
+        "asset_id": "definition:skill:skill.mission-control-coordinator",
+        "contract": "mission-control.published-definition/1",
+        "kind": "skill",
+        "manifest": {
+          "definition": {
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "body_summary": "Search Workflow Types and governed capabilities progressively, quarantine external discoveries, and prepare exact admitted launches.",
+            "bundle_ref": {
+              "digest": "sha256:206fdd72131ce924478feae7103c191cd07b24d8cbc6a778bb10bf4a960210c0",
+              "media_type": "application/vnd.belllabs.skill-manifest+json",
+              "size_bytes": 14153,
+              "uri": "workspace://.agents/skills/mission-control-coordinator/206fdd72131ce924478feae7103c191cd07b24d8cbc6a778bb10bf4a960210c0"
+            },
+            "compatibility": {
+              "executables": [],
+              "network_capabilities": [
+                "network.coordinator-mcp"
+              ],
+              "runtimes": [
+                "codex",
+                "governed-agent-runtime"
+              ],
+              "workspace_capabilities": [
+                "workspace.skill.read"
+              ]
+            },
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Coordinate governed BellLabs research workflows by searching exact internal Workflow Types and capabilities, quarantining external MCP or Agent Skill discoveries, validating designs, preparing immutable launch tickets, launching authorized StageGraph or GoalDirected runs, and retrieving typed results. Use for research goals that need capability discovery, MCP/skill selection, workflow planning, admission, launch, or result polling.",
+            "file_manifest": [
+              {
+                "digest": "sha256:0a5454d38f4982f6da6389cc77f43632e00af62ddbfc5fe2de36a6acf23685af",
+                "executable": false,
+                "path": "agents/openai.yaml",
+                "size_bytes": 253
+              },
+              {
+                "digest": "sha256:7f88495a937e966418460d3656a944fd92259fae444104e7a10c28ff43e935c8",
+                "executable": false,
+                "path": "assets/proposal-template.json",
+                "size_bytes": 469
+              },
+              {
+                "digest": "sha256:929e42171163ff9be8b4779155d7017bfb078cad901d9262915a97cf3b9a1dc8",
+                "executable": false,
+                "path": "references/authority-and-approvals.md",
+                "size_bytes": 913
+              },
+              {
+                "digest": "sha256:b378afbd0bed1cad2f7d3a466c9efedaf2c398ed91afa282ce220aef3fe01889",
+                "executable": false,
+                "path": "references/capability-selection.md",
+                "size_bytes": 1154
+              },
+              {
+                "digest": "sha256:9b4754f5a3dc0250aa7639189092b0f06850ed1b6841da55520b0e7a77c074ab",
+                "executable": false,
+                "path": "references/coordinator-protocol.md",
+                "size_bytes": 1028
+              },
+              {
+                "digest": "sha256:f4e386cc34900c04219397e2b26767ef094f0c5df29e28bf0f6df52a32dfcf37",
+                "executable": false,
+                "path": "references/examples.md",
+                "size_bytes": 1152
+              },
+              {
+                "digest": "sha256:b58b0720f218dae656d40e4db4e18ebcf848b0bd23602309e47daa93629b9999",
+                "executable": false,
+                "path": "references/workflow-design-contracts.md",
+                "size_bytes": 943
+              },
+              {
+                "digest": "sha256:69b78ee5114735ea814df228e2e4daad4e8d5a0e5684555cb99e3a2507539b63",
+                "executable": false,
+                "path": "schemas/workflow-design-draft.schema.json",
+                "size_bytes": 1574
+              },
+              {
+                "digest": "sha256:36ac01cd8c311a68f7ff461c0af1f6ad4769038990f574d4b6bad390765806ea",
+                "executable": false,
+                "path": "schemas/workflow-launch-proposal.schema.json",
+                "size_bytes": 982
+              },
+              {
+                "digest": "sha256:20fb8910e1ec924825572576d7761722f70ac3dd26b16f36897757141e609800",
+                "executable": false,
+                "path": "scripts/validate_launch_proposal.py",
+                "size_bytes": 976
+              },
+              {
+                "digest": "sha256:4f861420fe9acf12de15bad8142e17ae89a2952abcbcb10d5fcc3a943ae93aee",
+                "executable": false,
+                "path": "scripts/validate_workflow_design.py",
+                "size_bytes": 949
+              },
+              {
+                "digest": "sha256:0a6dfecd25f0ca24c75bcf35e94fc9dbba8bf0e7880d73e1c76fea2f3df687e1",
+                "executable": false,
+                "path": "SKILL.md",
+                "size_bytes": 3760
+              }
+            ],
+            "frontmatter": {
+              "description": "Coordinate governed BellLabs research workflows by searching exact internal Workflow Types and capabilities, quarantining external MCP or Agent Skill discoveries, validating designs, preparing immutable launch tickets, launching authorized StageGraph or GoalDirected runs, and retrieving typed results. Use for research goals that need capability discovery, MCP/skill selection, workflow planning, admission, launch, or result polling.",
+              "name": "mission-control-coordinator"
+            },
+            "kind": "skill",
+            "logical_id": "skill.mission-control-coordinator",
+            "manifest_digest": "sha256:206fdd72131ce924478feae7103c191cd07b24d8cbc6a778bb10bf4a960210c0",
+            "maturity": "qualified",
+            "required_capabilities": [
+              "catalog.search",
+              "workflow.launch",
+              "workflow.prepare",
+              "workflow.result.read"
+            ],
+            "review_status": "approved",
+            "schema_version": "1",
+            "skill_name": "mission-control-coordinator",
+            "source_provenance": {
+              "commit_digest": null,
+              "license": null,
+              "locator": "workspace:.agents/skills/mission-control-coordinator",
+              "source": "belllabs",
+              "upstream_identity": "mission-control-coordinator",
+              "upstream_version": "sha256:206fdd72131ce924478feae7103c191cd07b24d8cbc6a778bb10bf4a960210c0"
+            },
+            "title": "BellLabs Workflow Coordinator"
+          },
+          "published_at": "2026-10-03T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:6334e887c82480c8c9386389fe73ec9d0b82f517683aaf4ce87010520283eb05",
+            "kind": "skill",
+            "lifecycle_status": "published",
+            "logical_id": "skill.mission-control-coordinator",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:a13277e9f64f97a55619497e48c6775145fcda52d76d42448c26731503e294da",
+        "manifest_ref": "mc-catalog://definition/skill/skill.mission-control-coordinator/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "definition:skill:skill.mission-control-coordinator/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "definition:skill:skill.mission-control-coordinator/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "src/mission_control/application/coordinator/coordinator_surface_promotion.py",
+          ".agents/skills/mission-control-coordinator"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "definition:skill:skill.mission-control-coordinator/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:prompt:prompt.coordinator.propose-workflow",
+        "contract": "mission-control.published-definition/1",
+        "kind": "schema",
+        "manifest": {
+          "definition": {
+            "body": "Normalize this objective, then search Workflow Types first. Retrieve exact input, invariant, obligation, output, workspace, and linked-run contracts before selecting capabilities or drafting topology.\n\nObjective: {objective}",
+            "description": "Normalize an operator objective, then search existing Workflow Types and their exact contracts before proposing any new topology.",
+            "eval_refs": [],
+            "format": "markdown",
+            "kind": "prompt",
+            "logical_id": "prompt.coordinator.propose-workflow",
+            "payload_ref": null,
+            "schema_version": "1",
+            "template_engine": "format",
+            "title": "Propose governed workflow",
+            "trust_class": "reviewed",
+            "variables": [
+              {
+                "description": "The operator's requested outcome.",
+                "name": "objective",
+                "required": true,
+                "value_schema": {}
+              }
+            ]
+          },
+          "published_at": "2026-10-03T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:cdb9c24e053caa4868c4a35f5f42ef8fe09e79a63199d5b91caba99d7db26fbc",
+            "kind": "prompt",
+            "lifecycle_status": "published",
+            "logical_id": "prompt.coordinator.propose-workflow",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:41a5dca8e96c4a3c6844d230a1a1b821e6a716bbb125ba075aa9482e2270407b",
+        "manifest_ref": "mc-catalog://definition/prompt/prompt.coordinator.propose-workflow/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "definition:prompt:prompt.coordinator.propose-workflow/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "definition:prompt:prompt.coordinator.propose-workflow/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "src/mission_control/application/coordinator/coordinator_surface_promotion.py",
+          ".agents/skills/mission-control-coordinator"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "definition:prompt:prompt.coordinator.propose-workflow/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "skill-bundle-manifest:mission-control",
+        "contract": "mc.skill_bundle.v1",
+        "kind": "skill",
+        "manifest": {
+          "files": {
+            "SKILL.md": "sha256:dd297771a7801d0b7960f76338faaabbf995bcd200b215bead8dfa2fc9f399eb",
+            "references/operations.json": "sha256:8f8fe121ad9166d6c1838c1a81d52173dd81b47f21e592df427916a8fc7a1dfb",
+            "references/protocol.md": "sha256:acda9268b0bdcf1cc069149a97eaa879d5097138ca3b1c35741a9746ceef568d"
+          },
+          "name": "mission-control",
+          "operation_catalog_digest": "sha256:8f8fe121ad9166d6c1838c1a81d52173dd81b47f21e592df427916a8fc7a1dfb",
+          "schema_version": "mc.skill_bundle.v1",
+          "service_contract_range": ">=0.1.0,<0.2.0",
+          "version": "0.1.1"
+        },
+        "manifest_digest": "sha256:18d5880e476ccc9d4a04d2cd747a9a3f155bc36fcf12ac9ab23accea6531b5db",
+        "manifest_ref": "repo://skills/mission-control/manifest.json",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "0.1.1"
+      },
+      "kind": "asset_version",
+      "logical_key": "skill-bundle-manifest:mission-control/0.1.1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "skill-bundle-manifest:mission-control/0.1.1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "skills/mission-control/manifest.json"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "skill-bundle-manifest:mission-control/0.1.1:admit"
+    }
+  ],
+  "seed_key": "mc.catalog.approved-assets",
+  "seed_version": "1.0.0"
+}

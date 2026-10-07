@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+from tests.fixtures.fake_agent_protocol import FakeAgentProtocolClient, install
 
 from mission_control.adapters.deep_agents.async_subagents import (
     DeepAgentsAsyncSubagentAdapter,
@@ -36,7 +37,6 @@ from mission_control.domain.execution.delegation import (
     AsyncDelegationBoundary,
     classify_async_delegation,
 )
-from tests.fixtures.fake_agent_protocol import FakeAgentProtocolClient, install
 
 NOW = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
 GRAPH_BINDING_DIGEST = sha256_digest("research-graph-binding")

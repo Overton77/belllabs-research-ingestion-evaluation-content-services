@@ -1,0 +1,77 @@
+{
+  "declared_runtime_roles": [
+    "mission_control_runtime",
+    "mission_control_family_writer",
+    "mission_control_catalog_writer",
+    "mission_control_outbox_worker",
+    "mission_control_readonly"
+  ],
+  "mission_control_roles": [
+    {
+      "member_of": [],
+      "owns_owned_objects": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": false,
+      "rolname": "mission_control_catalog_writer",
+      "rolsuper": false
+    },
+    {
+      "member_of": [],
+      "owns_owned_objects": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": false,
+      "rolname": "mission_control_checkpointer",
+      "rolsuper": false
+    },
+    {
+      "member_of": [],
+      "owns_owned_objects": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": false,
+      "rolname": "mission_control_family_writer",
+      "rolsuper": false
+    },
+    {
+      "member_of": [],
+      "owns_owned_objects": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": false,
+      "rolname": "mission_control_outbox_worker",
+      "rolsuper": false
+    },
+    {
+      "member_of": [],
+      "owns_owned_objects": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": false,
+      "rolname": "mission_control_readonly",
+      "rolsuper": false
+    },
+    {
+      "member_of": [],
+      "owns_owned_objects": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": false,
+      "rolname": "mission_control_runtime",
+      "rolsuper": false
+    }
+  ]
+}

@@ -3,12 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
 from biotech_mission_adapters.application.schema.schema_catalog import (
     materialize_schema_catalog,
     parse_schema_catalog,
 )
 from biotech_mission_adapters.domain.schema_context.errors import SchemaParseError
-
 from tests.schema_context_helpers import SDL
 
 

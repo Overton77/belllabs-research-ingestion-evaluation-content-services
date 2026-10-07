@@ -1,0 +1,29 @@
+{
+  "identity_matches_target": true,
+  "note": "Route/project identity evidence is the referenced identity_evidence; an inserted installation row alone does not prove which project was reached.",
+  "observed_installation": [
+    {
+      "application_id": "ai-engineer",
+      "environment": "disposable",
+      "installation_id": "0192a4f0-0000-7000-8000-0000000a1e00",
+      "schema_component_version": "1.0.0",
+      "state": "active",
+      "supabase_project_ref": "mcdisposableaieng"
+    }
+  ],
+  "server_version_num": 170011,
+  "target": {
+    "app": "ai-engineer",
+    "application_id": "ai-engineer",
+    "approved_by": "lead:disposable-qualification",
+    "database_host": "127.0.0.1",
+    "database_name": "postgres",
+    "database_port": "55552",
+    "database_user": "mc_migrator",
+    "environment": "disposable",
+    "identity_evidence": "local docker disposable cluster for ai-engineer",
+    "installation_id": "0192a4f0-0000-7000-8000-0000000a1e00",
+    "project_label": "disposable-ai-engineer",
+    "project_ref": "mcdisposableaieng"
+  }
+}

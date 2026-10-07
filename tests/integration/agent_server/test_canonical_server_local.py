@@ -10,11 +10,15 @@ from langgraph_sdk import get_client
 from langgraph_sdk.errors import APIStatusError
 
 from mission_control.adapters.agent_server.async_subagents.auth import mint_scope_claim
+from tests.fixtures.mission_control_common_db import canonical_scope
 from tests.fixtures.mission_control_local_agent_server import (
     deterministic_child_definition,
     local_agent_server,
 )
 from tests.fixtures.rrm009_production_stack import SCOPE
+
+# Another tenant of the same installation, in canonical form.
+OTHER_SCOPE = canonical_scope("tenant-2")
 
 
 async def test_canonical_runtime_config_runs_and_cancels_bounded_child(
@@ -47,9 +51,7 @@ async def test_canonical_runtime_config_runs_and_cancels_bounded_child(
             url=endpoint,
             headers={
                 "Authorization": "Bearer "
-                + mint_scope_claim(
-                    os.environ["BELLABS_ASYNC_SUBAGENT_SERVER_TOKEN"], "other-tenant"
-                )
+                + mint_scope_claim(os.environ["BELLABS_ASYNC_SUBAGENT_SERVER_TOKEN"], OTHER_SCOPE)
             },
         )
         with pytest.raises(APIStatusError):

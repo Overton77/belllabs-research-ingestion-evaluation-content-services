@@ -68,6 +68,6 @@ class TemporalVisibilityInspectionReader:
                         closed_at=item.close_time,
                     )
                 )
-        except Exception as error:  # noqa: BLE001 - Visibility outages degrade the section
+        except Exception as error:
             raise RuntimeSourceUnavailable("Temporal Visibility is unavailable") from error
         return tuple(sorted(executions, key=lambda item: (item.workflow_id, item.temporal_run_id)))

@@ -5,6 +5,14 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
+from tests.unit.run_control.test_run_control import (
+    EMPTY_EVIDENCE_DIGEST,
+    INITIAL_EVIDENCE_FRONTIER,
+    WORKFLOW_DIGEST,
+    command,
+    request,
+    service,
+)
 
 from mission_control.application.execution.run_control_repository import (
     InMemoryRunControlRepository,
@@ -29,14 +37,6 @@ from mission_control.domain.policies.contracts import (
     StartAction,
     TerminalizationProposal,
     TerminalizeAction,
-)
-from tests.unit.run_control.test_run_control import (
-    EMPTY_EVIDENCE_DIGEST,
-    INITIAL_EVIDENCE_FRONTIER,
-    WORKFLOW_DIGEST,
-    command,
-    request,
-    service,
 )
 
 NOW = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)

@@ -302,8 +302,8 @@ class RunLaunchService:
 
 
 __all__ = [
-    "ForkTemplateDerivationPort",
     "LAUNCH_PERMISSION",
+    "ForkTemplateDerivationPort",
     "RunLaunchReceipt",
     "RunLaunchRejected",
     "RunLaunchRequest",

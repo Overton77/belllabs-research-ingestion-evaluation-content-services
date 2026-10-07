@@ -1,20 +1,23 @@
-"""Application PostgreSQL authority for runtime units and checkpoint lineage.
+"""Runtime units and checkpoint lineage on mission_control.
 
-Migration 0019 (RRM-003) holds units, attempts, namespaces and transitions; migration 0020
-(RRM-004) adds the claim lease and generation boundary on `runtime_unit_generations`, the
-fenced `runtime_unit_result_observations`, and writes typed `in_doubt` incidents into
-`runtime_reconciliation_incidents`.
+A runtime unit is a canonical ``activation`` (activation key = unit key); each execution
+generation is a canonical ``attempt`` whose fencing token is the claim fence and whose
+lease is the claim lease. Generation detail, cognitive namespaces, activity attempt
+observations, checkpoint transitions, unit results and stale-fence rejections are support
+lineage records; typed ``in_doubt`` incidents are canonical ``reconciliation_case`` rows.
 """
 
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
 import asyncpg
 
+from mission_control.adapters.postgres.run_control import canonical as mc
+from mission_control.adapters.postgres.run_control.canonical import SCOPE, scoped
 from mission_control.application.execution.operations.checkpoint_lineage import (
     NamespaceRecord,
     UnitGenerationRecord,
@@ -33,6 +36,7 @@ from mission_control.application.execution.operations.checkpoint_lineage import 
     resolve_incident,
     stale_claim_error,
 )
+from mission_control.contracts.identities import uuid7
 from mission_control.domain.execution.checkpoint_lineage import (
     ActivityAttemptObservation,
     AttemptAdmission,
@@ -51,8 +55,27 @@ from mission_control.domain.graph_runtime.identities import (
 from mission_control.domain.policies.contracts import UnitReconciliationDecision
 
 INCIDENT_TYPE = "runtime_unit_in_doubt"
-INCIDENT_ACTOR = "belllabs-operation-runtime"
-INCIDENT_RETENTION = timedelta(days=3650)
+INCIDENT_ACTOR = "mission-control-operation-runtime"
+
+GENERATION_COLUMNS = """
+    g.unit_key, g.execution_generation, a.fencing_token AS claim_fence, g.binding_key,
+    g.binding_digest, g.cognitive_namespace, g.state_schema_digest, g.lease_holder,
+    a.lease_expires_at, g.superseded
+"""
+GENERATION_JOIN = """
+    FROM mission_control.runtime_unit_generation g
+    JOIN mission_control.attempt a
+      ON a.installation_id = g.installation_id AND a.application_id = g.application_id
+     AND a.tenant_id = g.tenant_id AND a.attempt_key = g.attempt_key
+"""
+NAMESPACE_COLUMNS = """
+    namespace_key, owner_kind, owner_digest, head_checkpoint, head_transition_key,
+    head_state_schema_digest, in_flight_unit_key, in_flight_generation
+"""
+
+
+def attempt_key(unit_key: str, execution_generation: int) -> str:
+    return f"{unit_key}:gen:{execution_generation}"
 
 
 class PostgresCheckpointLineageRepository:
@@ -78,31 +101,36 @@ class PostgresCheckpointLineageRepository:
         unit_key = unit.unit_key
         holder = lease_holder_id(scope, unit_key, execution_generation, attempt)
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, scope)
+            args = await mc.begin(connection, scope)
+            run = await mc.require_run(connection, args, unit.belllabs_run_id)
             await connection.execute(
                 """
-                INSERT INTO belllabs_control.runtime_units (
-                    request_scope, unit_key, schema_version, belllabs_run_id,
-                    execution_epoch, family, unit_kind, semantic_operation_id,
-                    semantic_attempt, identity_payload, recorded_at
+                INSERT INTO mission_control.activation (
+                    installation_id, application_id, tenant_id, activation_id, run_id,
+                    activation_key, revision_id, program_node_id, parent_activation_id,
+                    expansion_key, repetition_ordinal, lifecycle, phase, terminal_outcome,
+                    completion_decision_id, governor_projection, version, updated_at,
+                    created_at, created_by_actor_ref
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11)
-                ON CONFLICT (request_scope, unit_key) DO NOTHING
+                VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, NULL, $8, $9, 'running', $10, NULL,
+                        NULL, $11::jsonb, 1, $12, $12, $13)
+                ON CONFLICT (installation_id, application_id, tenant_id, activation_key)
+                DO NOTHING
                 """,
-                scope,
+                *args,
+                uuid7(),
+                run["run_id"],
                 unit_key,
-                unit.schema_version,
-                unit.belllabs_run_id,
-                unit.execution_epoch,
-                unit.family,
-                unit.unit_kind,
-                unit.semantic_operation_id,
-                unit.semantic_attempt,
+                run["revision_id"],
+                f"{unit.family}:{unit.unit_kind}:{unit.semantic_operation_id}",
+                unit.semantic_attempt - 1,
+                f"runtime_unit:{unit.unit_kind}:epoch:{unit.execution_epoch}",
                 _dump(unit.model_dump(mode="json")),
                 observed_at,
+                INCIDENT_ACTOR,
             )
             await _lock_unit(connection, scope, unit_key)
-            current = await _generation(connection, scope, unit_key, execution_generation)
+            current = await _generation(connection, args, unit_key, execution_generation)
             check_generation_admission(
                 unit_key=unit_key,
                 execution_generation=execution_generation,
@@ -110,7 +138,7 @@ class PostgresCheckpointLineageRepository:
                 binding_digest=binding_digest,
                 namespace=namespace,
                 current=current,
-                max_generation=await _max_generation(connection, scope, unit_key),
+                max_generation=await _max_generation(connection, args, unit_key),
             )
             if current is None:
                 current = UnitGenerationRecord(
@@ -122,24 +150,7 @@ class PostgresCheckpointLineageRepository:
                     namespace=namespace.namespace if namespace else None,
                     state_schema_digest=namespace.state_schema_digest if namespace else None,
                 )
-                await connection.execute(
-                    """
-                    INSERT INTO belllabs_control.runtime_unit_generations (
-                        request_scope, unit_key, execution_generation, claim_fence,
-                        binding_id, binding_digest, cognitive_namespace,
-                        state_schema_digest, recorded_at, updated_at
-                    )
-                    VALUES ($1, $2, $3, 1, $4, $5, $6, $7, $8, $8)
-                    """,
-                    scope,
-                    unit_key,
-                    execution_generation,
-                    binding_id,
-                    binding_digest,
-                    current.namespace,
-                    current.state_schema_digest,
-                    observed_at,
-                )
+                await _insert_generation(connection, args, run["run_id"], current, observed_at)
             granted, took_over = True, False
             if lease_expires_at is not None and dispatching:
                 lease = decide_lease(
@@ -149,43 +160,56 @@ class PostgresCheckpointLineageRepository:
                 if lease.granted:
                     current = lease.record
                     await connection.execute(
-                        """
-                        UPDATE belllabs_control.runtime_unit_generations
-                        SET claim_fence = $4, lease_holder = $5, lease_expires_at = $6,
+                        f"""
+                        UPDATE mission_control.attempt
+                        SET fencing_token = $5, lease_expires_at = $6, version = version + 1,
                             updated_at = $7
-                        WHERE request_scope = $1 AND unit_key = $2
-                          AND execution_generation = $3
+                        WHERE {SCOPE} AND attempt_key = $4
                         """,
-                        scope,
-                        unit_key,
-                        execution_generation,
+                        *args,
+                        attempt_key(unit_key, execution_generation),
                         current.claim_fence,
-                        current.lease_holder,
                         current.lease_expires_at,
                         observed_at,
                     )
-            existing = await _transition(connection, scope, unit_key, execution_generation)
+                    await connection.execute(
+                        f"""
+                        UPDATE mission_control.runtime_unit_generation
+                        SET lease_holder = $6, updated_at = $7
+                        WHERE {SCOPE} AND unit_key = $4 AND execution_generation = $5
+                        """,
+                        *args,
+                        unit_key,
+                        execution_generation,
+                        current.lease_holder,
+                        observed_at,
+                    )
+            existing = await _transition(connection, args, unit_key, execution_generation)
             expected_source: QualifiedCheckpointKey | None = None
             if namespace is not None:
                 await connection.execute(
                     """
-                    INSERT INTO belllabs_control.runtime_cognitive_namespaces (
-                        request_scope, cognitive_namespace, owner_kind, owner_digest,
-                        updated_at
+                    INSERT INTO mission_control.cognitive_namespace (
+                        installation_id, application_id, tenant_id, cognitive_namespace_id,
+                        namespace_key, owner_kind, owner_digest, head_version, updated_at,
+                        created_at, created_by_actor_ref
                     )
-                    VALUES ($1, $2, $3, $4, $5)
-                    ON CONFLICT (request_scope, cognitive_namespace) DO NOTHING
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, 0, $8, $8, $9)
+                    ON CONFLICT (installation_id, application_id, tenant_id, namespace_key)
+                    DO NOTHING
                     """,
-                    scope,
+                    *args,
+                    uuid7(),
                     namespace.namespace,
                     namespace.owner_kind,
                     namespace.owner_digest,
                     observed_at,
+                    INCIDENT_ACTOR,
                 )
-                record = await _namespace(connection, scope, namespace.namespace)
+                record = await _namespace(connection, args, namespace.namespace)
                 assert record is not None
                 check_namespace_owner(namespace, record)
-                result = await _result(connection, scope, unit_key, execution_generation)
+                result = await _result(connection, args, unit_key, execution_generation)
                 # A unit generation whose result is already fixed never re-reserves its
                 # namespace: it only settles the recorded manifest (`observed_unsettled`).
                 if dispatching and existing is None and result is None:
@@ -193,19 +217,18 @@ class PostgresCheckpointLineageRepository:
                         record, unit_key=unit_key, execution_generation=execution_generation
                     )
                     if reserved != record:
-                        await _write_in_flight(connection, scope, reserved, observed_at)
+                        await _write_in_flight(connection, args, reserved, observed_at)
                 expected_source = existing.source_key if existing is not None else record.head
             prior_dispatch = bool(
                 await connection.fetchval(
-                    """
+                    f"""
                     SELECT EXISTS (
-                        SELECT 1 FROM belllabs_control.runtime_activity_attempt_observations
-                        WHERE request_scope = $1 AND unit_key = $2
-                          AND execution_generation = $3 AND dispatching
-                          AND observation_id <> $4
+                        SELECT 1 FROM mission_control.activity_attempt_observation
+                        WHERE {SCOPE} AND unit_key = $4 AND execution_generation = $5
+                          AND dispatching AND observation_key <> $6
                     )
                     """,
-                    scope,
+                    *args,
                     unit_key,
                     execution_generation,
                     holder,
@@ -225,20 +248,21 @@ class PostgresCheckpointLineageRepository:
             )
             await connection.execute(
                 """
-                INSERT INTO belllabs_control.runtime_activity_attempt_observations (
-                    request_scope, observation_id, schema_version, unit_key,
-                    execution_generation, claim_fence, temporal_workflow_id,
-                    temporal_run_id, temporal_activity_id, activity_attempt,
-                    worker_identity, binding_id, cognitive_namespace,
-                    expected_source_checkpoint, dispatching, observation_payload, observed_at
+                INSERT INTO mission_control.activity_attempt_observation (
+                    installation_id, application_id, tenant_id, activity_attempt_observation_id,
+                    observation_key, schema_version, unit_key, execution_generation, claim_fence,
+                    temporal_workflow_id, temporal_run_id, temporal_activity_id,
+                    activity_attempt, worker_identity, binding_key, cognitive_namespace,
+                    expected_source_checkpoint, dispatching, observation_payload, observed_at,
+                    created_at, created_by_actor_ref
                 )
-                VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-                    $14::jsonb, $15, $16::jsonb, $17
-                )
-                ON CONFLICT (request_scope, observation_id) DO NOTHING
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+                        $17::jsonb, $18, $19::jsonb, $20, $20, $14)
+                ON CONFLICT (installation_id, application_id, tenant_id, observation_key)
+                DO NOTHING
                 """,
-                scope,
+                *args,
+                uuid7(),
                 observation.observation_id,
                 observation.schema_version,
                 unit_key,
@@ -257,16 +281,15 @@ class PostgresCheckpointLineageRepository:
                 observed_at,
             )
             stored = await connection.fetchval(
-                """
-                SELECT observation_payload
-                FROM belllabs_control.runtime_activity_attempt_observations
-                WHERE request_scope = $1 AND observation_id = $2
+                f"""
+                SELECT observation_payload FROM mission_control.activity_attempt_observation
+                WHERE {SCOPE} AND observation_key = $4
                 """,
-                scope,
+                *args,
                 observation.observation_id,
             )
-            result = await _result(connection, scope, unit_key, execution_generation)
-            incident = await _incident(connection, scope, unit_key, execution_generation)
+            result = await _result(connection, args, unit_key, execution_generation)
+            incident = await _incident(connection, args, unit_key, execution_generation)
         return AttemptAdmission(
             observation=ActivityAttemptObservation.model_validate(_load(stored)),
             existing_transition=existing,
@@ -283,31 +306,31 @@ class PostgresCheckpointLineageRepository:
         scope = transition.request_scope
         rejection: LineageWriteRejection | None = None
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, scope)
+            args = await mc.begin(connection, scope)
             await _lock_unit(connection, scope, transition.unit_key)
             generation = await _generation(
-                connection, scope, transition.unit_key, transition.execution_generation
+                connection, args, transition.unit_key, transition.execution_generation
             )
-            namespace = await _namespace(connection, scope, transition.namespace)
+            namespace = await _namespace(connection, args, transition.namespace)
             existing = await _transition(
-                connection, scope, transition.unit_key, transition.execution_generation
+                connection, args, transition.unit_key, transition.execution_generation
             )
             decision = decide_transition(
                 transition,
                 generation=generation,
-                max_generation=await _max_generation(connection, scope, transition.unit_key),
+                max_generation=await _max_generation(connection, args, transition.unit_key),
                 namespace=namespace,
                 existing=existing,
                 rejected_at=datetime.now(UTC),
             )
             if isinstance(decision, LineageWriteRejection):
                 rejection = decision
-                await _record_rejection(connection, decision)
+                await _record_rejection(connection, args, decision)
             elif decision == "duplicate":
                 assert existing is not None
                 return existing
             else:
-                await _insert_transition(connection, transition)
+                await _insert_transition(connection, args, transition)
         if rejection is not None:
             raise stale_claim_error(rejection)
         return transition
@@ -321,15 +344,13 @@ class PostgresCheckpointLineageRepository:
         scope = result.request_scope
         rejection: LineageWriteRejection | None = None
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, scope)
+            args = await mc.begin(connection, scope)
             await _lock_unit(connection, scope, result.unit_key)
             generation = await _generation(
-                connection, scope, result.unit_key, result.execution_generation
+                connection, args, result.unit_key, result.execution_generation
             )
-            max_generation = await _max_generation(connection, scope, result.unit_key)
-            existing = await _result(
-                connection, scope, result.unit_key, result.execution_generation
-            )
+            max_generation = await _max_generation(connection, args, result.unit_key)
+            existing = await _result(connection, args, result.unit_key, result.execution_generation)
             now = datetime.now(UTC)
             decision = decide_result(
                 result,
@@ -340,7 +361,7 @@ class PostgresCheckpointLineageRepository:
             )
             if isinstance(decision, LineageWriteRejection):
                 rejection = decision
-                await _record_rejection(connection, decision)
+                await _record_rejection(connection, args, decision)
             elif decision == "duplicate":
                 assert existing is not None
                 return existing
@@ -348,7 +369,7 @@ class PostgresCheckpointLineageRepository:
                 assert generation is not None
                 if transition is not None:
                     require_linked_result(result, transition)
-                    namespace = await _namespace(connection, scope, transition.namespace)
+                    namespace = await _namespace(connection, args, transition.namespace)
                     transition_decision = decide_transition(
                         transition,
                         generation=generation,
@@ -356,7 +377,7 @@ class PostgresCheckpointLineageRepository:
                         namespace=namespace,
                         existing=await _transition(
                             connection,
-                            scope,
+                            args,
                             transition.unit_key,
                             transition.execution_generation,
                         ),
@@ -364,11 +385,11 @@ class PostgresCheckpointLineageRepository:
                     )
                     if isinstance(transition_decision, LineageWriteRejection):
                         rejection = transition_decision
-                        await _record_rejection(connection, transition_decision)
+                        await _record_rejection(connection, args, transition_decision)
                     elif transition_decision == "accept":
-                        await _insert_transition(connection, transition)
+                        await _insert_transition(connection, args, transition)
                 elif generation.namespace is not None:
-                    record = await _namespace(connection, scope, generation.namespace)
+                    record = await _namespace(connection, args, generation.namespace)
                     if record is not None:
                         released = release_in_flight(
                             record,
@@ -376,23 +397,24 @@ class PostgresCheckpointLineageRepository:
                             execution_generation=result.execution_generation,
                         )
                         if released != record:
-                            await _write_in_flight(connection, scope, released, now)
+                            await _write_in_flight(connection, args, released, now)
                 if rejection is None:
                     await connection.execute(
                         """
-                        INSERT INTO belllabs_control.runtime_unit_result_observations (
-                            request_scope, observation_id, schema_version, unit_key,
-                            execution_generation, claim_fence, binding_id, settlement_id,
-                            status, result_manifest_ref, result_manifest_digest,
-                            result_manifest_size_bytes, checkpoint_transition_id,
-                            content_digest, result_payload, observed_at
+                        INSERT INTO mission_control.unit_result_observation (
+                            installation_id, application_id, tenant_id,
+                            unit_result_observation_id, observation_key, schema_version,
+                            unit_key, execution_generation, claim_fence, binding_key,
+                            settlement_key, status, result_manifest_ref, result_manifest_digest,
+                            result_manifest_size_bytes, checkpoint_transition_key,
+                            content_digest, result_payload, observed_at, created_at,
+                            created_by_actor_ref
                         )
-                        VALUES (
-                            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-                            $15::jsonb, $16
-                        )
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+                                $15, $16, $17, $18::jsonb, $19, $19, $20)
                         """,
-                        scope,
+                        *args,
+                        uuid7(),
                         result.observation_id,
                         result.schema_version,
                         result.unit_key,
@@ -408,6 +430,7 @@ class PostgresCheckpointLineageRepository:
                         result.content_digest,
                         _dump(result.model_dump(mode="json")),
                         result.observed_at,
+                        INCIDENT_ACTOR,
                     )
         if rejection is not None:
             raise stale_claim_error(rejection)
@@ -417,8 +440,8 @@ class PostgresCheckpointLineageRepository:
         self, request_scope: str, unit_key: str, execution_generation: int
     ) -> UnitResultObservation | None:
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, request_scope)
-            return await _result(connection, request_scope, unit_key, execution_generation)
+            args = await mc.begin(connection, request_scope)
+            return await _result(connection, args, unit_key, execution_generation)
 
     async def release_lease(
         self,
@@ -430,16 +453,17 @@ class PostgresCheckpointLineageRepository:
         released_at: datetime,
     ) -> None:
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, request_scope)
+            args = await mc.begin(connection, request_scope)
             await _lock_unit(connection, request_scope, unit_key)
             await connection.execute(
-                """
-                UPDATE belllabs_control.runtime_unit_generations
-                SET lease_expires_at = $5, updated_at = $5
-                WHERE request_scope = $1 AND unit_key = $2 AND execution_generation = $3
-                  AND lease_holder = $4
+                f"""
+                UPDATE mission_control.attempt AS a
+                SET lease_expires_at = $7, version = a.version + 1, updated_at = $7
+                FROM mission_control.runtime_unit_generation AS g
+                WHERE {scoped("a")} AND {scoped("g")} AND g.attempt_key = a.attempt_key
+                  AND g.unit_key = $4 AND g.execution_generation = $5 AND g.lease_holder = $6
                 """,
-                request_scope,
+                *args,
                 unit_key,
                 execution_generation,
                 holder,
@@ -451,44 +475,28 @@ class PostgresCheckpointLineageRepository:
     ) -> UnitReconciliationIncident:
         scope = incident.request_scope
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, scope)
+            args = await mc.begin(connection, scope)
             await _lock_unit(connection, scope, incident.unit_key)
             latest = await _incident(
-                connection, scope, incident.unit_key, incident.execution_generation
+                connection, args, incident.unit_key, incident.execution_generation
             )
             if not decide_incident_opening(incident, latest):
                 assert latest is not None
                 return latest
-            await connection.execute(
-                """
-                INSERT INTO belllabs_control.runtime_reconciliation_incidents (
-                    incident_id, request_scope, binding_id, incident_type, severity,
-                    status, identity_digest, actor_ref, reason, evidence_refs,
-                    incident_payload, version, recorded_at, updated_at, retain_until,
-                    unit_key
-                )
-                VALUES (
-                    $1, $2, $3, $4, 'error', $5, $6, $7, $8, $9::jsonb, $10::jsonb, 1,
-                    $11, $11, $12, $13
-                )
-                ON CONFLICT (request_scope, incident_type, identity_digest) DO NOTHING
-                """,
-                incident.incident_id,
-                scope,
-                incident.binding_id,
-                INCIDENT_TYPE,
-                incident.status,
-                incident.identity_digest,
-                INCIDENT_ACTOR,
-                incident.reason,
-                _dump([item.checkpoint_id for item in incident.candidates]),
-                _dump(incident.model_dump(mode="json")),
-                incident.recorded_at,
-                incident.recorded_at + INCIDENT_RETENTION,
-                incident.unit_key,
+            await insert_incident(
+                connection,
+                args,
+                incident_type=INCIDENT_TYPE,
+                identity_digest=incident.identity_digest,
+                target_ref=incident.unit_key,
+                reason=incident.reason,
+                status=incident.status,
+                payload=incident.model_dump(mode="json"),
+                recorded_at=incident.recorded_at,
+                actor_ref=INCIDENT_ACTOR,
             )
             stored = await _incident(
-                connection, scope, incident.unit_key, incident.execution_generation
+                connection, args, incident.unit_key, incident.execution_generation
             )
         assert stored is not None
         return stored
@@ -497,17 +505,17 @@ class PostgresCheckpointLineageRepository:
         self, request_scope: str, unit_key: str, execution_generation: int
     ) -> UnitReconciliationIncident | None:
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, request_scope)
-            return await _incident(connection, request_scope, unit_key, execution_generation)
+            args = await mc.begin(connection, request_scope)
+            return await _incident(connection, args, unit_key, execution_generation)
 
     async def apply_reconciliation(
         self, request_scope: str, decision: UnitReconciliationDecision
     ) -> UnitReconciliationIncident:
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, request_scope)
+            args = await mc.begin(connection, request_scope)
             await _lock_unit(connection, request_scope, decision.unit_key)
             incident = await _incident(
-                connection, request_scope, decision.unit_key, decision.execution_generation
+                connection, args, decision.unit_key, decision.execution_generation
             )
             if incident is None:
                 raise CheckpointLineageConflict("no in_doubt incident exists for the decision")
@@ -515,28 +523,23 @@ class PostgresCheckpointLineageRepository:
             if resolved is incident:
                 return incident
             now = datetime.now(UTC)
-            await connection.execute(
-                """
-                UPDATE belllabs_control.runtime_reconciliation_incidents
-                SET status = 'resolved', incident_payload = $4::jsonb,
-                    version = version + 1, updated_at = $5
-                WHERE request_scope = $1 AND incident_type = $2 AND identity_digest = $3
-                """,
-                request_scope,
-                INCIDENT_TYPE,
-                incident.identity_digest,
-                _dump(resolved.model_dump(mode="json")),
-                now,
+            await resolve_incident_row(
+                connection,
+                args,
+                incident_type=INCIDENT_TYPE,
+                identity_digest=incident.identity_digest,
+                payload=resolved.model_dump(mode="json"),
+                updated_at=now,
             )
             generation = await _generation(
-                connection, request_scope, decision.unit_key, decision.execution_generation
+                connection, args, decision.unit_key, decision.execution_generation
             )
             if (
                 decision.decision in {"abandon_unit", "start_new_generation"}
                 and generation is not None
                 and generation.namespace is not None
             ):
-                record = await _namespace(connection, request_scope, generation.namespace)
+                record = await _namespace(connection, args, generation.namespace)
                 if record is not None:
                     released = release_in_flight(
                         record,
@@ -544,15 +547,15 @@ class PostgresCheckpointLineageRepository:
                         execution_generation=decision.execution_generation,
                     )
                     if released != record:
-                        await _write_in_flight(connection, request_scope, released, now)
+                        await _write_in_flight(connection, args, released, now)
             if decision.decision == "start_new_generation" and generation is not None:
                 await connection.execute(
-                    """
-                    UPDATE belllabs_control.runtime_unit_generations
-                    SET superseded = true, updated_at = $4
-                    WHERE request_scope = $1 AND unit_key = $2 AND execution_generation = $3
+                    f"""
+                    UPDATE mission_control.runtime_unit_generation
+                    SET superseded = true, updated_at = $6
+                    WHERE {SCOPE} AND unit_key = $4 AND execution_generation = $5
                     """,
-                    request_scope,
+                    *args,
                     decision.unit_key,
                     decision.execution_generation,
                     now,
@@ -563,23 +566,23 @@ class PostgresCheckpointLineageRepository:
         self, request_scope: str, unit_key: str, execution_generation: int
     ) -> CheckpointTransitionObservation | None:
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, request_scope)
-            return await _transition(connection, request_scope, unit_key, execution_generation)
+            args = await mc.begin(connection, request_scope)
+            return await _transition(connection, args, unit_key, execution_generation)
 
     async def get_namespace_head(
         self, request_scope: str, namespace: str
     ) -> QualifiedCheckpointKey | None:
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, request_scope)
-            record = await _namespace(connection, request_scope, namespace, lock=False)
+            args = await mc.begin(connection, request_scope)
+            record = await _namespace(connection, args, namespace, lock=False)
         return record.head if record is not None else None
 
     async def get_namespace_in_flight(
         self, request_scope: str, namespace: str
     ) -> tuple[str, int] | None:
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, request_scope)
-            record = await _namespace(connection, request_scope, namespace, lock=False)
+            args = await mc.begin(connection, request_scope)
+            record = await _namespace(connection, args, namespace, lock=False)
         if record is None or record.in_flight_unit_key is None:
             return None
         assert record.in_flight_generation is not None
@@ -589,15 +592,14 @@ class PostgresCheckpointLineageRepository:
         self, request_scope: str, unit_key: str
     ) -> tuple[ActivityAttemptObservation, ...]:
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, request_scope)
+            args = await mc.begin(connection, request_scope)
             rows = await connection.fetch(
-                """
-                SELECT observation_payload
-                FROM belllabs_control.runtime_activity_attempt_observations
-                WHERE request_scope = $1 AND unit_key = $2
+                f"""
+                SELECT observation_payload FROM mission_control.activity_attempt_observation
+                WHERE {SCOPE} AND unit_key = $4
                 ORDER BY execution_generation, activity_attempt, observed_at
                 """,
-                request_scope,
+                *args,
                 unit_key,
             )
         return tuple(
@@ -609,14 +611,13 @@ class PostgresCheckpointLineageRepository:
         self, request_scope: str, namespace: str
     ) -> tuple[CheckpointTransitionObservation, ...]:
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, request_scope)
+            args = await mc.begin(connection, request_scope)
             rows = await connection.fetch(
-                """
-                SELECT transition_payload
-                FROM belllabs_control.runtime_checkpoint_transitions
-                WHERE request_scope = $1 AND cognitive_namespace = $2
+                f"""
+                SELECT transition_payload FROM mission_control.checkpoint_transition
+                WHERE {SCOPE} AND namespace_key = $4
                 """,
-                request_scope,
+                *args,
                 namespace,
             )
         return tuple(
@@ -632,30 +633,9 @@ class PostgresCheckpointLineageRepository:
         self, request_scope: str, unit_key: str
     ) -> tuple[LineageWriteRejection, ...]:
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, request_scope)
-            rows = await connection.fetch(
-                """
-                SELECT * FROM belllabs_control.runtime_lineage_write_rejections
-                WHERE request_scope = $1 AND unit_key = $2
-                ORDER BY rejected_at, rejection_id
-                """,
-                request_scope,
-                unit_key,
-            )
-        return tuple(
-            LineageWriteRejection(
-                request_scope=row["request_scope"],
-                unit_key=row["unit_key"],
-                execution_generation=row["execution_generation"],
-                presented_fence=row["presented_fence"],
-                current_fence=row["current_fence"],
-                current_generation=row["current_generation"],
-                reason=row["reason"],
-                payload_digest=row["payload_digest"],
-                rejected_at=row["rejected_at"],
-            )
-            for row in rows
-        )
+            args = await mc.begin(connection, request_scope)
+            rows = await fetch_rejections(connection, args, [unit_key])
+        return tuple(rejection_from_row(row, request_scope) for row in rows)
 
     async def advance_claim_fence(
         self,
@@ -668,19 +648,18 @@ class PostgresCheckpointLineageRepository:
         """Advance the fence only from the expected value (operator or test takeover seam)."""
 
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, request_scope)
+            args = await mc.begin(connection, request_scope)
             await _lock_unit(connection, request_scope, unit_key)
             advanced = await connection.fetchval(
-                """
-                UPDATE belllabs_control.runtime_unit_generations
-                SET claim_fence = claim_fence + 1, updated_at = clock_timestamp()
-                WHERE request_scope = $1 AND unit_key = $2 AND execution_generation = $3
-                  AND claim_fence = $4
-                RETURNING claim_fence
+                f"""
+                UPDATE mission_control.attempt
+                SET fencing_token = fencing_token + 1, version = version + 1,
+                    updated_at = clock_timestamp()
+                WHERE {SCOPE} AND attempt_key = $4 AND fencing_token = $5
+                RETURNING fencing_token
                 """,
-                request_scope,
-                unit_key,
-                execution_generation,
+                *args,
+                attempt_key(unit_key, execution_generation),
                 expected_fence,
             )
         if advanced is None:
@@ -688,34 +667,88 @@ class PostgresCheckpointLineageRepository:
         return int(advanced)
 
 
-async def _set_scope(connection: asyncpg.Connection, request_scope: str) -> None:
-    await connection.execute("SELECT set_config('belllabs.request_scope', $1, true)", request_scope)
-
-
 async def _lock_unit(connection: asyncpg.Connection, scope: str, unit_key: str) -> None:
     """Serialize every write of one unit with a transaction-scoped advisory lock.
 
-    `runtime_units` stays insert-only (immutable identity), so the runtime role needs no
-    UPDATE privilege on it; the advisory lock follows the journal and run-control convention.
-    Concurrent recoveries of one unit therefore serialize here (REQ-CP-EXEC-014).
+    The activation stays an insert-only identity, so the runtime role needs no UPDATE
+    privilege on it; concurrent recoveries of one unit serialize here (REQ-CP-EXEC-014).
     """
 
+    await mc.advisory_lock(connection, f"mission-control-runtime-unit:{scope}:{unit_key}")
+
+
+async def _insert_generation(
+    connection: asyncpg.Connection,
+    args: tuple[Any, ...],
+    run_id: Any,
+    record: UnitGenerationRecord,
+    observed_at: datetime,
+) -> None:
+    activation_id = await connection.fetchval(
+        "SELECT activation_id FROM mission_control.activation "
+        f"WHERE {SCOPE} AND activation_key = $4",
+        *args,
+        record.unit_key,
+    )
+    key = attempt_key(record.unit_key, record.execution_generation)
     await connection.execute(
-        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-        f"belllabs-runtime-unit:{scope}:{unit_key}",
+        """
+        INSERT INTO mission_control.attempt (
+            installation_id, application_id, tenant_id, attempt_id, run_id, activation_id,
+            attempt_key, attempt_no, execution_generation, execution_outcome, failure_class,
+            binding_ref, binding_digest, lease_expires_at, fencing_token, started_at, ended_at,
+            version, updated_at, created_at, created_by_actor_ref
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, NULL, NULL, $9, $10, NULL, $11, $12, NULL,
+                1, $12, $12, $13)
+        """,
+        *args,
+        uuid7(),
+        run_id,
+        activation_id,
+        key,
+        record.execution_generation,
+        record.binding_id,
+        record.binding_digest,
+        record.claim_fence,
+        observed_at,
+        INCIDENT_ACTOR,
+    )
+    await connection.execute(
+        """
+        INSERT INTO mission_control.runtime_unit_generation (
+            installation_id, application_id, tenant_id, runtime_unit_generation_id, attempt_key,
+            unit_key, execution_generation, binding_key, binding_digest, cognitive_namespace,
+            state_schema_digest, lease_holder, superseded, recorded_at, updated_at, created_at,
+            created_by_actor_ref
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULL, false, $12, $12, $12, $13)
+        """,
+        *args,
+        uuid7(),
+        key,
+        record.unit_key,
+        record.execution_generation,
+        record.binding_id,
+        record.binding_digest,
+        record.namespace,
+        record.state_schema_digest,
+        observed_at,
+        INCIDENT_ACTOR,
     )
 
 
-async def _max_generation(connection: asyncpg.Connection, scope: str, unit_key: str) -> int | None:
+async def _max_generation(
+    connection: asyncpg.Connection, args: tuple[Any, ...], unit_key: str
+) -> int | None:
     row = await connection.fetchrow(
-        """
-        SELECT execution_generation, superseded
-        FROM belllabs_control.runtime_unit_generations
-        WHERE request_scope = $1 AND unit_key = $2
+        f"""
+        SELECT execution_generation, superseded FROM mission_control.runtime_unit_generation
+        WHERE {SCOPE} AND unit_key = $4
         ORDER BY execution_generation DESC
         LIMIT 1
         """,
-        scope,
+        *args,
         unit_key,
     )
     if row is None:
@@ -723,25 +756,12 @@ async def _max_generation(connection: asyncpg.Connection, scope: str, unit_key: 
     return effective_max_generation(int(row["execution_generation"]), bool(row["superseded"]))
 
 
-async def _generation(
-    connection: asyncpg.Connection, scope: str, unit_key: str, execution_generation: int
-) -> UnitGenerationRecord | None:
-    row = await connection.fetchrow(
-        """
-        SELECT * FROM belllabs_control.runtime_unit_generations
-        WHERE request_scope = $1 AND unit_key = $2 AND execution_generation = $3
-        """,
-        scope,
-        unit_key,
-        execution_generation,
-    )
-    if row is None:
-        return None
+def generation_from_row(row: asyncpg.Record) -> UnitGenerationRecord:
     return UnitGenerationRecord(
         unit_key=row["unit_key"],
         execution_generation=row["execution_generation"],
         claim_fence=row["claim_fence"],
-        binding_id=row["binding_id"],
+        binding_id=row["binding_key"],
         binding_digest=row["binding_digest"],
         namespace=row["cognitive_namespace"],
         state_schema_digest=row["state_schema_digest"],
@@ -751,43 +771,70 @@ async def _generation(
     )
 
 
-async def _namespace(
-    connection: asyncpg.Connection, scope: str, namespace: str, *, lock: bool = True
-) -> NamespaceRecord | None:
+async def _generation(
+    connection: asyncpg.Connection,
+    args: tuple[Any, ...],
+    unit_key: str,
+    execution_generation: int,
+) -> UnitGenerationRecord | None:
     row = await connection.fetchrow(
-        """
-        SELECT * FROM belllabs_control.runtime_cognitive_namespaces
-        WHERE request_scope = $1 AND cognitive_namespace = $2
-        """
-        + (" FOR UPDATE" if lock else ""),
-        scope,
-        namespace,
+        f"""
+        SELECT {GENERATION_COLUMNS} {GENERATION_JOIN}
+        WHERE {scoped("g")} AND g.unit_key = $4 AND g.execution_generation = $5
+        """,
+        *args,
+        unit_key,
+        execution_generation,
     )
-    if row is None:
-        return None
+    return generation_from_row(row) if row is not None else None
+
+
+def namespace_from_row(row: asyncpg.Record) -> NamespaceRecord:
     head = row["head_checkpoint"]
     return NamespaceRecord(
-        namespace=row["cognitive_namespace"],
+        namespace=row["namespace_key"],
         owner_kind=row["owner_kind"],
         owner_digest=row["owner_digest"],
         head=QualifiedCheckpointKey.model_validate(_load(head)) if head is not None else None,
-        head_transition_id=row["head_transition_id"],
+        head_transition_id=row["head_transition_key"],
         head_state_schema_digest=row["head_state_schema_digest"],
         in_flight_unit_key=row["in_flight_unit_key"],
         in_flight_generation=row["in_flight_generation"],
     )
 
 
+async def _namespace(
+    connection: asyncpg.Connection,
+    args: tuple[Any, ...],
+    namespace: str,
+    *,
+    lock: bool = True,
+) -> NamespaceRecord | None:
+    row = await connection.fetchrow(
+        f"""
+        SELECT {NAMESPACE_COLUMNS} FROM mission_control.cognitive_namespace
+        WHERE {SCOPE} AND namespace_key = $4
+        """
+        + (" FOR UPDATE" if lock else ""),
+        *args,
+        namespace,
+    )
+    return namespace_from_row(row) if row is not None else None
+
+
 async def _write_in_flight(
-    connection: asyncpg.Connection, scope: str, record: NamespaceRecord, at: datetime
+    connection: asyncpg.Connection,
+    args: tuple[Any, ...],
+    record: NamespaceRecord,
+    at: datetime,
 ) -> None:
     await connection.execute(
-        """
-        UPDATE belllabs_control.runtime_cognitive_namespaces
-        SET in_flight_unit_key = $3, in_flight_generation = $4, updated_at = $5
-        WHERE request_scope = $1 AND cognitive_namespace = $2
+        f"""
+        UPDATE mission_control.cognitive_namespace
+        SET in_flight_unit_key = $5, in_flight_generation = $6, updated_at = $7
+        WHERE {SCOPE} AND namespace_key = $4
         """,
-        scope,
+        *args,
         record.namespace,
         record.in_flight_unit_key,
         record.in_flight_generation,
@@ -796,14 +843,17 @@ async def _write_in_flight(
 
 
 async def _transition(
-    connection: asyncpg.Connection, scope: str, unit_key: str, execution_generation: int
+    connection: asyncpg.Connection,
+    args: tuple[Any, ...],
+    unit_key: str,
+    execution_generation: int,
 ) -> CheckpointTransitionObservation | None:
     payload = await connection.fetchval(
-        """
-        SELECT transition_payload FROM belllabs_control.runtime_checkpoint_transitions
-        WHERE request_scope = $1 AND unit_key = $2 AND execution_generation = $3
+        f"""
+        SELECT transition_payload FROM mission_control.checkpoint_transition
+        WHERE {SCOPE} AND unit_key = $4 AND execution_generation = $5
         """,
-        scope,
+        *args,
         unit_key,
         execution_generation,
     )
@@ -813,14 +863,17 @@ async def _transition(
 
 
 async def _result(
-    connection: asyncpg.Connection, scope: str, unit_key: str, execution_generation: int
+    connection: asyncpg.Connection,
+    args: tuple[Any, ...],
+    unit_key: str,
+    execution_generation: int,
 ) -> UnitResultObservation | None:
     payload = await connection.fetchval(
-        """
-        SELECT result_payload FROM belllabs_control.runtime_unit_result_observations
-        WHERE request_scope = $1 AND unit_key = $2 AND execution_generation = $3
+        f"""
+        SELECT result_payload FROM mission_control.unit_result_observation
+        WHERE {SCOPE} AND unit_key = $4 AND execution_generation = $5
         """,
-        scope,
+        *args,
         unit_key,
         execution_generation,
     )
@@ -830,17 +883,20 @@ async def _result(
 
 
 async def _incident(
-    connection: asyncpg.Connection, scope: str, unit_key: str, execution_generation: int
+    connection: asyncpg.Connection,
+    args: tuple[Any, ...],
+    unit_key: str,
+    execution_generation: int,
 ) -> UnitReconciliationIncident | None:
     payload = await connection.fetchval(
-        """
-        SELECT incident_payload FROM belllabs_control.runtime_reconciliation_incidents
-        WHERE request_scope = $1 AND incident_type = $2 AND unit_key = $3
-          AND (incident_payload->>'execution_generation')::bigint = $4
-        ORDER BY COALESCE((incident_payload->>'revision')::bigint, 1) DESC
+        f"""
+        SELECT detail FROM mission_control.reconciliation_case
+        WHERE {SCOPE} AND target_kind = $4 AND target_ref = $5
+          AND (detail->>'execution_generation')::bigint = $6
+        ORDER BY COALESCE((detail->>'revision')::bigint, 1) DESC
         LIMIT 1
         """,
-        scope,
+        *args,
         INCIDENT_TYPE,
         unit_key,
         execution_generation,
@@ -850,28 +906,94 @@ async def _incident(
     return UnitReconciliationIncident.model_validate(_load(payload))
 
 
-async def _insert_transition(
-    connection: asyncpg.Connection, transition: CheckpointTransitionObservation
+def incident_case_key(incident_type: str, identity_digest: str) -> str:
+    return mc.json_key(incident_type, identity_digest)
+
+
+async def insert_incident(
+    connection: asyncpg.Connection,
+    args: tuple[Any, ...],
+    *,
+    incident_type: str,
+    identity_digest: str,
+    target_ref: str,
+    reason: str,
+    status: str,
+    payload: dict[str, Any],
+    recorded_at: datetime,
+    actor_ref: str,
 ) -> None:
-    scope = transition.request_scope
+    """One typed incident as a canonical reconciliation case (unique per identity)."""
+
     await connection.execute(
         """
-        INSERT INTO belllabs_control.runtime_checkpoint_transitions (
-            request_scope, transition_id, schema_version, unit_key,
-            execution_generation, claim_fence, cognitive_namespace,
-            source_checkpoint_id, result_checkpoint_id,
-            result_parent_checkpoint_id, ancestry_verified, binding_digest,
-            state_schema_digest, classification, invocation_id,
-            result_manifest_ref, result_manifest_digest,
-            redacted_summary_digest, content_digest, transition_payload,
-            observed_at
+        INSERT INTO mission_control.reconciliation_case (
+            installation_id, application_id, tenant_id, case_id, case_key, target_kind,
+            target_ref, uncertainty_reason, desired_state_ref, observed_state_ref, lease_owner,
+            lease_expires_at, next_action, outcome, detail, version, updated_at, created_at,
+            created_by_actor_ref
         )
-        VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-            $15, $16, $17, $18, $19, $20::jsonb, $21
-        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, NULL, NULL, NULL, $9, NULL, $10::jsonb, 1,
+                $11, $11, $12)
+        ON CONFLICT (installation_id, application_id, tenant_id, case_key) DO NOTHING
         """,
-        scope,
+        *args,
+        uuid7(),
+        incident_case_key(incident_type, identity_digest),
+        incident_type,
+        target_ref,
+        reason,
+        status,
+        _dump(payload),
+        recorded_at,
+        actor_ref,
+    )
+
+
+async def resolve_incident_row(
+    connection: asyncpg.Connection,
+    args: tuple[Any, ...],
+    *,
+    incident_type: str,
+    identity_digest: str,
+    payload: dict[str, Any],
+    updated_at: datetime,
+) -> None:
+    await connection.execute(
+        f"""
+        UPDATE mission_control.reconciliation_case
+        SET next_action = 'resolved', detail = $5::jsonb, version = version + 1,
+            updated_at = $6
+        WHERE {SCOPE} AND case_key = $4
+        """,
+        *args,
+        incident_case_key(incident_type, identity_digest),
+        _dump(payload),
+        updated_at,
+    )
+
+
+async def _insert_transition(
+    connection: asyncpg.Connection,
+    args: tuple[Any, ...],
+    transition: CheckpointTransitionObservation,
+) -> None:
+    await connection.execute(
+        """
+        INSERT INTO mission_control.checkpoint_transition (
+            installation_id, application_id, tenant_id, checkpoint_transition_id,
+            transition_key, schema_version, unit_key, execution_generation, claim_fence,
+            namespace_key, source_checkpoint_key, result_checkpoint_key,
+            result_parent_checkpoint_key, ancestry_verified, binding_digest, state_schema_digest,
+            classification, invocation_digest, result_manifest_ref, result_manifest_digest,
+            redacted_summary_digest, content_digest, transition_payload, observed_at, created_at,
+            created_by_actor_ref
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
+                $19, $20, $21, $22, $23::jsonb, $24, $24, $25)
+        """,
+        *args,
+        uuid7(),
         transition.transition_id,
         transition.schema_version,
         transition.unit_key,
@@ -892,18 +1014,19 @@ async def _insert_transition(
         transition.content_digest,
         _dump(transition.model_dump(mode="json")),
         transition.observed_at,
+        INCIDENT_ACTOR,
     )
     await connection.execute(
-        """
-        UPDATE belllabs_control.runtime_cognitive_namespaces
-        SET head_checkpoint = $3::jsonb, head_checkpoint_id = $4,
-            head_transition_id = $5, head_state_schema_digest = $6,
+        f"""
+        UPDATE mission_control.cognitive_namespace
+        SET head_checkpoint = $5::jsonb, head_checkpoint_key = $6,
+            head_transition_key = $7, head_state_schema_digest = $8,
             head_version = head_version + 1,
             in_flight_unit_key = NULL, in_flight_generation = NULL,
-            updated_at = $7
-        WHERE request_scope = $1 AND cognitive_namespace = $2
+            updated_at = $9
+        WHERE {SCOPE} AND namespace_key = $4
         """,
-        scope,
+        *args,
         transition.namespace,
         _dump(transition.result_key.model_dump(mode="json")),
         transition.result_key.checkpoint_id,
@@ -914,19 +1037,23 @@ async def _insert_transition(
 
 
 async def _record_rejection(
-    connection: asyncpg.Connection, rejection: LineageWriteRejection
+    connection: asyncpg.Connection,
+    args: tuple[Any, ...],
+    rejection: LineageWriteRejection,
 ) -> None:
     await connection.execute(
         """
-        INSERT INTO belllabs_control.runtime_lineage_write_rejections (
-            request_scope, rejection_id, unit_key, execution_generation,
-            presented_fence, current_fence, current_generation, reason,
-            payload_digest, rejected_at
+        INSERT INTO mission_control.lineage_write_rejection (
+            installation_id, application_id, tenant_id, lineage_write_rejection_id,
+            rejection_key, unit_key, execution_generation, presented_fence, current_fence,
+            current_generation, reason, payload_digest, rejected_at, created_at,
+            created_by_actor_ref
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-        ON CONFLICT (request_scope, rejection_id) DO NOTHING
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $13, $14)
+        ON CONFLICT (installation_id, application_id, tenant_id, rejection_key) DO NOTHING
         """,
-        rejection.request_scope,
+        *args,
+        uuid7(),
         _rejection_id(rejection),
         rejection.unit_key,
         rejection.execution_generation,
@@ -936,6 +1063,39 @@ async def _record_rejection(
         rejection.reason,
         rejection.payload_digest,
         rejection.rejected_at,
+        INCIDENT_ACTOR,
+    )
+
+
+async def fetch_rejections(
+    connection: asyncpg.Connection, args: tuple[Any, ...], unit_keys: list[str]
+) -> list[asyncpg.Record]:
+    return list(
+        await connection.fetch(
+            f"""
+            SELECT unit_key, execution_generation, presented_fence, current_fence,
+                   current_generation, reason, payload_digest, rejected_at
+            FROM mission_control.lineage_write_rejection
+            WHERE {SCOPE} AND unit_key = ANY($4::text[])
+            ORDER BY rejected_at, rejection_key
+            """,
+            *args,
+            unit_keys,
+        )
+    )
+
+
+def rejection_from_row(row: asyncpg.Record, request_scope: str) -> LineageWriteRejection:
+    return LineageWriteRejection(
+        request_scope=request_scope,
+        unit_key=row["unit_key"],
+        execution_generation=row["execution_generation"],
+        presented_fence=row["presented_fence"],
+        current_fence=row["current_fence"],
+        current_generation=row["current_generation"],
+        reason=row["reason"],
+        payload_digest=row["payload_digest"],
+        rejected_at=row["rejected_at"],
     )
 
 

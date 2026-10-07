@@ -866,7 +866,7 @@ async def test_api_and_worker_composition_receive_public_family_registry_hook() 
 
 @pytest.mark.asyncio
 async def test_family_reads_hide_missing_and_cross_scope_runs_consistently() -> None:
-    run_service, repository, run_id = await admitted_family_run()
+    _run_service, repository, run_id = await admitted_family_run()
     for scope, target_run in (
         ("tenant-2", run_id),
         ("tenant-1", "missing-run"),
@@ -953,43 +953,65 @@ def test_family_mutations_inherit_payload_and_sensitive_data_bounds() -> None:
         )
 
 
+COMPONENT_MIGRATIONS = (
+    Path(__file__).parents[3] / "packages/mission-control-db-contract/component/migrations"
+)
+
+
 def test_migration_has_private_repository_dml_and_no_attachment_function() -> None:
-    migration = (
-        Path(__file__).parents[3]
-        / "src/mission_control/adapters/postgres/migrations"
-        / "0017_atomic_family_admission_v1.sql"
-    ).read_text(encoding="utf-8")
+    """The family admission is repository DML under the family writer capability role of the
+    common component: no database function attaches it, the runtime role only reads family
+    records, and the writer reads commands without ever inserting them."""
+
+    migration = (COMPONENT_MIGRATIONS / "0010_run_control_support.sql").read_text(encoding="utf-8")
     assert "CREATE FUNCTION" not in migration
     assert "commit_family_admission(" not in migration
-    assert "belllabs_family_repository_writer" in migration
-    assert "FROM PUBLIC, belllabs_control_runtime" in migration
-    assert "GRANT belllabs_family_repository_writer TO belllabs_app" not in migration
+    assert (
+        "GRANT SELECT, INSERT, UPDATE ON mission_control.family_admission_head\n"
+        "TO mission_control_family_writer;"
+    ) in migration
+    assert (
+        "GRANT SELECT ON mission_control.family_admission_head, "
+        "mission_control.family_admission_journal,\n    mission_control.family_admission_result\n"
+        "TO mission_control_runtime;"
+    ) in migration
+    assert "GRANT SELECT ON mission_control.command TO mission_control_family_writer;" in migration
+    assert (
+        "INSERT ON mission_control.command"
+        not in migration.split("-- Family writer:", 1)[1].split("-- Outbox relay:", 1)[0]
+    )
+    assert "GRANT mission_control_family_writer TO" not in migration
+    assert "belllabs_" not in migration
     repository = (
         Path(__file__).parents[3]
         / "src/mission_control/adapters/postgres/run_control/run_control_repository.py"
     ).read_text(encoding="utf-8")
     assert "family_writer_pool: asyncpg.Pool | None = None" in repository
     assert "self._family_writer_pool.acquire()" in repository
-    assert "SET LOCAL ROLE belllabs_family_repository_writer" not in repository
+    assert "SET LOCAL ROLE" not in repository and "SET ROLE" not in repository
 
 
 def test_operation_settlement_revision_key_uses_forward_migration() -> None:
-    migration = (
-        Path(__file__).parents[3]
-        / "src/mission_control/adapters/postgres/migrations"
-        / "0018_operation_settlement_revisions_v1.sql"
-    ).read_text(encoding="utf-8")
-    assert "DROP CONSTRAINT IF EXISTS operation_settlements_pkey" in migration
-    assert "PRIMARY KEY (request_scope, settlement_id, settlement_revision)" in migration
-    assert "pending_candidates" in migration
-    assert "'{usage_records}'" in migration
-    assert "'{outstanding_usage_ids}'" in migration
-    original = (
-        Path(__file__).parents[3]
-        / "src/mission_control/adapters/postgres/migrations"
-        / "0012_graph_runtime_operation_journal.sql"
-    ).read_text(encoding="utf-8")
-    assert "PRIMARY KEY (request_scope, settlement_id)" in original
+    """Settlements are revisioned per claim in the common component: the revision is part of
+    both natural keys, and at most one terminal settlement exists per claim."""
+
+    migration = (COMPONENT_MIGRATIONS / "0011_operation_journal_support.sql").read_text(
+        encoding="utf-8"
+    )
+    assert "settlement_revision bigint NOT NULL CHECK (settlement_revision >= 1)" in migration
+    assert (
+        "UNIQUE (installation_id, application_id, tenant_id, settlement_key, settlement_revision)"
+        in migration
+    )
+    assert (
+        "UNIQUE (installation_id, application_id, tenant_id, claim_key, settlement_revision)"
+        in migration
+    )
+    assert (
+        "CREATE UNIQUE INDEX operation_settlement_one_terminal_idx ON "
+        "mission_control.operation_settlement (installation_id, application_id, tenant_id, "
+        "claim_key) WHERE status <> 'reconciliation_required';"
+    ) in migration
 
 
 @pytest.mark.asyncio
@@ -1842,8 +1864,8 @@ async def test_authority_digest_is_order_independent_for_plain_and_combined_cas(
             state = await super().get_budget(request_scope, run_id)
             return state.model_copy(
                 update={
-                    "usage_ids": frozenset(reversed(sorted(state.usage_ids))),
-                    "settlement_ids": frozenset(reversed(sorted(state.settlement_ids))),
+                    "usage_ids": frozenset(sorted(state.usage_ids, reverse=True)),
+                    "settlement_ids": frozenset(sorted(state.settlement_ids, reverse=True)),
                     "usage_records": dict(reversed(tuple(state.usage_records.items()))),
                     "usage_settlements": dict(reversed(tuple(state.usage_settlements.items()))),
                 }

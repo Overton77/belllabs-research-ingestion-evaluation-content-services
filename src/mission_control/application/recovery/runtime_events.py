@@ -121,9 +121,11 @@ def _redact_payload(
     redacted: dict[str, object] = {}
     for key, value in payload.items():
         normalized = key.lower().replace("-", "_")
-        if normalized in allowed_exact or normalized in allowed_references:
-            redacted[key] = value
-        elif operator_debug and normalized in operator_exact:
+        if (
+            normalized in allowed_exact
+            or normalized in allowed_references
+            or (operator_debug and normalized in operator_exact)
+        ):
             redacted[key] = value
     return redacted
 

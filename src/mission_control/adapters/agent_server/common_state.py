@@ -61,7 +61,7 @@ def _reject_noncompact_payload(value: Any) -> None:
                 if any(fragment in normalized for fragment in _SENSITIVE_FRAGMENTS):
                     raise ValueError("common state cannot contain sensitive payloads")
                 if any(fragment in normalized for fragment in _LARGE_PAYLOAD_FRAGMENTS) and not (
-                    normalized.endswith("_ref") or normalized.endswith("_digest")
+                    normalized.endswith(("_ref", "_digest"))
                 ):
                     raise ValueError("common state cannot contain payload bodies")
                 inspect(nested)

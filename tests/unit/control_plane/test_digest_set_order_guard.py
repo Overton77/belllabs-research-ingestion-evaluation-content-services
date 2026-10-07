@@ -540,7 +540,7 @@ def _all_app_models() -> list[type[BaseModel]]:
                 continue  # executable CLI modules parse arguments when executed
             try:
                 importlib.import_module(module.name)
-            except Exception:  # noqa: S112 - modules needing live settings are not contracts
+            except Exception:
                 continue
     found: list[type[BaseModel]] = []
 

@@ -192,7 +192,7 @@ class DeepAgentRuntimeAdapter:
             }
             disclosure_observer = _SkillDisclosureObserver(binding)
             model_calls = _ModelCallObserver()
-            checkpointer = cast(BaseCheckpointSaver[Any], materialized.checkpointer)
+            checkpointer = materialized.checkpointer
             # REQ-CP-DA-018: classify the unit generation from the checkpointer before any
             # provider work, then act exactly as `CON-CP-CHECKPOINT-LINEAGE-V1` prescribes:
             # submit once, resume without input, reconstruct without invocation, or fail
@@ -372,7 +372,7 @@ class DeepAgentRuntimeAdapter:
                 extra_middleware=[],
                 name=f"belllabs-{binding.operation_id}",
             )
-            checkpointer = cast(BaseCheckpointSaver[Any], materialized.checkpointer)
+            checkpointer = materialized.checkpointer
             classified = await _classify(checkpointer, agent, plan)
             if classified.kind == CheckpointClassification.NOT_SUBMITTED:
                 return RuntimeResult(output_text="", checkpoint=None)
@@ -712,7 +712,7 @@ async def _terminal_result_may_exist(
         classified = await _classify(checkpointer, agent, plan)
     except CheckpointLineageInDoubt as error:
         return True, error.candidates, None
-    except Exception:  # noqa: BLE001 - an unclassifiable lineage is not provably non-terminal
+    except Exception:
         return True, (), None
     if classified.kind == CheckpointClassification.NOT_SUBMITTED:
         return False, (), None

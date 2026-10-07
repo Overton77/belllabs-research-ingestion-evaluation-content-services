@@ -1,0 +1,295 @@
+{
+  "descriptor_bound_to_release": true,
+  "descriptor_sha256": "b0330c546284548791dffae3c19452952db008fe5b32d36e8cc1a63488b93cfd",
+  "final": {
+    "complete": true,
+    "holds": [],
+    "invalid_indexes": [],
+    "schema": "mission_control_runtime",
+    "schema_exists": true,
+    "steps": [
+      {
+        "concurrent": false,
+        "id": "prerequisite.schema_role",
+        "sha256": "74ff2240976abcccfc8246a2ba5daf63655cc0b55966a0ed5ef234d7700c40e8",
+        "status": "complete"
+      },
+      {
+        "concurrent": false,
+        "id": "saver.v0",
+        "sha256": "ce7cab847fabee5cf941b9fd0444d10d66cd3cf87eb53b10776e218f9cf318a1",
+        "status": "complete"
+      },
+      {
+        "concurrent": false,
+        "id": "saver.v1",
+        "sha256": "99cdcac4b487dff1b05eece6225f3434fade396355495a0a34b0ae813da5a12c",
+        "status": "complete"
+      },
+      {
+        "concurrent": false,
+        "id": "saver.v2",
+        "sha256": "bcfa850d8ef40fc86930c1fd07d703383f78971c63ec4378866ef7a3516ee75d",
+        "status": "complete"
+      },
+      {
+        "concurrent": false,
+        "id": "saver.v3",
+        "sha256": "89a3c15d1431daad3dffe1d587bb59f4f74f03a25a08b34730b0884eb966cd02",
+        "status": "complete"
+      },
+      {
+        "concurrent": false,
+        "id": "saver.v4",
+        "sha256": "9509f161775a6e65d479523f5e8baad185b67540d85717a9cda5e41828daaa7c",
+        "status": "complete"
+      },
+      {
+        "concurrent": false,
+        "id": "saver.v5",
+        "sha256": "17db4fd369edb9244b9f91d9aeed145c3d04ad8ba6e95d06247f07a63527d11a",
+        "status": "complete"
+      },
+      {
+        "concurrent": true,
+        "id": "saver.v6",
+        "sha256": "eb1fff5be82002c71dd32ddba2106e0472fa28c867fa897ac45a5e3bbb58806e",
+        "status": "complete"
+      },
+      {
+        "concurrent": true,
+        "id": "saver.v7",
+        "sha256": "78f503d280c95f2d4428295df25cb7f3669affb46be10c8c8ba46bde5ee84510",
+        "status": "complete"
+      },
+      {
+        "concurrent": true,
+        "id": "saver.v8",
+        "sha256": "ea9b612ca341fbe6cb1daca3e9b159bf10a986a7e1341925e5e6ba81f131f01f",
+        "status": "complete"
+      },
+      {
+        "concurrent": false,
+        "id": "saver.v9",
+        "sha256": "e181a76c88b0b51977c9b5ddb95c8747e77077710c0bea28cdcf96305f35c948",
+        "status": "complete"
+      },
+      {
+        "concurrent": false,
+        "id": "store.ledger",
+        "sha256": "936534b176b895c17c596e1a165857145937c1aaf0b9dfd31c060d0ee41355f9",
+        "status": "complete"
+      },
+      {
+        "concurrent": false,
+        "id": "store.v0",
+        "sha256": "bca2404eecfb5f032ab479d27fa7be0cfaef84d1efd26d92f938d4c52df52d40",
+        "status": "complete"
+      },
+      {
+        "concurrent": true,
+        "id": "store.v1",
+        "sha256": "0cb84b0918382ba4a9b3899103e2ed8bd92395b29d964a5f21de2de667905c0e",
+        "status": "complete"
+      },
+      {
+        "concurrent": false,
+        "id": "store.v2",
+        "sha256": "83fb4d70e7dbb73187457fcc5e9cf7bd54c1b07c6747b425a4520c70ff542577",
+        "status": "complete"
+      },
+      {
+        "concurrent": false,
+        "id": "store.v3",
+        "sha256": "b29a372beb8e093a73749b86aef6abbb628e4b60c7a4b1dbee919a3d82a3a54e",
+        "status": "complete"
+      },
+      {
+        "concurrent": false,
+        "id": "post.grants",
+        "sha256": "a1f42b7e45864f8a23457f621a3c4fc662644f97a427064fb505581d9b8579f5",
+        "status": "complete"
+      }
+    ]
+  },
+  "finished_at": "2026-10-04T00:56:32.577980+00:00",
+  "format": "mission-control-runtime-receipt/v1",
+  "pins": {
+    "langgraph": "1.2.10",
+    "langgraph-checkpoint": "4.1.1",
+    "langgraph-checkpoint-postgres": "3.1.1",
+    "psycopg": "3.3.4"
+  },
+  "run_id": "372ff9824518521c",
+  "started_at": "2026-10-04T00:56:31.218724+00:00",
+  "status": "complete",
+  "steps": [
+    {
+      "concurrent": false,
+      "finished_at": "2026-10-04T00:56:31.852774+00:00",
+      "id": "prerequisite.schema_role",
+      "observed": "pending",
+      "sha256": "74ff2240976abcccfc8246a2ba5daf63655cc0b55966a0ed5ef234d7700c40e8",
+      "started_at": "2026-10-04T00:56:31.812826+00:00",
+      "status": "completed"
+    },
+    {
+      "concurrent": false,
+      "finished_at": "2026-10-04T00:56:31.893059+00:00",
+      "id": "saver.v0",
+      "observed": "pending",
+      "sha256": "ce7cab847fabee5cf941b9fd0444d10d66cd3cf87eb53b10776e218f9cf318a1",
+      "started_at": "2026-10-04T00:56:31.864362+00:00",
+      "status": "completed"
+    },
+    {
+      "concurrent": false,
+      "finished_at": "2026-10-04T00:56:31.932666+00:00",
+      "id": "saver.v1",
+      "observed": "pending",
+      "sha256": "99cdcac4b487dff1b05eece6225f3434fade396355495a0a34b0ae813da5a12c",
+      "started_at": "2026-10-04T00:56:31.903609+00:00",
+      "status": "completed"
+    },
+    {
+      "concurrent": false,
+      "finished_at": "2026-10-04T00:56:31.975623+00:00",
+      "id": "saver.v2",
+      "observed": "pending",
+      "sha256": "bcfa850d8ef40fc86930c1fd07d703383f78971c63ec4378866ef7a3516ee75d",
+      "started_at": "2026-10-04T00:56:31.944158+00:00",
+      "status": "completed"
+    },
+    {
+      "concurrent": false,
+      "finished_at": "2026-10-04T00:56:32.017252+00:00",
+      "id": "saver.v3",
+      "observed": "pending",
+      "sha256": "89a3c15d1431daad3dffe1d587bb59f4f74f03a25a08b34730b0884eb966cd02",
+      "started_at": "2026-10-04T00:56:31.987203+00:00",
+      "status": "completed"
+    },
+    {
+      "concurrent": false,
+      "finished_at": "2026-10-04T00:56:32.053575+00:00",
+      "id": "saver.v4",
+      "observed": "pending",
+      "sha256": "9509f161775a6e65d479523f5e8baad185b67540d85717a9cda5e41828daaa7c",
+      "started_at": "2026-10-04T00:56:32.035253+00:00",
+      "status": "completed"
+    },
+    {
+      "concurrent": false,
+      "finished_at": "2026-10-04T00:56:32.070912+00:00",
+      "id": "saver.v5",
+      "observed": "pending",
+      "sha256": "17db4fd369edb9244b9f91d9aeed145c3d04ad8ba6e95d06247f07a63527d11a",
+      "started_at": "2026-10-04T00:56:32.062138+00:00",
+      "status": "completed"
+    },
+    {
+      "concurrent": true,
+      "finished_at": "2026-10-04T00:56:32.104747+00:00",
+      "id": "saver.v6",
+      "observed": "pending",
+      "sha256": "eb1fff5be82002c71dd32ddba2106e0472fa28c867fa897ac45a5e3bbb58806e",
+      "started_at": "2026-10-04T00:56:32.085822+00:00",
+      "status": "completed"
+    },
+    {
+      "concurrent": true,
+      "finished_at": "2026-10-04T00:56:32.144178+00:00",
+      "id": "saver.v7",
+      "observed": "pending",
+      "sha256": "78f503d280c95f2d4428295df25cb7f3669affb46be10c8c8ba46bde5ee84510",
+      "started_at": "2026-10-04T00:56:32.121629+00:00",
+      "status": "completed"
+    },
+    {
+      "concurrent": true,
+      "finished_at": "2026-10-04T00:56:32.179210+00:00",
+      "id": "saver.v8",
+      "observed": "pending",
+      "sha256": "ea9b612ca341fbe6cb1daca3e9b159bf10a986a7e1341925e5e6ba81f131f01f",
+      "started_at": "2026-10-04T00:56:32.159759+00:00",
+      "status": "completed"
+    },
+    {
+      "concurrent": false,
+      "finished_at": "2026-10-04T00:56:32.210883+00:00",
+      "id": "saver.v9",
+      "observed": "pending",
+      "sha256": "e181a76c88b0b51977c9b5ddb95c8747e77077710c0bea28cdcf96305f35c948",
+      "started_at": "2026-10-04T00:56:32.194420+00:00",
+      "status": "completed"
+    },
+    {
+      "concurrent": false,
+      "finished_at": "2026-10-04T00:56:32.237164+00:00",
+      "id": "store.ledger",
+      "observed": "pending",
+      "sha256": "936534b176b895c17c596e1a165857145937c1aaf0b9dfd31c060d0ee41355f9",
+      "started_at": "2026-10-04T00:56:32.216703+00:00",
+      "status": "completed"
+    },
+    {
+      "concurrent": false,
+      "finished_at": "2026-10-04T00:56:32.274631+00:00",
+      "id": "store.v0",
+      "observed": "pending",
+      "sha256": "bca2404eecfb5f032ab479d27fa7be0cfaef84d1efd26d92f938d4c52df52d40",
+      "started_at": "2026-10-04T00:56:32.248043+00:00",
+      "status": "completed"
+    },
+    {
+      "concurrent": true,
+      "finished_at": "2026-10-04T00:56:32.307833+00:00",
+      "id": "store.v1",
+      "observed": "pending",
+      "sha256": "0cb84b0918382ba4a9b3899103e2ed8bd92395b29d964a5f21de2de667905c0e",
+      "started_at": "2026-10-04T00:56:32.289226+00:00",
+      "status": "completed"
+    },
+    {
+      "concurrent": false,
+      "finished_at": "2026-10-04T00:56:32.340550+00:00",
+      "id": "store.v2",
+      "observed": "pending",
+      "sha256": "83fb4d70e7dbb73187457fcc5e9cf7bd54c1b07c6747b425a4520c70ff542577",
+      "started_at": "2026-10-04T00:56:32.322108+00:00",
+      "status": "completed"
+    },
+    {
+      "concurrent": false,
+      "finished_at": "2026-10-04T00:56:32.367368+00:00",
+      "id": "store.v3",
+      "observed": "pending",
+      "sha256": "b29a372beb8e093a73749b86aef6abbb628e4b60c7a4b1dbee919a3d82a3a54e",
+      "started_at": "2026-10-04T00:56:32.352722+00:00",
+      "status": "completed"
+    },
+    {
+      "concurrent": false,
+      "finished_at": "2026-10-04T00:56:32.408609+00:00",
+      "id": "post.grants",
+      "observed": "pending",
+      "sha256": "a1f42b7e45864f8a23457f621a3c4fc662644f97a427064fb505581d9b8579f5",
+      "started_at": "2026-10-04T00:56:32.371102+00:00",
+      "status": "completed"
+    }
+  ],
+  "target": {
+    "app": "ai-engineer",
+    "application_id": "ai-engineer",
+    "approved_by": "lead:disposable-qualification",
+    "database_host": "127.0.0.1",
+    "database_name": "postgres",
+    "database_port": "55552",
+    "database_user": "mc_migrator",
+    "environment": "disposable",
+    "identity_evidence": "local docker disposable cluster for ai-engineer",
+    "installation_id": "0192a4f0-0000-7000-8000-0000000a1e00",
+    "project_label": "disposable-ai-engineer",
+    "project_ref": "mcdisposableaieng"
+  }
+}

@@ -8,7 +8,9 @@ from typing import Any
 
 import asyncpg
 
+from mission_control.adapters.postgres.scope import apply_scope
 from mission_control.application.artifacts.artifact_promotion import artifact_durable_reference
+from mission_control.contracts.identities import parse_request_scope, uuid7
 from mission_control.domain.authoring.identity import stable_id
 from mission_control.domain.execution.contracts import (
     ArtifactMetadataRevision,
@@ -18,9 +20,18 @@ from mission_control.domain.policies.errors import IdempotencyConflict, RunContr
 
 FailureHook = Callable[[str], Awaitable[None] | None]
 
+ARTIFACT_DESTINATION = "artifact_reference"
+_SERVICE_ACTOR = "service:mission-control-artifacts"
+
 
 class PostgresArtifactDurableReferenceRepository:
-    """Atomically admits one durable reference and its relayable event."""
+    """Atomically registers one content-addressed artifact and its relayable outbox event.
+
+    The durable reference is a canonical ``mission_control.artifact`` row (registered
+    once per artifact key, promotion and durable reference) and its ``artifact.admitted``
+    event a canonical ``mission_control.outbox`` row, committed in one transaction under
+    the tenant request scope. Replays return the existing reference without new rows.
+    """
 
     def __init__(self, pool: asyncpg.Pool, *, before_commit: FailureHook | None = None) -> None:
         self._pool = pool
@@ -42,6 +53,8 @@ class PostgresArtifactDurableReferenceRepository:
         durable_reference = artifact_durable_reference(request_scope, run_id, artifact.artifact_id)
         if artifact.durable_reference != durable_reference:
             raise ValueError("admitted metadata carries a conflicting durable reference")
+        scope = parse_request_scope(request_scope)
+        key = (scope.installation_id, scope.application_id, scope.tenant_id)
         event_id = stable_id("artifact-admitted-event", artifact.artifact_id)
         recorded_at = datetime.now(UTC)
         envelope: dict[str, object] = {
@@ -66,33 +79,39 @@ class PostgresArtifactDurableReferenceRepository:
             },
         }
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, request_scope)
+            await apply_scope(connection, scope)
             await connection.execute(
                 "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-                f"artifact:{artifact.artifact_id}",
+                f"artifact:{request_scope}:{artifact.artifact_id}",
             )
-            run_exists = await connection.fetchval(
-                """
-                SELECT EXISTS (
-                    SELECT 1 FROM belllabs_control.workflow_runs
-                    WHERE run_id = $1 AND request_scope = $2
-                )
-                """,
+            run_uuid = await connection.fetchval(
+                """SELECT run_id FROM mission_control.mission_run
+                   WHERE installation_id=$1 AND application_id=$2 AND tenant_id=$3
+                     AND run_key=$4""",
+                *key,
                 run_id,
-                request_scope,
             )
-            if not run_exists:
+            if run_uuid is None:
                 raise RunControlNotFound(f"workflow run not found: {run_id}")
             prior = await connection.fetchrow(
-                """
-                SELECT promotion_id, metadata_revision, manifest_revision,
-                       content_digest, object_ref, durable_reference
-                FROM belllabs_control.durable_artifact_references
-                WHERE artifact_id = $1
-                """,
+                """SELECT detail, content_digest, object_key, producer_run_id
+                   FROM mission_control.artifact
+                   WHERE installation_id=$1 AND application_id=$2 AND tenant_id=$3
+                     AND artifact_key=$4""",
+                *key,
                 artifact.artifact_id,
             )
             if prior is not None:
+                detail = _json(prior["detail"])
+                observed = (
+                    detail.get("promotion_id"),
+                    detail.get("metadata_revision"),
+                    detail.get("manifest_revision"),
+                    prior["content_digest"],
+                    prior["object_key"],
+                    detail.get("durable_reference"),
+                    prior["producer_run_id"],
+                )
                 expected = (
                     artifact.promotion_id,
                     artifact.revision,
@@ -100,43 +119,63 @@ class PostgresArtifactDurableReferenceRepository:
                     artifact.content_digest,
                     artifact.object_ref,
                     durable_reference,
+                    run_uuid,
                 )
-                observed = tuple(prior)
                 if observed != expected:
                     raise IdempotencyConflict("durable artifact reference conflict")
-                return str(prior["durable_reference"])
+                return str(detail["durable_reference"])
+            detail_value = {
+                "promotion_id": artifact.promotion_id,
+                "metadata_revision": artifact.revision,
+                "manifest_revision": artifact.manifest_revision,
+                "durable_reference": durable_reference,
+                "run_key": run_id,
+                "candidate_id": artifact.candidate_id,
+                "semantic_attempt_key": artifact.semantic_attempt_key,
+                "producer_binding_id": artifact.producer_binding_id,
+                "output_slot": artifact.output_slot,
+                "logical_path": artifact.logical_path,
+            }
+            try:
+                await connection.execute(
+                    """INSERT INTO mission_control.artifact
+                       (installation_id, application_id, tenant_id, artifact_id, artifact_key,
+                        producer_run_id, kind, schema_ref, media_type, content_digest,
+                        byte_size, storage_kind, object_key, artifact_version, custody_state,
+                        detail, updated_at, created_at, created_by_actor_ref)
+                       VALUES ($1,$2,$3,$4,$5,$6,'workspace_output',$7,$8,$9,$10,
+                               'object_store',$11,1,'registered',$12::jsonb,$13,$13,$14)""",
+                    *key,
+                    uuid7(),
+                    artifact.artifact_id,
+                    run_uuid,
+                    artifact.output_contract_ref,
+                    artifact.media_type,
+                    artifact.content_digest,
+                    artifact.size_bytes,
+                    artifact.object_ref,
+                    json.dumps(detail_value),
+                    recorded_at,
+                    _SERVICE_ACTOR,
+                )
+            except asyncpg.UniqueViolationError as error:
+                raise IdempotencyConflict("durable artifact reference conflict") from error
             await connection.execute(
-                """
-                INSERT INTO belllabs_control.durable_artifact_references
-                    (artifact_id, request_scope, run_id, promotion_id,
-                     metadata_revision, manifest_revision, content_digest,
-                     object_ref, durable_reference, admitted_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                """,
-                artifact.artifact_id,
-                request_scope,
-                run_id,
-                artifact.promotion_id,
-                artifact.revision,
-                artifact.manifest_revision,
-                artifact.content_digest,
-                artifact.object_ref,
-                durable_reference,
-                recorded_at,
-            )
-            await connection.execute(
-                """
-                INSERT INTO belllabs_control.artifact_reference_outbox
-                    (event_id, request_scope, run_id, artifact_id,
-                     event_type, envelope, recorded_at)
-                VALUES ($1, $2, $3, $4, 'artifact.admitted', $5::jsonb, $6)
-                """,
+                """INSERT INTO mission_control.outbox
+                   (installation_id, application_id, tenant_id, outbox_id, delivery_key,
+                    destination_kind, event_type, aggregate_key, aggregate_version,
+                    aggregate_sequence, payload, delivery_state, attempts, next_attempt_at,
+                    version, created_at, created_by_actor_ref)
+                   VALUES ($1,$2,$3,$4,$5,$6,'artifact.admitted',$7,1,1,$8::jsonb,'pending',0,
+                           $9,1,$9,$10)""",
+                *key,
+                uuid7(),
                 event_id,
-                request_scope,
-                run_id,
-                artifact.artifact_id,
+                ARTIFACT_DESTINATION,
+                f"artifact:{artifact.artifact_id}",
                 json.dumps(envelope),
                 recorded_at,
+                _SERVICE_ACTOR,
             )
             if self._before_commit is not None:
                 result = self._before_commit("artifact_admission")
@@ -145,14 +184,16 @@ class PostgresArtifactDurableReferenceRepository:
         return durable_reference
 
     async def get(self, request_scope: str, artifact_id: str) -> str | None:
+        scope = parse_request_scope(request_scope)
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, request_scope)
+            await apply_scope(connection, scope)
             value = await connection.fetchval(
-                """
-                SELECT durable_reference
-                FROM belllabs_control.durable_artifact_references
-                WHERE artifact_id = $1
-                """,
+                """SELECT detail->>'durable_reference' FROM mission_control.artifact
+                   WHERE installation_id=$1 AND application_id=$2 AND tenant_id=$3
+                     AND artifact_key=$4""",
+                scope.installation_id,
+                scope.application_id,
+                scope.tenant_id,
                 artifact_id,
             )
         return str(value) if value is not None else None
@@ -160,26 +201,22 @@ class PostgresArtifactDurableReferenceRepository:
     async def pending_events(
         self, request_scope: str, *, limit: int = 100
     ) -> tuple[dict[str, Any], ...]:
+        scope = parse_request_scope(request_scope)
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, request_scope)
+            await apply_scope(connection, scope)
             rows = await connection.fetch(
-                """
-                SELECT envelope
-                FROM belllabs_control.artifact_reference_outbox
-                WHERE delivered_at IS NULL
-                ORDER BY recorded_at, event_id
-                LIMIT $1
-                """,
+                """SELECT payload FROM mission_control.outbox
+                   WHERE installation_id=$1 AND application_id=$2 AND tenant_id=$3
+                     AND destination_kind=$4 AND delivered_at IS NULL
+                   ORDER BY global_position
+                   LIMIT $5""",
+                scope.installation_id,
+                scope.application_id,
+                scope.tenant_id,
+                ARTIFACT_DESTINATION,
                 limit,
             )
-        return tuple(_json(row["envelope"]) for row in rows)
-
-
-async def _set_scope(connection: asyncpg.Connection, request_scope: str) -> None:
-    await connection.execute(
-        "SELECT set_config('belllabs.request_scope', $1, true)",
-        request_scope,
-    )
+        return tuple(_json(row["payload"]) for row in rows)
 
 
 def _json(value: Any) -> dict[str, Any]:

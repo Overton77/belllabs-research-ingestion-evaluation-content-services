@@ -5,7 +5,7 @@ import base64
 import hashlib
 import json
 import re
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 PROMPT_INJECTION = re.compile(
@@ -183,7 +183,7 @@ def _scan(payload: dict[str, Any]) -> dict[str, Any]:
 
 def main() -> None:
     args = _arguments()
-    with open(args.input, encoding="utf-8") as stream:
+    with Path(args.input).open(encoding="utf-8") as stream:
         payload = json.load(stream)
     print(json.dumps(_scan(payload), sort_keys=True, separators=(",", ":")))
 

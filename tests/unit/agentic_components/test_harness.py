@@ -196,11 +196,11 @@ async def test_query_returns_only_compatible_qualified_components() -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("host", "path"),
-    (
+    [
         (AgentHost.CURSOR, ".cursor/mcp.json"),
         (AgentHost.CODEX, ".codex/config.toml"),
         (AgentHost.CLAUDE_CODE, ".mcp.json"),
-    ),
+    ],
 )
 async def test_materialization_renders_target_specific_project_config(
     host: AgentHost,

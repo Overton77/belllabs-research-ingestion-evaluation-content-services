@@ -22,7 +22,7 @@ def test_only_one_deployment_configuration_and_exact_registered_graphs():
     assert set(declared["graphs"]) == set().union(*deployment.PROFILES.values())
 
 
-@pytest.mark.parametrize("profile,graphs", list(deployment.PROFILES.items()))
+@pytest.mark.parametrize(("profile", "graphs"), list(deployment.PROFILES.items()))
 def test_profiles_select_exact_graphs(monkeypatch, profile, graphs):
     monkeypatch.setenv("MISSION_CONTROL_AGENT_SERVER_PROFILE", profile)
     assert deployment.allowed_graphs() == graphs

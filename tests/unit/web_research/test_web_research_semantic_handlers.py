@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+
 from biotech_mission_adapters.application.web_research.web_research_repository import (
     InMemoryWebResearchRecordRepository,
 )
@@ -29,7 +30,6 @@ from biotech_mission_adapters.domain.coordinator.web_research_runtime import (
     ReviewedSkillMountBinding,
     WebResearchGoal,
 )
-
 from mission_control.adapters.temporal.coordinator_runtime import (
     GoalDirectedCoordinatorDependencies,
     StageGraphCoordinatorDependencies,

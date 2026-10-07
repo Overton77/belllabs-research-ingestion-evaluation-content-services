@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from dataclasses import replace
 from datetime import timedelta
 from typing import Any
@@ -953,12 +954,10 @@ class StageGraphWorkflow:
                     def reconciled(waited: int = liability_hints_seen) -> bool:
                         return self._liability_hints > waited
 
-                    try:
+                    with contextlib.suppress(TimeoutError):
                         await workflow.wait_condition(
                             reconciled, timeout=timedelta(seconds=cancellation_backoff)
                         )
-                    except TimeoutError:
-                        pass
                     liability_hints_seen = self._liability_hints
                     cancellation_backoff = min(cancellation_backoff * 2, 3_600)
                     projection = replace(projection, run_version=terminal.resulting_run_version)

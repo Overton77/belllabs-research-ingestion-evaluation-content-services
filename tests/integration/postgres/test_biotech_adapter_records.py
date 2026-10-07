@@ -1,14 +1,23 @@
+"""The optional biotech adapter record component installed beside the common component.
+
+`biotech_mission_adapters` stays its own optional component with its own role and scope
+setting; this proof installs it (twice, idempotently) into a fresh database that already
+carries the common `mission_control` component, and checks the two never share authority:
+no legacy schema appears, the common component's release ledger is untouched, and no
+`mission_control_*` capability role reaches the adapter records (nor the adapter role the
+common tables).
+"""
+
 from __future__ import annotations
 
 import asyncio
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
-from uuid import uuid4
 
 import asyncpg
 import pytest
+
 from biotech_mission_adapters.adapters.postgres_records import (
     PostgresSchemaGroundingRecordRepository,
     PostgresWebResearchRecordRepository,
@@ -28,45 +37,69 @@ from biotech_mission_adapters.domain.schema_grounding.errors import (
     CatalogPublicationConflict,
     SchemaGroundingRecordNotFound,
 )
-
 from mission_control.domain.authoring.canonical import sha256_digest
+from tests.fixtures.mission_control_common_db import (
+    CAPABILITY_ROLES,
+    CommonDatabase,
+    common_database,
+)
+
+pytestmark = pytest.mark.common_db
+ADAPTER_ROLE = "biotech_mission_adapter_runtime"
+
+
+async def _isolated_from_common_component(owner: asyncpg.Connection) -> None:
+    assert await owner.fetchval("SELECT to_regnamespace('belllabs_control')") is None
+    for capability in CAPABILITY_ROLES:
+        assert not await owner.fetchval(
+            "SELECT has_schema_privilege($1, 'biotech_mission_adapters', 'USAGE')"
+            " OR has_table_privilege($1, 'biotech_mission_adapters.records',"
+            " 'SELECT, INSERT, UPDATE, DELETE')",
+            capability,
+        ), capability
+    assert not await owner.fetchval(
+        "SELECT has_table_privilege($1, 'mission_control.mission_run',"
+        " 'SELECT, INSERT, UPDATE, DELETE')",
+        ADAPTER_ROLE,
+    )
 
 
 @pytest.fixture
-async def records_pool(test_application_postgres_dsn):
-    parsed = urlsplit(test_application_postgres_dsn)
-    assert parsed.hostname in {"localhost", "127.0.0.1", "::1"}, "disposable loopback only"
-    database = "biotech_adapters_test_" + uuid4().hex[:12]
-    owner = await asyncpg.connect(test_application_postgres_dsn)
-    try:
-        await owner.execute(f'CREATE DATABASE "{database}"')
-    finally:
-        await owner.close()
-    dsn = urlunsplit(parsed._replace(path="/" + database))
-    owner = await asyncpg.connect(dsn)
+async def records_pool():
+    async with common_database() as database:
+        async for pool in _records_pool(database):
+            yield pool
+
+
+async def _records_pool(database: CommonDatabase):
+    owner = await asyncpg.connect(database.owner_dsn)
     migration = Path(__file__).resolve().parents[3] / (  # noqa: ASYNC240
         "integrations/biotech/src/biotech_mission_adapters/migrations/0001_scoped_records.sql"
     )
     sql = await asyncio.to_thread(migration.read_text, encoding="utf-8")
     try:
+        releases = await owner.fetchval("SELECT count(*) FROM mission_control.component_release")
         async with owner.transaction():
             await owner.execute(sql)
-        # Idempotent optional install; no general Mission Control schema required.
+        # Idempotent optional install beside the common component, which it never changes.
         async with owner.transaction():
             await owner.execute(sql)
-        assert await owner.fetchval("SELECT to_regnamespace('belllabs_control')") is None
+        assert (
+            await owner.fetchval("SELECT count(*) FROM mission_control.component_release")
+            == releases
+        )
+        await _isolated_from_common_component(owner)
     finally:
         await owner.close()
 
     async def role(connection):
-        await connection.execute("SET ROLE biotech_mission_adapter_runtime")
+        await connection.execute(f"SET ROLE {ADAPTER_ROLE}")
 
-    pool = await asyncpg.create_pool(dsn, min_size=1, max_size=6, setup=role)
+    pool = await asyncpg.create_pool(database.owner_dsn, min_size=1, max_size=6, setup=role)
     try:
         yield pool
     finally:
         await pool.close()
-    # Preserve the uniquely named disposable database for audit; never drop shared data.
 
 
 async def test_schema_records_concurrency_scope_and_immutability(records_pool):

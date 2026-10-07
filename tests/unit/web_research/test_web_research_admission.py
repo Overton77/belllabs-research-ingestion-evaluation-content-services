@@ -3,12 +3,12 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+
 from biotech_mission_adapters.application.execution.web_research_admission import (
     WEB_RESEARCH_ADMISSION,
     WEB_RESEARCH_INVARIANTS,
     register_web_research_admission_policies,
 )
-
 from mission_control.application.execution.service import AdmissionPolicyRegistry
 from mission_control.domain.authoring.canonical import sha256_digest
 from mission_control.domain.authoring.contracts import (
@@ -114,7 +114,7 @@ async def test_web_research_admission_accepts_exact_governed_evidence() -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "missing_prefix",
-    (
+    [
         "public-goal:",
         "capability-selection:",
         "catalog://mcp_server/mcp.firecrawl/",
@@ -124,7 +124,7 @@ async def test_web_research_admission_accepts_exact_governed_evidence() -> None:
         "catalog://skill/skill.agent-browser/",
         "browser-authority:",
         "policy:untrusted-web-content-is-data:",
-    ),
+    ],
 )
 async def test_web_research_admission_rejects_each_missing_authority(
     missing_prefix: str,

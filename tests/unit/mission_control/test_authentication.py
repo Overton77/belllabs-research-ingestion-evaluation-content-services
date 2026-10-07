@@ -33,7 +33,7 @@ def authenticated_world(tmp_path):
         database_secret_ref="TEST_DATABASE_DSN",
         accepted_issuers={"https://issuer.invalid"},
         accepted_audiences={"authenticated"},
-        required_component_version="transitional-local-v1",
+        required_component_version="1.0.0",
     )
     config = ApplicationAuthentication(
         binding=binding,

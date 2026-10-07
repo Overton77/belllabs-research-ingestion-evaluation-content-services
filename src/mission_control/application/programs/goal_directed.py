@@ -1085,9 +1085,9 @@ def document_payload(
 
 
 __all__ = [
+    "GoalAdmissionStale",
     "GoalDirectedDocumentRepository",
     "GoalDirectedOperationPreparationService",
-    "GoalAdmissionStale",
     "GoalDirectedOperationResultService",
     "GoalOperationBindingReader",
     "GoalOperationSettlementPort",

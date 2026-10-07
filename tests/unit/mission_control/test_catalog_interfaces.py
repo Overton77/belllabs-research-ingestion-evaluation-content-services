@@ -58,6 +58,8 @@ def test_catalog_cli_routes_preserve_typed_request_body():
 
 
 def test_plugin_search_preserves_trust_and_host_filters_and_does_not_install():
+    from tests.unit.agentic_components.test_harness import mcp_release
+
     from mission_control.application.agentic_components.repository import (
         InMemoryAgenticComponentRepository,
     )
@@ -69,7 +71,6 @@ def test_plugin_search_preserves_trust_and_host_filters_and_does_not_install():
     )
     from mission_control.domain.agentic_components.contracts import AgenticComponentRelease
     from mission_control.interfaces.http.mission_control import principal_request_scope
-    from tests.unit.agentic_components.test_harness import mcp_release
 
     principal = MissionPrincipal(
         installation_id=uuid4(),

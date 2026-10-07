@@ -16,7 +16,8 @@ this bundle.
 Operator deployment configuration names secret environment references, accepted
 issuers/audiences, public verification keys, tenant grants and immutable bindings.
 Token permissions and user-editable metadata do not create authority.
-Installation registration is an explicit separate administrative action.
+Installing the common release, its runtime phase and seeds are explicit
+`mission-db` administrative actions with reviewed plans; startup never performs them.
 
 Workers select one application and binding digest, verify actual persisted
 installation identity and role separation, and then connect to the configured
@@ -34,6 +35,6 @@ Disallowed registered graphs return 403.
 
 - [API bootstrap](../../src/mission_control/bootstrap/api.py).
 - [Worker bootstrap](../../src/mission_control/bootstrap/worker.py).
-- [Installation registration](../../src/mission_control/bootstrap/installation.py).
+- [Common installation readiness](../../src/mission_control/bootstrap/common_installation.py).
 - [Canonical Agent Server profile proofs](../../tests/integration/agent_server/test_canonical_server_local.py).
 - Operator setup: `docs/MISSION_CONTROL_LOCAL_API.md`.

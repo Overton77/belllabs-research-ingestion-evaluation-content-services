@@ -43,7 +43,7 @@ def _text(value: object) -> str:
 
 
 def _items(values: object) -> str:
-    if isinstance(values, str | bytes) or isinstance(values, Mapping):
+    if isinstance(values, (str | bytes, Mapping)):
         return _text(values)
     if not isinstance(values, Iterable):
         return _text(values)

@@ -1,0 +1,34 @@
+{
+  "component": "mission_control",
+  "component_version": "1.0.0",
+  "installer_protocol": "mission-control-sql/v2",
+  "owned_schemas": ["mission_control", "mission_control_search"],
+  "postgres_major": 17,
+  "min_postgres_version": 170000,
+  "required_extensions": [
+    {"name": "vector", "schema": "extensions", "required_by": ["mission_control_search"]}
+  ],
+  "supported_reader_versions": ["mission-control-runtime/1"],
+  "supported_writer_versions": ["mission-control-runtime/1"],
+  "runtime_roles": [
+    "mission_control_runtime",
+    "mission_control_family_writer",
+    "mission_control_catalog_writer",
+    "mission_control_outbox_worker",
+    "mission_control_readonly"
+  ],
+  "compatible_previous_fingerprints": [],
+  "seed_compatibility": {
+    "bundle_format": "mission-control-seed/v1",
+    "component_range": ">=1.0.0 <2.0.0",
+    "seed_keys": [
+      "mc.installation",
+      "mc.catalog.workflow-parity",
+      "mc.catalog.runtime-profiles",
+      "mc.catalog.approved-assets",
+      "mc.app.bindings",
+      "mc.qualification.parity"
+    ]
+  },
+  "runtime_descriptor_path": "../runtime/descriptor.json"
+}

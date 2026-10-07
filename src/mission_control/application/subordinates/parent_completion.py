@@ -56,11 +56,17 @@ AdmissionRule = Callable[[AsyncSubagentExecution], ResultDecision]
 
 def admit_typed_manifest(execution: AsyncSubagentExecution) -> ResultDecision:
     """Admit a completed child whose typed manifest was captured (identity re-verified at
-    completion, REQ-CP-DA-019); reject a child that ended without one."""
+    completion, REQ-CP-DA-019); reject a child that ended without one.
 
+    Native completion alone is not admission: the manifest must belong to this exact child
+    and execution generation, so a stale or foreign provider result cannot be admitted."""
+
+    manifest = execution.result_manifest
     if (
         execution.lifecycle == AsyncSubagentLifecycle.COMPLETED
-        and execution.result_manifest is not None
+        and manifest is not None
+        and manifest.child_execution_id == execution.child_execution_id
+        and manifest.execution_generation == execution.execution_generation
     ):
         return "admit"
     return "reject"

@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mission-control-db-contract"
+version = "1.0.0"
+description = "Common Mission Control SQL component, release builder and fail-closed installer (mission-db)"
+requires-python = ">=3.12"
+dependencies = ["asyncpg>=0.30,<1"]
+
+[project.scripts]
+mission-db = "mission_control_db_contract.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mission_control_db_contract"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+# Local evidence/release files in an admin CLI; blocking path I/O is intentional.
+ignore = ["ASYNC240"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = "src"
+explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+module = ["asyncpg", "asyncpg.*"]
+ignore_missing_imports = true

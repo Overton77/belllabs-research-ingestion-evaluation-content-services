@@ -1,93 +1,31 @@
 from __future__ import annotations
 
-import hmac
 import json
 from collections.abc import Awaitable
 from datetime import UTC, datetime
-from hashlib import sha256
 from typing import Any, cast
 
 import asyncpg
 from redis.asyncio import Redis
 
+from mission_control.adapters.postgres.scope import apply_scope
+from mission_control.contracts.identities import uuid7
+from mission_control.domain.authoring.canonical import sha256_digest, stable_json_dump
 from mission_control.domain.execution.contracts import (
     RuntimeApprovalDecision,
     RuntimeApprovalRequest,
-    RuntimeEventEnvelope,
 )
 from mission_control.domain.policies.errors import IdempotencyConflict
 
-
-class PostgresRedisRuntimeEventBus:
-    """Durable lifecycle events in Postgres with Redis fan-out for realtime clients."""
-
-    def __init__(self, pool: asyncpg.Pool, redis: Redis) -> None:
-        self._pool = pool
-        self._redis = redis
-
-    async def latest_sequence(self, request_scope: str, binding_id: str) -> int:
-        async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, request_scope)
-            value = await connection.fetchval(
-                """
-                SELECT COALESCE(MAX(sequence), 0)
-                FROM belllabs_control.agent_runtime_events
-                WHERE request_scope = $1 AND binding_id = $2
-                """,
-                request_scope,
-                binding_id,
-            )
-        return int(value)
-
-    async def publish(self, request_scope: str, envelope: RuntimeEventEnvelope) -> None:
-        payload = envelope.model_dump(mode="json")
-        async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, request_scope)
-            prior = await connection.fetchval(
-                """
-                SELECT envelope FROM belllabs_control.agent_runtime_events
-                WHERE request_scope = $1 AND event_id = $2
-                """,
-                request_scope,
-                envelope.event_id,
-            )
-            if prior is not None:
-                if _json(prior) != payload:
-                    raise IdempotencyConflict("runtime event identity has conflicting payload")
-            else:
-                await connection.execute(
-                    """
-                    INSERT INTO belllabs_control.agent_runtime_events
-                        (event_id, request_scope, binding_id, run_id, operation_id,
-                         sequence, event_type, envelope, occurred_at)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
-                    """,
-                    envelope.event_id,
-                    request_scope,
-                    envelope.binding_id,
-                    envelope.run_id,
-                    envelope.operation_id,
-                    envelope.sequence,
-                    envelope.event_type,
-                    json.dumps(payload),
-                    envelope.occurred_at,
-                )
-        await self._redis.publish(
-            _event_channel(request_scope, envelope.run_id),
-            json.dumps(payload, separators=(",", ":")),
-        )
-
-    async def publish_ephemeral(
-        self,
-        *,
-        request_scope: str,
-        run_id: str,
-        payload: dict[str, object],
-    ) -> None:
-        await self._redis.publish(
-            _event_channel(request_scope, run_id),
-            json.dumps(payload, separators=(",", ":")),
-        )
+# Durable approvals are canonical mission_control.human_task rows (typed inline request
+# packet) answered once by mission_control.human_resolution; Redis only notifies.
+# The former PostgreSQL+Redis runtime event bus and the HMAC checkpoint store had no
+# production caller and are retired; LangGraph checkpoints belong to the private runtime
+# persistence schema, not to business authority.
+_SCOPE = "installation_id = $1 AND application_id = $2 AND tenant_id = $3"
+APPROVAL_KIND = "runtime_approval"
+APPROVAL_PREFIX = "runtime-approval:"
+_WRITER = "mission-control-runtime/1"
 
 
 class PostgresRedisApprovalGateway:
@@ -109,18 +47,10 @@ class PostgresRedisApprovalGateway:
     async def request(self, request: RuntimeApprovalRequest) -> RuntimeApprovalDecision:
         payload = request.model_dump(mode="json")
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, request.request_scope)
-            prior = await connection.fetchval(
-                """
-                SELECT request_payload
-                FROM belllabs_control.agent_runtime_approval_requests
-                WHERE request_scope = $1 AND approval_id = $2
-                """,
-                request.request_scope,
-                request.approval_id,
-            )
+            args = await _scope(connection, request.request_scope)
+            prior = await _approval_row(connection, args, request.approval_id)
             if prior is not None:
-                persisted = RuntimeApprovalRequest.model_validate(_json(prior))
+                persisted = RuntimeApprovalRequest.model_validate(_json(prior["request_packet"]))
                 comparable = persisted.model_copy(
                     update={
                         "requested_at": request.requested_at,
@@ -133,17 +63,26 @@ class PostgresRedisApprovalGateway:
             else:
                 await connection.execute(
                     """
-                    INSERT INTO belllabs_control.agent_runtime_approval_requests
-                        (approval_id, request_scope, binding_id, request_payload,
-                         requested_at, expires_at)
-                    VALUES ($1, $2, $3, $4::jsonb, $5, $6)
+                    INSERT INTO mission_control.human_task (
+                        installation_id, application_id, tenant_id, human_task_id, task_key,
+                        target_ref, kind, request_packet_ref, assignee_scope, deadline_at,
+                        on_timeout, lifecycle, request_packet, version, updated_at, created_at,
+                        created_by_actor_ref
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'expire', 'open',
+                            $11::jsonb, 1, $12, $12, $13)
                     """,
-                    request.approval_id,
+                    *args,
+                    uuid7(),
+                    APPROVAL_PREFIX + request.approval_id,
+                    f"binding:{request.binding_id}",
+                    APPROVAL_KIND,
+                    f"runtime-approval-request@{sha256_digest(stable_json_dump(request))}",
                     request.request_scope,
-                    request.binding_id,
+                    request.expires_at,
                     json.dumps(payload),
                     request.requested_at,
-                    request.expires_at,
+                    _WRITER,
                 )
         await self._redis.publish(
             _approval_channel(request.request_scope, request.binding_id),
@@ -166,15 +105,16 @@ class PostgresRedisApprovalGateway:
             timeout -= max(1, int((datetime.now(UTC) - started).total_seconds()))
 
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, request.request_scope)
+            args = await _scope(connection, request.request_scope)
             await connection.execute(
-                """
-                UPDATE belllabs_control.agent_runtime_approval_requests
-                SET status = 'expired'
-                WHERE request_scope = $1 AND approval_id = $2 AND status = 'pending'
+                f"""
+                UPDATE mission_control.human_task
+                SET lifecycle = 'expired', version = version + 1, updated_at = clock_timestamp()
+                WHERE {_SCOPE} AND task_key = $4 AND kind = $5 AND lifecycle = 'open'
                 """,
-                request.request_scope,
-                request.approval_id,
+                *args,
+                APPROVAL_PREFIX + request.approval_id,
+                APPROVAL_KIND,
             )
         raise TimeoutError("runtime approval expired")
 
@@ -182,67 +122,59 @@ class PostgresRedisApprovalGateway:
         payload = decision.model_dump(mode="json")
         expired = False
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, decision.request_scope)
-            request = await connection.fetchrow(
-                """
-                SELECT binding_id, status, expires_at
-                FROM belllabs_control.agent_runtime_approval_requests
-                WHERE request_scope = $1 AND approval_id = $2
-                FOR UPDATE
-                """,
-                decision.request_scope,
-                decision.approval_id,
-            )
-            if request is None or request["binding_id"] != decision.binding_id:
+            args = await _scope(connection, decision.request_scope)
+            request = await _approval_row(connection, args, decision.approval_id, lock=True)
+            if request is None or request["target_ref"] != f"binding:{decision.binding_id}":
                 raise ValueError("approval request was not found in the authorized scope")
-            if request["expires_at"] <= datetime.now(UTC):
+            if request["deadline_at"] <= datetime.now(UTC):
                 await connection.execute(
-                    """
-                    UPDATE belllabs_control.agent_runtime_approval_requests
-                    SET status = 'expired'
-                    WHERE request_scope = $1 AND approval_id = $2
+                    f"""
+                    UPDATE mission_control.human_task
+                    SET lifecycle = 'expired', version = version + 1,
+                        updated_at = clock_timestamp()
+                    WHERE {_SCOPE} AND human_task_id = $4 AND lifecycle = 'open'
                     """,
-                    decision.request_scope,
-                    decision.approval_id,
+                    *args,
+                    request["human_task_id"],
                 )
                 expired = True
             else:
-                prior = await connection.fetchval(
-                    """
-                    SELECT decision_payload
-                    FROM belllabs_control.agent_runtime_approval_decisions
-                    WHERE request_scope = $1 AND approval_id = $2
-                    """,
-                    decision.request_scope,
-                    decision.approval_id,
-                )
-                if prior is not None:
-                    persisted = RuntimeApprovalDecision.model_validate(_json(prior))
+                if request["answer"] is not None:
+                    persisted = RuntimeApprovalDecision.model_validate(_json(request["answer"]))
                     comparable = persisted.model_copy(update={"decided_at": decision.decided_at})
                     if comparable != decision:
                         raise IdempotencyConflict("approval already has a different decision")
                     return persisted
-                if request["status"] != "pending":
+                if request["lifecycle"] != "open":
                     raise ValueError("approval request is no longer pending")
                 await connection.execute(
                     """
-                    INSERT INTO belllabs_control.agent_runtime_approval_decisions
-                        (approval_id, request_scope, decision_payload, decided_at)
-                    VALUES ($1, $2, $3::jsonb, $4)
+                    INSERT INTO mission_control.human_resolution (
+                        installation_id, application_id, tenant_id, resolution_id,
+                        human_task_id, actor_ref, answer, answer_ref, answer_digest,
+                        expected_task_version, decided_at, created_at, created_by_actor_ref
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, NULL, $8, $9, $10, $10, $6)
                     """,
-                    decision.approval_id,
-                    decision.request_scope,
+                    *args,
+                    uuid7(),
+                    request["human_task_id"],
+                    _decision_actor(payload),
                     json.dumps(payload),
+                    sha256_digest(stable_json_dump(decision)),
+                    request["version"],
                     decision.decided_at,
                 )
                 await connection.execute(
-                    """
-                    UPDATE belllabs_control.agent_runtime_approval_requests
-                    SET status = $3 WHERE request_scope = $1 AND approval_id = $2
+                    f"""
+                    UPDATE mission_control.human_task
+                    SET lifecycle = 'resolved', version = version + 1, updated_at = $5
+                    WHERE {_SCOPE} AND human_task_id = $4 AND version = $6
                     """,
-                    decision.request_scope,
-                    decision.approval_id,
-                    decision.decision,
+                    *args,
+                    request["human_task_id"],
+                    decision.decided_at,
+                    request["version"],
                 )
         if expired:
             raise ValueError("approval request has expired")
@@ -257,97 +189,47 @@ class PostgresRedisApprovalGateway:
         self, request_scope: str, approval_id: str
     ) -> RuntimeApprovalDecision | None:
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, request_scope)
-            payload = await connection.fetchval(
-                """
-                SELECT decision_payload
-                FROM belllabs_control.agent_runtime_approval_decisions
-                WHERE request_scope = $1 AND approval_id = $2
-                """,
-                request_scope,
-                approval_id,
-            )
-        return RuntimeApprovalDecision.model_validate(_json(payload)) if payload else None
-
-    async def save_checkpoint(
-        self,
-        *,
-        request_scope: str,
-        binding_id: str,
-        state_json: str,
-        status: str = "awaiting_approval",
-    ) -> None:
-        state_mac = hmac.new(
-            self._checkpoint_signing_key,
-            f"{request_scope}:{binding_id}:".encode() + state_json.encode(),
-            sha256,
-        ).hexdigest()
-        async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, request_scope)
-            await connection.execute(
-                """
-                INSERT INTO belllabs_control.agent_runtime_checkpoints
-                    (binding_id, request_scope, state_json, state_mac, status)
-                VALUES ($1, $2, $3, $4, $5)
-                ON CONFLICT (request_scope, binding_id) DO UPDATE
-                SET state_json = EXCLUDED.state_json,
-                    state_mac = EXCLUDED.state_mac,
-                    status = EXCLUDED.status,
-                    updated_at = clock_timestamp()
-                """,
-                binding_id,
-                request_scope,
-                state_json,
-                state_mac,
-                status,
-            )
-
-    async def load_checkpoint(self, request_scope: str, binding_id: str) -> str | None:
-        async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, request_scope)
-            row = await connection.fetchrow(
-                """
-                SELECT state_json, state_mac, status
-                FROM belllabs_control.agent_runtime_checkpoints
-                WHERE request_scope = $1 AND binding_id = $2
-                """,
-                request_scope,
-                binding_id,
-            )
-        if row is None or row["status"] == "completed":
+            args = await _scope(connection, request_scope)
+            row = await _approval_row(connection, args, approval_id)
+        if row is None or row["answer"] is None:
             return None
-        actual = hmac.new(
-            self._checkpoint_signing_key,
-            f"{request_scope}:{binding_id}:".encode() + row["state_json"].encode(),
-            sha256,
-        ).hexdigest()
-        if not hmac.compare_digest(actual, row["state_mac"]):
-            raise ValueError("runtime checkpoint authentication failed")
-        return row["state_json"]
-
-    async def complete_checkpoint(self, request_scope: str, binding_id: str) -> None:
-        async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, request_scope)
-            await connection.execute(
-                """
-                UPDATE belllabs_control.agent_runtime_checkpoints
-                SET status = 'completed', updated_at = clock_timestamp()
-                WHERE request_scope = $1 AND binding_id = $2
-                """,
-                request_scope,
-                binding_id,
-            )
+        return RuntimeApprovalDecision.model_validate(_json(row["answer"]))
 
 
-async def _set_scope(connection: asyncpg.Connection, request_scope: str) -> None:
-    await connection.execute(
-        "SELECT set_config('belllabs.request_scope', $1, true)",
-        request_scope,
+async def _scope(connection: asyncpg.Connection, request_scope: str) -> tuple[Any, ...]:
+    scope = await apply_scope(connection, request_scope)
+    return scope.installation_id, scope.application_id, scope.tenant_id
+
+
+async def _approval_row(
+    connection: asyncpg.Connection,
+    args: tuple[Any, ...],
+    approval_id: str,
+    *,
+    lock: bool = False,
+) -> asyncpg.Record | None:
+    return await connection.fetchrow(
+        """
+        SELECT task.human_task_id, task.target_ref, task.lifecycle, task.deadline_at,
+               task.version, task.request_packet, resolution.answer
+        FROM mission_control.human_task task
+        LEFT JOIN mission_control.human_resolution resolution
+          ON resolution.installation_id = task.installation_id
+         AND resolution.application_id = task.application_id
+         AND resolution.tenant_id = task.tenant_id
+         AND resolution.human_task_id = task.human_task_id
+        WHERE task.installation_id = $1 AND task.application_id = $2 AND task.tenant_id = $3
+          AND task.task_key = $4 AND task.kind = $5
+        """
+        + (" FOR UPDATE OF task" if lock else ""),
+        *args,
+        APPROVAL_PREFIX + approval_id,
+        APPROVAL_KIND,
     )
 
 
-def _event_channel(request_scope: str, run_id: str) -> str:
-    return f"belllabs:runtime:{request_scope}:{run_id}"
+def _decision_actor(payload: dict[str, Any]) -> str:
+    return str(payload["actor_id"])
 
 
 def _approval_channel(request_scope: str, binding_id: str) -> str:

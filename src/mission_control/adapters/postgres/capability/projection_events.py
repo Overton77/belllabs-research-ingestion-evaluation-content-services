@@ -1,4 +1,10 @@
-"""Scoped, row-locked processing of the immutable catalog publication outbox."""
+"""Leased, row-locked processing of immutable installation catalog events.
+
+Events are immutable ``catalog-event/1`` catalog records; their processing state is a
+``mission_control.catalog_projection_job`` row claimed with ``FOR UPDATE SKIP LOCKED``,
+fenced on (lease owner, attempt count, unexpired lease) and poisoned with an immutable
+alert. Every transaction binds the installation catalog scope first.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +15,12 @@ from datetime import datetime, timedelta
 
 import asyncpg
 
+from mission_control.adapters.postgres.control_plane.catalog_assets import (
+    CATALOG_SERVICE_ACTOR,
+    insert_projection_job,
+    json_value,
+)
+from mission_control.adapters.postgres.scope import apply_catalog_scope, parse_catalog_scope
 from mission_control.application.capabilities.catalog_projection_events import (
     CatalogProjectionEvent,
     ProjectionEventFailure,
@@ -16,57 +28,81 @@ from mission_control.application.capabilities.catalog_projection_events import (
     bounded_projection_backoff,
     projection_alert,
 )
+from mission_control.contracts.identities import uuid7
 from mission_control.domain.authoring.canonical import sha256_digest, stable_json_dump
 from mission_control.domain.authoring.contracts import ExactDefinitionRef
 
 
 class PostgresProjectionEventRepository:
-    def __init__(self, pool: asyncpg.Pool, *, catalog_scope: str) -> None:
+    def __init__(
+        self,
+        pool: asyncpg.Pool,
+        *,
+        catalog_scope: str,
+        actor_ref: str = CATALOG_SERVICE_ACTOR,
+    ) -> None:
         if not catalog_scope:
             raise ValueError("trusted installation catalog scope required")
+        self._installation_id, self._application_id = parse_catalog_scope(catalog_scope)
         self.pool = pool
         self.scope = catalog_scope
+        self._actor = actor_ref
 
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator[asyncpg.Connection]:
         async with self.pool.acquire() as connection, connection.transaction():
-            await connection.execute(
-                "SELECT set_config('belllabs.catalog_scope',$1,true)", self.scope
-            )
+            await apply_catalog_scope(connection, self._installation_id, self._application_id)
             yield connection
 
     async def seed(self, connection: asyncpg.Connection) -> None:
+        """Idempotently enqueue a job for any verified catalog event that has none."""
         rows = await connection.fetch(
-            """SELECT identity,payload,payload_digest
-            FROM belllabs_control.definition_catalog_records
-            WHERE catalog_scope=$1 AND contract='catalog-event/1'""",
-            self.scope,
+            """SELECT r.record_key, r.payload, r.payload_digest
+               FROM mission_control.catalog_record AS r
+               WHERE r.installation_id=$1 AND r.application_id=$2
+                 AND r.contract='catalog-event/1'
+                 AND NOT EXISTS (
+                     SELECT 1 FROM mission_control.catalog_projection_job AS j
+                     WHERE j.installation_id=r.installation_id
+                       AND j.application_id=r.application_id
+                       AND j.event_key=r.record_key)""",
+            self._installation_id,
+            self._application_id,
         )
         for row in rows:
-            payload = (
-                json.loads(row["payload"]) if isinstance(row["payload"], str) else row["payload"]
-            )
+            payload = json_value(row["payload"])
             if sha256_digest(payload) != row["payload_digest"]:
                 raise ValueError("catalog outbox digest mismatch")
             event = CatalogProjectionEvent.model_validate(payload)
-            if event.event_id != row["identity"] or event.tenant_scope != self.scope:
+            if event.event_id != row["record_key"] or event.tenant_scope != self.scope:
                 raise ValueError("catalog outbox identity mismatch")
-            await connection.execute(
-                """INSERT INTO belllabs_control.catalog_projection_processing
-                (catalog_scope,event_id,payload) VALUES($1,$2,$3::jsonb)
-                ON CONFLICT(catalog_scope,event_id) DO NOTHING""",
-                self.scope,
-                event.event_id,
-                json.dumps(stable_json_dump(event)),
+            await insert_projection_job(
+                connection,
+                installation_id=self._installation_id,
+                application_id=self._application_id,
+                event=stable_json_dump(event),
+                actor_ref=self._actor,
+                recorded_at=event.created_at,
             )
 
-    async def save(self, connection: asyncpg.Connection, event: CatalogProjectionEvent) -> None:
+    async def save(
+        self, connection: asyncpg.Connection, event: CatalogProjectionEvent, *, now: datetime
+    ) -> None:
         await connection.execute(
-            """UPDATE belllabs_control.catalog_projection_processing
-            SET payload=$3::jsonb WHERE catalog_scope=$1 AND event_id=$2""",
-            self.scope,
+            """UPDATE mission_control.catalog_projection_job
+               SET state=$4, attempt_count=$5, lease_owner=$6, lease_expires_at=$7,
+                   next_attempt_at=$8, payload=$9::jsonb, version=version + 1, updated_at=$10
+               WHERE installation_id=$1 AND application_id=$2 AND event_key=$3""",
+            self._installation_id,
+            self._application_id,
             event.event_id,
+            event.state.value,
+            event.attempt_count,
+            event.lease_owner,
+            event.lease_expires_at,
+            event.next_attempt_at,
             json.dumps(stable_json_dump(event)),
+            now,
         )
 
     async def claim_batch(
@@ -77,15 +113,15 @@ class PostgresProjectionEventRepository:
         async with self.transaction() as connection:
             await self.seed(connection)
             rows = await connection.fetch(
-                """SELECT payload FROM belllabs_control.catalog_projection_processing
-                WHERE catalog_scope=$1 AND payload->>'state' IN ('pending','retry','processing')
-                AND (payload->>'next_attempt_at')::timestamptz <= $2
-                AND ((payload->>'lease_expires_at') IS NULL OR
-                     (payload->>'lease_expires_at')::timestamptz <= $2)
-                ORDER BY (payload->>'next_attempt_at')::timestamptz,
-                         (payload->>'created_at')::timestamptz,event_id
-                LIMIT $3 FOR UPDATE SKIP LOCKED""",
-                self.scope,
+                """SELECT payload FROM mission_control.catalog_projection_job
+                   WHERE installation_id=$1 AND application_id=$2
+                     AND state IN ('pending','retry','processing')
+                     AND next_attempt_at <= $3
+                     AND (lease_expires_at IS NULL OR lease_expires_at <= $3)
+                   ORDER BY next_attempt_at, created_at, event_key
+                   LIMIT $4 FOR UPDATE SKIP LOCKED""",
+                self._installation_id,
+                self._application_id,
                 now,
                 limit,
             )
@@ -100,7 +136,7 @@ class PostgresProjectionEventRepository:
                         "lease_expires_at": now + lease_duration,
                     }
                 )
-                await self.save(connection, event)
+                await self.save(connection, event, now=now)
                 claimed.append(event)
             return tuple(claimed)
 
@@ -114,9 +150,10 @@ class PostgresProjectionEventRepository:
         if event.tenant_scope != self.scope:
             return None
         row = await connection.fetchrow(
-            """SELECT payload FROM belllabs_control.catalog_projection_processing
-            WHERE catalog_scope=$1 AND event_id=$2 FOR UPDATE""",
-            self.scope,
+            """SELECT payload FROM mission_control.catalog_projection_job
+               WHERE installation_id=$1 AND application_id=$2 AND event_key=$3 FOR UPDATE""",
+            self._installation_id,
+            self._application_id,
             event.event_id,
         )
         if row is None:
@@ -139,7 +176,7 @@ class PostgresProjectionEventRepository:
             current = await self.fenced(connection, event, owner, completed_at)
             if current is None:
                 return False
-            await self.save(connection, _completed(current, completed_at))
+            await self.save(connection, _completed(current, completed_at), now=completed_at)
             return True
 
     async def fail(
@@ -171,16 +208,23 @@ class PostgresProjectionEventRepository:
                     "poison_reason": failure.error_code if poison else None,
                 }
             )
-            await self.save(connection, updated)
+            await self.save(connection, updated, now=failed_at)
             if poison:
                 alert = projection_alert(updated, failure.error_code, failed_at)
                 await connection.execute(
-                    """INSERT INTO belllabs_control.catalog_projection_alerts
-                    (catalog_scope,alert_id,payload) VALUES($1,$2,$3::jsonb)
-                    ON CONFLICT(catalog_scope,alert_id) DO NOTHING""",
-                    self.scope,
+                    """INSERT INTO mission_control.catalog_projection_alert
+                       (installation_id, application_id, projection_alert_id, alert_key,
+                        event_key, error_code, payload, created_at, created_by_actor_ref)
+                       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,clock_timestamp(),$8)
+                       ON CONFLICT (installation_id, application_id, alert_key) DO NOTHING""",
+                    self._installation_id,
+                    self._application_id,
+                    uuid7(),
                     alert.alert_id,
+                    alert.event_id,
+                    alert.error_code,
                     json.dumps(stable_json_dump(alert)),
+                    self._actor,
                 )
             return updated
 
@@ -192,11 +236,12 @@ class PostgresProjectionEventRepository:
         async with self.transaction() as connection:
             await self.seed(connection)
             rows = await connection.fetch(
-                """SELECT payload FROM belllabs_control.catalog_projection_processing
-                WHERE catalog_scope=$1 AND payload->>'asset_kind'=$2 AND payload->>'logical_id'=$3
-                AND (payload->>'revision')::bigint=$4 AND payload->>'source_digest'=$5
-                FOR UPDATE""",
-                self.scope,
+                """SELECT payload FROM mission_control.catalog_projection_job
+                   WHERE installation_id=$1 AND application_id=$2 AND definition_kind=$3
+                     AND logical_id=$4 AND revision=$5 AND source_digest=$6
+                   FOR UPDATE""",
+                self._installation_id,
+                self._application_id,
                 ref.kind.value,
                 ref.logical_id,
                 ref.revision,
@@ -214,15 +259,13 @@ class PostgresProjectionEventRepository:
                     and event.lease_expires_at is not None
                     and event.lease_expires_at <= completed_at
                 ):
-                    await self.save(connection, _completed(event, completed_at))
+                    await self.save(connection, _completed(event, completed_at), now=completed_at)
                     count += 1
             return count
 
 
 def _event(value: object) -> CatalogProjectionEvent:
-    return CatalogProjectionEvent.model_validate(
-        json.loads(value) if isinstance(value, str) else value
-    )
+    return CatalogProjectionEvent.model_validate(json_value(value))
 
 
 def _completed(event: CatalogProjectionEvent, at: datetime) -> CatalogProjectionEvent:

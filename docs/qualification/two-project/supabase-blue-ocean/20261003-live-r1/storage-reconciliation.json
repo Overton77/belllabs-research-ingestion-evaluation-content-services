@@ -1,0 +1,5 @@
+{
+  "status": "not_performed",
+  "reason": "Storage buckets (mission-artifacts, capability-bundles) and storage.objects policies were excluded from the approved plan; a separate storage plan and approval are required.",
+  "existing_buckets_untouched": true
+}

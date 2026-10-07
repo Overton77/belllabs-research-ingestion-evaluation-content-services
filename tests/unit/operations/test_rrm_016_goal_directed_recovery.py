@@ -159,7 +159,7 @@ async def test_goal_directed_unit_crash_windows_converge_to_one_settlement(
 async def test_crash_injection_is_real_for_the_before_settlement_window() -> None:
     """Guard: the before-settlement crash happens after the fenced result is recorded."""
 
-    harness, dispatch, _claim_, _run_id = await _goal_unit("guard")
+    harness, dispatch, _claim, _run_id = await _goal_unit("guard")
     harness.crashable.crash_before_settlement = True
     with pytest.raises(SimulatedWorkerCrash):
         await harness.service.execute(

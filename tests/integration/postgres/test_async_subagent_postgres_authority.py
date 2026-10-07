@@ -1,9 +1,10 @@
-"""Migration 0021 and `PostgresAsyncSubagentAuthority` under the production runtime role.
+"""`PostgresAsyncSubagentAuthority` on mission_control under the production runtime role.
 
-Opt-in through `TEST_APPLICATION_POSTGRES_DSN` (disposable stack only). Every repository call
-runs as `belllabs_control_runtime`, so forced RLS and the least-privilege grants are what is
-exercised: the submission fence with lease takeover, the lifecycle mirror, provider-run
-records with pending usage, typed in_doubt incidents, decisions and the inspection read.
+Every repository call runs as a restricted login of `mission_control_runtime`, so forced
+RLS and the least-privilege grants are what is exercised: the submission fence with lease
+takeover, the lifecycle mirror on the canonical subordinate execution, provider-run
+records with pending usage, typed in_doubt incidents (canonical reconciliation cases),
+decisions (canonical commands) and the inspection read.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ import pytest
 from mission_control.adapters.postgres.async_subagents.async_subagents import (
     PostgresAsyncSubagentAuthority,
 )
+from mission_control.adapters.postgres.scope import apply_scope
 from mission_control.domain.execution.async_subagent_reconciliation import (
     AsyncProviderRunRecord,
     AsyncSubagentIncident,
@@ -28,49 +30,36 @@ from mission_control.domain.execution.contracts import (
     AsyncSubagentUsage,
 )
 from tests.acceptance.control_plane.test_wp_cp_045 import request as spawn_request
-from tests.integration.postgres.test_checkpoint_lineage_postgres import (
-    RUNTIME_ROLE,
-    _assume_runtime_role,
-    admit_run,
-    require_disposable_postgres,
-    reset_application_schema,
-)
+from tests.fixtures.mission_control_common_db import CommonDatabase
+from tests.integration.postgres.runtime_common import common_db as common_db
+from tests.integration.postgres.runtime_common import owner_rows
+from tests.integration.postgres.test_checkpoint_lineage_postgres import RUNTIME_ROLE, admit_run
+
+pytestmark = pytest.mark.common_db
 
 
 @pytest.mark.asyncio
 async def test_runtime_role_fences_submission_and_records_in_doubt_lineage(
-    test_application_postgres_dsn: str,
+    common_db: CommonDatabase,
 ) -> None:
-    require_disposable_postgres(test_application_postgres_dsn)
-    owner = await asyncpg.create_pool(dsn=test_application_postgres_dsn, min_size=1, max_size=2)
-    runtime = await asyncpg.create_pool(
-        dsn=test_application_postgres_dsn, min_size=1, max_size=4, setup=_assume_runtime_role
-    )
+    runtime = await common_db.pool(max_size=4)
+    scope = common_db.scope()
     try:
-        await reset_application_schema(owner)
-        async with owner.acquire() as connection:
-            versions = {
-                row["version"]
-                for row in await connection.fetch(
-                    "SELECT version FROM belllabs_control.schema_migrations"
-                )
-            }
-        assert "0021_async_subagent_submission_fence_v1.sql" in versions
-        run_id = await admit_run(owner)
+        run_id = await admit_run(runtime, common_db)
         authority = PostgresAsyncSubagentAuthority(runtime)
         async with runtime.acquire() as connection:
-            assert await connection.fetchval("SELECT current_user") == RUNTIME_ROLE
+            assert await connection.fetchval(
+                "SELECT pg_has_role(current_user, $1, 'MEMBER')", RUNTIME_ROLE
+            )
 
-        base = spawn_request().model_copy(
-            update={"request_scope": "tenant-1", "parent_run_id": run_id}
-        )
+        base = spawn_request().model_copy(update={"request_scope": scope, "parent_run_id": run_id})
         child_id = f"child-{uuid4().hex[:12]}"
         await authority.reserve_and_admit(base, child_id, f"link-{child_id}")
         await authority.reserve_and_admit(base, child_id, f"link-{child_id}")  # idempotent
 
         now = datetime(2026, 10, 2, 12, 0, tzinfo=UTC)
         first = await authority.acquire_submission_fence(
-            "tenant-1",
+            scope,
             child_id,
             holder="worker-1",
             lease_expires_at=now + timedelta(seconds=60),
@@ -80,7 +69,7 @@ async def test_runtime_role_fences_submission_and_records_in_doubt_lineage(
         # A live lease blocks a second submitter; an expired lease is taken over by fence 2.
         assert (
             await authority.acquire_submission_fence(
-                "tenant-1",
+                scope,
                 child_id,
                 holder="worker-2",
                 lease_expires_at=now + timedelta(seconds=120),
@@ -89,17 +78,17 @@ async def test_runtime_role_fences_submission_and_records_in_doubt_lineage(
             is None
         )
         second = await authority.acquire_submission_fence(
-            "tenant-1",
+            scope,
             child_id,
             holder="worker-2",
             lease_expires_at=now + timedelta(seconds=180),
             now=now + timedelta(seconds=61),
         )
         assert second == 2
-        await authority.release_submission_fence("tenant-1", child_id, 1)  # stale: no effect
-        await authority.release_submission_fence("tenant-1", child_id, 2)
+        await authority.release_submission_fence(scope, child_id, 1)  # stale: no effect
+        await authority.release_submission_fence(scope, child_id, 2)
         third = await authority.acquire_submission_fence(
-            "tenant-1",
+            scope,
             child_id,
             holder="worker-3",
             lease_expires_at=now + timedelta(seconds=240),
@@ -120,13 +109,13 @@ async def test_runtime_role_fences_submission_and_records_in_doubt_lineage(
             reservation_id=base.reservation_id,
             lifecycle=AsyncSubagentLifecycle.IN_DOUBT,
             in_doubt_reason="multiple_provider_runs",
-            incident_id=async_subagent_incident_id("tenant-1", child_id, 1),
+            incident_id=async_subagent_incident_id(scope, child_id, 1),
             created_at=now,
             updated_at=now,
         )
         incident = AsyncSubagentIncident(
             incident_id=execution.incident_id or "",
-            request_scope="tenant-1",
+            request_scope=scope,
             parent_run_id=run_id,
             parent_binding_id=base.parent_binding_id,
             child_execution_id=child_id,
@@ -138,10 +127,10 @@ async def test_runtime_role_fences_submission_and_records_in_doubt_lineage(
         stored = await authority.open_incident(incident)
         assert stored == await authority.open_incident(incident)  # idempotent open
         assert stored.status == "operator_required"
-        await authority.record_execution_state("tenant-1", execution)
+        await authority.record_execution_state(scope, execution)
         for run_id_, disposition in (("run-a", "bound"), ("run-b", "duplicate_cancelled")):
             await authority.record_provider_run(
-                "tenant-1",
+                scope,
                 AsyncProviderRunRecord(
                     child_execution_id=child_id,
                     provider_thread_id=child_id,
@@ -157,7 +146,7 @@ async def test_runtime_role_fences_submission_and_records_in_doubt_lineage(
                 ),
             )
         assert await authority.claim_reconciliation_decision(
-            "tenant-1",
+            scope,
             child_id,
             "adopt_provider_run",
             decision_id="decision-1",
@@ -167,7 +156,7 @@ async def test_runtime_role_fences_submission_and_records_in_doubt_lineage(
         # The child holds exactly one decision command: a replay is accepted, another decision
         # is refused (unique partial index of migration 0021).
         assert await authority.claim_reconciliation_decision(
-            "tenant-1",
+            scope,
             child_id,
             "adopt_provider_run",
             decision_id="decision-1",
@@ -175,14 +164,14 @@ async def test_runtime_role_fences_submission_and_records_in_doubt_lineage(
             reason="replay",
         )
         assert not await authority.claim_reconciliation_decision(
-            "tenant-1",
+            scope,
             child_id,
             "orphan_child",
             decision_id="decision-2",
             adopted_run_id=None,
             reason="too late",
         )
-        listed = await authority.list_provider_runs("tenant-1", child_id)
+        listed = await authority.list_provider_runs(scope, child_id)
         assert [record.provider_run_id for record in listed] == ["run-a", "run-b"]
         await authority.resolve_incident(
             stored.model_copy(
@@ -194,7 +183,7 @@ async def test_runtime_role_fences_submission_and_records_in_doubt_lineage(
                 }
             )
         )
-        resolved = await authority.get_incident("tenant-1", child_id)
+        resolved = await authority.get_incident(scope, child_id)
         assert resolved is not None and resolved.status == "resolved"
         assert resolved.adopted_run_id == "run-a"
         with pytest.raises(Exception, match="already resolved"):
@@ -217,11 +206,11 @@ async def test_runtime_role_fences_submission_and_records_in_doubt_lineage(
                 "updated_at": now + timedelta(seconds=5),
             }
         )
-        await authority.record_execution_state("tenant-1", bound)
-        await authority.record_fact("tenant-1", child_id, "lifecycle", "running")
-        await authority.record_fact("tenant-1", child_id, "lifecycle", "running")
+        await authority.record_execution_state(scope, bound)
+        await authority.record_fact(scope, child_id, "lifecycle", "running")
+        await authority.record_fact(scope, child_id, "lifecycle", "running")
 
-        views = await authority.list_children("tenant-1", run_id)
+        views = await authority.list_children(scope, run_id)
         assert [view.child_execution_id for view in views] == [child_id]
         view = views[0]
         assert view.lifecycle == AsyncSubagentLifecycle.RUNNING
@@ -241,29 +230,38 @@ async def test_runtime_role_fences_submission_and_records_in_doubt_lineage(
         # Forced RLS hides other scopes; the runtime role cannot delete ledgers.
         async with runtime.acquire() as connection:
             async with connection.transaction():
-                await connection.execute(
-                    "SELECT set_config('belllabs.request_scope', 'tenant-2', true)"
-                )
+                await apply_scope(connection, common_db.scope("tenant-2"))
                 assert (
                     await connection.fetchval(
-                        "SELECT count(*) FROM belllabs_control.async_subagent_provider_runs"
+                        "SELECT count(*) FROM mission_control.async_provider_run"
                     )
                     == 0
                 )
-            for table in ("async_subagent_provider_runs", "async_subagent_facts"):
+            for table in ("async_provider_run", "native_observation", "subordinate_execution"):
                 with pytest.raises(asyncpg.InsufficientPrivilegeError):
                     async with connection.transaction():
-                        await connection.execute(
-                            "SELECT set_config('belllabs.request_scope', 'tenant-1', true)"
-                        )
-                        await connection.execute(f"DELETE FROM belllabs_control.{table}")
-        async with owner.acquire() as connection:
-            kinds = await connection.fetch(
-                """SELECT command_kind FROM belllabs_control.async_subagent_commands
-                   WHERE child_execution_id = $1 ORDER BY recorded_at""",
-                child_id,
-            )
+                        await apply_scope(connection, scope)
+                        await connection.execute(f"DELETE FROM mission_control.{table}")
+        kinds = await owner_rows(
+            common_db,
+            """SELECT c.command_kind FROM mission_control.command c
+               JOIN mission_control.subordinate_execution s
+                 USING (installation_id, application_id, tenant_id, subordinate_id)
+               WHERE s.subordinate_key = $1 ORDER BY c.created_at, c.command_kind""",
+            child_id,
+        )
         assert [row["command_kind"] for row in kinds] == ["admit", "adopt_provider_run"]
+        lineage = await owner_rows(
+            common_db,
+            """SELECT s.observed_lifecycle, s.native_task_ref, r.run_key,
+                      (SELECT count(*) FROM mission_control.native_observation o
+                       WHERE o.subordinate_id = s.subordinate_id) AS facts
+               FROM mission_control.subordinate_execution s
+               JOIN mission_control.mission_run r USING (installation_id, application_id,
+                                                         tenant_id, run_id)
+               WHERE s.subordinate_key = $1""",
+            child_id,
+        )
+        assert [tuple(row.values()) for row in lineage] == [("running", "run-a", run_id, 1)]
     finally:
         await runtime.close()
-        await owner.close()

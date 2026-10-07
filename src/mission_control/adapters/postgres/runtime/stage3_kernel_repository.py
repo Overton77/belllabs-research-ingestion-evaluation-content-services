@@ -1,39 +1,34 @@
-"""RLS-scoped PostgreSQL persistence for the Stage 3 durable runtime kernel."""
+"""RLS-scoped persistence for the durable runtime kernel on mission_control.
+
+Kept here: the immutable execution-lineage journal helper used by fork materialization,
+durable decision requests (canonical ``human_task``) and responses (canonical
+``human_resolution``), and the semantic fork saga (canonical ``recovery_request`` of kind
+``fork`` plus support ``fork_request``, and ``fork_lineage`` once accepted).
+
+Retired with their tests-only callers (no bootstrap/composition or application-service
+construction): the standalone lineage provenance reader, the generic resource lease
+journal, the runtime incident repair/reconciliation repository and the retention
+deletion repository.
+"""
 
 from __future__ import annotations
 
 import json
-from collections import Counter
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
-from typing import Any, Literal, Protocol
+from datetime import timedelta
+from typing import Any, Literal
 
 import asyncpg
 
+from mission_control.adapters.postgres.run_control import canonical as mc
+from mission_control.adapters.postgres.run_control.canonical import SCOPE, scoped
 from mission_control.application.recovery.runtime_decisions import DurableDecisionRecord
 from mission_control.application.recovery.runtime_lineage import PersistedExecutionLineage
-from mission_control.application.recovery.runtime_reconciliation import (
-    RuntimeIncidentDecision,
-    RuntimeIncidentObservation,
-    RuntimeRepairAuditRecord,
-)
 from mission_control.application.recovery.runtime_recovery import ForkAdmission
-from mission_control.application.recovery.runtime_resources import (
-    ResourceCapacity,
-    ResourceExhausted,
-)
-from mission_control.domain.authoring.canonical import sha256_digest, stable_json_digest
-from mission_control.domain.graph_runtime.kernel import (
-    RESOURCE_ACQUISITION_ORDER,
-    DecisionRequest,
-    DecisionResponse,
-    ResourceKind,
-    ResourceLeaseRecord,
-    ResourceLeaseRequest,
-    ResourceLeaseStatus,
-    WaitLeaseProjection,
-)
+from mission_control.contracts.identities import parse_request_scope, uuid7
+from mission_control.domain.authoring.canonical import stable_json_digest
+from mission_control.domain.graph_runtime.kernel import DecisionRequest, DecisionResponse
 from mission_control.domain.policies.errors import IdempotencyConflict
 from mission_control.domain.policies.forks import (
     RunForkReceipt,
@@ -42,112 +37,15 @@ from mission_control.domain.policies.forks import (
 )
 
 RETENTION_DAYS = 90
-_LIVE_LEASE_STATUSES = frozenset(
-    {
-        ResourceLeaseStatus.REQUESTED,
-        ResourceLeaseStatus.ACQUIRED,
-        ResourceLeaseStatus.RETAINED,
-    }
-)
-_CAPACITY_STATUSES = frozenset(
-    {
-        ResourceLeaseStatus.ACQUIRED,
-        ResourceLeaseStatus.RETAINED,
-    }
-)
-
-
-class RetentionAuthority(Protocol):
-    async def authorize_deletion(
-        self,
-        *,
-        request_scope: str,
-        actor_id: str,
-        record_class: str,
-    ) -> bool: ...
-
-
-class DenyByDefaultRetentionAuthority:
-    async def authorize_deletion(
-        self,
-        *,
-        request_scope: str,
-        actor_id: str,
-        record_class: str,
-    ) -> bool:
-        del request_scope, actor_id, record_class
-        return False
-
-
-class PostgresExecutionLineageRepository:
-    """Immutable lineage journal with explicit parent traversal."""
-
-    def __init__(self, pool: asyncpg.Pool) -> None:
-        self._pool = pool
-
-    async def append(self, lineage: PersistedExecutionLineage) -> PersistedExecutionLineage:
-        scope = lineage.envelope.request_scope
-        async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, scope)
-            return await append_lineage_in_transaction(connection, lineage)
-
-    async def provenance_for_result(
-        self,
-        request_scope: str,
-        result_manifest_ref: str,
-    ) -> tuple[PersistedExecutionLineage, ...]:
-        async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, request_scope)
-            rows = await connection.fetch(
-                """
-                SELECT lineage_id, lineage_payload
-                FROM belllabs_control.runtime_lineage_records
-                WHERE request_scope = $1 AND result_manifest_ref = $2
-                """,
-                request_scope,
-                result_manifest_ref,
-            )
-            if not rows:
-                raise LookupError("result manifest has no persisted lineage")
-            by_id = {
-                row["lineage_id"]: PersistedExecutionLineage.model_validate(
-                    _json(row["lineage_payload"])
-                )
-                for row in rows
-            }
-            collected: dict[str, PersistedExecutionLineage] = {}
-            pending = list(by_id.values())
-            while pending:
-                item = pending.pop()
-                if item.lineage_id in collected:
-                    continue
-                collected[item.lineage_id] = item
-                parent_id = item.envelope.parent_lineage_id
-                if parent_id is None or parent_id in collected:
-                    continue
-                if parent_id in by_id:
-                    pending.append(by_id[parent_id])
-                    continue
-                parent_payload = await connection.fetchval(
-                    """
-                    SELECT lineage_payload
-                    FROM belllabs_control.runtime_lineage_records
-                    WHERE request_scope = $1 AND lineage_id = $2
-                    """,
-                    request_scope,
-                    parent_id,
-                )
-                if parent_payload is None:
-                    raise ValueError("persisted lineage contains a parent gap")
-                parent = PersistedExecutionLineage.model_validate(_json(parent_payload))
-                by_id[parent.lineage_id] = parent
-                pending.append(parent)
-        return tuple(
-            sorted(
-                collected.values(),
-                key=lambda item: (item.recorded_at, item.lineage_id),
-            )
-        )
+FORK_ACTION = "mc.run.fork"
+DECISION_KIND_PREFIX = "runtime_decision:"
+_FORK_STATE = {
+    "reserved": "admitted",
+    "admitting": "admitted",
+    "admitted": "running",
+    "copying": "running",
+    "accepted": "completed",
+}
 
 
 async def append_lineage_in_transaction(
@@ -155,20 +53,20 @@ async def append_lineage_in_transaction(
 ) -> PersistedExecutionLineage:
     """Append one immutable lineage record and its edges in the caller's transaction.
 
-    The caller has set the request scope. A fork materialization appends its lineage in
-    the same transaction as its reuse decisions (RRM-006).
+    The caller has applied the scope. A fork materialization appends its lineage in the
+    same transaction as its reuse decisions (RRM-006).
     """
 
     scope = lineage.envelope.request_scope
-    await _lock(connection, f"lineage:{scope}:{lineage.lineage_id}")
+    parsed = parse_request_scope(scope)
+    args = mc.scope_args(parsed)
+    await mc.advisory_lock(connection, f"lineage:{scope}:{lineage.lineage_id}")
     prior = await connection.fetchrow(
-        """
-        SELECT lineage_payload
-        FROM belllabs_control.runtime_lineage_records
-        WHERE request_scope = $1 AND lineage_id = $2
-        FOR UPDATE
+        f"""
+        SELECT lineage_payload FROM mission_control.execution_lineage_record
+        WHERE {SCOPE} AND lineage_key = $4
         """,
-        scope,
+        *args,
         lineage.lineage_id,
     )
     if prior is not None:
@@ -177,12 +75,11 @@ async def append_lineage_in_transaction(
             raise IdempotencyConflict("lineage identity was reused with conflicting facts")
         return persisted
     digest_owner = await connection.fetchval(
-        """
-        SELECT lineage_id
-        FROM belllabs_control.runtime_lineage_records
-        WHERE request_scope = $1 AND lineage_digest = $2
+        f"""
+        SELECT lineage_key FROM mission_control.execution_lineage_record
+        WHERE {SCOPE} AND lineage_digest = $4
         """,
-        scope,
+        *args,
         lineage.lineage_digest,
     )
     if digest_owner is not None:
@@ -190,27 +87,27 @@ async def append_lineage_in_transaction(
     parent_id = lineage.envelope.parent_lineage_id
     if parent_id is not None:
         parent_exists = await connection.fetchval(
-            """
-            SELECT 1
-            FROM belllabs_control.runtime_lineage_records
-            WHERE request_scope = $1 AND lineage_id = $2
+            f"""
+            SELECT 1 FROM mission_control.execution_lineage_record
+            WHERE {SCOPE} AND lineage_key = $4
             """,
-            scope,
+            *args,
             parent_id,
         )
         if parent_exists is None:
             raise ValueError("lineage parent must be persisted before its child")
     await connection.execute(
         """
-        INSERT INTO belllabs_control.runtime_lineage_records (
-            lineage_id, request_scope, belllabs_run_id, execution_epoch,
-            lineage_digest, result_manifest_ref, lineage_payload,
-            recorded_at, retain_until
+        INSERT INTO mission_control.execution_lineage_record (
+            installation_id, application_id, tenant_id, execution_lineage_record_id,
+            lineage_key, run_key, execution_epoch, lineage_digest, result_manifest_ref,
+            lineage_payload, recorded_at, retain_until, created_at, created_by_actor_ref
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12, $11, $13)
         """,
+        *args,
+        uuid7(),
         lineage.lineage_id,
-        scope,
         lineage.envelope.belllabs_run_id,
         lineage.envelope.execution_epoch,
         lineage.lineage_digest,
@@ -218,17 +115,20 @@ async def append_lineage_in_transaction(
         _dump(lineage),
         lineage.recorded_at,
         lineage.retain_until,
+        mc.WRITER_REF,
     )
     for parent_edge in lineage.parent_edges:
         await connection.execute(
             """
-            INSERT INTO belllabs_control.runtime_lineage_edges (
-                request_scope, lineage_id, parent_identity_key, child_identity_key,
-                relationship, edge_digest, recorded_at
+            INSERT INTO mission_control.execution_lineage_edge (
+                installation_id, application_id, tenant_id, execution_lineage_edge_id,
+                lineage_key, parent_identity_key, child_identity_key, relationship,
+                edge_digest, recorded_at, created_at, created_by_actor_ref
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, $11)
             """,
-            scope,
+            *args,
+            uuid7(),
             lineage.lineage_id,
             parent_edge.parent.canonical_key,
             parent_edge.child.canonical_key,
@@ -236,6 +136,7 @@ async def append_lineage_in_transaction(
             # Set-free edge: value-identical to the former JSON-mode digest (RRM-015).
             stable_json_digest(parent_edge),
             lineage.recorded_at,
+            mc.WRITER_REF,
         )
     return lineage
 
@@ -249,60 +150,36 @@ class PostgresDecisionRepository:
     async def create(self, request: DecisionRequest) -> DurableDecisionRecord:
         scope = request.request_scope
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, scope)
-            await _lock(connection, f"decision:{scope}:{request.decision_id}")
-            prior = await connection.fetchrow(
-                """
-                SELECT req.request_payload, req.status, resp.response_payload
-                FROM belllabs_control.runtime_decision_requests req
-                LEFT JOIN belllabs_control.runtime_decision_responses resp
-                  ON resp.request_scope = req.request_scope
-                 AND resp.decision_id = req.decision_id
-                WHERE req.request_scope = $1 AND req.decision_id = $2
-                FOR UPDATE OF req
-                """,
-                scope,
-                request.decision_id,
-            )
+            args = await mc.begin(connection, scope)
+            await mc.advisory_lock(connection, f"decision:{scope}:{request.decision_id}")
+            prior = await _decision_row(connection, args, request.decision_id, lock=True)
             if prior is not None:
-                persisted_request = DecisionRequest.model_validate(_json(prior["request_payload"]))
+                persisted_request = DecisionRequest.model_validate(_json(prior["request_packet"]))
                 if persisted_request != request:
                     raise IdempotencyConflict("decision identity has conflicting intent")
-                response = (
-                    DecisionResponse.model_validate(_json(prior["response_payload"]))
-                    if prior["response_payload"] is not None
-                    else None
-                )
-                return DurableDecisionRecord(
-                    request=persisted_request,
-                    status=prior["status"],
-                    response=response,
-                )
-            retain_until = request.requested_at + timedelta(days=RETENTION_DAYS)
+                return _decision_record(prior)
             await connection.execute(
                 """
-                INSERT INTO belllabs_control.runtime_decision_requests (
-                    decision_id, request_scope, binding_id, decision_type,
-                    request_schema_ref, request_digest, expected_belllabs_version,
-                    policy_ref, request_payload, status, requested_at, expires_at,
-                    retain_until
+                INSERT INTO mission_control.human_task (
+                    installation_id, application_id, tenant_id, human_task_id, task_key,
+                    target_ref, kind, request_packet_ref, assignee_scope, deadline_at,
+                    on_timeout, lifecycle, request_packet, version, updated_at, created_at,
+                    created_by_actor_ref
                 )
-                VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, 'pending', $10, $11, $12
-                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, 'open', $11::jsonb, 1,
+                        $12, $12, $13)
                 """,
-                request.decision_id,
-                scope,
-                request.binding_id,
-                request.decision_type,
-                request.schema_ref,
-                request.request_digest,
-                request.expected_lifecycle_version,
+                *args,
+                uuid7(),
+                DECISION_KIND_PREFIX + request.decision_id,
+                f"binding:{request.binding_id}",
+                DECISION_KIND_PREFIX + request.decision_type,
+                f"{request.schema_ref}@{request.request_digest}",
                 request.policy_ref,
+                request.expires_at,
                 _dump(request),
                 request.requested_at,
-                request.expires_at,
-                retain_until,
+                mc.WRITER_REF,
             )
             return DurableDecisionRecord(request=request)
 
@@ -312,31 +189,9 @@ class PostgresDecisionRepository:
         decision_id: str,
     ) -> DurableDecisionRecord | None:
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, request_scope)
-            row = await connection.fetchrow(
-                """
-                SELECT req.request_payload, req.status, resp.response_payload
-                FROM belllabs_control.runtime_decision_requests req
-                LEFT JOIN belllabs_control.runtime_decision_responses resp
-                  ON resp.request_scope = req.request_scope
-                 AND resp.decision_id = req.decision_id
-                WHERE req.request_scope = $1 AND req.decision_id = $2
-                """,
-                request_scope,
-                decision_id,
-            )
-        if row is None:
-            return None
-        response = (
-            DecisionResponse.model_validate(_json(row["response_payload"]))
-            if row["response_payload"] is not None
-            else None
-        )
-        return DurableDecisionRecord(
-            request=DecisionRequest.model_validate(_json(row["request_payload"])),
-            status=row["status"],
-            response=response,
-        )
+            args = await mc.begin(connection, request_scope)
+            row = await _decision_row(connection, args, decision_id)
+        return _decision_record(row) if row is not None else None
 
     async def answer(
         self,
@@ -345,30 +200,16 @@ class PostgresDecisionRepository:
     ) -> DurableDecisionRecord:
         scope = request.request_scope
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, scope)
-            await _lock(connection, f"decision:{scope}:{request.decision_id}")
-            prior = await connection.fetchrow(
-                """
-                SELECT req.request_payload, req.status, resp.response_payload
-                FROM belllabs_control.runtime_decision_requests req
-                LEFT JOIN belllabs_control.runtime_decision_responses resp
-                  ON resp.request_scope = req.request_scope
-                 AND resp.decision_id = req.decision_id
-                WHERE req.request_scope = $1 AND req.decision_id = $2
-                FOR UPDATE OF req
-                """,
-                scope,
-                request.decision_id,
-            )
+            args = await mc.begin(connection, scope)
+            await mc.advisory_lock(connection, f"decision:{scope}:{request.decision_id}")
+            prior = await _decision_row(connection, args, request.decision_id, lock=True)
             if prior is None:
                 raise LookupError("durable decision request not found")
-            persisted_request = DecisionRequest.model_validate(_json(prior["request_payload"]))
+            persisted_request = DecisionRequest.model_validate(_json(prior["request_packet"]))
             if persisted_request != request:
                 raise LookupError("durable decision request not found")
-            if prior["response_payload"] is not None:
-                persisted_response = DecisionResponse.model_validate(
-                    _json(prior["response_payload"])
-                )
+            if prior["answer"] is not None:
+                persisted_response = DecisionResponse.model_validate(_json(prior["answer"]))
                 if persisted_response != response:
                     raise IdempotencyConflict("decision already has a different response")
                 return DurableDecisionRecord(
@@ -376,32 +217,35 @@ class PostgresDecisionRepository:
                     status="answered",
                     response=persisted_response,
                 )
-            actor_type, actor_id = _split_actor_ref(response.actor_ref)
             await connection.execute(
                 """
-                INSERT INTO belllabs_control.runtime_decision_responses (
-                    response_id, request_scope, decision_id, response_digest,
-                    actor_id, actor_type, response_payload, decided_at
+                INSERT INTO mission_control.human_resolution (
+                    installation_id, application_id, tenant_id, resolution_id, human_task_id,
+                    actor_ref, answer, answer_ref, answer_digest, expected_task_version,
+                    decided_at, created_at, created_by_actor_ref
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
+                VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11, $11, $6)
                 """,
-                response.response_id,
-                scope,
-                response.decision_id,
-                response.response_digest,
-                actor_id,
-                actor_type,
+                *args,
+                uuid7(),
+                prior["human_task_id"],
+                response.actor_ref,
                 _dump(response),
+                f"decision-response:{response.response_id}",
+                response.response_digest,
+                prior["version"],
                 response.decided_at,
             )
             await connection.execute(
-                """
-                UPDATE belllabs_control.runtime_decision_requests
-                SET status = 'answered'
-                WHERE request_scope = $1 AND decision_id = $2
+                f"""
+                UPDATE mission_control.human_task
+                SET lifecycle = 'resolved', version = version + 1, updated_at = $5
+                WHERE {SCOPE} AND human_task_id = $4 AND version = $6
                 """,
-                scope,
-                request.decision_id,
+                *args,
+                prior["human_task_id"],
+                response.decided_at,
+                prior["version"],
             )
             return DurableDecisionRecord(
                 request=persisted_request,
@@ -410,367 +254,13 @@ class PostgresDecisionRepository:
             )
 
 
-class PostgresResourceLeaseJournal:
-    """Atomic hierarchical resource lease journal with capacity and expiry recovery."""
-
-    def __init__(
-        self,
-        pool: asyncpg.Pool,
-        capacity: ResourceCapacity,
-        *,
-        owner_instance_id: str = "runtime",
-    ) -> None:
-        self._pool = pool
-        self._capacity = capacity
-        self._owner_instance_id = owner_instance_id
-
-    async def acquire(
-        self,
-        request: ResourceLeaseRequest,
-        *,
-        now: datetime,
-    ) -> ResourceLeaseRecord:
-        if now >= request.deadline:
-            raise TimeoutError("resource lease deadline elapsed before acquisition")
-        scope = request.request_scope
-        canonical_digest = sha256_digest(request)
-        async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, scope)
-            await _lock(connection, f"resource-lease:{scope}")
-            await self._expire_due_locked(connection, request_scope=scope, now=now)
-            semantic = await connection.fetchrow(
-                """
-                SELECT lease_id, lease_payload, canonical_digest
-                FROM belllabs_control.execution_resource_leases
-                WHERE request_scope = $1 AND semantic_identity = $2
-                FOR UPDATE
-                """,
-                scope,
-                request.semantic_identity,
-            )
-            if semantic is not None:
-                prior = ResourceLeaseRecord.model_validate(_json(semantic["lease_payload"]))
-                if prior.request != request or prior.canonical_digest != canonical_digest:
-                    raise IdempotencyConflict(
-                        "resource semantic identity was reused with a different envelope"
-                    )
-                return prior
-            existing = await connection.fetchval(
-                """
-                SELECT 1
-                FROM belllabs_control.execution_resource_leases
-                WHERE request_scope = $1 AND lease_id = $2
-                """,
-                scope,
-                request.lease_id,
-            )
-            if existing is not None:
-                raise IdempotencyConflict("resource lease identity was reused")
-            active = await self._active_counts_locked(connection, scope, now=now)
-            requested = Counter(request.resources)
-            for resource, units in requested.items():
-                limit = self._capacity.limits.get(resource, 0)
-                if active[resource] + units > limit:
-                    raise ResourceExhausted(f"capacity exhausted for {resource.value}")
-            expires_at = min(
-                request.deadline,
-                now + timedelta(seconds=request.ttl_seconds),
-            )
-            record = ResourceLeaseRecord(
-                request=request,
-                status=ResourceLeaseStatus.ACQUIRED,
-                acquired_at=now,
-                expires_at=expires_at,
-                canonical_digest=canonical_digest,
-            )
-            await connection.execute(
-                """
-                INSERT INTO belllabs_control.execution_resource_leases (
-                    lease_id, request_scope, semantic_identity, envelope_digest,
-                    canonical_digest, resources, acquisition_order, status,
-                    retained_for_wait, owner_instance_id, version, acquired_at,
-                    renewed_at, expires_at, released_at, lease_payload
-                )
-                VALUES (
-                    $1, $2, $3, $4, $5, $6::jsonb, $7, $8, false, $9, 1,
-                    $10, NULL, $11, NULL, $12::jsonb
-                )
-                """,
-                request.lease_id,
-                scope,
-                request.semantic_identity,
-                request.envelope_digest,
-                canonical_digest,
-                _dump([item.value for item in request.resources]),
-                RESOURCE_ACQUISITION_ORDER.index(request.resources[0]) + 1,
-                ResourceLeaseStatus.ACQUIRED.value,
-                self._owner_instance_id,
-                now,
-                expires_at,
-                _dump(record),
-            )
-            return record
-
-    async def renew(
-        self,
-        *,
-        request_scope: str,
-        lease_id: str,
-        expected_digest: str,
-        now: datetime,
-    ) -> ResourceLeaseRecord:
-        async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, request_scope)
-            await _lock(connection, f"resource-lease:{request_scope}")
-            prior = await self._require_locked(connection, request_scope, lease_id)
-            self._require_digest(prior, expected_digest)
-            if prior.status not in {
-                ResourceLeaseStatus.ACQUIRED,
-                ResourceLeaseStatus.RETAINED,
-            }:
-                raise ValueError("only live resource leases can be renewed")
-            if prior.expires_at is None or now >= prior.expires_at:
-                expired = prior.model_copy(update={"status": ResourceLeaseStatus.EXPIRED})
-                await self._write_locked(connection, expired, version_bump=True)
-                raise TimeoutError("resource lease expired before renewal")
-            renewed = prior.model_copy(
-                update={
-                    "expires_at": min(
-                        prior.request.deadline,
-                        now + timedelta(seconds=prior.request.ttl_seconds),
-                    )
-                }
-            )
-            await self._write_locked(
-                connection,
-                renewed,
-                version_bump=True,
-                renewed_at=now,
-            )
-            return renewed
-
-    async def release(
-        self,
-        *,
-        request_scope: str,
-        lease_id: str,
-        expected_digest: str,
-        now: datetime,
-    ) -> ResourceLeaseRecord:
-        async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, request_scope)
-            await _lock(connection, f"resource-lease:{request_scope}")
-            prior = await self._require_locked(connection, request_scope, lease_id)
-            self._require_digest(prior, expected_digest)
-            if prior.status == ResourceLeaseStatus.RELEASED:
-                return prior
-            released = prior.model_copy(
-                update={
-                    "status": ResourceLeaseStatus.RELEASED,
-                    "released_at": now,
-                }
-            )
-            await self._write_locked(connection, released, version_bump=True)
-            return released
-
-    async def transition_to_wait(
-        self,
-        *,
-        request_scope: str,
-        wait_binding_ref: str,
-        lease_ids: tuple[str, ...],
-        retain: frozenset[str],
-        now: datetime,
-    ) -> WaitLeaseProjection:
-        if not retain <= set(lease_ids):
-            raise ValueError("wait retention references an unowned lease")
-        retained: list[str] = []
-        released: list[str] = []
-        async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, request_scope)
-            await _lock(connection, f"resource-lease:{request_scope}")
-            records = [
-                await self._require_locked(connection, request_scope, lease_id)
-                for lease_id in lease_ids
-            ]
-            for record in records:
-                if record.request.lease_id in retain:
-                    updated = record.model_copy(update={"status": ResourceLeaseStatus.RETAINED})
-                    retained.append(record.request.lease_id)
-                    await self._write_locked(
-                        connection,
-                        updated,
-                        version_bump=True,
-                        retained_for_wait=True,
-                    )
-                else:
-                    updated = record.model_copy(
-                        update={
-                            "status": ResourceLeaseStatus.RELEASED,
-                            "released_at": now,
-                        }
-                    )
-                    released.append(record.request.lease_id)
-                    await self._write_locked(
-                        connection,
-                        updated,
-                        version_bump=True,
-                        retained_for_wait=False,
-                    )
-        return WaitLeaseProjection(
-            wait_binding_ref=wait_binding_ref,
-            retained_reservations=tuple(sorted(retained)),
-            released_reservations=tuple(sorted(released)),
-        )
-
-    async def expire_due(
-        self,
-        *,
-        request_scope: str,
-        now: datetime,
-    ) -> tuple[ResourceLeaseRecord, ...]:
-        async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, request_scope)
-            await _lock(connection, f"resource-lease:{request_scope}")
-            return await self._expire_due_locked(connection, request_scope=request_scope, now=now)
-
-    async def _expire_due_locked(
-        self,
-        connection: asyncpg.Connection,
-        *,
-        request_scope: str,
-        now: datetime,
-    ) -> tuple[ResourceLeaseRecord, ...]:
-        rows = await connection.fetch(
-            """
-            SELECT lease_id, lease_payload
-            FROM belllabs_control.execution_resource_leases
-            WHERE request_scope = $1
-              AND status = ANY($2::text[])
-              AND expires_at IS NOT NULL
-              AND expires_at <= $3
-            FOR UPDATE
-            """,
-            request_scope,
-            [status.value for status in _LIVE_LEASE_STATUSES],
-            now,
-        )
-        expired: list[ResourceLeaseRecord] = []
-        for row in rows:
-            prior = ResourceLeaseRecord.model_validate(_json(row["lease_payload"]))
-            if prior.status not in {
-                ResourceLeaseStatus.ACQUIRED,
-                ResourceLeaseStatus.RETAINED,
-                ResourceLeaseStatus.REQUESTED,
-            }:
-                continue
-            updated = prior.model_copy(update={"status": ResourceLeaseStatus.EXPIRED})
-            await self._write_locked(connection, updated, version_bump=True)
-            expired.append(updated)
-        return tuple(expired)
-
-    async def _active_counts_locked(
-        self,
-        connection: asyncpg.Connection,
-        request_scope: str,
-        *,
-        now: datetime,
-    ) -> Counter[ResourceKind]:
-        rows = await connection.fetch(
-            """
-            SELECT lease_payload
-            FROM belllabs_control.execution_resource_leases
-            WHERE request_scope = $1
-              AND status = ANY($2::text[])
-            """,
-            request_scope,
-            [status.value for status in _CAPACITY_STATUSES],
-        )
-        counts: Counter[ResourceKind] = Counter()
-        for row in rows:
-            record = ResourceLeaseRecord.model_validate(_json(row["lease_payload"]))
-            if record.expires_at is not None and record.expires_at <= now:
-                continue
-            counts.update(record.request.resources)
-        return counts
-
-    async def _require_locked(
-        self,
-        connection: asyncpg.Connection,
-        request_scope: str,
-        lease_id: str,
-    ) -> ResourceLeaseRecord:
-        payload = await connection.fetchval(
-            """
-            SELECT lease_payload
-            FROM belllabs_control.execution_resource_leases
-            WHERE request_scope = $1 AND lease_id = $2
-            FOR UPDATE
-            """,
-            request_scope,
-            lease_id,
-        )
-        if payload is None:
-            raise LookupError("resource lease not found in request scope")
-        return ResourceLeaseRecord.model_validate(_json(payload))
-
-    async def _write_locked(
-        self,
-        connection: asyncpg.Connection,
-        record: ResourceLeaseRecord,
-        *,
-        version_bump: bool,
-        renewed_at: datetime | None = None,
-        retained_for_wait: bool | None = None,
-    ) -> None:
-        version = await connection.fetchval(
-            """
-            SELECT version
-            FROM belllabs_control.execution_resource_leases
-            WHERE request_scope = $1 AND lease_id = $2
-            """,
-            record.request.request_scope,
-            record.request.lease_id,
-        )
-        next_version = int(version) + 1 if version_bump else int(version)
-        await connection.execute(
-            """
-            UPDATE belllabs_control.execution_resource_leases
-            SET status = $3,
-                retained_for_wait = COALESCE($4, retained_for_wait),
-                version = $5,
-                acquired_at = $6,
-                renewed_at = COALESCE($7, renewed_at),
-                expires_at = $8,
-                released_at = $9,
-                lease_payload = $10::jsonb
-            WHERE request_scope = $1 AND lease_id = $2
-            """,
-            record.request.request_scope,
-            record.request.lease_id,
-            record.status.value,
-            retained_for_wait,
-            next_version,
-            record.acquired_at,
-            renewed_at,
-            record.expires_at,
-            record.released_at,
-            _dump(record),
-        )
-
-    @staticmethod
-    def _require_digest(record: ResourceLeaseRecord, expected_digest: str) -> None:
-        if record.canonical_digest != expected_digest:
-            raise IdempotencyConflict("resource lease digest does not match")
-
-
 class PostgresForkRepository:
     """Durable fork saga state (v2: snapshot, patch, derived run) for process-loss recovery.
 
-    RRM-001 disposition row 35: the advisory guard, the admission and materialization claims
-    and idempotency are kept; `reserve()` resolves the source snapshot (a foreign key) instead
-    of the retired runtime binding. Idempotency compares the fork intent without its request
-    times (`fork_request_fingerprint`), so a later replay continues the persisted intent.
+    The advisory guard, the admission and materialization claims and idempotency are kept;
+    `reserve()` resolves the sealed source snapshot (a scoped foreign key). Idempotency
+    compares the fork intent without its request times (`fork_request_fingerprint`), so a
+    later replay continues the persisted intent.
     """
 
     def __init__(self, pool: asyncpg.Pool) -> None:
@@ -780,10 +270,7 @@ class PostgresForkRepository:
     async def guard(self, request: RunForkRequest) -> AsyncIterator[None]:
         key = f"fork-execution:{request.request_scope}:{request.request_id}"
         async with self._pool.acquire() as connection:
-            await connection.execute(
-                "SELECT pg_advisory_lock(hashtextextended($1, 0))",
-                key,
-            )
+            await connection.execute("SELECT pg_advisory_lock(hashtextextended($1, 0))", key)
             try:
                 yield
             finally:
@@ -796,17 +283,15 @@ class PostgresForkRepository:
         scope = request.request_scope
         digest = fork_request_fingerprint(request)
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, scope)
-            await _lock(connection, f"fork:{scope}:{request.request_id}")
+            args = await mc.begin(connection, scope)
+            await mc.advisory_lock(connection, f"fork:{scope}:{request.request_id}")
             prior = await connection.fetchrow(
-                """
-                SELECT request_digest
-                FROM belllabs_control.runtime_fork_requests
-                WHERE request_scope = $1
-                  AND (request_id = $2 OR idempotency_key = $3)
+                f"""
+                SELECT request_digest FROM mission_control.fork_request
+                WHERE {SCOPE} AND (request_key = $4 OR idempotency_key = $5)
                 FOR UPDATE
                 """,
-                scope,
+                *args,
                 request.request_id,
                 request.idempotency_key,
             )
@@ -814,45 +299,82 @@ class PostgresForkRepository:
                 if prior["request_digest"] != digest:
                     raise IdempotencyConflict("fork identity has conflicting intent")
                 return False
-            snapshot_digest = await connection.fetchval(
-                """
-                SELECT snapshot_digest
-                FROM belllabs_control.run_snapshot_manifests
-                WHERE request_scope = $1 AND snapshot_id = $2 AND source_run_id = $3
+            snapshot = await connection.fetchrow(
+                f"""
+                SELECT s.snapshot_digest, s.checkpoint_id, run.run_id, s.projection_version
+                FROM mission_control.run_snapshot s
+                JOIN mission_control.mission_run run
+                  ON run.installation_id = s.installation_id
+                 AND run.application_id = s.application_id
+                 AND run.tenant_id = s.tenant_id AND run.run_key = s.source_run_key
+                WHERE {scoped("s")} AND s.snapshot_key = $4 AND s.source_run_key = $5
                 """,
-                scope,
+                *args,
                 request.snapshot_id,
                 request.source_run_id,
             )
-            if snapshot_digest is None:
+            if snapshot is None:
                 raise LookupError("fork source snapshot is unavailable")
-            if snapshot_digest != request.snapshot_digest:
+            if snapshot["snapshot_digest"] != request.snapshot_digest:
                 raise IdempotencyConflict("fork names another digest of its source snapshot")
+            recovery_id = uuid7()
             await connection.execute(
                 """
-                INSERT INTO belllabs_control.runtime_fork_requests (
-                    request_scope, request_id, idempotency_key, source_binding_id,
-                    request_digest, request_payload, status, requested_at,
-                    updated_at, retain_until, schema_version, source_run_id,
-                    source_snapshot_id, patch_digest, target_run_id
+                INSERT INTO mission_control.recovery_request (
+                    installation_id, application_id, tenant_id, recovery_id, source_run_id,
+                    source_attempt_id, source_checkpoint_id, kind, actor_ref, action,
+                    request_key, payload_digest, expected_source_version, expected_generation,
+                    state, target_run_id, reason_ref, result_ref, detail, version, updated_at,
+                    created_at, created_by_actor_ref
                 )
-                VALUES (
-                    $1, $2, $3, NULL, $4, $5::jsonb, 'reserved', $6, $6, $7, $8, $9,
-                    $10, $11, $12
-                )
+                VALUES ($1, $2, $3, $4, $5, NULL, $6, 'fork', $7, $8, $9, $10, $11, NULL,
+                        'admitted', NULL, NULL, NULL, $12::jsonb, 1, $13, $13, $7)
                 """,
-                scope,
+                *args,
+                recovery_id,
+                snapshot["run_id"],
+                snapshot["checkpoint_id"],
+                request.actor_id,
+                FORK_ACTION,
                 request.request_id,
+                digest,
+                snapshot["projection_version"],
+                _dump(
+                    {
+                        "derived_run_key": request.derived_run_id,
+                        "patch_digest": request.patch.patch_digest,
+                        "reason": request.reason,
+                    }
+                ),
+                request.requested_at,
+            )
+            await connection.execute(
+                """
+                INSERT INTO mission_control.fork_request (
+                    installation_id, application_id, tenant_id, fork_request_id, request_key,
+                    recovery_id, idempotency_key, schema_version, request_digest,
+                    request_payload, status, source_run_key, source_snapshot_key, patch_digest,
+                    target_run_key, requested_at, updated_at, retain_until, created_at,
+                    created_by_actor_ref
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, 'reserved', $11, $12,
+                        $13, $14, $15, $15, $16, $15, $17)
+                """,
+                *args,
+                uuid7(),
+                request.request_id,
+                recovery_id,
                 request.idempotency_key,
+                request.schema_version,
                 digest,
                 _dump(request),
-                request.requested_at,
-                request.requested_at + timedelta(days=RETENTION_DAYS),
-                request.schema_version,
                 request.source_run_id,
                 request.snapshot_id,
                 request.patch.patch_digest,
                 request.derived_run_id,
+                request.requested_at,
+                request.requested_at + timedelta(days=RETENTION_DAYS),
+                request.actor_id,
             )
             return True
 
@@ -879,14 +401,13 @@ class PostgresForkRepository:
         column: Literal["request_payload", "receipt_payload", "admission_payload"],
     ) -> Any:
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, request_scope)
+            args = await mc.begin(connection, request_scope)
             return await connection.fetchval(
                 f"""
-                SELECT {column}
-                FROM belllabs_control.runtime_fork_requests
-                WHERE request_scope = $1 AND request_id = $2 AND schema_version IS NOT NULL
+                SELECT {column} FROM mission_control.fork_request
+                WHERE {SCOPE} AND request_key = $4
                 """,
-                request_scope,
+                *args,
                 request_id,
             )
 
@@ -907,21 +428,25 @@ class PostgresForkRepository:
     ) -> bool:
         scope = request.request_scope
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, scope)
-            await _lock(connection, f"fork:{scope}:{request.request_id}")
-            result = await connection.execute(
-                """
-                UPDATE belllabs_control.runtime_fork_requests
-                SET status = $4, updated_at = $5
-                WHERE request_scope = $1 AND request_id = $2 AND status = $3
+            args = await mc.begin(connection, scope)
+            await mc.advisory_lock(connection, f"fork:{scope}:{request.request_id}")
+            recovery_id = await connection.fetchval(
+                f"""
+                UPDATE mission_control.fork_request
+                SET status = $6, updated_at = $7
+                WHERE {SCOPE} AND request_key = $4 AND status = $5
+                RETURNING recovery_id
                 """,
-                scope,
+                *args,
                 request.request_id,
                 from_status,
                 to_status,
                 request.requested_at,
             )
-            return _rowcount(result) == 1
+            if recovery_id is None:
+                return False
+            await _set_recovery_state(connection, args, recovery_id, to_status, request)
+            return True
 
     async def record_admission(
         self,
@@ -930,18 +455,9 @@ class PostgresForkRepository:
     ) -> ForkAdmission:
         scope = request.request_scope
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, scope)
-            await _lock(connection, f"fork:{scope}:{request.request_id}")
-            row = await connection.fetchrow(
-                """
-                SELECT request_digest, admission_payload, status
-                FROM belllabs_control.runtime_fork_requests
-                WHERE request_scope = $1 AND request_id = $2
-                FOR UPDATE
-                """,
-                scope,
-                request.request_id,
-            )
+            args = await mc.begin(connection, scope)
+            await mc.advisory_lock(connection, f"fork:{scope}:{request.request_id}")
+            row = await _fork_row(connection, args, request.request_id)
             if row is None or row["request_digest"] != fork_request_fingerprint(request):
                 raise LookupError("fork reservation is unavailable")
             if row["admission_payload"] is not None:
@@ -952,33 +468,25 @@ class PostgresForkRepository:
             if row["status"] != "admitting":
                 raise IdempotencyConflict("fork admission was not atomically claimed")
             await connection.execute(
-                """
-                UPDATE belllabs_control.runtime_fork_requests
-                SET admission_payload = $3::jsonb, status = 'admitted', updated_at = $4
-                WHERE request_scope = $1 AND request_id = $2
+                f"""
+                UPDATE mission_control.fork_request
+                SET admission_payload = $5::jsonb, status = 'admitted', updated_at = $6
+                WHERE {SCOPE} AND request_key = $4
                 """,
-                scope,
+                *args,
                 request.request_id,
                 _dump(admission),
                 request.requested_at,
             )
+            await _set_recovery_state(connection, args, row["recovery_id"], "admitted", request)
             return admission
 
     async def record(self, request: RunForkRequest, receipt: RunForkReceipt) -> RunForkReceipt:
         scope = request.request_scope
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, scope)
-            await _lock(connection, f"fork:{scope}:{request.request_id}")
-            row = await connection.fetchrow(
-                """
-                SELECT request_digest, receipt_payload, status
-                FROM belllabs_control.runtime_fork_requests
-                WHERE request_scope = $1 AND request_id = $2
-                FOR UPDATE
-                """,
-                scope,
-                request.request_id,
-            )
+            args = await mc.begin(connection, scope)
+            await mc.advisory_lock(connection, f"fork:{scope}:{request.request_id}")
+            row = await _fork_row(connection, args, request.request_id)
             if row is None or row["request_digest"] != fork_request_fingerprint(request):
                 raise LookupError("fork reservation is unavailable")
             if row["receipt_payload"] is not None:
@@ -989,555 +497,154 @@ class PostgresForkRepository:
             if row["status"] != "copying":
                 raise IdempotencyConflict("fork materialization was not atomically claimed")
             await connection.execute(
-                """
-                UPDATE belllabs_control.runtime_fork_requests
-                SET receipt_payload = $3::jsonb, status = 'accepted', updated_at = $4
-                WHERE request_scope = $1 AND request_id = $2
+                f"""
+                UPDATE mission_control.fork_request
+                SET receipt_payload = $5::jsonb, status = 'accepted', updated_at = $6
+                WHERE {SCOPE} AND request_key = $4
                 """,
-                scope,
+                *args,
                 request.request_id,
                 _dump(receipt),
                 receipt.recorded_at,
             )
+            await _accept_fork(connection, args, row, request, receipt)
             return receipt
 
 
-class PostgresRuntimeIncidentRepository:
-    """Idempotent, version-fact incident journal for Stage 3 reconciliation."""
-
-    def __init__(self, pool: asyncpg.Pool) -> None:
-        self._pool = pool
-
-    async def reserve_incident(self, observation: RuntimeIncidentObservation) -> bool:
-        scope = observation.request_scope
-        async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, scope)
-            await _lock(
-                connection,
-                f"incident:{scope}:{observation.incident_type.value}:{observation.identity_digest}",
-            )
-            prior = await connection.fetchrow(
-                """
-                SELECT incident_id, incident_payload
-                FROM belllabs_control.runtime_reconciliation_incidents
-                WHERE request_scope = $1
-                  AND incident_type = $2
-                  AND identity_digest = $3
-                FOR UPDATE
-                """,
-                scope,
-                observation.incident_type.value,
-                observation.identity_digest,
-            )
-            if prior is not None:
-                persisted = RuntimeIncidentObservation.model_validate(
-                    _json(prior["incident_payload"])["observation"]
-                )
-                if persisted != observation or prior["incident_id"] != observation.incident_id:
-                    raise ValueError("incident identity has conflicting observations")
-                return False
-            by_id = await connection.fetchrow(
-                """
-                SELECT incident_payload
-                FROM belllabs_control.runtime_reconciliation_incidents
-                WHERE request_scope = $1 AND incident_id = $2
-                FOR UPDATE
-                """,
-                scope,
-                observation.incident_id,
-            )
-            if by_id is not None:
-                persisted = RuntimeIncidentObservation.model_validate(
-                    _json(by_id["incident_payload"])["observation"]
-                )
-                if persisted != observation:
-                    raise ValueError("incident identity has conflicting observations")
-                return False
-            retain_until = observation.observed_at + timedelta(days=RETENTION_DAYS)
-            await connection.execute(
-                """
-                INSERT INTO belllabs_control.runtime_reconciliation_incidents (
-                    incident_id, request_scope, binding_id, incident_type, severity,
-                    status, identity_digest, before_version, after_version, actor_ref,
-                    reason, evidence_refs, retry_at, incident_payload, version,
-                    recorded_at, updated_at, retain_until
-                )
-                VALUES (
-                    $1, $2, $3, $4, 'warning', 'open', $5, $6, NULL,
-                    'service:runtime-reconciler', 'reserved', $7::jsonb, NULL,
-                    $8::jsonb, 1, $9, $9, $10
-                )
-                """,
-                observation.incident_id,
-                scope,
-                observation.binding_id,
-                observation.incident_type.value,
-                observation.identity_digest,
-                observation.observed_version,
-                _dump(list(observation.evidence_refs)),
-                _dump({"observation": observation.model_dump(mode="json")}),
-                observation.observed_at,
-                retain_until,
-            )
-            return True
-
-    async def record_incident_decision(
-        self,
-        observation: RuntimeIncidentObservation,
-        decision: RuntimeIncidentDecision,
-    ) -> RuntimeIncidentDecision:
-        if (
-            decision.incident_id != observation.incident_id
-            or decision.request_scope != observation.request_scope
-        ):
-            raise ValueError("incident decision does not match observation identity")
-        scope = observation.request_scope
-        async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, scope)
-            await _lock(
-                connection,
-                f"incident:{scope}:{observation.incident_type.value}:{observation.identity_digest}",
-            )
-            prior = await connection.fetchrow(
-                """
-                SELECT incident_payload, version, status
-                FROM belllabs_control.runtime_reconciliation_incidents
-                WHERE request_scope = $1 AND incident_id = $2
-                FOR UPDATE
-                """,
-                scope,
-                observation.incident_id,
-            )
-            if prior is None:
-                raise LookupError("incident reservation not found")
-            payload = _json(prior["incident_payload"])
-            persisted_observation = RuntimeIncidentObservation.model_validate(
-                payload["observation"]
-            )
-            if persisted_observation != observation:
-                raise ValueError("incident identity has conflicting observations")
-            if "decision" in payload:
-                persisted_decision = RuntimeIncidentDecision.model_validate(payload["decision"])
-                if persisted_decision != decision:
-                    raise ValueError("incident replay changed its decision")
-                return persisted_decision
-            status = _incident_status(decision)
-            updated_payload = {
-                "observation": observation.model_dump(mode="json"),
-                "decision": decision.model_dump(mode="json"),
-            }
-            await connection.execute(
-                """
-                UPDATE belllabs_control.runtime_reconciliation_incidents
-                SET status = $3,
-                    before_version = $4,
-                    after_version = $5,
-                    actor_ref = $6,
-                    reason = $7,
-                    evidence_refs = $8::jsonb,
-                    retry_at = $9,
-                    incident_payload = $10::jsonb,
-                    version = $11,
-                    updated_at = $12
-                WHERE request_scope = $1 AND incident_id = $2
-                """,
-                scope,
-                observation.incident_id,
-                status,
-                decision.before_version,
-                decision.after_version,
-                decision.actor_ref,
-                decision.reason,
-                _dump(list(decision.evidence_refs)),
-                decision.retry_at,
-                _dump(updated_payload),
-                int(prior["version"]) + 1,
-                observation.observed_at,
-            )
-            return decision
-
-    async def record_repair_audit(
-        self,
-        record: RuntimeRepairAuditRecord,
-    ) -> RuntimeRepairAuditRecord:
-        async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, record.request_scope)
-            await _lock(
-                connection,
-                f"repair-audit:{record.request_scope}:{record.audit_id}",
-            )
-            prior = await connection.fetchrow(
-                """
-                SELECT command_id, actor_id, reason, expected_belllabs_version,
-                       expected_checkpoint_id, before_digest, after_digest,
-                       evidence_refs, recorded_at, incident_id
-                FROM belllabs_control.runtime_repair_audit
-                WHERE request_scope = $1 AND audit_id = $2
-                """,
-                record.request_scope,
-                record.audit_id,
-            )
-            if prior is not None:
-                persisted = RuntimeRepairAuditRecord(
-                    request_scope=record.request_scope,
-                    audit_id=record.audit_id,
-                    incident_id=prior["incident_id"],
-                    command_id=prior["command_id"],
-                    actor_id=prior["actor_id"],
-                    reason=prior["reason"],
-                    expected_belllabs_version=prior["expected_belllabs_version"],
-                    expected_checkpoint_id=prior["expected_checkpoint_id"],
-                    before_digest=prior["before_digest"],
-                    after_digest=prior["after_digest"],
-                    evidence_refs=tuple(_json(prior["evidence_refs"])),
-                    recorded_at=prior["recorded_at"],
-                )
-                if persisted != record:
-                    raise IdempotencyConflict("repair audit identity has conflicting facts")
-                return persisted
-            await connection.execute(
-                """
-                INSERT INTO belllabs_control.runtime_repair_audit (
-                    request_scope, audit_id, incident_id, command_id, actor_id,
-                    reason, expected_belllabs_version, expected_checkpoint_id,
-                    before_digest, after_digest, evidence_refs, recorded_at
-                )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12)
-                """,
-                record.request_scope,
-                record.audit_id,
-                record.incident_id,
-                record.command_id,
-                record.actor_id,
-                record.reason,
-                record.expected_belllabs_version,
-                record.expected_checkpoint_id,
-                record.before_digest,
-                record.after_digest,
-                _dump(list(record.evidence_refs)),
-                record.recorded_at,
-            )
-            return record
-
-
-class PostgresStage3RetentionRepository:
-    """Audited tenant-scoped deletion for Stage 3 records past retain_until."""
-
-    def __init__(
-        self,
-        pool: asyncpg.Pool,
-        authority: RetentionAuthority | None = None,
-    ) -> None:
-        self._pool = pool
-        self._authority = authority or DenyByDefaultRetentionAuthority()
-
-    async def delete_expired(
-        self,
-        *,
-        request_scope: str,
-        record_class: Literal[
-            "checkpoint",
-            "event",
-            "incident",
-            "lineage",
-            "decision",
-            "fork",
-        ],
-        cutoff_at: datetime,
-        actor_id: str,
-        reason: str,
-        deletion_id: str,
-        recorded_at: datetime,
-    ) -> int:
-        if not await self._authority.authorize_deletion(
-            request_scope=request_scope,
-            actor_id=actor_id,
-            record_class=record_class,
-        ):
-            raise PermissionError("retention deletion lacks scoped operator authorization")
-        async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, request_scope)
-            await _lock(connection, f"retention:{request_scope}:{record_class}")
-            prior = await connection.fetchrow(
-                """
-                SELECT deleted_count, record_class, cutoff_at, actor_id, reason
-                FROM belllabs_control.runtime_retention_deletion_audit
-                WHERE request_scope = $1 AND deletion_id = $2
-                """,
-                request_scope,
-                deletion_id,
-            )
-            if prior is not None:
-                if (
-                    prior["record_class"] != record_class
-                    or prior["cutoff_at"] != cutoff_at
-                    or prior["actor_id"] != actor_id
-                    or prior["reason"] != reason
-                ):
-                    raise IdempotencyConflict("retention deletion identity has conflicting facts")
-                return int(prior["deleted_count"])
-            if record_class == "lineage":
-                deleted_count = await self._delete_expired_lineage(
-                    connection,
-                    request_scope=request_scope,
-                    cutoff_at=cutoff_at,
-                )
-            elif record_class == "incident":
-                deleted_count = await self._delete_expired_incidents(
-                    connection,
-                    request_scope=request_scope,
-                    cutoff_at=cutoff_at,
-                )
-            elif record_class == "checkpoint":
-                deleted_count = await self._delete_expired_checkpoints(
-                    connection,
-                    request_scope=request_scope,
-                    cutoff_at=cutoff_at,
-                )
-            elif record_class == "event":
-                deleted_count = await self._delete_expired_events(
-                    connection,
-                    request_scope=request_scope,
-                    cutoff_at=cutoff_at,
-                )
-            elif record_class == "decision":
-                deleted_count = await self._delete_expired_decisions(
-                    connection,
-                    request_scope=request_scope,
-                    cutoff_at=cutoff_at,
-                )
-            else:
-                deleted_count = await self._delete_expired_forks(
-                    connection,
-                    request_scope=request_scope,
-                    cutoff_at=cutoff_at,
-                )
-            await connection.execute(
-                """
-                INSERT INTO belllabs_control.runtime_retention_deletion_audit (
-                    request_scope, deletion_id, record_class, cutoff_at,
-                    deleted_count, actor_id, reason, recorded_at
-                )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                """,
-                request_scope,
-                deletion_id,
-                record_class,
-                cutoff_at,
-                deleted_count,
-                actor_id,
-                reason,
-                recorded_at,
-            )
-            return deleted_count
-
-    async def _delete_expired_lineage(
-        self,
-        connection: asyncpg.Connection,
-        *,
-        request_scope: str,
-        cutoff_at: datetime,
-    ) -> int:
-        lineage_ids = [
-            row["lineage_id"]
-            for row in await connection.fetch(
-                """
-                SELECT lineage_id
-                FROM belllabs_control.runtime_lineage_records
-                WHERE request_scope = $1 AND retain_until <= $2
-                FOR UPDATE
-                """,
-                request_scope,
-                cutoff_at,
-            )
-        ]
-        if not lineage_ids:
-            return 0
-        await connection.execute(
-            """
-            DELETE FROM belllabs_control.runtime_lineage_edges
-            WHERE request_scope = $1 AND lineage_id = ANY($2::text[])
-            """,
-            request_scope,
-            lineage_ids,
-        )
-        result = await connection.execute(
-            """
-            DELETE FROM belllabs_control.runtime_lineage_records
-            WHERE request_scope = $1 AND lineage_id = ANY($2::text[])
-            """,
-            request_scope,
-            lineage_ids,
-        )
-        return _rowcount(result)
-
-    async def _delete_expired_incidents(
-        self,
-        connection: asyncpg.Connection,
-        *,
-        request_scope: str,
-        cutoff_at: datetime,
-    ) -> int:
-        incident_ids = [
-            row["incident_id"]
-            for row in await connection.fetch(
-                """
-                SELECT incident_id
-                FROM belllabs_control.runtime_reconciliation_incidents
-                WHERE request_scope = $1 AND retain_until <= $2
-                FOR UPDATE
-                """,
-                request_scope,
-                cutoff_at,
-            )
-        ]
-        if not incident_ids:
-            return 0
-        await connection.execute(
-            """
-            DELETE FROM belllabs_control.runtime_repair_audit
-            WHERE request_scope = $1 AND incident_id = ANY($2::text[])
-            """,
-            request_scope,
-            incident_ids,
-        )
-        result = await connection.execute(
-            """
-            DELETE FROM belllabs_control.runtime_reconciliation_incidents
-            WHERE request_scope = $1 AND incident_id = ANY($2::text[])
-            """,
-            request_scope,
-            incident_ids,
-        )
-        return _rowcount(result)
-
-    async def _delete_expired_checkpoints(
-        self,
-        connection: asyncpg.Connection,
-        *,
-        request_scope: str,
-        cutoff_at: datetime,
-    ) -> int:
-        result = await connection.execute(
-            """
-            DELETE FROM belllabs_control.runtime_checkpoint_observations
-            WHERE request_scope = $1 AND retain_until <= $2
-            """,
-            request_scope,
-            cutoff_at,
-        )
-        return _rowcount(result)
-
-    async def _delete_expired_events(
-        self,
-        connection: asyncpg.Connection,
-        *,
-        request_scope: str,
-        cutoff_at: datetime,
-    ) -> int:
-        result = await connection.execute(
-            """
-            DELETE FROM belllabs_control.outbox event
-            USING belllabs_control.workflow_runs run
-            WHERE event.aggregate_id = run.run_id
-              AND run.request_scope = $1
-              AND event.recorded_at + interval '90 days' <= $2
-              AND event.delivered_at IS NOT NULL
-            """,
-            request_scope,
-            cutoff_at,
-        )
-        return _rowcount(result)
-
-    async def _delete_expired_decisions(
-        self,
-        connection: asyncpg.Connection,
-        *,
-        request_scope: str,
-        cutoff_at: datetime,
-    ) -> int:
-        decision_ids = [
-            row["decision_id"]
-            for row in await connection.fetch(
-                """
-                SELECT decision_id
-                FROM belllabs_control.runtime_decision_requests
-                WHERE request_scope = $1 AND retain_until <= $2
-                FOR UPDATE
-                """,
-                request_scope,
-                cutoff_at,
-            )
-        ]
-        if not decision_ids:
-            return 0
-        await connection.execute(
-            """
-            DELETE FROM belllabs_control.runtime_decision_responses
-            WHERE request_scope = $1 AND decision_id = ANY($2::text[])
-            """,
-            request_scope,
-            decision_ids,
-        )
-        result = await connection.execute(
-            """
-            DELETE FROM belllabs_control.runtime_decision_requests
-            WHERE request_scope = $1 AND decision_id = ANY($2::text[])
-            """,
-            request_scope,
-            decision_ids,
-        )
-        return _rowcount(result)
-
-    async def _delete_expired_forks(
-        self,
-        connection: asyncpg.Connection,
-        *,
-        request_scope: str,
-        cutoff_at: datetime,
-    ) -> int:
-        result = await connection.execute(
-            """
-            DELETE FROM belllabs_control.runtime_fork_requests
-            WHERE request_scope = $1 AND retain_until <= $2
-            """,
-            request_scope,
-            cutoff_at,
-        )
-        return _rowcount(result)
-
-
-def _incident_status(decision: RuntimeIncidentDecision) -> str:
-    if decision.disposition == "automatic":
-        return "resolved"
-    if decision.disposition == "retry_scheduled":
-        return "retry_scheduled"
-    return "operator_required"
-
-
-def _split_actor_ref(actor_ref: str) -> tuple[str, str]:
-    if ":" in actor_ref:
-        actor_type, _, remainder = actor_ref.partition(":")
-        return actor_type or "actor", remainder or actor_ref
-    return "actor", actor_ref
-
-
-def _rowcount(command_tag: str) -> int:
-    parts = command_tag.split()
-    return int(parts[-1]) if parts and parts[-1].isdigit() else 0
-
-
-async def _set_scope(connection: asyncpg.Connection, request_scope: str) -> None:
-    await connection.execute(
-        "SELECT set_config('belllabs.request_scope', $1, true)",
-        request_scope,
+async def _decision_row(
+    connection: asyncpg.Connection,
+    args: tuple[Any, ...],
+    decision_id: str,
+    *,
+    lock: bool = False,
+) -> asyncpg.Record | None:
+    return await connection.fetchrow(
+        f"""
+        SELECT task.human_task_id, task.request_packet, task.lifecycle, task.version,
+               resolution.answer
+        FROM mission_control.human_task task
+        LEFT JOIN mission_control.human_resolution resolution
+          ON resolution.installation_id = task.installation_id
+         AND resolution.application_id = task.application_id
+         AND resolution.tenant_id = task.tenant_id
+         AND resolution.human_task_id = task.human_task_id
+        WHERE {scoped("task")} AND task.task_key = $4 AND task.kind LIKE $5
+        """
+        + (" FOR UPDATE OF task" if lock else ""),
+        *args,
+        DECISION_KIND_PREFIX + decision_id,
+        DECISION_KIND_PREFIX + "%",
     )
 
 
-async def _lock(connection: asyncpg.Connection, key: str) -> None:
+def _decision_record(row: asyncpg.Record) -> DurableDecisionRecord:
+    response = (
+        DecisionResponse.model_validate(_json(row["answer"])) if row["answer"] is not None else None
+    )
+    status = {"open": "pending", "resolved": "answered"}.get(row["lifecycle"], row["lifecycle"])
+    return DurableDecisionRecord(
+        request=DecisionRequest.model_validate(_json(row["request_packet"])),
+        status=status,
+        response=response,
+    )
+
+
+async def _fork_row(
+    connection: asyncpg.Connection, args: tuple[Any, ...], request_id: str
+) -> asyncpg.Record | None:
+    return await connection.fetchrow(
+        f"""
+        SELECT request_digest, admission_payload, receipt_payload, status, recovery_id,
+               source_snapshot_key
+        FROM mission_control.fork_request
+        WHERE {SCOPE} AND request_key = $4
+        FOR UPDATE
+        """,
+        *args,
+        request_id,
+    )
+
+
+async def _set_recovery_state(
+    connection: asyncpg.Connection,
+    args: tuple[Any, ...],
+    recovery_id: Any,
+    saga_status: str,
+    request: RunForkRequest,
+) -> None:
     await connection.execute(
-        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-        key,
+        f"""
+        UPDATE mission_control.recovery_request
+        SET state = $5, version = version + 1, updated_at = $6
+        WHERE {SCOPE} AND recovery_id = $4
+        """,
+        *args,
+        recovery_id,
+        _FORK_STATE[saga_status],
+        request.requested_at,
+    )
+
+
+async def _accept_fork(
+    connection: asyncpg.Connection,
+    args: tuple[Any, ...],
+    row: asyncpg.Record,
+    request: RunForkRequest,
+    receipt: RunForkReceipt,
+) -> None:
+    """The accepted fork: completed recovery request and immutable fork lineage."""
+
+    target = await mc.run_row(connection, args, receipt.target_run_id)
+    snapshot = await connection.fetchrow(
+        f"""
+        SELECT s.checkpoint_id, run.run_id AS source_run_id
+        FROM mission_control.run_snapshot s
+        JOIN mission_control.mission_run run
+          ON run.installation_id = s.installation_id AND run.application_id = s.application_id
+         AND run.tenant_id = s.tenant_id AND run.run_key = s.source_run_key
+        WHERE {scoped("s")} AND s.snapshot_key = $4
+        """,
+        *args,
+        row["source_snapshot_key"],
+    )
+    await connection.execute(
+        f"""
+        UPDATE mission_control.recovery_request
+        SET state = 'completed', target_run_id = $5, result_ref = $6, version = version + 1,
+            updated_at = $7
+        WHERE {SCOPE} AND recovery_id = $4
+        """,
+        *args,
+        row["recovery_id"],
+        target["run_id"] if target is not None else None,
+        receipt.admission_ref,
+        receipt.recorded_at,
+    )
+    if target is None or snapshot is None:
+        return
+    await connection.execute(
+        """
+        INSERT INTO mission_control.fork_lineage (
+            installation_id, application_id, tenant_id, fork_lineage_id, source_run_id,
+            target_run_id, source_checkpoint_id, source_checkpoint_digest,
+            copied_artifact_manifest_digest, budget_admission_ref, grant_admission_ref, reason,
+            detail, created_at, created_by_actor_ref
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, $11, $12::jsonb, $13, $14)
+        ON CONFLICT (installation_id, application_id, tenant_id, target_run_id) DO NOTHING
+        """,
+        *args,
+        uuid7(),
+        snapshot["source_run_id"],
+        target["run_id"],
+        snapshot["checkpoint_id"],
+        receipt.snapshot_digest,
+        receipt.lineage.reuse_manifest_digest,
+        receipt.admission_ref,
+        request.reason,
+        _dump(receipt.lineage),
+        receipt.recorded_at,
+        request.actor_id,
     )
 
 

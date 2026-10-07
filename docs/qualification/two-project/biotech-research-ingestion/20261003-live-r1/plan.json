@@ -1,0 +1,200 @@
+{
+  "plan": {
+    "before": {
+      "attestations": [],
+      "extensions": [
+        {
+          "name": "pg_stat_statements",
+          "schema": "extensions",
+          "version": "1.11"
+        },
+        {
+          "name": "pgcrypto",
+          "schema": "extensions",
+          "version": "1.3"
+        },
+        {
+          "name": "plpgsql",
+          "schema": "pg_catalog",
+          "version": "1.0"
+        },
+        {
+          "name": "supabase_vault",
+          "schema": "vault",
+          "version": "0.3.1"
+        },
+        {
+          "name": "uuid-ossp",
+          "schema": "extensions",
+          "version": "1.1"
+        },
+        {
+          "name": "vector",
+          "schema": "extensions",
+          "version": "0.8.2"
+        }
+      ],
+      "fingerprint": null,
+      "identity": [],
+      "mission_control_roles": [],
+      "owned_schemas_present": [],
+      "receipts": [],
+      "server_version_num": 170006
+    },
+    "compatibility": {
+      "reader_version": "mission-control-runtime/1",
+      "writer_version": "mission-control-runtime/1"
+    },
+    "format": "mission-control-plan/v1",
+    "holds": [],
+    "mutations": [
+      "execute migration 0001_foundation (sha256:17fdeed4fd09b2a6ca82fa9dbc5fcb99a5255b25c86c4ac4055a0f4003c5c571)",
+      "execute migration 0002_authoring (sha256:fe9f2f9adc7675db24b9458ea9be0d7e32a2c10aa4e708dd069d6a19af49e7b5)",
+      "execute migration 0003_execution (sha256:fd0f839bd389f66c9dbb139934d7333699718fcfaa143e5757b23fefff947f27)",
+      "execute migration 0004_capability_artifacts (sha256:fe33a28c27f4fc9b965c417a407b5e1707a8bf8498c6dbf7b1cf90a47b8dfb07)",
+      "execute migration 0005_commands_effects_recovery (sha256:db724c6fd630bbe672e8b9f655db908de0c5fe1298d36101f7afb292daa6024e)",
+      "execute migration 0010_run_control_support (sha256:d4db0f9c534decb808e3d1ec29aed1a98a17cbf4f1abc01cdaa4b7bd963f5507)",
+      "execute migration 0011_operation_journal_support (sha256:c053ab24e9f22d4a88005fd510bdbf3f53e3201582888045da187ec0634e39ed)",
+      "execute migration 0012_runtime_lineage_support (sha256:5ba6d2fb9a66279028caeebac7db90e4098666831a658056628443cc234bdbbd)",
+      "execute migration 0013_snapshot_fork_support (sha256:a67e8ed97071893969723a6d799ce02976e6a46235527c44edc282b0f463c52a)",
+      "execute migration 0014_orchestration_support (sha256:0639a883b6d403ae83cd9e7b46b3b22a2f08b3e1b567d2b3ca5f1ebe21550840)",
+      "execute migration 0015_async_subagent_support (sha256:63b0a28c6a783058c1715f1873ac7ef0ec4cb4b11a375bedd290fbdd35640b14)",
+      "execute migration 0016_coordinator_support (sha256:baa2a9d2aa15269ca9facefa293620056fd72198ef2bb6232246a7bbbdc88dfb)",
+      "execute migration 0017_runtime_kernel_support (sha256:74ecee43b86b78aea50f7e4b59740031483cd79a296f07b8034c05af529787dd)",
+      "execute migration 0020_catalog_definitions (sha256:2d8be48cbfa8588d8feca5cb8824af902ab8a1465cb06240fe1b5c4b0a5b9a4d)",
+      "execute migration 0021_capability_bundle_admission (sha256:f01ce20b42d74284a0c79fd76da71b30a39628184c84f00a057e67aef557189f)",
+      "execute migration 0022_capability_search_projection (sha256:2d54d12db628a3015601b3723215f30ef69efdc79c2c15710a27263464f428f5)",
+      "execute migration 0023_capability_discovery_custody (sha256:d2022c5b9b858734fe6e5b2fd72a04dc7a42d264092c3427d91b5a6f317fac23)",
+      "execute migration 0024_workspace_artifact_custody (sha256:c6ca8f833dc46c0e055866e491858a565d9721c998e94bb6b3b6f09946581ed9)",
+      "create absent NOLOGIN role mission_control_runtime",
+      "create absent NOLOGIN role mission_control_family_writer",
+      "create absent NOLOGIN role mission_control_catalog_writer",
+      "create absent NOLOGIN role mission_control_outbox_worker",
+      "create absent NOLOGIN role mission_control_readonly",
+      "insert component_release receipts for pending migrations",
+      "insert application_installation identity row",
+      "insert release_attestation 1.0.0"
+    ],
+    "operation": "apply",
+    "pending_migrations": [
+      "0001_foundation",
+      "0002_authoring",
+      "0003_execution",
+      "0004_capability_artifacts",
+      "0005_commands_effects_recovery",
+      "0010_run_control_support",
+      "0011_operation_journal_support",
+      "0012_runtime_lineage_support",
+      "0013_snapshot_fork_support",
+      "0014_orchestration_support",
+      "0015_async_subagent_support",
+      "0016_coordinator_support",
+      "0017_runtime_kernel_support",
+      "0020_catalog_definitions",
+      "0021_capability_bundle_admission",
+      "0022_capability_search_projection",
+      "0023_capability_discovery_custody",
+      "0024_workspace_artifact_custody"
+    ],
+    "release": {
+      "component": "mission_control",
+      "component_version": "1.0.0",
+      "contract_schema_digest": "sha256:dbce50116df01e9a8d814f78e9ff61d91943afdfcc5fcb1a1d2d2001e488ab7f",
+      "lock_digest": "sha256:f8a8173a5def13d6e9fad38acd66b0007c616ab9a3c35afebf9e4166c07c900a",
+      "manifest_digest": "sha256:946bc371a7837ef5f52af8c8a7de4eb85aa8b801dd7cb61dab8512f709498a3e",
+      "migrations": [
+        {
+          "digest": "sha256:17fdeed4fd09b2a6ca82fa9dbc5fcb99a5255b25c86c4ac4055a0f4003c5c571",
+          "key": "0001_foundation"
+        },
+        {
+          "digest": "sha256:fe9f2f9adc7675db24b9458ea9be0d7e32a2c10aa4e708dd069d6a19af49e7b5",
+          "key": "0002_authoring"
+        },
+        {
+          "digest": "sha256:fd0f839bd389f66c9dbb139934d7333699718fcfaa143e5757b23fefff947f27",
+          "key": "0003_execution"
+        },
+        {
+          "digest": "sha256:fe33a28c27f4fc9b965c417a407b5e1707a8bf8498c6dbf7b1cf90a47b8dfb07",
+          "key": "0004_capability_artifacts"
+        },
+        {
+          "digest": "sha256:db724c6fd630bbe672e8b9f655db908de0c5fe1298d36101f7afb292daa6024e",
+          "key": "0005_commands_effects_recovery"
+        },
+        {
+          "digest": "sha256:d4db0f9c534decb808e3d1ec29aed1a98a17cbf4f1abc01cdaa4b7bd963f5507",
+          "key": "0010_run_control_support"
+        },
+        {
+          "digest": "sha256:c053ab24e9f22d4a88005fd510bdbf3f53e3201582888045da187ec0634e39ed",
+          "key": "0011_operation_journal_support"
+        },
+        {
+          "digest": "sha256:5ba6d2fb9a66279028caeebac7db90e4098666831a658056628443cc234bdbbd",
+          "key": "0012_runtime_lineage_support"
+        },
+        {
+          "digest": "sha256:a67e8ed97071893969723a6d799ce02976e6a46235527c44edc282b0f463c52a",
+          "key": "0013_snapshot_fork_support"
+        },
+        {
+          "digest": "sha256:0639a883b6d403ae83cd9e7b46b3b22a2f08b3e1b567d2b3ca5f1ebe21550840",
+          "key": "0014_orchestration_support"
+        },
+        {
+          "digest": "sha256:63b0a28c6a783058c1715f1873ac7ef0ec4cb4b11a375bedd290fbdd35640b14",
+          "key": "0015_async_subagent_support"
+        },
+        {
+          "digest": "sha256:baa2a9d2aa15269ca9facefa293620056fd72198ef2bb6232246a7bbbdc88dfb",
+          "key": "0016_coordinator_support"
+        },
+        {
+          "digest": "sha256:74ecee43b86b78aea50f7e4b59740031483cd79a296f07b8034c05af529787dd",
+          "key": "0017_runtime_kernel_support"
+        },
+        {
+          "digest": "sha256:2d8be48cbfa8588d8feca5cb8824af902ab8a1465cb06240fe1b5c4b0a5b9a4d",
+          "key": "0020_catalog_definitions"
+        },
+        {
+          "digest": "sha256:f01ce20b42d74284a0c79fd76da71b30a39628184c84f00a057e67aef557189f",
+          "key": "0021_capability_bundle_admission"
+        },
+        {
+          "digest": "sha256:2d54d12db628a3015601b3723215f30ef69efdc79c2c15710a27263464f428f5",
+          "key": "0022_capability_search_projection"
+        },
+        {
+          "digest": "sha256:d2022c5b9b858734fe6e5b2fd72a04dc7a42d264092c3427d91b5a6f317fac23",
+          "key": "0023_capability_discovery_custody"
+        },
+        {
+          "digest": "sha256:c6ca8f833dc46c0e055866e491858a565d9721c998e94bb6b3b6f09946581ed9",
+          "key": "0024_workspace_artifact_custody"
+        }
+      ],
+      "schema_fingerprint": "sha256:ef5a9e71c9c4a4fe23f343a5708c476a757bc1c5a61f9aacae3a76577b209c09",
+      "schema_fingerprint_algorithm": "mc-pg-catalog-v2",
+      "source_revision": "git:f6521c128738b4962f22fb7646882950c0b63d7c+inputs:sha256:61d1524579ff666c2171585546bf7828cf927c77fab8f6b5a1f630959a8a006e"
+    },
+    "status": "pending",
+    "target": {
+      "app": "biotech",
+      "application_id": "biotech",
+      "approved_by": "project owner, Claude Code session 2026-10-03 (approved LIVE_PLAN.md)",
+      "database_host": "db.bxnetwiimwhtlrjlbtab.supabase.co",
+      "database_name": "postgres",
+      "database_port": "5432",
+      "database_user": "postgres",
+      "environment": "production",
+      "identity_evidence": "docs/qualification/two-project/biotech-research-ingestion/g0-readonly-20261003/identity.json; route host/login carry project ref; credential source .env DATABASE_DIRECT (mission-control)",
+      "installation_id": "01a103c0-9a9e-7a95-961b-29dda83c842b",
+      "project_label": "biotech-research-ingestion",
+      "project_ref": "bxnetwiimwhtlrjlbtab"
+    }
+  },
+  "plan_digest": "sha256:eb81eed0cd569781106fc98860ed8b7ed68175c8a3f1f5abd67fb747bbac3464"
+}

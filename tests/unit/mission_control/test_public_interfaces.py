@@ -6,6 +6,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from tests.unit.run_control.test_run_control import service as run_control_service
 
 from mission_control.application.execution.boundary_interventions import BoundaryInterventionService
 from mission_control.application.installations.registry import (
@@ -21,7 +22,6 @@ from mission_control.interfaces.http.mission_control import (
     get_mission_principal,
     router,
 )
-from tests.unit.run_control.test_run_control import service as run_control_service
 
 
 def test_unconfigured_authentication_fails_closed():
@@ -52,7 +52,7 @@ def test_cross_application_denied_before_service_selection():
 
 
 @pytest.mark.parametrize(
-    "issuer,enabled,status",
+    ("issuer", "enabled", "status"),
     [
         ("https://attacker.invalid", True, 403),
         ("https://issuer.invalid", False, 503),
@@ -193,7 +193,7 @@ def test_strict_request_file_rejects_ambiguous_json(tmp_path, body):
 
 
 @pytest.mark.parametrize(
-    "status,expected", [(200, 0), (202, 0), (401, 3), (403, 3), (409, 4), (422, 2), (503, 5)]
+    ("status", "expected"), [(200, 0), (202, 0), (401, 3), (403, 3), (409, 4), (422, 2), (503, 5)]
 )
 def test_exit_codes(status, expected):
     assert exit_status(status) == expected
@@ -220,7 +220,7 @@ def test_cli_rejects_unbounded_wait(monkeypatch):
         ["run", "inspect", "r", "--application", "biotech"],
     ],
 )
-@pytest.mark.parametrize("outcome,code", [("completed", 0), ("failed", 6), ("cancelled", 6)])
+@pytest.mark.parametrize(("outcome", "code"), [("completed", 0), ("failed", 6), ("cancelled", 6)])
 def test_cli_flags_and_terminal_wait(monkeypatch, capsys, prefix, outcome, code):
     monkeypatch.setenv("MISSION_CONTROL_TOKEN", "sensitive")
     original_client = httpx.Client

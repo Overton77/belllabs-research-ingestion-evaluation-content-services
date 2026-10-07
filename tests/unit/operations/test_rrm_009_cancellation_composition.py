@@ -469,7 +469,7 @@ async def test_a_refused_completion_is_proposed_again_under_a_new_identity() -> 
             request_scope="tenant-1", run_id="run-1", idempotency_issuer="w", occurred_at=at
         )
 
-    identity = service._completion_command_id  # noqa: SLF001 - the identity rule itself
+    identity = service._completion_command_id
     assert await identity(request(first), base) == base
     receipts[base] = refused(first)
     # An Activity retry of the refused request replays its own receipt.
@@ -548,7 +548,7 @@ async def test_composition_resources_are_closed_when_build_or_worker_start_fails
             events.append("opened")
             return SimpleNamespace(saver=object(), store=object())
 
-        async def __aexit__(self, *exc: Any) -> None:
+        async def __aexit__(self, *exc: object) -> None:
             events.append("closed")
 
     monkeypatch.setattr(composition, "StandalonePersistenceLifespan", Lifespan)

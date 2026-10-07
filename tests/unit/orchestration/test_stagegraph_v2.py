@@ -265,7 +265,7 @@ def test_complete_dependency_truth_table(
 
 @pytest.mark.parametrize(
     ("kind", "minimum", "dispositions", "expected"),
-    (
+    [
         ("all", None, ("fulfilled", "fulfilled"), JoinDisposition.SATISFIED),
         ("all", None, ("fulfilled", "unresolved"), JoinDisposition.PENDING),
         ("all", None, ("fulfilled", "failed"), JoinDisposition.IMPOSSIBLE),
@@ -275,7 +275,7 @@ def test_complete_dependency_truth_table(
         ("minimum", 2, ("fulfilled", "fulfilled"), JoinDisposition.SATISFIED),
         ("minimum", 2, ("fulfilled", "unresolved"), JoinDisposition.PENDING),
         ("minimum", 2, ("fulfilled", "failed"), JoinDisposition.IMPOSSIBLE),
-    ),
+    ],
 )
 def test_join_satisfied_pending_impossible_truth_table(
     kind: str,

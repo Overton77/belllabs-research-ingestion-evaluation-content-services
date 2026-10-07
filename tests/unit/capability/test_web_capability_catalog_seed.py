@@ -13,7 +13,6 @@ from biotech_mission_adapters.domain.coordinator.web_capability_fixtures import 
     WEB_RESEARCH_CAPABILITIES,
     web_capability_definitions,
 )
-
 from mission_control.adapters.storage.control_plane_payloads import InMemoryPayloadStore
 from mission_control.application.authoring.control_plane_repository import (
     InMemoryDefinitionRepository,
@@ -96,8 +95,8 @@ def test_mcp_servers_freeze_provider_identity_and_separate_exact_tool_rows() -> 
 
     parent_by_tool = {tool.tool_name: tool.server_ref.logical_id for tool in tools}
     assert parent_by_tool == {
-        **{name: "mcp.firecrawl" for name in FIRECRAWL_TOOL_NAMES},
-        **{name: "mcp.tavily" for name in TAVILY_TOOL_NAMES},
+        **dict.fromkeys(FIRECRAWL_TOOL_NAMES, "mcp.firecrawl"),
+        **dict.fromkeys(TAVILY_TOOL_NAMES, "mcp.tavily"),
     }
     assert len({tool.logical_id for tool in tools}) == 7
     assert all(tool.schema_digest != tool.server_ref.digest for tool in tools)
@@ -137,8 +136,8 @@ def test_profile_selects_only_search_tools_and_has_explicit_browser_authority() 
         "skill.tavily-search",
         "skill.agent-browser",
     }
-    assert BROWSER_CAPABILITIES <= profile.maximum_capability_request.capabilities
-    assert WEB_RESEARCH_CAPABILITIES == profile.maximum_capability_request.capabilities
+    assert profile.maximum_capability_request.capabilities >= BROWSER_CAPABILITIES
+    assert profile.maximum_capability_request.capabilities == WEB_RESEARCH_CAPABILITIES
 
     browser = skills["skill.agent-browser"]
     assert browser.source_provenance.upstream_identity == "vercel-labs/agent-browser"
@@ -151,7 +150,7 @@ def test_profile_selects_only_search_tools_and_has_explicit_browser_authority() 
         "workspace.browser.write",
         "artifact.browser-evidence.write",
     } <= browser.compatibility.workspace_capabilities
-    assert BROWSER_CAPABILITIES <= browser.required_capabilities
+    assert browser.required_capabilities >= BROWSER_CAPABILITIES
 
 
 def test_workflow_fixture_freezes_browser_runtime_workspace_and_artifact_contracts() -> None:
@@ -183,8 +182,8 @@ def test_workflow_fixture_freezes_browser_runtime_workspace_and_artifact_contrac
         }
     )
     assert runtime.binding.endswith("+browser-runtime")
-    assert WEB_RESEARCH_CAPABILITIES == runtime.required_capabilities
-    assert WEB_RESEARCH_CAPABILITIES == workflow.authority_ceiling.capabilities
+    assert runtime.required_capabilities == WEB_RESEARCH_CAPABILITIES
+    assert workflow.authority_ceiling.capabilities == WEB_RESEARCH_CAPABILITIES
     assert {
         "workspace.browser.read",
         "workspace.browser.write",

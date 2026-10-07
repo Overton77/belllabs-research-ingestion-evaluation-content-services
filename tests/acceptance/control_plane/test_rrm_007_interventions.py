@@ -15,8 +15,11 @@ family's own boundary activity, which records `applied` atomically with the phas
    takes over; the resume continues from the recorded frontier. Receipts, the root's message
    receipt cache and every captured history (root and family) are checked.
 
-Cognition is a technical fixture (no model, no company research). Opt-in through
-`TEST_APPLICATION_POSTGRES_DSN` (disposable stack only).
+Cognition is a technical fixture (no model, no company research). Run control runs on a
+fresh disposable database with the common `mission_control` component installed, as the
+restricted `mission_control_runtime` login under forced RLS and a canonical
+`mc/{installation}/{application}/{tenant}` scope; the boundary ledger is read back from the
+canonical `command` / `delivery_report` rows.
 """
 
 from __future__ import annotations
@@ -24,7 +27,9 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import replace
-from typing import Any
+from functools import partial
+from pathlib import Path
+from typing import Any, Self
 
 import asyncpg
 import httpx
@@ -32,6 +37,29 @@ import pytest
 from temporalio.client import Client
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
+from tests.fixtures.mission_control_common_db import CommonDatabase, canonical_scope
+from tests.fixtures.mission_control_production_stack import start_local
+from tests.integration.postgres.runtime_common import common_db as common_db
+from tests.integration.temporal import test_rrm_007_boundary_interventions as interventions
+from tests.integration.temporal.test_rrm_007_boundary_interventions import (
+    GOAL_QUEUE,
+    Authority,
+    GovernedGoalActivities,
+    GovernedStageGraphActivities,
+    _goal_blueprint,
+    _has_wait,
+    _phase_is,
+    _state_is,
+    pause,
+    replay,
+    resume,
+    until,
+)
+from tests.integration.temporal.test_wp_bp_010_temporal import QUEUE, _blueprint
+from tests.integration.temporal.test_wp_bp_010_temporal import _run_input as stage_input
+from tests.integration.temporal.test_wp_bp_020_temporal import _run_input as goal_input
+from tests.unit.run_control.test_run_control import actor, command, request
+from tests.unit.run_control.test_run_control import service as run_control_service
 
 from mission_control.adapters.postgres.run_control.run_control_repository import (
     PostgresRunControlRepository,
@@ -61,32 +89,12 @@ from mission_control.interfaces.http.run_control import (
     get_boundary_intervention_service,
     get_run_control_service,
 )
-from tests.integration.postgres.test_checkpoint_lineage_postgres import (
-    require_disposable_postgres,
-    reset_application_schema,
-)
-from tests.integration.temporal.test_rrm_007_boundary_interventions import (
-    GOAL_QUEUE,
-    SCOPE,
-    Authority,
-    GovernedGoalActivities,
-    GovernedStageGraphActivities,
-    _goal_blueprint,
-    _has_wait,
-    _phase_is,
-    _state_is,
-    pause,
-    replay,
-    resume,
-    until,
-)
-from tests.integration.temporal.test_wp_bp_010_temporal import QUEUE, _blueprint
-from tests.integration.temporal.test_wp_bp_010_temporal import _run_input as stage_input
-from tests.integration.temporal.test_wp_bp_020_temporal import _run_input as goal_input
-from tests.unit.run_control.test_run_control import actor, command
-from tests.unit.run_control.test_run_control import service as run_control_service
+
+pytestmark = pytest.mark.common_db
 
 WORKFLOWS = [BellLabsRunWorkflow, StageGraphWorkflow, GoalDirectedWorkflow, OperationWorkflow]
+SCOPE = canonical_scope("tenant-1")
+TEMPORAL_PORT = 7346
 
 
 class Facade:
@@ -95,7 +103,7 @@ class Facade:
     def __init__(self, authority: Authority) -> None:
         self.authority = authority
 
-    async def __aenter__(self) -> Facade:
+    async def __aenter__(self) -> Self:
         api.dependency_overrides[get_run_control_service] = lambda: self.authority.run_control
         api.dependency_overrides[get_boundary_intervention_service] = lambda: self.authority.facade
         api.dependency_overrides[get_control_plane_principal] = lambda: ControlPlanePrincipal(
@@ -116,7 +124,10 @@ class Facade:
     async def command(self, run_id: str, command_id: str, action: Any) -> dict[str, Any]:
         run = await self.authority.run(run_id)
         body = command(run_id, run.version, command_id, action).model_copy(
-            update={"actor": actor().model_copy(update={"permissions": frozenset()})}
+            update={
+                "actor": actor().model_copy(update={"permissions": frozenset()}),
+                "request_scope": SCOPE,
+            }
         )
         response = await self._client.post(
             f"/run-control/v1/runs/{run_id}/commands", json=body.model_dump(mode="json")
@@ -145,13 +156,21 @@ async def _receipt_rows(pool: asyncpg.Pool, run_id: str) -> list[tuple[str, int,
     async with pool.acquire() as connection:
         rows = await connection.fetch(
             """
-            SELECT c.command_id, c.target_sequence, r.state, r.recorded_by
-            FROM belllabs_control.boundary_commands c
-            JOIN belllabs_control.boundary_command_receipts r
-              ON r.request_scope = c.request_scope AND r.run_id = c.run_id
-             AND r.command_id = c.command_id
-            WHERE c.run_id = $1
-            ORDER BY c.target_sequence, r.ordinal
+            SELECT receipt->>'command_id' AS command_id, c.target_sequence,
+                   receipt->>'state' AS state, receipt->>'recorded_by' AS recorded_by
+            FROM mission_control.command c
+            JOIN mission_control.mission_run m
+              ON (m.installation_id, m.application_id, m.tenant_id, m.run_id)
+               = (c.installation_id, c.application_id, c.tenant_id, c.run_id)
+            CROSS JOIN LATERAL (
+                SELECT c.payload->'initial_receipt' AS receipt
+                UNION ALL
+                SELECT d.detail FROM mission_control.delivery_report d
+                WHERE (d.installation_id, d.application_id, d.tenant_id, d.command_id)
+                    = (c.installation_id, c.application_id, c.tenant_id, c.command_id)
+            ) receipts
+            WHERE m.run_key = $1 AND c.payload ? 'initial_receipt'
+            ORDER BY c.target_sequence, (receipt->>'ordinal')::int
             """,
             run_id,
         )
@@ -169,19 +188,26 @@ def _submitter(client: Client) -> TemporalWorkflowSubmitter:
 
 @pytest.mark.asyncio
 async def test_interventions_on_real_temporal_with_postgres_authority(
-    test_application_postgres_dsn: str,
+    common_db: CommonDatabase,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
-    require_disposable_postgres(test_application_postgres_dsn)
-    owner = await asyncpg.create_pool(dsn=test_application_postgres_dsn, min_size=1, max_size=2)
-    try:
-        await reset_application_schema(owner)
-    finally:
-        await owner.close()
-    pool = await asyncpg.create_pool(dsn=test_application_postgres_dsn, min_size=1, max_size=8)
+    assert common_db.scope("tenant-1") == SCOPE
+    # The shared RRM-007 authority helpers read their module scope and request builders at
+    # call time: point them at the canonical scope of this disposable database.
+    monkeypatch.setattr(interventions, "SCOPE", SCOPE)
+    monkeypatch.setattr(interventions, "request", partial(request, request_scope=SCOPE))
+    monkeypatch.setattr(
+        interventions,
+        "command",
+        lambda *args: command(*args).model_copy(update={"request_scope": SCOPE}),
+    )
+    pool = await common_db.pool(max_size=8)
+    owner = await common_db.owner_pool()
     evidence: dict[str, Any] = {}
     try:
         run_control, _ = run_control_service(PostgresRunControlRepository(pool))  # type: ignore[arg-type]
-        async with await WorkflowEnvironment.start_local(dev_server_log_level="error") as env:
+        async with await start_local(tmp_path / "temporal.sqlite", port=TEMPORAL_PORT) as env:
             authority = Authority(env.client, run_control)
             authority.facade = BoundaryInterventionService(
                 run_control,
@@ -190,10 +216,11 @@ async def test_interventions_on_real_temporal_with_postgres_authority(
                 ),
             )
             async with Facade(authority) as facade:
-                evidence["stagegraph"] = await _stagegraph_demo(env, pool, authority, facade)
-                evidence["goal_directed"] = await _goal_directed_demo(env, pool, authority, facade)
+                evidence["stagegraph"] = await _stagegraph_demo(env, owner, authority, facade)
+                evidence["goal_directed"] = await _goal_directed_demo(env, owner, authority, facade)
     finally:
         await pool.close()
+        await owner.close()
     print("RRM-007 EVIDENCE interventions:", json.dumps(evidence, sort_keys=True))
 
 
@@ -203,7 +230,10 @@ async def _stagegraph_demo(
     activities = GovernedStageGraphActivities(authority)
     run_id = await authority.admit("rrm-007-demo-stagegraph")
     run_input = replace(
-        stage_input(_blueprint(workflow_wait=True)), run_id=run_id, force_continue_as_new=True
+        stage_input(_blueprint(workflow_wait=True)),
+        run_id=run_id,
+        request_scope=SCOPE,
+        force_continue_as_new=True,
     )
     condition_id = wait_condition_id("release-workflow")
     async with Worker(
@@ -292,7 +322,10 @@ async def _goal_directed_demo(
     activities = GovernedGoalActivities(authority, complete_at_iteration=2)
     activities.release_executor.clear()
     run_id = await authority.admit("rrm-007-demo-goal", bounded={"goal.iterations": 10})
-    run_input = goal_input(blueprint=_goal_blueprint(max_iterations=3), run_id=run_id)
+    run_input = replace(
+        goal_input(blueprint=_goal_blueprint(max_iterations=3), run_id=run_id),
+        request_scope=SCOPE,
+    )
     family_id = f"family/{run_id}/1"
 
     def worker(identity: str) -> Worker:

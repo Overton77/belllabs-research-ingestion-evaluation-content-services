@@ -9,9 +9,7 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from mission_control.adapters.postgres.connections import (
-    apply_application_migrations,
     create_application_family_writer_pool,
-    create_application_migration_pool,
     create_application_postgres_pool,
 )
 from mission_control.adapters.postgres.run_control.run_control_repository import (
@@ -212,11 +210,7 @@ async def initialize_run_control_resources(application: FastAPI) -> None:
     async with _initialization_lock:
         if getattr(state, "run_control_postgres_pool", None) is not None:
             return
-        migration_pool = await create_application_migration_pool(settings)
-        try:
-            await apply_application_migrations(migration_pool)
-        finally:
-            await migration_pool.close()
+        # Schema installation belongs to `mission-db`; startup never migrates.
         pool = await create_application_postgres_pool(settings)
         family_writer_pool = None
         if settings.has_application_family_writer_postgres:

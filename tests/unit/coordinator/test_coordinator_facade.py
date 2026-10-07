@@ -4,12 +4,12 @@ from datetime import UTC, datetime
 from hashlib import sha256
 
 import pytest
-from biotech_mission_adapters.domain.coordinator.web_capability_fixtures import (
-    web_capability_definitions,
-)
 from fastmcp import Client, Context, FastMCP
 from fastmcp.server.auth import AccessToken
 
+from biotech_mission_adapters.domain.coordinator.web_capability_fixtures import (
+    web_capability_definitions,
+)
 from mission_control.application.authoring.control_plane_repository import (
     InMemoryDefinitionRepository,
 )

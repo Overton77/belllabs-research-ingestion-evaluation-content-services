@@ -3,6 +3,8 @@
 unit proves pure contracts, reducers and isolated errors. integration proves
 concrete persistence and runtime boundaries. acceptance/mission_control proves
 authenticated scoped execution with real local PostgreSQL and Temporal.
+qualification/two_project is the reviewer-owned independent proof of the common
+release; its common_db tests fail, never skip, without MISSION_CONTROL_TEST_ADMIN_DSN.
 
 Do not hide a missing service behind a new default skip. Report environment gates
 and exact selections. Disable external tracing in deterministic tests and never

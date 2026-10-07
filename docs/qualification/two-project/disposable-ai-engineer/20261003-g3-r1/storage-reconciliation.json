@@ -1,0 +1,8 @@
+{
+  "status": "not_applicable_disposable",
+  "reason": "Disposable PostgreSQL has no Supabase Storage service; bucket creation and storage.objects policy reconciliation were not exercised. Live targets require a separately approved storage plan.",
+  "planned_private_buckets": [
+    "mission-artifacts",
+    "capability-bundles"
+  ]
+}

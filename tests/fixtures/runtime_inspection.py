@@ -14,6 +14,27 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver, empty_checkpoint
+from tests.fixtures.checkpoint_lineage import (
+    BINDING,
+    LINEAGE_NOW,
+    OTHER_SCHEMA,
+    SCHEMA,
+    activity_attempt,
+    in_doubt_incident,
+    namespace_claim,
+    stage_unit,
+    transition,
+    unit_result,
+)
+from tests.unit.run_control.test_run_control import (
+    EMPTY_EVIDENCE_DIGEST,
+    INITIAL_EVIDENCE_FRONTIER,
+    NOW,
+    WORKFLOW_DIGEST,
+    command,
+    operator_wait,
+    request,
+)
 
 from mission_control.application.execution.operations.checkpoint_lineage import (
     CheckpointLineageRepository,
@@ -40,27 +61,6 @@ from mission_control.domain.policies.contracts import (
     StartAction,
     TerminalizationProposal,
     TerminalizeAction,
-)
-from tests.fixtures.checkpoint_lineage import (
-    BINDING,
-    LINEAGE_NOW,
-    OTHER_SCHEMA,
-    SCHEMA,
-    activity_attempt,
-    in_doubt_incident,
-    namespace_claim,
-    stage_unit,
-    transition,
-    unit_result,
-)
-from tests.unit.run_control.test_run_control import (
-    EMPTY_EVIDENCE_DIGEST,
-    INITIAL_EVIDENCE_FRONTIER,
-    NOW,
-    WORKFLOW_DIGEST,
-    command,
-    operator_wait,
-    request,
 )
 
 READ_AT = LINEAGE_NOW + timedelta(hours=1)
@@ -111,7 +111,7 @@ async def put_checkpoint(
         # An available trigger the node has not seen yet: the node is the next task.
         values[f"branch:to:{pending}"] = None
     checkpoint["channel_values"] = values
-    versions: dict[str, Any] = {name: f"{step:032}.0.1" for name in values}
+    versions: dict[str, Any] = dict.fromkeys(values, f"{step:032}.0.1")
     checkpoint["channel_versions"] = versions
     await saver.aput(
         _config(namespace, parent),
@@ -151,13 +151,22 @@ def sensitive_state() -> dict[str, Any]:
     }
 
 
-async def terminal_run(run_service: RunControlService, request_id: str) -> str:
-    admitted = await run_service.admit(request(request_id=request_id))
+def _command(scope: str, run_id: str, version: int, command_id: str, action: Any) -> Any:
+    """The unit-test lifecycle command addressed to `scope` (literal or canonical)."""
+
+    return command(run_id, version, command_id, action).model_copy(update={"request_scope": scope})
+
+
+async def terminal_run(
+    run_service: RunControlService, request_id: str, *, scope: str = "tenant-1"
+) -> str:
+    admitted = await run_service.admit(request(request_scope=scope, request_id=request_id))
     assert admitted.run_id is not None
     run_id = admitted.run_id
-    await run_service.execute(command(run_id, 1, f"{request_id}-start", StartAction()))
+    await run_service.execute(_command(scope, run_id, 1, f"{request_id}-start", StartAction()))
     await run_service.execute(
-        command(
+        _command(
+            scope,
             run_id,
             2,
             f"{request_id}-release",
@@ -170,7 +179,8 @@ async def terminal_run(run_service: RunControlService, request_id: str) -> str:
         )
     )
     terminal = await run_service.execute(
-        command(
+        _command(
+            scope,
             run_id,
             3,
             f"{request_id}-terminalize",
@@ -197,10 +207,15 @@ async def terminal_run(run_service: RunControlService, request_id: str) -> str:
 
 
 async def execute_command(
-    run_service: RunControlService, run_id: str, command_id: str, action: Any
+    run_service: RunControlService,
+    run_id: str,
+    command_id: str,
+    action: Any,
+    *,
+    scope: str = "tenant-1",
 ) -> CommandResult:
-    run = await run_service.get_run("tenant-1", run_id)
-    result = await run_service.execute(command(run_id, run.version, command_id, action))
+    run = await run_service.get_run(scope, run_id)
+    result = await run_service.execute(_command(scope, run_id, run.version, command_id, action))
     assert result.status == CommandStatus.ACCEPTED, result.reason
     return result
 
@@ -209,21 +224,25 @@ async def seed_inspection_world(
     run_service: RunControlService,
     lineage: CheckpointLineageRepository,
     saver: BaseCheckpointSaver[Any],
+    *,
+    scope: str = "tenant-1",
+    other_scope: str = "tenant-2",
 ) -> SeededRuns:
     """Seed one active run (a settled and an in-doubt unit), one terminal run, and one
-    run of another scope, with checkpoint lineage in `saver`."""
+    run of another scope, with checkpoint lineage in `saver`. The in-memory unit tests use
+    the literal scopes; the PostgreSQL proof passes two canonical tenant scopes."""
 
-    admitted = await run_service.admit(request(request_id="inspection-active"))
+    admitted = await run_service.admit(request(request_scope=scope, request_id="inspection-active"))
     assert admitted.run_id is not None
     active = admitted.run_id
-    await run_service.execute(command(active, 1, "inspection-start", StartAction()))
-    terminal = await terminal_run(run_service, "inspection-terminal")
-    other = await run_service.admit(request(request_scope="tenant-2", request_id="other-scope"))
+    await run_service.execute(_command(scope, active, 1, "inspection-start", StartAction()))
+    terminal = await terminal_run(run_service, "inspection-terminal", scope=scope)
+    other = await run_service.admit(request(request_scope=other_scope, request_id="other-scope"))
     assert other.run_id is not None
 
-    settled = stage_unit(request_scope="tenant-1", run_id=active, operation_id="op-settled")
+    settled = stage_unit(request_scope=scope, run_id=active, operation_id="op-settled")
     in_doubt = stage_unit(
-        request_scope="tenant-1", run_id=active, operation_id="op-in-doubt", stage_id="other"
+        request_scope=scope, run_id=active, operation_id="op-in-doubt", stage_id="other"
     )
 
     # Settled unit: attempt (lease since expired), transition + fenced result.
@@ -269,7 +288,7 @@ async def seed_inspection_world(
         stamps=stamps_for(settled, schema=OTHER_SCHEMA),
         values={"messages": []},
     )
-    foreign = stage_unit(request_scope="tenant-1", run_id=active, operation_id="op-foreign")
+    foreign = stage_unit(request_scope=scope, run_id=active, operation_id="op-foreign")
     await put_checkpoint(
         saver, namespace, "foreign", "c1", step=0, stamps=stamps_for(foreign), values={}
     )
@@ -293,12 +312,14 @@ async def seed_inspection_world(
         active,
         "park-in-doubt",
         SetWaitAction(condition=operator_wait(in_doubt.unit_key), runnable_work_remains=False),
+        scope=scope,
     )
     await execute_command(
         run_service,
         active,
         "reserve-effect",
         ReserveBudgetAction(reservation_id="reservation:effect", amounts={"tokens.total": 5}),
+        scope=scope,
     )
     await execute_command(
         run_service,
@@ -311,6 +332,7 @@ async def seed_inspection_world(
             provider_idempotency_key="send:1",
             reservation_id="reservation:effect",
         ),
+        scope=scope,
     )
     await execute_command(
         run_service,
@@ -319,6 +341,7 @@ async def seed_inspection_world(
         ObserveEffectAction(
             effect_id="tool-effect:send", observation_id="observation:1", disposition="ambiguous"
         ),
+        scope=scope,
     )
     return SeededRuns(
         active_run=active,

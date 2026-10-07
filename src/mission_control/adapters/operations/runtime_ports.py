@@ -96,7 +96,7 @@ class FilesystemArtifactPayloadStore:
         else:
             staging = path.with_name(path.name + f".{os.getpid()}.staging")
             staging.write_bytes(content)
-            os.replace(staging, path)
+            staging.replace(path)
         return ArtifactPayloadAddress(
             object_ref=f"{FILE_ARTIFACT_SCHEME}{path.name}",
             content_digest=content_digest,

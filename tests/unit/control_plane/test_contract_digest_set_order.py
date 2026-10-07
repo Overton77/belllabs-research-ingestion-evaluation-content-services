@@ -330,7 +330,7 @@ async def test_bootstrap_authority_projection_digests_are_independent_of_set_ite
     monkeypatch.setattr(
         postgres_runtime_authority,
         "AuthoritativeRuntimeProjection",
-        lambda **values: SimpleNamespace(**values),
+        SimpleNamespace,
     )
 
     class Bindings:
@@ -372,7 +372,6 @@ async def test_graph_admission_and_reconciliation_ids_are_independent_of_set_ite
     from biotech_mission_adapters.application.schema.supporting_graph_reconciliation import (
         _reconciliation_request_digest,
     )
-
     from tests.unit.schema.test_schema_grounding_services import _reconciliation_fixture
 
     request, _records, _factory = await _reconciliation_fixture()
@@ -455,7 +454,7 @@ async def test_semantic_binding_operation_template_refs_are_independent_of_set_o
     )
 
     for family, initial_goal, build in (
-        ("StageGraph", None, lambda repo: _schema_context_provider(repo)),
+        ("StageGraph", None, _schema_context_provider),
         ("GoalDirected", "Reconcile the bounded supporting graph.", _supporting_graph_provider),
     ):
         provider = build(InMemoryOperationBindingRepository())
@@ -487,7 +486,6 @@ async def test_web_research_record_digests_are_independent_of_set_iteration_orde
         _append,
     )
     from biotech_mission_adapters.domain.coordinator.web_research_runtime import PublicGoalAdmission
-
     from tests.unit.web_research.test_web_research_semantic_handlers import (
         request as stage_request,
     )
@@ -659,19 +657,19 @@ async def test_journal_replay_proofs_accept_reordered_sets_and_reject_changed_fi
             self.stored_event = stored_event
 
         async def fetchval(self, sql: str, *_args: object) -> object:
-            if "budget_accounts" in sql:
+            if "mission_control.budget_account" in sql:
                 return budget.model_dump(mode="json")
-            if "lifecycle_transitions" in sql:
+            if "mission_control.run_lifecycle_transition" in sql:
                 return self.stored_transition
-            if "outbox" in sql:
+            if "mission_control.outbox" in sql:
                 return self.stored_event
             raise AssertionError(sql)
 
         async def fetchrow(self, *_args: object) -> None:
             return None
 
-        async def execute(self, *_args: object) -> None:
-            return None
+        async def execute(self, sql: str, *_args: object) -> str:
+            return "UPDATE 1" if sql.lstrip().startswith("UPDATE") else "SELECT 1"
 
     mutation = SimpleNamespace(
         resulting_run=run,
@@ -683,13 +681,17 @@ async def test_journal_replay_proofs_accept_reordered_sets_and_reject_changed_fi
         claim=SimpleNamespace(effect_claim_id="claim-1", claimed_at=run.updated_at),
         ledger_entries=(),
         outbox_events=(event,),
+        mutation_id="mutation-1",
     )
     current = run.model_copy(update={"version": run.version - 1})
     journal = object.__new__(PostgresAtomicOperationJournalRepository)
 
     async def commit(stored_transition: object, stored_event: object) -> None:
         await journal._commit_run_control(  # type: ignore[arg-type]
-            Connection(stored_transition, stored_event), mutation, current_run=current
+            Connection(stored_transition, stored_event),
+            ("installation", "biotech", "tenant"),
+            mutation,
+            current_run=current,
         )
 
     # Equal contracts stored with differently ordered sets are an exact replay.

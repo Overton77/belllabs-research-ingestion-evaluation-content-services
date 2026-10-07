@@ -1,7 +1,10 @@
 """Signed scoped HTTP -> mc.* Temporal -> real PostgreSQL/DeepAgents local proof.
 
 The deterministic model is registered through the production capability hook. No
-auth override, memory repository, model-provider network call, or prerequisite skip.
+auth override, memory repository, model-provider network call, or prerequisite skip. The
+application runs in ``production_common`` storage mode on a fresh database with the common
+``mission_control`` component installed; its installation row and attestation come from the
+common-database fixture (no startup registration), and every pool is a restricted login.
 """
 
 from __future__ import annotations
@@ -26,6 +29,14 @@ from joserfc import jwt
 from joserfc.jwk import RSAKey
 from temporalio.client import Client
 from temporalio.worker import Replayer
+from tests.fixtures import rrm009_production_stack as technical
+from tests.fixtures.mission_control_common_db import (
+    COMPONENT_VERSION,
+    CommonDatabase,
+    drop_common_database,
+)
+from tests.fixtures.mission_control_production_stack import _fresh_database, start_local
+from tests.fixtures.rrm009_production_harness import canonical_evidence, record_parity_trace
 
 from mission_control.adapters.auth.jwt import ActorGrant, ApplicationAuthentication
 from mission_control.adapters.postgres.orchestration.goal_directed_repository import (
@@ -60,15 +71,14 @@ from mission_control.bootstrap.api import (
     create_application,
 )
 from mission_control.bootstrap.composition import MissionApplicationServices
-from mission_control.bootstrap.installation import register_identity
 from mission_control.bootstrap.settings import get_settings
 from mission_control.contracts.identities import mission_root_id
 from mission_control.domain.authoring.extensions import ExtensionRegistry
 from mission_control.interfaces.http.run_control import ROLE_PERMISSIONS
-from tests.fixtures import rrm009_production_stack as technical
-from tests.fixtures.mission_control_production_stack import _fresh_database, start_local
 
-PORT = 7343
+pytestmark = pytest.mark.common_db
+
+PORT = 17233
 
 
 @dataclass
@@ -80,29 +90,45 @@ class ScopedStack:
     binding: technical.TechnicalBinding
     model_log: list[dict[str, Any]]
     scope: str
+    owner_pool: asyncpg.Pool
 
 
 @asynccontextmanager
 async def scoped_stack(root: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[ScopedStack]:
-    source = os.environ.get("MISSION_CONTROL_E2E_POSTGRES_DSN")
-    if not source:
-        pytest.fail("MISSION_CONTROL_E2E_POSTGRES_DSN must name an authorized disposable local DB")
     node = shutil.which("node")
     if node is None:
         pytest.fail("the pinned deterministic MCP/browser component requires local Node")
-    owner_dsn, runtime_dsn, writer_dsn = await _fresh_database(source)
-    installation, tenant = uuid4(), uuid4()
+    common, checkpoint_dsn = await _fresh_database()
+    try:
+        async with _scoped_stack(root, monkeypatch, common, checkpoint_dsn, node) as stack:
+            yield stack
+    finally:
+        await drop_common_database(common)
+
+
+@asynccontextmanager
+async def _scoped_stack(
+    root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    common: CommonDatabase,
+    checkpoint_dsn: str,
+    node: str,
+) -> AsyncIterator[ScopedStack]:
+    owner_dsn = common.owner_dsn
+    runtime_dsn = common.dsn("mission_control_runtime")
+    writer_dsn = common.dsn("mission_control_family_writer")
+    installation, tenant = common.installation_id, common.tenants["tenant-1"]
     binding = ApplicationBinding.seal(
-        application_id="biotech",
+        application_id=common.application_id,
         installation_id=installation,
         binding_version="1",
-        supabase_project_ref="local-authenticated-runtime-proof",
+        supabase_project_ref=common.project_ref,
         database_secret_ref="MC_SCOPED_RUNTIME_DSN",
         accepted_issuers={"https://local-qualification.invalid"},
         accepted_audiences={"mission-control"},
-        required_component_version="transitional-local-v1",
+        required_component_version=COMPONENT_VERSION,
     )
-    scope = f"mc/{installation}/biotech/{tenant}"
+    scope = common.scope("tenant-1")
     monkeypatch.setattr(technical, "SCOPE", scope)
     environment = {
         "MC_SCOPED_RUNTIME_DSN": runtime_dsn,
@@ -111,9 +137,8 @@ async def scoped_stack(root: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIter
         "APPLICATION_MIGRATION_DATABASE_DIRECT": owner_dsn,
         "APPLICATION_FAMILY_WRITER_DATABASE_DIRECT": writer_dsn,
         "MISSION_CONTROL_CATALOG_SCOPE": f"mc/{installation}/biotech/catalog",
-        "LANGGRAPH_CHECKPOINT_DATABASE_DIRECT": owner_dsn + "?connect_timeout=10",
+        "LANGGRAPH_CHECKPOINT_DATABASE_DIRECT": checkpoint_dsn,
         "LANGGRAPH_CHECKPOINT_SCHEMA": technical.LANGGRAPH_SCHEMA,
-        "LANGGRAPH_CHECKPOINT_SETUP": "1",
         "TEMPORAL_ADDRESS": f"127.0.0.1:{PORT}",
         "TEMPORAL_NAMESPACE": "default",
         "TEMPORAL_TASK_QUEUE": technical.TASK_QUEUE,
@@ -131,16 +156,11 @@ async def scoped_stack(root: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIter
         "OPENAI_API_KEY": "deterministic-local-no-provider-access",
         "S3_BUCKET": "",
     }
+    monkeypatch.delenv("LANGGRAPH_CHECKPOINT_SETUP", raising=False)
     for name, value in environment.items():
         monkeypatch.setenv(name, value)
     get_settings.cache_clear()
     settings = get_settings()
-    owner = await asyncpg.connect(owner_dsn)
-    try:
-        database = await owner.fetchval("SELECT current_database()")
-    finally:
-        await owner.close()
-    await register_identity(binding, owner_dsn=owner_dsn, expected_database=database)
     key = RSAKey.generate_key(2048, parameters={"kid": "scoped-proof"})
     public_key_file = root / "public-jwks.json"
     public_key_file.write_text(json.dumps({"keys": [key.as_dict(private=False)]}))
@@ -163,7 +183,7 @@ async def scoped_stack(root: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIter
     )
     queues = coordinator_task_queues(settings.temporal_task_queue)
     deployment = MissionDeployment(
-        storage_mode="transitional_local",
+        storage_mode="production_common",
         max_request_bytes=1_000_000,
         applications=(
             ApplicationDeployment(
@@ -204,6 +224,8 @@ async def scoped_stack(root: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIter
             ]
             pool = await asyncpg.create_pool(runtime_dsn, min_size=1, max_size=5)
             resources.push_async_callback(pool.close)
+            owner_pool = await asyncpg.create_pool(owner_dsn, min_size=1, max_size=2)
+            resources.push_async_callback(owner_pool.close)
             model_log: list[dict[str, Any]] = []
             binding_assets = technical.technical_binding()
             factory = ProductionWorkerActivityCompositionFactory(
@@ -243,7 +265,9 @@ async def scoped_stack(root: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIter
                 )
             )
             print("SCOPED E2E: signed API and actual production workers started", flush=True)
-            yield ScopedStack(http, env.client, services, pool, binding_assets, model_log, scope)
+            yield ScopedStack(
+                http, env.client, services, pool, binding_assets, model_log, scope, owner_pool
+            )
     finally:
         await env.shutdown()
         get_settings.cache_clear()
@@ -476,6 +500,13 @@ async def test_signed_scoped_stagegraph_goal_and_lifecycle_reach_mc_operations(
                 )
                 await replayer.replay_workflow(history)
             assert len(operation_ids) >= (2 if run_id == stage_run else 4), operation_ids
+            rows = await canonical_evidence(stack.owner_pool, run_id, request_scope=stack.scope)
+            assert rows["terminal_outcome"] == "succeeded", rows
+            assert rows["counts"]["settled_claims"] == (2 if run_id == stage_run else 4), rows
+            record_parity_trace(
+                "signed_scoped_" + ("stagegraph" if run_id == stage_run else "goal_directed"),
+                rows,
+            )
             evidence.append(
                 {
                     "run_id": run_id,

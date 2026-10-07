@@ -385,13 +385,13 @@ class AgentBrowserSubprocessAdapter(AgentBrowserVerificationPort):
         await self._command(
             workspace,
             environment,
-            base_arguments + ("open", url),
+            (*base_arguments, "open", url),
         )
         final_url = _extract_scalar(
             await self._command(
                 workspace,
                 environment,
-                base_arguments + ("get", "url"),
+                (*base_arguments, "get", "url"),
             )
         )
         try:
@@ -408,25 +408,21 @@ class AgentBrowserSubprocessAdapter(AgentBrowserVerificationPort):
             await self._command(
                 workspace,
                 environment,
-                base_arguments + ("get", "title"),
+                (*base_arguments, "get", "title"),
             )
         )
         excerpt = _extract_scalar(
             await self._command(
                 workspace,
                 environment,
-                base_arguments
-                + (
-                    "eval",
-                    "document.body?.innerText?.slice(0, 4000) ?? ''",
-                ),
+                (*base_arguments, "eval", "document.body?.innerText?.slice(0, 4000) ?? ''"),
             )
         )
         screenshot_path = workspace / f"verification-{index}.png"
         await self._command(
             workspace,
             environment,
-            base_arguments + ("screenshot", str(screenshot_path)),
+            (*base_arguments, "screenshot", str(screenshot_path)),
         )
         content = await asyncio.to_thread(screenshot_path.read_bytes)
         if not content or len(content) > self._maximum_screenshot_bytes:
@@ -491,7 +487,7 @@ class AgentBrowserSubprocessAdapter(AgentBrowserVerificationPort):
             await self._command(
                 workspace,
                 environment,
-                base_arguments + ("close",),
+                (*base_arguments, "close"),
             )
         except Exception:
             return

@@ -7,6 +7,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from mcp.types import TextContent
+
 from biotech_mission_adapters.adapters.infrastructure import web_research_runtime
 from biotech_mission_adapters.adapters.infrastructure.web_research_runtime import (
     AgentBrowserSubprocessAdapter,
@@ -21,8 +23,6 @@ from biotech_mission_adapters.domain.coordinator.web_research_runtime import (
     GovernedSearchRequest,
     ReviewedRuntimeArtifactBinding,
 )
-from mcp.types import TextContent
-
 from mission_control.adapters.capabilities import browser_subprocess
 from mission_control.domain.authoring.contracts import DefinitionKind, ExactDefinitionRef
 
@@ -207,7 +207,7 @@ async def test_exact_mcp_search_adapters_expose_only_bound_search_calls(
         }
 
     monkeypatch.setattr(web_research_runtime, "_call_exact_search_tool", call)
-    factory = lambda: object()  # noqa: E731
+    factory = object
     firecrawl = FirecrawlMCPSearchAdapter(
         factory,  # type: ignore[arg-type]
         exact_tool_ref=FIRECRAWL_REF,
@@ -338,12 +338,8 @@ def test_agent_browser_session_identity_preserves_full_run_uniqueness() -> None:
     suffix = (
         ":execution-epoch:1:workflow-cycle:0:stage:browser_verify:stage-cycle:0:operation-attempt:1"
     )
-    first = web_research_runtime._session_id(  # noqa: SLF001
-        "operation:run-one" + suffix
-    )
-    second = web_research_runtime._session_id(  # noqa: SLF001
-        "operation:run-two" + suffix
-    )
+    first = web_research_runtime._session_id("operation:run-one" + suffix)
+    second = web_research_runtime._session_id("operation:run-two" + suffix)
 
     assert first != second
     assert first.startswith("belllabs-")
@@ -356,11 +352,11 @@ def test_agent_browser_session_identity_isolates_activity_retry_invocations() ->
         "stage:browser_verify:stage-cycle:0:operation-attempt:1"
     )
 
-    first = web_research_runtime._session_id(  # noqa: SLF001
+    first = web_research_runtime._session_id(
         idempotency_key,
         invocation="belllabs-agent-browser-first",
     )
-    retry = web_research_runtime._session_id(  # noqa: SLF001
+    retry = web_research_runtime._session_id(
         idempotency_key,
         invocation="belllabs-agent-browser-retry",
     )
@@ -371,7 +367,7 @@ def test_agent_browser_session_identity_isolates_activity_retry_invocations() ->
 
 def test_agent_browser_eval_result_is_a_supported_scalar_envelope() -> None:
     assert (
-        web_research_runtime._extract_scalar(  # noqa: SLF001
+        web_research_runtime._extract_scalar(
             {"success": True, "data": {"result": "bounded page evidence"}}
         )
         == "bounded page evidence"
@@ -379,7 +375,7 @@ def test_agent_browser_eval_result_is_a_supported_scalar_envelope() -> None:
 
 
 def test_agent_browser_failure_detail_prefers_sanitized_stderr() -> None:
-    detail = web_research_runtime._browser_failure_detail(  # noqa: SLF001
+    detail = web_research_runtime._browser_failure_detail(
         BrowserSubprocessResult(
             exit_code=1,
             stdout=b'{"error":{"message":"less precise"}}',
@@ -391,7 +387,7 @@ def test_agent_browser_failure_detail_prefers_sanitized_stderr() -> None:
 
 
 def test_agent_browser_failure_detail_uses_json_error_not_page_output() -> None:
-    detail = web_research_runtime._browser_failure_detail(  # noqa: SLF001
+    detail = web_research_runtime._browser_failure_detail(
         BrowserSubprocessResult(
             exit_code=1,
             stdout=json.dumps(
@@ -426,7 +422,7 @@ async def test_browser_output_collection_does_not_wait_forever_for_daemon_pipe_e
     process.stderr = stderr  # type: ignore[attr-defined]
 
     captured_stdout, captured_stderr, exit_code = await asyncio.wait_for(
-        browser_subprocess._collect_bounded_output(  # noqa: SLF001
+        browser_subprocess._collect_bounded_output(
             process,  # type: ignore[arg-type]
             16_384,
         ),

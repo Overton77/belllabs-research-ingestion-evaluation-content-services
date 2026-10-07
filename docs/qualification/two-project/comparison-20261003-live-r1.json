@@ -1,0 +1,119 @@
+{
+  "common": {
+    "contract_schema_digest": "sha256:dbce50116df01e9a8d814f78e9ff61d91943afdfcc5fcb1a1d2d2001e488ab7f",
+    "migrations": 18,
+    "schema_fingerprint": "sha256:ef5a9e71c9c4a4fe23f343a5708c476a757bc1c5a61f9aacae3a76577b209c09"
+  },
+  "common_seed_bytes_equal": true,
+  "equal": {
+    "contract": true,
+    "manifest_fingerprint": true,
+    "migration_receipts": true,
+    "per_schema": true,
+    "schema_fingerprint": true
+  },
+  "evidence_index": {
+    "biotech-research-ingestion": {
+      "allowed-differences.json": "sha256:24e738bc40ffe7f6f99a668d86d897d33acbb7bc7fa4ce886188e5b2e13a1863",
+      "apply-result.json": "sha256:15d64706407a2fe4d58a2e18fe01c9b29d2158c14d33ea322a5689aa7aa5f4c5",
+      "decision.json": "sha256:86ce097645c6ef1a030a716411fde0c0fbd690fedaa3c7124bf3ce2802e55ae2",
+      "identity.json": "sha256:f9ecbf18596f0555ab8be0e91def45025222ca537d3c311f1c1c4c027640e21d",
+      "migration-receipts.json": "sha256:cb2af164c0574bd14dc97837a79400211b3e848efd2993b65e45fd163a16df11",
+      "plan.json": "sha256:c46e42c5346ab74306b680e6786483f9190b502760c36ce21626e3f1183d70b5",
+      "protected-after.json": "sha256:6e0e450e96ec09f89b948034cee4c02c67bdc14e4deab6e2b4df053637448ee8",
+      "protected-before.json": "sha256:7c186da2b09905404ea6d2dc12a75bfdca50bfce658f781a4672e077d94531c0",
+      "protected-diff.json": "sha256:cff8e863313422030718dc9da1fd45a66ae8f380ba1cbe1202746b09b51eeed4",
+      "recovery.json": "sha256:50f32375b37fb47c0d62abb18b92c7cccbbaf2ed5a1cfd07bc33d933591d9d35",
+      "release.json": "sha256:3b752919e633414ff5b9f658afe00276e88889e3c96e24af308bd192e791ff34",
+      "roles.json": "sha256:8918649297e200c8d6b126f8818da3827d5e689f363d81aa07c25c34dcaf5fab",
+      "runtime-receipts.json": "sha256:2b656f5fec6ebd38724a3d0882c877d14f18225614d7804d7cdb71e4f3f353bd",
+      "schema-after.json": "sha256:1e5c9efd8647e67a5f6983b3503ee3d0f7532e88b5f91ba6b4c1fbbb53f54dda",
+      "schema-before.json": "sha256:39011bf2c6ca216617b98a1cfa976ee3b6f11b9cb37f0d846d9b63597d1b355d",
+      "seed-plan.json": "sha256:934c5211118237d5b305286a53082568452888dfb6ac4dea7a80ae7ca593eb3f",
+      "seed-receipts.json": "sha256:5c18cf058c85a2de8a69f7c4b50ff9297750548c74253cd837a86ae54055c0a8",
+      "storage-reconciliation.json": "sha256:948107d4030b9ed9b6e155fa50e745d7a19982c0698342dfc596ef54c392fa4d"
+    },
+    "supabase-blue-ocean": {
+      "allowed-differences.json": "sha256:24e738bc40ffe7f6f99a668d86d897d33acbb7bc7fa4ce886188e5b2e13a1863",
+      "apply-result.json": "sha256:6b595be610b142172d0f5a050237ff634266c9389d09e600d2ab3fe7e8791387",
+      "decision.json": "sha256:86ce097645c6ef1a030a716411fde0c0fbd690fedaa3c7124bf3ce2802e55ae2",
+      "identity.json": "sha256:60f7901a4554c113f46b3e4363277b6f817b82af8d650c6a2f6b70fae9ae5367",
+      "migration-receipts.json": "sha256:cb2af164c0574bd14dc97837a79400211b3e848efd2993b65e45fd163a16df11",
+      "plan.json": "sha256:c0a21d769e38e1d4e82248ce41f4d35a13feb88f0c57537a3e113329d26665a6",
+      "protected-after.json": "sha256:86d1f766bad61f10b0db2720abbb73bac8e8c326bc5c9a42f0d178442f45a0c8",
+      "protected-before.json": "sha256:ac8062e34ffba3be76366ee1056a93fa142e6c8d078566fe4a82b8553a218be3",
+      "protected-diff.json": "sha256:cff8e863313422030718dc9da1fd45a66ae8f380ba1cbe1202746b09b51eeed4",
+      "recovery.json": "sha256:50f32375b37fb47c0d62abb18b92c7cccbbaf2ed5a1cfd07bc33d933591d9d35",
+      "release.json": "sha256:d17d4ee1cb45969b997683dbfafb8266b3bd96ae3d776c5b7e6a99be4f48f356",
+      "roles.json": "sha256:8918649297e200c8d6b126f8818da3827d5e689f363d81aa07c25c34dcaf5fab",
+      "runtime-receipts.json": "sha256:41c174dda25e1eb22ce1a206a94e7f678e48272265e1cdb2a7754affc0129c0b",
+      "schema-after.json": "sha256:1e5c9efd8647e67a5f6983b3503ee3d0f7532e88b5f91ba6b4c1fbbb53f54dda",
+      "schema-before.json": "sha256:39011bf2c6ca216617b98a1cfa976ee3b6f11b9cb37f0d846d9b63597d1b355d",
+      "seed-plan.json": "sha256:0677f19d1c5f0356c46c20c73a5769196e5bdbf01744628db73f20036c11a153",
+      "seed-receipts.json": "sha256:04ccbd8e48576637ee03693e481b96e2eb46cbfe16b63361d974c4ff0b237bfc",
+      "storage-reconciliation.json": "sha256:948107d4030b9ed9b6e155fa50e745d7a19982c0698342dfc596ef54c392fa4d"
+    }
+  },
+  "executed": "2026-10-03",
+  "kind": "live_two_project_comparison",
+  "not_done": [
+    "storage buckets/policies",
+    "runtime LOGIN roles and memberships (access expansion)",
+    "Agent Server native persistence (topology decision)",
+    "live tenant/actor mappings",
+    "application traffic on the new component"
+  ],
+  "order": [
+    "biotech-research-ingestion",
+    "supabase-blue-ocean"
+  ],
+  "per_target": {
+    "biotech-research-ingestion": {
+      "decision": "pass",
+      "protected_diff": "allowed",
+      "seeds": [
+        [
+          "mc.catalog.workflow-parity",
+          "sha256:ca92dd4f18cf90cf82694ca64a699674781b612ec166c6833ae68ca2628bb1e0"
+        ],
+        [
+          "mc.catalog.runtime-profiles",
+          "sha256:64dbe58e7fcbd6d082741e839d488a078e92c29e70a6cb4027b03b7d5e843779"
+        ],
+        [
+          "mc.catalog.approved-assets",
+          "sha256:f45e04f9a68ad5569304691fab2de48befa6dc017076b9bc8c3c557d5a1d3dd6"
+        ],
+        [
+          "mc.app.bindings",
+          "sha256:670a3e646b2f1d4cad93dcf3130c4cfb50287001fd707a953511abee77c40f29"
+        ]
+      ],
+      "verification": "verified"
+    },
+    "supabase-blue-ocean": {
+      "decision": "pass",
+      "protected_diff": "allowed",
+      "seeds": [
+        [
+          "mc.catalog.workflow-parity",
+          "sha256:ca92dd4f18cf90cf82694ca64a699674781b612ec166c6833ae68ca2628bb1e0"
+        ],
+        [
+          "mc.catalog.runtime-profiles",
+          "sha256:64dbe58e7fcbd6d082741e839d488a078e92c29e70a6cb4027b03b7d5e843779"
+        ],
+        [
+          "mc.catalog.approved-assets",
+          "sha256:f45e04f9a68ad5569304691fab2de48befa6dc017076b9bc8c3c557d5a1d3dd6"
+        ],
+        [
+          "mc.app.bindings",
+          "sha256:e5d589368296e906777ca4a5a77670aec9ab8522c2d7b17f997762ecb9b8a2b2"
+        ]
+      ],
+      "verification": "verified"
+    }
+  },
+  "run_id": "20261003-live-r1"
+}

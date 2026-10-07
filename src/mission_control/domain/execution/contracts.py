@@ -1108,7 +1108,7 @@ class DeepAgentExecutionBinding(Contract):
             if (
                 field.reference_only
                 and isinstance(value, str)
-                and not (value.startswith("ref:") or value.startswith("handle:"))
+                and not (value.startswith(("ref:", "handle:")))
             ):
                 raise ValueError("reference-only cognitive context value contains material")
         contributed = {

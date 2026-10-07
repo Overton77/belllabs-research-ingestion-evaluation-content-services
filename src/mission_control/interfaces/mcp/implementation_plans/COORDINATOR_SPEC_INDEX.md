@@ -27,9 +27,11 @@ Use this precedence order when documents disagree:
 Primary references:
 
 - `../../../biotech-meta/docs/workflow-catalog-configuration-composition-and-agent-entry.md`
-- `../../../docs/interview_and_research_result_documentation/workflow-control-plane-current-state-and-next-slices.md`
+- `docs/interview_and_research_result_documentation/workflow-control-plane-current-state-and-next-slices.md`
+  (historical, deleted from the working tree; recoverable with `git show f6521c1:docs/interview_and_research_result_documentation/workflow-control-plane-current-state-and-next-slices.md`)
 - `../../../biotech-meta/docs/checkpoints/schema_schema_workspaces_efficient_db_interaction/2026-07-16-large-schema-workspaces-selection-and-report-splitting-special-checkpoint.md`
-- `../../../docs/interview_and_research_result_documentation/SCHEMA_S3_REFERENCE.md` for existing S3 behavior; it does not establish the missing
+- `docs/interview_and_research_result_documentation/SCHEMA_S3_REFERENCE.md` (historical; `git show
+  f6521c1:docs/interview_and_research_result_documentation/SCHEMA_S3_REFERENCE.md`) for existing S3 behavior; it does not establish the missing
   canonical storage policy identified by Phase 5.
 
 ## Specification set and order

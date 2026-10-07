@@ -5,6 +5,7 @@ from hashlib import sha256
 from pathlib import Path
 
 import pytest
+
 from biotech_mission_adapters.application.schema.schema_catalog import (
     DEFAULT_SEMANTIC_OVERLAY,
     parse_schema_catalog,

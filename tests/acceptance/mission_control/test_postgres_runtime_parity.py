@@ -14,30 +14,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
+import asyncpg
 import pytest
-
-from mission_control.adapters.postgres.orchestration.goal_directed_repository import (
-    PostgresGoalDirectedDocumentRepository,
-)
-from mission_control.adapters.postgres.orchestration.stagegraph_repository import (
-    PostgresStageGraphOperationTemplateRepository,
-)
-from mission_control.application.execution.run_launch import fork_semantic_input_binding_ref
-from mission_control.application.recovery.run_forks import ForkPatchPolicyRegistry
-from mission_control.bootstrap.technical_api import api
-from mission_control.domain.policies.contracts import (
-    CancelAction,
-    PauseAction,
-    PauseDecision,
-    ResumeAction,
-    ResumeDecision,
-    RunOutcome,
-)
-from mission_control.domain.policies.forks import (
-    ForkPatchPolicy,
-    PatchablePath,
-    stage_objective_path,
-)
+from tests.fixtures.mission_control_common_db import legacy_poison_intact
 from tests.fixtures.mission_control_production_stack import (
     open_postgres_production_stack,
 )
@@ -65,6 +44,8 @@ from tests.fixtures.rrm009_production_harness import (
     _until,
     _visible,
     _wait_for,
+    canonical_evidence,
+    record_parity_trace,
 )
 from tests.fixtures.rrm009_production_stack import (
     AGENT_COGNITIVE_QUEUE,
@@ -75,6 +56,32 @@ from tests.fixtures.rrm009_production_stack import (
     stage_input,
     stage_templates,
 )
+from tests.fixtures.run_authority_digest import run_authority_digest
+
+from mission_control.adapters.postgres.orchestration.goal_directed_repository import (
+    PostgresGoalDirectedDocumentRepository,
+)
+from mission_control.adapters.postgres.orchestration.stagegraph_repository import (
+    PostgresStageGraphOperationTemplateRepository,
+)
+from mission_control.application.execution.run_launch import fork_semantic_input_binding_ref
+from mission_control.application.recovery.run_forks import ForkPatchPolicyRegistry
+from mission_control.bootstrap.technical_api import api
+from mission_control.domain.policies.contracts import (
+    CancelAction,
+    PauseAction,
+    PauseDecision,
+    ResumeAction,
+    ResumeDecision,
+    RunOutcome,
+)
+from mission_control.domain.policies.forks import (
+    ForkPatchPolicy,
+    PatchablePath,
+    stage_objective_path,
+)
+
+pytestmark = pytest.mark.common_db
 
 
 @pytest.fixture
@@ -380,7 +387,7 @@ async def test_stagegraph_runs_through_the_production_composition_with_fork_rela
     # Sync subagent, writable-slot capture and the exact MCP tool, per operation.
     calls = _calls(stack, source_run)
     assert sorted(calls) and all(value == {"parent": 4, "child": 1} for value in calls.values())
-    assert {"parent": 4, "child": 1} == next(iter(_calls(stack, derived_run).values()))
+    assert next(iter(_calls(stack, derived_run).values())) == {"parent": 4, "child": 1}
     payloads = [
         *await _operation_payloads(stack, source_run),
         *await _operation_payloads(stack, derived_run),
@@ -405,7 +412,7 @@ async def test_stagegraph_runs_through_the_production_composition_with_fork_rela
     async with stack.owner_pool.acquire() as connection:
         candidates = await connection.fetch(
             """SELECT DISTINCT entry->>'candidate_id' AS candidate_id
-               FROM belllabs_control.workspace_manifests,
+               FROM mission_control.workspace_manifest,
                     jsonb_array_elements(payload->'entries') entry
                WHERE entry->>'kind' = 'local_candidate'"""
         )
@@ -449,6 +456,20 @@ async def test_stagegraph_runs_through_the_production_composition_with_fork_rela
             f"family/{derived_run}/1",
         ],
     )
+    # The canonical rows behind both runs exist and link (not only the HTTP projections).
+    source_rows = await canonical_evidence(stack, source_run)
+    derived_rows = await canonical_evidence(stack, derived_run)
+    assert source_rows["counts"]["settled_claims"] == 2, source_rows
+    assert source_rows["terminal_outcome"] == derived_rows["terminal_outcome"] == "succeeded"
+    record_parity_trace(
+        "stagegraph_fork_relay_inspection",
+        {
+            "database": stack.database.name if stack.database else None,
+            "source": source_rows,
+            "derived": derived_rows,
+            "fork_request_id": fork_request_id,
+        },
+    )
     ready = await stack.http.get("/health/ready")
     # RRM-009 review: the unauthenticated probe discloses status and mode only.
     assert ready.status_code == 200 and ready.json() == {
@@ -482,8 +503,22 @@ async def test_stagegraph_runs_through_the_production_composition_with_fork_rela
 
 @pytest.mark.asyncio
 async def test_stagegraph_cancel_at_declared_wait_closes_real_runtime(
-    stack: ProductionStack,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # The legacy-poison parity run: legacy namespaces exist with sentinel rows that no
+    # restricted role may touch; the whole production stack must never fall back to them.
+    async with open_postgres_production_stack(
+        root=tmp_path, monkeypatch=monkeypatch, legacy_poison=True
+    ) as stack:
+        await _cancel_at_declared_wait(stack)
+        assert stack.database is not None
+        assert await legacy_poison_intact(stack.database.owner_dsn)
+        async with stack.worker_pool.acquire() as connection:
+            with pytest.raises(asyncpg.InsufficientPrivilegeError):
+                await connection.fetch("SELECT * FROM belllabs_control.workflow_runs")
+
+
+async def _cancel_at_declared_wait(stack: ProductionStack) -> None:
     catalog = await publish_technical_catalog(
         stack.control_plane, family="StageGraph", now=datetime.now(UTC)
     )
@@ -530,6 +565,20 @@ async def test_stagegraph_cancel_at_declared_wait_closes_real_runtime(
     )
     assert budget.status_code == 200, budget.text
     assert not any(budget.json()["reserved"].values()), budget.text
+    rows = await canonical_evidence(stack, run_id)
+    assert rows["terminal_outcome"] == "cancelled", rows
+    assert rows["counts"]["settled_claims"] == 1, rows
+    # A terminal run's authority rows and saver checkpoints no longer change.
+    first = await run_authority_digest(stack.owner_pool, run_id, request_scope=SCOPE)
+    second = await run_authority_digest(stack.owner_pool, run_id, request_scope=SCOPE)
+    assert first == second, (first, second)
+    empty = "d41d8cd98f00b204e9800998ecf8427e"
+    assert first["mission_run"] != empty and first["activation"] != empty, first
+    assert first["checkpoint_transition"] != empty and first["saver_checkpoints"] != empty, first
+    record_parity_trace(
+        "stagegraph_cancel_at_declared_wait_legacy_poison",
+        {**rows, "database": stack.database.name if stack.database else None, "poison": True},
+    )
 
 
 # --- GoalDirected ------------------------------------------------------------------------------
@@ -580,6 +629,11 @@ async def test_goal_directed_runs_two_iterations_through_the_production_composit
     )
     assert budget.status_code == 200
     replayed = await _replay(stack.client, [f"belllabs-run/{run_id}", f"family/{run_id}/1"])
+    rows = await canonical_evidence(stack, run_id)
+    assert rows["terminal_outcome"] == "succeeded", rows
+    assert rows["counts"]["settled_claims"] == 4, rows
+    assert rows["counts"]["operation_receipt"] >= 4, rows
+    record_parity_trace("goal_directed_two_iterations", rows)
     print(
         "RRM-009 EVIDENCE goal_directed:",
         json.dumps(

@@ -432,10 +432,10 @@ def _verify_selected_catalog_records(
             "Scenario D Agent Profile differs from the retrieved exact capability set"
         )
     if (
-        not REQUIRED_BROWSER_CAPABILITIES <= browser_skill_record.required_capabilities
+        not browser_skill_record.required_capabilities >= REQUIRED_BROWSER_CAPABILITIES
         or "agent-browser" not in browser_skill_record.compatibility.executables
-        or not REQUIRED_BROWSER_CAPABILITIES <= profile.maximum_capability_request.capabilities
-        or not REQUIRED_BROWSER_CAPABILITIES <= runtime_record.definition.required_capabilities
+        or not profile.maximum_capability_request.capabilities >= REQUIRED_BROWSER_CAPABILITIES
+        or not runtime_record.definition.required_capabilities >= REQUIRED_BROWSER_CAPABILITIES
         or not {
             "workspace.browser.read",
             "workspace.browser.write",
@@ -536,7 +536,7 @@ def verify_web_research_operation_binding(
                 mount_path=asset.mount_path,
             )
         )
-    if not REQUIRED_BROWSER_CAPABILITIES <= binding.capability_grant.capabilities:
+    if not binding.capability_grant.capabilities >= REQUIRED_BROWSER_CAPABILITIES:
         raise SemanticRoutingError(
             "OperationExecutionBinding lacks browser process/network/workspace authority"
         )
@@ -637,8 +637,8 @@ def _catalog_uri(ref: ExactDefinitionRef) -> str:
 
 
 __all__ = [
-    "WebResearchBindingPlanInput",
     "SemanticServiceWebResearchOperationBindingAuthor",
+    "WebResearchBindingPlanInput",
     "WebResearchOperationBindingAuthor",
     "WebResearchOperationBindingRequest",
     "WebResearchSemanticBindingProvider",

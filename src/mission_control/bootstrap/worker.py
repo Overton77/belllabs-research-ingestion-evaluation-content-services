@@ -11,12 +11,15 @@ from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 import asyncpg
-from langgraph.checkpoint.postgres.base import BasePostgresSaver
-from langgraph.store.postgres.base import BasePostgresStore
 from pydantic import SecretStr
 from temporalio.client import Client
 from temporalio.worker import Worker
 
+from mission_control.adapters.deep_agents.persistence import RuntimeConninfoError
+from mission_control.adapters.deep_agents.runtime_persistence_verifier import (
+    RuntimePersistenceUnavailable,
+    verify_runtime_persistence,
+)
 from mission_control.adapters.langsmith.tracing import configure_langsmith_tracing
 from mission_control.adapters.postgres.control_plane.definition_repository import (
     PostgresDefinitionRepository,
@@ -65,29 +68,18 @@ from mission_control.bootstrap.api import (
     ApplicationDeployment,
     MissionDeployment,
     RuntimeOptions,
+    application_pool,
     load_deployment,
     load_runtime_options,
-    local_pool,
 )
-from mission_control.bootstrap.composition import (
-    TRANSITIONAL_COMPONENT_VERSION,
-    CompositionReadiness,
-    inspect_family_writer_installation,
-    inspect_transitional_installation,
+from mission_control.bootstrap.common_installation import (
+    CommonReadiness,
+    inspect_common_installation,
 )
+from mission_control.bootstrap.composition import inspect_family_writer_installation
 from mission_control.bootstrap.settings import Settings, get_settings
 from mission_control.domain.authoring.extensions import ExtensionRegistry
 from mission_control.domain.policies.contracts import ActorContext
-
-WORKER_MIGRATIONS = frozenset(
-    {
-        "0028_workspace_artifact_documents.sql",
-        "0029_async_subagent_detail_documents.sql",
-        "0031_workspace_payload_hardening.sql",
-        "0032_async_subagent_detail_payload_identity.sql",
-        "0035_workspace_candidate_descriptors.sql",
-    }
-)
 
 
 @dataclass(frozen=True)
@@ -96,7 +88,7 @@ class PreparedWorker:
     settings: Settings
     runtime_pool: asyncpg.Pool
     family_pool: asyncpg.Pool
-    readiness: CompositionReadiness
+    readiness: CommonReadiness
 
 
 def select_application(
@@ -105,8 +97,8 @@ def select_application(
     binding_digest: str,
 ) -> ApplicationDeployment:
     deployment = MissionDeployment.model_validate(deployment.model_dump(mode="python"))
-    if deployment.storage_mode != "transitional_local":
-        raise InstallationUnavailable("the common Mission Control component is not released")
+    if deployment.storage_mode != "production_common":
+        raise InstallationUnavailable("only the common Mission Control component is supported")
     matches = [
         item
         for item in deployment.applications
@@ -120,8 +112,6 @@ def select_application(
     )
     if binding.binding_digest != binding_digest:
         raise InstallationUnavailable("worker application binding pin mismatch")
-    if binding.required_component_version != TRANSITIONAL_COMPONENT_VERSION:
-        raise InstallationUnavailable("worker component compatibility mismatch")
     if item.temporal is None or item.family_writer_secret_ref is None:
         raise InstallationUnavailable(
             "worker requires explicit Temporal and family writer bindings"
@@ -200,65 +190,26 @@ def _settings_for_application(settings: Settings, item: ApplicationDeployment) -
 
 
 async def inspect_checkpoint_binding(settings: Settings, database_name: str) -> None:
-    """Runtime recovery credentials cannot also mutate business authority tables."""
-    secret = settings.langgraph_checkpoint_database_direct
-    assert secret is not None
+    """The checkpoint login serves only the provisioned private saver/store schema.
+
+    Read-only: verifies the restricted `mission_control_checkpointer` identity, schema
+    privileges, pinned tables/columns/ledgers, valid indexes and search_path shadowing
+    through the exact saver conninfo. Missing or invalid persistence fails closed.
+    """
     try:
-        connection = await asyncpg.connect(secret.get_secret_value(), timeout=10)
-    except Exception:
-        raise InstallationUnavailable("configured checkpoint connection is unavailable") from None
+        conninfo = settings.langgraph_checkpoint_dsn
+    except RuntimeConninfoError as error:
+        raise InstallationUnavailable(f"checkpoint binding rejected: {error}") from None
     try:
-        row = await connection.fetchrow(
-            """SELECT current_database() AS database_name, role.rolsuper, role.rolbypassrls,
-               pg_has_role(current_user,'belllabs_control_runtime','member') AS runtime_member,
-               pg_has_role(current_user,'belllabs_family_repository_writer','member')
-                   AS family_member,
-               has_table_privilege(current_user,'belllabs_control.workflow_runs',
-                   'INSERT,UPDATE,DELETE') AS authority_writer,
-               has_schema_privilege(current_user,namespace.oid,'USAGE') AS schema_usage
-               FROM pg_roles role CROSS JOIN pg_namespace namespace
-               WHERE role.rolname=current_user AND namespace.nspname=$1""",
-            settings.langgraph_checkpoint_schema,
+        await verify_runtime_persistence(
+            conninfo,
+            expected_database=database_name,
+            schema=settings.langgraph_checkpoint_schema,
         )
-        if (
-            row is None
-            or row["database_name"] != database_name
-            or row["rolsuper"]
-            or row["rolbypassrls"]
-            or row["runtime_member"]
-            or row["family_member"]
-            or row["authority_writer"]
-            or not row["schema_usage"]
-        ):
-            raise InstallationUnavailable(
-                "checkpoint role must be restricted to its provisioned recovery schema"
-            )
-        try:
-            async with connection.transaction():
-                await connection.execute(
-                    "SELECT set_config('search_path', $1, true)",
-                    settings.langgraph_checkpoint_schema,
-                )
-                saver_versions = {
-                    record["v"]
-                    for record in await connection.fetch("SELECT v FROM checkpoint_migrations")
-                }
-                store_versions = {
-                    record["v"]
-                    for record in await connection.fetch("SELECT v FROM store_migrations")
-                }
-                if saver_versions != set(
-                    range(len(BasePostgresSaver.MIGRATIONS))
-                ) or store_versions != set(range(len(BasePostgresStore.MIGRATIONS))):
-                    raise InstallationUnavailable(
-                        "checkpoint schema differs from the pinned SDK release"
-                    )
-        except (asyncpg.UndefinedTableError, asyncpg.InsufficientPrivilegeError) as error:
-            raise InstallationUnavailable(
-                "checkpoint schema is not provisioned for this runtime"
-            ) from error
-    finally:
-        await connection.close()
+    except RuntimePersistenceUnavailable as error:
+        raise InstallationUnavailable(
+            f"checkpoint runtime persistence is not ready: {error}"
+        ) from None
 
 
 @asynccontextmanager
@@ -275,12 +226,10 @@ async def prepare_worker(
     binding = item.authentication.binding
     assert item.family_writer_secret_ref is not None
     async with AsyncExitStack() as stack:
-        pool = await local_pool(binding.database_secret_ref)
+        pool = await application_pool(binding.database_secret_ref)
         stack.push_async_callback(pool.close)
-        readiness = await inspect_transitional_installation(pool, binding)
-        if not WORKER_MIGRATIONS <= readiness.applied_migrations:
-            raise InstallationUnavailable("worker persistence migrations are incomplete")
-        family = await local_pool(item.family_writer_secret_ref)
+        readiness = await inspect_common_installation(pool, binding)
+        family = await application_pool(item.family_writer_secret_ref)
         stack.push_async_callback(family.close)
         await inspect_family_writer_installation(family, readiness.database_name, binding)
         await inspect_checkpoint_binding(configured, readiness.database_name)

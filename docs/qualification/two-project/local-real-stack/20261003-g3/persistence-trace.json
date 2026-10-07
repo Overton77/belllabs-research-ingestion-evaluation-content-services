@@ -1,0 +1,356 @@
+{
+  "async_child_cancellation_cognition": {
+    "activation_ids": [
+      "01a1045f-c997-7b0b-8818-42bde055031d"
+    ],
+    "artifact_ids": [],
+    "attempt_ids": [
+      "01a1045f-c9a9-7fa4-a2f8-487364bb07b5"
+    ],
+    "counts": {
+      "activation": 1,
+      "artifact": 0,
+      "attempt": 1,
+      "budget_entry": 18,
+      "compiled_program": 1,
+      "mission_event": 24,
+      "operation_intent": 1,
+      "operation_receipt": 1,
+      "operation_settlement": 1,
+      "outbox_for_mission_events": 24,
+      "settled_claims": 0,
+      "subordinate_execution": 1
+    },
+    "lifecycle": "completed",
+    "mission_id": "01a1045f-c5e6-75bb-b372-ca515bed8eb7",
+    "recorded_at": "2026-10-04T00:46:05.759726+00:00",
+    "request_scope": "mc/0192a4f0-0000-7000-8000-00000000b10e/biotech/9287e246-224b-5814-bc00-44bb5396e0c5",
+    "revision_id": "01a1045f-c5e6-7f14-95b7-bedf25297e8f",
+    "run_id": "01a1045f-c5e6-7ba9-ba75-7adb66afdfa2",
+    "run_key": "68a5d413-1489-55e6-b5ae-98520c95e9c3",
+    "subordinate_ids": [
+      "01a1045f-db04-7466-824d-2f15c2116432"
+    ],
+    "terminal_outcome": "cancelled"
+  },
+  "async_child_cancellation_completion_wait": {
+    "activation_ids": [
+      "01a10460-5a59-7a46-a660-b0c1c349d2c4"
+    ],
+    "artifact_ids": [],
+    "attempt_ids": [
+      "01a10460-5a71-7d59-8ffe-6b95d75a76df"
+    ],
+    "counts": {
+      "activation": 1,
+      "artifact": 0,
+      "attempt": 1,
+      "budget_entry": 18,
+      "compiled_program": 1,
+      "mission_event": 26,
+      "operation_intent": 1,
+      "operation_receipt": 1,
+      "operation_settlement": 1,
+      "outbox_for_mission_events": 26,
+      "settled_claims": 0,
+      "subordinate_execution": 1
+    },
+    "lifecycle": "completed",
+    "mission_id": "01a10460-54b9-79dd-9e2c-3cc68be70c35",
+    "recorded_at": "2026-10-04T00:46:54.545168+00:00",
+    "request_scope": "mc/0192a4f0-0000-7000-8000-00000000b10e/biotech/9287e246-224b-5814-bc00-44bb5396e0c5",
+    "revision_id": "01a10460-54b9-7034-bec4-e0e0e87e2f7e",
+    "run_id": "01a10460-54b9-7e19-b128-270ac4868121",
+    "run_key": "5ba616cf-b50f-5316-9c75-ef16beb7a99a",
+    "subordinate_ids": [
+      "01a10460-7150-78a5-b935-f9245f0fa3b6"
+    ],
+    "terminal_outcome": "cancelled"
+  },
+  "async_children_completion": {
+    "activation_ids": [
+      "01a10461-3b88-73b1-9b0f-9db632aafe72",
+      "01a10461-7dee-7e94-9640-97582b68a11f"
+    ],
+    "artifact_ids": [],
+    "attempt_ids": [
+      "01a10461-3b9e-765b-a18d-686da8f7548e",
+      "01a10461-7dfe-7e00-a597-6137fde19832"
+    ],
+    "counts": {
+      "activation": 2,
+      "artifact": 0,
+      "attempt": 2,
+      "budget_entry": 29,
+      "compiled_program": 1,
+      "mission_event": 42,
+      "operation_intent": 2,
+      "operation_receipt": 2,
+      "operation_settlement": 2,
+      "outbox_for_mission_events": 42,
+      "settled_claims": 2,
+      "subordinate_execution": 2
+    },
+    "lifecycle": "completed",
+    "mission_id": "01a10461-35af-7fbf-aac8-98082e73a7d8",
+    "recorded_at": "2026-10-04T00:47:50.625429+00:00",
+    "request_scope": "mc/0192a4f0-0000-7000-8000-00000000b10e/biotech/9287e246-224b-5814-bc00-44bb5396e0c5",
+    "revision_id": "01a10461-35af-76e3-9365-92d54030029b",
+    "run_id": "01a10461-35af-7df4-b104-fd3aa6b29989",
+    "run_key": "78206182-0e30-5040-bfb5-c9f6a639521b",
+    "subordinate_ids": [
+      "01a10461-55d4-7b74-bd5d-d64850f2793b",
+      "01a10461-9292-76cc-9ff0-4a982e84e96b"
+    ],
+    "terminal_outcome": "succeeded"
+  },
+  "generic_artifact_promotion_retry": {
+    "activation_ids": [
+      "01a1045f-6387-7b87-b0f1-4a7217c8f1eb"
+    ],
+    "artifact_ids": [
+      "01a1045f-891c-7bea-9f09-9ace9ed48bb3"
+    ],
+    "attempt_ids": [
+      "01a1045f-6391-7a6b-b792-ccb46fa8538d"
+    ],
+    "counts": {
+      "activation": 1,
+      "artifact": 1,
+      "attempt": 1,
+      "budget_entry": 7,
+      "compiled_program": 1,
+      "mission_event": 7,
+      "operation_intent": 1,
+      "operation_receipt": 1,
+      "operation_settlement": 1,
+      "outbox_for_mission_events": 7,
+      "settled_claims": 1,
+      "subordinate_execution": 0
+    },
+    "lifecycle": "active",
+    "mission_id": "01a1045f-60d6-7527-9f37-4805847fda07",
+    "recorded_at": "2026-10-04T00:45:32.572049+00:00",
+    "request_scope": "mc/0192a4f0-0000-7000-8000-00000000b10e/biotech/9287e246-224b-5814-bc00-44bb5396e0c5",
+    "revision_id": "01a1045f-60d6-714b-9ffa-33595e8434d0",
+    "run_id": "01a1045f-60d6-7cec-80e1-26e2235bbbef",
+    "run_key": "49015baa-27a4-5c97-8bbe-f9c22167a539",
+    "subordinate_ids": [],
+    "terminal_outcome": null
+  },
+  "goal_directed_two_iterations": {
+    "activation_ids": [
+      "01a10463-d63b-76d2-ac67-3e0e412dd6f1",
+      "01a10464-0029-7de4-a02b-f2dbfdd03449",
+      "01a10464-2a05-7d86-8fe6-a67544869ded",
+      "01a10464-529e-72bf-9211-570500346772"
+    ],
+    "artifact_ids": [],
+    "attempt_ids": [
+      "01a10463-d649-7995-8a7b-f67ddbcd4233",
+      "01a10464-0030-7d40-8fd5-7cd87b02b7d7",
+      "01a10464-2a0b-72c4-8646-678251f1bccb",
+      "01a10464-52a3-7ecd-85c8-7e111619b780"
+    ],
+    "counts": {
+      "activation": 4,
+      "artifact": 0,
+      "attempt": 4,
+      "budget_entry": 35,
+      "compiled_program": 1,
+      "mission_event": 27,
+      "operation_intent": 4,
+      "operation_receipt": 4,
+      "operation_settlement": 4,
+      "outbox_for_mission_events": 27,
+      "settled_claims": 4,
+      "subordinate_execution": 0
+    },
+    "lifecycle": "completed",
+    "mission_id": "01a10463-d260-7acc-8dc5-fd045acdd265",
+    "recorded_at": "2026-10-04T00:50:56.606912+00:00",
+    "request_scope": "mc/0192a4f0-0000-7000-8000-00000000b10e/biotech/9287e246-224b-5814-bc00-44bb5396e0c5",
+    "revision_id": "01a10463-d260-743c-b394-f661b14357a0",
+    "run_id": "01a10463-d260-793f-8efb-88b86aa20be0",
+    "run_key": "cf4dda20-d0c3-5002-9c93-6276e6414ca1",
+    "subordinate_ids": [],
+    "terminal_outcome": "succeeded"
+  },
+  "signed_scoped_goal_directed": {
+    "activation_ids": [
+      "01a1045e-bbef-745c-b575-6360d4e07b64",
+      "01a1045e-e06f-7291-94e1-84a75fc16134",
+      "01a1045f-04c4-736c-8ad8-67ad7f82323c",
+      "01a1045f-289a-75a9-b349-148c28281bc9"
+    ],
+    "artifact_ids": [],
+    "attempt_ids": [
+      "01a1045e-bbf4-7a97-911c-76b864310688",
+      "01a1045e-e074-7f82-8aa3-a22c827f3e2f",
+      "01a1045f-04c9-7344-a560-fa48cc9163ee",
+      "01a1045f-28a0-7b93-8633-d23ff2e70695"
+    ],
+    "counts": {
+      "activation": 4,
+      "artifact": 0,
+      "attempt": 4,
+      "budget_entry": 35,
+      "compiled_program": 1,
+      "mission_event": 27,
+      "operation_intent": 4,
+      "operation_receipt": 4,
+      "operation_settlement": 4,
+      "outbox_for_mission_events": 27,
+      "settled_claims": 4,
+      "subordinate_execution": 0
+    },
+    "lifecycle": "completed",
+    "mission_id": "01a1045e-b846-7172-9e92-36eae5536859",
+    "recorded_at": "2026-10-04T00:45:18.381258+00:00",
+    "request_scope": "mc/0192a4f0-0000-7000-8000-00000000b10e/biotech/9287e246-224b-5814-bc00-44bb5396e0c5",
+    "revision_id": "01a1045e-b846-7447-a558-4ee7f8813b7e",
+    "run_id": "01a1045e-b846-76eb-a5c9-c2c379900534",
+    "run_key": "b1831649-70c1-5b66-86a8-6347caa23093",
+    "subordinate_ids": [],
+    "terminal_outcome": "succeeded"
+  },
+  "signed_scoped_stagegraph": {
+    "activation_ids": [
+      "01a1045e-6a04-7d5d-96c3-de222fd49cf4",
+      "01a1045e-9553-730a-be16-56dbb62b164a"
+    ],
+    "artifact_ids": [],
+    "attempt_ids": [
+      "01a1045e-6a0f-7fc0-8d1c-791d3b92dc62",
+      "01a1045e-9558-78d7-a93c-f6d20e88c366"
+    ],
+    "counts": {
+      "activation": 2,
+      "artifact": 0,
+      "attempt": 2,
+      "budget_entry": 23,
+      "compiled_program": 1,
+      "mission_event": 24,
+      "operation_intent": 2,
+      "operation_receipt": 2,
+      "operation_settlement": 2,
+      "outbox_for_mission_events": 24,
+      "settled_claims": 2,
+      "subordinate_execution": 0
+    },
+    "lifecycle": "completed",
+    "mission_id": "01a1045e-669a-7f04-8849-03e96d35d154",
+    "recorded_at": "2026-10-04T00:45:18.038641+00:00",
+    "request_scope": "mc/0192a4f0-0000-7000-8000-00000000b10e/biotech/9287e246-224b-5814-bc00-44bb5396e0c5",
+    "revision_id": "01a1045e-669a-7dba-9f6c-97e83e28b006",
+    "run_id": "01a1045e-669a-712c-9d2f-305b9e12afc0",
+    "run_key": "36c514b5-0f72-532f-afac-ca2e9b8cc94a",
+    "subordinate_ids": [],
+    "terminal_outcome": "succeeded"
+  },
+  "stagegraph_cancel_at_declared_wait_legacy_poison": {
+    "activation_ids": [
+      "01a10463-9379-7815-b9af-9fd8064a346e"
+    ],
+    "artifact_ids": [],
+    "attempt_ids": [
+      "01a10463-9386-7720-ae29-e2e083a6587d"
+    ],
+    "counts": {
+      "activation": 1,
+      "artifact": 0,
+      "attempt": 1,
+      "budget_entry": 13,
+      "compiled_program": 1,
+      "mission_event": 15,
+      "operation_intent": 1,
+      "operation_receipt": 1,
+      "operation_settlement": 1,
+      "outbox_for_mission_events": 15,
+      "settled_claims": 1,
+      "subordinate_execution": 0
+    },
+    "database": "mct_83f5062c38",
+    "lifecycle": "completed",
+    "mission_id": "01a10463-8f86-7fec-b955-1120bba7aa36",
+    "poison": true,
+    "recorded_at": "2026-10-04T00:50:09.192566+00:00",
+    "request_scope": "mc/0192a4f0-0000-7000-8000-00000000b10e/biotech/9287e246-224b-5814-bc00-44bb5396e0c5",
+    "revision_id": "01a10463-8f86-7a16-9ca3-b27e6c93e738",
+    "run_id": "01a10463-8f86-7016-b8d4-2ecfe3125c12",
+    "run_key": "d6f332e8-44cf-5c29-b32a-1c0f2db15b2a",
+    "subordinate_ids": [],
+    "terminal_outcome": "cancelled"
+  },
+  "stagegraph_fork_relay_inspection": {
+    "database": "mct_df54c57e0d",
+    "derived": {
+      "activation_ids": [
+        "01a10461-ea57-7bc2-89b6-235cf61cc8e1",
+        "01a10461-f167-79e4-bdec-61c34df7fa88"
+      ],
+      "artifact_ids": [],
+      "attempt_ids": [
+        "01a10461-ea61-745c-85de-51e8b620248a",
+        "01a10461-f16d-7d04-8301-e1f63b3e1fe4"
+      ],
+      "counts": {
+        "activation": 2,
+        "artifact": 0,
+        "attempt": 2,
+        "budget_entry": 22,
+        "compiled_program": 1,
+        "mission_event": 22,
+        "operation_intent": 2,
+        "operation_receipt": 2,
+        "operation_settlement": 2,
+        "outbox_for_mission_events": 22,
+        "settled_claims": 2,
+        "subordinate_execution": 0
+      },
+      "lifecycle": "completed",
+      "mission_id": "01a10461-e58b-708a-93b2-89a19f60e74b",
+      "request_scope": "mc/0192a4f0-0000-7000-8000-00000000b10e/biotech/9287e246-224b-5814-bc00-44bb5396e0c5",
+      "revision_id": "01a10461-e58b-7745-b3b9-b0753f34d100",
+      "run_id": "01a10461-e58b-7a06-af15-6f46251eb2cb",
+      "run_key": "14a703d1-dbc5-578e-b9da-dd8ed18284fa",
+      "subordinate_ids": [],
+      "terminal_outcome": "succeeded"
+    },
+    "fork_request_id": "fork-3b965e3d",
+    "recorded_at": "2026-10-04T00:49:52.309035+00:00",
+    "source": {
+      "activation_ids": [
+        "01a10461-b9b4-7c85-9bf7-6579e0235f4d",
+        "01a10463-55a9-71f4-abcb-f06bf54be8a9"
+      ],
+      "artifact_ids": [],
+      "attempt_ids": [
+        "01a10461-b9c3-7d89-bd83-992f847949c1",
+        "01a10463-55b0-7293-84b6-8bf90a9d9e9e"
+      ],
+      "counts": {
+        "activation": 2,
+        "artifact": 0,
+        "attempt": 2,
+        "budget_entry": 23,
+        "compiled_program": 1,
+        "mission_event": 24,
+        "operation_intent": 2,
+        "operation_receipt": 2,
+        "operation_settlement": 2,
+        "outbox_for_mission_events": 24,
+        "settled_claims": 2,
+        "subordinate_execution": 0
+      },
+      "lifecycle": "completed",
+      "mission_id": "01a10461-b4b1-7eb1-9ea8-01addbefbb2a",
+      "request_scope": "mc/0192a4f0-0000-7000-8000-00000000b10e/biotech/9287e246-224b-5814-bc00-44bb5396e0c5",
+      "revision_id": "01a10461-b4b1-768a-8880-659beedd7696",
+      "run_id": "01a10461-b4b1-7b2e-88eb-812151a94f49",
+      "run_key": "3b965e3d-3ab1-5e33-ad7f-f2154b82276f",
+      "subordinate_ids": [],
+      "terminal_outcome": "succeeded"
+    }
+  }
+}

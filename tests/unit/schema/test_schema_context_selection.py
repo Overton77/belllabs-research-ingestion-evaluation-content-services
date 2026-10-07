@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
 from biotech_mission_adapters.application.schema.schema_context_selection import (
     AgentRunOutput,
     SchemaContextSelectionWorkflow,
@@ -15,7 +16,6 @@ from biotech_mission_adapters.domain.schema_context.validation import (
     accept_selection,
     validate_selection,
 )
-
 from tests.schema_context_helpers import catalog, request, selection
 
 

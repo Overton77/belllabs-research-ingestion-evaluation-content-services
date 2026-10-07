@@ -6,12 +6,15 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Deployment resources are selected by the operator, never relative to site-packages.
 # Local commands use their working directory; installed deployments set this root.
 PROJECT_ROOT = Path(os.environ.get("MISSION_CONTROL_HOME", str(Path.cwd()))).resolve()
+# The private LangGraph saver/store schema (adapters/deep_agents/persistence.RUNTIME_SCHEMA;
+# imported lazily there because the deep_agents package imports these settings).
+RUNTIME_CHECKPOINT_SCHEMA = "mission_control_runtime"
 
 
 class IntegrationConfigurationError(ValueError):
@@ -196,12 +199,14 @@ class Settings(BaseSettings):
     # One shared key for multi-replica inspection pagination (>= 16 bytes). When absent the
     # checkpoint signing key derives it, which is also shared by every replica.
     inspection_cursor_key: SecretStr | None = None
-    # REQ-CP-DA-004 (clarified): the persistent, registered LangGraph saver and store. The
-    # saver DSN defaults to the application authority DSN; the schema keeps checkpoints out
-    # of `belllabs_control`. `setup` runs the saver/store DDL (an administrative step).
+    # REQ-CP-DA-004 (clarified): the persistent, registered LangGraph saver and store live
+    # in the private `mission_control_runtime` schema, provisioned only by
+    # `mission-db runtime-apply` (packages/mission-control-db-contract/runtime). There is no
+    # fallback to `belllabs_langgraph` or `public`. `setup` is a TEST-ONLY vendor setup()
+    # switch for disposable schemas; it is refused for the runtime schema and in production.
     langgraph_checkpoint_database_direct: SecretStr | None = None
     langgraph_checkpoint_schema: str = Field(
-        default="belllabs_langgraph", pattern=r"^[a-z_][a-z0-9_]{0,62}$"
+        default=RUNTIME_CHECKPOINT_SCHEMA, pattern=r"^[a-z_][a-z0-9_]{0,62}$"
     )
     langgraph_checkpoint_setup: bool = False
     # The exact checkpointer/store definition digests the deployment serves with that saver
@@ -278,9 +283,10 @@ class Settings(BaseSettings):
 
     @property
     def application_migration_postgres_dsn(self) -> str:
-        if self.application_migration_database_direct is not None:
-            return self.application_migration_database_direct.get_secret_value()
-        return self.application_postgres_dsn
+        # Migration authority is never inferred from the restricted runtime credential.
+        if self.application_migration_database_direct is None:
+            raise ValueError("APPLICATION_MIGRATION_DATABASE_DIRECT is required for migrations")
+        return self.application_migration_database_direct.get_secret_value()
 
     @property
     def application_backfill_postgres_dsn(self) -> str:
@@ -326,17 +332,46 @@ class Settings(BaseSettings):
             )
         return secret.get_secret_value().encode()
 
+    @model_validator(mode="after")
+    def _checkpoint_runtime_binding(self) -> Settings:
+        from mission_control.adapters.deep_agents.persistence import (
+            FORBIDDEN_CHECKPOINT_SCHEMAS,
+            RUNTIME_SCHEMA,
+        )
+
+        schema = self.langgraph_checkpoint_schema
+        if schema in FORBIDDEN_CHECKPOINT_SCHEMAS:
+            raise ValueError("LANGGRAPH_CHECKPOINT_SCHEMA names a forbidden fallback schema")
+        if self.langgraph_checkpoint_setup and schema == RUNTIME_SCHEMA:
+            raise ValueError(
+                "mission_control_runtime is provisioned only by mission-db runtime-apply"
+            )
+        if self.bell_labs_environment == "production" and (
+            schema != RUNTIME_SCHEMA or self.langgraph_checkpoint_setup
+        ):
+            raise ValueError(
+                "production checkpoints require mission_control_runtime without vendor setup"
+            )
+        return self
+
     @property
     def langgraph_checkpoint_dsn(self) -> str:
-        """The persistent saver/store DSN (psycopg), with the dedicated schema selected."""
+        """The saver/store conninfo with exactly one `options=-c search_path=<schema>,pg_temp`.
+
+        A configured DSN that already carries `options` or a search_path is rejected
+        (`RuntimeConninfoError`), never silently overridden.
+        """
+
+        from mission_control.adapters.deep_agents.persistence import (
+            runtime_checkpoint_conninfo,
+        )
 
         value = (
             self.langgraph_checkpoint_database_direct.get_secret_value()
             if self.langgraph_checkpoint_database_direct is not None
             else self.application_postgres_dsn
         )
-        separator = "&" if "?" in value else "?"
-        return f"{value}{separator}options=-c%20search_path%3D{self.langgraph_checkpoint_schema}"
+        return runtime_checkpoint_conninfo(value, self.langgraph_checkpoint_schema)
 
     @property
     def inspection_cursor_secret(self) -> bytes:

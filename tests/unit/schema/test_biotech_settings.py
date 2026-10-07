@@ -1,8 +1,8 @@
 import pytest
-from biotech_mission_adapters.adapters.infrastructure.neo4j import create_neo4j
-from biotech_mission_adapters.bootstrap.settings import BiotechSettings
 from pydantic import SecretStr
 
+from biotech_mission_adapters.adapters.infrastructure.neo4j import create_neo4j
+from biotech_mission_adapters.bootstrap.settings import BiotechSettings
 from mission_control.bootstrap.settings import IntegrationConfigurationError
 
 

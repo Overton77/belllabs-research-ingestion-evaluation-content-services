@@ -1,0 +1,71 @@
+{
+  "actor_ref": "seed:mission-control-catalog",
+  "component_compatibility": ">=1.0.0 <2.0.0",
+  "depends_on": [
+    {
+      "seed_key": "mc.catalog.approved-assets",
+      "seed_version": "1.0.0"
+    },
+    {
+      "seed_key": "mc.app.bindings",
+      "seed_version": "1.0.0"
+    }
+  ],
+  "description": "Installation binding for app 'biotech': identity facts copied from deployments/biotech/target.toml and secret reference NAMES only. No tenant/actor mapping or grant is seeded until owner-approved (approved_tenant_actor_mappings is a documented empty placeholder).",
+  "format": "mission-control-seed/v1",
+  "records": [
+    {
+      "fields": {
+        "asset_id": "app-binding:biotech",
+        "contract": "mission-control.app-binding/1",
+        "kind": "profile",
+        "manifest": {
+          "application_id": "biotech",
+          "approved_tenant_actor_mappings": [],
+          "binding": "mission-control.app-binding/1",
+          "common_catalog_seeds": [
+            "mc.catalog.workflow-parity@1.0.0",
+            "mc.catalog.runtime-profiles@1.0.0",
+            "mc.catalog.approved-assets@1.0.0"
+          ],
+          "installation_id": "01a103c0-9a9e-7a95-961b-29dda83c842b",
+          "project_label": "biotech-research-ingestion",
+          "project_ref": "bxnetwiimwhtlrjlbtab",
+          "secret_reference_names": {
+            "migration_database_url_env": "MC_BIOTECH_MIGRATION_DATABASE_URL"
+          },
+          "supersedes": "app-binding:biotech@1",
+          "target_ref": "deployments/biotech/target.toml",
+          "target_sha256": "sha256:dd05165ccc7eb9ae85369aa8409a636c3451c657e924b45095dc0c021fc0391f",
+          "unresolved_operator_fields": []
+        },
+        "manifest_digest": "sha256:74b793435be2ecb74e506d6c4e6fe059a061eebbc88373740b5db8db6750562f",
+        "manifest_ref": "repo://deployments/biotech/target.toml",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "2"
+      },
+      "kind": "asset_version",
+      "logical_key": "app-binding:biotech/2"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "app-binding:biotech/2",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "deployments/biotech/target.toml"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "app-binding:biotech/2:admit"
+    }
+  ],
+  "seed_key": "mc.app.bindings",
+  "seed_version": "1.0.1"
+}

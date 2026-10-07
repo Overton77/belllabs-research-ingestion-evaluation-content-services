@@ -39,6 +39,33 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langgraph_sdk import get_client
 from langgraph_sdk.errors import NotFoundError
 from temporalio.api.enums.v1 import EventType
+from tests.fixtures.rrm009_production_harness import (
+    PRINCIPAL,
+    ProductionStack,
+    _admit,
+    _command,
+    _launch,
+    _receipt_states,
+    _release_wait,
+    _replay,
+    _run,
+    _send,
+    _wait_for,
+)
+from tests.fixtures.rrm009_production_stack import (
+    CHILD_MARKER,
+    OPERATOR,
+    SCOPE,
+    ChildModel,
+    TechnicalBinding,
+    TechnicalCatalog,
+    TechnicalModel,
+    call_usage,
+    publish_technical_catalog,
+    stage_input,
+    stage_templates,
+    technical_binding,
+)
 
 from mission_control.adapters.agent_server.async_subagents.auth import mint_scope_claim
 from mission_control.adapters.agent_server.async_subagents.bindings import (
@@ -80,33 +107,6 @@ from mission_control.domain.execution.contracts import (
 )
 from mission_control.domain.policies.contracts import ActorContext, CancelAction
 from mission_control.interfaces.http.control_plane import get_control_plane_principal
-from tests.fixtures.rrm009_production_harness import (
-    PRINCIPAL,
-    ProductionStack,
-    _admit,
-    _command,
-    _launch,
-    _receipt_states,
-    _release_wait,
-    _replay,
-    _run,
-    _send,
-    _wait_for,
-)
-from tests.fixtures.rrm009_production_stack import (
-    CHILD_MARKER,
-    OPERATOR,
-    SCOPE,
-    ChildModel,
-    TechnicalBinding,
-    TechnicalCatalog,
-    TechnicalModel,
-    call_usage,
-    publish_technical_catalog,
-    stage_input,
-    stage_templates,
-    technical_binding,
-)
 
 CancellationWindow = Literal["sync_child", "cognition", "completion_wait"]
 TOKEN_ENV = "BELLABS_ASYNC_SUBAGENT_SERVER_TOKEN"
@@ -342,12 +342,14 @@ async def operation_rows(stack: ProductionStack, run_id: str) -> list[dict[str, 
     async with stack.owner_pool.acquire() as connection:
         rows = await connection.fetch(
             """
-            SELECT c.semantic_attempt_key, s.status, s.failure_code, s.usage_payload
-            FROM belllabs_control.operation_effect_claims c
-            JOIN belllabs_control.operation_settlements s
-              ON s.request_scope = c.request_scope AND s.effect_claim_id = c.effect_claim_id
-            WHERE c.belllabs_run_id = $1
-            ORDER BY c.semantic_attempt_key
+            SELECT DISTINCT ON (c.semantic_attempt_key)
+                   c.semantic_attempt_key, s.status, s.failure_code, s.usage_payload
+            FROM mission_control.operation_claim c
+            JOIN mission_control.operation_settlement s
+              ON (s.installation_id, s.application_id, s.tenant_id, s.claim_key)
+               = (c.installation_id, c.application_id, c.tenant_id, c.claim_key)
+            WHERE c.run_key = $1
+            ORDER BY c.semantic_attempt_key, s.settlement_revision DESC
             """,
             run_id,
         )
@@ -371,10 +373,11 @@ async def transitions(
     async with stack.owner_pool.acquire() as connection:
         rows = await connection.fetch(
             """
-            SELECT t.classification FROM belllabs_control.runtime_checkpoint_transitions t
-            WHERE t.unit_key IN (
-                SELECT c.unit_key FROM belllabs_control.operation_effect_claims c
-                WHERE c.belllabs_run_id = $1 AND c.semantic_attempt_key LIKE $2
+            SELECT t.classification FROM mission_control.checkpoint_transition t
+            WHERE (t.installation_id, t.application_id, t.tenant_id, t.unit_key) IN (
+                SELECT c.installation_id, c.application_id, c.tenant_id, c.unit_key
+                FROM mission_control.operation_claim c
+                WHERE c.run_key = $1 AND c.semantic_attempt_key LIKE $2
             )
             ORDER BY t.observed_at
             """,
@@ -542,13 +545,13 @@ async def _child(stack: ProductionStack, run_id: str) -> tuple[str, str]:
     """The run's single async child and its provider run, once submitted."""
 
     async def submitted() -> bool:
-        children = await PostgresAsyncSubagentAuthority(stack.owner_pool).list_children(
+        children = await PostgresAsyncSubagentAuthority(stack.worker_pool).list_children(
             SCOPE, run_id
         )
         return len(children) == 1 and children[0].provider_run_id is not None
 
     await _wait_for(stack, run_id, submitted, 120)
-    (view,) = await PostgresAsyncSubagentAuthority(stack.owner_pool).list_children(SCOPE, run_id)
+    (view,) = await PostgresAsyncSubagentAuthority(stack.worker_pool).list_children(SCOPE, run_id)
     assert view.provider_run_id is not None
     return view.child_execution_id, view.provider_run_id
 
@@ -653,7 +656,7 @@ async def run_cancellation_drill(
         ] == settled_rows
         assert (await _run(stack, run_id))["phase"] == "active"
         assert child_id is not None and provider_run_id is not None
-        children = await PostgresAsyncSubagentAuthority(stack.owner_pool).list_children(
+        children = await PostgresAsyncSubagentAuthority(stack.worker_pool).list_children(
             SCOPE, run_id
         )
         assert [item.child_execution_id for item in children] == [child_id]
@@ -792,7 +795,10 @@ async def run_cancellation_drill(
     if settled_draft is None:
         assert other_calls == [], other_calls
     else:
-        assert all(DRAFT_OPERATION.split(":slot:")[0] in item["operation"] for item in other_calls)
+        assert all(
+            DRAFT_OPERATION.split(":slot:", maxsplit=1)[0] in item["operation"]
+            for item in other_calls
+        )
         assert sorted(item["model"] for item in other_calls) == ["child", *["parent"] * 4]
     # sync_child: the parent's `task` call, then the child's held call; async windows: the
     # spawn call, then the held (cognition) or final (completion_wait) parent call.

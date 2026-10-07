@@ -1,0 +1,58 @@
+{
+  "lock": {
+    "exit": 0,
+    "status": "locked"
+  },
+  "qualify-before": {
+    "exit": 0,
+    "status": "pass"
+  },
+  "plan": {
+    "exit": 0,
+    "status": null
+  },
+  "apply": {
+    "exit": 0,
+    "status": "verified"
+  },
+  "replan": {
+    "exit": 0,
+    "status": null
+  },
+  "apply-replay": {
+    "exit": 0,
+    "status": "verified"
+  },
+  "verify": {
+    "exit": 0,
+    "status": "verified"
+  },
+  "runtime-plan": {
+    "exit": 0,
+    "status": "pending"
+  },
+  "runtime-apply": {
+    "exit": 0,
+    "status": "complete"
+  },
+  "runtime-replay": {
+    "exit": 0,
+    "status": "complete"
+  },
+  "seed-plan": {
+    "exit": 0,
+    "status": "planned"
+  },
+  "seed-apply": {
+    "exit": 0,
+    "status": "seeded"
+  },
+  "seed-replay": {
+    "exit": 0,
+    "status": "seeded"
+  },
+  "qualify-after": {
+    "exit": 0,
+    "status": "pass"
+  }
+}

@@ -29,6 +29,7 @@ from mission_control.domain.coordinator.search_document import (
 )
 
 __all__ = [
+    "SEARCH_DOCUMENT_FORMAT_VERSION",
     "AuthorizationState",
     "CapabilitySearchHit",
     "CapabilitySearchRequest",
@@ -41,7 +42,6 @@ __all__ = [
     "PolicyReason",
     "PolicyReasonCode",
     "RenderedSearchDocument",
-    "SEARCH_DOCUMENT_FORMAT_VERSION",
     "SearchDocumentMetadata",
     "SearchDocumentSource",
     "SelectionDecision",

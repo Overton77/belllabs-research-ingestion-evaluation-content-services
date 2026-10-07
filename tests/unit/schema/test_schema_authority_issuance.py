@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import Self, cast
 
 import pytest
+from neo4j import READ_ACCESS, WRITE_ACCESS
+
 from biotech_mission_adapters.adapters.infrastructure.neo4j_schema_deployment import (
     Neo4jLiveSchemaDeploymentReader,
     deployment_evidence_query,
@@ -39,8 +41,6 @@ from biotech_mission_adapters.domain.schema_grounding.errors import (
     GraphCapabilityDenied,
     SchemaDeploymentMismatch,
 )
-from neo4j import READ_ACCESS, WRITE_ACCESS
-
 from mission_control.domain.authoring.canonical import sha256_digest
 
 NOW = datetime(2026, 7, 26, 18, 0, tzinfo=UTC)
@@ -362,10 +362,10 @@ async def test_revoked_deployment_evidence_issues_nothing() -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "updates",
-    (
+    [
         {"workspace_read_only": False},
         {"requested_graph_access": "write"},
-    ),
+    ],
 )
 async def test_write_scoped_workspace_or_grant_is_denied_before_live_read(
     updates: dict[str, object],
@@ -617,7 +617,7 @@ class _Session:
         self.query: str | None = None
         self.parameters: dict[str, object] | None = None
 
-    async def __aenter__(self) -> _Session:
+    async def __aenter__(self) -> Self:
         return self
 
     async def __aexit__(self, *_args: object) -> None:
@@ -654,7 +654,7 @@ class _MergeSession:
     def __init__(self) -> None:
         self.stored: dict[str, object] | None = None
 
-    async def __aenter__(self) -> _MergeSession:
+    async def __aenter__(self) -> Self:
         return self
 
     async def __aexit__(self, *_args: object) -> None:

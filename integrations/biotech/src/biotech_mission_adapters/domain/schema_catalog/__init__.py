@@ -36,8 +36,8 @@ __all__ = [
     "derive_catalog",
     "load_semantic_overlay",
     "parse_physical_schema",
-    "require_valid_catalog_overlay",
     "render_tier_zero",
+    "require_valid_catalog_overlay",
     "semantic_overlay_json_schema",
     "validate_catalog_overlay",
 ]

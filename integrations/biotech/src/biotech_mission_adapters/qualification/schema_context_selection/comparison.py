@@ -85,7 +85,7 @@ def compare_schema_context_runs(baseline_root: Path, candidate_root: Path) -> di
     )
     gate(
         "core_semantic_membership",
-        _CORE_NODES <= candidate_nodes,
+        candidate_nodes >= _CORE_NODES,
         f"Missing core nodes: {sorted(_CORE_NODES - candidate_nodes)}.",
     )
     gate(
@@ -106,7 +106,7 @@ def compare_schema_context_runs(baseline_root: Path, candidate_root: Path) -> di
     )
     gate(
         "all_offered_products_recovered",
-        _OFFERED_PRODUCTS <= recovered,
+        recovered >= _OFFERED_PRODUCTS,
         f"Missing products: {sorted(_OFFERED_PRODUCTS - recovered)}.",
     )
     rejected = int(_metric(candidate_metrics, "query", "rejected_count", default=-1))

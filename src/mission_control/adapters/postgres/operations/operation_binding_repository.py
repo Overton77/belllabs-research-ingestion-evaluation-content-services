@@ -7,6 +7,7 @@ import json
 import asyncpg
 
 from mission_control.adapters.postgres.documents import PostgresDocumentStore
+from mission_control.contracts.identities import parse_request_scope
 from mission_control.domain.authoring.canonical import sha256_digest, stable_json_dump
 from mission_control.domain.execution.contracts import (
     OperationExecutionBinding,
@@ -75,10 +76,14 @@ class PostgresOperationBindingRepository:
                 "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
                 f"operation-binding:{request_scope}:{binding.semantic_attempt_key}",
             )
+            scope = parse_request_scope(request_scope)
             row = await connection.fetchrow(
-                """SELECT payload, digest FROM belllabs_control.immutable_documents
-                   WHERE request_scope=$1 AND contract='operation.binding/1' AND identity=$2""",
-                request_scope,
+                """SELECT payload, digest FROM mission_control.runtime_document
+                   WHERE installation_id = $1 AND application_id = $2 AND tenant_id = $3
+                     AND contract = 'operation.binding/1' AND identity = $4""",
+                scope.installation_id,
+                scope.application_id,
+                scope.tenant_id,
                 binding.semantic_attempt_key,
             )
             if row is not None:
@@ -137,10 +142,14 @@ class PostgresOperationBindingRepository:
                 "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
                 f"operation-claim:{binding.request_scope}:{binding.side_effect_key}",
             )
+            scope = parse_request_scope(binding.request_scope)
             exists = await connection.fetchval(
-                """SELECT EXISTS (SELECT 1 FROM belllabs_control.immutable_documents
-                   WHERE request_scope=$1 AND contract='operation.claim/1' AND identity=$2)""",
-                binding.request_scope,
+                """SELECT EXISTS (SELECT 1 FROM mission_control.runtime_document
+                   WHERE installation_id = $1 AND application_id = $2 AND tenant_id = $3
+                     AND contract = 'operation.claim/1' AND identity = $4)""",
+                scope.installation_id,
+                scope.application_id,
+                scope.tenant_id,
                 binding.side_effect_key,
             )
             await self._documents.put_on(

@@ -9,7 +9,8 @@ not a product specification and does not supersede accepted authority in `biotec
 Primary architecture references:
 
 - `../../../biotech-meta/docs/workflow-catalog-configuration-composition-and-agent-entry.md`
-- `../../docs/interview_and_research_result_documentation/workflow-control-plane-current-state-and-next-slices.md`
+- `docs/interview_and_research_result_documentation/workflow-control-plane-current-state-and-next-slices.md`
+  (historical, deleted from the working tree; recoverable with `git show f6521c1:docs/interview_and_research_result_documentation/workflow-control-plane-current-state-and-next-slices.md`; current navigation: `docs/knowledge/index.md`)
 - `../../../biotech-meta/docs/checkpoints/schema_schema_workspaces_efficient_db_interaction/2026-07-16-large-schema-workspaces-selection-and-report-splitting-special-checkpoint.md`
 
 ## Executive decision

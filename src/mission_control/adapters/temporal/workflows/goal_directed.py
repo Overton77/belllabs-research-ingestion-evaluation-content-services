@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 from dataclasses import asdict, replace
 from datetime import timedelta
 from typing import Any
@@ -1303,10 +1304,8 @@ class GoalDirectedWorkflow:
             def reconciled(waited: int = seen) -> bool:
                 return self._liability_hints > waited
 
-            try:
+            with contextlib.suppress(TimeoutError):
                 await workflow.wait_condition(reconciled, timeout=timedelta(seconds=backoff))
-            except TimeoutError:
-                pass
             seen = self._liability_hints
             backoff = min(backoff * 2, 3_600)
 

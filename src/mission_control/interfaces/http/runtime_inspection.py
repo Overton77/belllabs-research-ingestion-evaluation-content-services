@@ -24,10 +24,10 @@ from mission_control.adapters.postgres.run_control.inspection_repository import 
 from mission_control.application.execution.inspection import (
     AsyncChildDetailReader,
     CheckpointHistoryReader,
-    InspectionCursorCodec,
     RuntimeInspectionService,
     TemporalVisibilityReader,
 )
+from mission_control.application.execution.inspection_cursor import InspectionCursorCodec
 from mission_control.domain.policies.contracts import RunPhase
 from mission_control.domain.policies.inspection import (
     CHECKPOINT_SUMMARY_PERMISSION,

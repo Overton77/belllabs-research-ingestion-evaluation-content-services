@@ -11,6 +11,19 @@ from typing import Any
 
 import httpx
 import pytest
+from tests.unit.run_control.test_boundary_commands import TARGET, pause
+from tests.unit.run_control.test_run_control import (
+    ALL_PERMISSIONS,
+    actor,
+    command,
+    operator_wait,
+    reconcile,
+    request,
+    service,
+)
+from tests.unit.run_control.test_run_control import (
+    SetWaitAction as _SetWaitAction,
+)
 
 from mission_control.application.execution.boundary_interventions import (
     BoundaryCommandDeliveryService,
@@ -35,19 +48,6 @@ from mission_control.interfaces.http.run_control import (
     get_boundary_intervention_service,
     get_run_control_service,
     get_unit_reconciliation_service,
-)
-from tests.unit.run_control.test_boundary_commands import TARGET, pause
-from tests.unit.run_control.test_run_control import (
-    ALL_PERMISSIONS,
-    actor,
-    command,
-    operator_wait,
-    reconcile,
-    request,
-    service,
-)
-from tests.unit.run_control.test_run_control import (
-    SetWaitAction as _SetWaitAction,
 )
 
 PARAMS = {"request_scope": "tenant-1"}
@@ -82,10 +82,9 @@ def _principal(roles: set[str]) -> ControlPlanePrincipal:
 
 
 def _body(lifecycle: LifecycleCommand, permissions: frozenset[str] | None = None) -> dict:
-    body = lifecycle.model_copy(
+    return lifecycle.model_copy(
         update={"actor": actor().model_copy(update={"permissions": permissions or frozenset()})}
     ).model_dump(mode="json")
-    return body
 
 
 @pytest.mark.asyncio

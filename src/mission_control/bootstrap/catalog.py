@@ -41,7 +41,7 @@ def compose_catalog_service(
         None
         if embeddings is None
         else CapabilitySearchService(
-            search=PostgresCatalogSearchRepository(pool),
+            search=PostgresCatalogSearchRepository(pool, catalog_scope=catalog_scope),
             definitions=definitions,
             embeddings=embeddings,
             embedding_model_id=embedding_model_id,

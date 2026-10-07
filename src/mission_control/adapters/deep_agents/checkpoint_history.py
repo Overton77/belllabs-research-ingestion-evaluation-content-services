@@ -75,7 +75,7 @@ class LangGraphCheckpointHistoryReader:
                 if item.config["configurable"].get("checkpoint_ns", "") != ROOT_CHECKPOINT_NS:
                     continue  # nested namespaces are evidence only, never root lineage
                 observations.append(_observation(checkpointer_ref_digest, namespace, item))
-        except Exception as error:  # noqa: BLE001 - a saver outage degrades the section
+        except Exception as error:
             raise RuntimeSourceUnavailable("the registered checkpointer is unavailable") from error
         if len(observations) > self._max_checkpoints:
             raise RuntimeSourceUnavailable(
@@ -92,7 +92,7 @@ class LangGraphCheckpointHistoryReader:
         saver = self._saver(key.checkpointer_ref_digest)
         try:
             item = await saver.aget_tuple(root_checkpoint_config(key.thread_id, key.checkpoint_id))
-        except Exception as error:  # noqa: BLE001
+        except Exception as error:
             raise RuntimeSourceUnavailable("the registered checkpointer is unavailable") from error
         if item is None:
             return None
@@ -114,7 +114,7 @@ class LangGraphCheckpointHistoryReader:
                     config=root_checkpoint_config(key.thread_id, key.checkpoint_id),
                     channels=delta_channels,
                 )
-            except Exception as error:  # noqa: BLE001
+            except Exception as error:
                 raise RuntimeSourceUnavailable(
                     "the delta-channel history is unavailable"
                 ) from error

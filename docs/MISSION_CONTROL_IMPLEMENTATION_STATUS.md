@@ -1,8 +1,20 @@
+---
+type: Implementation Evidence
+title: Mission Control implementation and parity evidence
+description: "mission_control component, qualified on two local disposable databases and installed live in both Supabase projects (release 1.0.0, owner-approved 2026-10-03; no application traffic yet — see common component status and…"
+tags: [mission-control, status, evidence]
+---
 # Mission Control implementation and parity evidence
 
-Status: local execution parity and source organization qualified, 2026-10-03.
-Final fresh regression: **1,343 passed, 23 skipped, two expected failures, zero
-failures**. Eleven unchanged end-to-end cases passed separately (eight Mission
+Status (2026-10-03): `production_common` is implemented locally on the common
+`mission_control` component, qualified on two local disposable databases and
+**installed live in both Supabase projects** (release 1.0.0, owner-approved 2026-10-03;
+no application traffic yet — see
+[common component status](#common-component-status-2026-10-03) and
+[final qualification results](#final-qualification-results)).
+The counts in this paragraph are the **pre-common-component baseline at `f6521c1`** and
+do not validate the common component. Baseline fresh regression: **1,343 passed, 23
+skipped, two expected failures, zero failures**. Eleven unchanged end-to-end cases passed separately (eight Mission
 Control and three canonical Agent Server profiles). Final lint, typing and both
 isolated wheel checks passed. These selections cover the selected tree across two
 runs; overlapping peer selections below must not be added to these counts.
@@ -18,12 +30,94 @@ was performed. Existing unrelated working-tree changes are preserved.
 - Preflight: `uv run python -m mission_control.bootstrap.preflight`; read-only configured startup.
 - Worker: `uv run python -m mission_control.bootstrap.worker`; explicit application and binding pin.
 - CLI: `missionctl`; downloadable skill directory: `skills/mission-control/`.
-- Installation tooling: sibling `../biotech-postgres-db-contract`, CLI `biotech-db`.
+- Installation tooling: `packages/mission-control-db-contract` (distribution
+  `mission-control-db-contract`, CLI `mission-db`); app targets in `deployments/<app>/`.
+  The sibling `../biotech-postgres-db-contract` (`biotech-db`) is superseded and pending
+  its reviewed thin-wrapper replacement.
 - Operator setup: [MISSION_CONTROL_LOCAL_API.md](MISSION_CONTROL_LOCAL_API.md).
 
 The configured API/worker live under `mission_control.bootstrap`. Source imports
 use `src/mission_control`; old application imports and startup aliases are not the
 supported entrypoints. The removal guide records deliberate compatibility retirement.
+
+## Common component status (2026-10-03)
+
+Implemented locally:
+
+- One storage mode, `production_common`. API, worker and preflight verify the
+  persisted installation identity, complete attested release, schema fingerprint,
+  writer version `mission-control-runtime/1` and restricted pool roles; no
+  transitional or memory fallback remains in bootstrap.
+- All PostgreSQL repositories read and write `mission_control` (business authority)
+  and `mission_control_search` (projection) with transaction-local `mc.*` scope and
+  forced RLS. Legacy tables without a live writer are retired with evidence (see the
+  [removal guide](REMOVAL_GUIDE.md#retired-legacy-tables)).
+- LangGraph saver/store live only in `mission_control_runtime`, provisioned by
+  `mission-db runtime-apply`; `LANGGRAPH_CHECKPOINT_SCHEMA` defaults to it and legacy or
+  business schemas are refused.
+- Seed bundles (`packages/mission-control-db-contract/seeds/`) apply and replay with
+  receipts.
+
+Qualified on two local disposable clusters (final run `20261003-g3-r2`, evidence in
+`docs/qualification/two-project/disposable-{biotech,ai-engineer}/20261003-g3-r2/` and
+`comparison-20261003-g3-r2.json`; `r1` is superseded by a comment-only migration change): identical release, schema fingerprint
+`sha256:ef5a9e71c9c4a4fe23f343a5708c476a757bc1c5a61f9aacae3a76577b209c09` and generated
+contract `sha256:dbce50116df01e9a8d814f78e9ff61d91943afdfcc5fcb1a1d2d2001e488ab7f`;
+protected-object diffs limited to 12 allowed role/membership additions; apply, runtime
+and seed phases replayed as no-ops. This is synthetic local qualification, not live
+evidence or production parity.
+
+**Live installation (owner-approved, executed 2026-10-03, Biotech first):** release
+`mission_control` 1.0.0 is installed in both Supabase projects —
+`biotech-research-ingestion` (`bxnetwiimwhtlrjlbtab`, app `biotech`) and
+`supabase-blue-ocean` (`wkythqbofmckbuoothhn`, app `ai-engineer`). Each now holds the
+schemas `mission_control` (111 tables), `mission_control_search` (3) and
+`mission_control_runtime` (6, pinned LangGraph saver/store), six NOLOGIN capability roles,
+18 release receipts, one active installation row and the common catalog plus app-binding
+seeds (`mc.app.bindings` 1.0.0 frozen as applied, 1.0.1 recording the approved targets).
+Both report the identical fingerprint `sha256:ef5a9e71…` and contract `sha256:dbce5011…`;
+pre-existing objects (including Biotech's legacy `capability_search` rows and all 25
+AI Engineer domain schemas) are unchanged apart from the 12 approved role/membership
+additions. Evidence: `docs/qualification/two-project/{biotech-research-ingestion,supabase-blue-ocean}/20261003-live-r1/`
+and `comparison-20261003-live-r1.json`; plan in `docs/qualification/two-project/LIVE_PLAN.md`.
+
+Still not done (each needs its own approval or decision):
+
+1. **Application traffic.** No API/worker is deployed against the new schemas; runtime
+   LOGIN roles and memberships (access expansion) do not exist yet.
+2. **Tenant/actor mappings and issuer/audience bindings** for real users.
+3. **Storage** buckets (`mission-artifacts`, `capability-bundles`) and their
+   `storage.objects` policies.
+4. **Agent Server** native persistence topology and production license
+   (`packages/mission-control-db-contract/runtime/AGENT_SERVER_TOPOLOGY.md`): the pinned
+   server cannot use a private schema of the business database.
+5. **Recovery point.** No PITR/backup was verified before apply; the change was additive
+   and its protected comparison is clean, but restore remains unproven.
+6. Production paid-provider/semantic-search qualification (no embeddings generated).
+
+The legacy migration runner (`apply_application_migrations`,
+`apply_capability_search_migrations`), its two `scripts/migrate_*.py` callers and
+`bootstrap/installation.py` were removed on 2026-10-03 (pre-removal bytes and SHA-256 in
+`.scratch/two-project-rollout-checkpoint/retired-legacy-runner/`). Sandbox snapshot persistence is retired (no common table),
+so that capability is unavailable.
+
+## Final qualification results
+
+Run 2026-10-03 on Python 3.12.14 with disposable PostgreSQL 17 + pgvector and the cached
+local Temporal dev server (`.scratch/two-project-rollout-checkpoint/final-verification/`).
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Full regression (all markers, services configured) | `uv run --group biotech pytest` | 1439 passed, 1 failed, 25 skipped, 2 xfailed; the failure (seed-bundle drift after the live targets were approved) was fixed by freezing `mc.app.bindings@1.0.0` and adding 1.0.1: `tests/unit/control_plane/test_catalog_seed_bundles.py` 7 passed |
+| Skips (individually justified, 25) | — | 19 live Agent Server Block C drills (`AGENT_SERVER_ENDPOINT`), 3 metered live qualifications (`BELLABS_RUN_WP_*_LIVE`), 2 legacy experiment notebooks (`TEST_APPLICATION_POSTGRES_DSN`), 1 WSL-only recovery test; the 2 xfails are the known RRM-012 reference harness |
+| Acceptance on the common component | `pytest tests/acceptance/mission_control` (+ converted control-plane/integration files) | 30 passed on real PostgreSQL + Temporal; canonical lineage asserted (`local-real-stack/20261003-g3/persistence-trace.json`) |
+| Independent two-project qualification | `pytest tests/qualification/two_project` | included in the full run (34 tests, 0 failed) |
+| Package `mission-db` | `pytest packages/mission-control-db-contract/tests` | 64 passed on two disposable clusters (one installed by a non-superuser CREATEROLE login) |
+| Thin Biotech consumer | `../biotech-postgres-db-contract`: `pytest tests` | 17 passed |
+| Two-disposable CLI proof | `scripts/qualify_two_disposables.py --run-id 20261003-g3-r2` | pass on both targets; identical fingerprint/contract; protected diff = allowed only |
+| Lint / typing | `ruff check src tests scripts experiments integrations/biotech/src`; mypy (runtime, Biotech package, `mission-db` strict) | clean; 346 + 100 + 13 files, no issues |
+| Wheels | isolated `uv run --isolated --with <wheel>` | runtime wheel imports (no `mission_control_db_contract`, no legacy SQL); `mission-db` wheel runs standalone |
+| Live targets | `mission-db apply/verify/runtime-apply/seed-apply/qualify` | Biotech then Blue Ocean: verified, protected diff allowed-only, decision pass |
 
 ## Living parity checklist
 
@@ -43,8 +137,8 @@ supported entrypoints. The removal guide records deliberate compatibility retire
 | Parent/child boundaries | Existing sync subagent and durable async child records, linked independent roots | Real local Agent Protocol server completed two hosted DeepAgents child runs with PostgreSQL admission/usage settlement; cancellation during cognition and completion wait passed with provider acknowledgement, usage reconciliation and replay. Linked domain/native Temporal regression and scoped identity review passed |
 | Directory skill bundles | Whole-directory canonical manifests, immutable version/digest pins, secure materialization, remote admission | 66 targeted tests including seven real PostgreSQL cases; live bucket permissions and executable read-only mounts remain unqualified |
 | Persistent stores | Scoped PostgreSQL immutable docs, catalog, workspace/artifact/candidate metadata, async details; LangGraph PostgreSQL saver/store | Real RLS, concurrency, replay, mutation rejection and production execution tests |
-| Installation/migration tooling | Pinned release verifier, ordered transactional apply, advisory lock, receipts, schema/RLS/grant fingerprint, read-only verify | Sibling installer: 22 passing tests including two disposable database installations/upgrades and atomic rollback |
-| Common production schema | Source ownership preserved; runtime deliberately rejects unavailable `production_common` | Blocked on canonical owner component/release and its qualified adapters; transitional `belllabs_control` qualification is not production completion |
+| Installation/migration tooling | `mission-db`: release build/lock, plan bound to before-fingerprint, atomic apply under advisory lock, receipts + attestation, `mc-pg-catalog-v2` fingerprint over both owned schemas, runtime phase, seeds, snapshot/compare/qualify | Two-disposable CLI proof `20261003-g3-r1` and independent `tests/qualification/two_project/`; the sibling installer's 22 historical tests remain baseline only |
+| Common production schema | Release `mission_control` 1.0.0 (migrations 0001-0005, 0010-0017, 0020-0024) from `packages/mission-control-db-contract`; all repositories use `mission_control`/`mission_control_search`; saver/store in `mission_control_runtime`; startup accepts only `production_common` | Qualified on two local disposables (identical fingerprint and contract digest); **installed live in both Supabase projects on 2026-10-03** (release 1.0.0, no application traffic yet); remaining gates in the still-not-done list above |
 
 Queued/immediate intervention support follows the existing mapped controls. Broader
 new control semantics and expanded goal-loop design are not silently claimed as
@@ -52,7 +146,13 @@ existing parity. Broad KnowledgeServices monorepo generalization remains deferre
 
 ## Migrations and data safety
 
-New versioned migrations in `src/mission_control/adapters/postgres/migrations/`:
+Historical note: the list below is the transitional `belllabs_control` chain in
+`src/mission_control/adapters/postgres/migrations/` (40 files, bytes pinned by
+`docs/organization/legacy-belllabs-control-chain.json`). It is no longer applied by
+the runtime and is never applied to a live project; the common component's own chain
+lives in `packages/mission-control-db-contract/component/migrations/`.
+
+Transitional migrations recorded at the time:
 
 - 0027 immutable runtime documents; 0028 workspace/artifact documents.
 - 0029 async subagent details; 0030 definition catalog.
@@ -66,8 +166,9 @@ New versioned migrations in `src/mission_control/adapters/postgres/migrations/`:
   Their exact isolated-database validation belongs to the post-organization record.
 
 Tests apply these only to dedicated local/disposable databases. Startup does not
-migrate or fabricate installation identity. The installer tests use explicitly
-synthetic release SQL and do not pretend it is the absent canonical release.
+migrate or fabricate installation identity. (At the time, the sibling installer tests
+used synthetic release SQL; the common release now exists and is installed only by
+`mission-db`.)
 No old Mongo history is backfilled or purged. Clean-break scope preserves old data;
 any future historical import requires its own mapping, validation and authorization.
 Recovery retains the old implementation and data, plus the initial tracked diff in
@@ -90,10 +191,10 @@ into the new general kernel.
 
 ## Qualification gates
 
-1. Author/release common SQL in its approved owner,
-   `C:\Users\Pinda\Proyectos\aiengineer\ai-engineer-db-contract`, then consume the
-   reviewed release and qualify production adapters. That path is outside the
-   authorized Biotech source scope; permission was requested separately.
+1. Done locally: the common SQL is authored and released from its corrected owner,
+   `packages/mission-control-db-contract` (ownership amendment D09; the earlier
+   `ai-engineer-db-contract` placement is superseded), and the production adapters are
+   converted. Live application remains blocked; see the common component status.
 2. Qualify live Supabase identity, RLS/storage policy and restricted runtime roles
    against the actual installation without destructive live operations.
 3. Qualify executable directory bundles on OS-enforced read-only mounts. The

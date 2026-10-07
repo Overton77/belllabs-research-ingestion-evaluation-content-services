@@ -119,7 +119,7 @@ def _flatten_agent_profile(
     middleware: set[ExactDefinitionRef] = set()
     requirements: dict[str, CapabilityRequirement] = {}
     for parent_ref in sorted(profile.parent_profile_refs, key=_ref_order):
-        parent = _flatten_agent_profile(parent_ref, profiles, stack=stack + (profile_ref,))
+        parent = _flatten_agent_profile(parent_ref, profiles, stack=(*stack, profile_ref))
         for component in parent.components:
             prior_component_ref = components.get(component.slot)
             if prior_component_ref is not None and prior_component_ref != component.ref:

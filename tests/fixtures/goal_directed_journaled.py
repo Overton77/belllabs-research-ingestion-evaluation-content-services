@@ -29,6 +29,14 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.store.memory import InMemoryStore
 from pydantic import PrivateAttr
+from tests.fixtures.checkpoint_recovery import ScriptedRecoveryModel
+from tests.unit.operations.test_operation_execution import (
+    MCP_DIGEST,
+    SKILL_DIGEST,
+    operation_request,
+)
+from tests.unit.run_control.test_run_control import ConfigurationVerifier, actor
+from tests.unit.run_control.test_run_control import request as run_request
 
 from mission_control.adapters.deep_agents import (
     DeepAgentRuntimeAdapter,
@@ -120,14 +128,6 @@ from mission_control.domain.programs.goal_directed_runtime import (
     GoalOperationReconciliationRequest,
     GoalOperationSettlement,
 )
-from tests.fixtures.checkpoint_recovery import ScriptedRecoveryModel
-from tests.unit.operations.test_operation_execution import (
-    MCP_DIGEST,
-    SKILL_DIGEST,
-    operation_request,
-)
-from tests.unit.run_control.test_run_control import ConfigurationVerifier, actor
-from tests.unit.run_control.test_run_control import request as run_request
 
 SCOPE = "tenant-1"
 DIGEST = "sha256:" + "a" * 64
@@ -756,8 +756,8 @@ __all__: Sequence[str] = (
     "goal_run_control",
     "goal_run_input",
     "goal_start_action",
-    "goal_templates",
     "goal_template_workspace",
+    "goal_templates",
     "governed_result_service",
     "preparer",
     "turns_by_operation",

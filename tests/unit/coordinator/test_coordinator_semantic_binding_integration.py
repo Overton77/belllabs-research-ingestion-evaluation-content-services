@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytest
+
 from biotech_mission_adapters.application.schema.schema_catalog import CATALOG_GENERATOR_VERSION
 from biotech_mission_adapters.application.schema.schema_context_stage_handlers import (
     SchemaContextBindingPlanInput,
@@ -21,7 +22,6 @@ from biotech_mission_adapters.domain.schema_grounding.contracts import (
     DurableObjectRef,
     SchemaCatalogBuildRequest,
 )
-
 from mission_control.application.coordinator.coordinator_launch import (
     CoordinatorWorkflowLaunchService,
 )
@@ -269,14 +269,14 @@ async def _supporting_graph_provider(
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("family", "run_id", "expected_operations"),
-    (
+    [
         (
             "StageGraph",
             "run-full-chain-a",
             {"semantic_selector", "independent_reviewer"},
         ),
         ("GoalDirected", "run-full-chain-c", {"goal_executor", "goal_verifier"}),
-    ),
+    ],
 )
 async def test_full_coordinator_chain_freezes_real_oebs_before_dispatch(
     family: str,

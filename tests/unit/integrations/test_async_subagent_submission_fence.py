@@ -176,7 +176,7 @@ async def test_unobservable_submission_is_in_doubt_with_an_incident_never_orphan
 ) -> None:
     client = FakeAgentProtocolClient(served=SERVED)
     install(monkeypatch, client)
-    service, details, authority = governed(client)
+    service, _details, authority = governed(client)
     client.fail_after_create = ConnectionError("response lost")
     client.fail_list_after_create = ConnectionError("server unreachable")
     in_doubt = await service.spawn(request())

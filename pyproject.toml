@@ -33,11 +33,18 @@ dependencies = [
   "opentelemetry-api>=1.37,<2",
   "opentelemetry-sdk>=1.37,<2",
   "psycopg[binary,pool]==3.3.4",
+  # Imported directly throughout contracts/domain; declared so it is never only transitive.
+  "pydantic>=2.10,<3",
+  "pydantic-core>=2.27",
   "pydantic-settings>=2.10,<3",
   "python-socketio>=5.13,<6",
+  "pyyaml>=6,<7",
   "redis>=6,<7",
+  # Imported directly by the coordinator MCP mount; declared for the same reason as pydantic.
+  "starlette>=0.47",
   "supabase>=2.18,<3",
   "temporalio[opentelemetry]>=1.30,<2",
+  "typing-extensions>=4.12",
   "uvicorn[standard]>=0.35,<1",
 ]
 
@@ -46,59 +53,258 @@ missionctl = "mission_control.interfaces.cli.main:main"
 
 [dependency-groups]
 biotech = ["biotech-mission-adapters==0.1.0"]
+dbcontract = ["mission-control-db-contract"]
+# Lint, type-check and test tooling. Installed by default (`uv sync`).
 dev = [
-  "httpx>=0.28,<1",
-  "ipykernel>=7,<8",
+  "deptry>=0.25,<1",
+  "hypothesis>=6.130,<7",
   "jsonschema>=4.26.0",
-  "jupyter>=1.1,<2",
   "mypy>=1.17,<2",
-  "polars>=1.43.2",
+  "prek>=0.5,<1",
   "pytest>=8.4,<9",
   "pytest-asyncio>=1.1,<2",
+  "pytest-cov>=6,<8",
+  "pytest-timeout>=2.4,<3",
+  "pytest-xdist>=3.8,<4",
   "ruff>=0.12,<1",
+  "ty>=0.0.85",
+]
+# Exploration only; opt in with `uv sync --group notebooks` (or `make install-all`).
+notebooks = [
+  "ipykernel>=7,<8",
+  "jupyter>=1.1,<2",
+  "polars>=1.43.2",
 ]
 
 [tool.uv]
 package = true
+default-groups = ["dev"]
 
 [tool.uv.sources]
 biotech-mission-adapters = { path = "integrations/biotech", editable = true }
+mission-control-db-contract = { path = "packages/mission-control-db-contract", editable = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mission_control"]
+# Historical transitional SQL stays in the repository as pinned bytes, never in wheels.
+exclude = ["src/mission_control/adapters/postgres/migrations/*.sql"]
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 pythonpath = ["src", "integrations/biotech/src", "."]
+# -ra: summarize every non-passing outcome; strict flags make typos in markers/config fail loudly.
+addopts = "-ra --strict-markers --strict-config"
+# pytest-timeout safety net; live/qualification drills are long but never this long.
+timeout = 900
 markers = [
   "block_c_live: live Agent Server Block C qualification drills",
   "block_c_restart: Block C process-restart prepare/resume phases",
   "block_c_nn1: Block C N/N+1 compatibility drills",
   "block_c_nn1_deploy: two-endpoint N/N+1 deployment qualification drills",
+  "common_db: requires MISSION_CONTROL_TEST_ADMIN_DSN (disposable PostgreSQL 17 + pgvector); fails, never skips, when absent",
 ]
+
+[tool.coverage.run]
+source = ["mission_control"]
+branch = true
+parallel = true
+
+[tool.coverage.paths]
+source = ["src/mission_control", "*/site-packages/mission_control"]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+exclude_also = [
+  "if TYPE_CHECKING:",
+  "raise NotImplementedError",
+  "@overload",
+  "^\\s*\\.\\.\\.$",
+  "if __name__ == .__main__.:",
+]
+
+# ---------------------------------------------------------------------------
+# Ruff: linter + formatter (replaces flake8/isort/black/pyupgrade)
+# ---------------------------------------------------------------------------
 
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# Pre-commit passes file paths explicitly; keep the excludes authoritative there too.
+# (.agents/skills/mission-control-coordinator is digested into the catalog seed bundles.)
+force-exclude = true
+# First-party roots so isort classifies imports correctly from any working directory.
+src = ["src", "tests", "packages/mission-control-db-contract/src", "integrations/biotech/src"]
+# Legacy/experimental trees are not quality gates; .gitignore'd trees are excluded already.
+extend-exclude = [
+  "app",
+  "experiments",
+  "sandbox-work",
+  "graphify-out",
+  "internal_hidden_docs",
+  ".agents",  # vendored skill reference scripts, not project code
+  ".venv-wsl",
+  ".tmp*",
+]
+
+[tool.ruff.format]
+docstring-code-format = true
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "ASYNC"]
+select = [
+  # Core correctness and modernisation
+  "E", "W", "F", "I", "UP", "B", "ASYNC",
+  # Simplification and performance
+  "SIM", "C4", "PIE", "PERF", "RET", "RSE", "FURB",
+  # Ruff-specific, pylint (errors/warnings/conventions) and pytest style
+  "RUF", "PLE", "PLW", "PLC", "PT",
+  # Library hygiene: pathlib, tz-aware datetimes, stub conventions, no stray prints, naming
+  "PTH", "DTZ", "PYI", "T20", "N",
+  # Zero-cost guards (currently clean): string concat, import conventions, logging, slots,
+  # banned imports, future annotations, executables, builtin shadowing
+  "ISC", "ICN", "G", "LOG", "SLOT", "TID", "FA", "EXE", "A",
+  # Targeted security checks (bandit subset). S608 (SQL built from strings) is deliberately
+  # omitted: adapters compose identifiers, and the postgres tests are the gate for that.
+  "S102", "S105", "S106", "S107", "S113", "S301", "S302", "S307", "S324",
+  "S501", "S506", "S508", "S509", "S602", "S604", "S605",
+]
+ignore = [
+  "ISC001",  # conflicts with the formatter
+  "SIM117",  # nested `with` blocks read better than one long parenthesised statement
+  "SIM102",  # nested guards are kept separate so each can carry its own comment
+  "PERF401", # explicit loops are preferred over comprehensions in reducer code
+  "PLC0415", # local imports are intentional for lazy/optional adapters and cycle breaks
+  "PLC0414", # `import x as x` is the explicit re-export idiom (mypy no_implicit_reexport)
+  "PLW0603", # module-level singletons (compiled graphs, tracing flag) use `global` by design
+  "PLW2901", # `for x in xs: x = normalise(x)` is the accepted normalisation idiom
+  "RUF001",  # typographic dashes/quotes in research prose strings are intentional
+  "RUF002",  # same, in docstrings
+  "PT011",   # `pytest.raises(ValueError)` without match is accepted test style
+  "PT012",   # multi-statement `pytest.raises` blocks are accepted test style
+  "PT018",   # composite assertions are accepted test style
+  "N818",    # exception names follow the domain language rather than an `Error` suffix
+  "RUF043",  # `pytest.raises(match=...)` patterns here are literal messages, not regexes
+  "FURB162", # `.replace("Z", "+00:00")` kept explicit for clarity around provider timestamps
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["mission_control", "mission_control_db_contract", "biotech_mission_adapters"]
 
 [tool.ruff.lint.per-file-ignores]
+# Tests: stdout in live drills, fake credentials, fixture-level globals and probe classes.
+"tests/**" = ["T201", "S105", "S106", "S107", "RUF012"]
+"packages/*/tests/**" = ["T201", "S105", "S106", "S107", "RUF012"]
+# Operator-facing entrypoints print by design.
+"scripts/**" = ["T201"]
+"docs/tools/**" = ["T201"]
+"packages/*/scripts/**" = ["T201"]
+"packages/*/seeds/**" = ["T201"]
+"packages/*/runtime/**" = ["T201"]
+"integrations/*/src/*/bootstrap/scripts/**" = ["T201"]
+"src/mission_control/interfaces/cli/**" = ["T201"]
+"src/mission_control/bootstrap/preflight.py" = ["T201"]
+# Environment-variable or token *names*, not secrets.
+"src/mission_control/adapters/agent_server/async_subagents/auth.py" = ["S105"]
+"src/mission_control/adapters/deep_agents/materializer.py" = ["S107"]
+"integrations/biotech/src/biotech_mission_adapters/adapters/infrastructure/neo4j_schema_deployment.py" = ["S105"]
+# Long literal fixtures.
 "tests/fixtures/agent_server_block_c.py" = ["E501"]
 "tests/unit/control_plane/test_digest_set_order_guard.py" = ["E501"]
+
+# ---------------------------------------------------------------------------
+# mypy: the authoritative type gate (slow, thorough)
+# ---------------------------------------------------------------------------
 
 [tool.mypy]
 python_version = "3.12"
 plugins = ["pydantic.mypy"]
+files = ["src/mission_control"]
 mypy_path = "src"
 explicit_package_bases = true
+# Everything in src is annotated; keep it that way.
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
 check_untyped_defs = true
 no_implicit_optional = true
+no_implicit_reexport = true
+strict_equality = true
+warn_redundant_casts = true
 warn_unused_ignores = true
+warn_unused_configs = true
 disable_error_code = ["import-untyped"]
+# Next steps toward `strict = true` (counts at 2026-10-07): warn_return_any (32),
+# disallow_any_generics (12), disallow_untyped_decorators (4).
 
 [[tool.mypy.overrides]]
 module = "mission_control.adapters.temporal.client"
 disable_error_code = ["arg-type"]
+
+# deepagents re-exports `get_client` without `__all__`; tests monkeypatch it on this module,
+# so the attribute access must stay rather than importing from langgraph_sdk directly.
+[[tool.mypy.overrides]]
+module = "deepagents.middleware.async_subagents"
+implicit_reexport = true
+
+# ---------------------------------------------------------------------------
+# ty: Astral's Rust type checker. Seconds instead of minutes; editor + pre-commit feedback.
+# mypy remains the gate, so rules that still misfire on LangGraph generics and dataclass
+# default factories are visible as warnings rather than failures.
+# ---------------------------------------------------------------------------
+
+[tool.ty.environment]
+python = ".venv"
+python-version = "3.12"
+root = ["src"]
+
+[tool.ty.src]
+include = ["src"]
+
+[tool.ty.terminal]
+# Warnings stay visible but only error-level diagnostics fail the command (hook, make check).
+error-on-warning = false
+
+[tool.ty.rules]
+# Known false-positive classes in ty 0.0.85 on this codebase (LangGraph StateGraph generics,
+# `object`-typed kwargs, `field(default_factory=frozenset)`); ~230 hits, all accepted by mypy.
+invalid-argument-type = "ignore"
+invalid-assignment = "ignore"
+# typeshed deprecation of `-> AsyncIterator` under @asynccontextmanager; mypy accepts the pattern.
+deprecated = "ignore"
+# Small residue worth seeing but not blocking.
+invalid-return-type = "warn"
+call-non-callable = "warn"
+unsupported-operator = "warn"
+
+# ---------------------------------------------------------------------------
+# deptry: declared-vs-imported dependency drift
+# ---------------------------------------------------------------------------
+
+[tool.deptry]
+known_first_party = ["mission_control"]
+
+[tool.deptry.package_module_name_map]
+python-socketio = "socketio"
+# `storage3` ships inside the supabase distribution.
+supabase = ["supabase", "storage3"]
+# Namespace sub-package; imported as `langgraph.checkpoint.postgres`.
+langgraph-checkpoint-postgres = "langgraph"
+
+[tool.deptry.per_rule_ignores]
+# Loaded by configuration/CLI rather than imported: provider routes, Agent Server runtime,
+# `langgraph dev`, the ASGI server, and the OpenTelemetry pins behind temporalio[opentelemetry].
+DEP002 = [
+  "langchain-anthropic",
+  "langchain-quickjs",
+  "langgraph-api",
+  "langgraph-cli",
+  "langgraph-runtime-inmem",
+  "opentelemetry-api",
+  "opentelemetry-sdk",
+  "uvicorn",
+]

@@ -21,7 +21,8 @@ The worker requires explicit selected application and binding pin. CLI missionct
 uses the signed application-scoped API. Agent Server's canonical configuration is
 agent_server/langgraph.json and never defines a competing mission scheduler.
 
-Local transitional readiness is not production common-schema readiness.
+Readiness is production_common only (common release installed by mission-db);
+local disposable proof is not a live installation.
 Never point application services at Temporal's private database. Never remove
 Compose volumes or user records to fix readiness. No live destructive changes or
 paid provider qualification without authorization.

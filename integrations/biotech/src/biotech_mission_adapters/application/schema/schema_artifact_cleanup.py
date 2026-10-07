@@ -334,10 +334,10 @@ def _verify_exact_descriptors(
 
 
 __all__ = [
-    "SchemaArtifactCleanupPlan",
     "TARGET_CONSTRAINTS",
     "TARGET_INDEXES",
     "TARGET_LABELS",
+    "SchemaArtifactCleanupPlan",
     "TargetLabelUsage",
     "plan_zero_count_schema_artifact_cleanup",
     "verify_schema_artifact_cleanup_postcondition",

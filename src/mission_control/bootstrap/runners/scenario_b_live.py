@@ -250,7 +250,9 @@ async def _internal_gap(
         limit=20,
     )
     response = await CapabilitySearchService(
-        search=PostgresCatalogSearchRepository(postgres_pool),
+        search=PostgresCatalogSearchRepository(
+            postgres_pool, catalog_scope=settings.mission_control_catalog_scope
+        ),
         definitions=PostgresDefinitionRepository(postgres_pool, catalog_scope=tenant_scope),
         embeddings=OpenAICapabilityEmbeddingAdapter(settings),
         embedding_model_id=settings.capability_embedding_model,

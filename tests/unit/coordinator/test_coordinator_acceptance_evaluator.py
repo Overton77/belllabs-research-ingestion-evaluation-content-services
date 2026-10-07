@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from scripts.evaluate_coordinator_acceptance import (
     RATE_METRICS,
     REQUIRED_METRICS,
@@ -38,7 +37,7 @@ def test_retrieval_case_requires_expected_workflow_and_every_capability() -> Non
 
 
 def test_acceptance_metric_contract_contains_every_specified_metric() -> None:
-    assert REQUIRED_METRICS == {
+    assert {
         "workflow_type_recall_at_k",
         "capability_recall_at_k",
         "web_capability_recall_at_k",
@@ -56,11 +55,11 @@ def test_acceptance_metric_contract_contains_every_specified_metric() -> None:
         "median_prepare_latency_ms",
         "catalog_tokens_loaded",
         "operator_corrections_per_plan",
-    }
+    } == REQUIRED_METRICS
 
 
 def test_acceptance_metrics_reject_missing_numeric_integrity() -> None:
-    valid = {name: 0 for name in REQUIRED_METRICS}
+    valid = dict.fromkeys(REQUIRED_METRICS, 0)
     _validate_metrics(valid)
 
     with pytest.raises(ValueError, match="must be numeric"):

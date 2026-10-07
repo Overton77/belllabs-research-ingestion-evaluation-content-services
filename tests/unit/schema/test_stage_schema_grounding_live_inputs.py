@@ -6,12 +6,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
 from biotech_mission_adapters.adapters.infrastructure.schema_grounding_payloads import (
     SchemaGroundingInputKind,
     schema_grounding_input_uri,
 )
 from biotech_mission_adapters.bootstrap.scripts import stage_schema_grounding_live_inputs
-
 from mission_control.application.ports.payloads import ContentAddress
 
 

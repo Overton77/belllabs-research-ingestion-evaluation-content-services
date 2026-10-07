@@ -730,7 +730,7 @@ class RuntimeInspectionService:
                     request_scope, child.child_execution_id
                 )
                 enriched.append(_with_detail(child, detail))
-        except Exception:  # noqa: BLE001 - a detail outage degrades the section only
+        except Exception:
             sections.runtime(
                 "async_children_detail",
                 "postgres_detail",
@@ -758,7 +758,7 @@ class RuntimeInspectionService:
             executions = await self._visibility.list_run_executions(
                 request_scope, snapshot.run.projection.run_id
             )
-        except Exception:  # noqa: BLE001 - Temporal unavailability degrades freshness only
+        except Exception:
             sections.runtime(
                 "temporal",
                 "temporal_visibility",

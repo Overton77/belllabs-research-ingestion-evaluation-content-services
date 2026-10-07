@@ -1,0 +1,30 @@
+{
+  "identity_matches_target": true,
+  "note": "Route/project identity evidence is the referenced identity_evidence; an inserted installation row alone does not prove which project was reached.",
+  "observed_installation": [
+    {
+      "application_id": "ai-engineer",
+      "environment": "production",
+      "installation_id": "01a103c0-9a9e-70f3-9398-eb1573a98324",
+      "schema_component_version": "1.0.0",
+      "state": "active",
+      "supabase_project_ref": "wkythqbofmckbuoothhn"
+    }
+  ],
+  "server_version_num": 170006,
+  "target": {
+    "app": "ai-engineer",
+    "application_id": "ai-engineer",
+    "approved_by": "project owner, Claude Code session 2026-10-03 (approved LIVE_PLAN.md)",
+    "database_host": "aws-1-us-east-1.pooler.supabase.com",
+    "database_name": "postgres",
+    "database_port": "5432",
+    "database_session_user": "postgres",
+    "database_user": "postgres.wkythqbofmckbuoothhn",
+    "environment": "production",
+    "identity_evidence": "docs/qualification/two-project/supabase-blue-ocean/g0-readonly-20261003/identity.json; route host/login carry project ref; credential source .env POSTGRES_URL_NON_POOLING (aiengineer apps)",
+    "installation_id": "01a103c0-9a9e-70f3-9398-eb1573a98324",
+    "project_label": "supabase-blue-ocean",
+    "project_ref": "wkythqbofmckbuoothhn"
+  }
+}

@@ -18,6 +18,10 @@ from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from tests.fixtures.checkpoint_lineage import bind_unit, stage_unit
+from tests.fixtures.checkpoint_recovery import governed_workspace
+from tests.unit.run_control.test_run_control import actor, command
+from tests.unit.run_control.test_run_control import request as run_request
 
 from mission_control.adapters.agent_server.async_subagents.bindings import (
     technical_child_definition,
@@ -61,10 +65,6 @@ from mission_control.domain.policies.contracts import (
     ReserveBudgetAction,
     StartAction,
 )
-from tests.fixtures.checkpoint_lineage import bind_unit, stage_unit
-from tests.fixtures.checkpoint_recovery import governed_workspace
-from tests.unit.run_control.test_run_control import actor, command
-from tests.unit.run_control.test_run_control import request as run_request
 
 SAVER_SCHEMA = "rrm013_live_saver"
 CLAIMED_BY = "operation-runtime:rrm-013"
@@ -129,13 +129,13 @@ class ParentSpawnModel(BaseChatModel):
 
     def _generate(
         self, messages: list[BaseMessage], stop: Any = None, run_manager: Any = None, **kwargs: Any
-    ) -> ChatResult:  # noqa: E501
+    ) -> ChatResult:
         del stop, run_manager, kwargs
         return self._reply(messages)
 
     async def _agenerate(
         self, messages: list[BaseMessage], stop: Any = None, run_manager: Any = None, **kwargs: Any
-    ) -> ChatResult:  # noqa: E501
+    ) -> ChatResult:
         del stop, run_manager, kwargs
         return self._reply(messages)
 

@@ -2,26 +2,34 @@ from __future__ import annotations
 
 import asyncpg
 
+from mission_control.adapters.postgres.scope import apply_scope
+from mission_control.contracts.identities import parse_request_scope, uuid7
 from mission_control.domain.execution.contracts import (
     ArtifactMetadataRevision,
     ArtifactPromotionState,
 )
 from mission_control.domain.policies.errors import IdempotencyConflict
 
+_SERVICE_ACTOR = "service:mission-control-artifacts"
+
 
 class PostgresArtifactMetadataRepository:
-    """Immutable promotion history, serialized per artifact and intent within a scope."""
+    """Immutable promotion history, serialized per artifact and intent within a scope.
+
+    Rows are ``mission_control.artifact_metadata_revision`` support records under the
+    tenant request scope (three-column RLS); history is append-only.
+    """
 
     def __init__(self, pool: asyncpg.Pool, *, request_scope: str) -> None:
         if not request_scope.strip():
             raise ValueError("artifact repository requires request scope")
         self._pool = pool
         self._scope = request_scope
+        parsed = parse_request_scope(request_scope)
+        self._key = (parsed.installation_id, parsed.application_id, parsed.tenant_id)
 
     async def _scope_connection(self, connection: asyncpg.Connection) -> None:
-        await connection.execute(
-            "SELECT set_config('belllabs.request_scope', $1, true)", self._scope
-        )
+        await apply_scope(connection, self._scope)
 
     async def _get(
         self, *, intent_key: str | None = None, artifact_id: str | None = None
@@ -29,11 +37,12 @@ class PostgresArtifactMetadataRepository:
         async with self._pool.acquire() as connection, connection.transaction():
             await self._scope_connection(connection)
             payload = await connection.fetchval(
-                """SELECT payload FROM belllabs_control.artifact_metadata_revisions
-                   WHERE request_scope=$1 AND (($2::text IS NOT NULL AND intent_key=$2)
-                     OR ($3::text IS NOT NULL AND artifact_id=$3))
+                """SELECT payload FROM mission_control.artifact_metadata_revision
+                   WHERE installation_id=$1 AND application_id=$2 AND tenant_id=$3
+                     AND (($4::text IS NOT NULL AND intent_key=$4)
+                       OR ($5::text IS NOT NULL AND artifact_key=$5))
                    ORDER BY revision DESC LIMIT 1""",
-                self._scope,
+                *self._key,
                 intent_key,
                 artifact_id,
             )
@@ -63,12 +72,12 @@ class PostgresArtifactMetadataRepository:
                         f"artifact-metadata:{self._scope}:{identity}",
                     )
                 rows = await connection.fetch(
-                    """SELECT DISTINCT ON (artifact_id) payload
-                       FROM belllabs_control.artifact_metadata_revisions
-                       WHERE request_scope=$1 AND
-                         (intent_key=$2 OR artifact_id=$3 OR promotion_id=$4)
-                       ORDER BY artifact_id, revision DESC""",
-                    self._scope,
+                    """SELECT DISTINCT ON (artifact_key) payload
+                       FROM mission_control.artifact_metadata_revision
+                       WHERE installation_id=$1 AND application_id=$2 AND tenant_id=$3
+                         AND (intent_key=$4 OR artifact_key=$5 OR promotion_key=$6)
+                       ORDER BY artifact_key, revision DESC""",
+                    *self._key,
                     revision.intent_key,
                     revision.artifact_id,
                     revision.promotion_id,
@@ -85,9 +94,10 @@ class PostgresArtifactMetadataRepository:
                     current = candidate
                 if current is not None and revision.revision <= current.revision:
                     matching = await connection.fetchval(
-                        """SELECT payload FROM belllabs_control.artifact_metadata_revisions
-                           WHERE request_scope=$1 AND artifact_id=$2 AND revision=$3""",
-                        self._scope,
+                        """SELECT payload FROM mission_control.artifact_metadata_revision
+                           WHERE installation_id=$1 AND application_id=$2 AND tenant_id=$3
+                             AND artifact_key=$4 AND revision=$5""",
+                        *self._key,
                         revision.artifact_id,
                         revision.revision,
                     )
@@ -99,9 +109,15 @@ class PostgresArtifactMetadataRepository:
                 if revision.revision != (current.revision + 1 if current else 1):
                     raise IdempotencyConflict("artifact metadata revision gap")
                 await connection.execute(
-                    """INSERT INTO belllabs_control.artifact_metadata_revisions
-                       (request_scope, artifact_id, intent_key, promotion_id, revision,
-                        state, payload, recorded_at) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8)""",
+                    """INSERT INTO mission_control.artifact_metadata_revision
+                       (installation_id, application_id, tenant_id,
+                        artifact_metadata_revision_id, request_scope, artifact_key, intent_key,
+                        promotion_key, revision, state, payload, recorded_at, created_at,
+                        created_by_actor_ref)
+                       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,
+                               clock_timestamp(),$13)""",
+                    *self._key,
+                    uuid7(),
                     self._scope,
                     revision.artifact_id,
                     revision.intent_key,
@@ -110,6 +126,7 @@ class PostgresArtifactMetadataRepository:
                     revision.state.value,
                     revision.model_dump_json(),
                     revision.recorded_at,
+                    _SERVICE_ACTOR,
                 )
                 return revision
         except asyncpg.UniqueViolationError as error:
@@ -122,11 +139,12 @@ class PostgresArtifactMetadataRepository:
             await self._scope_connection(connection)
             rows = await connection.fetch(
                 """SELECT payload FROM (
-                     SELECT DISTINCT ON (artifact_id) artifact_id, state, payload
-                     FROM belllabs_control.artifact_metadata_revisions
-                     WHERE request_scope=$1 ORDER BY artifact_id, revision DESC
-                   ) latest WHERE state=$2 ORDER BY artifact_id""",
-                self._scope,
+                     SELECT DISTINCT ON (artifact_key) artifact_key, state, payload
+                     FROM mission_control.artifact_metadata_revision
+                     WHERE installation_id=$1 AND application_id=$2 AND tenant_id=$3
+                     ORDER BY artifact_key, revision DESC
+                   ) latest WHERE state=$4 ORDER BY artifact_key""",
+                *self._key,
                 state.value,
             )
         return tuple(ArtifactMetadataRevision.model_validate_json(row["payload"]) for row in rows)

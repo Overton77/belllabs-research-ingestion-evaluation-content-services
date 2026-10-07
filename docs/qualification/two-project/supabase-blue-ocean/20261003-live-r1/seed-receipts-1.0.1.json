@@ -1,0 +1,125 @@
+{
+  "bundles": [
+    {
+      "outcome": "replay",
+      "receipt": {
+        "applied_by": "postgres",
+        "component_version": "1.0.0",
+        "record_counts": {
+          "created": 4,
+          "records": {
+            "asset_decision": 2,
+            "asset_version": 2
+          },
+          "reused": 0,
+          "revoked": 0
+        },
+        "seed_digest": "sha256:ca92dd4f18cf90cf82694ca64a699674781b612ec166c6833ae68ca2628bb1e0",
+        "seed_key": "mc.catalog.workflow-parity",
+        "seed_version": "1.0.0"
+      },
+      "seed_key": "mc.catalog.workflow-parity",
+      "seed_version": "1.0.0"
+    },
+    {
+      "outcome": "replay",
+      "receipt": {
+        "applied_by": "postgres",
+        "component_version": "1.0.0",
+        "record_counts": {
+          "created": 4,
+          "records": {
+            "asset_decision": 2,
+            "asset_version": 2
+          },
+          "reused": 0,
+          "revoked": 0
+        },
+        "seed_digest": "sha256:64dbe58e7fcbd6d082741e839d488a078e92c29e70a6cb4027b03b7d5e843779",
+        "seed_key": "mc.catalog.runtime-profiles",
+        "seed_version": "1.0.0"
+      },
+      "seed_key": "mc.catalog.runtime-profiles",
+      "seed_version": "1.0.0"
+    },
+    {
+      "outcome": "replay",
+      "receipt": {
+        "applied_by": "postgres",
+        "component_version": "1.0.0",
+        "record_counts": {
+          "created": 6,
+          "records": {
+            "asset_decision": 3,
+            "asset_version": 3
+          },
+          "reused": 0,
+          "revoked": 0
+        },
+        "seed_digest": "sha256:f45e04f9a68ad5569304691fab2de48befa6dc017076b9bc8c3c557d5a1d3dd6",
+        "seed_key": "mc.catalog.approved-assets",
+        "seed_version": "1.0.0"
+      },
+      "seed_key": "mc.catalog.approved-assets",
+      "seed_version": "1.0.0"
+    },
+    {
+      "outcome": "replay",
+      "receipt": {
+        "applied_by": "postgres",
+        "component_version": "1.0.0",
+        "record_counts": {
+          "created": 2,
+          "records": {
+            "asset_decision": 1,
+            "asset_version": 1
+          },
+          "reused": 0,
+          "revoked": 0
+        },
+        "seed_digest": "sha256:e5d589368296e906777ca4a5a77670aec9ab8522c2d7b17f997762ecb9b8a2b2",
+        "seed_key": "mc.app.bindings",
+        "seed_version": "1.0.0"
+      },
+      "seed_key": "mc.app.bindings",
+      "seed_version": "1.0.0"
+    },
+    {
+      "outcome": "applied",
+      "receipt": {
+        "applied_by": "postgres",
+        "component_version": "1.0.0",
+        "record_counts": {
+          "created": 2,
+          "records": {
+            "asset_decision": 1,
+            "asset_version": 1
+          },
+          "reused": 0,
+          "revoked": 0
+        },
+        "seed_digest": "sha256:4e9968e5c7ab5f548d6cb93c370733fd9f41539222cd771d297a106229a3d58e",
+        "seed_key": "mc.app.bindings",
+        "seed_version": "1.0.1"
+      },
+      "seed_key": "mc.app.bindings",
+      "seed_version": "1.0.1"
+    }
+  ],
+  "status": "seeded",
+  "target": {
+    "app": "ai-engineer",
+    "application_id": "ai-engineer",
+    "approved_by": "project owner, Claude Code session 2026-10-03 (approved LIVE_PLAN.md)",
+    "database_host": "aws-1-us-east-1.pooler.supabase.com",
+    "database_name": "postgres",
+    "database_port": "5432",
+    "database_session_user": "postgres",
+    "database_user": "postgres.wkythqbofmckbuoothhn",
+    "environment": "production",
+    "identity_evidence": "docs/qualification/two-project/supabase-blue-ocean/g0-readonly-20261003/identity.json; route host/login carry project ref; credential source .env POSTGRES_URL_NON_POOLING (aiengineer apps)",
+    "installation_id": "01a103c0-9a9e-70f3-9398-eb1573a98324",
+    "project_label": "supabase-blue-ocean",
+    "project_ref": "wkythqbofmckbuoothhn"
+  }
+}

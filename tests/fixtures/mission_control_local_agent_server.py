@@ -25,6 +25,7 @@ import httpx
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
+from tests.fixtures.rrm009_production_stack import SCOPE, _LoggedModel, call_usage
 
 from mission_control.adapters.agent_server.async_subagents.auth import mint_scope_claim
 from mission_control.adapters.agent_server.async_subagents.bindings import (
@@ -43,7 +44,6 @@ from mission_control.domain.execution.contracts import (
     DeepAgentModelComponent,
     DeepAgentProfile,
 )
-from tests.fixtures.rrm009_production_stack import SCOPE, _LoggedModel, call_usage
 
 CANONICAL_CONFIG = Path(__file__).resolve().parents[2] / "agent_server" / "langgraph.json"
 
@@ -145,9 +145,13 @@ async def local_agent_server(
     authorization_out: list[str] | None = None,
 ) -> AsyncIterator[str]:
     await asyncio.to_thread(root.mkdir, parents=True, exist_ok=True)
-    with socket.socket() as listener:
-        listener.bind(("127.0.0.1", 0))
-        port = listener.getsockname()[1]
+    # The qualification's reserved loopback port (MISSION_CONTROL_AGENT_SERVER_PORT, default
+    # 8133); "0" selects any free port.
+    port = int(os.environ.get("MISSION_CONTROL_AGENT_SERVER_PORT", "8133"))
+    if port == 0:
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            port = listener.getsockname()[1]
     endpoint = f"http://127.0.0.1:{port}"
     signing_secret = secrets.token_urlsafe(32)
     monkeypatch.setenv("BELLABS_ASYNC_SUBAGENT_SERVER_TOKEN", signing_secret)

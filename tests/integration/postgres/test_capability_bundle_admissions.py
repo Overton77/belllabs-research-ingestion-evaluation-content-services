@@ -8,16 +8,28 @@ from uuid import uuid4
 import asyncpg
 import httpx
 import pytest
+import pytest_asyncio
 from storage3 import SyncStorageClient
 
 from mission_control.adapters.capabilities.capability_bundles import BundleError, bytes_digest
 from mission_control.adapters.capabilities.capability_pins import CapabilityPins, PinnedSkill
 from mission_control.adapters.postgres.capability_bundles import PostgresCapabilityBundleAdmissions
+from mission_control.adapters.postgres.scope import apply_catalog_scope_string
 from mission_control.adapters.supabase_storage.bundles import SupabaseCapabilityBundleStore
-from tests.integration.postgres.test_immutable_runtime_documents import (
-    document_pool as document_pool,
+from tests.integration.postgres.catalog_common import AI_ENGINEER_CATALOG, BIOTECH_CATALOG
+from tests.integration.postgres.catalog_common import catalog_db as catalog_db
+from tests.integration.postgres.catalog_common import (
+    catalog_writer_pool as catalog_writer_pool,
 )
+from tests.integration.postgres.catalog_common import runtime_pool as runtime_pool
 from tests.unit.integrations.test_capability_directory_bundles import source
+
+pytestmark = pytest.mark.common_db
+
+
+@pytest_asyncio.fixture
+async def document_pool(runtime_pool: asyncpg.Pool) -> asyncpg.Pool:
+    return runtime_pool
 
 
 @pytest.fixture
@@ -70,7 +82,7 @@ async def test_concurrent_immutable_registration_and_worker_resolution(
     document_pool, staged_bundle
 ):
     reader, pin, _, _, _ = staged_bundle
-    scope = str(uuid4())
+    scope = BIOTECH_CATALOG
     admissions = PostgresCapabilityBundleAdmissions(
         document_pool, catalog_scope=scope, storage_namespace=reader.storage_namespace
     )
@@ -108,7 +120,7 @@ async def test_concurrent_immutable_registration_and_worker_resolution(
 async def test_unregistered_and_cross_scope_do_not_fetch_cloud(document_pool, staged_bundle):
     reader, pin, _, _, requests = staged_bundle
     admissions = PostgresCapabilityBundleAdmissions(
-        document_pool, catalog_scope=str(uuid4()), storage_namespace=reader.storage_namespace
+        document_pool, catalog_scope=BIOTECH_CATALOG, storage_namespace=reader.storage_namespace
     )
     before = len(requests)
     with pytest.raises(BundleError, match="not admitted"):
@@ -116,7 +128,7 @@ async def test_unregistered_and_cross_scope_do_not_fetch_cloud(document_pool, st
     assert len(requests) == before
     await admissions.register(pin, reader=reader)
     other = PostgresCapabilityBundleAdmissions(
-        document_pool, catalog_scope=str(uuid4()), storage_namespace=reader.storage_namespace
+        document_pool, catalog_scope=AI_ENGINEER_CATALOG, storage_namespace=reader.storage_namespace
     )
     before = len(requests)
     with pytest.raises(BundleError, match="not admitted"):
@@ -128,7 +140,7 @@ async def test_unregistered_and_cross_scope_do_not_fetch_cloud(document_pool, st
 async def test_changed_bytes_leave_orphans_not_rebound_version(document_pool, staged_bundle):
     reader, pin, directory, objects, _ = staged_bundle
     admissions = PostgresCapabilityBundleAdmissions(
-        document_pool, catalog_scope=str(uuid4()), storage_namespace=reader.storage_namespace
+        document_pool, catalog_scope=BIOTECH_CATALOG, storage_namespace=reader.storage_namespace
     )
     first = await admissions.register(pin, reader=reader)
     (directory / "assets" / "image.bin").write_bytes(b"new bytes")
@@ -149,7 +161,7 @@ async def test_changed_bytes_leave_orphans_not_rebound_version(document_pool, st
 async def test_concurrent_different_manifests_have_exactly_one_winner(document_pool, staged_bundle):
     reader, first, directory, _, _ = staged_bundle
     admissions = PostgresCapabilityBundleAdmissions(
-        document_pool, catalog_scope=str(uuid4()), storage_namespace=reader.storage_namespace
+        document_pool, catalog_scope=BIOTECH_CATALOG, storage_namespace=reader.storage_namespace
     )
     (directory / "assets" / "image.bin").write_bytes(b"different captured bytes")
     staged = reader.stage(directory, asset_id=first.ref.logical_id, version=first.ref.revision)
@@ -174,7 +186,7 @@ async def test_concurrent_different_manifests_have_exactly_one_winner(document_p
 @pytest.mark.asyncio
 async def test_corrupt_remote_bytes_never_register(document_pool, staged_bundle):
     reader, pin, _, objects, _ = staged_bundle
-    scope = str(uuid4())
+    scope = BIOTECH_CATALOG
     admissions = PostgresCapabilityBundleAdmissions(
         document_pool, catalog_scope=scope, storage_namespace=reader.storage_namespace
     )
@@ -183,39 +195,33 @@ async def test_corrupt_remote_bytes_never_register(document_pool, staged_bundle)
     with pytest.raises(BundleError, match="digest/size"):
         await admissions.register(pin, reader=reader)
     async with document_pool.acquire() as connection, connection.transaction():
-        await connection.execute("SELECT set_config('belllabs.catalog_scope',$1,true)", scope)
-        assert (
-            await connection.fetchval(
-                "SELECT count(*) FROM belllabs_control.capability_bundle_admissions"
-            )
-            == 0
-        )
+        await apply_catalog_scope_string(connection, scope)
+        for table in ("capability_bundle_admission", "asset_version", "asset_decision"):
+            assert await connection.fetchval(f"SELECT count(*) FROM mission_control.{table}") == 0
 
 
 @pytest.mark.asyncio
 async def test_scoped_rls_and_append_only_grants(document_pool, staged_bundle):
     reader, pin, _, _, _ = staged_bundle
-    scope = str(uuid4())
+    scope = BIOTECH_CATALOG
     admissions = PostgresCapabilityBundleAdmissions(
         document_pool, catalog_scope=scope, storage_namespace=reader.storage_namespace
     )
     await admissions.register(pin, reader=reader)
     async with document_pool.acquire() as connection, connection.transaction():
-        await connection.execute(
-            "SELECT set_config('belllabs.catalog_scope',$1,true)", str(uuid4())
-        )
+        await apply_catalog_scope_string(connection, AI_ENGINEER_CATALOG)
         assert (
             await connection.fetchval(
-                "SELECT count(*) FROM belllabs_control.capability_bundle_admissions"
+                "SELECT count(*) FROM mission_control.capability_bundle_admission"
             )
             == 0
         )
     for verb in ("DELETE FROM", "UPDATE"):
         async with document_pool.acquire() as connection, connection.transaction():
-            await connection.execute("SELECT set_config('belllabs.catalog_scope',$1,true)", scope)
-            sql = verb + " belllabs_control.capability_bundle_admissions"
+            await apply_catalog_scope_string(connection, scope)
+            sql = verb + " mission_control.capability_bundle_admission"
             if verb == "UPDATE":
-                sql += " SET version=2"
+                sql += " SET bundle_version=2"
             with pytest.raises(asyncpg.InsufficientPrivilegeError):
                 await connection.execute(sql)
 
@@ -224,14 +230,14 @@ async def test_scoped_rls_and_append_only_grants(document_pool, staged_bundle):
 async def test_mismatched_namespace_and_definition_kind_fail_closed(document_pool, staged_bundle):
     reader, pin, _, _, requests = staged_bundle
     admissions = PostgresCapabilityBundleAdmissions(
-        document_pool, catalog_scope=str(uuid4()), storage_namespace="other-installation"
+        document_pool, catalog_scope=BIOTECH_CATALOG, storage_namespace="other-installation"
     )
     before = len(requests)
     with pytest.raises(BundleError, match="namespace"):
         await admissions.register(pin, reader=reader)
     assert len(requests) == before
     admissions = PostgresCapabilityBundleAdmissions(
-        document_pool, catalog_scope=str(uuid4()), storage_namespace=reader.storage_namespace
+        document_pool, catalog_scope=BIOTECH_CATALOG, storage_namespace=reader.storage_namespace
     )
     from mission_control.domain.authoring.contracts import DefinitionKind
 
@@ -239,3 +245,58 @@ async def test_mismatched_namespace_and_definition_kind_fail_closed(document_poo
     with pytest.raises(BundleError, match="exact bytes_v1 skill pin"):
         await admissions.register(wrong, reader=reader)
     assert len(requests) == before
+
+
+@pytest.mark.asyncio
+async def test_catalog_writer_admission_is_canonical_asset_and_replays_exactly(
+    catalog_writer_pool, document_pool, staged_bundle
+):
+    reader, pin, _, _, _ = staged_bundle
+    writer = PostgresCapabilityBundleAdmissions(
+        catalog_writer_pool,
+        catalog_scope=BIOTECH_CATALOG,
+        storage_namespace=reader.storage_namespace,
+    )
+    first = await writer.register(pin, reader=reader)
+    assert await writer.register(pin, reader=reader) == first  # exact replay, no new rows
+    async with catalog_writer_pool.acquire() as connection, connection.transaction():
+        await apply_catalog_scope_string(connection, BIOTECH_CATALOG)
+        asset = await connection.fetchrow(
+            "SELECT asset_id, version, kind, status, manifest_digest "
+            "FROM mission_control.asset_version"
+        )
+        assert dict(asset) == {
+            "asset_id": "skill-bundle:skill.fixture",
+            "version": "1",
+            "kind": "skill",
+            "status": "admitted",
+            "manifest_digest": first.digest,
+        }
+        assert await connection.fetchval("SELECT count(*) FROM mission_control.asset_decision") == 1
+        assert (
+            await connection.fetchval(
+                "SELECT count(*) FROM mission_control.capability_bundle_admission"
+            )
+            == 1
+        )
+    # Workers (runtime role) resolve the writer's admission; the other app cannot.
+    worker = PostgresCapabilityBundleAdmissions(
+        document_pool, catalog_scope=BIOTECH_CATALOG, storage_namespace=reader.storage_namespace
+    )
+    assert (await worker.resolve(pin, reader=reader))[0] == first
+    foreign = PostgresCapabilityBundleAdmissions(
+        document_pool, catalog_scope=AI_ENGINEER_CATALOG, storage_namespace=reader.storage_namespace
+    )
+    with pytest.raises(BundleError, match="not admitted"):
+        await foreign.resolve(pin, reader=reader)
+    # A revoked admission is no longer resolvable and cannot be re-admitted by replay.
+    async with catalog_writer_pool.acquire() as connection, connection.transaction():
+        await apply_catalog_scope_string(connection, BIOTECH_CATALOG)
+        await connection.execute(
+            "UPDATE mission_control.asset_version SET status='revoked', "
+            "version_no=version_no+1, updated_at=now()"
+        )
+    with pytest.raises(BundleError, match="not admitted"):
+        await worker.resolve(pin, reader=reader)
+    with pytest.raises(BundleError, match="not admitted"):
+        await writer.register(pin, reader=reader)

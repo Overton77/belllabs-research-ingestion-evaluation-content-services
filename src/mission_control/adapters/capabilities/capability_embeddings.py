@@ -74,7 +74,7 @@ class OpenAICapabilityEmbeddingAdapter:
                     encoding_format="float",
                 )
             except Exception as error:
-                raise CapabilityEmbeddingDependencyError() from error
+                raise CapabilityEmbeddingDependencyError from error
             ordered = sorted(response.data, key=lambda item: item.index)
             if len(ordered) != len(batch) or [item.index for item in ordered] != list(
                 range(len(batch))

@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+
 from biotech_mission_adapters.application.capabilities.reviewed_capability_promotion import (
     AGENT_BROWSER_COMMIT,
     FIRECRAWL_COMMIT,
@@ -25,7 +26,6 @@ from biotech_mission_adapters.domain.coordinator.web_capability_fixtures import 
     SEARCH_TOOL_LOGICAL_IDS,
     web_capability_definitions,
 )
-
 from mission_control.adapters.storage.control_plane_payloads import InMemoryPayloadStore
 from mission_control.application.authoring.control_plane_repository import (
     InMemoryDefinitionRepository,

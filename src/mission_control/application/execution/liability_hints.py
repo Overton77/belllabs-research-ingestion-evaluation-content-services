@@ -56,7 +56,7 @@ class FamilyLiabilityHints:
         family = run.execution_target.family_workflow_id
         try:
             await self._transport.liability_reconciled(family, reference)
-        except Exception:  # noqa: BLE001 - a hint; the family's timer is the fallback
+        except Exception:
             logger.warning(
                 "liability hint not delivered",
                 extra={"run_id": run_id, "family_workflow_id": family},

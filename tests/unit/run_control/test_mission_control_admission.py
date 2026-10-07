@@ -36,10 +36,10 @@ async def test_admission_pins_trusted_scope_actor_and_checks_current_grants_on_r
     authority, _ = service()
     facade = MissionAdmissionService(authority, request_scope="tenant-1")
     body = admission_request()
-    grants = dict(
-        sponsorship_refs=frozenset({body.sponsorship_ref}),
-        approval_refs=frozenset(body.approval_refs),
-    )
+    grants = {
+        "sponsorship_refs": frozenset({body.sponsorship_ref}),
+        "approval_refs": frozenset(body.approval_refs),
+    }
     receipt = await facade.admit(body, actor(), **grants)
     assert receipt.status == "accepted"
     assert await facade.admit(body, actor(), **grants) == receipt

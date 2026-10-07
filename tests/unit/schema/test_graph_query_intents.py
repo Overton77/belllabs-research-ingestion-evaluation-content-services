@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+
 from biotech_mission_adapters.application.schema.graph_query import (
     compile_query_intent,
     validate_query_intent,
@@ -11,7 +12,6 @@ from biotech_mission_adapters.domain.schema_context.contracts import QueryExecut
 from biotech_mission_adapters.domain.schema_context.errors import QueryIntentRejected
 from biotech_mission_adapters.domain.schema_context.expansion import expand_selection
 from biotech_mission_adapters.domain.schema_context.projection import build_operation_projection
-
 from tests.schema_context_helpers import accepted, catalog
 
 

@@ -1,0 +1,419 @@
+{
+  "descriptor_schema": "mission-control.runtime-descriptor/1",
+  "component": "mission_control_runtime",
+  "schema": "mission_control_runtime",
+  "role": "mission_control_checkpointer",
+  "pins": {
+    "langgraph": "1.2.10",
+    "langgraph-checkpoint": "4.1.1",
+    "langgraph-checkpoint-postgres": "3.1.1",
+    "psycopg": "3.3.4"
+  },
+  "vendor_sources_sha256": {
+    "langgraph/checkpoint/postgres/base.py": "435424725ce05366ea3671efaed9a7c15f2b4a100205daaa96845723912ef112",
+    "langgraph/checkpoint/postgres/aio.py": "31bf96bd0f55aed1e2e811e94a74cf7a404d130de4bf61f6752399d8563f7aab",
+    "langgraph/store/postgres/base.py": "b9722a5c119f126528b50550250b8497a25a17b63b934be242ad18a4741e1878",
+    "langgraph/store/postgres/aio.py": "a0362f730898e615f6101537c6be0fefc6dcea2a45883ac9717a89e5daf8e57c"
+  },
+  "session": {
+    "search_path": "mission_control_runtime, pg_temp",
+    "runtime_libpq_options": "-c search_path=mission_control_runtime,pg_temp",
+    "advisory_lock_sql": "SELECT pg_catalog.pg_advisory_lock(pg_catalog.hashtextextended('mission_control_runtime.provision', 0))",
+    "advisory_unlock_sql": "SELECT pg_catalog.pg_advisory_unlock(pg_catalog.hashtextextended('mission_control_runtime.provision', 0))",
+    "lock_timeout": "5s"
+  },
+  "steps": [
+    {
+      "id": "prerequisite.schema_role",
+      "kind": "sql",
+      "transactional": true,
+      "concurrent": false,
+      "sql": "DO $role$\nDECLARE\n    existing record;\nBEGIN\n    SELECT oid, rolsuper, rolbypassrls, rolcanlogin, rolcreaterole, rolcreatedb, rolreplication\n      INTO existing FROM pg_catalog.pg_roles WHERE rolname = 'mission_control_checkpointer';\n    IF FOUND THEN\n        IF existing.rolsuper OR existing.rolbypassrls OR existing.rolcanlogin\n           OR existing.rolcreaterole OR existing.rolcreatedb OR existing.rolreplication THEN\n            RAISE EXCEPTION 'existing role mission_control_checkpointer is not a restricted NOLOGIN role';\n        END IF;\n        IF EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members m WHERE m.member = existing.oid) THEN\n            RAISE EXCEPTION 'existing role mission_control_checkpointer holds role memberships';\n        END IF;\n    ELSE\n        CREATE ROLE mission_control_checkpointer NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE\n            NOINHERIT NOREPLICATION;\n    END IF;\nEND\n$role$;\nCREATE SCHEMA mission_control_runtime;\nREVOKE ALL ON SCHEMA mission_control_runtime FROM PUBLIC;\nREVOKE ALL ON SCHEMA mission_control_runtime FROM mission_control_checkpointer;\nGRANT USAGE ON SCHEMA mission_control_runtime TO mission_control_checkpointer;\n",
+      "sha256": "74ff2240976abcccfc8246a2ba5daf63655cc0b55966a0ed5ef234d7700c40e8",
+      "records_version": null,
+      "precheck": [
+        "SELECT pg_catalog.to_regnamespace('mission_control_runtime') IS NULL"
+      ],
+      "verify": [
+        "SELECT n.nspowner = (SELECT r.oid FROM pg_catalog.pg_roles r WHERE r.rolname = current_user) FROM pg_catalog.pg_namespace n WHERE n.nspname = 'mission_control_runtime'",
+        "SELECT NOT (r.rolsuper OR r.rolbypassrls OR r.rolcanlogin OR r.rolcreaterole OR r.rolcreatedb OR r.rolreplication) FROM pg_catalog.pg_roles r WHERE r.rolname = 'mission_control_checkpointer'",
+        "SELECT NOT EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members m JOIN pg_catalog.pg_roles r ON r.oid = m.member WHERE r.rolname = 'mission_control_checkpointer')",
+        "SELECT pg_catalog.has_schema_privilege('mission_control_checkpointer', 'mission_control_runtime', 'USAGE') AND NOT pg_catalog.has_schema_privilege('mission_control_checkpointer', 'mission_control_runtime', 'CREATE')",
+        "SELECT NOT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace n CROSS JOIN LATERAL pg_catalog.aclexplode(n.nspacl) acl WHERE n.nspname = 'mission_control_runtime' AND acl.grantee = 0)",
+        "SELECT NOT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace n WHERE n.nspname IN ('mission_control', 'mission_control_search') AND (pg_catalog.has_schema_privilege('mission_control_checkpointer', n.oid, 'USAGE') OR pg_catalog.has_schema_privilege('mission_control_checkpointer', n.oid, 'CREATE')))"
+      ],
+      "verify_recorded": []
+    },
+    {
+      "id": "saver.v0",
+      "kind": "vendor",
+      "transactional": true,
+      "concurrent": false,
+      "sql": "CREATE TABLE IF NOT EXISTS checkpoint_migrations (\n    v INTEGER PRIMARY KEY\n);",
+      "sha256": "ce7cab847fabee5cf941b9fd0444d10d66cd3cf87eb53b10776e218f9cf318a1",
+      "records_version": {
+        "table": "checkpoint_migrations",
+        "v": 0,
+        "sql": "INSERT INTO mission_control_runtime.checkpoint_migrations (v) VALUES (0)"
+      },
+      "precheck": [
+        "SELECT pg_catalog.current_schema() = 'mission_control_runtime'"
+      ],
+      "verify": [
+        "SELECT pg_catalog.to_regclass('mission_control_runtime.checkpoint_migrations') IS NOT NULL AND (SELECT c.relkind = 'r' FROM pg_catalog.pg_class c WHERE c.oid = pg_catalog.to_regclass('mission_control_runtime.checkpoint_migrations'))",
+        "SELECT pg_catalog.count(*) = 1 FROM pg_catalog.pg_attribute a WHERE a.attrelid = pg_catalog.to_regclass('mission_control_runtime.checkpoint_migrations') AND a.attnum > 0 AND NOT a.attisdropped AND (a.attname::text, pg_catalog.format_type(a.atttypid, a.atttypmod), a.attnotnull) IN (VALUES ('v', 'integer', true))",
+        "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_index i JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'mission_control_runtime' AND c.relname = 'checkpoint_migrations_pkey' AND i.indrelid = pg_catalog.to_regclass('mission_control_runtime.checkpoint_migrations') AND i.indisvalid AND i.indisready)"
+      ],
+      "verify_recorded": [
+        "SELECT EXISTS (SELECT 1 FROM mission_control_runtime.checkpoint_migrations WHERE v = 0)"
+      ]
+    },
+    {
+      "id": "saver.v1",
+      "kind": "vendor",
+      "transactional": true,
+      "concurrent": false,
+      "sql": "CREATE TABLE IF NOT EXISTS checkpoints (\n    thread_id TEXT NOT NULL,\n    checkpoint_ns TEXT NOT NULL DEFAULT '',\n    checkpoint_id TEXT NOT NULL,\n    parent_checkpoint_id TEXT,\n    type TEXT,\n    checkpoint JSONB NOT NULL,\n    metadata JSONB NOT NULL DEFAULT '{}',\n    PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id)\n);",
+      "sha256": "99cdcac4b487dff1b05eece6225f3434fade396355495a0a34b0ae813da5a12c",
+      "records_version": {
+        "table": "checkpoint_migrations",
+        "v": 1,
+        "sql": "INSERT INTO mission_control_runtime.checkpoint_migrations (v) VALUES (1)"
+      },
+      "precheck": [
+        "SELECT pg_catalog.current_schema() = 'mission_control_runtime'"
+      ],
+      "verify": [
+        "SELECT pg_catalog.to_regclass('mission_control_runtime.checkpoints') IS NOT NULL AND (SELECT c.relkind = 'r' FROM pg_catalog.pg_class c WHERE c.oid = pg_catalog.to_regclass('mission_control_runtime.checkpoints'))",
+        "SELECT pg_catalog.count(*) = 7 FROM pg_catalog.pg_attribute a WHERE a.attrelid = pg_catalog.to_regclass('mission_control_runtime.checkpoints') AND a.attnum > 0 AND NOT a.attisdropped AND (a.attname::text, pg_catalog.format_type(a.atttypid, a.atttypmod), a.attnotnull) IN (VALUES ('thread_id', 'text', true), ('checkpoint_ns', 'text', true), ('checkpoint_id', 'text', true), ('parent_checkpoint_id', 'text', false), ('type', 'text', false), ('checkpoint', 'jsonb', true), ('metadata', 'jsonb', true))",
+        "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_index i JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'mission_control_runtime' AND c.relname = 'checkpoints_pkey' AND i.indrelid = pg_catalog.to_regclass('mission_control_runtime.checkpoints') AND i.indisvalid AND i.indisready)"
+      ],
+      "verify_recorded": [
+        "SELECT EXISTS (SELECT 1 FROM mission_control_runtime.checkpoint_migrations WHERE v = 1)"
+      ]
+    },
+    {
+      "id": "saver.v2",
+      "kind": "vendor",
+      "transactional": true,
+      "concurrent": false,
+      "sql": "CREATE TABLE IF NOT EXISTS checkpoint_blobs (\n    thread_id TEXT NOT NULL,\n    checkpoint_ns TEXT NOT NULL DEFAULT '',\n    channel TEXT NOT NULL,\n    version TEXT NOT NULL,\n    type TEXT NOT NULL,\n    blob BYTEA,\n    PRIMARY KEY (thread_id, checkpoint_ns, channel, version)\n);",
+      "sha256": "bcfa850d8ef40fc86930c1fd07d703383f78971c63ec4378866ef7a3516ee75d",
+      "records_version": {
+        "table": "checkpoint_migrations",
+        "v": 2,
+        "sql": "INSERT INTO mission_control_runtime.checkpoint_migrations (v) VALUES (2)"
+      },
+      "precheck": [
+        "SELECT pg_catalog.current_schema() = 'mission_control_runtime'"
+      ],
+      "verify": [
+        "SELECT pg_catalog.to_regclass('mission_control_runtime.checkpoint_blobs') IS NOT NULL AND (SELECT c.relkind = 'r' FROM pg_catalog.pg_class c WHERE c.oid = pg_catalog.to_regclass('mission_control_runtime.checkpoint_blobs'))",
+        "SELECT pg_catalog.count(*) = 6 FROM pg_catalog.pg_attribute a WHERE a.attrelid = pg_catalog.to_regclass('mission_control_runtime.checkpoint_blobs') AND a.attnum > 0 AND NOT a.attisdropped AND (a.attname::text, pg_catalog.format_type(a.atttypid, a.atttypmod), a.attnotnull) IN (VALUES ('thread_id', 'text', true), ('checkpoint_ns', 'text', true), ('channel', 'text', true), ('version', 'text', true), ('type', 'text', true), ('blob', 'bytea', false))",
+        "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_index i JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'mission_control_runtime' AND c.relname = 'checkpoint_blobs_pkey' AND i.indrelid = pg_catalog.to_regclass('mission_control_runtime.checkpoint_blobs') AND i.indisvalid AND i.indisready)"
+      ],
+      "verify_recorded": [
+        "SELECT EXISTS (SELECT 1 FROM mission_control_runtime.checkpoint_migrations WHERE v = 2)"
+      ]
+    },
+    {
+      "id": "saver.v3",
+      "kind": "vendor",
+      "transactional": true,
+      "concurrent": false,
+      "sql": "CREATE TABLE IF NOT EXISTS checkpoint_writes (\n    thread_id TEXT NOT NULL,\n    checkpoint_ns TEXT NOT NULL DEFAULT '',\n    checkpoint_id TEXT NOT NULL,\n    task_id TEXT NOT NULL,\n    idx INTEGER NOT NULL,\n    channel TEXT NOT NULL,\n    type TEXT,\n    blob BYTEA NOT NULL,\n    PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id, task_id, idx)\n);",
+      "sha256": "89a3c15d1431daad3dffe1d587bb59f4f74f03a25a08b34730b0884eb966cd02",
+      "records_version": {
+        "table": "checkpoint_migrations",
+        "v": 3,
+        "sql": "INSERT INTO mission_control_runtime.checkpoint_migrations (v) VALUES (3)"
+      },
+      "precheck": [
+        "SELECT pg_catalog.current_schema() = 'mission_control_runtime'"
+      ],
+      "verify": [
+        "SELECT pg_catalog.to_regclass('mission_control_runtime.checkpoint_writes') IS NOT NULL AND (SELECT c.relkind = 'r' FROM pg_catalog.pg_class c WHERE c.oid = pg_catalog.to_regclass('mission_control_runtime.checkpoint_writes'))",
+        "SELECT pg_catalog.count(*) = 8 FROM pg_catalog.pg_attribute a WHERE a.attrelid = pg_catalog.to_regclass('mission_control_runtime.checkpoint_writes') AND a.attnum > 0 AND NOT a.attisdropped AND (a.attname::text, pg_catalog.format_type(a.atttypid, a.atttypmod), a.attnotnull) IN (VALUES ('thread_id', 'text', true), ('checkpoint_ns', 'text', true), ('checkpoint_id', 'text', true), ('task_id', 'text', true), ('idx', 'integer', true), ('channel', 'text', true), ('type', 'text', false), ('blob', 'bytea', true))",
+        "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_index i JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'mission_control_runtime' AND c.relname = 'checkpoint_writes_pkey' AND i.indrelid = pg_catalog.to_regclass('mission_control_runtime.checkpoint_writes') AND i.indisvalid AND i.indisready)"
+      ],
+      "verify_recorded": [
+        "SELECT EXISTS (SELECT 1 FROM mission_control_runtime.checkpoint_migrations WHERE v = 3)"
+      ]
+    },
+    {
+      "id": "saver.v4",
+      "kind": "vendor",
+      "transactional": true,
+      "concurrent": false,
+      "sql": "ALTER TABLE checkpoint_blobs ALTER COLUMN blob DROP not null;",
+      "sha256": "9509f161775a6e65d479523f5e8baad185b67540d85717a9cda5e41828daaa7c",
+      "records_version": {
+        "table": "checkpoint_migrations",
+        "v": 4,
+        "sql": "INSERT INTO mission_control_runtime.checkpoint_migrations (v) VALUES (4)"
+      },
+      "precheck": [
+        "SELECT pg_catalog.current_schema() = 'mission_control_runtime'"
+      ],
+      "verify": [
+        "SELECT pg_catalog.to_regclass('mission_control_runtime.checkpoint_blobs') IS NOT NULL AND (SELECT c.relkind = 'r' FROM pg_catalog.pg_class c WHERE c.oid = pg_catalog.to_regclass('mission_control_runtime.checkpoint_blobs'))",
+        "SELECT pg_catalog.count(*) = 1 FROM pg_catalog.pg_attribute a WHERE a.attrelid = pg_catalog.to_regclass('mission_control_runtime.checkpoint_blobs') AND a.attnum > 0 AND NOT a.attisdropped AND (a.attname::text, pg_catalog.format_type(a.atttypid, a.atttypmod), a.attnotnull) IN (VALUES ('blob', 'bytea', false))"
+      ],
+      "verify_recorded": [
+        "SELECT EXISTS (SELECT 1 FROM mission_control_runtime.checkpoint_migrations WHERE v = 4)"
+      ]
+    },
+    {
+      "id": "saver.v5",
+      "kind": "vendor",
+      "transactional": true,
+      "concurrent": false,
+      "sql": "SELECT 1;",
+      "sha256": "17db4fd369edb9244b9f91d9aeed145c3d04ad8ba6e95d06247f07a63527d11a",
+      "records_version": {
+        "table": "checkpoint_migrations",
+        "v": 5,
+        "sql": "INSERT INTO mission_control_runtime.checkpoint_migrations (v) VALUES (5)"
+      },
+      "precheck": [
+        "SELECT pg_catalog.current_schema() = 'mission_control_runtime'"
+      ],
+      "verify": [],
+      "verify_recorded": [
+        "SELECT EXISTS (SELECT 1 FROM mission_control_runtime.checkpoint_migrations WHERE v = 5)"
+      ]
+    },
+    {
+      "id": "saver.v6",
+      "kind": "vendor",
+      "transactional": false,
+      "concurrent": true,
+      "sql": "\n    CREATE INDEX CONCURRENTLY IF NOT EXISTS checkpoints_thread_id_idx ON checkpoints(thread_id);\n    ",
+      "sha256": "eb1fff5be82002c71dd32ddba2106e0472fa28c867fa897ac45a5e3bbb58806e",
+      "records_version": {
+        "table": "checkpoint_migrations",
+        "v": 6,
+        "sql": "INSERT INTO mission_control_runtime.checkpoint_migrations (v) VALUES (6)"
+      },
+      "precheck": [
+        "SELECT pg_catalog.current_schema() = 'mission_control_runtime'",
+        "SELECT NOT EXISTS (SELECT 1 FROM pg_catalog.pg_index i JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'mission_control_runtime' AND c.relname = 'checkpoints_thread_id_idx' AND NOT (i.indisvalid AND i.indisready))"
+      ],
+      "verify": [
+        "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_index i JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'mission_control_runtime' AND c.relname = 'checkpoints_thread_id_idx' AND i.indrelid = pg_catalog.to_regclass('mission_control_runtime.checkpoints') AND i.indisvalid AND i.indisready)"
+      ],
+      "verify_recorded": [
+        "SELECT EXISTS (SELECT 1 FROM mission_control_runtime.checkpoint_migrations WHERE v = 6)"
+      ]
+    },
+    {
+      "id": "saver.v7",
+      "kind": "vendor",
+      "transactional": false,
+      "concurrent": true,
+      "sql": "\n    CREATE INDEX CONCURRENTLY IF NOT EXISTS checkpoint_blobs_thread_id_idx ON checkpoint_blobs(thread_id);\n    ",
+      "sha256": "78f503d280c95f2d4428295df25cb7f3669affb46be10c8c8ba46bde5ee84510",
+      "records_version": {
+        "table": "checkpoint_migrations",
+        "v": 7,
+        "sql": "INSERT INTO mission_control_runtime.checkpoint_migrations (v) VALUES (7)"
+      },
+      "precheck": [
+        "SELECT pg_catalog.current_schema() = 'mission_control_runtime'",
+        "SELECT NOT EXISTS (SELECT 1 FROM pg_catalog.pg_index i JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'mission_control_runtime' AND c.relname = 'checkpoint_blobs_thread_id_idx' AND NOT (i.indisvalid AND i.indisready))"
+      ],
+      "verify": [
+        "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_index i JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'mission_control_runtime' AND c.relname = 'checkpoint_blobs_thread_id_idx' AND i.indrelid = pg_catalog.to_regclass('mission_control_runtime.checkpoint_blobs') AND i.indisvalid AND i.indisready)"
+      ],
+      "verify_recorded": [
+        "SELECT EXISTS (SELECT 1 FROM mission_control_runtime.checkpoint_migrations WHERE v = 7)"
+      ]
+    },
+    {
+      "id": "saver.v8",
+      "kind": "vendor",
+      "transactional": false,
+      "concurrent": true,
+      "sql": "\n    CREATE INDEX CONCURRENTLY IF NOT EXISTS checkpoint_writes_thread_id_idx ON checkpoint_writes(thread_id);\n    ",
+      "sha256": "ea9b612ca341fbe6cb1daca3e9b159bf10a986a7e1341925e5e6ba81f131f01f",
+      "records_version": {
+        "table": "checkpoint_migrations",
+        "v": 8,
+        "sql": "INSERT INTO mission_control_runtime.checkpoint_migrations (v) VALUES (8)"
+      },
+      "precheck": [
+        "SELECT pg_catalog.current_schema() = 'mission_control_runtime'",
+        "SELECT NOT EXISTS (SELECT 1 FROM pg_catalog.pg_index i JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'mission_control_runtime' AND c.relname = 'checkpoint_writes_thread_id_idx' AND NOT (i.indisvalid AND i.indisready))"
+      ],
+      "verify": [
+        "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_index i JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'mission_control_runtime' AND c.relname = 'checkpoint_writes_thread_id_idx' AND i.indrelid = pg_catalog.to_regclass('mission_control_runtime.checkpoint_writes') AND i.indisvalid AND i.indisready)"
+      ],
+      "verify_recorded": [
+        "SELECT EXISTS (SELECT 1 FROM mission_control_runtime.checkpoint_migrations WHERE v = 8)"
+      ]
+    },
+    {
+      "id": "saver.v9",
+      "kind": "vendor",
+      "transactional": true,
+      "concurrent": false,
+      "sql": "ALTER TABLE checkpoint_writes ADD COLUMN IF NOT EXISTS task_path TEXT NOT NULL DEFAULT '';",
+      "sha256": "e181a76c88b0b51977c9b5ddb95c8747e77077710c0bea28cdcf96305f35c948",
+      "records_version": {
+        "table": "checkpoint_migrations",
+        "v": 9,
+        "sql": "INSERT INTO mission_control_runtime.checkpoint_migrations (v) VALUES (9)"
+      },
+      "precheck": [
+        "SELECT pg_catalog.current_schema() = 'mission_control_runtime'"
+      ],
+      "verify": [
+        "SELECT pg_catalog.to_regclass('mission_control_runtime.checkpoint_writes') IS NOT NULL AND (SELECT c.relkind = 'r' FROM pg_catalog.pg_class c WHERE c.oid = pg_catalog.to_regclass('mission_control_runtime.checkpoint_writes'))",
+        "SELECT pg_catalog.count(*) = 1 FROM pg_catalog.pg_attribute a WHERE a.attrelid = pg_catalog.to_regclass('mission_control_runtime.checkpoint_writes') AND a.attnum > 0 AND NOT a.attisdropped AND (a.attname::text, pg_catalog.format_type(a.atttypid, a.atttypmod), a.attnotnull) IN (VALUES ('task_path', 'text', true))"
+      ],
+      "verify_recorded": [
+        "SELECT EXISTS (SELECT 1 FROM mission_control_runtime.checkpoint_migrations WHERE v = 9)"
+      ]
+    },
+    {
+      "id": "store.ledger",
+      "kind": "vendor",
+      "transactional": true,
+      "concurrent": false,
+      "sql": "\n                CREATE TABLE IF NOT EXISTS store_migrations (\n                    v INTEGER PRIMARY KEY\n                )\n            ",
+      "sha256": "936534b176b895c17c596e1a165857145937c1aaf0b9dfd31c060d0ee41355f9",
+      "records_version": null,
+      "precheck": [
+        "SELECT pg_catalog.current_schema() = 'mission_control_runtime'"
+      ],
+      "verify": [
+        "SELECT pg_catalog.to_regclass('mission_control_runtime.store_migrations') IS NOT NULL AND (SELECT c.relkind = 'r' FROM pg_catalog.pg_class c WHERE c.oid = pg_catalog.to_regclass('mission_control_runtime.store_migrations'))",
+        "SELECT pg_catalog.count(*) = 1 FROM pg_catalog.pg_attribute a WHERE a.attrelid = pg_catalog.to_regclass('mission_control_runtime.store_migrations') AND a.attnum > 0 AND NOT a.attisdropped AND (a.attname::text, pg_catalog.format_type(a.atttypid, a.atttypmod), a.attnotnull) IN (VALUES ('v', 'integer', true))",
+        "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_index i JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'mission_control_runtime' AND c.relname = 'store_migrations_pkey' AND i.indrelid = pg_catalog.to_regclass('mission_control_runtime.store_migrations') AND i.indisvalid AND i.indisready)"
+      ],
+      "verify_recorded": []
+    },
+    {
+      "id": "store.v0",
+      "kind": "vendor",
+      "transactional": true,
+      "concurrent": false,
+      "sql": "\nCREATE TABLE IF NOT EXISTS store (\n    -- 'prefix' represents the doc's 'namespace'\n    prefix text NOT NULL,\n    key text NOT NULL,\n    value jsonb NOT NULL,\n    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,\n    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,\n    PRIMARY KEY (prefix, key)\n);\n",
+      "sha256": "bca2404eecfb5f032ab479d27fa7be0cfaef84d1efd26d92f938d4c52df52d40",
+      "records_version": {
+        "table": "store_migrations",
+        "v": 0,
+        "sql": "INSERT INTO mission_control_runtime.store_migrations (v) VALUES (0)"
+      },
+      "precheck": [
+        "SELECT pg_catalog.current_schema() = 'mission_control_runtime'"
+      ],
+      "verify": [
+        "SELECT pg_catalog.to_regclass('mission_control_runtime.store') IS NOT NULL AND (SELECT c.relkind = 'r' FROM pg_catalog.pg_class c WHERE c.oid = pg_catalog.to_regclass('mission_control_runtime.store'))",
+        "SELECT pg_catalog.count(*) = 5 FROM pg_catalog.pg_attribute a WHERE a.attrelid = pg_catalog.to_regclass('mission_control_runtime.store') AND a.attnum > 0 AND NOT a.attisdropped AND (a.attname::text, pg_catalog.format_type(a.atttypid, a.atttypmod), a.attnotnull) IN (VALUES ('prefix', 'text', true), ('key', 'text', true), ('value', 'jsonb', true), ('created_at', 'timestamp with time zone', false), ('updated_at', 'timestamp with time zone', false))",
+        "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_index i JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'mission_control_runtime' AND c.relname = 'store_pkey' AND i.indrelid = pg_catalog.to_regclass('mission_control_runtime.store') AND i.indisvalid AND i.indisready)"
+      ],
+      "verify_recorded": [
+        "SELECT EXISTS (SELECT 1 FROM mission_control_runtime.store_migrations WHERE v = 0)"
+      ]
+    },
+    {
+      "id": "store.v1",
+      "kind": "vendor",
+      "transactional": false,
+      "concurrent": true,
+      "sql": "\n-- For faster lookups by prefix\nCREATE INDEX CONCURRENTLY IF NOT EXISTS store_prefix_idx ON store USING btree (prefix text_pattern_ops);\n",
+      "sha256": "0cb84b0918382ba4a9b3899103e2ed8bd92395b29d964a5f21de2de667905c0e",
+      "records_version": {
+        "table": "store_migrations",
+        "v": 1,
+        "sql": "INSERT INTO mission_control_runtime.store_migrations (v) VALUES (1)"
+      },
+      "precheck": [
+        "SELECT pg_catalog.current_schema() = 'mission_control_runtime'",
+        "SELECT NOT EXISTS (SELECT 1 FROM pg_catalog.pg_index i JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'mission_control_runtime' AND c.relname = 'store_prefix_idx' AND NOT (i.indisvalid AND i.indisready))"
+      ],
+      "verify": [
+        "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_index i JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'mission_control_runtime' AND c.relname = 'store_prefix_idx' AND i.indrelid = pg_catalog.to_regclass('mission_control_runtime.store') AND i.indisvalid AND i.indisready)"
+      ],
+      "verify_recorded": [
+        "SELECT EXISTS (SELECT 1 FROM mission_control_runtime.store_migrations WHERE v = 1)"
+      ]
+    },
+    {
+      "id": "store.v2",
+      "kind": "vendor",
+      "transactional": true,
+      "concurrent": false,
+      "sql": "\n-- Add expires_at column to store table\nALTER TABLE store\nADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITH TIME ZONE,\nADD COLUMN IF NOT EXISTS ttl_minutes INT;\n",
+      "sha256": "83fb4d70e7dbb73187457fcc5e9cf7bd54c1b07c6747b425a4520c70ff542577",
+      "records_version": {
+        "table": "store_migrations",
+        "v": 2,
+        "sql": "INSERT INTO mission_control_runtime.store_migrations (v) VALUES (2)"
+      },
+      "precheck": [
+        "SELECT pg_catalog.current_schema() = 'mission_control_runtime'"
+      ],
+      "verify": [
+        "SELECT pg_catalog.to_regclass('mission_control_runtime.store') IS NOT NULL AND (SELECT c.relkind = 'r' FROM pg_catalog.pg_class c WHERE c.oid = pg_catalog.to_regclass('mission_control_runtime.store'))",
+        "SELECT pg_catalog.count(*) = 2 FROM pg_catalog.pg_attribute a WHERE a.attrelid = pg_catalog.to_regclass('mission_control_runtime.store') AND a.attnum > 0 AND NOT a.attisdropped AND (a.attname::text, pg_catalog.format_type(a.atttypid, a.atttypmod), a.attnotnull) IN (VALUES ('expires_at', 'timestamp with time zone', false), ('ttl_minutes', 'integer', false))"
+      ],
+      "verify_recorded": [
+        "SELECT EXISTS (SELECT 1 FROM mission_control_runtime.store_migrations WHERE v = 2)"
+      ]
+    },
+    {
+      "id": "store.v3",
+      "kind": "vendor",
+      "transactional": true,
+      "concurrent": false,
+      "sql": "\n-- Add indexes for efficient TTL sweeping\nCREATE INDEX IF NOT EXISTS idx_store_expires_at ON store (expires_at)\nWHERE expires_at IS NOT NULL;\n",
+      "sha256": "b29a372beb8e093a73749b86aef6abbb628e4b60c7a4b1dbee919a3d82a3a54e",
+      "records_version": {
+        "table": "store_migrations",
+        "v": 3,
+        "sql": "INSERT INTO mission_control_runtime.store_migrations (v) VALUES (3)"
+      },
+      "precheck": [
+        "SELECT pg_catalog.current_schema() = 'mission_control_runtime'"
+      ],
+      "verify": [
+        "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_index i JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'mission_control_runtime' AND c.relname = 'idx_store_expires_at' AND i.indrelid = pg_catalog.to_regclass('mission_control_runtime.store') AND i.indisvalid AND i.indisready)"
+      ],
+      "verify_recorded": [
+        "SELECT EXISTS (SELECT 1 FROM mission_control_runtime.store_migrations WHERE v = 3)"
+      ]
+    },
+    {
+      "id": "post.grants",
+      "kind": "sql",
+      "transactional": true,
+      "concurrent": false,
+      "sql": "REVOKE ALL ON ALL TABLES IN SCHEMA mission_control_runtime FROM PUBLIC;\nDO $grants$\nDECLARE\n    item record;\nBEGIN\n    FOR item IN\n        SELECT DISTINCT n.nspname, c.relname, r.rolname\n          FROM pg_catalog.pg_class c\n          JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace\n          CROSS JOIN LATERAL pg_catalog.aclexplode(c.relacl) acl\n          JOIN pg_catalog.pg_roles r ON r.oid = acl.grantee\n         WHERE n.nspname = 'mission_control_runtime' AND acl.grantee <> c.relowner\n    LOOP\n        EXECUTE pg_catalog.format(\n            'REVOKE ALL ON %I.%I FROM %I', item.nspname, item.relname, item.rolname\n        );\n    END LOOP;\nEND\n$grants$;\nGRANT SELECT, INSERT, UPDATE, DELETE ON mission_control_runtime.checkpoints, mission_control_runtime.checkpoint_blobs, mission_control_runtime.checkpoint_writes, mission_control_runtime.store TO mission_control_checkpointer;\nGRANT SELECT ON mission_control_runtime.checkpoint_migrations, mission_control_runtime.store_migrations TO mission_control_checkpointer;\n",
+      "sha256": "a1f42b7e45864f8a23457f621a3c4fc662644f97a427064fb505581d9b8579f5",
+      "records_version": null,
+      "precheck": [],
+      "verify": [
+        "SELECT pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.checkpoints', 'SELECT') AND pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.checkpoints', 'INSERT') AND pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.checkpoints', 'UPDATE') AND pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.checkpoints', 'DELETE') AND NOT pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.checkpoints', 'TRUNCATE') AND NOT pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.checkpoints', 'REFERENCES') AND NOT pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.checkpoints', 'TRIGGER')",
+        "SELECT pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.checkpoint_blobs', 'SELECT') AND pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.checkpoint_blobs', 'INSERT') AND pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.checkpoint_blobs', 'UPDATE') AND pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.checkpoint_blobs', 'DELETE') AND NOT pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.checkpoint_blobs', 'TRUNCATE') AND NOT pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.checkpoint_blobs', 'REFERENCES') AND NOT pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.checkpoint_blobs', 'TRIGGER')",
+        "SELECT pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.checkpoint_writes', 'SELECT') AND pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.checkpoint_writes', 'INSERT') AND pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.checkpoint_writes', 'UPDATE') AND pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.checkpoint_writes', 'DELETE') AND NOT pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.checkpoint_writes', 'TRUNCATE') AND NOT pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.checkpoint_writes', 'REFERENCES') AND NOT pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.checkpoint_writes', 'TRIGGER')",
+        "SELECT pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.store', 'SELECT') AND pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.store', 'INSERT') AND pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.store', 'UPDATE') AND pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.store', 'DELETE') AND NOT pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.store', 'TRUNCATE') AND NOT pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.store', 'REFERENCES') AND NOT pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.store', 'TRIGGER')",
+        "SELECT pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.checkpoint_migrations', 'SELECT') AND NOT pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.checkpoint_migrations', 'INSERT') AND NOT pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.checkpoint_migrations', 'UPDATE') AND NOT pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.checkpoint_migrations', 'DELETE') AND NOT pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.checkpoint_migrations', 'TRUNCATE') AND NOT pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.checkpoint_migrations', 'REFERENCES') AND NOT pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.checkpoint_migrations', 'TRIGGER')",
+        "SELECT pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.store_migrations', 'SELECT') AND NOT pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.store_migrations', 'INSERT') AND NOT pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.store_migrations', 'UPDATE') AND NOT pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.store_migrations', 'DELETE') AND NOT pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.store_migrations', 'TRUNCATE') AND NOT pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.store_migrations', 'REFERENCES') AND NOT pg_catalog.has_table_privilege('mission_control_checkpointer', 'mission_control_runtime.store_migrations', 'TRIGGER')",
+        "SELECT NOT EXISTS (SELECT 1 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace CROSS JOIN LATERAL pg_catalog.aclexplode(c.relacl) acl WHERE n.nspname = 'mission_control_runtime' AND acl.grantee <> c.relowner AND acl.grantee <> (SELECT r.oid FROM pg_catalog.pg_roles r WHERE r.rolname = 'mission_control_checkpointer'))"
+      ],
+      "verify_recorded": []
+    }
+  ],
+  "final_verify": [
+    "SELECT (SELECT pg_catalog.array_agg(c.relname::text ORDER BY c.relname) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'mission_control_runtime' AND c.relkind IN ('r', 'p', 'v', 'm', 'f', 'S')) = ARRAY['checkpoint_blobs', 'checkpoint_migrations', 'checkpoint_writes', 'checkpoints', 'store', 'store_migrations']::text[]",
+    "SELECT (SELECT pg_catalog.count(*) FROM pg_catalog.pg_attribute a WHERE a.attrelid = pg_catalog.to_regclass('mission_control_runtime.checkpoint_migrations') AND a.attnum > 0 AND NOT a.attisdropped) = 1",
+    "SELECT (SELECT pg_catalog.count(*) FROM pg_catalog.pg_attribute a WHERE a.attrelid = pg_catalog.to_regclass('mission_control_runtime.checkpoints') AND a.attnum > 0 AND NOT a.attisdropped) = 7",
+    "SELECT (SELECT pg_catalog.count(*) FROM pg_catalog.pg_attribute a WHERE a.attrelid = pg_catalog.to_regclass('mission_control_runtime.checkpoint_blobs') AND a.attnum > 0 AND NOT a.attisdropped) = 6",
+    "SELECT (SELECT pg_catalog.count(*) FROM pg_catalog.pg_attribute a WHERE a.attrelid = pg_catalog.to_regclass('mission_control_runtime.checkpoint_writes') AND a.attnum > 0 AND NOT a.attisdropped) = 9",
+    "SELECT (SELECT pg_catalog.count(*) FROM pg_catalog.pg_attribute a WHERE a.attrelid = pg_catalog.to_regclass('mission_control_runtime.store_migrations') AND a.attnum > 0 AND NOT a.attisdropped) = 1",
+    "SELECT (SELECT pg_catalog.count(*) FROM pg_catalog.pg_attribute a WHERE a.attrelid = pg_catalog.to_regclass('mission_control_runtime.store') AND a.attnum > 0 AND NOT a.attisdropped) = 7",
+    "SELECT NOT EXISTS (SELECT 1 FROM pg_catalog.pg_index i JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'mission_control_runtime' AND NOT (i.indisvalid AND i.indisready))"
+  ]
+}

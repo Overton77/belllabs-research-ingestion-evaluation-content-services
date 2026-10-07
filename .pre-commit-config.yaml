@@ -1,0 +1,57 @@
+# Git hooks, run by prek (a Rust reimplementation of pre-commit that reads this same file).
+#
+#   make hooks        # uv run prek install   -> hooks run on every commit
+#   make precommit    # uv run prek run --all-files
+#
+# mypy is intentionally not a hook (minutes on a cold cache); `make typecheck` / `make ci` own it.
+# ty gives type feedback here in seconds.
+
+minimum_pre_commit_version: "3.2.0"
+default_install_hook_types: [pre-commit]
+default_stages: [pre-commit]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-added-large-files
+        args: [--maxkb=1500]
+      - id: check-merge-conflict
+      - id: check-toml
+      - id: check-yaml
+      - id: check-json
+        exclude: ^(\.vscode/|\.cursor/)
+      - id: detect-private-key
+      - id: end-of-file-fixer
+        types_or: [python, toml, yaml]
+      - id: trailing-whitespace
+        types_or: [python, toml, yaml]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    # Keep in step with the ruff version in uv.lock.
+    rev: v0.15.22
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.12.23
+    hooks:
+      # Fails the commit when pyproject.toml changed but uv.lock was not re-resolved.
+      - id: uv-lock
+
+  - repo: local
+    hooks:
+      - id: ty
+        name: ty check (fast types)
+        entry: uv run --no-sync ty check
+        language: system
+        types: [python]
+        pass_filenames: false
+      - id: deptry
+        name: deptry (dependency drift)
+        entry: uv run --no-sync deptry src
+        language: system
+        files: ^(src/|pyproject\.toml$)
+        pass_filenames: false

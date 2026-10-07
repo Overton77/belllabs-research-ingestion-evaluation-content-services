@@ -6,10 +6,10 @@ import json
 import asyncpg
 import pytest
 
-from mission_control.adapters.postgres.connections import apply_application_migrations
 from mission_control.adapters.postgres.run_control.run_control_repository import (
     PostgresRunControlRepository,
 )
+from mission_control.adapters.postgres.scope import apply_scope
 from mission_control.domain.authoring.canonical import sha256_digest
 from mission_control.domain.policies.contracts import (
     ApplyAuthorityBatchAction,
@@ -27,18 +27,55 @@ from mission_control.domain.policies.errors import (
     RunControlNotFound,
 )
 from mission_control.domain.policies.family_admission import FamilyAdmissionReceipt
+from tests.fixtures.mission_control_common_db import CommonDatabase
+from tests.integration.postgres.runtime_common import common_db as common_db
+from tests.integration.postgres.runtime_common import (
+    owner_rows,
+    scoped_command,
+    scoped_request,
+)
 from tests.unit.run_control.test_atomic_family_admission import (
     authority_batch,
-    family_mutation,
     family_service,
 )
-from tests.unit.run_control.test_run_control import command, request
+from tests.unit.run_control.test_atomic_family_admission import (
+    family_mutation as unit_family_mutation,
+)
+
+pytestmark = pytest.mark.common_db
+
+_BOUND: list[CommonDatabase] = []
+
+
+@pytest.fixture(autouse=True)
+def _bind_database(common_db: CommonDatabase):  # type: ignore[no-untyped-def]
+    _BOUND.append(common_db)
+    yield
+    _BOUND.remove(common_db)
+
+
+def scope(tenant: str = "tenant-1") -> str:
+    return _BOUND[-1].scope(tenant)
+
+
+def request(*, request_scope: str = "tenant-1", **kwargs: object):  # type: ignore[no-untyped-def]
+    return scoped_request(_BOUND[-1], request_scope, **kwargs)  # type: ignore[arg-type]
+
+
+def command(run_id: str, version: int, command_id: str, action: object):  # type: ignore[no-untyped-def]
+    return scoped_command(_BOUND[-1], run_id, version, command_id, action)
+
+
+def family_mutation(run_id: str, **kwargs: object):  # type: ignore[no-untyped-def]
+    return unit_family_mutation(run_id, **kwargs).model_copy(  # type: ignore[arg-type]
+        update={"request_scope": scope()}
+    )
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("combined", [False, True])
 async def test_postgres_stale_rejection_is_not_persisted(
-    test_application_postgres_dsn: str,
+    common_db: CommonDatabase,
     combined: bool,
 ) -> None:
     class PausingPostgresRepository(PostgresRunControlRepository):
@@ -60,14 +97,9 @@ async def test_postgres_stale_rejection_is_not_persisted(
                 await self.resume_command_read.wait()
             return await super().get_effects(request_scope, run_id)
 
-    pool = await asyncpg.create_pool(dsn=test_application_postgres_dsn, min_size=1, max_size=8)
-    family_writer_pool = await asyncpg.create_pool(
-        dsn=test_application_postgres_dsn, min_size=1, max_size=8
-    )
+    pool = await common_db.pool("mission_control_runtime", max_size=8)
+    family_writer_pool = await common_db.pool("mission_control_family_writer", max_size=8)
     try:
-        async with pool.acquire() as connection:
-            await connection.execute("DROP SCHEMA IF EXISTS belllabs_control CASCADE")
-        await apply_application_migrations(pool)
         repository = PausingPostgresRepository(pool, family_writer_pool)
         run_service, _ = family_service(repository)  # type: ignore[arg-type]
         parent = await run_service.admit(
@@ -75,7 +107,7 @@ async def test_postgres_stale_rejection_is_not_persisted(
         )
         assert parent.run_id is not None
         parent_run_id = parent.run_id
-        parent_budget = await run_service.get_budget("tenant-1", parent_run_id)
+        parent_budget = await run_service.get_budget(scope(), parent_run_id)
         child_request = request(request_id=f"postgres-rejection-child-{combined}")
         child_request = child_request.model_copy(
             update={
@@ -136,17 +168,17 @@ async def test_postgres_stale_rejection_is_not_persisted(
         )
         assert result.status == CommandStatus.ACCEPTED
 
-        async with pool.acquire() as connection:
-            stored_status = await connection.fetchval(
-                """
-                SELECT result->>'status'
-                FROM belllabs_control.lifecycle_command_results
-                WHERE run_id = $1 AND command_id = $2
-                """,
-                parent_run_id,
-                lifecycle.command_id,
-            )
-        assert stored_status == CommandStatus.ACCEPTED.value
+        stored = await owner_rows(
+            common_db,
+            """
+            SELECT result->>'status' AS status FROM mission_control.request_receipt
+            WHERE action = 'mc.run.lifecycle_command' AND resource_ref = $1
+              AND result->>'command_id' = $2
+            """,
+            parent_run_id,
+            lifecycle.command_id,
+        )
+        assert [row["status"] for row in stored] == [CommandStatus.ACCEPTED.value]
         if combined:
             assert (
                 await run_service.execute_family_admission(lifecycle, mutation) == result_or_receipt
@@ -154,15 +186,13 @@ async def test_postgres_stale_rejection_is_not_persisted(
         else:
             assert await run_service.execute(lifecycle) == result
     finally:
-        async with pool.acquire() as connection:
-            await connection.execute("DROP SCHEMA IF EXISTS belllabs_control CASCADE")
         await family_writer_pool.close()
         await pool.close()
 
 
 @pytest.mark.asyncio
 async def test_postgres_parent_rollup_cannot_be_overwritten_by_family_admission(
-    test_application_postgres_dsn: str,
+    common_db: CommonDatabase,
 ) -> None:
     class PausingPostgresRepository(PostgresRunControlRepository):
         def __init__(
@@ -183,21 +213,16 @@ async def test_postgres_parent_rollup_cannot_be_overwritten_by_family_admission(
                 await self.resume_family_read.wait()
             return await super().get_effects(request_scope, run_id)
 
-    pool = await asyncpg.create_pool(dsn=test_application_postgres_dsn, min_size=1, max_size=8)
-    family_writer_pool = await asyncpg.create_pool(
-        dsn=test_application_postgres_dsn, min_size=1, max_size=8
-    )
+    pool = await common_db.pool("mission_control_runtime", max_size=8)
+    family_writer_pool = await common_db.pool("mission_control_family_writer", max_size=8)
     try:
-        async with pool.acquire() as connection:
-            await connection.execute("DROP SCHEMA IF EXISTS belllabs_control CASCADE")
-        await apply_application_migrations(pool)
         pausing_repository = PausingPostgresRepository(pool, family_writer_pool)
         run_service, _ = family_service(pausing_repository)  # type: ignore[arg-type]
         parent = await run_service.admit(request(request_id="postgres-authority-parent"))
         assert parent.run_id is not None
         parent_run_id = parent.run_id
         pausing_repository.target_run_id = parent_run_id
-        parent_budget = await run_service.get_budget("tenant-1", parent_run_id)
+        parent_budget = await run_service.get_budget(scope(), parent_run_id)
         child_request = request(request_id="postgres-authority-child")
         child_request = child_request.model_copy(
             update={
@@ -235,7 +260,7 @@ async def test_postgres_parent_rollup_cannot_be_overwritten_by_family_admission(
         receipt = await family_task
 
         assert receipt.command_result.status == CommandStatus.ACCEPTED
-        final_budget = await run_service.get_budget("tenant-1", parent_run_id)
+        final_budget = await run_service.get_budget(scope(), parent_run_id)
         assert final_budget.reserved["tokens.total"] == 50
         assert final_budget.reservations["postgres-authority-family"] == {"tokens.total": 10}
 
@@ -265,34 +290,21 @@ async def test_postgres_parent_rollup_cannot_be_overwritten_by_family_admission(
         plain_result = await plain_task
 
         assert plain_result.status == CommandStatus.ACCEPTED
-        final_budget = await run_service.get_budget("tenant-1", parent_run_id)
+        final_budget = await run_service.get_budget(scope(), parent_run_id)
         assert final_budget.reserved["tokens.total"] == 80
         assert final_budget.reservations["postgres-authority-plain"] == {"tokens.total": 10}
     finally:
-        async with pool.acquire() as connection:
-            await connection.execute("DROP SCHEMA IF EXISTS belllabs_control CASCADE")
         await family_writer_pool.close()
         await pool.close()
 
 
 @pytest.mark.asyncio
 async def test_postgres_atomic_family_admission_contract(
-    test_application_postgres_dsn: str,
+    common_db: CommonDatabase,
 ) -> None:
-    pool = await asyncpg.create_pool(dsn=test_application_postgres_dsn, min_size=1, max_size=8)
-    family_writer_pool = await asyncpg.create_pool(
-        dsn=test_application_postgres_dsn, min_size=1, max_size=8
-    )
+    pool = await common_db.pool("mission_control_runtime", max_size=8)
+    family_writer_pool = await common_db.pool("mission_control_family_writer", max_size=8)
     try:
-        async with pool.acquire() as connection:
-            await connection.execute("DROP SCHEMA IF EXISTS belllabs_control CASCADE")
-        await apply_application_migrations(pool)
-        async with pool.acquire() as connection:
-            assert await connection.fetchval(
-                "SELECT EXISTS (SELECT 1 FROM belllabs_control.schema_migrations "
-                "WHERE version = '0017_atomic_family_admission_v1.sql')"
-            )
-
         repository = PostgresRunControlRepository(
             pool,
             family_writer_pool=family_writer_pool,
@@ -319,12 +331,14 @@ async def test_postgres_atomic_family_admission_contract(
                 ),
                 family_mutation(run_id, mutation_id="missing-writer"),
             )
-        assert (await run_service.get_run("tenant-1", run_id)).version == 1
+        assert (await run_service.get_run(scope(), run_id)).version == 1
         with pytest.raises(RunControlNotFound):
-            await repository.get_family_admission_receipt("tenant-2", run_id, "operator", "missing")
+            await repository.get_family_admission_receipt(
+                scope("tenant-2"), run_id, "operator", "missing"
+            )
         with pytest.raises(RunControlNotFound):
             await repository.get_family_head(
-                "tenant-2", run_id, "test_family", type(family_mutation(run_id))
+                scope("tenant-2"), run_id, "test_family", type(family_mutation(run_id))
             )
 
         for boundary in (
@@ -356,14 +370,10 @@ async def test_postgres_atomic_family_admission_contract(
                     ),
                     family_mutation(run_id, mutation_id=f"rollback-{boundary}"),
                 )
-            assert (await run_service.get_run("tenant-1", run_id)).version == 1
-            async with pool.acquire() as connection:
-                assert (
-                    await connection.fetchval(
-                        "SELECT count(*) FROM belllabs_control.family_admission_results"
-                    )
-                    == 0
-                )
+            assert (await run_service.get_run(scope(), run_id)).version == 1
+            assert not await owner_rows(
+                common_db, "SELECT 1 FROM mission_control.family_admission_result"
+            )
 
         first_command = command(
             run_id,
@@ -442,92 +452,80 @@ async def test_postgres_atomic_family_admission_contract(
                 winner_mutation.model_copy(update={"candidate_ref": "candidate:different"}),
             )
 
-        async with pool.acquire() as connection:
-            counts = await connection.fetchrow(
+        counts = (
+            await owner_rows(
+                common_db,
                 """
                 SELECT
-                  (SELECT count(*) FROM belllabs_control.family_admission_heads) AS heads,
-                  (SELECT count(*) FROM belllabs_control.family_admission_journal) AS journal,
-                  (SELECT count(*) FROM belllabs_control.family_admission_results) AS results,
-                  -- Reservation ledger entries are keyed by reservation identity.
-                  (SELECT count(*) FROM belllabs_control.budget_ledger
-                   WHERE idempotency_id IN ('concurrent-a', 'concurrent-b')) AS ledger,
-                  (SELECT count(*) FROM belllabs_control.outbox
+                  (SELECT count(*) FROM mission_control.family_admission_head) AS heads,
+                  (SELECT count(*) FROM mission_control.family_admission_journal) AS journal,
+                  (SELECT count(*) FROM mission_control.family_admission_result) AS results,
+                  -- Reservation entries are keyed by reservation identity (one per entry).
+                  (SELECT count(DISTINCT causation_ref) FROM mission_control.budget_entry
+                   WHERE source_key IN ('concurrent-a', 'concurrent-b')) AS ledger,
+                  (SELECT count(*) FROM mission_control.outbox
                    WHERE aggregate_version = 2) AS outbox
-                """
+                """,
             )
-            assert dict(counts) == {
-                "heads": 1,
-                "journal": 1,
-                "results": 2,
-                "ledger": 1,
-                "outbox": 2,
-            }
+        )[0]
+        assert dict(counts) == {
+            "heads": 1,
+            "journal": 1,
+            "results": 2,
+            "ledger": 1,
+            "outbox": 2,
+        }
 
         tenant_two = await run_service.admit(
             request(request_scope="tenant-2", request_id="family-tenant-two")
         )
         assert tenant_two.run_id is not None
         async with pool.acquire() as connection, connection.transaction():
-            await connection.execute("SET LOCAL ROLE belllabs_control_runtime")
-            await connection.execute(
-                "SELECT set_config('belllabs.request_scope', 'tenant-2', true)"
-            )
+            await apply_scope(connection, scope("tenant-2"))
             isolated_counts = await connection.fetchrow(
                 """
                 SELECT
-                  (SELECT count(*) FROM belllabs_control.family_admission_heads) AS heads,
-                  (SELECT count(*) FROM belllabs_control.family_admission_journal) AS journal,
-                  (SELECT count(*) FROM belllabs_control.family_admission_results) AS results
+                  (SELECT count(*) FROM mission_control.family_admission_head) AS heads,
+                  (SELECT count(*) FROM mission_control.family_admission_journal) AS journal,
+                  (SELECT count(*) FROM mission_control.family_admission_result) AS results
                 """
             )
             assert dict(isolated_counts) == {"heads": 0, "journal": 0, "results": 0}
             for table in (
-                "family_admission_heads",
+                "family_admission_head",
                 "family_admission_journal",
-                "family_admission_results",
+                "family_admission_result",
             ):
                 assert not await connection.fetchval(
                     "SELECT has_table_privilege("
-                    "'belllabs_control_runtime', $1, 'INSERT') "
+                    "'mission_control_runtime', $1, 'INSERT') "
                     "OR has_table_privilege("
-                    "'belllabs_control_runtime', $1, 'UPDATE')",
-                    f"belllabs_control.{table}",
+                    "'mission_control_runtime', $1, 'UPDATE')",
+                    f"mission_control.{table}",
                 )
-            assert (
-                await connection.fetchval(
-                    "SELECT to_regprocedure("
-                    "'belllabs_control.commit_family_admission("
-                    "text,text,text,bigint,text,text,text,jsonb,timestamptz,"
-                    "text,text,text,jsonb,timestamptz,boolean)')"
-                )
-                is None
-            )
             assert not await connection.fetchval(
                 "SELECT pg_has_role("
-                "'belllabs_control_runtime', "
-                "'belllabs_family_repository_writer', 'MEMBER')"
+                "'mission_control_runtime', "
+                "'mission_control_family_writer', 'MEMBER')"
             )
             assert not await connection.fetchval(
-                """
-                SELECT COALESCE((
-                    SELECT pg_has_role(
-                        app_role.oid, writer_role.oid, 'MEMBER'
-                    )
-                    FROM pg_roles app_role
-                    CROSS JOIN pg_roles writer_role
-                    WHERE app_role.rolname = 'belllabs_app'
-                      AND writer_role.rolname = 'belllabs_family_repository_writer'
-                ), false)
-                """
+                "SELECT pg_has_role(current_user, 'mission_control_family_writer', 'MEMBER')"
             )
-            with pytest.raises(asyncpg.PostgresError):
+        async with pool.acquire() as connection, connection.transaction():
+            await apply_scope(connection, scope())
+            with pytest.raises(asyncpg.InsufficientPrivilegeError):
                 await connection.execute(
                     """
-                    INSERT INTO belllabs_control.family_admission_heads
-                        (request_scope, run_id, family_kind, family_version,
-                         mutation_fingerprint, mutation, updated_at)
-                    VALUES ('tenant-1', $1, 'forged', 1, $2, '{}'::jsonb, clock_timestamp())
+                    INSERT INTO mission_control.family_admission_head (
+                        installation_id, application_id, tenant_id, family_admission_head_id,
+                        run_key, family_kind, family_version, mutation_fingerprint,
+                        mutation_contract, mutation, updated_at, created_at,
+                        created_by_actor_ref
+                    )
+                    SELECT installation_id, application_id, tenant_id, gen_random_uuid(),
+                           run_key, 'forged', 1, $2, 'mc.family-mutation/1', '{}'::jsonb,
+                           clock_timestamp(), clock_timestamp(), 'forged'
+                    FROM mission_control.mission_run WHERE run_key = $1
                     """,
                     run_id,
                     "sha256:" + "f" * 64,
@@ -541,21 +539,22 @@ async def test_postgres_atomic_family_admission_contract(
         )
         await run_service.execute(plain)
         async with pool.acquire() as connection, connection.transaction():
-            await connection.execute("SET LOCAL ROLE belllabs_control_runtime")
-            await connection.execute(
-                "SELECT set_config('belllabs.request_scope', 'tenant-1', true)"
-            )
+            await apply_scope(connection, scope())
             with pytest.raises(asyncpg.InsufficientPrivilegeError):
                 await connection.execute(
                     """
-                    INSERT INTO belllabs_control.family_admission_results
-                        (request_scope, run_id, idempotency_issuer, command_id,
-                         command_fingerprint, family_mutation_fingerprint,
-                         receipt, recorded_at)
-                    SELECT 'tenant-1', run_id, idempotency_issuer, command_id,
-                           command_fingerprint, $2, '{}'::jsonb, clock_timestamp()
-                    FROM belllabs_control.lifecycle_command_results
-                    WHERE run_id = $1 AND command_id = 'plain-collision'
+                    INSERT INTO mission_control.family_admission_result (
+                        installation_id, application_id, tenant_id,
+                        family_admission_result_id, run_key, idempotency_issuer, command_key,
+                        command_fingerprint, family_mutation_fingerprint, request_receipt_id,
+                        receipt_contract, receipt, recorded_at, created_at, created_by_actor_ref
+                    )
+                    SELECT installation_id, application_id, tenant_id, gen_random_uuid(),
+                           resource_ref, actor_ref, 'plain-collision', payload_digest, $2,
+                           request_receipt_id, 'mc.family-admission-receipt/1', '{}'::jsonb,
+                           clock_timestamp(), clock_timestamp(), 'forged'
+                    FROM mission_control.request_receipt
+                    WHERE resource_ref = $1 AND result->>'command_id' = 'plain-collision'
                     """,
                     run_id,
                     "sha256:" + "f" * 64,
@@ -572,24 +571,17 @@ async def test_postgres_atomic_family_admission_contract(
         with pytest.raises(IdempotencyConflict):
             await run_service.execute(winner_command)
     finally:
-        async with pool.acquire() as connection:
-            await connection.execute("DROP SCHEMA IF EXISTS belllabs_control CASCADE")
         await family_writer_pool.close()
         await pool.close()
 
 
 @pytest.mark.asyncio
 async def test_postgres_authority_batch_is_atomic_and_preserves_outbox_finality(
-    test_application_postgres_dsn: str,
+    common_db: CommonDatabase,
 ) -> None:
-    pool = await asyncpg.create_pool(dsn=test_application_postgres_dsn, min_size=1, max_size=8)
-    family_writer_pool = await asyncpg.create_pool(
-        dsn=test_application_postgres_dsn, min_size=1, max_size=8
-    )
+    pool = await common_db.pool("mission_control_runtime", max_size=8)
+    family_writer_pool = await common_db.pool("mission_control_family_writer", max_size=8)
     try:
-        async with pool.acquire() as connection:
-            await connection.execute("DROP SCHEMA IF EXISTS belllabs_control CASCADE")
-        await apply_application_migrations(pool)
         repository = PostgresRunControlRepository(
             pool,
             family_writer_pool=family_writer_pool,
@@ -704,7 +696,7 @@ async def test_postgres_authority_batch_is_atomic_and_preserves_outbox_finality(
             )
             == spoofed
         )
-        assert (await run_service.get_run("tenant-1", run_id)).version == 3
+        assert (await run_service.get_run(scope(), run_id)).version == 3
 
         for boundary in (
             "family_admission.after_run_control",
@@ -738,9 +730,9 @@ async def test_postgres_authority_batch_is_atomic_and_preserves_outbox_finality(
                         mutation_id=f"postgres-authority-batch-rollback-{boundary}",
                     ),
                 )
-            assert (await run_service.get_run("tenant-1", run_id)).version == 3
-            assert (await run_service.get_budget("tenant-1", run_id)).consumed == {}
-            assert (await run_service.get_effects("tenant-1", run_id)).claims[
+            assert (await run_service.get_run(scope(), run_id)).version == 3
+            assert (await run_service.get_budget(scope(), run_id)).consumed == {}
+            assert (await run_service.get_effects(scope(), run_id)).claims[
                 "effect-1"
             ].settlement is None
 
@@ -762,9 +754,9 @@ async def test_postgres_authority_batch_is_atomic_and_preserves_outbox_finality(
             family_mutation(run_id, mutation_id="postgres-authority-batch-rejected"),
         )
         assert rejected.command_result.status == CommandStatus.REJECTED
-        assert (await run_service.get_run("tenant-1", run_id)).version == 3
-        assert (await run_service.get_budget("tenant-1", run_id)).consumed == {}
-        assert (await run_service.get_effects("tenant-1", run_id)).claims[
+        assert (await run_service.get_run(scope(), run_id)).version == 3
+        assert (await run_service.get_budget(scope(), run_id)).consumed == {}
+        assert (await run_service.get_effects(scope(), run_id)).claims[
             "effect-1"
         ].settlement is None
 
@@ -773,45 +765,48 @@ async def test_postgres_authority_batch_is_atomic_and_preserves_outbox_finality(
         receipt = await run_service.execute_family_admission(lifecycle, mutation)
         assert receipt.command_result.status == CommandStatus.ACCEPTED
         assert await run_service.execute_family_admission(lifecycle, mutation) == receipt
-        projection = await run_service.get_run("tenant-1", run_id)
+        projection = await run_service.get_run(scope(), run_id)
         assert projection.version == 4
         assert len(projection.accepted_obligation_evidence) == 1
         assert len(projection.accepted_output_evidence) == 1
 
-        async with pool.acquire() as connection:
-            counts = await connection.fetchrow(
+        counts = (
+            await owner_rows(
+                common_db,
                 """
                 SELECT
-                  (SELECT count(*) FROM belllabs_control.lifecycle_transitions
-                   WHERE run_id = $1 AND resulting_version = 4) AS transitions,
-                  (SELECT count(*) FROM belllabs_control.budget_ledger
-                   WHERE run_id = $1 AND idempotency_id IN
+                  (SELECT count(*) FROM mission_control.run_lifecycle_transition
+                   WHERE run_key = $1 AND resulting_version = 4) AS transitions,
+                  (SELECT count(DISTINCT e.causation_ref) FROM mission_control.budget_entry e
+                   JOIN mission_control.mission_run r USING (installation_id, application_id,
+                                                             tenant_id, run_id)
+                   WHERE r.run_key = $1 AND e.source_key IN
                      ('accepted-usage', 'accepted-usage-settlement')) AS budget_entries,
-                  (SELECT count(*) FROM belllabs_control.effect_ledger_entries
-                   WHERE run_id = $1 AND kind IN ('observation', 'settlement')) AS effect_entries,
-                  (SELECT count(*) FROM belllabs_control.outbox
-                   WHERE aggregate_id = $1 AND aggregate_version = 4) AS outbox
+                  (SELECT count(*) FROM mission_control.effect_ledger_entry
+                   WHERE run_key = $1 AND kind IN ('observation', 'settlement')) AS effect_entries,
+                  (SELECT count(*) FROM mission_control.outbox
+                   WHERE aggregate_key = $1 AND aggregate_version = 4) AS outbox
                 """,
                 run_id,
             )
-            outbox = await connection.fetch(
-                """
-                SELECT event_type, sequence,
-                       (envelope->>'is_version_final')::boolean AS is_version_final,
-                       envelope->'payload'->>'authority_batch_digest' AS batch_digest,
-                       CASE
-                         WHEN envelope->'payload' ? 'action_identity_summary'
-                         THEN jsonb_array_length(
-                           envelope->'payload'->'action_identity_summary'
-                         )
-                         ELSE NULL
-                       END AS identity_count
-                FROM belllabs_control.outbox
-                WHERE aggregate_id = $1 AND aggregate_version = 4
-                ORDER BY sequence
-                """,
-                run_id,
-            )
+        )[0]
+        outbox = await owner_rows(
+            common_db,
+            """
+            SELECT event_type, aggregate_sequence AS sequence,
+                   (payload->>'is_version_final')::boolean AS is_version_final,
+                   payload->'payload'->>'authority_batch_digest' AS batch_digest,
+                   CASE
+                     WHEN payload->'payload' ? 'action_identity_summary'
+                     THEN jsonb_array_length(payload->'payload'->'action_identity_summary')
+                     ELSE NULL
+                   END AS identity_count
+            FROM mission_control.outbox
+            WHERE aggregate_key = $1 AND aggregate_version = 4
+            ORDER BY aggregate_sequence
+            """,
+            run_id,
+        )
         assert dict(counts) == {
             "transitions": 1,
             "budget_entries": 4,
@@ -829,24 +824,17 @@ async def test_postgres_authority_batch_is_atomic_and_preserves_outbox_finality(
         assert outbox[1]["batch_digest"] is None
         assert outbox[1]["identity_count"] is None
     finally:
-        async with pool.acquire() as connection:
-            await connection.execute("DROP SCHEMA IF EXISTS belllabs_control CASCADE")
         await family_writer_pool.close()
         await pool.close()
 
 
 @pytest.mark.asyncio
 async def test_postgres_usage_settlement_provenance_is_exact_and_replayable(
-    test_application_postgres_dsn: str,
+    common_db: CommonDatabase,
 ) -> None:
-    pool = await asyncpg.create_pool(dsn=test_application_postgres_dsn, min_size=1, max_size=8)
-    family_writer_pool = await asyncpg.create_pool(
-        dsn=test_application_postgres_dsn, min_size=1, max_size=8
-    )
+    pool = await common_db.pool("mission_control_runtime", max_size=8)
+    family_writer_pool = await common_db.pool("mission_control_family_writer", max_size=8)
     try:
-        async with pool.acquire() as connection:
-            await connection.execute("DROP SCHEMA IF EXISTS belllabs_control CASCADE")
-        await apply_application_migrations(pool)
         repository = PostgresRunControlRepository(
             pool,
             family_writer_pool=family_writer_pool,
@@ -1031,44 +1019,37 @@ async def test_postgres_usage_settlement_provenance_is_exact_and_replayable(
         settled_effect = await run_service.execute(settle_effect_command)
         assert settled_effect.status == CommandStatus.ACCEPTED
         assert await run_service.execute(settle_effect_command) == settled_effect
-        budget = await run_service.get_budget("tenant-1", run_id)
+        budget = await run_service.get_budget(scope(), run_id)
         provenance = budget.usage_settlements["correct-settlement"]
         assert provenance.usage_id == "pending-usage"
         assert provenance.reservation_id == "effect-reservation"
         assert "empty-settlement" not in budget.usage_settlements
-        effects = await run_service.get_effects("tenant-1", run_id)
+        effects = await run_service.get_effects(scope(), run_id)
         assert effects.claims["effect-1"].settlement is not None
     finally:
-        async with pool.acquire() as connection:
-            await connection.execute("DROP SCHEMA IF EXISTS belllabs_control CASCADE")
         await family_writer_pool.close()
         await pool.close()
 
 
 @pytest.mark.asyncio
 async def test_postgres_authority_cas_ignores_set_and_map_construction_order(
-    test_application_postgres_dsn: str,
+    common_db: CommonDatabase,
 ) -> None:
     class ReorderedPostgresRepository(PostgresRunControlRepository):
         async def get_budget(self, request_scope: str, run_id: str) -> BudgetState:
             state = await super().get_budget(request_scope, run_id)
             return state.model_copy(
                 update={
-                    "usage_ids": frozenset(reversed(sorted(state.usage_ids))),
-                    "settlement_ids": frozenset(reversed(sorted(state.settlement_ids))),
+                    "usage_ids": frozenset(sorted(state.usage_ids, reverse=True)),
+                    "settlement_ids": frozenset(sorted(state.settlement_ids, reverse=True)),
                     "usage_records": dict(reversed(tuple(state.usage_records.items()))),
                     "usage_settlements": dict(reversed(tuple(state.usage_settlements.items()))),
                 }
             )
 
-    pool = await asyncpg.create_pool(dsn=test_application_postgres_dsn, min_size=1, max_size=8)
-    family_writer_pool = await asyncpg.create_pool(
-        dsn=test_application_postgres_dsn, min_size=1, max_size=8
-    )
+    pool = await common_db.pool("mission_control_runtime", max_size=8)
+    family_writer_pool = await common_db.pool("mission_control_family_writer", max_size=8)
     try:
-        async with pool.acquire() as connection:
-            await connection.execute("DROP SCHEMA IF EXISTS belllabs_control CASCADE")
-        await apply_application_migrations(pool)
         repository = ReorderedPostgresRepository(
             pool,
             family_writer_pool=family_writer_pool,
@@ -1079,20 +1060,21 @@ async def test_postgres_authority_cas_ignores_set_and_map_construction_order(
         run_id = admitted.run_id
         identifiers = [f"identity-{index:02d}" for index in range(40)]
         settlements = [f"settlement-{item}" for item in identifiers]
-        async with pool.acquire() as connection:
-            await connection.execute(
-                """
-                UPDATE belllabs_control.budget_accounts
-                SET state = jsonb_set(
-                    jsonb_set(state, '{usage_ids}', $2::jsonb),
-                    '{settlement_ids}', $3::jsonb
-                )
-                WHERE run_id = $1
-                """,
-                run_id,
-                json.dumps(identifiers),
-                json.dumps(settlements),
+        await owner_rows(
+            common_db,
+            """
+            UPDATE mission_control.budget_account
+            SET state = jsonb_set(
+                jsonb_set(state, '{usage_ids}', $2::jsonb),
+                '{settlement_ids}', $3::jsonb
             )
+            WHERE run_id = (SELECT run_id FROM mission_control.mission_run WHERE run_key = $1)
+            RETURNING 1
+            """,
+            run_id,
+            json.dumps(identifiers),
+            json.dumps(settlements),
+        )
         plain = await run_service.execute(
             command(
                 run_id,
@@ -1122,7 +1104,5 @@ async def test_postgres_authority_cas_ignores_set_and_map_construction_order(
         )
         assert combined.command_result.status == CommandStatus.ACCEPTED
     finally:
-        async with pool.acquire() as connection:
-            await connection.execute("DROP SCHEMA IF EXISTS belllabs_control CASCADE")
         await family_writer_pool.close()
         await pool.close()

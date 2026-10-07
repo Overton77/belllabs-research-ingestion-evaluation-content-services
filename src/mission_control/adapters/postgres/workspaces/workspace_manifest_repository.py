@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncpg
 
+from mission_control.adapters.postgres.scope import apply_scope
+from mission_control.contracts.identities import parse_request_scope, uuid7
 from mission_control.domain.execution.contracts import (
     WorkspaceMaterializationManifest,
     WorkspaceMaterializationRequest,
@@ -16,20 +18,26 @@ from mission_control.domain.execution.materialization import (
 )
 from mission_control.domain.policies.errors import IdempotencyConflict
 
+_SERVICE_ACTOR = "service:mission-control-workspaces"
+
 
 class PostgresWorkspaceManifestRepository:
-    """Scoped, append-only workspace lineage and transactional writable reservations."""
+    """Scoped, append-only workspace lineage and transactional writable reservations.
+
+    Support records ``mission_control.workspace_manifest`` and
+    ``mission_control.workspace_slot_reservation`` under the tenant request scope.
+    """
 
     def __init__(self, pool: asyncpg.Pool, *, request_scope: str) -> None:
         if not request_scope.strip():
             raise ValueError("workspace repository requires request scope")
         self._pool = pool
         self._scope = request_scope
+        parsed = parse_request_scope(request_scope)
+        self._key = (parsed.installation_id, parsed.application_id, parsed.tenant_id)
 
     async def _scope_connection(self, connection: asyncpg.Connection) -> None:
-        await connection.execute(
-            "SELECT set_config('belllabs.request_scope', $1, true)", self._scope
-        )
+        await apply_scope(connection, self._scope)
 
     async def _lock(self, connection: asyncpg.Connection, namespace_id: str) -> None:
         await self._scope_connection(connection)
@@ -48,15 +56,16 @@ class PostgresWorkspaceManifestRepository:
                     continue
                 boundary = slot_ownership_boundary(slot.logical_path)
                 prior = await connection.fetchrow(
-                    """SELECT workspace_id, owner_id, reservation_token
-                       FROM belllabs_control.workspace_slot_reservations
-                       WHERE request_scope=$1 AND namespace_id=$2 AND logical_path=$3""",
-                    self._scope,
+                    """SELECT workspace_key, owner_key, reservation_token
+                       FROM mission_control.workspace_slot_reservation
+                       WHERE installation_id=$1 AND application_id=$2 AND tenant_id=$3
+                         AND namespace_key=$4 AND logical_path=$5""",
+                    *self._key,
                     request.namespace_id,
                     boundary,
                 )
                 if prior is not None:
-                    if (prior["workspace_id"], prior["owner_id"]) != (
+                    if (prior["workspace_key"], prior["owner_key"]) != (
                         request.workspace_id,
                         slot.owner.owner_id,
                     ) or prior["reservation_token"] not in accepted:
@@ -65,27 +74,31 @@ class PostgresWorkspaceManifestRepository:
                         )
                     continue
                 await connection.execute(
-                    """INSERT INTO belllabs_control.workspace_slot_reservations
-                       (request_scope, namespace_id, logical_path, workspace_id,
-                        owner_id, reservation_token, reserved_at)
-                       VALUES ($1,$2,$3,$4,$5,$6,$7)""",
-                    self._scope,
+                    """INSERT INTO mission_control.workspace_slot_reservation
+                       (installation_id, application_id, tenant_id, slot_reservation_id,
+                        namespace_key, logical_path, workspace_key, owner_key,
+                        reservation_token, reserved_at, created_at, created_by_actor_ref)
+                       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,clock_timestamp(),$11)""",
+                    *self._key,
+                    uuid7(),
                     request.namespace_id,
                     boundary,
                     request.workspace_id,
                     slot.owner.owner_id,
                     token,
                     request.created_at,
+                    _SERVICE_ACTOR,
                 )
 
     async def _current(
         self, connection: asyncpg.Connection, namespace_id: str, workspace_id: str
     ) -> WorkspaceMaterializationManifest | None:
         rows = await connection.fetch(
-            """SELECT payload FROM belllabs_control.workspace_manifests
-               WHERE request_scope=$1 AND namespace_id=$2 AND workspace_id=$3
+            """SELECT payload FROM mission_control.workspace_manifest
+               WHERE installation_id=$1 AND application_id=$2 AND tenant_id=$3
+                 AND namespace_key=$4 AND workspace_key=$5
                ORDER BY revision DESC LIMIT 2""",
-            self._scope,
+            *self._key,
             namespace_id,
             workspace_id,
         )
@@ -120,9 +133,10 @@ class PostgresWorkspaceManifestRepository:
             async with self._pool.acquire() as connection, connection.transaction():
                 await self._lock(connection, manifest.namespace_id)
                 matching = await connection.fetchval(
-                    """SELECT payload FROM belllabs_control.workspace_manifests
-                       WHERE request_scope=$1 AND manifest_id=$2""",
-                    self._scope,
+                    """SELECT payload FROM mission_control.workspace_manifest
+                       WHERE installation_id=$1 AND application_id=$2 AND tenant_id=$3
+                         AND manifest_key=$4""",
+                    *self._key,
                     manifest.manifest_id,
                 )
                 if matching is not None:
@@ -142,11 +156,15 @@ class PostgresWorkspaceManifestRepository:
                 ):
                     raise IdempotencyConflict("workspace manifest lineage conflict")
                 await connection.execute(
-                    """INSERT INTO belllabs_control.workspace_manifests
-                       (request_scope, namespace_id, workspace_id, revision, manifest_id,
-                        manifest_digest, prior_manifest_digest, payload, created_at)
-                       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9)""",
-                    self._scope,
+                    """INSERT INTO mission_control.workspace_manifest
+                       (installation_id, application_id, tenant_id, workspace_manifest_id,
+                        namespace_key, workspace_key, revision, manifest_key, manifest_digest,
+                        prior_manifest_digest, payload, manifest_created_at, created_at,
+                        created_by_actor_ref)
+                       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,
+                               clock_timestamp(),$13)""",
+                    *self._key,
+                    uuid7(),
                     manifest.namespace_id,
                     manifest.workspace_id,
                     manifest.revision,
@@ -155,6 +173,7 @@ class PostgresWorkspaceManifestRepository:
                     manifest.prior_manifest_digest,
                     manifest.model_dump_json(),
                     manifest.created_at,
+                    _SERVICE_ACTOR,
                 )
                 return manifest
         except asyncpg.UniqueViolationError as error:

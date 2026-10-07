@@ -1,0 +1,295 @@
+{
+  "descriptor_bound_to_release": true,
+  "descriptor_sha256": "b0330c546284548791dffae3c19452952db008fe5b32d36e8cc1a63488b93cfd",
+  "final": {
+    "complete": true,
+    "holds": [],
+    "invalid_indexes": [],
+    "schema": "mission_control_runtime",
+    "schema_exists": true,
+    "steps": [
+      {
+        "concurrent": false,
+        "id": "prerequisite.schema_role",
+        "sha256": "74ff2240976abcccfc8246a2ba5daf63655cc0b55966a0ed5ef234d7700c40e8",
+        "status": "complete"
+      },
+      {
+        "concurrent": false,
+        "id": "saver.v0",
+        "sha256": "ce7cab847fabee5cf941b9fd0444d10d66cd3cf87eb53b10776e218f9cf318a1",
+        "status": "complete"
+      },
+      {
+        "concurrent": false,
+        "id": "saver.v1",
+        "sha256": "99cdcac4b487dff1b05eece6225f3434fade396355495a0a34b0ae813da5a12c",
+        "status": "complete"
+      },
+      {
+        "concurrent": false,
+        "id": "saver.v2",
+        "sha256": "bcfa850d8ef40fc86930c1fd07d703383f78971c63ec4378866ef7a3516ee75d",
+        "status": "complete"
+      },
+      {
+        "concurrent": false,
+        "id": "saver.v3",
+        "sha256": "89a3c15d1431daad3dffe1d587bb59f4f74f03a25a08b34730b0884eb966cd02",
+        "status": "complete"
+      },
+      {
+        "concurrent": false,
+        "id": "saver.v4",
+        "sha256": "9509f161775a6e65d479523f5e8baad185b67540d85717a9cda5e41828daaa7c",
+        "status": "complete"
+      },
+      {
+        "concurrent": false,
+        "id": "saver.v5",
+        "sha256": "17db4fd369edb9244b9f91d9aeed145c3d04ad8ba6e95d06247f07a63527d11a",
+        "status": "complete"
+      },
+      {
+        "concurrent": true,
+        "id": "saver.v6",
+        "sha256": "eb1fff5be82002c71dd32ddba2106e0472fa28c867fa897ac45a5e3bbb58806e",
+        "status": "complete"
+      },
+      {
+        "concurrent": true,
+        "id": "saver.v7",
+        "sha256": "78f503d280c95f2d4428295df25cb7f3669affb46be10c8c8ba46bde5ee84510",
+        "status": "complete"
+      },
+      {
+        "concurrent": true,
+        "id": "saver.v8",
+        "sha256": "ea9b612ca341fbe6cb1daca3e9b159bf10a986a7e1341925e5e6ba81f131f01f",
+        "status": "complete"
+      },
+      {
+        "concurrent": false,
+        "id": "saver.v9",
+        "sha256": "e181a76c88b0b51977c9b5ddb95c8747e77077710c0bea28cdcf96305f35c948",
+        "status": "complete"
+      },
+      {
+        "concurrent": false,
+        "id": "store.ledger",
+        "sha256": "936534b176b895c17c596e1a165857145937c1aaf0b9dfd31c060d0ee41355f9",
+        "status": "complete"
+      },
+      {
+        "concurrent": false,
+        "id": "store.v0",
+        "sha256": "bca2404eecfb5f032ab479d27fa7be0cfaef84d1efd26d92f938d4c52df52d40",
+        "status": "complete"
+      },
+      {
+        "concurrent": true,
+        "id": "store.v1",
+        "sha256": "0cb84b0918382ba4a9b3899103e2ed8bd92395b29d964a5f21de2de667905c0e",
+        "status": "complete"
+      },
+      {
+        "concurrent": false,
+        "id": "store.v2",
+        "sha256": "83fb4d70e7dbb73187457fcc5e9cf7bd54c1b07c6747b425a4520c70ff542577",
+        "status": "complete"
+      },
+      {
+        "concurrent": false,
+        "id": "store.v3",
+        "sha256": "b29a372beb8e093a73749b86aef6abbb628e4b60c7a4b1dbee919a3d82a3a54e",
+        "status": "complete"
+      },
+      {
+        "concurrent": false,
+        "id": "post.grants",
+        "sha256": "a1f42b7e45864f8a23457f621a3c4fc662644f97a427064fb505581d9b8579f5",
+        "status": "complete"
+      }
+    ]
+  },
+  "finished_at": "2026-10-04T01:07:18.624345+00:00",
+  "format": "mission-control-runtime-receipt/v1",
+  "pins": {
+    "langgraph": "1.2.10",
+    "langgraph-checkpoint": "4.1.1",
+    "langgraph-checkpoint-postgres": "3.1.1",
+    "psycopg": "3.3.4"
+  },
+  "run_id": "25584b800b888db0",
+  "started_at": "2026-10-04T01:06:41.794570+00:00",
+  "status": "complete",
+  "steps": [
+    {
+      "concurrent": false,
+      "finished_at": "2026-10-04T01:06:51.999347+00:00",
+      "id": "prerequisite.schema_role",
+      "observed": "pending",
+      "sha256": "74ff2240976abcccfc8246a2ba5daf63655cc0b55966a0ed5ef234d7700c40e8",
+      "started_at": "2026-10-04T01:06:50.986989+00:00",
+      "status": "completed"
+    },
+    {
+      "concurrent": false,
+      "finished_at": "2026-10-04T01:06:53.093386+00:00",
+      "id": "saver.v0",
+      "observed": "pending",
+      "sha256": "ce7cab847fabee5cf941b9fd0444d10d66cd3cf87eb53b10776e218f9cf318a1",
+      "started_at": "2026-10-04T01:06:52.351108+00:00",
+      "status": "completed"
+    },
+    {
+      "concurrent": false,
+      "finished_at": "2026-10-04T01:06:54.124055+00:00",
+      "id": "saver.v1",
+      "observed": "pending",
+      "sha256": "99cdcac4b487dff1b05eece6225f3434fade396355495a0a34b0ae813da5a12c",
+      "started_at": "2026-10-04T01:06:53.416690+00:00",
+      "status": "completed"
+    },
+    {
+      "concurrent": false,
+      "finished_at": "2026-10-04T01:06:55.183994+00:00",
+      "id": "saver.v2",
+      "observed": "pending",
+      "sha256": "bcfa850d8ef40fc86930c1fd07d703383f78971c63ec4378866ef7a3516ee75d",
+      "started_at": "2026-10-04T01:06:54.459183+00:00",
+      "status": "completed"
+    },
+    {
+      "concurrent": false,
+      "finished_at": "2026-10-04T01:06:56.225309+00:00",
+      "id": "saver.v3",
+      "observed": "pending",
+      "sha256": "89a3c15d1431daad3dffe1d587bb59f4f74f03a25a08b34730b0884eb966cd02",
+      "started_at": "2026-10-04T01:06:55.515134+00:00",
+      "status": "completed"
+    },
+    {
+      "concurrent": false,
+      "finished_at": "2026-10-04T01:06:58.993937+00:00",
+      "id": "saver.v4",
+      "observed": "pending",
+      "sha256": "9509f161775a6e65d479523f5e8baad185b67540d85717a9cda5e41828daaa7c",
+      "started_at": "2026-10-04T01:06:56.996175+00:00",
+      "status": "completed"
+    },
+    {
+      "concurrent": false,
+      "finished_at": "2026-10-04T01:07:00.407386+00:00",
+      "id": "saver.v5",
+      "observed": "pending",
+      "sha256": "17db4fd369edb9244b9f91d9aeed145c3d04ad8ba6e95d06247f07a63527d11a",
+      "started_at": "2026-10-04T01:06:59.856447+00:00",
+      "status": "completed"
+    },
+    {
+      "concurrent": true,
+      "finished_at": "2026-10-04T01:07:01.882194+00:00",
+      "id": "saver.v6",
+      "observed": "pending",
+      "sha256": "eb1fff5be82002c71dd32ddba2106e0472fa28c867fa897ac45a5e3bbb58806e",
+      "started_at": "2026-10-04T01:07:01.154933+00:00",
+      "status": "completed"
+    },
+    {
+      "concurrent": true,
+      "finished_at": "2026-10-04T01:07:03.144525+00:00",
+      "id": "saver.v7",
+      "observed": "pending",
+      "sha256": "78f503d280c95f2d4428295df25cb7f3669affb46be10c8c8ba46bde5ee84510",
+      "started_at": "2026-10-04T01:07:02.669994+00:00",
+      "status": "completed"
+    },
+    {
+      "concurrent": true,
+      "finished_at": "2026-10-04T01:07:04.059833+00:00",
+      "id": "saver.v8",
+      "observed": "pending",
+      "sha256": "ea9b612ca341fbe6cb1daca3e9b159bf10a986a7e1341925e5e6ba81f131f01f",
+      "started_at": "2026-10-04T01:07:03.594974+00:00",
+      "status": "completed"
+    },
+    {
+      "concurrent": false,
+      "finished_at": "2026-10-04T01:07:05.049510+00:00",
+      "id": "saver.v9",
+      "observed": "pending",
+      "sha256": "e181a76c88b0b51977c9b5ddb95c8747e77077710c0bea28cdcf96305f35c948",
+      "started_at": "2026-10-04T01:07:04.519289+00:00",
+      "status": "completed"
+    },
+    {
+      "concurrent": false,
+      "finished_at": "2026-10-04T01:07:05.799305+00:00",
+      "id": "store.ledger",
+      "observed": "pending",
+      "sha256": "936534b176b895c17c596e1a165857145937c1aaf0b9dfd31c060d0ee41355f9",
+      "started_at": "2026-10-04T01:07:05.251409+00:00",
+      "status": "completed"
+    },
+    {
+      "concurrent": false,
+      "finished_at": "2026-10-04T01:07:06.803253+00:00",
+      "id": "store.v0",
+      "observed": "pending",
+      "sha256": "bca2404eecfb5f032ab479d27fa7be0cfaef84d1efd26d92f938d4c52df52d40",
+      "started_at": "2026-10-04T01:07:06.110745+00:00",
+      "status": "completed"
+    },
+    {
+      "concurrent": true,
+      "finished_at": "2026-10-04T01:07:07.694101+00:00",
+      "id": "store.v1",
+      "observed": "pending",
+      "sha256": "0cb84b0918382ba4a9b3899103e2ed8bd92395b29d964a5f21de2de667905c0e",
+      "started_at": "2026-10-04T01:07:07.246903+00:00",
+      "status": "completed"
+    },
+    {
+      "concurrent": false,
+      "finished_at": "2026-10-04T01:07:08.664239+00:00",
+      "id": "store.v2",
+      "observed": "pending",
+      "sha256": "83fb4d70e7dbb73187457fcc5e9cf7bd54c1b07c6747b425a4520c70ff542577",
+      "started_at": "2026-10-04T01:07:08.151333+00:00",
+      "status": "completed"
+    },
+    {
+      "concurrent": false,
+      "finished_at": "2026-10-04T01:07:09.367280+00:00",
+      "id": "store.v3",
+      "observed": "pending",
+      "sha256": "b29a372beb8e093a73749b86aef6abbb628e4b60c7a4b1dbee919a3d82a3a54e",
+      "started_at": "2026-10-04T01:07:08.987751+00:00",
+      "status": "completed"
+    },
+    {
+      "concurrent": false,
+      "finished_at": "2026-10-04T01:07:10.663190+00:00",
+      "id": "post.grants",
+      "observed": "pending",
+      "sha256": "a1f42b7e45864f8a23457f621a3c4fc662644f97a427064fb505581d9b8579f5",
+      "started_at": "2026-10-04T01:07:09.459554+00:00",
+      "status": "completed"
+    }
+  ],
+  "target": {
+    "app": "biotech",
+    "application_id": "biotech",
+    "approved_by": "project owner, Claude Code session 2026-10-03 (approved LIVE_PLAN.md)",
+    "database_host": "db.bxnetwiimwhtlrjlbtab.supabase.co",
+    "database_name": "postgres",
+    "database_port": "5432",
+    "database_user": "postgres",
+    "environment": "production",
+    "identity_evidence": "docs/qualification/two-project/biotech-research-ingestion/g0-readonly-20261003/identity.json; route host/login carry project ref; credential source .env DATABASE_DIRECT (mission-control)",
+    "installation_id": "01a103c0-9a9e-7a95-961b-29dda83c842b",
+    "project_label": "biotech-research-ingestion",
+    "project_ref": "bxnetwiimwhtlrjlbtab"
+  }
+}

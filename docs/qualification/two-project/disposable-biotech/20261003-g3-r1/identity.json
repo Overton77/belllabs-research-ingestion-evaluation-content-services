@@ -1,0 +1,29 @@
+{
+  "identity_matches_target": true,
+  "note": "Route/project identity evidence is the referenced identity_evidence; an inserted installation row alone does not prove which project was reached.",
+  "observed_installation": [
+    {
+      "application_id": "biotech",
+      "environment": "disposable",
+      "installation_id": "0192a4f0-0000-7000-8000-00000000b10e",
+      "schema_component_version": "1.0.0",
+      "state": "active",
+      "supabase_project_ref": "mcdisposablebiotech"
+    }
+  ],
+  "server_version_num": 170011,
+  "target": {
+    "app": "biotech",
+    "application_id": "biotech",
+    "approved_by": "lead:disposable-qualification",
+    "database_host": "127.0.0.1",
+    "database_name": "postgres",
+    "database_port": "55551",
+    "database_user": "mc_migrator",
+    "environment": "disposable",
+    "identity_evidence": "local docker disposable cluster for biotech",
+    "installation_id": "0192a4f0-0000-7000-8000-00000000b10e",
+    "project_label": "disposable-biotech",
+    "project_ref": "mcdisposablebiotech"
+  }
+}

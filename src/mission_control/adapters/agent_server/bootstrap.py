@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 from langgraph.types import interrupt
@@ -17,7 +17,7 @@ from mission_control.domain.graph_runtime.identities import ExecutionEpochKey
 
 def make_bootstrap_node(
     reconciler: RuntimeBootstrapReconciler | None,
-):
+) -> Callable[[Mapping[str, Any], Any], Awaitable[dict[str, object]]]:
     async def bootstrap_runtime_authority(
         state: Mapping[str, Any],
         runtime: Any,

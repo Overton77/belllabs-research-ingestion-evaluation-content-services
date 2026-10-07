@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+
 from biotech_mission_adapters.adapters.temporal.coordinator_runtime import (
     SchemaGroundingCoordinatorRuntimeDependencies,
     create_schema_grounding_coordinator_runtime,
@@ -33,7 +34,6 @@ from biotech_mission_adapters.domain.schema_grounding.contracts import (
     DurableObjectRef,
     SchemaCatalogBuildRequest,
 )
-
 from mission_control.adapters.storage.control_plane_payloads import InMemoryPayloadStore
 from mission_control.adapters.temporal.coordinator_runtime import (
     GoalDirectedCoordinatorDependencies,

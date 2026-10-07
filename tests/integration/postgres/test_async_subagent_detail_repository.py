@@ -1,11 +1,15 @@
-"""Actual PostgreSQL transactional detail replacement; no provider or Mongo calls."""
+"""Actual PostgreSQL transactional detail replacement on mission_control; no provider calls.
+
+Each test runs on a fresh disposable common database as a restricted login of
+`mission_control_runtime`; child details are bound to a real admitted parent run.
+"""
 
 from __future__ import annotations
 
 import asyncio
-import os
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
 
 import asyncpg
 import pytest
@@ -14,7 +18,10 @@ import pytest_asyncio
 from mission_control.adapters.postgres.async_subagents.async_subagent_detail_repository import (
     PostgresAsyncSubagentDetailRepository,
 )
-from mission_control.adapters.postgres.connections import apply_application_migrations
+from mission_control.adapters.postgres.run_control.run_control_repository import (
+    PostgresRunControlRepository,
+)
+from mission_control.adapters.postgres.scope import apply_scope
 from mission_control.application.subordinates.service import AsyncSubagentError
 from mission_control.domain.execution.contracts import (
     AsyncSubagentContract,
@@ -25,38 +32,43 @@ from mission_control.domain.execution.contracts import (
     ParentAsyncSubagentLink,
 )
 from tests.acceptance.control_plane.test_wp_cp_045 import contract
+from tests.fixtures.mission_control_common_db import CommonDatabase
+from tests.integration.postgres.runtime_common import common_db as common_db
+from tests.integration.postgres.runtime_common import scoped_request
+from tests.unit.run_control.test_run_control import service
+
+pytestmark = pytest.mark.common_db
 
 NOW = datetime(2026, 10, 3, tzinfo=UTC)
 
 
+@dataclass(frozen=True)
+class DetailEnvironment:
+    pool: asyncpg.Pool
+    db: CommonDatabase
+    scope: str
+    run_id: str
+
+
 @pytest_asyncio.fixture
-async def detail_pool():
-    dsn = os.environ.get("TEST_APPLICATION_POSTGRES_DSN")
-    if not dsn:
-        pytest.fail("Set TEST_APPLICATION_POSTGRES_DSN to an isolated disposable database")
-    owner = await asyncpg.create_pool(dsn, min_size=1, max_size=2)
+async def detail_env(common_db: CommonDatabase) -> AsyncIterator[DetailEnvironment]:
+    pool = await common_db.pool(max_size=8)
     try:
-        await apply_application_migrations(owner)
-    finally:
-        await owner.close()
-
-    async def runtime_role(connection):
-        await connection.execute("SET ROLE belllabs_control_runtime")
-
-    pool = await asyncpg.create_pool(dsn, min_size=1, max_size=8, setup=runtime_role)
-    try:
-        yield pool
+        run_service, _ = service(PostgresRunControlRepository(pool))  # type: ignore[arg-type]
+        admitted = await run_service.admit(scoped_request(common_db, request_id="detail-parent"))
+        assert admitted.run_id is not None
+        yield DetailEnvironment(pool, common_db, common_db.scope(), admitted.run_id)
     finally:
         await pool.close()
 
 
-def details():
+def details(parent_run_id: str):  # type: ignore[no-untyped-def]
     specification = contract()
     execution = AsyncSubagentExecution(
         child_execution_id="child-1",
         contract_id=specification.contract_id,
         contract_digest=specification.contract_digest,
-        parent_run_id="parent-1",
+        parent_run_id=parent_run_id,
         parent_operation_id="operation-1",
         parent_binding_id="binding-1",
         execution_generation=1,
@@ -84,10 +96,10 @@ def details():
     return specification, execution, link
 
 
-async def test_atomic_create_replay_and_scope(detail_pool):
-    repository = PostgresAsyncSubagentDetailRepository(detail_pool)
-    scope = str(uuid4())
-    specification, execution, link = details()
+async def test_atomic_create_replay_and_scope(detail_env):
+    repository = PostgresAsyncSubagentDetailRepository(detail_env.pool)
+    scope = detail_env.scope
+    specification, execution, link = details(detail_env.run_id)
     results = await asyncio.gather(
         *[repository.create_before_submit(scope, specification, execution, link) for _ in range(8)]
     )
@@ -95,7 +107,9 @@ async def test_atomic_create_replay_and_scope(detail_pool):
     assert await repository.get_contract(scope, specification.contract_id) == specification
     assert await repository.get_link(scope, execution.child_execution_id) == link
     with pytest.raises(AsyncSubagentError, match="not found"):
-        await repository.get_execution("other-" + scope, execution.child_execution_id)
+        await repository.get_execution(
+            detail_env.db.scope("tenant-2"), execution.child_execution_id
+        )
     with pytest.raises(AsyncSubagentError, match="identity collision"):
         await repository.create_before_submit(
             scope, specification, execution.model_copy(update={"objective_ref": "changed"}), link
@@ -124,10 +138,10 @@ async def test_atomic_create_replay_and_scope(detail_pool):
         await repository.get_execution(scope, new_execution.child_execution_id)
 
 
-async def test_execution_monotonic_save_and_identity(detail_pool):
-    repository = PostgresAsyncSubagentDetailRepository(detail_pool)
-    scope = str(uuid4())
-    specification, execution, link = details()
+async def test_execution_monotonic_save_and_identity(detail_env):
+    repository = PostgresAsyncSubagentDetailRepository(detail_env.pool)
+    scope = detail_env.scope
+    specification, execution, link = details(detail_env.run_id)
     await repository.create_before_submit(scope, specification, execution, link)
     admitted = execution.model_copy(update={"lifecycle": AsyncSubagentLifecycle.ADMITTED})
     await repository.save_execution(scope, admitted)  # same-clock sequential transition is legal
@@ -155,10 +169,10 @@ async def test_execution_monotonic_save_and_identity(detail_pool):
     assert await repository.create_before_submit(scope, specification, execution, link) == failed
 
 
-async def test_later_unbound_execution_cannot_erase_provider_identity(detail_pool):
-    repository = PostgresAsyncSubagentDetailRepository(detail_pool)
-    scope = str(uuid4())
-    specification, execution, link = details()
+async def test_later_unbound_execution_cannot_erase_provider_identity(detail_env):
+    repository = PostgresAsyncSubagentDetailRepository(detail_env.pool)
+    scope = detail_env.scope
+    specification, execution, link = details(detail_env.run_id)
     await repository.create_before_submit(scope, specification, execution, link)
     running = execution.model_copy(
         update={
@@ -182,10 +196,10 @@ async def test_later_unbound_execution_cannot_erase_provider_identity(detail_poo
     assert await repository.get_execution(scope, execution.child_execution_id) == running
 
 
-async def test_link_cancellation_and_message_receipts_do_not_regress(detail_pool):
-    repository = PostgresAsyncSubagentDetailRepository(detail_pool)
-    scope = str(uuid4())
-    specification, execution, link = details()
+async def test_link_cancellation_and_message_receipts_do_not_regress(detail_env):
+    repository = PostgresAsyncSubagentDetailRepository(detail_env.pool)
+    scope = detail_env.scope
+    specification, execution, link = details(detail_env.run_id)
     await repository.create_before_submit(scope, specification, execution, link)
     message = AsyncSubagentMessage(
         message_id="message-1",
@@ -212,30 +226,38 @@ async def test_link_cancellation_and_message_receipts_do_not_regress(detail_pool
     assert await repository.get_link(scope, execution.child_execution_id) == applied
 
 
-async def test_missing_context_and_immutable_contract_grants(detail_pool):
-    repository = PostgresAsyncSubagentDetailRepository(detail_pool)
-    scope = str(uuid4())
-    specification, execution, link = details()
+async def test_missing_context_and_immutable_contract_grants(detail_env):
+    repository = PostgresAsyncSubagentDetailRepository(detail_env.pool)
+    scope = detail_env.scope
+    specification, execution, link = details(detail_env.run_id)
     await repository.create_before_submit(scope, specification, execution, link)
-    async with detail_pool.acquire() as connection:
-        assert await connection.fetchval("SELECT current_user") == "belllabs_control_runtime"
+    async with detail_env.pool.acquire() as connection:
+        assert await connection.fetchval(
+            "SELECT pg_has_role(current_user, 'mission_control_runtime', 'MEMBER')"
+        )
+        # Missing transaction scope context: forced RLS returns no rows.
         assert not await connection.fetchval(
-            "SELECT EXISTS(SELECT 1 FROM belllabs_control.async_subagent_execution_details "
-            "WHERE request_scope=$1)",
-            scope,
+            "SELECT EXISTS(SELECT 1 FROM mission_control.subordinate_execution_detail)"
         )
         with pytest.raises(asyncpg.InsufficientPrivilegeError):
             await connection.execute(
-                "UPDATE belllabs_control.async_subagent_contract_details SET payload=payload"
+                "UPDATE mission_control.subordinate_contract SET payload=payload"
             )
         with pytest.raises(asyncpg.InsufficientPrivilegeError):
-            await connection.execute("DELETE FROM belllabs_control.async_subagent_link_details")
+            await connection.execute("DELETE FROM mission_control.subordinate_link_detail")
+        async with connection.transaction():
+            await apply_scope(connection, scope)
+            # Missing scope cannot be bypassed by the immutable trigger path either.
+            with pytest.raises(asyncpg.InsufficientPrivilegeError):
+                await connection.execute(
+                    "UPDATE mission_control.subordinate_contract SET payload=payload"
+                )
 
 
-async def test_stale_cancellation_cannot_erase_admission_with_later_timestamp(detail_pool):
-    repository = PostgresAsyncSubagentDetailRepository(detail_pool)
-    scope = str(uuid4())
-    specification, execution, link = details()
+async def test_stale_cancellation_cannot_erase_admission_with_later_timestamp(detail_env):
+    repository = PostgresAsyncSubagentDetailRepository(detail_env.pool)
+    scope = detail_env.scope
+    specification, execution, link = details(detail_env.run_id)
     await repository.create_before_submit(scope, specification, execution, link)
     admitted = link.model_copy(
         update={
@@ -281,10 +303,10 @@ async def test_stale_cancellation_cannot_erase_admission_with_later_timestamp(de
     assert await repository.get_link(scope, execution.child_execution_id) == cancelled
 
 
-async def test_terminal_message_receipt_is_immutable(detail_pool):
-    repository = PostgresAsyncSubagentDetailRepository(detail_pool)
-    scope = str(uuid4())
-    specification, execution, link = details()
+async def test_terminal_message_receipt_is_immutable(detail_env):
+    repository = PostgresAsyncSubagentDetailRepository(detail_env.pool)
+    scope = detail_env.scope
+    specification, execution, link = details(detail_env.run_id)
     await repository.create_before_submit(scope, specification, execution, link)
     message = AsyncSubagentMessage(
         message_id="terminal-message",
@@ -313,20 +335,20 @@ async def test_terminal_message_receipt_is_immutable(detail_pool):
 
 
 @pytest.mark.parametrize(
-    "table,identity",
+    ("table", "identity"),
     [
-        ("async_subagent_execution_details", "child_execution_id"),
-        ("async_subagent_link_details", "link_id"),
+        ("subordinate_execution_detail", "child_execution_id"),
+        ("subordinate_link_detail", "link_id"),
     ],
 )
 @pytest.mark.parametrize("mutation", ["mismatch", "missing", "null"])
-async def test_database_rejects_payload_identity_drift(detail_pool, table, identity, mutation):
-    repository = PostgresAsyncSubagentDetailRepository(detail_pool)
-    scope = str(uuid4())
-    specification, execution, link = details()
+async def test_database_rejects_payload_identity_drift(detail_env, table, identity, mutation):
+    repository = PostgresAsyncSubagentDetailRepository(detail_env.pool)
+    scope = detail_env.scope
+    specification, execution, link = details(detail_env.run_id)
     await repository.create_before_submit(scope, specification, execution, link)
-    async with detail_pool.acquire() as connection, connection.transaction():
-        await connection.execute("SELECT set_config('belllabs.request_scope', $1, true)", scope)
+    async with detail_env.pool.acquire() as connection, connection.transaction():
+        await apply_scope(connection, scope)
         # Identifiers are closed pytest parameters, never supplied by request data.
         expression = {
             "mismatch": f"jsonb_set(payload, '{{{identity}}}', '\"another-identity\"')",
@@ -335,9 +357,8 @@ async def test_database_rejects_payload_identity_drift(detail_pool, table, ident
         }[mutation]
         with pytest.raises(asyncpg.CheckViolationError):
             await connection.execute(
-                f"UPDATE belllabs_control.{table} SET payload={expression} "
-                "WHERE request_scope=$1 AND child_execution_id=$2",
-                scope,
+                f"UPDATE mission_control.{table} SET payload={expression} "
+                "WHERE subordinate_key = $1",
                 execution.child_execution_id,
             )
     assert await repository.get_execution(scope, execution.child_execution_id) == execution

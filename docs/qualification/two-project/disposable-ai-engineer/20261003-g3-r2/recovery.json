@@ -1,0 +1,10 @@
+{
+  "status": "disposable_only",
+  "tested": [
+    "SQL failure mid-release rolls back DDL, receipts and identity (package tests)",
+    "stale plan digest rejected (package tests)",
+    "interrupted concurrent runtime index held, no version row (package tests)",
+    "replayed apply, runtime and seed phases are no-ops (this run)"
+  ],
+  "live_recovery_point": "blocked: no approved backup/PITR recovery point for either live project"
+}

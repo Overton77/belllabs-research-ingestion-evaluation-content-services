@@ -176,8 +176,10 @@ class WorkspaceMaterializationService:
         )
         return await self._append_revision(
             current,
-            entries=tuple(item for item in current.entries if item.logical_path != logical_path)
-            + (entry,),
+            entries=(
+                *tuple(item for item in current.entries if item.logical_path != logical_path),
+                entry,
+            ),
             created_at=recorded_at or datetime.now(UTC),
         )
 
@@ -227,10 +229,12 @@ class WorkspaceMaterializationService:
             )
             return await self._append_revision(
                 current,
-                entries=tuple(
-                    entry for entry in current.entries if entry.entry_id != existing.entry_id
-                )
-                + (relinked,),
+                entries=(
+                    *tuple(
+                        entry for entry in current.entries if entry.entry_id != existing.entry_id
+                    ),
+                    relinked,
+                ),
                 created_at=recorded_at or datetime.now(UTC),
             )
         candidate = next(
@@ -263,10 +267,10 @@ class WorkspaceMaterializationService:
         )
         return await self._append_revision(
             current,
-            entries=tuple(
-                entry for entry in current.entries if entry.entry_id != candidate.entry_id
-            )
-            + (promoted,),
+            entries=(
+                *tuple(entry for entry in current.entries if entry.entry_id != candidate.entry_id),
+                promoted,
+            ),
             created_at=recorded_at or datetime.now(UTC),
         )
 

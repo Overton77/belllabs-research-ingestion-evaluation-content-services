@@ -3,8 +3,8 @@ from __future__ import annotations
 import base64
 import subprocess
 import uuid
-from collections.abc import Mapping, Sequence
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Mapping, Sequence
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from pathlib import Path
 from typing import Final
 
@@ -138,13 +138,13 @@ class DockerSandboxFactory:
         self,
         binding: DeepAgentExecutionBinding,
         _secrets: Mapping[str, str],
-    ):
+    ) -> AbstractAsyncContextManager[DockerSandbox]:
         component = binding.sandbox
         if component.backend != "docker":
             raise DeepAgentUnsupportedPlacement("Docker factory cannot change placement")
 
         @asynccontextmanager
-        async def context():
+        async def context() -> AsyncIterator[DockerSandbox]:
             name = f"belllabs-deep-agent-{uuid.uuid4().hex[:12]}"
             workspace_path = self.workspace_path(binding)
             workspace_path.mkdir(parents=True, exist_ok=True)

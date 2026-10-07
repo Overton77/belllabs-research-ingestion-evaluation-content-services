@@ -617,7 +617,7 @@ def _atomic_replace_read_only(path: Path, content: bytes) -> None:
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        temporary.replace(path)
         _mark_read_only(path)
     finally:
         temporary.unlink(missing_ok=True)

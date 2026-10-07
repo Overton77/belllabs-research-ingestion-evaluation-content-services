@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+
 from biotech_mission_adapters.application.schema.schema_catalog import CATALOG_GENERATOR_VERSION
 from biotech_mission_adapters.application.schema.schema_catalog_build import (
     SchemaCatalogBuildService,
@@ -36,7 +37,6 @@ from biotech_mission_adapters.domain.schema_grounding.contracts import (
     SupportingGraphReconciliationRequest,
 )
 from biotech_mission_adapters.domain.schema_grounding.errors import SchemaSourceDigestMismatch
-
 from mission_control.adapters.storage.control_plane_payloads import InMemoryPayloadStore
 from tests.schema_context_helpers import SDL, accepted, catalog
 
@@ -398,10 +398,10 @@ async def _reconciliation_fixture(
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("deployment", "capability", "failure_code"),
-    (
+    [
         (False, True, "deployment_manifest_missing"),
         (True, False, "graph_capability_denied"),
-    ),
+    ],
 )
 async def test_graph_gate_denial_prevents_executor_creation(
     deployment: bool,

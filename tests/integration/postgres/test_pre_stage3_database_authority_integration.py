@@ -1,324 +1,268 @@
+"""Runtime-authority release surface (migrations 0010-0017) on mission_control.
+
+Every support table is tenant scoped (FK to tenant, forced RLS with the three-column
+context policy), immutable records carry the reject_mutation trigger, and the capability
+roles hold exactly the runtime-authority grants: no PUBLIC access, no DELETE or TRUNCATE
+for any login capability, the family writer alone writes family admission, the read-only
+role only reads, and the catalog writer has nothing here.
+"""
+
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from pathlib import Path
-
-import asyncpg
 import pytest
 
-from mission_control.adapters.postgres import connections as postgres_integration
-from mission_control.adapters.postgres.connections import (
-    MIGRATIONS_ROOT,
-    apply_application_migrations,
+from tests.fixtures.mission_control_common_db import CommonDatabase
+from tests.integration.postgres.runtime_common import common_db as common_db
+from tests.integration.postgres.runtime_common import owner_rows
+
+pytestmark = pytest.mark.common_db
+
+RUNTIME = "mission_control_runtime"
+FAMILY = "mission_control_family_writer"
+READONLY = "mission_control_readonly"
+CATALOG = "mission_control_catalog_writer"
+OUTBOX = "mission_control_outbox_worker"
+
+S, SI, SIU = (
+    frozenset({"SELECT"}),
+    frozenset({"SELECT", "INSERT"}),
+    frozenset({"SELECT", "INSERT", "UPDATE"}),
 )
+NONE: frozenset[str] = frozenset()
 
-DIGEST = "sha256:" + "a" * 64
-NOW = datetime(2026, 8, 8, 20, 0, tzinfo=UTC)
-
-RLS_TABLES = (
-    "runtime_execution_bindings",
-    "runtime_execution_attempts",
-    "runtime_checkpoint_observations",
-    "runtime_intervention_commands",
-    "runtime_interrupt_requests",
-    "runtime_interrupt_decisions",
-    "runtime_async_tasks",
-    "operation_effect_claims",
-    "operation_journal_mutations",
-    "operation_execution_attempts",
-    "operation_settlements",
-    "operation_journal_backfill_batches",
-    "operation_journal_backfill_applied_batches",
-    "operation_journal_backfill_quarantine",
-)
-TABLE_PRIVILEGES = ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER")
-
-RUNTIME_READ_WRITE = {
-    "runtime_execution_bindings",
-    "runtime_checkpoint_observations",
-    "runtime_intervention_commands",
-    "runtime_interrupt_requests",
-    "runtime_interrupt_decisions",
-    "runtime_async_tasks",
+# Support table -> (runtime, family writer, readonly) table-level privileges.
+SUPPORT_TABLES: dict[str, tuple[frozenset[str], frozenset[str], frozenset[str]]] = {
+    "run_lifecycle_transition": (SI, SI, S),
+    "effect_ledger": (SIU, frozenset({"SELECT", "UPDATE"}), S),
+    "effect_ledger_entry": (SI, SI, S),
+    "family_admission_head": (S, SIU, S),
+    "family_admission_journal": (S, SI, S),
+    "family_admission_result": (S, SI, S),
+    "operation_claim": (SI, NONE, S),
+    "operation_journal_mutation": (SI, NONE, S),
+    "operation_technical_attempt": (SI, NONE, S),
+    "operation_settlement": (SI, NONE, S),
+    "runtime_unit_generation": (SI, NONE, S),
+    "cognitive_namespace": (SI, NONE, S),
+    "activity_attempt_observation": (SI, NONE, S),
+    "checkpoint_transition": (SI, NONE, S),
+    "unit_result_observation": (SI, NONE, S),
+    "lineage_write_rejection": (SI, NONE, S),
+    "run_snapshot": (SI, NONE, S),
+    "fork_request": (SIU, NONE, S),
+    "fork_reuse_decision": (SI, NONE, S),
+    "execution_lineage_record": (SI, NONE, S),
+    "execution_lineage_edge": (SI, NONE, S),
+    "run_composition_link": (SI, NONE, S),
+    "run_dependency_revision": (SI, NONE, S),
+    "linked_result_decision": (SI, NONE, S),
+    "linked_child_terminal": (SI, NONE, S),
+    "runtime_document": (SI, NONE, S),
+    "subordinate_admission": (SIU, NONE, S),
+    "subordinate_message": (SI, NONE, S),
+    "async_provider_run": (SIU, NONE, S),
+    "subordinate_contract": (SI, NONE, S),
+    "subordinate_execution_detail": (SI, NONE, S),
+    "subordinate_link_detail": (SI, NONE, S),
+    "coordinator_launch_ticket": (SIU, NONE, NONE),
+    "coordinator_audit_event": (SI, NONE, NONE),
+    "coordinator_workflow_result": (SI, NONE, NONE),
+    "runtime_execution_binding": (SIU, NONE, S),
+    "runtime_execution_attempt": (SI, NONE, S),
+    "runtime_intervention": (SIU, NONE, S),
 }
-RUNTIME_APPEND = {
-    "runtime_execution_attempts",
-    "operation_journal_mutations",
-    "operation_execution_attempts",
+APPEND_ONLY = {
+    "run_lifecycle_transition",
+    "effect_ledger_entry",
+    "family_admission_journal",
+    "family_admission_result",
+    "operation_journal_mutation",
+    "operation_technical_attempt",
+    "operation_settlement",
+    "activity_attempt_observation",
+    "checkpoint_transition",
+    "unit_result_observation",
+    "lineage_write_rejection",
+    "run_snapshot",
+    "fork_reuse_decision",
+    "execution_lineage_record",
+    "execution_lineage_edge",
+    "run_composition_link",
+    "run_dependency_revision",
+    "linked_result_decision",
+    "linked_child_terminal",
+    "runtime_document",
+    "subordinate_message",
+    "subordinate_contract",
+    "coordinator_audit_event",
+    "coordinator_workflow_result",
+    "runtime_execution_attempt",
 }
-AGENT_READ = {
-    "runtime_execution_bindings",
-    "runtime_execution_attempts",
-    "runtime_checkpoint_observations",
-    "runtime_interrupt_requests",
-    "runtime_async_tasks",
-}
-BACKFILL_TABLES = {
-    "operation_journal_backfill_batches",
-    "operation_journal_backfill_applied_batches",
-    "operation_journal_backfill_quarantine",
-}
-
-RESTRICTED_COLUMN_GRANTS = {
-    ("belllabs_control_runtime", "operation_effect_claims", "INSERT"): {
-        "effect_claim_id",
-        "request_scope",
-        "belllabs_run_id",
-        "operation_contract_digest",
-        "idempotency_key",
-        "request_digest",
-        "semantic_binding_id",
-        "semantic_binding_digest",
-        "semantic_attempt_key",
-        "claim_mode",
-        "status",
-        "claimed_by",
-        "claimed_at",
-        "heartbeat_at",
-        "lease_expires_at",
-    },
-    ("belllabs_control_runtime", "operation_effect_claims", "UPDATE"): {
-        "status",
-        "heartbeat_at",
-        "lease_expires_at",
-    },
-    ("belllabs_control_runtime", "operation_settlements", "INSERT"): {
-        "settlement_id",
-        "request_scope",
-        "effect_claim_id",
-        "settlement_revision",
-        "settlement_digest",
-        "status",
-        "usage_payload",
-        "pending_external_usage_payload",
-        "result_manifest_ref",
-        "result_manifest_digest",
-        "result_manifest_size_bytes",
-        "failure_code",
-        "settlement_payload",
-        "settled_at",
-    },
-    ("belllabs_operation_backfill", "operation_effect_claims", "UPDATE"): {
+# Column-level UPDATE grants (table-level UPDATE absent) per (role, table).
+COLUMN_UPDATES = {
+    (RUNTIME, "operation_claim"): {
         "status",
         "heartbeat_at",
         "lease_expires_at",
-    },
-    ("belllabs_operation_backfill", "operation_journal_backfill_batches", "UPDATE"): {
-        "status",
-        "source_cursor",
-        "source_claim_count",
-        "source_settlement_count",
-        "target_claim_count",
-        "target_settlement_count",
-        "quarantine_count",
-        "source_aggregate_digest",
-        "target_aggregate_digest",
+        "version",
         "updated_at",
-        "completed_at",
-        "failure_summary",
     },
-    ("belllabs_operation_backfill", "operation_journal_backfill_quarantine", "UPDATE"): {
-        "reason_code",
-        "observed_digest",
-        "expected_digest",
-        "observed_request_scope",
+    (RUNTIME, "runtime_unit_generation"): {"lease_holder", "superseded", "updated_at"},
+    (RUNTIME, "cognitive_namespace"): {
+        "head_checkpoint",
+        "head_checkpoint_key",
+        "head_transition_key",
+        "head_state_schema_digest",
+        "head_version",
+        "in_flight_unit_key",
+        "in_flight_generation",
+        "updated_at",
+    },
+    (RUNTIME, "subordinate_execution_detail"): {"execution_generation", "payload", "updated_at"},
+    (RUNTIME, "subordinate_link_detail"): {"payload", "updated_at"},
+    (RUNTIME, "attempt"): {"fencing_token", "lease_expires_at", "version", "updated_at"},
+    (FAMILY, "command"): {"lifecycle", "outcome", "version", "updated_at"},
+    (OUTBOX, "outbox"): {
+        "delivery_state",
+        "lease_owner",
+        "lease_expires_at",
+        "attempts",
+        "next_attempt_at",
+        "delivered_at",
+        "version",
     },
 }
 
 
-def _expected_table_privileges(role: str, table: str) -> set[str]:
-    if role == "belllabs_control_runtime":
-        if table in RUNTIME_READ_WRITE:
-            return {"SELECT", "INSERT", "UPDATE"}
-        if table in RUNTIME_APPEND:
-            return {"SELECT", "INSERT"}
-        if table in {"operation_effect_claims", "operation_settlements"}:
-            return {"SELECT"}
-        return set()
-    if role == "belllabs_agent_runtime":
-        return {"SELECT"} if table in AGENT_READ else set()
-    if role == "belllabs_operations_readonly":
-        return {"SELECT"}
-    if role == "belllabs_operation_backfill":
-        if table in BACKFILL_TABLES:
-            return {"SELECT", "INSERT"}
-        if table in {"operation_effect_claims", "operation_settlements"}:
-            return {"SELECT", "INSERT"}
-    return set()
-
-
-async def _apply_through_0011(pool: asyncpg.Pool) -> None:
-    paths = [
-        path
-        for path in sorted(MIGRATIONS_ROOT.glob("*.sql"))
-        if "_capability_search" not in path.stem
-        and path.name <= "0011_coordinator_workflow_results.sql"
-    ]
-    async with pool.acquire() as connection, connection.transaction():
-        await connection.execute(
-            """
-            CREATE SCHEMA belllabs_control;
-            CREATE TABLE belllabs_control.schema_migrations (
-                version text PRIMARY KEY,
-                applied_at timestamptz NOT NULL DEFAULT clock_timestamp()
-            );
-            """
-        )
-        for path in paths:
-            await connection.execute(path.read_text(encoding="utf-8"))
-            await connection.execute(
-                "INSERT INTO belllabs_control.schema_migrations (version) VALUES ($1)",
-                path.name,
-            )
+async def _table_privileges(db: CommonDatabase, role: str, table: str) -> frozenset[str]:
+    rows = await owner_rows(
+        db,
+        """
+        SELECT privilege FROM unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE',
+                                            'REFERENCES', 'TRIGGER']) AS privilege
+        WHERE has_table_privilege($1, 'mission_control.' || $2, privilege)
+        """,
+        role,
+        table,
+    )
+    return frozenset(row["privilege"] for row in rows)
 
 
 @pytest.mark.asyncio
-async def test_upgrade_from_0011_applies_rls_and_least_privilege_role_matrix(
-    test_application_postgres_dsn: str,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
+async def test_support_tables_are_scoped_forced_rls_and_append_only(
+    common_db: CommonDatabase,
 ) -> None:
-    pool = await asyncpg.create_pool(dsn=test_application_postgres_dsn, min_size=1, max_size=4)
-    try:
-        async with pool.acquire() as connection:
-            await connection.execute("DROP SCHEMA IF EXISTS belllabs_control CASCADE")
-        await _apply_through_0011(pool)
-        async with pool.acquire() as connection:
-            assert (
-                await connection.fetchval(
-                    "SELECT to_regclass('belllabs_control.operation_effect_claims')"
-                )
-                is None
-            )
+    rows = await owner_rows(
+        common_db,
+        """
+        SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity,
+               (SELECT array_agg(pg_get_expr(p.polqual, p.polrelid))
+                FROM pg_policy p WHERE p.polrelid = c.oid) AS policies,
+               EXISTS (
+                   SELECT 1 FROM pg_constraint k
+                   WHERE k.conrelid = c.oid AND k.contype = 'f'
+                     AND k.confrelid = 'mission_control.tenant'::regclass
+               ) AS tenant_fk,
+               EXISTS (
+                   SELECT 1 FROM pg_trigger t JOIN pg_proc f ON f.oid = t.tgfoid
+                   WHERE t.tgrelid = c.oid AND f.proname = 'reject_mutation'
+               ) AS immutable,
+               (SELECT array_agg(a.attname ORDER BY a.attnum) FROM pg_attribute a
+                WHERE a.attrelid = c.oid AND a.attnum IN (1, 2, 3)) AS scope_columns
+        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'mission_control' AND c.relname = ANY($1::text[])
+        """,
+        list(SUPPORT_TABLES),
+    )
+    assert {row["relname"] for row in rows} == set(SUPPORT_TABLES)
+    for row in rows:
+        name = row["relname"]
+        assert (row["relrowsecurity"], row["relforcerowsecurity"]) == (True, True), name
+        assert row["tenant_fk"], name
+        assert row["scope_columns"] == ["installation_id", "application_id", "tenant_id"], name
+        (policy,) = row["policies"]
+        for column in ("installation_id", "application_id", "tenant_id"):
+            assert column in policy, (name, policy)
+        assert row["immutable"] == (name in APPEND_ONLY), name
 
-        isolated_migrations = tmp_path / "migrations"
-        isolated_migrations.mkdir()
-        for name in (
-            "0012_graph_runtime_operation_journal.sql",
-            "0013_legacy_operation_journal_backfill.sql",
-        ):
-            (isolated_migrations / name).write_text(
-                (MIGRATIONS_ROOT / name).read_text(encoding="utf-8"),
-                encoding="utf-8",
-            )
-        monkeypatch.setattr(postgres_integration, "MIGRATIONS_ROOT", isolated_migrations)
-        await apply_application_migrations(pool)
 
-        async with pool.acquire() as connection:
-            versions = {
-                row["version"]
-                for row in await connection.fetch(
-                    "SELECT version FROM belllabs_control.schema_migrations"
-                )
-            }
-            assert {
-                "0012_graph_runtime_operation_journal.sql",
-                "0013_legacy_operation_journal_backfill.sql",
-            } <= versions
-
-            rls_rows = await connection.fetch(
-                """
-                SELECT cls.relname, cls.relrowsecurity, cls.relforcerowsecurity,
-                       count(policy.policyname) AS policy_count
-                FROM pg_class cls
-                JOIN pg_namespace ns ON ns.oid = cls.relnamespace
-                LEFT JOIN pg_policies policy
-                  ON policy.schemaname = ns.nspname
-                 AND policy.tablename = cls.relname
-                 AND policy.policyname = 'request_scope_isolation'
-                WHERE ns.nspname = 'belllabs_control'
-                  AND cls.relname = ANY($1::text[])
-                GROUP BY cls.relname, cls.relrowsecurity, cls.relforcerowsecurity
-                """,
-                list(RLS_TABLES),
-            )
-            assert {row["relname"] for row in rls_rows} == set(RLS_TABLES)
-            assert all(
-                row["relrowsecurity"] and row["relforcerowsecurity"] and row["policy_count"] == 1
-                for row in rls_rows
-            )
-
-            role_rows = await connection.fetch(
-                """
-                SELECT rolname, rolsuper, rolcreatedb, rolcreaterole, rolbypassrls
-                FROM pg_roles
-                WHERE rolname = ANY($1::text[])
-                """,
-                [
-                    "belllabs_control_runtime",
-                    "belllabs_agent_runtime",
-                    "belllabs_operations_readonly",
-                    "belllabs_operation_backfill",
-                ],
-            )
-            assert len(role_rows) == 4
-            assert all(
-                not row["rolsuper"]
-                and not row["rolcreatedb"]
-                and not row["rolcreaterole"]
-                and not row["rolbypassrls"]
-                for row in role_rows
-            )
-
-            roles = (
-                "belllabs_control_runtime",
-                "belllabs_agent_runtime",
-                "belllabs_operations_readonly",
-                "belllabs_operation_backfill",
-            )
-            for role in roles:
-                for table in RLS_TABLES:
-                    expected = _expected_table_privileges(role, table)
-                    for privilege in TABLE_PRIVILEGES:
-                        actual = await connection.fetchval(
-                            "SELECT has_table_privilege($1, $2, $3)",
-                            role,
-                            f"belllabs_control.{table}",
-                            privilege,
-                        )
-                        assert actual is (privilege in expected), (
-                            role,
-                            table,
-                            privilege,
-                            expected,
-                        )
-
-            for (role, table, privilege), allowed_columns in RESTRICTED_COLUMN_GRANTS.items():
-                columns = {
-                    row["column_name"]
-                    for row in await connection.fetch(
-                        """
-                        SELECT column_name
-                        FROM information_schema.columns
-                        WHERE table_schema = 'belllabs_control' AND table_name = $1
-                        """,
-                        table,
-                    )
-                }
-                actual_columns = {
-                    column
-                    for column in columns
-                    if await connection.fetchval(
-                        "SELECT has_column_privilege($1, $2, $3, $4)",
-                        role,
-                        f"belllabs_control.{table}",
-                        column,
-                        privilege,
-                    )
-                }
-                assert actual_columns == allowed_columns
-
-            for role in roles:
-                expected_sequence = role == "belllabs_control_runtime"
-                for privilege in ("USAGE", "SELECT", "UPDATE"):
-                    actual = await connection.fetchval(
-                        "SELECT has_sequence_privilege($1, $2, $3)",
-                        role,
-                        "belllabs_control.runtime_execution_attempts_attempt_id_seq",
-                        privilege,
-                    )
-                    assert actual is (expected_sequence and privilege in {"USAGE", "SELECT"})
-    finally:
-        async with pool.acquire() as connection:
-            await connection.execute("DROP SCHEMA IF EXISTS belllabs_control CASCADE")
-        await pool.close()
+@pytest.mark.asyncio
+async def test_capability_role_matrix_is_least_privilege(common_db: CommonDatabase) -> None:
+    for table, (runtime, family, readonly) in SUPPORT_TABLES.items():
+        assert await _table_privileges(common_db, RUNTIME, table) == runtime, table
+        assert await _table_privileges(common_db, FAMILY, table) == family, table
+        assert await _table_privileges(common_db, READONLY, table) == readonly, table
+        assert await _table_privileges(common_db, CATALOG, table) == NONE, table
+        assert await _table_privileges(common_db, OUTBOX, table) == NONE, table
+        assert await _table_privileges(common_db, "public", table) == NONE, table
+    # No login capability may delete or truncate any mission_control record.
+    deleters = await owner_rows(
+        common_db,
+        """
+        SELECT r.rolname, c.relname FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        CROSS JOIN (VALUES ($1), ($2), ($3), ($4), ($5)) AS r(rolname)
+        WHERE n.nspname = 'mission_control' AND c.relkind = 'r'
+          AND (has_table_privilege(r.rolname, c.oid, 'DELETE')
+               OR has_table_privilege(r.rolname, c.oid, 'TRUNCATE'))
+        """,
+        RUNTIME,
+        FAMILY,
+        READONLY,
+        CATALOG,
+        OUTBOX,
+    )
+    assert deleters == []
+    for (role, table), columns in COLUMN_UPDATES.items():
+        granted = await owner_rows(
+            common_db,
+            """
+            SELECT a.attname FROM pg_attribute a
+            WHERE a.attrelid = ('mission_control.' || $2)::regclass AND a.attnum > 0
+              AND NOT a.attisdropped
+              AND has_column_privilege($1, a.attrelid, a.attnum, 'UPDATE')
+            """,
+            role,
+            table,
+        )
+        assert {row["attname"] for row in granted} == columns, (role, table)
+    # The runtime capability never inherits the family writer or catalog authority, and the
+    # immutable canonical records stay insert-only for it.
+    memberships = await owner_rows(
+        common_db,
+        "SELECT pg_has_role($1, $2, 'MEMBER') AS family, pg_has_role($1, $3, 'MEMBER') AS catalog",
+        RUNTIME,
+        FAMILY,
+        CATALOG,
+    )
+    assert dict(memberships[0]) == {"family": False, "catalog": False}
+    for table in (
+        "definition_snapshot",
+        "mission_revision",
+        "compiled_program",
+        "ledger_commit",
+        "mission_event",
+        "budget_entry",
+        "delivery_report",
+        "operation_receipt",
+        "continuation_checkpoint",
+        "fork_lineage",
+        "human_resolution",
+        "native_observation",
+    ):
+        assert await _table_privileges(common_db, RUNTIME, table) == SI, table
+    sequence = await owner_rows(
+        common_db,
+        """
+        SELECT has_sequence_privilege($1, 'mission_control.outbox_global_position', 'USAGE')
+                 AS runtime,
+               has_sequence_privilege($2, 'mission_control.outbox_global_position', 'USAGE')
+                 AS family,
+               has_sequence_privilege($3, 'mission_control.outbox_global_position', 'USAGE')
+                 AS readonly
+        """,
+        RUNTIME,
+        FAMILY,
+        READONLY,
+    )
+    assert dict(sequence[0]) == {"runtime": True, "family": True, "readonly": False}

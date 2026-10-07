@@ -11,7 +11,7 @@ The API authenticates a signed identity and resolves a trusted installation,
 application and tenant binding. A route cannot select another pool or grant itself
 permissions. The bound service's request scope must match the resolved identity.
 
-Admission injects actor and scope from trusted context, validates immutable ERC
+Admission injects actor and scope from trusted context, validates the immutable Compiled Program (code: ERC)
 and workflow references, and delegates to the existing run-control reducer.
 Launch verifies the admitted family and exact input binding before Temporal start.
 Repeated starts verify the actual first history event and immutable root payload.

@@ -1,0 +1,67 @@
+{
+  "difference_count": 12,
+  "differences": [
+    {
+      "allowed_by": "PostgreSQL 16+ grants the CREATEROLE creator (postgres) ADMIN option only (no INHERIT/SET); no capability is gained",
+      "change": "added",
+      "path": "memberships/mission_control_catalog_writer<-postgres"
+    },
+    {
+      "allowed_by": "PostgreSQL 16+ grants the CREATEROLE creator (postgres) ADMIN option only (no INHERIT/SET); no capability is gained",
+      "change": "added",
+      "path": "memberships/mission_control_checkpointer<-postgres"
+    },
+    {
+      "allowed_by": "PostgreSQL 16+ grants the CREATEROLE creator (postgres) ADMIN option only (no INHERIT/SET); no capability is gained",
+      "change": "added",
+      "path": "memberships/mission_control_family_writer<-postgres"
+    },
+    {
+      "allowed_by": "PostgreSQL 16+ grants the CREATEROLE creator (postgres) ADMIN option only (no INHERIT/SET); no capability is gained",
+      "change": "added",
+      "path": "memberships/mission_control_outbox_worker<-postgres"
+    },
+    {
+      "allowed_by": "PostgreSQL 16+ grants the CREATEROLE creator (postgres) ADMIN option only (no INHERIT/SET); no capability is gained",
+      "change": "added",
+      "path": "memberships/mission_control_readonly<-postgres"
+    },
+    {
+      "allowed_by": "PostgreSQL 16+ grants the CREATEROLE creator (postgres) ADMIN option only (no INHERIT/SET); no capability is gained",
+      "change": "added",
+      "path": "memberships/mission_control_runtime<-postgres"
+    },
+    {
+      "allowed_by": "release 0001 / runtime phase creates this restricted NOLOGIN role",
+      "change": "added",
+      "path": "roles/mission_control_catalog_writer"
+    },
+    {
+      "allowed_by": "release 0001 / runtime phase creates this restricted NOLOGIN role",
+      "change": "added",
+      "path": "roles/mission_control_checkpointer"
+    },
+    {
+      "allowed_by": "release 0001 / runtime phase creates this restricted NOLOGIN role",
+      "change": "added",
+      "path": "roles/mission_control_family_writer"
+    },
+    {
+      "allowed_by": "release 0001 / runtime phase creates this restricted NOLOGIN role",
+      "change": "added",
+      "path": "roles/mission_control_outbox_worker"
+    },
+    {
+      "allowed_by": "release 0001 / runtime phase creates this restricted NOLOGIN role",
+      "change": "added",
+      "path": "roles/mission_control_readonly"
+    },
+    {
+      "allowed_by": "release 0001 / runtime phase creates this restricted NOLOGIN role",
+      "change": "added",
+      "path": "roles/mission_control_runtime"
+    }
+  ],
+  "status": "allowed",
+  "unallowed_count": 0
+}

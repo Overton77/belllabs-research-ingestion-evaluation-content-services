@@ -288,7 +288,7 @@ def create_coordinator_server(
         return await _principal_call(
             context,
             principals,
-            lambda principal: facade.bootstrap(principal),
+            facade.bootstrap,
         )
 
     @server.tool(annotations={"readOnlyHint": True})

@@ -1,9 +1,10 @@
-"""PostgreSQL adapters for safe macro snapshots and semantic forks (RRM-006, migration 0024).
+"""PostgreSQL adapters for safe macro snapshots and semantic forks on mission_control.
 
-Every query runs with `belllabs.request_scope` set, so forced row-level security confines
-reads and writes to the caller's scope. Snapshots and reuse decisions are insert-only; the
-fork materialization writes its reuse decisions, its lineage-journal record and the fork
-row's materialization payload in one transaction.
+A sealed run snapshot is a canonical ``continuation_checkpoint`` with a ``valid``
+checkpoint validation and its boundary detail in support ``run_snapshot``. The fork
+materialization writes its reuse decisions, its execution-lineage record and the fork
+saga's materialization payload in one transaction. Every statement runs with the
+composite scope applied and filters on all three scope columns.
 """
 
 from __future__ import annotations
@@ -13,6 +14,11 @@ from typing import Any
 
 import asyncpg
 
+from mission_control.adapters.postgres.orchestration.orchestration_binding_repository import (
+    semantic_binding_row,
+)
+from mission_control.adapters.postgres.run_control import canonical as mc
+from mission_control.adapters.postgres.run_control.canonical import SCOPE, scoped
 from mission_control.adapters.postgres.runtime.stage3_kernel_repository import (
     append_lineage_in_transaction,
 )
@@ -24,6 +30,7 @@ from mission_control.application.recovery.run_forks import (
     fork_marker_of,
 )
 from mission_control.application.recovery.runtime_lineage import PersistedExecutionLineage
+from mission_control.contracts.identities import uuid7
 from mission_control.domain.authoring.canonical import stable_json_digest, stable_json_dump
 from mission_control.domain.policies.errors import IdempotencyConflict
 from mission_control.domain.policies.forks import (
@@ -35,9 +42,7 @@ from mission_control.domain.policies.forks import (
     fork_request_fingerprint,
 )
 
-
-async def _scope(connection: asyncpg.Connection, request_scope: str) -> None:
-    await connection.execute("SELECT set_config('belllabs.request_scope', $1, true)", request_scope)
+SNAPSHOT_ACTOR = "mission-control-run-snapshots"
 
 
 def _load(value: Any) -> Any:
@@ -49,58 +54,105 @@ def _dump(value: Any) -> str:
 
 
 class PostgresRunSnapshotRepository:
-    """Insert-only, content-addressed run snapshots (`run_snapshot_manifests`)."""
+    """Insert-only, content-addressed sealed run snapshots."""
 
     def __init__(self, pool: asyncpg.Pool) -> None:
         self._pool = pool
 
     async def get(self, request_scope: str, snapshot_id: str) -> RunSnapshotManifest | None:
         async with self._pool.acquire() as connection, connection.transaction():
-            await _scope(connection, request_scope)
+            args = await mc.begin(connection, request_scope)
             payload = await connection.fetchval(
-                """
-                SELECT manifest FROM belllabs_control.run_snapshot_manifests
-                WHERE request_scope = $1 AND snapshot_id = $2
+                f"""
+                SELECT manifest FROM mission_control.continuation_checkpoint
+                WHERE {SCOPE} AND checkpoint_key = $4
                 """,
-                request_scope,
+                *args,
                 snapshot_id,
             )
         return RunSnapshotManifest.model_validate(_load(payload)) if payload else None
 
     async def put(self, snapshot: RunSnapshotManifest) -> RunSnapshotManifest:
         async with self._pool.acquire() as connection, connection.transaction():
-            await _scope(connection, snapshot.request_scope)
-            await connection.execute(
-                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-                f"run-snapshot:{snapshot.request_scope}:{snapshot.snapshot_id}",
+            args = await mc.begin(connection, snapshot.request_scope)
+            await mc.advisory_lock(
+                connection, f"run-snapshot:{snapshot.request_scope}:{snapshot.snapshot_id}"
             )
             prior = await connection.fetchrow(
-                """
-                SELECT snapshot_digest, manifest FROM belllabs_control.run_snapshot_manifests
-                WHERE request_scope = $1 AND snapshot_id = $2
+                f"""
+                SELECT manifest_digest, manifest FROM mission_control.continuation_checkpoint
+                WHERE {SCOPE} AND checkpoint_key = $4
                 """,
-                snapshot.request_scope,
+                *args,
                 snapshot.snapshot_id,
             )
             if prior is not None:
-                if prior["snapshot_digest"] != snapshot.snapshot_digest:
+                if prior["manifest_digest"] != snapshot.snapshot_digest:
                     raise ForkRejected(
                         "snapshot_digest_conflict",
                         "the same run version and boundary produced a different snapshot",
-                        reasons=(prior["snapshot_digest"], snapshot.snapshot_digest),
+                        reasons=(prior["manifest_digest"], snapshot.snapshot_digest),
                     )
                 return RunSnapshotManifest.model_validate(_load(prior["manifest"]))
+            run = await mc.require_run(connection, args, snapshot.source_run_id)
+            checkpoint_id = uuid7()
             await connection.execute(
                 """
-                INSERT INTO belllabs_control.run_snapshot_manifests (
-                    request_scope, snapshot_id, schema_version, source_run_id,
-                    execution_epoch, family, boundary_kind, projection_version,
-                    snapshot_digest, manifest, taken_at
+                INSERT INTO mission_control.continuation_checkpoint (
+                    installation_id, application_id, tenant_id, checkpoint_id, run_id,
+                    checkpoint_key, activation_id, attempt_id, predecessor_checkpoint_id,
+                    manifest_ref, manifest_digest, contract_version, runtime_checkpoint_ref,
+                    sandbox_snapshot_ref, source_revision_digest, source_binding_digest,
+                    source_input_digest, execution_epoch, execution_generation, event_frontier,
+                    harness_format, manifest, created_at, created_by_actor_ref
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11)
+                VALUES ($1, $2, $3, $4, $5, $6, NULL, NULL, NULL, $6, $7, $8, NULL, NULL, NULL,
+                        $9, $10, $11, 1, $12, $13, $14::jsonb, $15, $16)
                 """,
-                snapshot.request_scope,
+                *args,
+                checkpoint_id,
+                run["run_id"],
                 snapshot.snapshot_id,
+                snapshot.snapshot_digest,
+                snapshot.schema_version,
+                snapshot.semantic_input_binding_digest,
+                snapshot.input_manifest.digest,
+                snapshot.execution_epoch,
+                f"run-version:{snapshot.projection_version}",
+                snapshot.family,
+                _dump(snapshot),
+                snapshot.taken_at,
+                SNAPSHOT_ACTOR,
+            )
+            await connection.execute(
+                """
+                INSERT INTO mission_control.checkpoint_validation (
+                    installation_id, application_id, tenant_id, checkpoint_validation_id,
+                    checkpoint_id, status, reason, decided_at, created_at, created_by_actor_ref
+                )
+                VALUES ($1, $2, $3, $4, $5, 'valid', $6, $7, $7, $8)
+                """,
+                *args,
+                uuid7(),
+                checkpoint_id,
+                f"sealed at {snapshot.boundary_kind}:{snapshot.boundary_ref}"[:1024],
+                snapshot.taken_at,
+                SNAPSHOT_ACTOR,
+            )
+            await connection.execute(
+                """
+                INSERT INTO mission_control.run_snapshot (
+                    installation_id, application_id, tenant_id, run_snapshot_id, snapshot_key,
+                    checkpoint_id, schema_version, source_run_key, execution_epoch, family,
+                    boundary_kind, projection_version, snapshot_digest, taken_at, created_at,
+                    created_by_actor_ref
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $14, $15)
+                """,
+                *args,
+                uuid7(),
+                snapshot.snapshot_id,
+                checkpoint_id,
                 snapshot.schema_version,
                 snapshot.source_run_id,
                 snapshot.execution_epoch,
@@ -108,8 +160,8 @@ class PostgresRunSnapshotRepository:
                 snapshot.boundary_kind,
                 snapshot.projection_version,
                 snapshot.snapshot_digest,
-                _dump(snapshot),
                 snapshot.taken_at,
+                SNAPSHOT_ACTOR,
             )
             return snapshot
 
@@ -123,50 +175,39 @@ class PostgresForkSourceReader:
     async def read_fork_source(self, request_scope: str, run_id: str) -> ForkSourceFacts | None:
         async with self._pool.acquire() as connection:
             async with connection.transaction(readonly=True, isolation="repeatable_read"):
-                await _scope(connection, request_scope)
-                version = await connection.fetchval(
-                    """
-                    SELECT version FROM belllabs_control.workflow_runs
-                    WHERE request_scope = $1 AND run_id = $2
-                    """,
-                    request_scope,
-                    run_id,
-                )
-                if version is None:
+                args = await mc.begin(connection, request_scope)
+                run = await mc.run_row(connection, args, run_id)
+                if run is None:
                     return None
                 heads = await connection.fetch(
-                    """
+                    f"""
                     SELECT family_kind, family_version, mutation_fingerprint, mutation
-                    FROM belllabs_control.family_admission_heads
-                    WHERE request_scope = $1 AND run_id = $2
+                    FROM mission_control.family_admission_head
+                    WHERE {SCOPE} AND run_key = $4
                     ORDER BY family_kind
                     """,
-                    request_scope,
+                    *args,
                     run_id,
                 )
                 links = await connection.fetch(
-                    """
-                    SELECT link.link_id, link.child_run_id, terminal.status
-                    FROM belllabs_control.run_composition_links AS link
-                    LEFT JOIN belllabs_control.linked_child_terminal_records AS terminal
-                      ON terminal.link_id = link.link_id
-                    WHERE link.request_scope = $1 AND link.parent_run_id = $2
-                    ORDER BY link.link_id
+                    f"""
+                    SELECT link.link_key, link.child_run_key, terminal.status
+                    FROM mission_control.run_composition_link AS link
+                    LEFT JOIN mission_control.linked_child_terminal AS terminal
+                      ON terminal.installation_id = link.installation_id
+                     AND terminal.application_id = link.application_id
+                     AND terminal.tenant_id = link.tenant_id
+                     AND terminal.link_key = link.link_key
+                    WHERE {scoped("link")} AND link.parent_run_key = $4
+                    ORDER BY link.link_key
                     """,
-                    request_scope,
+                    *args,
                     run_id,
                 )
-                binding = await connection.fetchrow(
-                    """
-                    SELECT blueprint_digest, binding_digest
-                    FROM belllabs_control.workflow_semantic_input_bindings
-                    WHERE request_scope = $1 AND run_id = $2
-                    """,
-                    request_scope,
-                    run_id,
-                )
+                binding = await semantic_binding_row(connection, args, run_id)
+        manifest = _load(binding["manifest"]) if binding is not None else None
         return ForkSourceFacts(
-            run_version=int(version),
+            run_version=int(run["version"]),
             family_heads=tuple(
                 FamilyHeadRecord(
                     family_kind=row["family_kind"],
@@ -178,15 +219,15 @@ class PostgresForkSourceReader:
             ),
             linked_runs=tuple(
                 LinkedRunRecord(
-                    link_id=row["link_id"],
-                    child_run_id=row["child_run_id"],
+                    link_id=row["link_key"],
+                    child_run_id=row["child_run_key"],
                     terminal_status=row["status"],
                 )
                 for row in links
             ),
-            blueprint_digest=binding["blueprint_digest"] if binding is not None else None,
+            blueprint_digest=manifest["blueprint_digest"] if manifest is not None else None,
             semantic_input_binding_digest=(
-                binding["binding_digest"] if binding is not None else None
+                binding["manifest_digest"] if binding is not None else None
             ),
         )
 
@@ -205,19 +246,15 @@ class PostgresForkMaterializationStore:
     ) -> ForkLineageManifest:
         scope = request.request_scope
         async with self._pool.acquire() as connection, connection.transaction():
-            await _scope(connection, scope)
-            await connection.execute(
-                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-                f"fork:{scope}:{request.request_id}",
-            )
+            args = await mc.begin(connection, scope)
+            await mc.advisory_lock(connection, f"fork:{scope}:{request.request_id}")
             row = await connection.fetchrow(
-                """
-                SELECT request_digest, materialization_payload
-                FROM belllabs_control.runtime_fork_requests
-                WHERE request_scope = $1 AND request_id = $2 AND schema_version IS NOT NULL
+                f"""
+                SELECT request_digest, materialization_payload FROM mission_control.fork_request
+                WHERE {SCOPE} AND request_key = $4
                 FOR UPDATE
                 """,
-                scope,
+                *args,
                 request.request_id,
             )
             if row is None or row["request_digest"] != fork_request_fingerprint(request):
@@ -233,15 +270,18 @@ class PostgresForkMaterializationStore:
                 candidate = decision.candidate
                 await connection.execute(
                     """
-                    INSERT INTO belllabs_control.run_fork_reuse_decisions (
-                        request_scope, fork_request_id, derived_run_id, derived_unit_key,
-                        source_run_id, source_unit_key, schema_version, decision, reason,
-                        result_manifest_ref, result_manifest_digest, decision_digest,
-                        decision_payload, recorded_at
+                    INSERT INTO mission_control.fork_reuse_decision (
+                        installation_id, application_id, tenant_id, fork_reuse_decision_id,
+                        fork_request_key, derived_run_key, derived_unit_key, source_run_key,
+                        source_unit_key, schema_version, decision, reason, result_manifest_ref,
+                        result_manifest_digest, decision_digest, decision_payload, recorded_at,
+                        created_at, created_by_actor_ref
                     )
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+                            $16::jsonb, $17, $17, $18)
                     """,
-                    scope,
+                    *args,
+                    uuid7(),
                     request.request_id,
                     decision.derived_run_id,
                     decision.derived_unit_key,
@@ -255,15 +295,16 @@ class PostgresForkMaterializationStore:
                     stable_json_digest(decision),
                     _dump(decision),
                     request.requested_at,
+                    request.actor_id,
                 )
             await append_lineage_in_transaction(connection, execution_lineage)
             await connection.execute(
-                """
-                UPDATE belllabs_control.runtime_fork_requests
-                SET materialization_payload = $3::jsonb
-                WHERE request_scope = $1 AND request_id = $2
+                f"""
+                UPDATE mission_control.fork_request
+                SET materialization_payload = $5::jsonb
+                WHERE {SCOPE} AND request_key = $4
                 """,
-                scope,
+                *args,
                 request.request_id,
                 _dump(lineage),
             )
@@ -273,46 +314,44 @@ class PostgresForkMaterializationStore:
         self, request_scope: str, request_id: str
     ) -> ForkLineageManifest | None:
         async with self._pool.acquire() as connection, connection.transaction():
-            await _scope(connection, request_scope)
+            args = await mc.begin(connection, request_scope)
             payload = await connection.fetchval(
-                """
-                SELECT materialization_payload FROM belllabs_control.runtime_fork_requests
-                WHERE request_scope = $1 AND request_id = $2 AND schema_version IS NOT NULL
+                f"""
+                SELECT materialization_payload FROM mission_control.fork_request
+                WHERE {SCOPE} AND request_key = $4
                 """,
-                request_scope,
+                *args,
                 request_id,
             )
         return ForkLineageManifest.model_validate(_load(payload)) if payload else None
 
     async def fork_of_run(self, request_scope: str, derived_run_id: str) -> ForkOfRun | None:
         async with self._pool.acquire() as connection, connection.transaction():
-            await _scope(connection, request_scope)
+            args = await mc.begin(connection, request_scope)
             row = await connection.fetchrow(
-                """
-                SELECT request_id, materialization_payload IS NOT NULL AS materialized
-                FROM belllabs_control.runtime_fork_requests
-                WHERE request_scope = $1 AND target_run_id = $2
+                f"""
+                SELECT request_key, materialization_payload IS NOT NULL AS materialized
+                FROM mission_control.fork_request
+                WHERE {SCOPE} AND target_run_key = $4
                 """,
-                request_scope,
+                *args,
                 derived_run_id,
             )
         if row is None:
             return None
-        return ForkOfRun(fork_request_id=row["request_id"], materialized=row["materialized"])
+        return ForkOfRun(fork_request_id=row["request_key"], materialized=row["materialized"])
 
     async def fork_marker(self, request_scope: str, run_id: str) -> str | None:
         """The fork request id named by the run's admission transition (version 1), if any."""
 
         async with self._pool.acquire() as connection, connection.transaction():
-            await _scope(connection, request_scope)
+            args = await mc.begin(connection, request_scope)
             payload = await connection.fetchval(
-                """
-                SELECT t.transition
-                FROM belllabs_control.lifecycle_transitions t
-                JOIN belllabs_control.workflow_runs r ON r.run_id = t.run_id
-                WHERE r.request_scope = $1 AND t.run_id = $2 AND t.resulting_version = 1
+                f"""
+                SELECT transition FROM mission_control.run_lifecycle_transition
+                WHERE {SCOPE} AND run_key = $4 AND resulting_version = 1
                 """,
-                request_scope,
+                *args,
                 run_id,
             )
         if payload is None:
@@ -323,13 +362,13 @@ class PostgresForkMaterializationStore:
         self, request_scope: str, derived_run_id: str, derived_unit_key: str
     ) -> ForkReuseDecision | None:
         async with self._pool.acquire() as connection, connection.transaction():
-            await _scope(connection, request_scope)
+            args = await mc.begin(connection, request_scope)
             payload = await connection.fetchval(
-                """
-                SELECT decision_payload FROM belllabs_control.run_fork_reuse_decisions
-                WHERE request_scope = $1 AND derived_run_id = $2 AND derived_unit_key = $3
+                f"""
+                SELECT decision_payload FROM mission_control.fork_reuse_decision
+                WHERE {SCOPE} AND derived_run_key = $4 AND derived_unit_key = $5
                 """,
-                request_scope,
+                *args,
                 derived_run_id,
                 derived_unit_key,
             )
@@ -339,14 +378,14 @@ class PostgresForkMaterializationStore:
         self, request_scope: str, request_id: str
     ) -> tuple[ForkReuseDecision, ...]:
         async with self._pool.acquire() as connection, connection.transaction():
-            await _scope(connection, request_scope)
+            args = await mc.begin(connection, request_scope)
             rows = await connection.fetch(
-                """
-                SELECT decision_payload FROM belllabs_control.run_fork_reuse_decisions
-                WHERE request_scope = $1 AND fork_request_id = $2
+                f"""
+                SELECT decision_payload FROM mission_control.fork_reuse_decision
+                WHERE {SCOPE} AND fork_request_key = $4
                 ORDER BY derived_unit_key
                 """,
-                request_scope,
+                *args,
                 request_id,
             )
         return tuple(

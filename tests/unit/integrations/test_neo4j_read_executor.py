@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Self
 
 import pytest
-from biotech_mission_adapters.adapters.infrastructure.neo4j_read_executor import Neo4jReadExecutor
 
+from biotech_mission_adapters.adapters.infrastructure.neo4j_read_executor import Neo4jReadExecutor
 from tests.unit.schema.test_graph_query_intents import _intent
 
 
@@ -25,10 +25,10 @@ class _Session:
     def __init__(self, driver: _Driver) -> None:
         self.driver = driver
 
-    async def __aenter__(self) -> _Session:
+    async def __aenter__(self) -> Self:
         return self
 
-    async def __aexit__(self, *_args: Any) -> None:
+    async def __aexit__(self, *_args: object) -> None:
         return None
 
     async def run(self, query: Any, parameters: dict[str, Any] | None = None) -> _Cursor:

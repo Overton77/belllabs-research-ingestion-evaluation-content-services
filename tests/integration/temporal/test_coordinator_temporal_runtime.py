@@ -117,7 +117,6 @@ async def test_fastmcp_first_all_application_worker_factories_validate() -> None
         SchemaGroundingActivities,
         create_schema_grounding_activity_worker,
     )
-
     from mission_control.adapters.temporal.artifact_activities import (
         ArtifactPromotionActivities,
         create_generic_artifact_worker,

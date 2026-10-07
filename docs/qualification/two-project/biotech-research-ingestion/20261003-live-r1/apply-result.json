@@ -1,0 +1,46 @@
+{
+  "applied_migrations": [
+    "0001_foundation",
+    "0002_authoring",
+    "0003_execution",
+    "0004_capability_artifacts",
+    "0005_commands_effects_recovery",
+    "0010_run_control_support",
+    "0011_operation_journal_support",
+    "0012_runtime_lineage_support",
+    "0013_snapshot_fork_support",
+    "0014_orchestration_support",
+    "0015_async_subagent_support",
+    "0016_coordinator_support",
+    "0017_runtime_kernel_support",
+    "0020_catalog_definitions",
+    "0021_capability_bundle_admission",
+    "0022_capability_search_projection",
+    "0023_capability_discovery_custody",
+    "0024_workspace_artifact_custody"
+  ],
+  "attestation_verified": true,
+  "component_version": "1.0.0",
+  "fingerprint_algorithm": "mc-pg-catalog-v2",
+  "identity_verified": true,
+  "migration_count": 18,
+  "outcome": "applied",
+  "plan_digest": "sha256:eb81eed0cd569781106fc98860ed8b7ed68175c8a3f1f5abd67fb747bbac3464",
+  "plan_matched": true,
+  "reader_version": "mission-control-runtime/1",
+  "runtime_roles_verified": [
+    "mission_control_catalog_writer",
+    "mission_control_family_writer",
+    "mission_control_outbox_worker",
+    "mission_control_readonly",
+    "mission_control_runtime"
+  ],
+  "schema_fingerprint": "sha256:ef5a9e71c9c4a4fe23f343a5708c476a757bc1c5a61f9aacae3a76577b209c09",
+  "schema_fingerprint_verified": true,
+  "schema_fingerprints": {
+    "mission_control": "sha256:461609218ce65a7a7b75072a65484ac479aed55bb3b42ccb37ef81a2dc1d2d29",
+    "mission_control_search": "sha256:1df2cc3c968448828537bd0dc171b97fde614b00c85c6f8b6c9552ab2c796c89"
+  },
+  "status": "verified",
+  "writer_version": "mission-control-runtime/1"
+}

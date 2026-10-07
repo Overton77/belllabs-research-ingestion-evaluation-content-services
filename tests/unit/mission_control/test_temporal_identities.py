@@ -8,6 +8,8 @@ from temporalio.api.common.v1 import Payloads, WorkflowType
 from temporalio.api.history.v1 import HistoryEvent, WorkflowExecutionStartedEventAttributes
 from temporalio.converter import DataConverter
 from temporalio.exceptions import ApplicationError
+from tests.fixtures.rrm009_production_stack import goal_blueprint, goal_revision
+from tests.unit.run_control.test_run_control import actor, request, service
 
 from mission_control.adapters.temporal.linked_run_workflow import linked_root_input
 from mission_control.adapters.temporal.submission import TemporalWorkflowSubmitter
@@ -26,8 +28,6 @@ from mission_control.domain.authoring.fixtures import GENERIC_STAGE_GRAPH
 from mission_control.domain.composition.contracts import RunCompositionLink
 from mission_control.domain.coordinator.launch import BlueprintFamily, LaunchIdempotencyConflict
 from mission_control.domain.programs.contracts import GoalDirectedRunInput, StageGraphRunInput
-from tests.fixtures.rrm009_production_stack import goal_blueprint, goal_revision
-from tests.unit.run_control.test_run_control import actor, request, service
 
 INSTALLATION = UUID("00000000-0000-0000-0000-000000000001")
 SCOPE = f"mc/{INSTALLATION}/biotech/00000000-0000-0000-0000-000000000002"

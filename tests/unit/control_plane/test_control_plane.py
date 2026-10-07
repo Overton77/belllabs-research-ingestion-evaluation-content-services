@@ -300,7 +300,7 @@ def test_compilation_context_rejects_naive_time() -> None:
     with pytest.raises(ValidationError, match="timezone"):
         CompilationContext(
             compilation_id="naive-time",
-            compiled_at=datetime(2026, 1, 2, 3, 4),
+            compiled_at=datetime(2026, 1, 2, 3, 4),  # noqa: DTZ001 - naive input is under test
             actor_id="caller",
             authority_subject_id="caller",
             authority_scope="tenant-1",
@@ -594,6 +594,6 @@ async def test_externalized_payload_has_same_contract_and_detects_tampering() ->
     assert await service.retrieve(compiled.digest) == compiled
 
     record["payload_ref"]["digest"] = "sha256:" + "0" * 64
-    repository._erc[compiled.digest] = record  # noqa: SLF001 - deliberate corruption seam
+    repository._erc[compiled.digest] = record
     with pytest.raises(PayloadIntegrityError, match="content-address mismatch"):
         await service.retrieve(compiled.digest)

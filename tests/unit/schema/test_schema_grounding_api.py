@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 from biotech_mission_adapters.application.schema.schema_grounding_repository import (
     InMemorySchemaGroundingRecordRepository,
     schema_grounding_record,
@@ -10,9 +13,6 @@ from biotech_mission_adapters.interfaces.http.schema_grounding import (
     get_schema_grounding_repository,
     router,
 )
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
 from mission_control.interfaces.http.control_plane import (
     ControlPlanePrincipal,
     get_control_plane_principal,

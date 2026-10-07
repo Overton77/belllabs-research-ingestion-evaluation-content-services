@@ -1423,13 +1423,14 @@ def _add_soft_limit_proposal(
     if not triggered:
         return proposals
     proposal_id = stable_id("continuation", run_id, *sorted(triggered))
-    return proposals + [
+    return [
+        *proposals,
         ContinuationProposal(
             proposal_id=proposal_id,
             triggered_dimensions=frozenset(triggered),
             action="reduce_effort",
             reason="one or more independent budget soft limits were reached",
-        )
+        ),
     ]
 
 

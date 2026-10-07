@@ -1,3 +1,5 @@
+"""Frozen run semantic input bindings as canonical immutable execution bindings."""
+
 from __future__ import annotations
 
 import json
@@ -5,10 +7,15 @@ from typing import Any
 
 import asyncpg
 
+from mission_control.adapters.postgres.run_control import canonical as mc
+from mission_control.adapters.postgres.run_control.canonical import scoped
 from mission_control.application.programs.orchestration_binding_repository import (
     SemanticInputBindingConflict,
 )
+from mission_control.contracts.identities import uuid7
 from mission_control.domain.programs.bindings import RunSemanticInputBinding
+
+BINDING_CONTRACT = "mc.semantic-input-binding/1"
 
 
 class PostgresRunSemanticInputBindingRepository:
@@ -22,45 +29,40 @@ class PostgresRunSemanticInputBindingRepository:
         binding: RunSemanticInputBinding,
     ) -> RunSemanticInputBinding:
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, binding.request_scope)
-            await connection.execute(
-                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-                f"semantic-binding:{binding.request_scope}:{binding.run_id}",
+            args = await mc.begin(connection, binding.request_scope)
+            await mc.advisory_lock(
+                connection, f"semantic-binding:{binding.request_scope}:{binding.run_id}"
             )
-            prior = await connection.fetchrow(
-                """
-                SELECT binding_digest, binding_payload
-                FROM belllabs_control.workflow_semantic_input_bindings
-                WHERE request_scope = $1 AND run_id = $2
-                """,
-                binding.request_scope,
-                binding.run_id,
-            )
+            prior = await _binding_row(connection, args, binding.run_id)
             if prior is not None:
-                persisted = RunSemanticInputBinding.model_validate(_json(prior["binding_payload"]))
-                if prior["binding_digest"] != binding.binding_digest or persisted != binding:
+                persisted = RunSemanticInputBinding.model_validate(_json(prior["manifest"]))
+                if prior["manifest_digest"] != binding.binding_digest or persisted != binding:
                     raise SemanticInputBindingConflict(
                         "Workflow Run already has a different semantic input binding"
                     )
                 return persisted
+            run = await mc.require_run(connection, args, binding.run_id)
             await connection.execute(
                 """
-                INSERT INTO belllabs_control.workflow_semantic_input_bindings (
-                    binding_id, request_scope, run_id, blueprint_family,
-                    effective_configuration_digest, blueprint_digest,
-                    binding_digest, binding_payload, created_at
+                INSERT INTO mission_control.execution_binding (
+                    installation_id, application_id, tenant_id, execution_binding_id,
+                    binding_key, revision_id, run_id, program_node_id, subordinate_id,
+                    binding_contract, manifest, manifest_ref, manifest_digest,
+                    admission_decision, admitted_at, created_at, created_by_actor_ref
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, NULL, $8, $9::jsonb, NULL, $10,
+                        'admitted', $11, $11, $12)
                 """,
+                *args,
+                uuid7(),
                 binding.binding_id,
-                binding.request_scope,
-                binding.run_id,
-                binding.blueprint_family,
-                binding.effective_configuration_digest,
-                binding.blueprint_digest,
-                binding.binding_digest,
+                run["revision_id"],
+                run["run_id"],
+                BINDING_CONTRACT,
                 _dump(binding),
+                binding.binding_digest,
                 binding.created_at,
+                mc.WRITER_REF,
             )
         return binding
 
@@ -72,20 +74,11 @@ class PostgresRunSemanticInputBindingRepository:
         run_id: str,
     ) -> RunSemanticInputBinding | None:
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, request_scope)
-            payload = await connection.fetchval(
-                """
-                SELECT binding_payload
-                FROM belllabs_control.workflow_semantic_input_bindings
-                WHERE binding_id = $1 AND request_scope = $2 AND run_id = $3
-                """,
-                binding_id,
-                request_scope,
-                run_id,
-            )
-        if payload is None:
+            args = await mc.begin(connection, request_scope)
+            row = await _binding_row(connection, args, run_id, binding_key=binding_id)
+        if row is None:
             return None
-        return RunSemanticInputBinding.model_validate(_json(payload))
+        return RunSemanticInputBinding.model_validate(_json(row["manifest"]))
 
     async def get_for_run(
         self,
@@ -94,25 +87,43 @@ class PostgresRunSemanticInputBindingRepository:
         run_id: str,
     ) -> RunSemanticInputBinding | None:
         async with self._pool.acquire() as connection, connection.transaction():
-            await _set_scope(connection, request_scope)
-            payload = await connection.fetchval(
-                """
-                SELECT binding_payload
-                FROM belllabs_control.workflow_semantic_input_bindings
-                WHERE request_scope = $1 AND run_id = $2
-                """,
-                request_scope,
-                run_id,
-            )
-        if payload is None:
+            args = await mc.begin(connection, request_scope)
+            row = await _binding_row(connection, args, run_id)
+        if row is None:
             return None
-        return RunSemanticInputBinding.model_validate(_json(payload))
+        return RunSemanticInputBinding.model_validate(_json(row["manifest"]))
 
 
-async def _set_scope(connection: asyncpg.Connection, request_scope: str) -> None:
-    await connection.execute(
-        "SELECT set_config('belllabs.request_scope', $1, true)",
-        request_scope,
+async def semantic_binding_row(
+    connection: asyncpg.Connection, args: tuple[Any, ...], run_key: str
+) -> asyncpg.Record | None:
+    """The run's semantic binding manifest and digest (shared with fork source reads)."""
+
+    return await _binding_row(connection, args, run_key)
+
+
+async def _binding_row(
+    connection: asyncpg.Connection,
+    args: tuple[Any, ...],
+    run_key: str,
+    *,
+    binding_key: str | None = None,
+) -> asyncpg.Record | None:
+    return await connection.fetchrow(
+        f"""
+        SELECT binding.manifest, binding.manifest_digest
+        FROM mission_control.execution_binding binding
+        JOIN mission_control.mission_run run
+          ON run.installation_id = binding.installation_id
+         AND run.application_id = binding.application_id
+         AND run.tenant_id = binding.tenant_id AND run.run_id = binding.run_id
+        WHERE {scoped("binding")} AND run.run_key = $4 AND binding.binding_contract = $5
+          AND ($6::text IS NULL OR binding.binding_key = $6)
+        """,
+        *args,
+        run_key,
+        BINDING_CONTRACT,
+        binding_key,
     )
 
 

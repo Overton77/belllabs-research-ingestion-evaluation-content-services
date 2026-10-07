@@ -13,6 +13,7 @@ from mission_control.domain.authoring.canonical import sha256_digest
 from mission_control.domain.authoring.contracts import (
     DefinitionKind,
     EffectiveRunConfiguration,
+    ExactDefinitionRef,
     GoalDirectedBlueprint,
     StageGraphBlueprint,
 )
@@ -382,17 +383,15 @@ class CoordinatorLaunchPreparationService:
         preview = await self._admission.preview(run_request)
         resolved_refs = tuple(
             sorted(
-                set(
-                    (
-                        *erc.source_refs,
-                        *proposal.selected_asset_refs,
-                        *(
-                            (runtime_plan.run_plan.workflow_implementation_ref,)
-                            if runtime_plan is not None
-                            else ()
-                        ),
-                    )
-                ),
+                {
+                    *erc.source_refs,
+                    *proposal.selected_asset_refs,
+                    *(
+                        (runtime_plan.run_plan.workflow_implementation_ref,)
+                        if runtime_plan is not None
+                        else ()
+                    ),
+                },
                 key=lambda ref: (ref.kind.value, ref.logical_id, ref.revision, ref.digest),
             )
         )
@@ -589,7 +588,7 @@ class CoordinatorWorkflowLaunchService:
 def _required_source_ref(
     erc: EffectiveRunConfiguration,
     kind: DefinitionKind,
-):
+) -> ExactDefinitionRef:
     matches = tuple(ref for ref in erc.source_refs if ref.kind == kind)
     if len(matches) != 1:
         raise LaunchTicketUnavailable(

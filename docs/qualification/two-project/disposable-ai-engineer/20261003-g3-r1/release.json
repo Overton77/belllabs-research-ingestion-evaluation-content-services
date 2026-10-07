@@ -1,0 +1,237 @@
+{
+  "component": "mission_control",
+  "component_version": "1.0.0",
+  "contract_schema_digest": "sha256:dbce50116df01e9a8d814f78e9ff61d91943afdfcc5fcb1a1d2d2001e488ab7f",
+  "lock_digest": "sha256:2bc97e69517847ecfbd673e4ecaeea74e3f929416844092a2bbaaaf94ee80f5b",
+  "manifest": {
+    "compatible_previous_fingerprints": [],
+    "component": "mission_control",
+    "component_version": "1.0.0",
+    "contract_path": "generated/contract.json",
+    "contract_schema_digest": "sha256:dbce50116df01e9a8d814f78e9ff61d91943afdfcc5fcb1a1d2d2001e488ab7f",
+    "installer_protocol": "mission-control-sql/v2",
+    "min_postgres_version": 170000,
+    "ordered_migrations": [
+      {
+        "key": "0001_foundation",
+        "path": "migrations/0001_foundation.sql",
+        "sha256": "17fdeed4fd09b2a6ca82fa9dbc5fcb99a5255b25c86c4ac4055a0f4003c5c571"
+      },
+      {
+        "key": "0002_authoring",
+        "path": "migrations/0002_authoring.sql",
+        "sha256": "fe9f2f9adc7675db24b9458ea9be0d7e32a2c10aa4e708dd069d6a19af49e7b5"
+      },
+      {
+        "key": "0003_execution",
+        "path": "migrations/0003_execution.sql",
+        "sha256": "fd0f839bd389f66c9dbb139934d7333699718fcfaa143e5757b23fefff947f27"
+      },
+      {
+        "key": "0004_capability_artifacts",
+        "path": "migrations/0004_capability_artifacts.sql",
+        "sha256": "fe33a28c27f4fc9b965c417a407b5e1707a8bf8498c6dbf7b1cf90a47b8dfb07"
+      },
+      {
+        "key": "0005_commands_effects_recovery",
+        "path": "migrations/0005_commands_effects_recovery.sql",
+        "sha256": "db724c6fd630bbe672e8b9f655db908de0c5fe1298d36101f7afb292daa6024e"
+      },
+      {
+        "key": "0010_run_control_support",
+        "path": "migrations/0010_run_control_support.sql",
+        "sha256": "4be38adab6127f49ac9445d9171f9041dd2aa4efcf5d9dfe81eaceed242cfb20"
+      },
+      {
+        "key": "0011_operation_journal_support",
+        "path": "migrations/0011_operation_journal_support.sql",
+        "sha256": "c053ab24e9f22d4a88005fd510bdbf3f53e3201582888045da187ec0634e39ed"
+      },
+      {
+        "key": "0012_runtime_lineage_support",
+        "path": "migrations/0012_runtime_lineage_support.sql",
+        "sha256": "5ba6d2fb9a66279028caeebac7db90e4098666831a658056628443cc234bdbbd"
+      },
+      {
+        "key": "0013_snapshot_fork_support",
+        "path": "migrations/0013_snapshot_fork_support.sql",
+        "sha256": "a67e8ed97071893969723a6d799ce02976e6a46235527c44edc282b0f463c52a"
+      },
+      {
+        "key": "0014_orchestration_support",
+        "path": "migrations/0014_orchestration_support.sql",
+        "sha256": "0639a883b6d403ae83cd9e7b46b3b22a2f08b3e1b567d2b3ca5f1ebe21550840"
+      },
+      {
+        "key": "0015_async_subagent_support",
+        "path": "migrations/0015_async_subagent_support.sql",
+        "sha256": "63b0a28c6a783058c1715f1873ac7ef0ec4cb4b11a375bedd290fbdd35640b14"
+      },
+      {
+        "key": "0016_coordinator_support",
+        "path": "migrations/0016_coordinator_support.sql",
+        "sha256": "baa2a9d2aa15269ca9facefa293620056fd72198ef2bb6232246a7bbbdc88dfb"
+      },
+      {
+        "key": "0017_runtime_kernel_support",
+        "path": "migrations/0017_runtime_kernel_support.sql",
+        "sha256": "74ecee43b86b78aea50f7e4b59740031483cd79a296f07b8034c05af529787dd"
+      },
+      {
+        "key": "0020_catalog_definitions",
+        "path": "migrations/0020_catalog_definitions.sql",
+        "sha256": "2d8be48cbfa8588d8feca5cb8824af902ab8a1465cb06240fe1b5c4b0a5b9a4d"
+      },
+      {
+        "key": "0021_capability_bundle_admission",
+        "path": "migrations/0021_capability_bundle_admission.sql",
+        "sha256": "f01ce20b42d74284a0c79fd76da71b30a39628184c84f00a057e67aef557189f"
+      },
+      {
+        "key": "0022_capability_search_projection",
+        "path": "migrations/0022_capability_search_projection.sql",
+        "sha256": "2d54d12db628a3015601b3723215f30ef69efdc79c2c15710a27263464f428f5"
+      },
+      {
+        "key": "0023_capability_discovery_custody",
+        "path": "migrations/0023_capability_discovery_custody.sql",
+        "sha256": "d2022c5b9b858734fe6e5b2fd72a04dc7a42d264092c3427d91b5a6f317fac23"
+      },
+      {
+        "key": "0024_workspace_artifact_custody",
+        "path": "migrations/0024_workspace_artifact_custody.sql",
+        "sha256": "c6ca8f833dc46c0e055866e491858a565d9721c998e94bb6b3b6f09946581ed9"
+      }
+    ],
+    "owned_schemas": [
+      "mission_control",
+      "mission_control_search"
+    ],
+    "postgres_major": 17,
+    "required_extensions": [
+      {
+        "name": "vector",
+        "required_by": [
+          "mission_control_search"
+        ],
+        "schema": "extensions"
+      }
+    ],
+    "runtime_descriptor": {
+      "path": "../runtime/descriptor.json",
+      "sha256": "b0330c546284548791dffae3c19452952db008fe5b32d36e8cc1a63488b93cfd"
+    },
+    "runtime_roles": [
+      "mission_control_runtime",
+      "mission_control_family_writer",
+      "mission_control_catalog_writer",
+      "mission_control_outbox_worker",
+      "mission_control_readonly"
+    ],
+    "schema_fingerprint": "sha256:ef5a9e71c9c4a4fe23f343a5708c476a757bc1c5a61f9aacae3a76577b209c09",
+    "schema_fingerprint_algorithm": "mc-pg-catalog-v2",
+    "schema_fingerprints": {
+      "mission_control": "sha256:461609218ce65a7a7b75072a65484ac479aed55bb3b42ccb37ef81a2dc1d2d29",
+      "mission_control_search": "sha256:1df2cc3c968448828537bd0dc171b97fde614b00c85c6f8b6c9552ab2c796c89"
+    },
+    "seed_compatibility": {
+      "bundle_format": "mission-control-seed/v1",
+      "component_range": ">=1.0.0 <2.0.0",
+      "seed_keys": [
+        "mc.installation",
+        "mc.catalog.workflow-parity",
+        "mc.catalog.runtime-profiles",
+        "mc.catalog.approved-assets",
+        "mc.app.bindings",
+        "mc.qualification.parity"
+      ]
+    },
+    "source_identity": "mission-control-db-contract",
+    "source_inputs_digest": "sha256:e3fbbd281b314ae2b135cb2c349f426e575e804b11fdb237f2ffa3aeb9041421",
+    "source_revision": "git:f6521c128738b4962f22fb7646882950c0b63d7c+inputs:sha256:e3fbbd281b314ae2b135cb2c349f426e575e804b11fdb237f2ffa3aeb9041421",
+    "supported_reader_versions": [
+      "mission-control-runtime/1"
+    ],
+    "supported_writer_versions": [
+      "mission-control-runtime/1"
+    ]
+  },
+  "manifest_digest": "sha256:05629600f5c58421b4e3be82914a7efb1a4191588e049b0c478d7847c5a7c91e",
+  "migrations": [
+    {
+      "digest": "sha256:17fdeed4fd09b2a6ca82fa9dbc5fcb99a5255b25c86c4ac4055a0f4003c5c571",
+      "key": "0001_foundation"
+    },
+    {
+      "digest": "sha256:fe9f2f9adc7675db24b9458ea9be0d7e32a2c10aa4e708dd069d6a19af49e7b5",
+      "key": "0002_authoring"
+    },
+    {
+      "digest": "sha256:fd0f839bd389f66c9dbb139934d7333699718fcfaa143e5757b23fefff947f27",
+      "key": "0003_execution"
+    },
+    {
+      "digest": "sha256:fe33a28c27f4fc9b965c417a407b5e1707a8bf8498c6dbf7b1cf90a47b8dfb07",
+      "key": "0004_capability_artifacts"
+    },
+    {
+      "digest": "sha256:db724c6fd630bbe672e8b9f655db908de0c5fe1298d36101f7afb292daa6024e",
+      "key": "0005_commands_effects_recovery"
+    },
+    {
+      "digest": "sha256:4be38adab6127f49ac9445d9171f9041dd2aa4efcf5d9dfe81eaceed242cfb20",
+      "key": "0010_run_control_support"
+    },
+    {
+      "digest": "sha256:c053ab24e9f22d4a88005fd510bdbf3f53e3201582888045da187ec0634e39ed",
+      "key": "0011_operation_journal_support"
+    },
+    {
+      "digest": "sha256:5ba6d2fb9a66279028caeebac7db90e4098666831a658056628443cc234bdbbd",
+      "key": "0012_runtime_lineage_support"
+    },
+    {
+      "digest": "sha256:a67e8ed97071893969723a6d799ce02976e6a46235527c44edc282b0f463c52a",
+      "key": "0013_snapshot_fork_support"
+    },
+    {
+      "digest": "sha256:0639a883b6d403ae83cd9e7b46b3b22a2f08b3e1b567d2b3ca5f1ebe21550840",
+      "key": "0014_orchestration_support"
+    },
+    {
+      "digest": "sha256:63b0a28c6a783058c1715f1873ac7ef0ec4cb4b11a375bedd290fbdd35640b14",
+      "key": "0015_async_subagent_support"
+    },
+    {
+      "digest": "sha256:baa2a9d2aa15269ca9facefa293620056fd72198ef2bb6232246a7bbbdc88dfb",
+      "key": "0016_coordinator_support"
+    },
+    {
+      "digest": "sha256:74ecee43b86b78aea50f7e4b59740031483cd79a296f07b8034c05af529787dd",
+      "key": "0017_runtime_kernel_support"
+    },
+    {
+      "digest": "sha256:2d8be48cbfa8588d8feca5cb8824af902ab8a1465cb06240fe1b5c4b0a5b9a4d",
+      "key": "0020_catalog_definitions"
+    },
+    {
+      "digest": "sha256:f01ce20b42d74284a0c79fd76da71b30a39628184c84f00a057e67aef557189f",
+      "key": "0021_capability_bundle_admission"
+    },
+    {
+      "digest": "sha256:2d54d12db628a3015601b3723215f30ef69efdc79c2c15710a27263464f428f5",
+      "key": "0022_capability_search_projection"
+    },
+    {
+      "digest": "sha256:d2022c5b9b858734fe6e5b2fd72a04dc7a42d264092c3427d91b5a6f317fac23",
+      "key": "0023_capability_discovery_custody"
+    },
+    {
+      "digest": "sha256:c6ca8f833dc46c0e055866e491858a565d9721c998e94bb6b3b6f09946581ed9",
+      "key": "0024_workspace_artifact_custody"
+    }
+  ],
+  "schema_fingerprint": "sha256:ef5a9e71c9c4a4fe23f343a5708c476a757bc1c5a61f9aacae3a76577b209c09",
+  "schema_fingerprint_algorithm": "mc-pg-catalog-v2",
+  "source_revision": "git:f6521c128738b4962f22fb7646882950c0b63d7c+inputs:sha256:e3fbbd281b314ae2b135cb2c349f426e575e804b11fdb237f2ffa3aeb9041421"
+}

@@ -15,8 +15,11 @@ async def main() -> int:
             async with application.router.lifespan_context(application):
                 result: dict[str, object] = {
                     "ready": bool(application.state.mission_control_ready),
-                    "storage_mode": "transitional_local",
-                    "production_ready": False,
+                    "storage_mode": "production_common",
+                    "production_ready": all(
+                        item.readiness.production_ready
+                        for item in application.state.mission_control_compositions.values()
+                    ),
                     "application_tenants": len(application.state.mission_control_compositions),
                     "schema_changes": False,
                 }

@@ -9,6 +9,8 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from pydantic import SecretStr, ValidationError
+
 from biotech_mission_adapters.adapters.infrastructure.web_research_runtime import (
     AgentBrowserSubprocessAdapter,
 )
@@ -23,8 +25,6 @@ from biotech_mission_adapters.domain.coordinator.web_research_runtime import (
     GovernedBrowserVerificationRequest,
     WebResearchGoal,
 )
-from pydantic import SecretStr, ValidationError
-
 from mission_control.adapters.capabilities.capability_embeddings import (
     CapabilityEmbeddingDependencyError,
     OpenAICapabilityEmbeddingAdapter,
@@ -75,6 +75,10 @@ from tests.unit.web_research.test_web_research_live_adapters import (
 
 SENTINEL = "sk-proj-SENTINEL_OPENAI_KEY_1234567890"
 NOW = datetime(2026, 7, 26, 18, 0, tzinfo=UTC)
+# A canonical Mission Control scope: mc/{installation}/{application}/{tenant}.
+AUDIT_INSTALLATION = "0192a4f0-0000-7000-8000-00000000b10e"
+AUDIT_TENANT = "0192a4f0-0000-7000-8000-0000000000aa"
+AUDIT_SCOPE = f"mc/{AUDIT_INSTALLATION}/biotech/{AUDIT_TENANT}"
 
 
 class _Transaction(AbstractAsyncContextManager[None]):
@@ -97,6 +101,9 @@ class _AuditConnection:
 
     def transaction(self) -> _Transaction:
         return _Transaction()
+
+    def is_in_transaction(self) -> bool:
+        return True
 
     async def execute(self, query: str, *args: object) -> str:
         self.calls.append((query, args))
@@ -143,7 +150,7 @@ async def test_postgres_audit_sink_persists_only_digest_metadata() -> None:
         occurred_at=NOW,
         operation="search_capabilities",
         actor_id="operator-1",
-        tenant_scope="tenant-a",
+        tenant_scope=AUDIT_SCOPE,
         outcome="succeeded",
         correlation_id=str(uuid4()),
         request_digest="sha256:" + "a" * 64,
@@ -153,9 +160,9 @@ async def test_postgres_audit_sink_persists_only_digest_metadata() -> None:
     await PostgresCoordinatorAuditSink(pool).emit(event)  # type: ignore[arg-type]
 
     assert len(pool.connection.calls) == 2
-    assert pool.connection.calls[0][1] == ("tenant-a",)
+    assert pool.connection.calls[0][1] == (AUDIT_INSTALLATION, "biotech", AUDIT_TENANT)
     insert_sql, insert_args = pool.connection.calls[1]
-    assert "coordinator_audit_events" in insert_sql
+    assert "mission_control.coordinator_audit_event" in insert_sql
     assert event.request_digest in insert_args
     assert event.response_digest in insert_args
     serialized = repr(pool.connection.calls)
@@ -170,13 +177,13 @@ async def test_postgres_audit_sink_reads_back_only_scoped_digest_events() -> Non
     event_id = uuid4()
     pool.connection.rows = [
         {
-            "event_id": event_id,
+            "event_key": str(event_id),
             "occurred_at": NOW,
             "operation": "get_workflow_result",
-            "actor_id": "operator-1",
-            "tenant_scope": "tenant-a",
+            "actor_key": "operator-1",
+            "tenant_scope": AUDIT_SCOPE,
             "outcome": "succeeded",
-            "correlation_id": str(uuid4()),
+            "correlation_key": str(uuid4()),
             "request_digest": "sha256:" + "a" * 64,
             "response_digest": "sha256:" + "b" * 64,
             "error_code": None,
@@ -184,7 +191,7 @@ async def test_postgres_audit_sink_reads_back_only_scoped_digest_events() -> Non
     ]
 
     events = await PostgresCoordinatorAuditSink(pool).list_events(  # type: ignore[arg-type]
-        tenant_scope="tenant-a",
+        tenant_scope=AUDIT_SCOPE,
         actor_id="operator-1",
         occurred_since=NOW,
     )
@@ -192,7 +199,11 @@ async def test_postgres_audit_sink_reads_back_only_scoped_digest_events() -> Non
     assert len(events) == 1
     assert events[0].event_id == str(event_id)
     assert events[0].operation == "get_workflow_result"
-    assert pool.connection.calls[0][1] == ("tenant-a",)
+    assert pool.connection.calls[0][1] == (AUDIT_INSTALLATION, "biotech", AUDIT_TENANT)
+    with pytest.raises(ValueError, match="canonical"):
+        await PostgresCoordinatorAuditSink(pool).list_events(  # type: ignore[arg-type]
+            tenant_scope="tenant-a", actor_id="operator-1", occurred_since=NOW
+        )
     assert "request_payload" not in pool.connection.calls[1][0]
     assert "response_payload" not in pool.connection.calls[1][0]
 
@@ -626,12 +637,12 @@ async def test_candidate_tool_schema_resource_and_skill_injection_remain_data() 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "missing_capability",
-    (
+    [
         "browser.process",
         "network.web",
         "workspace.browser.write",
         "artifact.browser-evidence.write",
-    ),
+    ],
 )
 async def test_missing_agent_browser_grant_fails_launch_preparation(
     missing_capability: str,

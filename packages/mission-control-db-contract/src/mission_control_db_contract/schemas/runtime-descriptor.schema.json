@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mission-control.runtime-descriptor/1",
+  "title": "Mission Control runtime (saver/store) provisioning descriptor",
+  "description": "Matches packages/mission-control-db-contract/runtime/descriptor.json as authored by the runtime-persistence lane (see runtime/README.md). mission_control_db_contract.runtime.load_descriptor is the enforcing validator and additionally recomputes every step sha256.",
+  "type": "object",
+  "required": ["descriptor_schema", "component", "schema", "role", "pins", "session", "steps", "final_verify"],
+  "properties": {
+    "descriptor_schema": {"const": "mission-control.runtime-descriptor/1"},
+    "component": {"const": "mission_control_runtime"},
+    "schema": {"const": "mission_control_runtime"},
+    "role": {"type": "string"},
+    "pins": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string"}},
+    "vendor_sources_sha256": {
+      "type": "object",
+      "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+    },
+    "session": {
+      "type": "object",
+      "required": ["search_path", "advisory_lock_sql", "advisory_unlock_sql", "lock_timeout"],
+      "properties": {
+        "search_path": {"type": "string", "pattern": "^mission_control_runtime(, ?(pg_catalog|mission_control_runtime))*, ?pg_temp$"},
+        "runtime_libpq_options": {"type": "string"},
+        "advisory_lock_sql": {"type": "string", "pattern": "^SELECT pg_catalog\\.pg_advisory_lock\\("},
+        "advisory_unlock_sql": {"type": "string", "pattern": "^SELECT pg_catalog\\.pg_advisory_unlock\\("},
+        "lock_timeout": {"type": "string", "pattern": "^[0-9]{1,4}(ms|s)$"}
+      }
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "transactional", "concurrent", "sql", "sha256", "records_version", "precheck", "verify", "verify_recorded"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*(\\.[a-z0-9_]+)+$"},
+          "kind": {"enum": ["sql", "vendor"]},
+          "transactional": {"type": "boolean"},
+          "concurrent": {"type": "boolean"},
+          "sql": {"type": "string"},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "records_version": {
+            "oneOf": [
+              {"type": "null"},
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["table", "v", "sql"],
+                "properties": {
+                  "table": {"type": "string"},
+                  "v": {"type": "integer"},
+                  "sql": {"type": "string", "pattern": "^INSERT INTO mission_control_runtime\\.[a-z_]+ \\(v\\) VALUES \\([0-9]+\\)$"}
+                }
+              }
+            ]
+          },
+          "precheck": {"$ref": "#/$defs/probes"},
+          "verify": {"$ref": "#/$defs/probes"},
+          "verify_recorded": {"$ref": "#/$defs/probes"}
+        }
+      }
+    },
+    "final_verify": {"$ref": "#/$defs/probes"}
+  },
+  "$defs": {
+    "probes": {
+      "type": "array",
+      "description": "Each SELECT must return exactly one row whose single column is true; no row, NULL or false fails.",
+      "items": {"type": "string", "pattern": "^\\s*SELECT "}
+    }
+  }
+}

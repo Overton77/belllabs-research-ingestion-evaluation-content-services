@@ -1,25 +1,26 @@
-"""PostgreSQL checkpoint lineage and recovery authority (migrations 0019, 0020).
+"""PostgreSQL checkpoint lineage and recovery authority on the common mission_control.
 
-Runs against the disposable stack only.
+Runtime units are canonical activations and execution generations canonical attempts
+(fencing token = claim fence); lineage evidence is support. Every repository call runs
+under a restricted login of `mission_control_runtime` with forced RLS.
 """
 
 from __future__ import annotations
 
 import asyncio
 from datetime import timedelta
-from urllib.parse import urlparse
 from uuid import uuid4
 
 import asyncpg
 import pytest
 
-from mission_control.adapters.postgres.connections import apply_application_migrations
 from mission_control.adapters.postgres.operations.checkpoint_lineage import (
     PostgresCheckpointLineageRepository,
 )
 from mission_control.adapters.postgres.run_control.run_control_repository import (
     PostgresRunControlRepository,
 )
+from mission_control.adapters.postgres.scope import apply_scope
 from mission_control.domain.execution.checkpoint_lineage import CheckpointNamespaceBusy
 from tests.fixtures.checkpoint_lineage import (
     LINEAGE_NOW,
@@ -29,166 +30,153 @@ from tests.fixtures.checkpoint_lineage import (
     goal_unit,
     namespace_claim,
 )
-from tests.unit.run_control.test_run_control import request as run_request
+from tests.fixtures.mission_control_common_db import CommonDatabase
+from tests.integration.postgres.runtime_common import common_db as common_db
+from tests.integration.postgres.runtime_common import owner_rows, scoped_request
 from tests.unit.run_control.test_run_control import service as run_control_service
 
+pytestmark = pytest.mark.common_db
 
-def require_disposable_postgres(dsn: str) -> None:
-    parsed = urlparse(dsn)
-    if (
-        parsed.hostname not in {"127.0.0.1", "localhost"}
-        or parsed.port != 55432
-        or parsed.path != "/belllabs"
-        or parsed.username != "belllabs"
-    ):
-        raise RuntimeError("checkpoint lineage proofs require the disposable local PostgreSQL")
+RUNTIME_ROLE = "mission_control_runtime"
 
 
-async def reset_application_schema(pool: asyncpg.Pool) -> None:
-    async with pool.acquire() as connection:
-        await connection.execute("DROP SCHEMA IF EXISTS belllabs_control CASCADE")
-    await apply_application_migrations(pool)
-
-
-async def admit_run(pool: asyncpg.Pool) -> str:
+async def admit_run(pool: asyncpg.Pool, db: CommonDatabase) -> str:
     run_service, _ = run_control_service(PostgresRunControlRepository(pool))  # type: ignore[arg-type]
-    decision = await run_service.admit(run_request(request_id=f"lineage-{uuid4()}"))
+    decision = await run_service.admit(scoped_request(db, request_id=f"lineage-{uuid4()}"))
     assert decision.run_id is not None
     return decision.run_id
 
 
 @pytest.mark.asyncio
 async def test_postgres_repository_satisfies_the_checkpoint_lineage_contract(
-    test_application_postgres_dsn: str,
+    common_db: CommonDatabase,
 ) -> None:
-    require_disposable_postgres(test_application_postgres_dsn)
-    pool = await asyncpg.create_pool(dsn=test_application_postgres_dsn, min_size=1, max_size=4)
+    pool = await common_db.pool(max_size=4)
     try:
-        await reset_application_schema(pool)
-        run_id = await admit_run(pool)
+        run_id = await admit_run(pool, common_db)
         await assert_checkpoint_lineage_repository_contract(
             PostgresCheckpointLineageRepository(pool),
-            request_scope="tenant-1",
+            request_scope=common_db.scope(),
             run_id=run_id,
         )
         await assert_checkpoint_recovery_repository_contract(
             PostgresCheckpointLineageRepository(pool),
-            request_scope="tenant-1",
+            request_scope=common_db.scope(),
             run_id=run_id,
         )
+        # Units are canonical activations of the admitted run; generations are canonical
+        # attempts whose fencing token is the claim fence.
+        rows = await owner_rows(
+            common_db,
+            """
+            SELECT a.activation_key, t.attempt_no, t.fencing_token, g.execution_generation
+            FROM mission_control.activation a
+            JOIN mission_control.mission_run r USING (installation_id, application_id,
+                                                      tenant_id, run_id)
+            JOIN mission_control.attempt t
+              ON t.installation_id = a.installation_id AND t.application_id = a.application_id
+             AND t.tenant_id = a.tenant_id AND t.activation_id = a.activation_id
+            JOIN mission_control.runtime_unit_generation g
+              ON g.installation_id = t.installation_id AND g.application_id = t.application_id
+             AND g.tenant_id = t.tenant_id AND g.attempt_key = t.attempt_key
+            WHERE r.run_key = $1
+            """,
+            run_id,
+        )
+        assert rows
+        assert all(row["attempt_no"] == row["execution_generation"] for row in rows)
     finally:
         await pool.close()
 
 
-RUNTIME_ROLE = "belllabs_control_runtime"
-
-
-async def _assume_runtime_role(connection: asyncpg.Connection) -> None:
-    await connection.execute(f"SET ROLE {RUNTIME_ROLE}")
-
-
 @pytest.mark.asyncio
 async def test_runtime_role_grants_and_rls_admit_the_full_lineage_contract(
-    test_application_postgres_dsn: str,
+    common_db: CommonDatabase,
 ) -> None:
-    """Migrations 0019/0020 grants are sufficient for the production role, and no broader.
+    """The release grants are sufficient for the production role, and no broader.
 
-    Production pools connect as a non-owner member of `belllabs_control_runtime`
-    (`src/mission_control/adapters/postgres/connections.py`). Every repository call
-    here runs under that role, so
-    forced RLS and the table grants are exercised instead of the owner's privileges.
+    Production pools connect as a non-owner login holding only `mission_control_runtime`,
+    so forced RLS and the table grants are exercised instead of the owner's privileges.
     """
 
-    require_disposable_postgres(test_application_postgres_dsn)
-    owner = await asyncpg.create_pool(dsn=test_application_postgres_dsn, min_size=1, max_size=2)
-    runtime = await asyncpg.create_pool(
-        dsn=test_application_postgres_dsn,
-        min_size=1,
-        max_size=4,
-        setup=_assume_runtime_role,
-    )
+    runtime = await common_db.pool(max_size=4)
+    scope = common_db.scope()
     try:
-        await reset_application_schema(owner)
-        run_id = await admit_run(owner)
+        run_id = await admit_run(runtime, common_db)
         async with runtime.acquire() as connection:
-            assert await connection.fetchval("SELECT current_user") == RUNTIME_ROLE
+            assert await connection.fetchval(
+                "SELECT pg_has_role(current_user, $1, 'MEMBER')", RUNTIME_ROLE
+            )
             assert not await connection.fetchval(
                 "SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user"
             )
             async with connection.transaction():
-                await connection.execute(
-                    "SELECT set_config('belllabs.request_scope', 'tenant-1', true)"
-                )
+                await apply_scope(connection, scope)
+                # Activations (unit identities) are insert-only for the runtime role.
                 with pytest.raises(asyncpg.InsufficientPrivilegeError):
-                    await connection.execute(
-                        "SELECT 1 FROM belllabs_control.runtime_units FOR UPDATE"
-                    )
+                    await connection.execute("SELECT 1 FROM mission_control.activation FOR UPDATE")
         await assert_checkpoint_lineage_repository_contract(
             PostgresCheckpointLineageRepository(runtime),
-            request_scope="tenant-1",
+            request_scope=scope,
             run_id=run_id,
         )
         # RRM-004: lease, fenced result, incidents and reconciliation under the same role.
         await assert_checkpoint_recovery_repository_contract(
             PostgresCheckpointLineageRepository(runtime),
-            request_scope="tenant-1",
+            request_scope=scope,
             run_id=run_id,
         )
         async with runtime.acquire() as connection, connection.transaction():
-            await connection.execute(
-                "SELECT set_config('belllabs.request_scope', 'tenant-1', true)"
-            )
+            await apply_scope(connection, scope)
             # The fenced result observation is insert-only for the runtime role.
             for statement in (
-                "UPDATE belllabs_control.runtime_unit_result_observations SET claim_fence = 9",
-                "DELETE FROM belllabs_control.runtime_unit_result_observations",
+                "UPDATE mission_control.unit_result_observation SET claim_fence = 9",
+                "DELETE FROM mission_control.unit_result_observation",
             ):
                 with pytest.raises(asyncpg.InsufficientPrivilegeError):
                     async with connection.transaction():
                         await connection.execute(statement)
             assert (
                 await connection.fetchval(
-                    "SELECT count(*) FROM belllabs_control.runtime_reconciliation_incidents"
-                    " WHERE unit_key IS NOT NULL"
+                    "SELECT count(*) FROM mission_control.reconciliation_case"
+                    " WHERE target_kind = 'runtime_unit_in_doubt'"
                 )
                 == 3
             ), "two unit generations' incidents, one of them at revision 2"
         async with runtime.acquire() as connection, connection.transaction():
-            await connection.execute(
-                "SELECT set_config('belllabs.request_scope', 'tenant-2', true)"
-            )
+            await apply_scope(connection, common_db.scope("tenant-2"))
             assert (
                 await connection.fetchval(
-                    "SELECT count(*) FROM belllabs_control.runtime_checkpoint_transitions"
+                    "SELECT count(*) FROM mission_control.checkpoint_transition"
                 )
                 == 0
-            ), "forced RLS hides another request scope's lineage"
+            ), "forced RLS hides another tenant's lineage"
             assert (
                 await connection.fetchval(
-                    "SELECT count(*) FROM belllabs_control.runtime_unit_result_observations"
+                    "SELECT count(*) FROM mission_control.unit_result_observation"
                 )
                 == 0
-            ), "forced RLS hides another request scope's results"
+            ), "forced RLS hides another tenant's results"
+        async with runtime.acquire() as connection, connection.transaction():
+            # Missing scope context: no rows.
+            assert await connection.fetchval("SELECT count(*) FROM mission_control.activation") == 0
     finally:
         await runtime.close()
-        await owner.close()
 
 
 @pytest.mark.asyncio
 async def test_concurrent_session_invocations_serialize_on_the_namespace_row(
-    test_application_postgres_dsn: str,
+    common_db: CommonDatabase,
 ) -> None:
     """REQ-BP-GD-012: two concurrent dispatches into one session admit exactly one."""
 
-    require_disposable_postgres(test_application_postgres_dsn)
-    pool = await asyncpg.create_pool(dsn=test_application_postgres_dsn, min_size=2, max_size=6)
+    pool = await common_db.pool(min_size=2, max_size=6)
     try:
-        await reset_application_schema(pool)
-        run_id = await admit_run(pool)
+        run_id = await admit_run(pool, common_db)
         repository = PostgresCheckpointLineageRepository(pool)
         units = [
             goal_unit(
-                request_scope="tenant-1",
+                request_scope=common_db.scope(),
                 run_id=run_id,
                 operation_id=f"goal-iteration/{iteration}/executor",
                 goal_iteration=iteration,
@@ -213,26 +201,24 @@ async def test_concurrent_session_invocations_serialize_on_the_namespace_row(
         )
         busy = [item for item in outcomes if isinstance(item, CheckpointNamespaceBusy)]
         admitted = [item for item in outcomes if not isinstance(item, BaseException)]
-        assert len(busy) == 1 and len(admitted) == 1
+        assert len(busy) == 1 and len(admitted) == 1, outcomes
     finally:
         await pool.close()
 
 
 @pytest.mark.asyncio
 async def test_concurrent_recoveries_of_one_unit_serialize_on_the_claim_lease(
-    test_application_postgres_dsn: str,
+    common_db: CommonDatabase,
 ) -> None:
     """REQ-CP-EXEC-014: after the holder's lease expired, concurrent recoveries of one unit
     serialize on the per-unit lock; exactly one takes the lease over (fence 2)."""
 
-    require_disposable_postgres(test_application_postgres_dsn)
-    pool = await asyncpg.create_pool(dsn=test_application_postgres_dsn, min_size=2, max_size=8)
+    pool = await common_db.pool(min_size=2, max_size=8)
     try:
-        await reset_application_schema(pool)
-        run_id = await admit_run(pool)
+        run_id = await admit_run(pool, common_db)
         repository = PostgresCheckpointLineageRepository(pool)
         unit = goal_unit(
-            request_scope="tenant-1",
+            request_scope=common_db.scope(),
             run_id=run_id,
             operation_id="goal-iteration/1/executor",
             goal_iteration=1,

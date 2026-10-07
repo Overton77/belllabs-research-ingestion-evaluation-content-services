@@ -14,7 +14,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Literal, Protocol
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 import asyncpg
 from fastapi import FastAPI, Header, HTTPException
@@ -77,7 +77,7 @@ class ApplicationDeployment(BaseModel):
 
 class MissionDeployment(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    storage_mode: Literal["production_common", "transitional_local"]
+    storage_mode: Literal["production_common"]
     applications: tuple[ApplicationDeployment, ...] = Field(min_length=1)
     max_request_bytes: int = Field(ge=1, le=16_000_000)
 
@@ -140,19 +140,31 @@ def install_authentication(application: FastAPI, verifier: MissionTokenVerifier)
     application.dependency_overrides[get_mission_principal] = authenticate
 
 
-async def local_pool(secret_ref: str) -> asyncpg.Pool:
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+TLS_MODES = frozenset({"require", "verify-ca", "verify-full"})
+
+
+async def application_pool(secret_ref: str) -> asyncpg.Pool:
+    """Open an app-bound restricted pool; remote endpoints must require TLS."""
     dsn = os.environ.get(secret_ref)
     if not dsn:
         raise RuntimeError("configured database credential reference is unavailable")
     parsed = urlsplit(dsn)
-    if parsed.scheme not in {"postgres", "postgresql"} or parsed.hostname not in {
-        "127.0.0.1",
-        "localhost",
-        "::1",
-    }:
-        raise RuntimeError("transitional_local requires a loopback PostgreSQL endpoint")
+    query = dict(parse_qsl(parsed.query))
+    if parsed.scheme not in {"postgres", "postgresql"} or not parsed.hostname:
+        raise RuntimeError("configured database credential is not a PostgreSQL endpoint")
+    if parsed.hostname not in LOOPBACK_HOSTS and query.get("sslmode") not in TLS_MODES:
+        raise RuntimeError("remote PostgreSQL endpoints must require TLS")
+    if "options" in query:
+        raise RuntimeError("application pools cannot override server options")
     try:
-        return await asyncpg.create_pool(dsn=dsn, min_size=1, max_size=8, command_timeout=30)
+        return await asyncpg.create_pool(
+            dsn=dsn,
+            min_size=1,
+            max_size=8,
+            command_timeout=30,
+            server_settings={"statement_timeout": "30000", "lock_timeout": "10000"},
+        )
     except Exception:
         raise RuntimeError("configured PostgreSQL connection is unavailable") from None
 
@@ -163,8 +175,8 @@ def create_application(
     runtime_options: Mapping[str, RuntimeOptions] | None = None,
 ) -> FastAPI:
     deployment = MissionDeployment.model_validate(deployment.model_dump(mode="python"))
-    if deployment.storage_mode != "transitional_local":
-        raise RuntimeError("the common Mission Control component is not released")
+    if deployment.storage_mode != "production_common":
+        raise RuntimeError("only the common Mission Control component is supported")
     configs = tuple(item.authentication for item in deployment.applications)
     verifier = MissionTokenVerifier(configs)
     registry = ApplicationRegistry(tuple(config.binding for config in configs))
@@ -184,11 +196,11 @@ def create_application(
                 for item in deployment.applications:
                     config = item.authentication
                     binding = config.binding
-                    pool = await local_pool(binding.database_secret_ref)
+                    pool = await application_pool(binding.database_secret_ref)
                     stack.push_async_callback(pool.close)
                     family_pool = None
                     if item.family_writer_secret_ref is not None:
-                        family_pool = await local_pool(item.family_writer_secret_ref)
+                        family_pool = await application_pool(item.family_writer_secret_ref)
                         stack.push_async_callback(family_pool.close)
                     options = options_by_app.get(binding.application_id) or RuntimeOptions(
                         AdmissionPolicyRegistry(),
@@ -231,7 +243,7 @@ def create_application(
                             admission_policies=options.admission_policies,
                             extensions=options.extensions,
                             payload_store=options.payload_store,
-                            storage_mode="transitional_local",
+                            storage_mode="production_common",
                             registry=registry,
                             family_writer_pool=family_pool,
                             family_admissions=options.family_admissions,
@@ -297,8 +309,9 @@ def create_application(
         )
         return {
             "ready": True,
-            "storage_mode": "transitional_local",
-            "production_ready": False,
+            "storage_mode": "production_common",
+            "production_ready": all(item.readiness.production_ready for item in services),
+            "component_versions": sorted({item.readiness.component_version for item in services}),
             "launch_configured": all(item.launch is not None for item in services),
         }
 

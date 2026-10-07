@@ -10,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
 from biotech_mission_adapters.application.web_research.web_research_semantic_binding import (
     REQUIRED_SELECTED_IDENTITIES,
 )
@@ -24,7 +25,6 @@ from biotech_mission_adapters.bootstrap.runners.web_research_coordinator_live im
     _retrieve_exact_capabilities,
 )
 from biotech_mission_adapters.bootstrap.scripts.run_web_research_coordinator_live import parse_args
-
 from mission_control.application.artifacts.artifact_promotion import ArtifactPayloadAddress
 from mission_control.application.execution.service import ACTION_PERMISSIONS
 from mission_control.application.programs.service import (

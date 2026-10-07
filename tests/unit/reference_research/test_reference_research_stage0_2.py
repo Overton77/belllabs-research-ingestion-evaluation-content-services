@@ -4,6 +4,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
+
 from biotech_mission_adapters.adapters.agent_server.operations.reference_research import (
     ReferenceLangGraphCanaryExecutor,
 )
@@ -27,8 +29,6 @@ from biotech_mission_adapters.domain.reference_research.contracts import (
 from biotech_mission_adapters.interfaces.http.reference_research_schemas import (
     reference_research_contract_schemas,
 )
-from pydantic import ValidationError
-
 from mission_control.adapters.agent_server.graphs import GRAPH_REGISTRY
 from mission_control.adapters.storage.control_plane_payloads import InMemoryPayloadStore
 from mission_control.application.authoring.control_plane_repository import (

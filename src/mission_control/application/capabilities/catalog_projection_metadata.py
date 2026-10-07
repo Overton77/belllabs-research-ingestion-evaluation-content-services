@@ -60,9 +60,7 @@ def classify_definition(
     elif isinstance(definition, RuntimeProfileDefinition):
         capabilities = definition.required_capabilities
         runtimes = frozenset({definition.binding, definition.logical_id})
-    elif isinstance(definition, WorkspaceTemplateDefinition):
-        capabilities = definition.required_capabilities
-    elif isinstance(definition, EvaluationProfileDefinition):
+    elif isinstance(definition, (WorkspaceTemplateDefinition, EvaluationProfileDefinition)):
         capabilities = definition.required_capabilities
 
     if _is_research_capability(capabilities):

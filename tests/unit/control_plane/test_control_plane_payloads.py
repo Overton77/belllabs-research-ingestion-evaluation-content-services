@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Self
 
 import pytest
+
 from biotech_mission_adapters.adapters.infrastructure.schema_grounding_payloads import (
     SchemaGroundingInputKind,
     schema_grounding_input_store,
 )
-
 from mission_control.adapters.storage import control_plane_payloads
 from mission_control.adapters.storage.control_plane_payloads import S3PayloadStore
 from mission_control.bootstrap.settings import Settings
@@ -19,7 +19,7 @@ class _Body:
     def __init__(self, payload: bytes) -> None:
         self._payload = payload
 
-    async def __aenter__(self) -> _Body:
+    async def __aenter__(self) -> Self:
         return self
 
     async def __aexit__(self, *args: object) -> None:

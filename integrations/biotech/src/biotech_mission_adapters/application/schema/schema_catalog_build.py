@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -278,11 +279,9 @@ class SchemaCatalogBuildService:
             payload=record.model_dump(mode="json"),
             created_at=rejected_at,
         )
-        try:
+        # The original immutable record remains the authoritative outcome.
+        with contextlib.suppress(CatalogPublicationConflict):
             await self._records.append(envelope)
-        except CatalogPublicationConflict:
-            # The original immutable record remains the authoritative outcome.
-            pass
 
 
 def _bundle_payload(root: Path, manifest: dict[str, Any]) -> dict[str, object]:

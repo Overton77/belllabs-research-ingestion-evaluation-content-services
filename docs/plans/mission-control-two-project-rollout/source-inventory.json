@@ -1,0 +1,741 @@
+{
+  "format_version": 1,
+  "observed_head": "f6521c128738b4962f22fb7646882950c0b63d7c",
+  "observed_date": "2026-10-03",
+  "scope": "Read-only static baseline; not an execution trace or live database inventory. SQL regex excludes dynamic queries and document-store delegation; complement with implementation-plan matrix and runtime tracing.",
+  "untracked_preserved": [
+    ".tmp-cleanup-unit/",
+    ".tmp-worker-poll-20261003/"
+  ],
+  "repositories": [
+    {
+      "path": "src/mission_control/adapters/postgres/async_subagents/async_subagent_detail_repository.py",
+      "sha256": "f4557a1713ce42c4a61ce863409f0c1c17958ace2329bb3a823811d078b4a610",
+      "sql_relations": [
+        "belllabs_control.async_subagent_contract_details",
+        "belllabs_control.async_subagent_execution_details",
+        "belllabs_control.async_subagent_link_details"
+      ]
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/async_subagents/async_subagents.py",
+      "sha256": "a89daac2ffeb443ef620c02b91b7a1142372d74c485ca49067ddbb81ca402cd0",
+      "sql_relations": [
+        "belllabs_control.async_subagent_authority",
+        "belllabs_control.async_subagent_commands",
+        "belllabs_control.async_subagent_facts",
+        "belllabs_control.async_subagent_messages",
+        "belllabs_control.async_subagent_provider_runs",
+        "belllabs_control.runtime_reconciliation_incidents"
+      ]
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/capability/capability_search_generation_repository.py",
+      "sha256": "6846c50d8c4a577588bc4f199035eda80ab50b3192626ac3e54acf1d3675ff96",
+      "sql_relations": [
+        "capability_search.activate_generation",
+        "capability_search.active_generations",
+        "capability_search.generations"
+      ]
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/capability/capability_search_repository.py",
+      "sha256": "5c45d4b8821130ee90024e4f61e9266306d4085d70093c567d314cafa03ef9cd",
+      "sql_relations": [
+        "capability_search.active_generations",
+        "capability_search.documents",
+        "capability_search.generations"
+      ]
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/capability/projection_events.py",
+      "sha256": "85e735c4cd6d0809e7f6bbc937dc4a51a2bac70dc7ccd424ae5811369717b65d",
+      "sql_relations": [
+        "belllabs_control.catalog_projection_alerts",
+        "belllabs_control.catalog_projection_processing",
+        "belllabs_control.definition_catalog_records"
+      ]
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/capability_bundles.py",
+      "sha256": "1d3510b4d9852e94740c9aa4d5846f15ec00a29b0d8db6ce049871c46d349871",
+      "sql_relations": [
+        "belllabs_control.capability_bundle_admissions"
+      ]
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/connections.py",
+      "sha256": "9794ef57810a3de1fddc30d87d8ff86e6df8613cec43d4186bfac0e401fbc134",
+      "sql_relations": [
+        "belllabs_control.schema_migrations",
+        "capability_search.schema_migrations"
+      ]
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/control_plane/definition_repository.py",
+      "sha256": "517bc06d0581bc89ed3aca810e0a072a045f4914b6968200abe54cad8de76e3c",
+      "sql_relations": [
+        "belllabs_control.definition_catalog_aliases",
+        "belllabs_control.definition_catalog_heads",
+        "belllabs_control.definition_catalog_records"
+      ]
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/coordinator/coordinator_audit_repository.py",
+      "sha256": "c68adef5af567c3405feaf5e2a7471ff39f1931e10150608478ba3a914aee6f9",
+      "sql_relations": [
+        "belllabs_control.coordinator_audit_events"
+      ]
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/coordinator/launch_ticket_repository.py",
+      "sha256": "324b0c0ab7fd8fa2d9e8ee5db06ed5ed59bee20c048f6330af94535cfbc20299",
+      "sql_relations": [
+        "belllabs_control.coordinator_launch_tickets"
+      ]
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/coordinator/workflow_result_repository.py",
+      "sha256": "241a161c2b419a25941cc68271cba9850c79b7432808531bba811c967a3770b8",
+      "sql_relations": [
+        "belllabs_control.coordinator_workflow_results",
+        "belllabs_control.workflow_runs"
+      ]
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/documents.py",
+      "sha256": "690fe3051527b706356cdd8ea92d5b0f79d16a0e8d9eb87bab83522fa2516cd3",
+      "sql_relations": [
+        "belllabs_control.immutable_documents"
+      ]
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/operations/checkpoint_lineage.py",
+      "sha256": "4bdb82d80b90886d15b14e142e072d10648d87a950a781cb03ba5d8642cc3b5f",
+      "sql_relations": [
+        "belllabs_control.runtime_activity_attempt_observations",
+        "belllabs_control.runtime_checkpoint_transitions",
+        "belllabs_control.runtime_cognitive_namespaces",
+        "belllabs_control.runtime_lineage_write_rejections",
+        "belllabs_control.runtime_reconciliation_incidents",
+        "belllabs_control.runtime_unit_generations",
+        "belllabs_control.runtime_unit_result_observations",
+        "belllabs_control.runtime_units"
+      ]
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/operations/operation_binding_repository.py",
+      "sha256": "e5b0468be739ee17298145e48ffe29d3a28454080fee65e3ec39acc1c89948e1",
+      "sql_relations": [
+        "belllabs_control.immutable_documents"
+      ]
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/operations/operation_journal.py",
+      "sha256": "c892be5ed46af3a64cfceea5df5db2fd5a4192df46e6119d3b3d7c713d5e43be",
+      "sql_relations": [
+        "belllabs_control.budget_accounts",
+        "belllabs_control.budget_ledger",
+        "belllabs_control.lifecycle_command_results",
+        "belllabs_control.lifecycle_transitions",
+        "belllabs_control.operation_effect_claims",
+        "belllabs_control.operation_execution_attempts",
+        "belllabs_control.operation_journal_mutations",
+        "belllabs_control.operation_settlements",
+        "belllabs_control.outbox",
+        "belllabs_control.workflow_runs"
+      ]
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/orchestration/linked_run_repository.py",
+      "sha256": "d707c791f2ab1368632ab8b64eacac41b67dc85589a9924202ae27d2de0b273b",
+      "sql_relations": [
+        "belllabs_control.linked_child_terminal_records",
+        "belllabs_control.linked_run_result_decisions",
+        "belllabs_control.run_composition_links",
+        "belllabs_control.run_dependency_revisions"
+      ]
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/orchestration/orchestration_binding_repository.py",
+      "sha256": "b9a113d942808e03662585c6ab233fc9d614cff345ddcc241e72a17b7b565f1c",
+      "sql_relations": [
+        "belllabs_control.workflow_semantic_input_bindings"
+      ]
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/run_control/inspection_repository.py",
+      "sha256": "b6e89f8112098a5f5be41d5950f33f80747f70c6c81207fc8450841a092c9de5",
+      "sql_relations": [
+        "belllabs_control.async_subagent_authority",
+        "belllabs_control.async_subagent_facts",
+        "belllabs_control.boundary_command_receipts",
+        "belllabs_control.boundary_commands",
+        "belllabs_control.budget_accounts",
+        "belllabs_control.effect_ledgers",
+        "belllabs_control.operation_effect_claims",
+        "belllabs_control.operation_execution_attempts",
+        "belllabs_control.operation_settlements",
+        "belllabs_control.runtime_activity_attempt_observations",
+        "belllabs_control.runtime_checkpoint_transitions",
+        "belllabs_control.runtime_cognitive_namespaces",
+        "belllabs_control.runtime_lineage_write_rejections",
+        "belllabs_control.runtime_reconciliation_incidents",
+        "belllabs_control.runtime_unit_generations",
+        "belllabs_control.runtime_unit_result_observations",
+        "belllabs_control.runtime_units",
+        "belllabs_control.workflow_runs"
+      ]
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/run_control/run_control_repository.py",
+      "sha256": "80d4605bb38bd44537f08dbcd77992419a5d929a1139613455832b7e8234296e",
+      "sql_relations": [
+        "belllabs_control.boundary_command_receipts",
+        "belllabs_control.boundary_commands",
+        "belllabs_control.budget_accounts",
+        "belllabs_control.budget_ledger",
+        "belllabs_control.consumer_cursors",
+        "belllabs_control.effect_ledger_entries",
+        "belllabs_control.effect_ledgers",
+        "belllabs_control.family_admission_heads",
+        "belllabs_control.family_admission_journal",
+        "belllabs_control.family_admission_results",
+        "belllabs_control.lifecycle_command_results",
+        "belllabs_control.lifecycle_transitions",
+        "belllabs_control.outbox",
+        "belllabs_control.run_request_decisions",
+        "belllabs_control.workflow_runs"
+      ]
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/runtime/run_forks.py",
+      "sha256": "c725c0a56e01f43189b230b78568aeb01009f2fc7b48097883384009f79f831d",
+      "sql_relations": [
+        "belllabs_control.family_admission_heads",
+        "belllabs_control.lifecycle_transitions",
+        "belllabs_control.linked_child_terminal_records",
+        "belllabs_control.run_composition_links",
+        "belllabs_control.run_fork_reuse_decisions",
+        "belllabs_control.run_snapshot_manifests",
+        "belllabs_control.runtime_fork_requests",
+        "belllabs_control.workflow_runs",
+        "belllabs_control.workflow_semantic_input_bindings"
+      ]
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/runtime/runtime_execution_repository.py",
+      "sha256": "2e5633214999c65154ee3f2e9cffd10f454008b0489a6f817e2acc9d91f792f2",
+      "sql_relations": [
+        "belllabs_control.runtime_execution_attempts",
+        "belllabs_control.runtime_execution_bindings",
+        "belllabs_control.runtime_intervention_commands"
+      ]
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/runtime/stage3_kernel_repository.py",
+      "sha256": "e98d3018eac3c05fc201e89821c454863a51ec4872c928653015a3d45a3c4041",
+      "sql_relations": [
+        "belllabs_control.execution_resource_leases",
+        "belllabs_control.outbox",
+        "belllabs_control.run_snapshot_manifests",
+        "belllabs_control.runtime_checkpoint_observations",
+        "belllabs_control.runtime_decision_requests",
+        "belllabs_control.runtime_decision_responses",
+        "belllabs_control.runtime_fork_requests",
+        "belllabs_control.runtime_lineage_edges",
+        "belllabs_control.runtime_lineage_records",
+        "belllabs_control.runtime_reconciliation_incidents",
+        "belllabs_control.runtime_repair_audit",
+        "belllabs_control.runtime_retention_deletion_audit"
+      ]
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/workspace_candidate_contents.py",
+      "sha256": "28895dc5278e8425b232a21c2ee85feac6ee1f8048d7d4ef508508b3ee7d3572",
+      "sql_relations": [
+        "belllabs_control.workspace_candidate_descriptors"
+      ]
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/workspaces/artifact_metadata_repository.py",
+      "sha256": "6fe9d528867af5b1b0ee7517545fde29093362daa79d49ce6c49ac38028c2d24",
+      "sql_relations": [
+        "belllabs_control.artifact_metadata_revisions"
+      ]
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/workspaces/artifact_repository.py",
+      "sha256": "7ba3ab15e79370e30ae84490daca660c2ace1da9cacca68f2d91d7b5a8cd2cbb",
+      "sql_relations": [
+        "belllabs_control.artifact_reference_outbox",
+        "belllabs_control.durable_artifact_references",
+        "belllabs_control.workflow_runs"
+      ]
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/workspaces/snapshot_repository.py",
+      "sha256": "27ed68b0ea1697c0087e51623f78233e098e44917012b3246acac51c809540b5",
+      "sql_relations": [
+        "belllabs_control.immutable_documents"
+      ]
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/workspaces/workspace_manifest_repository.py",
+      "sha256": "c555d4dc2d0333aa124b9a362efb7e84ed2fb85537b9b97bfea794d132c0bb14",
+      "sql_relations": [
+        "belllabs_control.workspace_manifests",
+        "belllabs_control.workspace_slot_reservations"
+      ]
+    },
+    {
+      "path": "src/mission_control/adapters/realtime/postgres_redis.py",
+      "sha256": "9e1782c6da7dfefe2491e1d8b0ed693b0c0662464c2c45e91d36b3e2b8431661",
+      "sql_relations": [
+        "belllabs_control.agent_runtime_approval_decisions",
+        "belllabs_control.agent_runtime_approval_requests",
+        "belllabs_control.agent_runtime_checkpoints",
+        "belllabs_control.agent_runtime_events"
+      ]
+    },
+    {
+      "path": "src/mission_control/bootstrap/composition.py",
+      "sha256": "d7a22f12f5d91066261639fb39c09db16fc7cbf748156f52ab074d6a94b76e4d",
+      "sql_relations": [
+        "belllabs_control.mission_installation_identity",
+        "belllabs_control.schema_migrations"
+      ]
+    },
+    {
+      "path": "src/mission_control/bootstrap/installation.py",
+      "sha256": "17aa36583b4fd6f43cc5efb98522dc4c725d380bad8e9a30e049aab1d38d6280",
+      "sql_relations": [
+        "belllabs_control.mission_installation_identity"
+      ]
+    },
+    {
+      "path": "src/mission_control/bootstrap/technical_api.py",
+      "sha256": "106855590aee148d4eb5e0047729e8750de4e03b4d8a2393ae88b311de934d0b",
+      "sql_relations": [
+        "belllabs_control.agent_runtime_events"
+      ]
+    }
+  ],
+  "transitional_migrations": [
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0001_run_control.sql",
+      "sha256": "128bd8af48045889d109ff4b38e9ba0b581404b5d747a7153a84edce8558b861",
+      "creates_tables": [
+        "belllabs_control.schema_migrations",
+        "belllabs_control.run_request_decisions",
+        "belllabs_control.workflow_runs",
+        "belllabs_control.lifecycle_command_results",
+        "belllabs_control.lifecycle_transitions",
+        "belllabs_control.budget_accounts",
+        "belllabs_control.budget_ledger",
+        "belllabs_control.outbox",
+        "belllabs_control.consumer_cursors"
+      ],
+      "document_contracts": []
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0002_linked_runs.sql",
+      "sha256": "c81f8537b9e53f7f7e22bc5bccde3ae1bf577a4ed9c1c74256f1adf28276e9c0",
+      "creates_tables": [
+        "belllabs_control.run_composition_links",
+        "belllabs_control.run_dependency_revisions",
+        "belllabs_control.linked_run_result_decisions",
+        "belllabs_control.linked_child_terminal_records"
+      ],
+      "document_contracts": []
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0003_artifact_references.sql",
+      "sha256": "2580e3e4e85ec4b5766b87bf5a48a397c103ee2d019c31776efad3a605497fed",
+      "creates_tables": [
+        "belllabs_control.durable_artifact_references",
+        "belllabs_control.artifact_reference_outbox"
+      ],
+      "document_contracts": []
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0004_agent_runtime.sql",
+      "sha256": "538cef38c9baacc298beb77ef0e20698586e9da7ef5926df33d5322a17787495",
+      "creates_tables": [
+        "belllabs_control.agent_runtime_sessions",
+        "belllabs_control.agent_runtime_messages",
+        "belllabs_control.agent_runtime_events",
+        "belllabs_control.agent_runtime_approval_requests",
+        "belllabs_control.agent_runtime_approval_decisions",
+        "belllabs_control.agent_runtime_checkpoints"
+      ],
+      "document_contracts": []
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0005_capability_search.sql",
+      "sha256": "5840849faa023a99dcd6bb9a5b26f8552c13b2e1a1a55114ec80a94c0c9c106e",
+      "creates_tables": [
+        "capability_search.documents"
+      ],
+      "document_contracts": []
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0006_coordinator_launch_tickets.sql",
+      "sha256": "f7038f8446176d310d9423389b214674432e919e95c4fa8d32751223c45fabd6",
+      "creates_tables": [
+        "belllabs_control.coordinator_launch_tickets"
+      ],
+      "document_contracts": []
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0007_capability_search_generations.sql",
+      "sha256": "0c678164ca0eac77fb543599b9e5da657d158f2291c3134db010899cf4f450b1",
+      "creates_tables": [
+        "capability_search.generations",
+        "capability_search.active_generations"
+      ],
+      "document_contracts": []
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0008_orchestration_input_bindings.sql",
+      "sha256": "52ebd4ed955abf94c9ff7a189b76e937eee6610d0c0a11752482e3ea7a2c015e",
+      "creates_tables": [
+        "belllabs_control.workflow_semantic_input_bindings"
+      ],
+      "document_contracts": []
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0009_outbox_global_position_sequence.sql",
+      "sha256": "3d585cf36f6b6f82e79ca3cd120fdf46565b3d4217782b575fc81c9c209e7311",
+      "creates_tables": [],
+      "document_contracts": []
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0010_coordinator_audit_events.sql",
+      "sha256": "a725fab7f0e6ea34927f1a5fb59e168320fd78e012745f808d9b3cfc5dabb707",
+      "creates_tables": [
+        "belllabs_control.coordinator_audit_events"
+      ],
+      "document_contracts": []
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0011_coordinator_workflow_results.sql",
+      "sha256": "dc1d5928dcf7be7fbad84fd5b15d3146d887e186ad579398204cf1e879d71f24",
+      "creates_tables": [
+        "belllabs_control.coordinator_workflow_results"
+      ],
+      "document_contracts": []
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0012_graph_runtime_operation_journal.sql",
+      "sha256": "089e4296870772f8e50cc1494ae3fd6b9c779776333e7e73984ae290f8afb755",
+      "creates_tables": [
+        "belllabs_control.runtime_execution_bindings",
+        "belllabs_control.runtime_execution_attempts",
+        "belllabs_control.runtime_checkpoint_observations",
+        "belllabs_control.runtime_intervention_commands",
+        "belllabs_control.runtime_interrupt_requests",
+        "belllabs_control.runtime_interrupt_decisions",
+        "belllabs_control.runtime_async_tasks",
+        "belllabs_control.operation_effect_claims",
+        "belllabs_control.operation_journal_mutations",
+        "belllabs_control.operation_execution_attempts",
+        "belllabs_control.operation_settlements"
+      ],
+      "document_contracts": []
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0013_legacy_operation_journal_backfill.sql",
+      "sha256": "b11ed50a37448b0fc5e2f2f42c5bb88c5673f8a17619ff8adb0bc979d945d3cf",
+      "creates_tables": [
+        "belllabs_control.operation_journal_backfill_batches",
+        "belllabs_control.operation_journal_backfill_applied_batches",
+        "belllabs_control.operation_journal_backfill_quarantine"
+      ],
+      "document_contracts": []
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0014_stage3_durable_runtime_kernel.sql",
+      "sha256": "44127d072fae91f31c5f808cdd6dd9cf429ecf8e8157034ada88a71f74884ce8",
+      "creates_tables": [
+        "belllabs_control.runtime_lineage_records",
+        "belllabs_control.runtime_lineage_edges",
+        "belllabs_control.execution_resource_leases",
+        "belllabs_control.runtime_decision_requests",
+        "belllabs_control.runtime_decision_responses",
+        "belllabs_control.runtime_reconciliation_incidents",
+        "belllabs_control.runtime_fork_requests",
+        "belllabs_control.runtime_repair_audit",
+        "belllabs_control.runtime_retention_deletion_audit"
+      ],
+      "document_contracts": []
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0015_transactional_run_control_v1.sql",
+      "sha256": "7c57f2be58081cc4e5a6bed76df0b1f8d0958467e3cb3933d3a94fe6be3b20d9",
+      "creates_tables": [
+        "belllabs_control.effect_ledgers",
+        "belllabs_control.effect_ledger_entries"
+      ],
+      "document_contracts": []
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0016_async_subagent_parent_child_v1.sql",
+      "sha256": "3b3cbf8a8534f2d45163d6d53a54b8037eda03439b4841656e48af9b89e483ef",
+      "creates_tables": [
+        "belllabs_control.async_subagent_authority",
+        "belllabs_control.async_subagent_commands",
+        "belllabs_control.async_subagent_facts",
+        "belllabs_control.async_subagent_messages"
+      ],
+      "document_contracts": []
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0017_atomic_family_admission_v1.sql",
+      "sha256": "fe01df7f29d7f592c2872ba5d588708527051e7cf9287aecc2e4649732256b67",
+      "creates_tables": [
+        "belllabs_control.family_admission_heads",
+        "belllabs_control.family_admission_journal",
+        "belllabs_control.family_admission_results"
+      ],
+      "document_contracts": []
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0018_operation_settlement_revisions_v1.sql",
+      "sha256": "17ed57b5117727dc9569548ec096a62b2f6b0752a96d80a63e55c5c114923047",
+      "creates_tables": [],
+      "document_contracts": []
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0019_runtime_unit_checkpoint_lineage_v1.sql",
+      "sha256": "b35d229db4b2a3aaaa3b56262b1b2f55e3b0a5b24b09b91515ab0892aa8e287f",
+      "creates_tables": [
+        "belllabs_control.runtime_units",
+        "belllabs_control.runtime_unit_generations",
+        "belllabs_control.runtime_activity_attempt_observations",
+        "belllabs_control.runtime_cognitive_namespaces",
+        "belllabs_control.runtime_checkpoint_transitions",
+        "belllabs_control.runtime_lineage_write_rejections"
+      ],
+      "document_contracts": []
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0020_runtime_unit_recovery_v1.sql",
+      "sha256": "4222975b3bbf7f33673c3c0d408cd19bf81a84abb02dcb28d47bbf8af28b5501",
+      "creates_tables": [
+        "belllabs_control.runtime_unit_result_observations"
+      ],
+      "document_contracts": []
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0021_async_subagent_submission_fence_v1.sql",
+      "sha256": "fa0853254080e75cefd1490c38a26fc1c5bfc6b0e11ee596eb684021fe7819a0",
+      "creates_tables": [
+        "belllabs_control.async_subagent_provider_runs"
+      ],
+      "document_contracts": []
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0022_runtime_inspection_reads_v1.sql",
+      "sha256": "520d2a7c515e7499b1a57b7268cf5c2d9a1e0b4838365a28a5b0116f8409b5a6",
+      "creates_tables": [],
+      "document_contracts": []
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0023_boundary_command_receipts_v1.sql",
+      "sha256": "39e28128692f43971566aa86ffb8ca81cd8ce4b68c7ea843b1f7204cf74dd030",
+      "creates_tables": [
+        "belllabs_control.boundary_commands",
+        "belllabs_control.boundary_command_receipts"
+      ],
+      "document_contracts": []
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0024_run_snapshots_semantic_forks_v1.sql",
+      "sha256": "4cbc4b0c9790f0e7b2922a780701ddcd5684c3be35f9fe0286a5f6a1181682a9",
+      "creates_tables": [
+        "belllabs_control.run_snapshot_manifests",
+        "belllabs_control.run_fork_reuse_decisions"
+      ],
+      "document_contracts": []
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0025_operation_claim_unit_key_runtime_grant_v1.sql",
+      "sha256": "24e65615992193a03b834fdc8c39b575ed4af267b0d60b83f7bbc6e90f3487d8",
+      "creates_tables": [],
+      "document_contracts": []
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0026_family_writer_terminal_boundary_receipts_v1.sql",
+      "sha256": "02fa68fe9e1ecded03049c7faa7738feb9a218a1c9a5790563b87b18d5f46ea9",
+      "creates_tables": [],
+      "document_contracts": []
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0027_immutable_runtime_documents.sql",
+      "sha256": "d4b113263a11e0f2ec45efa35aecdd9fd544200532e3acb718e6e4c806443c5f",
+      "creates_tables": [
+        "belllabs_control.immutable_documents"
+      ],
+      "document_contracts": [
+        "goal.handoff/1",
+        "goal.iteration/1",
+        "goal.revision/1",
+        "goal.template/1",
+        "goal.verification/1",
+        "operation.binding-index/1",
+        "operation.binding/1",
+        "operation.claim/1",
+        "operation.settlement/1",
+        "stagegraph.template/1"
+      ]
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0028_workspace_artifact_documents.sql",
+      "sha256": "e3e6778257b6f50321742b3240a500eadb95607a3b35554f0f695a10cd28b001",
+      "creates_tables": [
+        "belllabs_control.workspace_manifests",
+        "belllabs_control.workspace_slot_reservations",
+        "belllabs_control.artifact_metadata_revisions"
+      ],
+      "document_contracts": []
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0029_async_subagent_detail_documents.sql",
+      "sha256": "afc76ca5a4233bb1fd5c5b8ac928630b1c975e811fc0c5960e1e9c599ee7fb86",
+      "creates_tables": [
+        "belllabs_control.async_subagent_contract_details",
+        "belllabs_control.async_subagent_execution_details",
+        "belllabs_control.async_subagent_link_details"
+      ],
+      "document_contracts": []
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0030_definition_catalog.sql",
+      "sha256": "161771d106c5bdfcb982aa158b130e4de72856f48cfae7d5fcf7811777df308d",
+      "creates_tables": [
+        "belllabs_control.definition_catalog_heads",
+        "belllabs_control.definition_catalog_records",
+        "belllabs_control.definition_catalog_aliases"
+      ],
+      "document_contracts": [
+        "alias-movement/1",
+        "catalog-event/1",
+        "compilation-index/1",
+        "definition-retirement/1",
+        "effective-run-configuration/1",
+        "published-definition/1"
+      ]
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0031_workspace_payload_hardening.sql",
+      "sha256": "73c74274fbf1bf48d0aa926915dc5000965d89c8d231ac6dc42a31ec9dd2f187",
+      "creates_tables": [],
+      "document_contracts": []
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0032_async_subagent_detail_payload_identity.sql",
+      "sha256": "00eca22a8cddd9c2537ca4bcdcdb566a824360570a73647b63ebb508307ac368",
+      "creates_tables": [],
+      "document_contracts": []
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0033_capability_bundle_admissions.sql",
+      "sha256": "c97245e19d89a5663f59ebb74d74b129a24128a5af93af1446b79036c1386fcf",
+      "creates_tables": [
+        "belllabs_control.capability_bundle_admissions"
+      ],
+      "document_contracts": []
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0034_mission_installation_identity.sql",
+      "sha256": "0a8a3174809aa168c9733da1ee014e413f0d9b1cce1e85d8433c3a68c3c5415b",
+      "creates_tables": [
+        "belllabs_control.mission_installation_identity"
+      ],
+      "document_contracts": []
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0035_workspace_candidate_descriptors.sql",
+      "sha256": "218843308389106b4b1a84a268a98751765ba991e3582359bbdc4684059621f0",
+      "creates_tables": [
+        "belllabs_control.workspace_candidate_descriptors"
+      ],
+      "document_contracts": [
+        "CapturedWorkspaceCandidate/1"
+      ]
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0036_mission_identity_family_read.sql",
+      "sha256": "a3bafbb83a54ac0dbe8eb7967e2fff5c29f5fd36f9222d9680c647bb7cc2d57c",
+      "creates_tables": [],
+      "document_contracts": []
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0037_catalog_projection_processing.sql",
+      "sha256": "f3881c1ee989770bc54332ed7de58ca48e2e8caf6dd4f00aca10b25e84110af4",
+      "creates_tables": [
+        "belllabs_control.catalog_projection_processing",
+        "belllabs_control.catalog_projection_alerts"
+      ],
+      "document_contracts": []
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0038_external_discovery_contracts.sql",
+      "sha256": "418a33717a09426f350eb9d3156bb1ef5a263034623e138de42de743ebf789d5",
+      "creates_tables": [],
+      "document_contracts": [
+        "external-discovery-candidate/1",
+        "external-discovery-evidence/1",
+        "external-inspection-report/1",
+        "external-inspection-workspace-report/1",
+        "external-inspection-workspace/1",
+        "goal.handoff/1",
+        "goal.iteration/1",
+        "goal.revision/1",
+        "goal.template/1",
+        "goal.verification/1",
+        "operation.binding-index/1",
+        "operation.binding/1",
+        "operation.claim/1",
+        "operation.settlement/1",
+        "stagegraph.template/1"
+      ]
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0039_sandbox_snapshot_contracts.sql",
+      "sha256": "3338271fc47c8cc5d3c6e20512a670e1653f3291a861440d7c3439c031fa4149",
+      "creates_tables": [],
+      "document_contracts": [
+        "external-discovery-candidate/1",
+        "external-discovery-evidence/1",
+        "external-inspection-report/1",
+        "external-inspection-workspace-report/1",
+        "external-inspection-workspace/1",
+        "goal.handoff/1",
+        "goal.iteration/1",
+        "goal.revision/1",
+        "goal.template/1",
+        "goal.verification/1",
+        "operation.binding-index/1",
+        "operation.binding/1",
+        "operation.claim/1",
+        "operation.settlement/1",
+        "sandbox.snapshot.clone-claim/1",
+        "sandbox.snapshot.clone/1",
+        "sandbox.snapshot.creation-claim/1",
+        "sandbox.snapshot/1",
+        "stagegraph.template/1"
+      ]
+    },
+    {
+      "path": "src/mission_control/adapters/postgres/migrations/0040_sandbox_snapshot_identity_indexes.sql",
+      "sha256": "84208c1fb55902485c4b137e0154c9c2b046e9b12c14f29a7669f80bdc0d35c8",
+      "creates_tables": [],
+      "document_contracts": [
+        "sandbox.snapshot.clone/1",
+        "sandbox.snapshot/1"
+      ]
+    }
+  ]
+}

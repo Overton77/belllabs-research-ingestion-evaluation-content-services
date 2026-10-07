@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+
 from biotech_mission_adapters.application.schema.schema_artifact_cleanup import (
     TARGET_CONSTRAINTS,
     TARGET_INDEXES,

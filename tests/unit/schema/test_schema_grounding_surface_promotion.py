@@ -3,12 +3,12 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+
 from biotech_mission_adapters.bootstrap.scripts.promote_schema_grounding_surface import _plan
 from biotech_mission_adapters.domain.schema_grounding.definitions import (
     register_schema_grounding_extensions,
     schema_grounding_definitions,
 )
-
 from mission_control.adapters.storage.control_plane_payloads import InMemoryPayloadStore
 from mission_control.application.authoring.control_plane_repository import (
     InMemoryDefinitionRepository,

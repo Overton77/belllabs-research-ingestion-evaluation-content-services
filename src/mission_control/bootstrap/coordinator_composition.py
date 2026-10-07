@@ -209,7 +209,9 @@ def build_production_coordinator_facade(
         cast(asyncpg.Pool, application_postgres_pool),
         catalog_scope=settings.mission_control_catalog_scope,
     )
-    catalog_index = PostgresCatalogSearchRepository(capability_postgres_pool)
+    catalog_index = PostgresCatalogSearchRepository(
+        capability_postgres_pool, catalog_scope=settings.mission_control_catalog_scope
+    )
     search = None
     if settings.capability_search_enabled:
         embeddings = OpenAICapabilityEmbeddingAdapter(settings)

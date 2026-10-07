@@ -42,7 +42,7 @@ def test_unicode_key_collision_is_rejected_before_digesting() -> None:
 
 def test_naive_timestamp_is_rejected() -> None:
     with pytest.raises(ValueError, match="timezone"):
-        canonical_bytes(datetime(2026, 10, 3))
+        canonical_bytes(datetime(2026, 10, 3))  # noqa: DTZ001 - naive input is under test
 
 
 def test_decimal_canonicalization_does_not_round_through_ambient_context() -> None:

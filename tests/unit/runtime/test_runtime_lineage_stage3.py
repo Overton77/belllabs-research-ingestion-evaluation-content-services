@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -77,7 +78,7 @@ def lineage(
     edges = (
         tuple(
             LineageParentEdge(child=child, parent=parent, relationship="contains")
-            for parent, child in zip(identities, identities[1:], strict=False)
+            for parent, child in itertools.pairwise(identities)
         )
         if complete_identity_chain
         else ()

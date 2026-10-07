@@ -1,0 +1,80 @@
+{
+  "bundles": [
+    {
+      "record_counts": {
+        "asset_decision": 2,
+        "asset_version": 2
+      },
+      "seed_digest": "sha256:ca92dd4f18cf90cf82694ca64a699674781b612ec166c6833ae68ca2628bb1e0",
+      "seed_key": "mc.catalog.workflow-parity",
+      "seed_version": "1.0.0",
+      "status": "pending"
+    },
+    {
+      "record_counts": {
+        "asset_decision": 2,
+        "asset_version": 2
+      },
+      "seed_digest": "sha256:64dbe58e7fcbd6d082741e839d488a078e92c29e70a6cb4027b03b7d5e843779",
+      "seed_key": "mc.catalog.runtime-profiles",
+      "seed_version": "1.0.0",
+      "status": "pending"
+    },
+    {
+      "record_counts": {
+        "asset_decision": 3,
+        "asset_version": 3
+      },
+      "seed_digest": "sha256:f45e04f9a68ad5569304691fab2de48befa6dc017076b9bc8c3c557d5a1d3dd6",
+      "seed_key": "mc.catalog.approved-assets",
+      "seed_version": "1.0.0",
+      "status": "pending"
+    },
+    {
+      "record_counts": {
+        "asset_decision": 1,
+        "asset_version": 1
+      },
+      "seed_digest": "sha256:e5d589368296e906777ca4a5a77670aec9ab8522c2d7b17f997762ecb9b8a2b2",
+      "seed_key": "mc.app.bindings",
+      "seed_version": "1.0.0",
+      "status": "pending"
+    },
+    {
+      "record_counts": {
+        "asset_decision": 2,
+        "asset_version": 2,
+        "tenant": 1
+      },
+      "seed_digest": "sha256:8eb0f25e416de4cfdb16b2f1dcd049831bbdb6cf0db7968be10554c27046e330",
+      "seed_key": "mc.qualification.parity",
+      "seed_version": "1.0.0",
+      "status": "pending"
+    }
+  ],
+  "component_version": "1.0.0",
+  "dependency_order": [
+    "mc.catalog.workflow-parity@1.0.0",
+    "mc.catalog.runtime-profiles@1.0.0",
+    "mc.catalog.approved-assets@1.0.0",
+    "mc.app.bindings@1.0.0",
+    "mc.qualification.parity@1.0.0"
+  ],
+  "mutations": [],
+  "seed_plan_digest": "sha256:aab08e52aa7cda7edcea58d0295b61cfbc74900efa9faa8da7a504e0785f545e",
+  "status": "planned",
+  "target": {
+    "app": "ai-engineer",
+    "application_id": "ai-engineer",
+    "approved_by": "lead:disposable-qualification",
+    "database_host": "127.0.0.1",
+    "database_name": "postgres",
+    "database_port": "55552",
+    "database_user": "mc_migrator",
+    "environment": "disposable",
+    "identity_evidence": "local docker disposable cluster for ai-engineer",
+    "installation_id": "0192a4f0-0000-7000-8000-0000000a1e00",
+    "project_label": "disposable-ai-engineer",
+    "project_ref": "mcdisposableaieng"
+  }
+}

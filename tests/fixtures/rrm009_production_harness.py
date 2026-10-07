@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
@@ -25,6 +26,20 @@ from temporalio.api.workflowservice.v1 import DescribeTaskQueueRequest
 from temporalio.client import Client
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer
+from tests.fixtures.checkpoint_lineage import bind_unit, stage_unit
+from tests.fixtures.mission_control_common_db import CommonDatabase
+from tests.fixtures.rrm009_production_stack import (
+    LANGGRAPH_SCHEMA,
+    OPERATOR,
+    REPORT_PATH,
+    SCOPE,
+    WAIT_ID,
+    TechnicalBinding,
+    TechnicalCatalog,
+    admission_request,
+    publish_technical_catalog,
+    stage_templates,
+)
 
 from mission_control.adapters.operations.runtime_ports import (
     FilesystemArtifactPayloadStore,
@@ -49,6 +64,7 @@ from mission_control.application.artifacts.artifact_promotion import (
 from mission_control.application.authoring.service import ControlPlaneService
 from mission_control.bootstrap.settings import Settings
 from mission_control.bootstrap.technical_api import api
+from mission_control.contracts.identities import parse_request_scope
 from mission_control.domain.execution.contracts import (
     ArtifactPromotionPlan,
     GenericArtifactWorkflowRequest,
@@ -66,19 +82,6 @@ from mission_control.domain.policies.contracts import (
 )
 from mission_control.interfaces.http.control_plane import (
     ControlPlanePrincipal,
-)
-from tests.fixtures.checkpoint_lineage import bind_unit, stage_unit
-from tests.fixtures.rrm009_production_stack import (
-    LANGGRAPH_SCHEMA,
-    OPERATOR,
-    REPORT_PATH,
-    SCOPE,
-    WAIT_ID,
-    TechnicalBinding,
-    TechnicalCatalog,
-    admission_request,
-    publish_technical_catalog,
-    stage_templates,
 )
 
 TEMPORAL_PORT = 7341
@@ -136,6 +139,7 @@ class ProductionStack:
     model_log: list[dict[str, Any]] = field(default_factory=list)
     worker_stack: AsyncExitStack = field(default_factory=AsyncExitStack)
     worker_queues: tuple[str, ...] = ()
+    database: CommonDatabase | None = None
 
     async def restart_temporal(self) -> None:
         """Stop the dev server and start it again on the same port and database file."""
@@ -187,7 +191,7 @@ async def _diagnose(stack: ProductionStack, run_id: str) -> str:
     async for execution in stack.client.list_workflows(f"BellLabsRunId = '{run_id}'"):
         try:
             history = await stack.client.get_workflow_handle(execution.id).fetch_history()
-        except Exception as error:  # noqa: BLE001 - diagnostics only
+        except Exception as error:
             lines.append(f"{execution.id}: {type(error).__name__}")
             continue
         lines.append(
@@ -354,12 +358,18 @@ async def _operation_payloads(stack: ProductionStack, run_id: str) -> list[dict[
     async with stack.owner_pool.acquire() as connection:
         rows = await connection.fetch(
             """
-            SELECT s.result_manifest_ref, s.result_manifest_digest, s.result_manifest_size_bytes
-            FROM belllabs_control.operation_settlements s
-            JOIN belllabs_control.operation_effect_claims c
-              ON c.request_scope = s.request_scope AND c.effect_claim_id = s.effect_claim_id
-            WHERE c.belllabs_run_id = $1 AND s.result_manifest_ref IS NOT NULL
-            ORDER BY s.settled_at
+            SELECT result_manifest_ref, result_manifest_digest, result_manifest_size_bytes
+            FROM (
+                SELECT DISTINCT ON (s.claim_key) s.*
+                FROM mission_control.operation_settlement s
+                JOIN mission_control.operation_claim c
+                  ON (c.installation_id, c.application_id, c.tenant_id, c.claim_key)
+                   = (s.installation_id, s.application_id, s.tenant_id, s.claim_key)
+                WHERE c.run_key = $1
+                ORDER BY s.claim_key, s.settlement_revision DESC
+            ) latest
+            WHERE result_manifest_ref IS NOT NULL
+            ORDER BY settled_at
             """,
             run_id,
         )
@@ -549,3 +559,201 @@ async def promote_generic_artifact(stack: ProductionStack) -> tuple[str, dict[st
     assert artifact["status"] == "admitted"
     assert artifact["durable_reference"].startswith(f"artifact://{SCOPE}/{run_id}/")
     return run_id, result
+
+
+# --- Canonical mission_control evidence --------------------------------------------------------
+
+
+def _scoped(alias: str) -> str:
+    return (
+        f"{alias}.installation_id = $1 AND {alias}.application_id = $2 AND {alias}.tenant_id = $3"
+    )
+
+
+async def canonical_evidence(
+    stack: ProductionStack | asyncpg.Pool,
+    run_key: str,
+    *,
+    request_scope: str = SCOPE,
+    units: bool = True,
+    children: bool = False,
+    artifacts: bool = False,
+) -> dict[str, Any]:
+    """Assert the run's canonical `mission_control` rows exist and link; return their ids and
+    per-table counts (ids and scopes only, never payload contents).
+
+    Read through the owner connection once the scenario settled: mission, mission_revision,
+    definition_snapshot and compiled_program behind the mission_run; activations and
+    attempts of the run's units; operation_intent with exactly one terminal
+    operation_receipt per settled claim; the mission's event sequence contiguous from 1 with
+    its outbox rows; subordinate executions of hosted children; artifacts the run produced.
+    """
+
+    scope = parse_request_scope(request_scope)
+    key = (scope.installation_id, scope.application_id, scope.tenant_id)
+    pool = stack if isinstance(stack, asyncpg.Pool) else stack.owner_pool
+    async with pool.acquire() as connection:
+        run = await connection.fetchrow(
+            f"""
+            SELECT r.run_id, r.mission_id, r.revision_id, r.lifecycle, r.terminal_outcome,
+                   (SELECT count(*) FROM mission_control.compiled_program p
+                     WHERE {_scoped("p")} AND p.revision_id = r.revision_id) AS programs,
+                   (SELECT count(*) FROM mission_control.definition_snapshot d
+                     WHERE {_scoped("d")}
+                       AND d.definition_snapshot_id = rev.definition_snapshot_id) AS snapshots
+            FROM mission_control.mission_run r
+            JOIN mission_control.mission m
+              ON (m.installation_id, m.application_id, m.tenant_id, m.mission_id)
+               = (r.installation_id, r.application_id, r.tenant_id, r.mission_id)
+            JOIN mission_control.mission_revision rev
+              ON (rev.installation_id, rev.application_id, rev.tenant_id, rev.revision_id)
+               = (r.installation_id, r.application_id, r.tenant_id, r.revision_id)
+             AND rev.mission_id = r.mission_id
+            WHERE {_scoped("r")} AND r.run_key = $4
+            """,
+            *key,
+            run_key,
+        )
+        assert run is not None, f"no canonical mission_run for {run_key}"
+        assert run["programs"] >= 1 and run["snapshots"] == 1, dict(run)
+        run_id, mission_id = run["run_id"], run["mission_id"]
+        activations = await connection.fetch(
+            f"""SELECT a.activation_id FROM mission_control.activation a
+                WHERE {_scoped("a")} AND a.run_id = $4 ORDER BY a.activation_id""",
+            *key,
+            run_id,
+        )
+        attempts = await connection.fetch(
+            f"""SELECT t.attempt_id, t.activation_id FROM mission_control.attempt t
+                WHERE {_scoped("t")} AND t.run_id = $4 ORDER BY t.attempt_id""",
+            *key,
+            run_id,
+        )
+        activation_ids = {row["activation_id"] for row in activations}
+        assert all(row["activation_id"] in activation_ids for row in attempts)
+        if units:
+            assert activations and attempts, (run_key, len(activations), len(attempts))
+        intents = await connection.fetch(
+            f"""
+            SELECT i.operation_intent_id, i.state, i.activation_id, c.status AS claim_status,
+                   (SELECT count(*) FROM mission_control.operation_receipt o
+                     WHERE {_scoped("o")}
+                       AND o.operation_intent_id = i.operation_intent_id) AS receipts
+            FROM mission_control.operation_intent i
+            LEFT JOIN mission_control.operation_claim c
+              ON (c.installation_id, c.application_id, c.tenant_id, c.operation_intent_id)
+               = (i.installation_id, i.application_id, i.tenant_id, i.operation_intent_id)
+            WHERE {_scoped("i")} AND i.run_id = $4
+            """,
+            *key,
+            run_id,
+        )
+        settled = [row for row in intents if row["claim_status"] == "settled"]
+        assert all(row["receipts"] == 1 for row in settled), [dict(row) for row in intents]
+        assert all(row["receipts"] <= 1 for row in intents), [dict(row) for row in intents]
+        assert all(
+            row["activation_id"] is None or row["activation_id"] in activation_ids
+            for row in intents
+        )
+        sequence = [
+            row["seq"]
+            for row in await connection.fetch(
+                f"""SELECT e.seq FROM mission_control.mission_event e
+                    WHERE {_scoped("e")} AND e.mission_id = $4 ORDER BY e.seq""",
+                *key,
+                mission_id,
+            )
+        ]
+        assert sequence and sequence == list(range(1, len(sequence) + 1)), sequence
+        outbox = int(
+            await connection.fetchval(
+                f"""SELECT count(*) FROM mission_control.outbox o
+                    JOIN mission_control.mission_event e
+                      ON (e.installation_id, e.application_id, e.tenant_id, e.event_id)
+                       = (o.installation_id, o.application_id, o.tenant_id, o.event_id)
+                    WHERE {_scoped("o")} AND e.mission_id = $4""",
+                *key,
+                mission_id,
+            )
+        )
+        assert outbox >= 1, f"no outbox rows for {run_key}"
+        subordinates = await connection.fetch(
+            f"""SELECT s.subordinate_id, s.execution_kind
+                FROM mission_control.subordinate_execution s
+                WHERE {_scoped("s")} AND s.run_id = $4 ORDER BY s.subordinate_id""",
+            *key,
+            run_id,
+        )
+        if children:
+            assert any(row["execution_kind"] == "async" for row in subordinates), run_key
+        produced = await connection.fetch(
+            f"""SELECT a.artifact_id FROM mission_control.artifact a
+                WHERE {_scoped("a")} AND a.producer_run_id = $4 ORDER BY a.artifact_id""",
+            *key,
+            run_id,
+        )
+        if artifacts:
+            assert produced, f"no artifact produced by {run_key}"
+        settlements = int(
+            await connection.fetchval(
+                f"""SELECT count(*) FROM mission_control.operation_settlement s
+                    JOIN mission_control.operation_claim c
+                      ON (c.installation_id, c.application_id, c.tenant_id, c.claim_key)
+                       = (s.installation_id, s.application_id, s.tenant_id, s.claim_key)
+                    WHERE {_scoped("s")} AND c.run_key = $4""",
+                *key,
+                run_key,
+            )
+        )
+        budget_entries = int(
+            await connection.fetchval(
+                f"""SELECT count(*) FROM mission_control.budget_entry b
+                    WHERE {_scoped("b")} AND b.run_id = $4""",
+                *key,
+                run_id,
+            )
+        )
+    return {
+        "request_scope": request_scope,
+        "run_key": run_key,
+        "run_id": str(run_id),
+        "mission_id": str(mission_id),
+        "revision_id": str(run["revision_id"]),
+        "lifecycle": run["lifecycle"],
+        "terminal_outcome": run["terminal_outcome"],
+        "activation_ids": [str(row["activation_id"]) for row in activations],
+        "attempt_ids": [str(row["attempt_id"]) for row in attempts],
+        "subordinate_ids": [str(row["subordinate_id"]) for row in subordinates],
+        "artifact_ids": [str(row["artifact_id"]) for row in produced],
+        "counts": {
+            "compiled_program": int(run["programs"]),
+            "activation": len(activations),
+            "attempt": len(attempts),
+            "operation_intent": len(intents),
+            "operation_receipt": sum(int(row["receipts"]) for row in intents),
+            "settled_claims": len(settled),
+            "operation_settlement": settlements,
+            "mission_event": len(sequence),
+            "outbox_for_mission_events": outbox,
+            "budget_entry": budget_entries,
+            "subordinate_execution": len(subordinates),
+            "artifact": len(produced),
+        },
+    }
+
+
+def record_parity_trace(name: str, evidence: dict[str, Any]) -> None:
+    """Merge one scenario's canonical evidence (ids, scopes, counts) into the JSON file named
+    by ``MISSION_CONTROL_PARITY_TRACE`` (no-op when unset)."""
+
+    target = os.environ.get("MISSION_CONTROL_PARITY_TRACE")
+    if not target:
+        return
+    path = Path(target)
+    try:
+        current = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    except json.JSONDecodeError:
+        current = {}
+    current[name] = {"recorded_at": datetime.now(UTC).isoformat(), **evidence}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(current, indent=2, sort_keys=True, default=str), encoding="utf-8")

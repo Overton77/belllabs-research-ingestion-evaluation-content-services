@@ -8,9 +8,12 @@ import httpx
 from fastapi import FastAPI
 from mcp.types import (
     LATEST_PROTOCOL_VERSION,
+    BlobResourceContents,
     CallToolResult,
     ListToolsResult,
     ReadResourceResult,
+    TextResourceContents,
+    Tool,
 )
 
 from mission_control.bootstrap.settings import Settings
@@ -53,7 +56,7 @@ class CoordinatorStreamableHttpClient:
         )
         response.raise_for_status()
 
-    async def list_tools(self):
+    async def list_tools(self) -> list[Tool]:
         result = await self._rpc("tools/list", {})
         return ListToolsResult.model_validate(result).tools
 
@@ -73,7 +76,7 @@ class CoordinatorStreamableHttpClient:
         )
         return CoordinatorHttpToolResult(data=result.structuredContent)
 
-    async def read_resource(self, uri: str):
+    async def read_resource(self, uri: str) -> list[TextResourceContents | BlobResourceContents]:
         result = ReadResourceResult.model_validate(await self._rpc("resources/read", {"uri": uri}))
         return result.contents
 
@@ -112,7 +115,7 @@ async def mounted_coordinator_client(
     )
 
     @asynccontextmanager
-    async def lifespan(_application: FastAPI):
+    async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
         async with deployment.app.router.lifespan_context(deployment.app):
             yield
 

@@ -1,15 +1,19 @@
 from __future__ import annotations
 
-import json
 from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime
 from typing import Any
 
+import asyncpg
 import pytest
 
 from mission_control.adapters.postgres.coordinator.workflow_result_repository import (
     PostgresWorkflowResultRepository,
 )
+from mission_control.adapters.postgres.run_control.run_control_repository import (
+    PostgresRunControlRepository,
+)
+from mission_control.adapters.postgres.scope import apply_scope
 from mission_control.application.coordinator.coordinator_facade import BlueprintRuntimeStatus
 from mission_control.bootstrap.coordinator_composition import (
     CoordinatorProductionDependencies,
@@ -26,7 +30,15 @@ from mission_control.domain.coordinator.launch import (
     StageGraphResultDetails,
     WorkflowResultRecord,
 )
-from mission_control.domain.policies.contracts import RunOutcome, RunPhase
+from mission_control.domain.policies.contracts import CancelAction, RunOutcome, RunPhase
+from tests.fixtures.mission_control_common_db import CommonDatabase, catalog_scope
+from tests.integration.postgres.runtime_common import common_db as common_db
+from tests.integration.postgres.runtime_common import (
+    owner_rows,
+    scoped_command,
+    scoped_request,
+)
+from tests.unit.run_control.test_run_control import service
 
 NOW = datetime(2026, 7, 26, 19, 0, tzinfo=UTC)
 SENTINEL = "sk-proj-SENTINEL_OPENAI_KEY_1234567890"
@@ -77,137 +89,148 @@ def result(
     )
 
 
-class _Transaction(AbstractAsyncContextManager[None]):
-    async def __aenter__(self) -> None:
-        return None
+class _Acquire(AbstractAsyncContextManager[object]):
+    async def __aenter__(self) -> object:
+        return object()
 
-    async def __aexit__(
-        self,
-        exc_type: object,
-        exc: object,
-        traceback: object,
-    ) -> None:
-        return None
-
-
-class _Connection:
-    def __init__(self) -> None:
-        self.phase = "terminal"
-        self.run_exists = True
-        self.rows: dict[str, dict[str, object]] = {}
-        self.calls: list[tuple[str, tuple[object, ...]]] = []
-
-    def transaction(self) -> _Transaction:
-        return _Transaction()
-
-    async def execute(self, query: str, *args: object) -> str:
-        self.calls.append((query, args))
-        return "SELECT 1"
-
-    async def fetchrow(
-        self,
-        query: str,
-        *args: object,
-    ) -> dict[str, object] | None:
-        self.calls.append((query, args))
-        if "FROM belllabs_control.workflow_runs" in query:
-            return {"phase": self.phase} if self.run_exists else None
-        if "INSERT INTO belllabs_control.coordinator_workflow_results" in query:
-            run_id = str(args[0])
-            if run_id in self.rows:
-                return None
-            row = {
-                "tenant_scope": args[1],
-                "request_scope": args[2],
-                "result_digest": args[6],
-                "result_payload": args[7],
-            }
-            self.rows[run_id] = row
-            return row
-        if "FROM belllabs_control.coordinator_workflow_results" in query:
-            run_id = str(args[0])
-            row = self.rows.get(run_id)
-            if row is None:
-                return None
-            if len(args) >= 3 and (
-                row["tenant_scope"] != args[1] or row["request_scope"] != args[2]
-            ):
-                return None
-            return row
-        raise AssertionError(f"unexpected query: {query}")
-
-
-class _Acquire(AbstractAsyncContextManager[_Connection]):
-    def __init__(self, connection: _Connection) -> None:
-        self._connection = connection
-
-    async def __aenter__(self) -> _Connection:
-        return self._connection
-
-    async def __aexit__(
-        self,
-        exc_type: object,
-        exc: object,
-        traceback: object,
-    ) -> None:
+    async def __aexit__(self, exc_type: object, exc: object, traceback: object) -> None:
         return None
 
 
 class _Pool:
-    def __init__(self) -> None:
-        self.connection = _Connection()
+    """Composition-only stand-in: never acquired in the composition test."""
 
     def acquire(self) -> _Acquire:
-        return _Acquire(self.connection)
+        return _Acquire()
+
+
+async def _terminal_run(db: CommonDatabase, pool: asyncpg.Pool, request_id: str) -> str:
+    """An admitted run whose cancellation was accepted, then settled terminal by the
+    owner-side fixture (terminal settlement itself is proven by the run-control tests)."""
+
+    run_service, _ = service(PostgresRunControlRepository(pool))  # type: ignore[arg-type]
+    admitted = await run_service.admit(scoped_request(db, request_id=request_id))
+    assert admitted.run_id is not None
+    await run_service.execute(
+        scoped_command(db, admitted.run_id, 1, f"{request_id}-cancel", CancelAction())
+    )
+    await owner_rows(
+        db,
+        """
+        UPDATE mission_control.mission_run
+        SET phase = 'terminal', lifecycle = 'completed', terminal_outcome = 'cancelled',
+            projection = jsonb_set(jsonb_set(projection, '{phase}', '"terminal"'),
+                                   '{terminal_outcome}', '"cancelled"')
+        WHERE run_key = $1
+        RETURNING 1
+        """,
+        admitted.run_id,
+    )
+    projection = await run_service.get_run(db.scope(), admitted.run_id)
+    assert projection.phase == RunPhase.TERMINAL
+    return admitted.run_id
+
+
+def _scoped(record: WorkflowResultRecord, scope: str, run_id: str) -> WorkflowResultRecord:
+    return record.model_copy(
+        update={"tenant_scope": scope, "request_scope": scope, "run_id": run_id}
+    )
 
 
 @pytest.mark.asyncio
-async def test_save_get_and_repeated_save_are_immutable_and_idempotent() -> None:
-    pool = _Pool()
-    repository = PostgresWorkflowResultRepository(pool)  # type: ignore[arg-type]
-    expected = result()
+@pytest.mark.common_db
+async def test_save_get_and_repeated_save_are_immutable_and_idempotent(
+    common_db: CommonDatabase,
+) -> None:
+    pool = await common_db.pool()
+    try:
+        run_id = await _terminal_run(common_db, pool, "result-run")
+        scope = common_db.scope()
+        repository = PostgresWorkflowResultRepository(pool)
+        expected = _scoped(result(), scope, run_id)
 
-    assert await repository.save(expected) == expected
-    assert await repository.save(expected) == expected
-    assert await repository.get("global", "global", expected.run_id) == expected
-    persisted = pool.connection.rows[expected.run_id]
-    assert persisted["result_digest"].startswith("sha256:")
-    assert SENTINEL not in json.dumps(persisted)
-    set_configs = [args for query, args in pool.connection.calls if "set_config" in query]
-    assert ("global",) in set_configs
-
-
-@pytest.mark.asyncio
-async def test_changed_or_cross_scope_result_cannot_replace_existing_record() -> None:
-    pool = _Pool()
-    repository = PostgresWorkflowResultRepository(pool)  # type: ignore[arg-type]
-    original = result()
-    await repository.save(original)
-
-    with pytest.raises(ValueError, match="immutable"):
-        await repository.save(result(warnings=("changed",)))
-    assert await repository.get("tenant-other", "global", original.run_id) is None
-
-
-@pytest.mark.asyncio
-async def test_nonterminal_run_and_secret_material_fail_before_persistence() -> None:
-    pool = _Pool()
-    repository = PostgresWorkflowResultRepository(pool)  # type: ignore[arg-type]
-    pool.connection.phase = "active"
-    with pytest.raises(ValueError, match="terminal Workflow Run"):
-        await repository.save(result())
-    assert not pool.connection.rows
-
-    pool.connection.phase = "terminal"
-    with pytest.raises(ValueError, match="secret material"):
-        await repository.save(
-            result(
-                output_contract_results={
-                    "verified_web_research": {"summary": f"provider returned api_key={SENTINEL}"}
-                }
-            )
+        assert await repository.save(expected) == expected
+        assert await repository.save(expected) == expected
+        assert await repository.get(scope, scope, run_id) == expected
+        rows = await owner_rows(
+            common_db,
+            "SELECT result_digest, result_payload::text AS payload, run_key "
+            "FROM mission_control.coordinator_workflow_result",
         )
-    assert not pool.connection.rows
+        assert len(rows) == 1 and rows[0]["run_key"] == run_id
+        assert rows[0]["result_digest"].startswith("sha256:")
+        assert SENTINEL not in rows[0]["payload"]
+        async with pool.acquire() as connection, connection.transaction():
+            await apply_scope(connection, scope)
+            with pytest.raises(asyncpg.InsufficientPrivilegeError):
+                await connection.execute(
+                    "UPDATE mission_control.coordinator_workflow_result SET result_digest = $1",
+                    "sha256:" + "f" * 64,
+                )
+    finally:
+        await pool.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.common_db
+async def test_changed_or_cross_scope_result_cannot_replace_existing_record(
+    common_db: CommonDatabase,
+) -> None:
+    pool = await common_db.pool()
+    try:
+        run_id = await _terminal_run(common_db, pool, "result-immutable")
+        scope = common_db.scope()
+        repository = PostgresWorkflowResultRepository(pool)
+        original = _scoped(result(), scope, run_id)
+        await repository.save(original)
+
+        with pytest.raises(ValueError, match="immutable"):
+            await repository.save(_scoped(result(warnings=("changed",)), scope, run_id))
+        other = common_db.scope("tenant-2")
+        assert await repository.get(other, other, original.run_id) is None
+        with pytest.raises(ValueError, match="tenant scope must match"):
+            await repository.get(other, scope, original.run_id)
+        with pytest.raises(ValueError):
+            await repository.get("global", "global", original.run_id)
+    finally:
+        await pool.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.common_db
+async def test_nonterminal_run_and_secret_material_fail_before_persistence(
+    common_db: CommonDatabase,
+) -> None:
+    pool = await common_db.pool()
+    try:
+        scope = common_db.scope()
+        run_service, _ = service(PostgresRunControlRepository(pool))  # type: ignore[arg-type]
+        active = await run_service.admit(scoped_request(common_db, request_id="result-active"))
+        assert active.run_id is not None
+        repository = PostgresWorkflowResultRepository(pool)
+        with pytest.raises(ValueError, match="terminal Workflow Run"):
+            await repository.save(_scoped(result(), scope, active.run_id))
+
+        run_id = await _terminal_run(common_db, pool, "result-secret")
+        with pytest.raises(ValueError, match="secret material"):
+            await repository.save(
+                _scoped(
+                    result(
+                        output_contract_results={
+                            "verified_web_research": {
+                                "summary": f"provider returned api_key={SENTINEL}"
+                            }
+                        }
+                    ),
+                    scope,
+                    run_id,
+                )
+            )
+        assert not await owner_rows(
+            common_db, "SELECT 1 FROM mission_control.coordinator_workflow_result"
+        )
+    finally:
+        await pool.close()
 
 
 class _Ready:
@@ -240,7 +263,7 @@ def test_production_composition_uses_only_application_pool_for_results() -> None
     facade = build_production_coordinator_facade(
         settings=get_settings().model_copy(
             update={
-                "mission_control_catalog_scope": "installation:test-coordinator",
+                "mission_control_catalog_scope": catalog_scope("biotech"),
                 "external_capability_discovery_enabled": False,
             }
         ),

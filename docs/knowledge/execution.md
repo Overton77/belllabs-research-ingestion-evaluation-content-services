@@ -1,7 +1,7 @@
 ---
 type: Workflow
 title: StageGraph and GoalDirected execution
-description: How both program families share Temporal and bounded operation settlement.
+description: How the Stage Graph and GoalDirected code families share Temporal and bounded operation settlement; GoalDirected implements a subset of the Goal Loop workflow system.
 tags: [mission-control, implementation]
 ---
 
@@ -19,7 +19,7 @@ mission scheduler or bypass the budget ledger.
 
 New scoped roots use `mc.mission_run.v1`; scoped operation children use
 `mc.operation.v1`. IDs include installation, application, tenant and run identity.
-Family inputs must match their root's scope, ERC, workflow type and epoch.
+Family inputs must match their root's scope, Compiled Program (the code calls it `EffectiveRunConfiguration`, ERC), workflow type and epoch.
 Cross-parent operation requests fail before child launch.
 
 Linked independent roots preserve admitted parent/child lineage. Hosted subordinate

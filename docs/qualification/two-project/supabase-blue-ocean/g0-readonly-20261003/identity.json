@@ -1,0 +1,82 @@
+{
+  "evidence_kind": "g0_readonly_inventory",
+  "observed_at": "2026-10-03",
+  "method": "Supabase management connector: list_projects plus read-only catalog SELECTs (pg_namespace, pg_class, pg_roles, pg_extension, pg_stat_user_tables, storage.buckets). No DDL, DML, role or storage change.",
+  "identity_status": "management_metadata_observed_route_unverified",
+  "limits": [
+    "A project name is not identity proof; the operator must confirm the mapping, environment and approved connection-secret references.",
+    "No direct database route (host/port/login) was exercised; the connector's own route is not the installer's route.",
+    "Row counts come from pg_stat_user_tables (estimates), not a consistent snapshot; they are inventory, not protected-data evidence."
+  ],
+  "expected_label": "supabase-blue-ocean",
+  "expected_application_id": "ai-engineer",
+  "management_metadata": {
+    "project_ref": "wkythqbofmckbuoothhn",
+    "name": "supabase-blue-ocean",
+    "organization_slug": "vercel_icfg_SIEqFciu9zf7npelC0RqFUee",
+    "region": "us-east-1",
+    "status": "ACTIVE_HEALTHY",
+    "database_host": "db.wkythqbofmckbuoothhn.supabase.co",
+    "database_version": "17.6.1.104",
+    "postgres_engine": "17",
+    "created_at": "2026-04-04T00:15:23.686251Z"
+  },
+  "catalog_observation": {
+    "server_version_num": 170006,
+    "schemas": {
+      "api": {"owner": "postgres", "tables": 0},
+      "auth": {"owner": "supabase_admin", "tables": 27},
+      "content": {"owner": "postgres", "tables": 18},
+      "corpus": {"owner": "postgres", "tables": 51},
+      "curriculum": {"owner": "postgres", "tables": 13},
+      "evaluation": {"owner": "postgres", "tables": 30},
+      "evidence": {"owner": "postgres", "tables": 32},
+      "extensions": {"owner": "postgres", "tables": 0},
+      "graphql": {"owner": "supabase_admin", "tables": 0},
+      "graphql_public": {"owner": "supabase_admin", "tables": 0},
+      "knowledge": {"owner": "postgres", "tables": 13},
+      "knowledge_service": {"owner": "postgres", "tables": 11},
+      "observability": {"owner": "postgres", "tables": 31},
+      "orchestration": {"owner": "postgres", "tables": 36},
+      "provenance": {"owner": "postgres", "tables": 4},
+      "public": {"owner": "pg_database_owner", "tables": 41},
+      "ranking": {"owner": "postgres", "tables": 16},
+      "realtime": {"owner": "supabase_admin", "tables": 3},
+      "research": {"owner": "postgres", "tables": 20},
+      "research_private": {"owner": "postgres", "tables": 0},
+      "retrieval": {"owner": "postgres", "tables": 48},
+      "staging": {"owner": "postgres", "tables": 4},
+      "storage": {"owner": "supabase_admin", "tables": 8},
+      "supabase_migrations": {"owner": "postgres", "tables": 1},
+      "taxonomy": {"owner": "postgres", "tables": 9},
+      "temporal": {"owner": "postgres", "tables": 9},
+      "util": {"owner": "postgres", "tables": 0},
+      "vault": {"owner": "supabase_admin", "tables": 1}
+    },
+    "note_temporal_schema": "The `temporal` schema holds application temporal-knowledge records (stream_kind, event_kind, knowledge_head, ...), not Temporal server persistence. It is an AI Engineer domain schema and is protected.",
+    "extensions": {
+      "btree_gist": "1.7 (extensions)",
+      "pg_jsonschema": "0.3.3 (extensions)",
+      "pg_stat_statements": "1.11 (extensions)",
+      "pg_trgm": "1.6 (extensions)",
+      "pgcrypto": "1.3 (extensions)",
+      "plpgsql": "1.0 (pg_catalog)",
+      "supabase_vault": "0.3.1 (vault)",
+      "uuid-ossp": "1.1 (extensions)",
+      "vector": "0.8.0 (extensions)"
+    },
+    "roles_named_mission_or_belllabs": [],
+    "mission_control_schemas_present": false,
+    "storage_buckets_private": [
+      "ai-engineer-transcripts",
+      "research-ingestion-intents",
+      "ai-engineer-project-provenance",
+      "matthew-berman-transcripts",
+      "source-captures",
+      "content-derivatives",
+      "ai-engineer-cloud-bucket",
+      "research-reports"
+    ]
+  },
+  "collision_check": "No mission_control, mission_control_search or mission_control_runtime schema and no mission_*/belllabs_* role exist. All 25 non-system application schemas are protected domain objects; no MC bucket (mission-artifacts, capability-bundles) exists yet."
+}

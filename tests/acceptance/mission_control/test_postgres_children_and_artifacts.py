@@ -9,18 +9,6 @@ from pathlib import Path
 
 import pytest
 from temporalio.api.enums.v1 import EventType
-
-from mission_control.adapters.postgres.async_subagents.async_subagent_detail_repository import (
-    PostgresAsyncSubagentDetailRepository,
-)
-from mission_control.adapters.postgres.async_subagents.async_subagents import (
-    PostgresAsyncSubagentAuthority,
-)
-from mission_control.domain.execution.contracts import (
-    AsyncSubagentDependencyClass,
-    AsyncSubagentLifecycle,
-    DeepAgentExecutionBinding,
-)
 from tests.fixtures import rrm009_cancellation
 from tests.fixtures.mission_control_local_agent_server import (
     deterministic_child_definition,
@@ -35,9 +23,37 @@ from tests.fixtures.rrm009_production_harness import (
     _run,
     _terminal,
     _wait_for,
+    canonical_evidence,
     promote_generic_artifact,
+    record_parity_trace,
 )
 from tests.fixtures.rrm009_production_stack import ANSWER_MARKER, SCOPE, technical_binding
+
+from mission_control.adapters.postgres.async_subagents.async_subagent_detail_repository import (
+    PostgresAsyncSubagentDetailRepository,
+)
+from mission_control.adapters.postgres.async_subagents.async_subagents import (
+    PostgresAsyncSubagentAuthority,
+)
+from mission_control.domain.execution.contracts import (
+    AsyncSubagentDependencyClass,
+    AsyncSubagentLifecycle,
+    DeepAgentExecutionBinding,
+)
+
+pytestmark = pytest.mark.common_db
+
+_ARTIFACTS_OF_RUN = """
+    SELECT count(*) FROM mission_control.artifact a
+    JOIN mission_control.mission_run r
+      ON (r.installation_id, r.application_id, r.tenant_id, r.run_id)
+       = (a.installation_id, a.application_id, a.tenant_id, a.producer_run_id)
+    WHERE r.run_key = $1
+"""
+_METADATA_REVISIONS = """
+    SELECT count(*) FROM mission_control.artifact_metadata_revision
+    WHERE request_scope = $1 AND artifact_key = $2
+"""
 
 
 @pytest.fixture
@@ -58,22 +74,8 @@ async def test_generic_artifact_real_operation_and_promotion_retry(stack: Produc
     }
     assert list(_calls(stack, run_id).values()) == [{"parent": 4, "child": 1}]
     async with stack.owner_pool.acquire() as connection:
-        assert (
-            await connection.fetchval(
-                "SELECT count(*) FROM belllabs_control.durable_artifact_references WHERE run_id=$1",
-                run_id,
-            )
-            == 1
-        )
-        assert (
-            await connection.fetchval(
-                "SELECT count(*) FROM belllabs_control.artifact_metadata_revisions "
-                "WHERE request_scope=$1 AND artifact_id=$2",
-                SCOPE,
-                artifact["artifact_id"],
-            )
-            == 4
-        )
+        assert await connection.fetchval(_ARTIFACTS_OF_RUN, run_id) == 1
+        assert await connection.fetchval(_METADATA_REVISIONS, SCOPE, artifact["artifact_id"]) == 4
 
     # Re-run the actual activity with its recorded Temporal input after the workspace
     # manifest already links the promoted artifact. No mocked DB or candidate provider.
@@ -94,15 +96,11 @@ async def test_generic_artifact_real_operation_and_promotion_retry(stack: Produc
     assert replayed == artifact
     assert list(_calls(stack, run_id).values()) == [{"parent": 4, "child": 1}]
     async with stack.owner_pool.acquire() as connection:
-        assert (
-            await connection.fetchval(
-                "SELECT count(*) FROM belllabs_control.artifact_metadata_revisions "
-                "WHERE request_scope=$1 AND artifact_id=$2",
-                SCOPE,
-                artifact["artifact_id"],
-            )
-            == 4
-        )
+        assert await connection.fetchval(_METADATA_REVISIONS, SCOPE, artifact["artifact_id"]) == 4
+        assert await connection.fetchval(_ARTIFACTS_OF_RUN, run_id) == 1
+    rows = await canonical_evidence(stack, run_id, artifacts=True)
+    assert rows["counts"]["artifact"] == 1 and rows["counts"]["settled_claims"] == 1, rows
+    record_parity_trace("generic_artifact_promotion_retry", rows)
     print(
         "POSTGRES ARTIFACT EVIDENCE",
         json.dumps(
@@ -163,6 +161,9 @@ async def test_real_hosted_async_child_cancellation_uses_postgres_detail(
         ) as production:
             evidence = await rrm009_cancellation.run_cancellation_drill(production, technical, gate)
             assert evidence["child"]["cancellation_receipt"] == "provider_acknowledged"
+            rows = await canonical_evidence(production, evidence["run_id"], children=True)
+            assert rows["terminal_outcome"] == "cancelled", rows
+            record_parity_trace(f"async_child_cancellation_{window}", rows)
             print("POSTGRES ASYNC CANCELLATION EVIDENCE", json.dumps(evidence, sort_keys=True))
 
 
@@ -207,6 +208,10 @@ async def test_real_hosted_async_children_complete_and_settle_in_postgres(
                 assert link.result_decision == "admit" and link.settled
                 assert link.usage_disposition == "settled"
                 assert len(await rrm009_cancellation.provider_runs(child.child_execution_id)) == 1
+            rows = await canonical_evidence(production, run_id, children=True)
+            assert rows["terminal_outcome"] == "succeeded", rows
+            assert rows["counts"]["subordinate_execution"] >= 2, rows
+            record_parity_trace("async_children_completion", rows)
             print(
                 "POSTGRES ASYNC COMPLETION EVIDENCE",
                 json.dumps(

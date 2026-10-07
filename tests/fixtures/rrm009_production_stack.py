@@ -24,6 +24,10 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import BaseTool
+from tests.acceptance.control_plane.test_wp_cp_040 import exact, exact_fixture
+from tests.fixtures.mission_control_common_db import canonical_scope
+from tests.unit.operations.test_operation_execution import operation_request
+from tests.unit.run_control.test_run_control import request as run_request
 
 from mission_control.adapters.deep_agents.materializer import ResolvedSkillBundle
 from mission_control.adapters.temporal.deployment_composition import DeploymentCapabilityComponents
@@ -90,11 +94,9 @@ from mission_control.domain.programs.contracts import (
     GoalRevision,
     StageGraphRunInput,
 )
-from tests.acceptance.control_plane.test_wp_cp_040 import exact, exact_fixture
-from tests.unit.operations.test_operation_execution import operation_request
-from tests.unit.run_control.test_run_control import request as run_request
 
-SCOPE = "tenant-1"
+# Canonical `mc/{installation}/{application}/{tenant}` scope of the disposable common DB.
+SCOPE = canonical_scope("tenant-1")
 OPERATOR = "operator"
 WAIT_ID = "release-review"
 GOAL_OBLIGATION = "fixture-obligation"
@@ -106,11 +108,8 @@ CHILD_MARKER = "RRM009-CHILD-OK"
 ANSWER_MARKER = "RRM009-OK"
 MCP_CODE = "RRM009"
 REPORT_PATH = "/workspace/output/report.md"
-LANGGRAPH_SCHEMA = "rrm009_langgraph"
-APP_LOGIN = "belllabs_app"
-APP_PASSWORD = "belllabs-app-local"  # the disposable stack's init script value
-FAMILY_WRITER_LOGIN = "rrm009_family_writer"
-FAMILY_WRITER_PASSWORD = "rrm009-family-writer-local"
+# The provisioned runtime checkpoint schema (packages/mission-control-db-contract/runtime).
+LANGGRAPH_SCHEMA = "mission_control_runtime"
 TOKENS_PER_CALL = 5
 TASK_QUEUE = "rrm009"
 # The placement's task queue must be the deployment's agent-cognitive queue: the family
@@ -415,7 +414,7 @@ def baseline_reservation(family: str) -> dict[str, int]:
 def admission_request(catalog: TechnicalCatalog, request_id: str) -> RunRequest:
     """A run request bound to the compiled ERC, with hard caps at the effective ceilings."""
 
-    base = run_request(request_id=request_id)
+    base = run_request(request_scope=SCOPE, request_id=request_id)
     ceilings = catalog.erc.effective_authority.budgets.dimensions
     dimensions = tuple(
         BudgetDimensionLimit(
@@ -564,6 +563,7 @@ def _template(
     return OperationExecutionRequest.model_validate(
         {
             **base.model_dump(mode="python"),
+            "request_scope": SCOPE,
             "prompt_segments": _segments(objective, source="input:rrm009@1"),
             "mcp_servers": (),
             "skills": (),

@@ -1,0 +1,356 @@
+{
+  "actor_ref": "seed:mission-control-catalog",
+  "component_compatibility": ">=1.0.0 <2.0.0",
+  "depends_on": [
+    {
+      "seed_key": "mc.catalog.workflow-parity",
+      "seed_version": "1.0.0"
+    }
+  ],
+  "description": "OPT-IN SYNTHETIC QUALIFICATION FIXTURE. A clearly labeled qualification tenant (qualification_fixture=true) and the deterministic generic StageGraph/GoalDirected contract-fixture blueprints. Not production provider support, not real usage; no actors, grants, missions, runs or receipts.",
+  "format": "mission-control-seed/v1",
+  "records": [
+    {
+      "fields": {
+        "external_tenant_ref": "qualification:mission-control-parity",
+        "qualification_fixture": true,
+        "state": "active"
+      },
+      "kind": "tenant",
+      "logical_key": "qualification:mission-control-parity"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:blueprint:fixture.generic-stage-graph",
+        "contract": "mission-control.published-definition/1",
+        "kind": "blueprint",
+        "manifest": {
+          "definition": {
+            "capacity_ceilings": [],
+            "completion_obligations": [],
+            "contract_version": "CON-BP-STAGEGRAPH-V2",
+            "cycle_limits": [],
+            "dependencies": [
+              {
+                "consumer_input_slot_id": "intermediate",
+                "consumer_stage_id": "finish",
+                "dependency_class": "required",
+                "dependency_id": "prepare-to-finish",
+                "join_id": "inputs",
+                "producer_output_slot_id": "intermediate",
+                "producer_stage_id": "prepare"
+              }
+            ],
+            "description": "Validates structure only; workflow-specific semantics remain intentionally unset.",
+            "fairness_groups": [
+              {
+                "group_id": "default",
+                "weight": 1
+              }
+            ],
+            "family": "StageGraph",
+            "invalidation_reuse_declarations": [],
+            "joins": [
+              {
+                "consumer_stage_id": "finish",
+                "dependency_ids": [
+                  "prepare-to-finish"
+                ],
+                "join_id": "inputs",
+                "kind": "all",
+                "minimum": null,
+                "slow_sibling_policy": {
+                  "arrival_route": "evaluate_late_result",
+                  "execution_action": "continue",
+                  "triggers": [
+                    "join_released"
+                  ]
+                }
+              }
+            ],
+            "kind": "blueprint",
+            "late_result_policy": {
+              "rules": [
+                {
+                  "decision": "admit",
+                  "rule_id": "admit-consumer-late-result",
+                  "trigger": "consumer_already_admitted"
+                }
+              ]
+            },
+            "linked_run_slots": [],
+            "logical_id": "fixture.generic-stage-graph",
+            "obligation_matrix": [],
+            "policy_definitions": [],
+            "schema_version": "1",
+            "stage_mappings": [],
+            "stages": [
+              {
+                "fairness_group_id": "default",
+                "input_slots": [
+                  {
+                    "input_slot_id": "intermediate",
+                    "required": true
+                  }
+                ],
+                "obligation_slots": [],
+                "operation_slots": [
+                  {
+                    "allowed_variants": [
+                      {
+                        "operation_contract_ref": "operation:fixture-finish@1",
+                        "operation_variant_id": "default"
+                      }
+                    ],
+                    "concurrency_slots": 1,
+                    "fallback_sequence": [],
+                    "operation_slot_id": "execute",
+                    "priority": 0,
+                    "reservation": {}
+                  }
+                ],
+                "output_slots": [
+                  {
+                    "output_contract_ref": "contract:fixture-result@1",
+                    "output_slot_id": "result"
+                  }
+                ],
+                "stage_cycle_policy": null,
+                "stage_id": "finish"
+              },
+              {
+                "fairness_group_id": "default",
+                "input_slots": [],
+                "obligation_slots": [],
+                "operation_slots": [
+                  {
+                    "allowed_variants": [
+                      {
+                        "operation_contract_ref": "operation:fixture-prepare@1",
+                        "operation_variant_id": "default"
+                      }
+                    ],
+                    "concurrency_slots": 1,
+                    "fallback_sequence": [],
+                    "operation_slot_id": "execute",
+                    "priority": 0,
+                    "reservation": {}
+                  }
+                ],
+                "output_slots": [
+                  {
+                    "output_contract_ref": "contract:fixture-intermediate@1",
+                    "output_slot_id": "intermediate"
+                  }
+                ],
+                "stage_cycle_policy": null,
+                "stage_id": "prepare"
+              }
+            ],
+            "title": "Generic StageGraph contract fixture",
+            "waits": [],
+            "workflow_cycle_policy": null,
+            "workflow_evaluation_contract_ref": null,
+            "workflow_obligation_slots": []
+          },
+          "published_at": "2026-10-03T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:2900e786c9e387b1f3f4494021b1f77bf4bc338e44479aa5366c134abcb97523",
+            "kind": "blueprint",
+            "lifecycle_status": "published",
+            "logical_id": "fixture.generic-stage-graph",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:108045009403ba194dff2904aeae6a2584063d5e6d74e55178c3923bd581ed08",
+        "manifest_ref": "mc-catalog://definition/blueprint/fixture.generic-stage-graph/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "qualification:blueprint:fixture.generic-stage-graph/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "qualification:blueprint:fixture.generic-stage-graph/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "src/mission_control/domain/authoring/fixtures.py"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "qualification:blueprint:fixture.generic-stage-graph/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:blueprint:fixture.generic-goal-directed",
+        "contract": "mission-control.published-definition/1",
+        "kind": "blueprint",
+        "manifest": {
+          "definition": {
+            "acceptance_contract": "TODO(workflow specification): pin exact independent acceptance criteria",
+            "admitted_input_classes": [
+              "fixture-input"
+            ],
+            "allowed_async_subgoal_classes": [
+              "fixture_subgoal"
+            ],
+            "allowed_linked_run_slot_ids": [
+              "fixture_link"
+            ],
+            "allowed_operation_classes": [
+              "fixture_operation"
+            ],
+            "authority_ceiling": {
+              "budgets": {
+                "dimensions": {
+                  "goal.iterations": 1
+                }
+              },
+              "capabilities": [
+                "fixture-operation"
+              ],
+              "max_concurrency": 1
+            },
+            "convergence_policy": {
+              "authority_breach_action": "fail",
+              "hard_budget_action": "partial_or_fail",
+              "irrecoverable_failure_action": "partial_or_fail",
+              "iteration_limit_action": "partial_or_fail",
+              "max_no_progress_iterations": 3,
+              "max_repeated_blockers": 3,
+              "no_progress_action": "partial_or_fail",
+              "repeated_blocker_action": "partial_or_fail",
+              "soft_budget_action": "continue"
+            },
+            "description": "Validates bounded iteration only; no product objective or threshold is implied.",
+            "family": "GoalDirected",
+            "handoff_policy": {
+              "allowed_snapshot_ref_classes": [
+                "fixture-snapshot"
+              ],
+              "allowed_workspace_ref_classes": [
+                "fixture-workspace"
+              ],
+              "handoff_required_for_fresh_session": true,
+              "max_instruction_bytes": 1024,
+              "schema_version": "belllabs.goal-handoff.v1"
+            },
+            "independent_verification_required": true,
+            "iteration_reservation": {
+              "goal.iterations": 1
+            },
+            "kind": "blueprint",
+            "logical_id": "fixture.generic-goal-directed",
+            "max_iterations": 1,
+            "objective_contract": "TODO(workflow specification): pin an exact objective contract reference",
+            "prohibited_work": [
+              "product work"
+            ],
+            "protected_scope_policy": {
+              "expansion_route": "new_run",
+              "protected_fields": [
+                "acceptance",
+                "admitted_inputs",
+                "authority",
+                "budget",
+                "invariants",
+                "linked_run_permissions",
+                "objective",
+                "prohibited_work",
+                "required_outputs"
+              ]
+            },
+            "required_obligation_refs": [
+              "fixture-obligation"
+            ],
+            "required_output_contracts": [
+              "fixture-output"
+            ],
+            "schema_version": "1",
+            "session_policy": {
+              "compaction_failure_action": "pause",
+              "context_compaction_policy_ref": "context-compaction:fixture@1",
+              "context_selection_policy_ref": "context-selection:fixture@1",
+              "fresh_agent_token_threshold": 100000,
+              "handoff_token_reserve": 4000,
+              "max_rollovers": 0,
+              "protected_fact_classes": [
+                "objective"
+              ],
+              "rollover_mode": "fresh_from_handoff",
+              "session_mode": "reuse"
+            },
+            "title": "Generic GoalDirected contract fixture",
+            "variant_names": [],
+            "verifier_policy": {
+              "acceptance_version": 1,
+              "binding_ref": "verifier:fixture@1",
+              "operation_class": "fixture_verifier",
+              "output_contract_ref": "fixture-output",
+              "rubric_ref": "rubric:fixture@1",
+              "rubric_version": 1
+            },
+            "workspace_policy": {
+              "checkpoint_path": "/goal/checkpoint.json",
+              "goal_path": "/goal/GOAL.md",
+              "handoff_path": "/goal/HANDOFF.md",
+              "rollback_on_failure": true,
+              "snapshot_mode": "on_rollover",
+              "workspace_mode": "shared"
+            }
+          },
+          "published_at": "2026-10-03T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:750ee4e8f2f8198fe59f4e8a328715cbc15ad1f8fef479c16cb4508e62c7c948",
+            "kind": "blueprint",
+            "lifecycle_status": "published",
+            "logical_id": "fixture.generic-goal-directed",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:fcba71831569fa92e476bb781a69a0c2bd6713837e0cfcadfb0c47ff83f4e552",
+        "manifest_ref": "mc-catalog://definition/blueprint/fixture.generic-goal-directed/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "qualification:blueprint:fixture.generic-goal-directed/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "qualification:blueprint:fixture.generic-goal-directed/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "src/mission_control/domain/authoring/fixtures.py"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "qualification:blueprint:fixture.generic-goal-directed/1:admit"
+    }
+  ],
+  "seed_key": "mc.qualification.parity",
+  "seed_version": "1.0.0"
+}

@@ -18,6 +18,17 @@ from langgraph.store.memory import InMemoryStore
 from temporalio import activity
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
+from tests.acceptance.control_plane.test_wp_cp_040 import exact_fixture
+from tests.fixtures.checkpoint_lineage import (
+    execute_with_checkpoint_lineage,
+    materialized_workspace,
+)
+from tests.fixtures.goal_directed_journaled import (
+    FixtureGoalSettlements,
+    goal_template_workspace,
+)
+from tests.fixtures.operation_activities import cancelled_operation_result
+from tests.unit.operations.test_operation_execution import operation_request
 
 from mission_control.adapters.deep_agents import (
     DeepAgentRuntimeAdapter,
@@ -66,17 +77,6 @@ from mission_control.domain.programs.goal_directed_runtime import (
     GoalOperationReconciliationRequest,
     GoalOperationReconciliationResult,
 )
-from tests.acceptance.control_plane.test_wp_cp_040 import exact_fixture
-from tests.fixtures.checkpoint_lineage import (
-    execute_with_checkpoint_lineage,
-    materialized_workspace,
-)
-from tests.fixtures.goal_directed_journaled import (
-    FixtureGoalSettlements,
-    goal_template_workspace,
-)
-from tests.fixtures.operation_activities import cancelled_operation_result
-from tests.unit.operations.test_operation_execution import operation_request
 
 DIGEST = "sha256:" + "a" * 64
 QUEUE = "wp-bp-020-sandbox-rollover"

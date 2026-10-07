@@ -13,6 +13,13 @@ from langchain_core.tools import BaseTool
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.store.memory import InMemoryStore
 from pydantic import ValidationError
+from tests.fixtures.checkpoint_lineage import (
+    activity_attempt,
+    bind_unit,
+    goal_unit,
+    stage_unit,
+)
+from tests.unit.operations.test_operation_execution import operation_request
 
 from mission_control.adapters.deep_agents import (
     DeepAgentRuntimeAdapter,
@@ -72,13 +79,6 @@ from mission_control.domain.execution.materialization import (
     compose_cognitive_context_schema,
     compose_cognitive_state_schema,
 )
-from tests.fixtures.checkpoint_lineage import (
-    activity_attempt,
-    bind_unit,
-    goal_unit,
-    stage_unit,
-)
-from tests.unit.operations.test_operation_execution import operation_request
 
 DIGEST_A = "sha256:" + "a" * 64
 MCP_TOOL_SCHEMA_DIGEST = "sha256:bb30ffeeaa9cc8d145c2160ac76df146df61820df24db1078c4db98573714a99"
@@ -967,6 +967,8 @@ def test_create_deep_agent_has_one_non_experiment_production_call_site() -> None
 async def test_operation_service_pins_records_and_links_the_result_checkpoint() -> None:
     """Production seam: `OperationExecutionService` → adapter → transition → settlement."""
 
+    from tests.unit.operations.test_operation_execution import MCP_DIGEST, SKILL_DIGEST
+
     from mission_control.adapters.operations.conformance import (
         ConformanceAssetVerifier,
         ConformanceBudgetAuthority,
@@ -978,7 +980,6 @@ async def test_operation_service_pins_records_and_links_the_result_checkpoint() 
         InMemoryOperationBindingRepository,
         OperationExecutionService,
     )
-    from tests.unit.operations.test_operation_execution import MCP_DIGEST, SKILL_DIGEST
 
     class AcceptingAuthority:
         async def verify(self, request: OperationExecutionRequest) -> None:

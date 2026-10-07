@@ -10,6 +10,9 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any
 
+from tests.fixtures.checkpoint_recovery import MemoryOperationJournal
+from tests.unit.run_control.test_run_control import ALL_PERMISSIONS, NOW, WORKFLOW_DIGEST
+
 from mission_control.application.execution.inspection import InMemoryInspectionReadRepository
 from mission_control.application.execution.operations.checkpoint_lineage import (
     InMemoryCheckpointLineageRepository,
@@ -55,8 +58,6 @@ from mission_control.domain.policies.inspection import (
     JournalClaimInspection,
     JournalSettlementSummary,
 )
-from tests.fixtures.checkpoint_recovery import MemoryOperationJournal
-from tests.unit.run_control.test_run_control import ALL_PERMISSIONS, NOW, WORKFLOW_DIGEST
 
 FORK_PERMISSIONS = ALL_PERMISSIONS | {
     "workflow_run.read",
@@ -398,12 +399,13 @@ def technical_snapshot(
 ) -> RunSnapshotManifest:
     """A minimal, valid StageGraph snapshot of `run_id` (storage and saga suites)."""
 
+    from tests.unit.run_control.test_run_control import request as run_request
+
     from mission_control.domain.policies.forks import (
         BudgetFrontier,
         FamilyPosition,
         snapshot_id_for,
     )
-    from tests.unit.run_control.test_run_control import request as run_request
 
     admitted = run_request(request_scope=request_scope)
     boundary_ref = "family-head:stagegraph:result-head"

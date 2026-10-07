@@ -89,4 +89,6 @@ OpenAPI: `http://127.0.0.1:8000/docs`. Temporal UI: `:8080`.
 - `README.md` § Local development
 - `.env.example`
 - `Makefile`
-- As-built: `docs/interview_and_research_result_documentation/CODEBASE_DOMAIN_WORKFLOW_GUIDE.md`
+- As-built: `docs/knowledge/index.md` (current navigation). The former
+  `docs/interview_and_research_result_documentation/CODEBASE_DOMAIN_WORKFLOW_GUIDE.md` is
+  historical, deleted from the working tree; recoverable with `git show f6521c1:docs/interview_and_research_result_documentation/CODEBASE_DOMAIN_WORKFLOW_GUIDE.md`.

@@ -1,0 +1,594 @@
+{
+  "excluded_schemas": [
+    "information_schema",
+    "mission_control",
+    "mission_control_runtime",
+    "mission_control_search",
+    "pg_*"
+  ],
+  "extensions": {
+    "plpgsql": {
+      "schema": "pg_catalog",
+      "version": "1.0"
+    },
+    "vector": {
+      "schema": "extensions",
+      "version": "0.8.7"
+    }
+  },
+  "fingerprint_algorithm": "mc-pg-catalog-v2",
+  "format": "mission-control-protected-snapshot/v1",
+  "memberships": {
+    "mcqd_aiengineer_anon<-mc_migrator": {
+      "admin_option": true,
+      "inherit_option": true,
+      "set_option": true
+    },
+    "mcqd_aiengineer_authenticated<-mc_migrator": {
+      "admin_option": true,
+      "inherit_option": true,
+      "set_option": true
+    },
+    "mcqd_aiengineer_service<-mc_migrator": {
+      "admin_option": true,
+      "inherit_option": true,
+      "set_option": true
+    },
+    "mission_control_catalog_writer<-mc_migrator": {
+      "admin_option": true,
+      "inherit_option": false,
+      "set_option": false
+    },
+    "mission_control_checkpointer<-mc_migrator": {
+      "admin_option": true,
+      "inherit_option": false,
+      "set_option": false
+    },
+    "mission_control_family_writer<-mc_migrator": {
+      "admin_option": true,
+      "inherit_option": false,
+      "set_option": false
+    },
+    "mission_control_outbox_worker<-mc_migrator": {
+      "admin_option": true,
+      "inherit_option": false,
+      "set_option": false
+    },
+    "mission_control_readonly<-mc_migrator": {
+      "admin_option": true,
+      "inherit_option": false,
+      "set_option": false
+    },
+    "mission_control_runtime<-mc_migrator": {
+      "admin_option": true,
+      "inherit_option": false,
+      "set_option": false
+    },
+    "pg_read_all_settings<-pg_monitor": {
+      "admin_option": false,
+      "inherit_option": true,
+      "set_option": true
+    },
+    "pg_read_all_stats<-pg_monitor": {
+      "admin_option": false,
+      "inherit_option": true,
+      "set_option": true
+    },
+    "pg_stat_scan_tables<-pg_monitor": {
+      "admin_option": false,
+      "inherit_option": true,
+      "set_option": true
+    }
+  },
+  "roles": {
+    "mc_migrator": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": true,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": true,
+      "rolinherit": true,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "mcqd_aiengineer_anon": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": false,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "mcqd_aiengineer_authenticated": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": false,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "mcqd_aiengineer_service": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": false,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "mission_control_catalog_writer": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": false,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "mission_control_checkpointer": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": false,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "mission_control_family_writer": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": false,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "mission_control_outbox_worker": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": false,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "mission_control_readonly": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": false,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "mission_control_runtime": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": false,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "pg_checkpoint": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "pg_create_subscription": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "pg_database_owner": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "pg_execute_server_program": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "pg_maintain": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "pg_monitor": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "pg_read_all_data": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "pg_read_all_settings": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "pg_read_all_stats": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "pg_read_server_files": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "pg_signal_backend": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "pg_stat_scan_tables": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "pg_use_reserved_connections": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "pg_write_all_data": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "pg_write_server_files": {
+      "has_valid_until": false,
+      "rolbypassrls": false,
+      "rolcanlogin": false,
+      "rolconnlimit": -1,
+      "rolcreatedb": false,
+      "rolcreaterole": false,
+      "rolinherit": true,
+      "rolreplication": false,
+      "rolsuper": false
+    },
+    "postgres": {
+      "has_valid_until": false,
+      "rolbypassrls": true,
+      "rolcanlogin": true,
+      "rolconnlimit": -1,
+      "rolcreatedb": true,
+      "rolcreaterole": true,
+      "rolinherit": true,
+      "rolreplication": true,
+      "rolsuper": true
+    }
+  },
+  "schemas": {
+    "corpus": {
+      "relations": {
+        "chunks": {
+          "chunks": [
+            {
+              "digest": "e98d17a6c6d95af49dd0b6df9c92a39c430087700d4052e9962e95b300d60d7c",
+              "index": 0,
+              "rows": 480
+            }
+          ],
+          "content_digest": "sha256:38e4a8009d7bef046226f9934f4f5f28242015b3b43545ca5848ebdd7009760b",
+          "ordering": "primary_key",
+          "rls_may_filter": false,
+          "row_count": 480,
+          "status": "hashed"
+        },
+        "documents": {
+          "chunks": [
+            {
+              "digest": "82f58353cc16477e6db2cd955e71e478b2ce6f039833a232e82b6ccb866c4ac0",
+              "index": 0,
+              "rows": 120
+            }
+          ],
+          "content_digest": "sha256:5123fed9d6a445d260a478b7c9ee9a618aadd507c0ae4c1dc02a9ddd500a5f4c",
+          "ordering": "primary_key",
+          "rls_may_filter": false,
+          "row_count": 120,
+          "status": "hashed"
+        }
+      },
+      "sequences": {
+        "chunks_chunk_id_seq": {
+          "is_called": true,
+          "last_value": 480
+        }
+      },
+      "structure": {
+        "columns": "sha256:9e8551fb07c14acb78d222f1b6ae8bff13fd132054afca4235649a2188b097ea",
+        "constraints": "sha256:7ffc3358095fca528bc3591e413d7c8b2e5f4de6cfd003517a975f47b0fa847a",
+        "enums": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "functions": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "grants": "sha256:6191658afb38ec7851cfc94954715cafef7fed58ad767e4a1ca07bcf0206994d",
+        "indexes": "sha256:11e4e4a02f4a35c6beb101f39fa7cd877d7b2fff1764b7d8520192bb67b29fbe",
+        "policies": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "present": "sha256:b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b",
+        "relations": "sha256:d8a7f3c22cee22ad5cc2be2606e433da3697f0ee232d604c25085155312c2ec6",
+        "sequences": "sha256:d1ad7cce4be684ee8ff0accfea7240b17fc86fde6d4ee91d8fabc34501e0eaf9",
+        "triggers": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "types": "sha256:1fabbd3c7452f5a223b2ba0dfa39f26c80a91a02dd6943e57e4a3d80d8577e1f",
+        "views": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "structure_digest": "sha256:42de0885b6367a60197c1bdb2f2f75e483557879da5026346e3878e41e676101"
+    },
+    "extensions": {
+      "relations": {},
+      "sequences": {},
+      "structure": {
+        "columns": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "constraints": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "enums": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "functions": "sha256:a62dd5192f8345ba5fd6992a48bea8ce1aafd3149bbb250c314575d197ba1d8c",
+        "grants": "sha256:05ed0362db07815edbc3c37d04a22ab670b91d843ced39594a6bcabaabf922e2",
+        "indexes": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "policies": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "present": "sha256:b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b",
+        "relations": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "sequences": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "triggers": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "types": "sha256:f23840eefa679db68adf41d429592bcff94f250acaa35df9b73af515ee05157f",
+        "views": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "structure_digest": "sha256:6424f1350b17236337673caaf1f89fe08f024c8b60c6f33069b6538a4dae38d0"
+    },
+    "knowledge": {
+      "relations": {
+        "entities": {
+          "chunks": [],
+          "content_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "ordering": "primary_key",
+          "rls_may_filter": true,
+          "row_count": 0,
+          "status": "hashed"
+        }
+      },
+      "sequences": {},
+      "structure": {
+        "columns": "sha256:7abf525b83afa1ab165202c5a50e3aec12e7c92023c424656be0dcc239137f41",
+        "constraints": "sha256:b144f946e298659eff0c58b8691493fd10511588451f72955de9eddbb03668a5",
+        "enums": "sha256:13bf33db454934011b69911bcf95bf23bcd4e28d5a72a3055e5d0063864ed829",
+        "functions": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "grants": "sha256:227ebc29f1f599d937e3454e98d0a1c20187d528cd679f0987d6053f98c7bd23",
+        "indexes": "sha256:8797bbd02a243b11ab1ed68c3470d1f8c904696f60ca2d09032508b1008da8b7",
+        "policies": "sha256:c620a8eaa56d4860fcb4102f8ecf940986a3fbf6493a9eec016310ea1c62eaad",
+        "present": "sha256:b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b",
+        "relations": "sha256:09a2e67a42af3696732091897f5b32c6beb326187b6c7bf42f9d5e70b085a900",
+        "sequences": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "triggers": "sha256:6918ce9e884e18b614c75cb95a37adb9caff6f46e9e893a63c241b24316656ef",
+        "types": "sha256:7b1ac51d624842c289d6e9c2da269066f6a54ea0861cbf6354f89909fb85e12a",
+        "views": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "structure_digest": "sha256:c8aac8fd0df03b21113610b6ff0df857a9724af358e71e55697db1a825e346fc"
+    },
+    "public": {
+      "relations": {
+        "app_settings": {
+          "chunks": [
+            {
+              "digest": "ea94d492b8c815b1110a72fc76c8d70b5446f0e7e4f14b7ffd12f790f5fb5fb2",
+              "index": 0,
+              "rows": 5
+            }
+          ],
+          "content_digest": "sha256:34e388e706ed591bac466250a228adf1ee72ecc4193fb5b30d103acc15056a38",
+          "ordering": "primary_key",
+          "rls_may_filter": false,
+          "row_count": 5,
+          "status": "hashed"
+        }
+      },
+      "sequences": {},
+      "structure": {
+        "columns": "sha256:f254e9d7b6e28e53873df8a424566f40ac354f9a2d126827b978950cb3f4096e",
+        "constraints": "sha256:6ed96807c2f06b5cb51822ad7462662fe975713a5a962111f33db623424d6fff",
+        "enums": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "functions": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "grants": "sha256:2d8f1795be7fafc43e7187df6c58f6bac0bbb202a1a7fc9ae548b7d83c8a613b",
+        "indexes": "sha256:cf7519c7e49505704264273d2feb45f78011cac7ca546446cc33dbf6d13857b7",
+        "policies": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "present": "sha256:b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b",
+        "relations": "sha256:e92a47c39d10aa011f756879d7044f4e43970bf30a4c9cdf9d987a62147acacf",
+        "sequences": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "triggers": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "types": "sha256:3518cb23f40f88023aaf1ca762a8e7d57cfb008c3972ba10fb0aae1d525c98be",
+        "views": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "structure_digest": "sha256:f41547492e6a4aabe527bf64d4c0ac97e06719b05849569eff0181eda6d72563"
+    },
+    "temporal": {
+      "relations": {
+        "events": {
+          "chunks": [
+            {
+              "digest": "f2cb53a11aa274ef40dd01453abbcf69d9695c902095cf70fac2fbc012b756d8",
+              "index": 0,
+              "rows": 40
+            }
+          ],
+          "content_digest": "sha256:3ff708160dd5c0d27b82e7b68e02f872447ad87e44f4a7c06f2a5fbc1051fe5b",
+          "ordering": "primary_key",
+          "rls_may_filter": false,
+          "row_count": 40,
+          "status": "hashed"
+        }
+      },
+      "sequences": {
+        "event_seq": {
+          "is_called": true,
+          "last_value": 1294
+        }
+      },
+      "structure": {
+        "columns": "sha256:62557066241f2fc677302057ec5d8f7aff359b5a4d0a5d41b3ac7cc1abc76b71",
+        "constraints": "sha256:260b99f681a6f23ff7846e199cbcd72e1fe60244e1240bba09774a791f3b8a1b",
+        "enums": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "functions": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "grants": "sha256:e32350a7bd203d938fcdfc3d0ff788d8d05b4d2165af104b60cb2c923f4670d3",
+        "indexes": "sha256:5866b040e16bf31fb092d5275f5a63227a141988dc2a465cbd3bc2463a86abf5",
+        "policies": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "present": "sha256:b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b",
+        "relations": "sha256:948f27bb481fa3c8af9eea120620b135796bc36e68aacd376e38a8e78f67536c",
+        "sequences": "sha256:e6c7346d671f182b6894be5d99a13114b9864b39c3ed4d362604ca544f6a0180",
+        "triggers": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "types": "sha256:f2cea2ca482c59f2943e710db2d96cad05e9d6176638cda953f12dae12e960a6",
+        "views": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "structure_digest": "sha256:aee16829f193e4d9a1b940180ba1dd074219ab86f59c481dee66c6f109186ba7"
+    },
+    "util": {
+      "relations": {},
+      "sequences": {},
+      "structure": {
+        "columns": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "constraints": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "enums": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "functions": "sha256:a1b5aa51e7a1f1ad477acfba39433ac077e37f106c7fdef239aef3a8554de38a",
+        "grants": "sha256:60660514664cc072a5d5e7a7d31f1215639b2d0e46eb6fd860ee8f272d7a4a9c",
+        "indexes": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "policies": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "present": "sha256:b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b",
+        "relations": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "sequences": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "triggers": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "types": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "views": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "structure_digest": "sha256:2bac341308ba049c7b9f23bb11f0fe0e69c6a4c7ea78ca1125ca7e605836d993"
+    }
+  },
+  "server_version_num": 170011,
+  "snapshot_method": {
+    "chunk_size": 1000,
+    "concurrent_writers": "not attributable; quiesce writers for equality proofs",
+    "isolation": "repeatable_read",
+    "ordering": "primary key, else full row text COLLATE C",
+    "read_only": true,
+    "row_digest": "sha256(string_agg(row_to_json(t)::text, '\\n') per chunk) in-database"
+  },
+  "storage_buckets": null,
+  "target": {
+    "app": "ai-engineer",
+    "application_id": "ai-engineer",
+    "database_host": "127.0.0.1",
+    "database_name": "postgres",
+    "database_port": "55552",
+    "database_user": "mc_migrator",
+    "environment": "disposable",
+    "identity_evidence": "local docker disposable cluster for ai-engineer",
+    "installation_id": "0192a4f0-0000-7000-8000-0000000a1e00",
+    "project_label": "disposable-ai-engineer",
+    "project_ref": "mcdisposableaieng"
+  }
+}

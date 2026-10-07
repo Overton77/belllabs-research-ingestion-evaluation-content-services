@@ -4,11 +4,11 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
+
 from biotech_mission_adapters.domain.schema_grounding.definitions import (
     register_schema_grounding_extensions,
     schema_grounding_definitions,
 )
-
 from mission_control.adapters.storage.control_plane_payloads import InMemoryPayloadStore
 from mission_control.application.authoring.control_plane_repository import (
     InMemoryDefinitionRepository,
