@@ -101,7 +101,11 @@ def test_cursor_profiles_are_unqualified_and_differ_where_the_spec_says() -> Non
     assert "session_start" not in CURSOR_CLOUD_DESCRIBE.hooks.events_supported
     assert "session_end" not in CURSOR_CLOUD_DESCRIBE.hooks.events_supported
     assert "prompt_prefix" not in CURSOR_CLOUD_DESCRIBE.instruction_channel
-    assert CURSOR_LOCAL_DESCRIBE.hooks.fail_closed and CURSOR_CLOUD_DESCRIBE.hooks.fail_closed
+    # Kernel Hooks are fail-closed on the worker; the cloud VM runs catalog command hooks
+    # only (it cannot reach the loopback callback), so cloud does not claim fail-closed
+    # (FT-G6 describe honesty).
+    assert CURSOR_LOCAL_DESCRIBE.hooks.fail_closed
+    assert not CURSOR_CLOUD_DESCRIBE.hooks.fail_closed
 
 
 def _payload(**changes: Any) -> dict[str, Any]:

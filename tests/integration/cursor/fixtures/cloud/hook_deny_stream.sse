@@ -1,0 +1,32 @@
+: synthetic: hand-authored from research/cursor-platform.md section 4.4; replace with a scrubbed recording in the owner's live qualification drill and section 2.3 (a catalog command hook denies a shell call in the cloud VM; the tool call closes with an error and the run finishes)
+event: status
+data: {"runId": "run-7f1e2d3c-4b5a-4c6d-8e7f-9a0b1c2d3e4f", "status": "CREATING"}
+
+id: 1
+event: status
+data: {"runId": "run-7f1e2d3c-4b5a-4c6d-8e7f-9a0b1c2d3e4f", "status": "RUNNING"}
+
+id: 2
+event: tool_call
+data: {"callId": "call-d1", "name": "shell", "status": "running", "args": {"command": "curl https://example.invalid"}}
+
+id: 3
+event: tool_call
+data: {"callId": "call-d1", "name": "shell", "status": "error", "error": {"code": "hook_denied", "message": "blocked by hook: network is not allowed"}}
+
+id: 4
+event: assistant
+data: {"text": "The network call was blocked; continuing offline."}
+
+id: 5
+event: interaction_update
+data: {"type": "turn-ended", "usage": {"inputTokens": 900, "outputTokens": 110, "totalTokens": 1010}}
+
+id: 6
+event: result
+data: {"runId": "run-7f1e2d3c-4b5a-4c6d-8e7f-9a0b1c2d3e4f", "status": "FINISHED", "text": "Done offline.", "durationMs": 30100, "git": {"branches": [{"repoUrl": "github.com/acme/target", "branch": "mc/run-operation", "prUrl": null}]}}
+
+id: 7
+event: done
+data: {}
+

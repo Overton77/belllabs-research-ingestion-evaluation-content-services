@@ -8,12 +8,19 @@ with client `agentId` and `Idempotency-Key`, `409 agent_id_conflict`, `409 agent
 artifacts through presigned URLs that must not carry the API key, usage and archive. When a run
 reaches its result the fake pushes the agent's commit to `mc/<run>` on the bare remote, as the
 cloud agent would. No network is touched.
+
+FT-G6: a stream can be held open after an event id (`hold_after`; released by a cancel or by
+the test), deliver `after_cancel` events when the held run was cancelled (a tool call that
+completes during the cancel), and later runs (`POST .../runs`, a continuation agent's create)
+replay their own event lists (`later`), so every SPEC-07 section 7 control replays offline.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import tempfile
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -44,10 +51,30 @@ API_KEY = "cursor-test-key-not-real"
 PRESIGNED = "https://s3.fake.invalid/presigned"
 
 
-def load_cloud_fixture() -> tuple[list[SseEvent], dict[str, Any]]:
-    events = parse_sse_text((FIXTURES / "run_stream.sse").read_text(encoding="utf-8"))
-    record = json.loads((FIXTURES / "run_record.json").read_text(encoding="utf-8"))
-    return events, record
+def load_sse(name: str) -> list[SseEvent]:
+    return parse_sse_text((FIXTURES / f"{name}.sse").read_text(encoding="utf-8"))
+
+
+def load_cloud_fixture(
+    stream: str = "run_stream", record: str = "run_record"
+) -> tuple[list[SseEvent], dict[str, Any]]:
+    events = load_sse(stream)
+    loaded = json.loads((FIXTURES / f"{record}.json").read_text(encoding="utf-8"))
+    return events, loaded
+
+
+class _HeldStream(httpx.AsyncByteStream):
+    def __init__(self, chunks: AsyncIterator[bytes]) -> None:
+        self._chunks = chunks
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        async for chunk in self._chunks:
+            yield chunk
+
+    async def aclose(self) -> None:
+        aclose = getattr(self._chunks, "aclose", None)
+        if aclose is not None:
+            await aclose()
 
 
 def make_remote(root: Path) -> Path:
@@ -78,6 +105,16 @@ class FakeCloudApi:
     cancelled: list[str] = field(default_factory=list)
     downloads: list[str] = field(default_factory=list)
     pushed: bool = False
+    # FT-G6 controls.
+    hold_after: str | None = None
+    after_cancel: list[SseEvent] = field(default_factory=list)
+    later: list[list[SseEvent]] = field(default_factory=list)
+    run_events: dict[str, list[SseEvent]] = field(default_factory=dict)
+    created_runs: list[str] = field(default_factory=list)
+    run_prompts: dict[str, str] = field(default_factory=dict)
+    held: asyncio.Event = field(default_factory=asyncio.Event)
+    release: asyncio.Event = field(default_factory=asyncio.Event)
+    hold_done: bool = False
 
     @property
     def run_id(self) -> str:
@@ -115,8 +152,9 @@ class FakeCloudApi:
             if self.busy or run["status"] not in {"FINISHED", "ERROR", "CANCELLED", "EXPIRED"}:
                 return self._error(409, "agent_busy")
             new = {"id": f"run-{uuid4()}", "agentId": agent_id, "status": "CREATING"}
-            self.runs[new["id"]] = new
+            self._register_run(new, json.loads(request.content))
             agent["latestRunId"] = new["id"]
+            agent["status"] = "ACTIVE"
             return httpx.Response(200, json={"run": new})
         if len(rest) >= 2 and rest[0] == "runs":
             run = self.runs.get(rest[1])
@@ -130,6 +168,7 @@ class FakeCloudApi:
                 run["status"] = "CANCELLED"
                 agent["status"] = "IDLE"
                 self.cancelled.append(rest[1])
+                self.release.set()
                 return httpx.Response(200, json={"run": run})
             if rest[2:] == ["stream"] and method == "GET":
                 return self._stream(request, agent, run)
@@ -165,7 +204,8 @@ class FakeCloudApi:
         agent_id = body.get("agentId") or f"bc-{uuid4()}"
         if agent_id in self.agents:
             return self._error(409, "agent_id_conflict")
-        run = {"id": self.run_id, "agentId": agent_id, "status": "CREATING"}
+        run_id = self.run_id if self.run_id not in self.runs else f"run-{uuid4()}"
+        run = {"id": run_id, "agentId": agent_id, "status": "CREATING"}
         agent = {
             "id": agent_id,
             "name": body.get("name"),
@@ -175,11 +215,20 @@ class FakeCloudApi:
             "repos": body.get("repos"),
         }
         self.agents[agent_id] = agent
-        self.runs[run["id"]] = run
+        self._register_run(run, body)
         response = {"agent": agent, "run": run}
         if key is not None:
             self.idempotency[key] = response
         return httpx.Response(200, json=response)
+
+    def _register_run(self, run: dict[str, Any], body: dict[str, Any]) -> None:
+        self.runs[run["id"]] = run
+        self.created_runs.append(run["id"])
+        prompt = (body.get("prompt") or {}).get("text")
+        if prompt is not None:
+            self.run_prompts[run["id"]] = str(prompt)
+        if run["id"] != self.run_id and self.later:
+            self.run_events[run["id"]] = self.later.pop(0)
 
     def _stream(
         self, request: httpx.Request, agent: dict[str, Any], run: dict[str, Any]
@@ -193,33 +242,60 @@ class FakeCloudApi:
         ):
             self._finish(agent, run)
             return self._error(410, "stream_expired")
-        selected: list[SseEvent] = []
-        seen_last = last is None
-        for event in self.events:
-            if event.id is None:
-                # The leading status has no id and is re-sent on every reconnect.
-                if event.event == "status" or seen_last:
-                    selected.append(event)
-                continue
-            if not seen_last:
-                seen_last = event.id == last
-                continue
-            selected.append(event)
-            if event.event == "result":
-                self._finish(agent, run)
-            if self.cut_after is not None and event.id == self.cut_after:
-                self.cut_after = None
-                break
+        events = self.run_events.get(run["id"], self.events)
+        held = run["id"] == self.run_id and self.hold_after is not None and not self.hold_done
+
+        async def chunks() -> AsyncIterator[bytes]:
+            if run["status"] == "CANCELLED" and run["id"] in self.cancelled:
+                # A cancelled run's stream drains what closed during the cancel, then ends.
+                for event in events:
+                    if event.id is None and event.event == "status":
+                        yield render_sse([event]).encode("utf-8")
+                        break
+                for extra in self.after_cancel:
+                    if last is None or extra.id is None or int(extra.id) > int(last):
+                        yield render_sse([extra]).encode("utf-8")
+                return
+            seen_last = last is None
+            for event in events:
+                if event.id is None:
+                    # The leading status has no id and is re-sent on every reconnect.
+                    if event.event == "status" or seen_last:
+                        yield render_sse([event]).encode("utf-8")
+                    continue
+                if not seen_last:
+                    seen_last = event.id == last
+                    continue
+                if event.event == "result":
+                    # The run is final (and the agent's commit pushed) before the client
+                    # reads the result event: the reader may close the stream right after it.
+                    self._finish(agent, run)
+                yield render_sse([event]).encode("utf-8")
+                if self.cut_after is not None and event.id == self.cut_after:
+                    self.cut_after = None
+                    return
+                if held and event.id == self.hold_after:
+                    self.held.set()
+                    await self.release.wait()
+                    self.hold_done = True
+                    if run["status"] == "CANCELLED":
+                        for extra in self.after_cancel:
+                            yield render_sse([extra]).encode("utf-8")
+                        return
+
         return httpx.Response(
             200,
             headers={
                 "Content-Type": "text/event-stream",
                 RETENTION_HEADER: str(self.record["retention_seconds"]),
             },
-            content=render_sse(selected).encode("utf-8"),
+            stream=_HeldStream(chunks()),
         )
 
     def _finish(self, agent: dict[str, Any], run: dict[str, Any]) -> None:
+        if run.get("status") == "CANCELLED":
+            agent["status"] = "IDLE"
+            return
         final = self.record["run"]
         run.update({key: value for key, value in final.items() if key != "id"})
         agent["status"] = "IDLE"
@@ -281,7 +357,7 @@ class CloudStack:
 
 
 def cloud_operation(
-    remote: Path, rows: tuple[ResolvedCapability, ...], **cloud_changes: Any
+    remote: Path | str, rows: tuple[ResolvedCapability, ...], **cloud_changes: Any
 ) -> OperationExecutionRequest:
     base = cursor_operation("cursor_cloud")
     projection = render_host_files(rows, "cursor_cloud", operating_contract(base), None, ())
@@ -301,14 +377,24 @@ def cloud_stack(
     api_changes: dict[str, Any] | None = None,
     cost: int | None = None,
     env_vars: dict[str, str] | None = None,
+    stream: str = "run_stream",
+    record: str = "run_record",
+    operation_changes: dict[str, Any] | None = None,
+    remote: Path | None = None,
+    inputs: Any = None,
+    artifacts: MemoryArtifacts | None = None,
 ) -> CloudStack:
-    events, record = load_cloud_fixture()
-    remote = make_remote(tmp_path)
+    events, record_body = load_cloud_fixture(stream, record)
+    remote = remote or make_remote(tmp_path)
     rows = cloud_rows()
     operation = cloud_operation(remote, rows, **(cloud_changes or {}))
-    api = FakeCloudApi(events, record, remote, **(api_changes or {}))
+    if operation_changes:
+        operation = OperationExecutionRequest.model_validate(
+            {**operation.model_dump(mode="python"), **operation_changes}
+        )
+    api = FakeCloudApi(events, record_body, remote, **(api_changes or {}))
     client = CloudAgentsClient(SecretStr(API_KEY), transport=api.transport())
-    artifacts = MemoryArtifacts()
+    artifacts = artifacts or MemoryArtifacts()
 
     async def cost_reader(agent_id: str, run_id: str) -> int | None:
         return cost
@@ -321,6 +407,7 @@ def cloud_stack(
         publisher=GitBranchPublisher(tmp_path / "mirrors"),
         projections=RenderedProjectionSource(static_rows(rows), kernel_hooks=()),
         artifacts=artifacts,
+        inputs=inputs,
         cost_reader=cost_reader,
         env_resolver=env_resolver,
     )

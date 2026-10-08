@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -84,11 +85,24 @@ def _scheduled(history: Any) -> list[str]:
     ]
 
 
+CAPTURE_DIR = Path(__file__).resolve().parent / "histories" / "ft_lanes"
+
+
+def _capture(history: Any, name: str) -> None:
+    """FT-G6: `MC_CAPTURE_LANE_HISTORIES=1` writes each history for the replay suite
+    (`test_lane_replay_histories.py`); a normal run never writes anything."""
+
+    if os.environ.get("MC_CAPTURE_LANE_HISTORIES") == "1":
+        CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
+        (CAPTURE_DIR / f"{name}.json").write_text(history.to_json(), encoding="utf-8")
+
+
 async def _replays(handle: WorkflowHandle[Any, Any]) -> Any:
     history = await handle.fetch_history()
     await Replayer(
         workflows=[OperationWorkflow], workflow_runner=coordinator_workflow_runner()
     ).replay_workflow(history)
+    _capture(history, handle.id)
     return history
 
 
@@ -422,6 +436,8 @@ async def test_continue_as_new_carries_commands_and_cursor_and_phases_upsert_at_
                 await Replayer(
                     workflows=[OperationWorkflow], workflow_runner=coordinator_workflow_runner()
                 ).replay_workflow(history)
+            _capture(first, "ft-g2-continue-as-new-first")
+            _capture(latest, "ft-g2-continue-as-new-latest")
 
     assert result.disposition == "completed"
     continued = [

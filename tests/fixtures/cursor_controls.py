@@ -81,7 +81,8 @@ def operator() -> ActorContext:
 
 @dataclass
 class ControlStack:
-    local: LocalStack
+    # The lane stack under test: a `LocalStack` (cursor_local) or a `CloudStack` (cursor_cloud).
+    local: Any
     lanes: LaneStack
     service: LaneTurnService
     run_control: RunControlService
@@ -91,16 +92,17 @@ class ControlStack:
     facade: MissionControlService
     run_id: str
     operation: OperationExecutionRequest
+    profile: str = "cursor_local"
 
     @property
     def identity(self) -> LaneExecutionIdentity:
-        return LaneExecutionIdentity.of(self.operation, "cursor_local", 1)
+        return LaneExecutionIdentity.of(self.operation, self.profile, 1)
 
     def turn(self, **changes: Any) -> LaneTurnRequest:
         return LaneTurnRequest.model_validate(
             {
                 "operation": self.operation,
-                "lane_profile": "cursor_local",
+                "lane_profile": self.profile,
                 "generation": 1,
                 **changes,
             }
@@ -144,22 +146,18 @@ class ControlStack:
             family="StageGraph",
             node_key=str(unit.location.stage_id),
             iteration_start=False,
-            lane_profile="cursor_local",
+            lane_profile=self.profile,
         )
 
     async def entries(self) -> tuple[MailboxEntry, ...]:
         return await self.mailbox.list_entries(SCOPE, self.run_id)
 
 
-async def control_stack(
-    tmp_path: Path,
-    fixture: str = "full_run",
-    *,
-    launcher_changes: Mapping[str, Any] | None = None,
-    declared_outputs: tuple[str, ...] = (),
-    operation_changes: Mapping[str, Any] | None = None,
-    settings: InjectionSettings = FAST,
-) -> ControlStack:
+async def _admitted_unit(
+    declared_outputs: tuple[str, ...], operation_changes: Mapping[str, Any] | None
+) -> tuple[RunControlService, Any, str, Any, dict[str, Any]]:
+    """A started Run, one StageGraph unit of it, and the operation fields that bind it."""
+
     run_control, repository = run_control_service()
     admitted = await run_control.admit(
         run_request(request_scope=SCOPE, request_id=f"ft-g4-{uuid4()}")
@@ -197,20 +195,32 @@ async def control_stack(
             "exclusive_write_paths": tuple(f"/outputs/{name}" for name in declared_outputs),
         }
     changes.update(operation_changes or {})
-    local = local_stack(
-        tmp_path, fixture, launcher_changes=launcher_changes, operation_changes=changes
-    )
-    operation = local.operation
-    lanes = lane_stack(local.harness, frames=local.frames, operation=operation)
-    local.frames.register_run(SCOPE, run_id, RUN_UUID, {unit.unit_key: ACTIVATION_UUID})
+    return run_control, repository, run_id, unit, changes
+
+
+def _compose(
+    stack: Any,
+    harness: Any,
+    frames: Any,
+    operation: OperationExecutionRequest,
+    *,
+    run_control: RunControlService,
+    repository: Any,
+    run_id: str,
+    unit: Any,
+    settings: InjectionSettings,
+    profile: str,
+) -> ControlStack:
+    lanes = lane_stack(harness, frames=frames, operation=operation)
+    frames.register_run(SCOPE, run_id, RUN_UUID, {unit.unit_key: ACTIVATION_UUID})
     mailbox = MailboxDeliveryService(repository.mailbox, run_control)
     injections = InterruptAndInjectService(mailbox, settings=settings)
     service = LaneTurnService(
         lanes=LaneRegistry(
-            [DeepAgentsHarness(ConformanceRuntime()), local.harness], allow_unqualified=True
+            [DeepAgentsHarness(ConformanceRuntime()), harness], allow_unqualified=True
         ),
         boundary=lanes.boundary,
-        frames=local.frames,
+        frames=frames,
         states=lanes.states,
         mailbox=mailbox,
         injections=injections,
@@ -222,7 +232,7 @@ async def control_stack(
         mailbox=mailbox,
     )
     return ControlStack(
-        local=local,
+        local=stack,
         lanes=lanes,
         service=service,
         run_control=run_control,
@@ -232,6 +242,80 @@ async def control_stack(
         facade=facade,
         run_id=run_id,
         operation=operation,
+        profile=profile,
+    )
+
+
+async def control_stack(
+    tmp_path: Path,
+    fixture: str = "full_run",
+    *,
+    launcher_changes: Mapping[str, Any] | None = None,
+    declared_outputs: tuple[str, ...] = (),
+    operation_changes: Mapping[str, Any] | None = None,
+    settings: InjectionSettings = FAST,
+) -> ControlStack:
+    run_control, repository, run_id, unit, changes = await _admitted_unit(
+        declared_outputs, operation_changes
+    )
+    local = local_stack(
+        tmp_path, fixture, launcher_changes=launcher_changes, operation_changes=changes
+    )
+    return _compose(
+        local,
+        local.harness,
+        local.frames,
+        local.operation,
+        run_control=run_control,
+        repository=repository,
+        run_id=run_id,
+        unit=unit,
+        settings=settings,
+        profile="cursor_local",
+    )
+
+
+async def cloud_control_stack(
+    tmp_path: Path,
+    *,
+    stream: str = "run_stream",
+    record: str = "run_record",
+    api_changes: Mapping[str, Any] | None = None,
+    declared_outputs: tuple[str, ...] = (),
+    operation_changes: Mapping[str, Any] | None = None,
+    settings: InjectionSettings = FAST,
+    inputs: Any = None,
+    artifacts: Any = None,
+) -> ControlStack:
+    """The `cursor_cloud` lane (fake Cloud Agents API, bare remote) inside a real Run."""
+
+    from tests.fixtures.cursor_cloud import cloud_stack
+
+    from mission_control.application.frames.sink import InMemoryFrameStore
+
+    run_control, repository, run_id, unit, changes = await _admitted_unit(
+        declared_outputs, operation_changes
+    )
+    cloud = cloud_stack(
+        tmp_path,
+        stream=stream,
+        record=record,
+        api_changes=dict(api_changes or {}),
+        operation_changes=changes,
+        inputs=inputs,
+        artifacts=artifacts,
+    )
+    return _compose(
+        cloud,
+        cloud.harness,
+        InMemoryFrameStore(),
+        cloud.operation,
+        run_control=run_control,
+        repository=repository,
+        run_id=run_id,
+        unit=unit,
+        settings=settings,
+        profile="cursor_cloud",
     )
 
 
@@ -260,11 +344,13 @@ def register_run(stack: LocalStack) -> None:
     )
 
 
-def harness_fields(operation: OperationExecutionRequest, heid: str) -> dict[str, Any]:
+def harness_fields(
+    operation: OperationExecutionRequest, heid: str, profile: str | None = None
+) -> dict[str, Any]:
     assert operation.cursor_binding is not None
     return {
         "scope": harness_scope(operation.request_scope),
-        "lane_profile": "cursor_local",
+        "lane_profile": profile or operation.cursor_binding.lane_profile,
         "harness_execution_id": heid,
         "binding_digest": operation.cursor_binding.binding_digest,
         "idempotency_key": f"{heid}:1:test",
@@ -272,18 +358,21 @@ def harness_fields(operation: OperationExecutionRequest, heid: str) -> dict[str,
     }
 
 
-async def started_session(stack: LocalStack) -> tuple[str, SessionHandle]:
-    """Stage, prepare and start the stack's operation directly on the harness."""
+async def started_session(stack: Any) -> tuple[str, SessionHandle]:
+    """Stage, prepare and start the stack's operation directly on its harness (either lane)."""
 
     harness = stack.harness
-    heid = str(LaneExecutionIdentity.of(stack.operation, "cursor_local", 1).harness_execution_id)
-    fields = harness_fields(stack.operation, heid)
-    harness.stage(heid, stack.operation)
+    operation = stack.operation
+    assert operation.cursor_binding is not None
+    profile = operation.cursor_binding.lane_profile
+    heid = str(LaneExecutionIdentity.of(operation, profile, 1).harness_execution_id)
+    fields = harness_fields(operation, heid, profile)
+    harness.stage(heid, operation)
     prepared = await harness.prepare(
         PrepareRequest(
             **fields,
-            run_id=stack.operation.identity.run_id,
-            operation_id=stack.operation.identity.operation_id,
+            run_id=operation.identity.run_id,
+            operation_id=operation.identity.operation_id,
             attempt_no=1,
         )
     )
@@ -336,21 +425,40 @@ def fork_stack_from(
     return fork, inputs_manifest
 
 
+def source_agent(stack: ControlStack) -> str:
+    """The agent the stack's first turn runs on (either lane)."""
+
+    if stack.profile == "cursor_cloud":
+        return next(iter(stack.local.api.agents))
+    return str(stack.local.launcher.meta["agent_id"])
+
+
 async def seal_and_transfer(stack: ControlStack) -> tuple[dict[str, Any], Any]:
-    """`request_continuation` through B4: request, seal from the live lease, transfer with
-    the Cursor hydrator (a new agent in the same lease)."""
+    """`request_continuation` through B4: request, seal from the live session's workspace
+    (the lease, or the run branch), transfer with the lane's hydrator (a new agent)."""
 
     from tests.fixtures.continuation import CONT_SCOPE, build_service, facts, seal_target, trigger
 
     from mission_control.adapters.cursor.controls import (
+        CursorCloudSessionHydrator,
+        CursorCloudWorkspaceSnapshots,
         CursorSessionHydrator,
         CursorWorkspaceSnapshots,
     )
     from mission_control.domain.context.checkpoint import CheckpointIdentities
 
     harness = stack.local.harness
-    agent = str(stack.local.launcher.meta["agent_id"])
-    wired = build_service(snapshots=CursorWorkspaceSnapshots(harness, stack.local.artifacts))
+    artifacts = stack.local.artifacts
+    agent = source_agent(stack)
+    snapshots: Any
+    hydrator: Any
+    if stack.profile == "cursor_cloud":
+        snapshots = CursorCloudWorkspaceSnapshots(harness, artifacts)
+        hydrator = CursorCloudSessionHydrator(harness, artifacts)
+    else:
+        snapshots = CursorWorkspaceSnapshots(harness, artifacts)
+        hydrator = CursorSessionHydrator(harness)
+    wired = build_service(snapshots=snapshots)
     service = wired["service"]
     transfer = await service.request(
         trigger(),
@@ -358,14 +466,14 @@ async def seal_and_transfer(stack: ControlStack) -> tuple[dict[str, Any], Any]:
         run_key="run-continuation-1",
         activation_key="unit-collect-1",
         logical_execution_id="logical-collect-1",
-        lane_profile="cursor_local",
+        lane_profile=stack.profile,
         source_session_ref=agent,
     )
     base = facts()
     sealed = await service.seal(
         transfer.transfer_id,
         facts(
-            lane_profile="cursor_local",
+            lane_profile=stack.profile,
             identities=CheckpointIdentities(
                 **{**base.identities.model_dump(), "source_agent_session_ref": agent}
             ),
@@ -374,9 +482,7 @@ async def seal_and_transfer(stack: ControlStack) -> tuple[dict[str, Any], Any]:
         request_scope=CONT_SCOPE,
     )
     assert sealed.checkpoint is not None, sealed.transfer
-    outcome = await service.transfer(
-        transfer.transfer_id, CursorSessionHydrator(harness), request_scope=CONT_SCOPE
-    )
+    outcome = await service.transfer(transfer.transfer_id, hydrator, request_scope=CONT_SCOPE)
     return wired, outcome
 
 
@@ -402,12 +508,14 @@ __all__ = [
     "RUN_UUID",
     "ControlStack",
     "StaticInputs",
+    "cloud_control_stack",
     "control_stack",
     "fork_stack_from",
     "harness_fields",
     "operator",
     "register_run",
     "seal_and_transfer",
+    "source_agent",
     "started_session",
     "states",
 ]

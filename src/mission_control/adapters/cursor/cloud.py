@@ -22,7 +22,17 @@ One Session Turn of a bound operation, driven by `lane.turn` (FT-G2):
 
 Kernel Hooks cannot call the worker's loopback listener from the cloud VM, so the cloud
 projection carries catalog command hooks only; an immediate cancel reaches the agent through
-`POST .../cancel`. Qualification stays false until FT-G6 records a real run.
+`POST .../cancel`. Qualification stays false until a recorded live drill (FT-G6).
+
+FT-G6 controls (SPEC-07 section 7, the describe-honesty suite): SSE events are keyed and
+cursored per run (`sse:<run>:<id>`, cursor `<run>@<id>`), so a replacement or continuation
+run never resumes with another run's `Last-Event-ID` (`400 invalid_last_event_id`) and never
+collides with its frames; a later turn's text is staged by its instruction ref
+(`cancel_and_replace` replacement, continuation prompt); `snapshot` names the branch's current
+head (`branch:<branch>@<sha>`) and a fork's `prepare` publishes the derived run's branch from
+it; a continuation commits the checkpoint packet's files to the branch and creates a fresh
+agent on it (`CursorCloudSessionHydrator` in `adapters/cursor/controls.py`), whose first run is
+the next turn.
 """
 
 from __future__ import annotations
@@ -56,17 +66,19 @@ from mission_control.adapters.cursor.projection import (
     ProjectionSource,
     packet_files,
     projection_digests,
+    safe_relative,
     turn_text,
     verify_projection,
 )
 from mission_control.adapters.cursor.scm import GitBranchPublisher, PublishedBranch
+from mission_control.application.execution.harness.controls import SessionHandover
 from mission_control.application.execution.harness.describe import CURSOR_CLOUD_DESCRIBE
 from mission_control.application.execution.harness.lane_turns import LaneExecutionIdentity
 from mission_control.application.execution.harness.protocol import NativeTurnLost
 from mission_control.application.frames.kinds import bounded_key, cursor_cloud_final_key
 from mission_control.domain.agentic_components.projection import HostProjection
 from mission_control.domain.authoring.canonical import sha256_digest
-from mission_control.domain.context.render import bytes_digest
+from mission_control.domain.context.render import INPUTS_MANIFEST_PATH, bytes_digest
 from mission_control.domain.execution.contracts import OperationExecutionRequest
 from mission_control.domain.execution.lane_turns import ClosingFacts
 from mission_control.domain.execution.lanes import (
@@ -115,8 +127,42 @@ def run_branch(binding: CursorExecutionBinding, run_id: str) -> str:
     return binding.workspace.branch_prefix + _REF_CHARS.sub("-", run_id)
 
 
-def sse_provider_key(event_id: str) -> str:
-    return bounded_key("sse", event_id)
+def sse_provider_key(event_id: str, run_id: str | None = None) -> str:
+    """`sse:<run>:<id>`: SSE ids are per run (`Last-Event-ID` from another run is a `400`)."""
+
+    return bounded_key("sse", run_id, event_id) if run_id else bounded_key("sse", event_id)
+
+
+def stream_cursor(run_id: str, event_id: str) -> str:
+    return f"{run_id}@{event_id}"
+
+
+def last_event_id(cursor: str | None, run_id: str) -> str | None:
+    """The `Last-Event-ID` a cursor names for `run_id` (another run's cursor names none)."""
+
+    if cursor is None or cursor == STREAM_START:
+        return None
+    run, separator, event_id = cursor.rpartition("@")
+    if not separator:
+        return cursor
+    if run != run_id or not event_id or event_id == STREAM_START:
+        return None
+    return event_id
+
+
+BRANCH_SNAPSHOT_PREFIX: Final = "branch:"
+CHECKPOINT_INVALID: Final = "CHECKPOINT_INVALID"
+
+
+def branch_snapshot(branch: str, head: str) -> str:
+    return f"{BRANCH_SNAPSHOT_PREFIX}{branch}@{head}"
+
+
+def parse_branch_snapshot(ref: str) -> tuple[str, str] | None:
+    if not ref.startswith(BRANCH_SNAPSHOT_PREFIX):
+        return None
+    branch, separator, head = ref.removeprefix(BRANCH_SNAPSHOT_PREFIX).rpartition("@")
+    return (branch, head) if separator and branch and head else None
 
 
 def _content_key(kind: str, run_id: str, data: str) -> str:
@@ -139,6 +185,11 @@ class _CloudSession:
     agent_url: str | None = None
     metadata: str = "sent"
     retention_seconds: int | None = None
+    # FT-G6: staged texts of later turns, a forked base, a hydrated continuation.
+    turn_texts: dict[str, str] | None = None
+    forked_from: str | None = None
+    handover: SessionHandover | None = None
+    first_runs: dict[str, str] | None = None
 
 
 class CursorCloudHarness:
@@ -215,9 +266,20 @@ class CursorCloudHarness:
         verify_projection(binding, digests)
         packet = await packet_files(session.operation, self._inputs)
         files = [(item.path, item.content) for item in projection.files] + packet
+        base_ref = binding.workspace.base_ref
+        forked = _workspace_item(packet)
+        if forked is not None:
+            # A fork: the derived run's branch starts at the source branch's snapshot head.
+            parsed = parse_branch_snapshot(forked)
+            if parsed is None:
+                raise LaneProjectionError(
+                    CHECKPOINT_INVALID, f"{forked} is not a cursor_cloud branch snapshot"
+                )
+            base_ref = parsed[1]
+            session.forked_from = forked
         branch = await self._publisher.publish(
             repository=self._repository(binding),
-            base_ref=binding.workspace.base_ref,
+            base_ref=base_ref,
             branch=run_branch(binding, request.run_id),
             files=files,
         )
@@ -335,6 +397,12 @@ class CursorCloudHarness:
         agent_id = request.session.native_session_ref or session.agent_id
         if agent_id is None:
             raise ValueError("send_turn requires a created cloud agent")
+        first_run = (session.first_runs or {}).get(agent_id)
+        if first_run is not None and request.instruction_ref in (session.turn_texts or {}):
+            # A continuation agent: its create request enqueued the continuation turn.
+            return TurnHandle(
+                session=request.session, turn_no=request.turn_no, native_turn_ref=first_run
+            )
         if request.turn_no == 1:
             # The create request enqueued the first run.
             run_id = session.initial_run_id
@@ -346,10 +414,11 @@ class CursorCloudHarness:
             return TurnHandle(
                 session=request.session, turn_no=request.turn_no, native_turn_ref=str(run_id)
             )
+        text = (session.turn_texts or {}).get(request.instruction_ref) or turn_text(
+            session.operation
+        )
         try:
-            run = await self._client.create_run(
-                agent_id, {"prompt": {"text": turn_text(session.operation)}}
-            )
+            run = await self._client.create_run(agent_id, {"prompt": {"text": text}})
         except AgentBusy:
             return TurnHandle(session=request.session, turn_no=request.turn_no, status="busy")
         return TurnHandle(
@@ -400,8 +469,8 @@ class CursorCloudHarness:
         run_id = request.turn.native_turn_ref
         if agent_id is None or run_id is None:
             raise NativeTurnLost("no cloud run to observe")
-        after = None if request.after in (None, STREAM_START) else request.after
-        cursor = request.after or STREAM_START
+        after = last_event_id(request.after, run_id)
+        cursor = stream_cursor(run_id, after) if after is not None else STREAM_START
         try:
             async for item in self._client.stream(agent_id, run_id, last_event_id=after):
                 if isinstance(item, StreamOpened):
@@ -426,8 +495,8 @@ class CursorCloudHarness:
                     break
                 body = item.json()
                 if item.id is not None:
-                    cursor = item.id
-                    key = sse_provider_key(item.id)
+                    cursor = stream_cursor(run_id, item.id)
+                    key = sse_provider_key(item.id, run_id)
                 else:
                     # The leading status is re-sent on every reconnect without an id.
                     key = _content_key(item.event, run_id, item.data)
@@ -472,7 +541,114 @@ class CursorCloudHarness:
         return body_closing_facts(body)
 
     def resume_cursor(self, provider_key: str) -> str | None:
-        return provider_key.removeprefix("sse:") if provider_key.startswith("sse:") else None
+        if not provider_key.startswith("sse:"):
+            return None
+        run, separator, event_id = provider_key.removeprefix("sse:").rpartition(":")
+        return stream_cursor(run, event_id) if separator and run else event_id
+
+    # --- FT-G6: later turns and continuation -----------------------------------------------------
+
+    def stage_turn(self, harness_execution_id: str, instruction_ref: str, text: str) -> None:
+        session = self._sessions.get(harness_execution_id)
+        if session is None:
+            raise NativeTurnLost(f"harness execution {harness_execution_id} is not staged")
+        session.turn_texts = {**(session.turn_texts or {}), instruction_ref: text}
+
+    async def pending_handover(self, harness_execution_id: str) -> SessionHandover | None:
+        session = self._sessions.get(harness_execution_id)
+        return None if session is None else session.handover
+
+    async def complete_handover(self, harness_execution_id: str, transfer_id: str) -> None:
+        session = self._sessions.get(harness_execution_id)
+        if session is not None and session.handover is not None:
+            if session.handover.transfer_id == transfer_id:
+                session.agent_id = session.handover.session.native_session_ref
+                session.handover = None
+
+    def live_session(self, agent_id: str) -> str | None:
+        for harness_execution_id, session in self._sessions.items():
+            if session.agent_id == agent_id and session.branch is not None:
+                return harness_execution_id
+        return None
+
+    def session_branch(self, harness_execution_id: str) -> tuple[str, str]:
+        session = self._sessions[harness_execution_id]
+        assert session.branch is not None
+        return self._repository(session.binding), session.branch.branch
+
+    async def read_branch(
+        self, harness_execution_id: str, roots: tuple[str, ...]
+    ) -> list[tuple[str, bytes]]:
+        repository, branch = self.session_branch(harness_execution_id)
+        head = await self._publisher.head(repository=repository, branch=branch)
+        return await self._publisher.read_tree(repository=repository, ref=head, roots=roots)
+
+    async def hydrate_agent(
+        self,
+        harness_execution_id: str,
+        *,
+        transfer_id: str,
+        files: list[tuple[str, bytes]],
+        prompt: str,
+        source_session_ref: str,
+    ) -> tuple[str, dict[str, str]]:
+        """Commit the continuation's files to the run branch, then create a fresh agent on
+        it whose first run is the continuation turn; offer the handover. Returns the agent id
+        and the restored digests read back from the pushed branch."""
+
+        session = self._sessions[harness_execution_id]
+        binding = session.binding
+        cloud = binding.cloud
+        assert cloud is not None and session.branch is not None
+        repository, branch = self.session_branch(harness_execution_id)
+        head = await self._publisher.commit_files(
+            repository=repository,
+            branch=branch,
+            files=files,
+            message=f"mission control: continuation {transfer_id}",
+        )
+        agent_ref = client_agent_id(f"{harness_execution_id}:{transfer_id}", 1)
+        body: dict[str, Any] = {
+            "prompt": {"text": prompt},
+            "model": {"id": binding.model_id},
+            "name": f"mc-{session.identity.run_key}-continuation"[:100],
+            "repos": [{"url": repository, "startingRef": branch}],
+            "workOnCurrentBranch": True,
+            "autoCreatePR": cloud.auto_create_pr,
+            "mode": binding.mode,
+            "agentId": agent_ref,
+        }
+        try:
+            created = await self._client.create_agent(body, idempotency_key=None)
+            agent = created.get("agent") or {}
+            run = created.get("run") or {}
+            first_run = str(run.get("id") or agent.get("latestRunId"))
+        except AgentIdConflict:
+            agent = await self._client.get_agent(agent_ref)
+            first_run = str(agent.get("latestRunId"))
+        agent_id = str(agent["id"])
+        instruction_ref = f"continuation:{transfer_id}"
+        self.stage_turn(harness_execution_id, instruction_ref, prompt)
+        session.first_runs = {**(session.first_runs or {}), agent_id: first_run}
+        session.handover = SessionHandover(
+            transfer_id=transfer_id,
+            session=SessionHandle(
+                lane_profile=PROFILE,
+                harness_execution_id=harness_execution_id,
+                generation=session.identity.attempt_no,
+                native_session_ref=agent_id,
+                native_details={"cloud_branch": f"{branch}@{head}"},
+            ),
+            instruction_ref=instruction_ref,
+            source_session_ref=source_session_ref,
+        )
+        restored = {
+            f"/{safe_relative(path).as_posix()}": bytes_digest(content)
+            for path, content in await self._publisher.read_tree(
+                repository=repository, ref=head, roots=tuple(path for path, _ in files)
+            )
+        }
+        return agent_id, restored
 
     # --- controls -----------------------------------------------------------------------------
 
@@ -555,7 +731,10 @@ class CursorCloudHarness:
         session = self._session(request)
         if session.branch is None:
             raise ValueError("no published branch to snapshot")
-        refs = [f"branch:{session.branch.branch}@{session.branch.head}"]
+        head = await self._publisher.head(
+            repository=self._repository(session.binding), branch=session.branch.branch
+        )
+        refs = [branch_snapshot(session.branch.branch, head)]
         if session.agent_id is not None:
             refs += [
                 f"artifact:{item.get('path')}"
@@ -631,11 +810,31 @@ class CursorCloudHarness:
         )
 
 
+def _workspace_item(packet: list[tuple[str, bytes]]) -> str | None:
+    """The snapshot ref of the packet's `workspace` item (`.mission/inputs.json`), if any."""
+
+    raw = dict(packet).get(INPUTS_MANIFEST_PATH)
+    if raw is None:
+        return None
+    try:
+        workspace = json.loads(raw.decode("utf-8")).get("workspace")
+    except (ValueError, AttributeError):
+        return None
+    if isinstance(workspace, dict) and workspace.get("snapshot_ref"):
+        return str(workspace["snapshot_ref"])
+    return None
+
+
 __all__ = [
+    "BRANCH_SNAPSHOT_PREFIX",
     "PROFILE",
     "STREAM_START",
     "CursorCloudHarness",
+    "branch_snapshot",
     "client_agent_id",
+    "last_event_id",
+    "parse_branch_snapshot",
     "run_branch",
     "sse_provider_key",
+    "stream_cursor",
 ]

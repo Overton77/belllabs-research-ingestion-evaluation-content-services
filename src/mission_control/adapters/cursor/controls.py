@@ -1,4 +1,4 @@
-"""Cursor-local continuation: workspace snapshots and the fresh-agent hydrator (FT-G4).
+"""Cursor continuation: workspace snapshots and the fresh-agent hydrators (FT-G4, FT-G6).
 
 SPEC-07 section 7 `request_continuation` is emulated on Cursor (`Agent.resume` continues the
 same Agent Session within one attempt only; a continuation always creates a new agent):
@@ -27,10 +27,12 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Final, Protocol
 
+from mission_control.adapters.cursor.cloud import CursorCloudHarness
 from mission_control.adapters.cursor.local import CursorLocalHarness
 from mission_control.adapters.cursor.projection import safe_relative
 from mission_control.adapters.cursor.snapshot import (
     CHECKPOINT_INVALID,
+    SNAPSHOT_ROOTS,
     SnapshotArtifacts,
     bytes_digest,
     packet_tree,
@@ -69,36 +71,38 @@ def _read_digests(root: Path, paths: Sequence[str]) -> dict[str, str]:
     return observed
 
 
-class CursorWorkspaceSnapshots:
-    """B4 `WorkspaceSnapshotPort` over a live `cursor_local` lease."""
+def _selected(path: str, roots: Sequence[str]) -> bool:
+    prefixes = tuple(item.strip("/").rstrip("*").rstrip("/") for item in roots)
+    return not prefixes or any(
+        path == prefix or path.startswith(prefix + "/") for prefix in prefixes
+    )
 
-    def __init__(self, harness: CursorLocalHarness, store: SnapshotArtifacts) -> None:
-        self._harness = harness
+
+class _StagedSnapshots:
+    """Stage a frozen tree content-addressed and store its manifest (shared by both lanes)."""
+
+    def __init__(self, store: SnapshotArtifacts, *, label: str) -> None:
         self._store = store
+        self._label = label
 
-    async def snapshot(
-        self, *, request_scope: str, run_key: str, session_ref: str, roots: Sequence[str]
+    async def _freeze(
+        self,
+        tree: Sequence[tuple[str, bytes]],
+        *,
+        request_scope: str,
+        run_key: str,
+        roots: Sequence[str],
     ) -> WorkspaceSnapshot:
-        found = self._harness.live_session(session_ref)
-        if found is None:
-            raise ContinuationRejected(
-                CHECKPOINT_INVALID, f"no live cursor_local lease holds session {session_ref}"
-            )
-        root = Path(self._harness.lease_path(found))
-        prefixes = tuple(item.strip("/").rstrip("*").rstrip("/") for item in roots)
-        tree = await asyncio.to_thread(packet_tree, root)
         manifest: dict[str, str] = {}
         durable: dict[str, str] = {}
         total = 0
         for path, content in tree:
-            if prefixes and not any(
-                path == prefix or path.startswith(prefix + "/") for prefix in prefixes
-            ):
+            if not _selected(path, roots):
                 continue
             manifest[f"/{path}"] = bytes_digest(content)
             durable[f"/{path}"] = await self._store.stage(
                 request_scope=request_scope,
-                name=f"cursor-local/continuation/{run_key}/{path}",
+                name=f"{self._label}/continuation/{run_key}/{path}",
                 content=content,
                 media_type="application/octet-stream",
             )
@@ -106,7 +110,7 @@ class CursorWorkspaceSnapshots:
         body = {"manifest": manifest, "durable_refs": durable, "total_bytes": total}
         manifest_ref = await self._store.stage(
             request_scope=request_scope,
-            name=f"cursor-local/continuation/{run_key}/workspace-snapshot.json",
+            name=f"{self._label}/continuation/{run_key}/workspace-snapshot.json",
             content=json.dumps(body, sort_keys=True).encode("utf-8"),
             media_type="application/json",
         )
@@ -131,6 +135,93 @@ class CursorWorkspaceSnapshots:
             manifest=body.get("manifest", {}),
             durable_refs=body.get("durable_refs", {}),
             total_bytes=int(body.get("total_bytes", 0)),
+        )
+
+
+class CursorWorkspaceSnapshots(_StagedSnapshots):
+    """B4 `WorkspaceSnapshotPort` over a live `cursor_local` lease."""
+
+    def __init__(self, harness: CursorLocalHarness, store: SnapshotArtifacts) -> None:
+        super().__init__(store, label="cursor-local")
+        self._harness = harness
+
+    async def snapshot(
+        self, *, request_scope: str, run_key: str, session_ref: str, roots: Sequence[str]
+    ) -> WorkspaceSnapshot:
+        found = self._harness.live_session(session_ref)
+        if found is None:
+            raise ContinuationRejected(
+                CHECKPOINT_INVALID, f"no live cursor_local lease holds session {session_ref}"
+            )
+        root = Path(self._harness.lease_path(found))
+        tree = await asyncio.to_thread(packet_tree, root)
+        return await self._freeze(tree, request_scope=request_scope, run_key=run_key, roots=roots)
+
+
+class CursorCloudWorkspaceSnapshots(_StagedSnapshots):
+    """B4 `WorkspaceSnapshotPort` over a live `cursor_cloud` session: the run branch's
+    `inputs/`, `outputs/` and `.mission/` at its current head."""
+
+    def __init__(self, harness: CursorCloudHarness, store: SnapshotArtifacts) -> None:
+        super().__init__(store, label="cursor-cloud")
+        self._harness = harness
+
+    async def snapshot(
+        self, *, request_scope: str, run_key: str, session_ref: str, roots: Sequence[str]
+    ) -> WorkspaceSnapshot:
+        found = self._harness.live_session(session_ref)
+        if found is None:
+            raise ContinuationRejected(
+                CHECKPOINT_INVALID, f"no live cursor_cloud session for agent {session_ref}"
+            )
+        tree = await self._harness.read_branch(found, SNAPSHOT_ROOTS)
+        return await self._freeze(tree, request_scope=request_scope, run_key=run_key, roots=roots)
+
+
+class CursorCloudSessionHydrator:
+    """B4 `SessionHydrator` for `cursor_cloud`: the continuation's files committed to the run
+    branch and a fresh agent created on it (its first run is the continuation turn)."""
+
+    def __init__(self, harness: CursorCloudHarness, bytes_source: BytesSource) -> None:
+        self._harness = harness
+        self._bytes = bytes_source
+        self.hydrated: list[str] = []
+
+    async def hydrate(self, request: HydrationRequest) -> HydrationReceipt:
+        found = self._harness.live_session(request.source_session_ref)
+        if found is None:
+            raise ContinuationRejected(
+                CHECKPOINT_INVALID,
+                f"the source agent {request.source_session_ref} has no live cloud session",
+            )
+        files: list[tuple[str, bytes]] = []
+        for path, durable_ref in sorted(request.snapshot.durable_refs.items()):
+            try:
+                files.append((path.lstrip("/"), await self._bytes.retrieve(durable_ref)))
+            except LookupError as error:
+                raise ContinuationRejected(
+                    CHECKPOINT_INVALID, f"snapshot bytes for {path} are missing"
+                ) from error
+        files.extend(
+            (name.lstrip("/"), text.encode("utf-8"))
+            for name, text in sorted(request.mission_files.items())
+        )
+        agent_id, restored = await self._harness.hydrate_agent(
+            found,
+            transfer_id=request.transfer_id,
+            files=files,
+            prompt=request.prompt_text,
+            source_session_ref=request.source_session_ref,
+        )
+        self.hydrated.append(agent_id)
+        return HydrationReceipt(
+            target_session_ref=agent_id,
+            restored=restored,
+            native_identity={
+                "agent_id": agent_id,
+                "source_agent_id": request.source_session_ref,
+                "checkpoint_id": request.checkpoint.checkpoint_id,
+            },
         )
 
 
@@ -197,6 +288,8 @@ class CursorSessionHydrator:
 __all__ = [
     "CONTINUATION_TURN_PREFIX",
     "WORKSPACE_SNAPSHOT_PREFIX",
+    "CursorCloudSessionHydrator",
+    "CursorCloudWorkspaceSnapshots",
     "CursorSessionHydrator",
     "CursorWorkspaceSnapshots",
 ]

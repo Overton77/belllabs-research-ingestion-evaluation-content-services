@@ -1,0 +1,5 @@
+: synthetic: hand-authored from research/cursor-platform.md section 4.4; replace with a scrubbed recording in the owner's live qualification drill (what the held stream delivers once its run was cancelled: the running edit closes as interrupted)
+id: 6
+event: tool_call
+data: {"callId": "call-c2", "name": "edit", "status": "error", "error": {"message": "interrupted"}}
+

@@ -1,0 +1,28 @@
+: synthetic: hand-authored from research/cursor-platform.md section 4.4; replace with a scrubbed recording in the owner's live qualification drill (a run that ends ERROR)
+event: status
+data: {"runId": "run-7f1e2d3c-4b5a-4c6d-8e7f-9a0b1c2d3e4f", "status": "CREATING"}
+
+id: 1
+event: status
+data: {"runId": "run-7f1e2d3c-4b5a-4c6d-8e7f-9a0b1c2d3e4f", "status": "RUNNING"}
+
+id: 2
+event: tool_call
+data: {"callId": "call-e1", "name": "shell", "status": "running", "args": {"command": "make build"}}
+
+id: 3
+event: tool_call
+data: {"callId": "call-e1", "name": "shell", "status": "error", "error": {"message": "exit 2"}}
+
+id: 4
+event: interaction_update
+data: {"type": "turn-ended", "usage": {"inputTokens": 1200, "outputTokens": 140, "totalTokens": 1340}}
+
+id: 5
+event: result
+data: {"runId": "run-7f1e2d3c-4b5a-4c6d-8e7f-9a0b1c2d3e4f", "status": "ERROR", "text": "", "durationMs": 40200, "error": {"code": "provider_error", "message": "model request failed"}}
+
+id: 6
+event: done
+data: {}
+
