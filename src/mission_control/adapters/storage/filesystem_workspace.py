@@ -41,10 +41,16 @@ class FilesystemWorkspaceProvisioner:
                         f"verified input is missing for {slot.logical_path}"
                     ) from error
                 host_path.parent.mkdir(parents=True, exist_ok=True)
-                if host_path.exists() and host_path.read_bytes() != content:
-                    raise WorkspaceDigestMismatch(
-                        f"existing mount differs from governed input: {slot.logical_path}"
-                    )
+                if host_path.exists():
+                    if host_path.read_bytes() != content:
+                        raise WorkspaceDigestMismatch(
+                            f"existing mount differs from governed input: {slot.logical_path}"
+                        )
+                    # FT-D3: re-provisioning a workspace (a retry, or the next iteration of a
+                    # `shared` Goal Loop) finds its earlier read-only inputs already mounted;
+                    # rewriting a 0444 file raises PermissionError.
+                    host_path.chmod(0o444)
+                    continue
                 host_path.write_bytes(content)
                 host_path.chmod(0o444)
             else:

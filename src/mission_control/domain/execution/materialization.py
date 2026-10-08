@@ -7,6 +7,7 @@ from mission_control.domain.authoring.canonical import (
     stable_json_digest,
     stable_json_dump,
 )
+from mission_control.domain.context.render import is_context_input_slot
 from mission_control.domain.execution.contracts import (
     CapabilityGrant,
     CognitiveChannelDefinition,
@@ -375,6 +376,21 @@ def _goal_slot_shape(slot: WorkspaceSlotBinding) -> tuple[object, ...]:
     )
 
 
+def _compiled_shape(slots: tuple[WorkspaceSlotBinding, ...]) -> list[tuple[object, ...]]:
+    """The compiled slot set of one role root, without the Context Packer's input slots.
+
+    FT-D3: the read-only ``ctx-`` slots a Context Packet adds under a unit's role root
+    (``.mission/context.md``, ``.mission/inputs.json``, materialized inputs) are that unit's
+    packet; their set and digests differ from one iteration to the next by design, so they
+    never decide whether the next iteration joins a ``shared`` workspace. Every other slot,
+    a declared read-only input included, still has to match exactly.
+    """
+
+    return sorted(
+        (_goal_slot_shape(slot) for slot in slots if not is_context_input_slot(slot)), key=repr
+    )
+
+
 def shared_goal_workspace_slots(
     current: tuple[WorkspaceSlotBinding, ...],
     requested: tuple[WorkspaceSlotBinding, ...],
@@ -393,7 +409,8 @@ def shared_goal_workspace_slots(
       retry), which returns `current` unchanged;
     - otherwise the iteration is the workspace's latest iteration plus one, its slots are
       the same compiled slot set (name, relative path, access, owner kind, input) as every
-      earlier iteration's, and its owners own nothing in the workspace yet. The result is
+      earlier iteration's, the Context Packer's per-iteration `ctx-` input slots excluded
+      (FT-D3), and its owners own nothing in the workspace yet. The result is
       `current` followed by the requested slots, so earlier roots keep their owners.
 
     Anything else returns `None`, and the caller keeps treating the request as a conflict.
@@ -423,11 +440,8 @@ def shared_goal_workspace_slots(
         # Iterations run one after another and each runs both roles, so the next root is
         # always the latest one plus one; a skipped or earlier iteration is a conflict.
         return None
-    shape = sorted((_goal_slot_shape(slot) for slot in requested), key=repr)
-    if any(
-        sorted((_goal_slot_shape(slot) for slot in group), key=repr) != shape
-        for group in groups.values()
-    ):
+    shape = _compiled_shape(requested)
+    if any(_compiled_shape(tuple(group)) != shape for group in groups.values()):
         return None
     if {slot.owner.owner_id for slot in requested} & {slot.owner.owner_id for slot in current}:
         return None

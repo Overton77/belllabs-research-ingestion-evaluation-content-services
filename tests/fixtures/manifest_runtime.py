@@ -17,13 +17,24 @@ the production ``WorkflowLaunchDispatcher`` prepares from the admitted state.
 
 from __future__ import annotations
 
-from dataclasses import asdict
+import json
+import re
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
+from hashlib import sha256
 from typing import Any, cast
 
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
 from tests.fixtures.catalog.fast_track_catalog import fast_track_catalog
 from tests.fixtures.rrm009_production_harness import ProductionStack
-from tests.fixtures.rrm009_production_stack import _template, _workspace
+from tests.fixtures.rrm009_production_stack import (
+    TechnicalBinding,
+    _LoggedModel,
+    _template,
+    _workspace,
+    call_usage,
+)
 
 from mission_control.adapters.postgres.control_plane.definition_repository import (
     PostgresDefinitionRepository,
@@ -39,6 +50,9 @@ from mission_control.adapters.postgres.orchestration.stagegraph_repository impor
 )
 from mission_control.adapters.postgres.subscriptions.store import PostgresSubscriptionStore
 from mission_control.adapters.storage.control_plane_payloads import InMemoryPayloadStore
+from mission_control.adapters.temporal.deployment_composition import (
+    DeploymentCapabilityComponents,
+)
 from mission_control.application.authoring.manifest_service import (
     ManifestCompileService,
     ManifestProgramCompiler,
@@ -67,7 +81,9 @@ from mission_control.domain.authoring.contracts import (
     StageGraphBlueprint,
 )
 from mission_control.domain.authoring.extensions import ExtensionRegistry
+from mission_control.domain.authoring.identity import stable_id
 from mission_control.domain.authoring.manifest_lowering import GOAL_WORKSPACE, STAGE_WORKSPACE
+from mission_control.domain.context.refs import workspace_candidate_ref
 from mission_control.domain.execution.contracts import (
     StructuredOutputBinding,
     WorkspaceOwner,
@@ -230,3 +246,200 @@ async def compose_lifecycle(
         ),
     )
     return service, inputs
+
+
+# --- Deterministic chain cognition (FT-D3) ----------------------------------------------------
+
+
+@dataclass
+class GoalScript:
+    """What one admitted Goal Loop (by effective configuration digest) is scripted to do."""
+
+    obligation: str
+    output_contract: str
+    output_name: str
+    accept_at: int | None
+    """The iteration whose verifier accepts; ``None`` never accepts (a cancel scenario)."""
+
+
+@dataclass
+class ChainScript:
+    """Shared, mutable script of the chain scenarios; models read it at call time."""
+
+    request_scope: str
+    by_configuration: dict[str, GoalScript] = field(default_factory=dict)
+    reads: dict[tuple[str, str], list[str]] = field(default_factory=dict)
+    """(run, operation) -> the text of each file the executor read before writing."""
+    outputs: dict[tuple[str, str], str] = field(default_factory=dict)
+    """(run, operation) -> the workspace candidate ref the executor reported."""
+
+
+def candidate_ref(
+    request_scope: str,
+    *,
+    run_id: str,
+    operation_id: str,
+    attempt: int,
+    slot_name: str,
+    logical_path: str,
+    content: bytes,
+) -> str:
+    """The ``workspace-candidate://`` ref the runtime registers for a captured slot file.
+
+    Mirrors ``bind_operation_execution_request`` (binding id) and
+    ``WorkspaceCandidateCaptureService.capture`` (candidate id); the chain release resolves
+    the supplier's accepted output through exactly this registered descriptor.
+    """
+
+    semantic_key = f"{run_id}:operation:{operation_id}:attempt:{attempt}"
+    binding_id = stable_id("operation-binding", f"{request_scope}:{semantic_key}")
+    digest = f"sha256:{sha256(content).hexdigest()}"
+    return workspace_candidate_ref(
+        stable_id("workspace-candidate", binding_id, slot_name, logical_path, digest)
+    )
+
+
+_INDEX = re.compile(r"This index: (\S+?)/\.mission/context\.md")
+
+
+class ChainModel(_LoggedModel):
+    """A Goal Loop role scripted per admitted configuration.
+
+    Executor, by tool messages since its latest input: read ``.mission/context.md`` and
+    ``.mission/inputs.json`` of its role root (when the packet names them), write one output
+    file into its writable slot, then answer with that file's registered candidate ref.
+    Verifier: accept the scripted obligation at the scripted iteration, otherwise reject.
+    """
+
+    script: Any
+    configuration_digest: str
+    attempt: int
+    slots: Any  # ((slot_name, logical_path), ...)
+
+    @property
+    def _llm_type(self) -> str:
+        return "ft-d3-chain"
+
+    def _reply(self, messages: list[BaseMessage]) -> ChatResult:
+        human_indexes = [index for index, item in enumerate(messages) if item.type == "human"]
+        since_input = messages[human_indexes[-1] :] if human_indexes else messages
+        tools = [item for item in since_input if isinstance(item, ToolMessage)]
+        self._record("parent", messages)
+        goal = self.script.by_configuration.get(self.configuration_digest)
+        if goal is None or "goal-iteration/" not in self.operation_id:
+            return self._final({"answer": "unscripted", "facts": {}, "output_refs": []})
+        iteration = int(self.operation_id.split("goal-iteration/", 1)[1].split("/", 1)[0])
+        role = self.operation_id.rsplit("/", 1)[-1].split(":", 1)[0]
+        if role != "executor":
+            return self._final(self._verdict(goal, iteration))
+        text = "\n".join(str(item.content) for item in messages if isinstance(item, HumanMessage))
+        index = _INDEX.search(text)
+        reads: tuple[str, ...] = (
+            (f"{index.group(1)}/.mission/context.md", f"{index.group(1)}/.mission/inputs.json")
+            if index
+            else ()
+        )
+        path, content = self._output(goal, iteration)
+        if len(tools) < len(reads):
+            return self._call("read_file", {"file_path": reads[len(tools)]})
+        if len(tools) == len(reads):
+            return self._call("write_file", {"file_path": path, "content": content})
+        key = (self.run_id, self.operation_id)
+        self.script.reads[key] = [str(item.content) for item in tools[: len(reads)]]
+        ref = candidate_ref(
+            self.script.request_scope,
+            run_id=self.run_id,
+            operation_id=self.operation_id,
+            attempt=self.attempt,
+            slot_name=self._slot(path),
+            logical_path=path,
+            content=content.encode("utf-8"),
+        )
+        self.script.outputs[key] = ref
+        accepted = goal.accept_at is not None and iteration >= goal.accept_at
+        return self._final(
+            {
+                "schema_version": "belllabs.goal-executor-observation.v1",
+                "disposition": "completed",
+                "output_refs": [ref],
+                "completion_claim": accepted,
+                "accepted_fact_refs": [f"fact:{goal.obligation}:{iteration}"],
+                "evidence_refs": [f"evidence:{goal.obligation}:executor:{iteration}"],
+                "handoff": None,
+                "output_contract_ref": goal.output_contract,
+            }
+        )
+
+    def _slot(self, path: str) -> str:
+        for name, root in self.slots:
+            if path == root or path.startswith(str(root).rstrip("/") + "/"):
+                return str(name)
+        return str(self.slots[0][0])
+
+    def _output(self, goal: GoalScript, iteration: int) -> tuple[str, str]:
+        root = next(
+            (str(root) for _name, root in self.slots if str(root).rstrip("/").endswith("/work")),
+            f"/goal/{iteration}/executor/work",
+        )
+        document = {
+            "schema": f"{goal.output_name}@1",
+            "obligation": goal.obligation,
+            "iteration": iteration,
+            "rows": [{"claim": f"{goal.obligation} claim {iteration}", "citation": "pmid:0"}],
+        }
+        return f"{root.rstrip('/')}/{goal.output_name}.json", json.dumps(document, sort_keys=True)
+
+    def _verdict(self, goal: GoalScript, iteration: int) -> dict[str, Any]:
+        accepted = goal.accept_at is not None and iteration >= goal.accept_at
+        return {
+            "schema_version": "belllabs.goal-verifier-observation.v1",
+            "decision": "accepted" if accepted else "rejected",
+            "progress_made": True,
+            "accepted_obligation_refs": [goal.obligation] if accepted else [],
+            "findings": [],
+            "evidence_refs": [f"evidence:{goal.obligation}:verifier:{iteration}"],
+            "unmet_obligations": [] if accepted else [goal.obligation],
+            "obligation_applicability": [[goal.obligation, True]],
+            "output_contract_ref": goal.output_contract,
+        }
+
+    def _call(self, name: str, args: dict[str, Any]) -> ChatResult:
+        call_id = sha256(f"{self.operation_id}:{name}".encode()).hexdigest()[:12]
+        message = AIMessage(
+            content="",
+            tool_calls=[{"name": name, "args": args, "id": f"ftd3-{call_id}", "type": "tool_call"}],
+            usage_metadata=call_usage(),
+        )
+        return ChatResult(generations=[ChatGeneration(message=message)])
+
+    def _final(self, body: dict[str, Any]) -> ChatResult:
+        message = AIMessage(content=json.dumps(body, sort_keys=True), usage_metadata=call_usage())
+        return ChatResult(generations=[ChatGeneration(message=message)])
+
+
+def chain_components(
+    technical: TechnicalBinding, script: ChainScript, model_log: list[dict[str, Any]]
+) -> DeploymentCapabilityComponents:
+    """The qualification's components with the parent model replaced by ``ChainModel``."""
+
+    base = technical.components(model_log)
+
+    def parent(bound: Any, _secrets: Any) -> ChainModel:
+        return ChainModel(
+            run_id=bound.run_id,
+            operation_id=bound.operation_id,
+            log=model_log,
+            script=script,
+            configuration_digest=bound.erc_digest,
+            attempt=bound.operation_attempt,
+            slots=tuple(
+                (slot.slot_name, slot.logical_path)
+                for slot in bound.workspace.slot_bindings
+                if slot.access == "exclusive_write"
+            ),
+        )
+
+    return replace(
+        base,
+        model_factories={**base.model_factories, technical.binding.model.ref.digest: parent},
+    )
