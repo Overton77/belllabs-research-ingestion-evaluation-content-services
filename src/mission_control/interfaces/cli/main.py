@@ -443,6 +443,28 @@ def queue_command_body(client: MissionClient, args: argparse.Namespace) -> dict[
     }
 
 
+def cancel_command_body(client: MissionClient, args: argparse.Namespace) -> dict[str, Any]:
+    """`command cancel RUN --urgency immediate`: a `cancel` bound to the Run's current version
+    and Generation (read first). `immediate` persists the Stop Fence before the cancel path
+    (SPEC-06 scenario 3); `normal` cancels at the next safe boundary."""
+
+    inspection = client.inspection(args.run_id)
+    if inspection.status_code >= 300:
+        raise ValueError(f"run inspection failed with HTTP {inspection.status_code}")
+    current = _json(inspection)
+    request_id = getattr(args, "request_id", None)
+    return {
+        "schema_version": "mc.command.v1",
+        "request_id": str(UUID(request_id) if request_id else uuid4()),
+        "expected_version": current["version"],
+        "expected_generation": current["execution_generation"],
+        "target": {"kind": "run", "id": args.run_id},
+        "kind": "cancel",
+        "payload": {"urgency": args.urgency},
+        "reason": args.reason,
+    }
+
+
 def watch_events(transport: httpx.Client, client: MissionClient, args: argparse.Namespace) -> int:
     """Print each mission event as one JSON line; exit 6 on resync_required."""
 
@@ -788,6 +810,12 @@ def main(argv: list[str] | None = None) -> int:
     inject.add_argument("--node-key")
     inject.add_argument("--reason", default="injected by missionctl")
     inject.add_argument("--request-id")
+    # SPEC-06 scenario 3: cancel now (Stop Fence first) or at the next safe boundary.
+    cancel = commands.add_parser("cancel", parents=[common])
+    cancel.add_argument("run_id")
+    cancel.add_argument("--urgency", choices=("normal", "immediate"), default="normal")
+    cancel.add_argument("--reason", default="cancelled by missionctl")
+    cancel.add_argument("--request-id")
     mission = groups.add_parser("mission", parents=[common])
     mission_commands = mission.add_subparsers(dest="action", required=True)
     schema = mission_commands.add_parser("schema", parents=[common])
@@ -939,6 +967,8 @@ def main(argv: list[str] | None = None) -> int:
             client = MissionClient(transport, application)
             if args.group == "command" and args.action in {"queue", "inject"}:
                 body = queue_command_body(client, args)
+            if args.group == "command" and args.action == "cancel":
+                body = cancel_command_body(client, args)
             if args.group == "run" and args.action == "transcript":
                 return run_transcript(client, args, deadline_seconds)
             if args.group == "run" and args.action == "frames":
