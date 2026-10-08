@@ -198,9 +198,29 @@ CREATE POLICY transcript_document_scope ON mission_control_search.transcript_doc
 REVOKE ALL ON mission_control.provider_frame, mission_control.frame_retention_policy FROM PUBLIC;
 REVOKE ALL ON mission_control_search.transcript_document FROM PUBLIC;
 
+-- Retention: no login capability may DELETE a mission_control record directly, so the
+-- retention job (runtime) expires frames only through this definer function. The table
+-- is FORCE RLS, so the scope policy still binds the owner: only frames of the
+-- transaction's (installation, application, tenant) context older than the cutoff go.
+CREATE FUNCTION mission_control.expire_provider_frames(
+    p_cutoff timestamptz, p_keep_closing boolean
+) RETURNS TABLE (expired_closing boolean)
+LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path = pg_catalog AS $$
+    DELETE FROM mission_control.provider_frame AS f
+    WHERE f.installation_id = mission_control.ctx_installation_id()
+      AND f.application_id = mission_control.ctx_application_id()
+      AND f.tenant_id = mission_control.ctx_tenant_id()
+      AND f.observed_at < p_cutoff
+      AND (NOT f.closing OR NOT p_keep_closing)
+    RETURNING f.closing
+$$;
+REVOKE ALL ON FUNCTION mission_control.expire_provider_frames(timestamptz, boolean) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION mission_control.expire_provider_frames(timestamptz, boolean)
+TO mission_control_runtime;
+
 -- Worker (runtime) writes frames and the identity records in the frame-append
--- transaction; the retention job (runtime) deletes expired frames. Readers read.
-GRANT SELECT, INSERT, DELETE ON mission_control.provider_frame TO mission_control_runtime;
+-- transaction; readers read.
+GRANT SELECT, INSERT ON mission_control.provider_frame TO mission_control_runtime;
 GRANT SELECT, INSERT ON mission_control.harness_execution, mission_control.agent_session,
     mission_control.session_turn TO mission_control_runtime;
 GRANT UPDATE (lane_profile, generation, native_identity, observation_cursor, lifecycle,

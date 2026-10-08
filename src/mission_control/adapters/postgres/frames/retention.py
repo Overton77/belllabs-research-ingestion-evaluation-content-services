@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 
 import asyncpg
 
-from mission_control.adapters.postgres.run_control.canonical import SCOPE, begin
+from mission_control.adapters.postgres.run_control.canonical import begin
 from mission_control.domain.frames.contracts import DEFAULT_EXCERPT_CAP_BYTES
 
 DEFAULT_RETAIN_DAYS = 30
@@ -99,17 +99,17 @@ class PostgresFrameRetention:
             args = await begin(connection, request_scope)
             policy = await _policy(connection, args)
             cutoff = now - timedelta(days=policy.retain_days)
+            # Scope comes from the transaction context `begin` set; the definer function
+            # is the only path that deletes frames (no role holds DELETE on the table).
             rows = await connection.fetch(
-                f"""
-                DELETE FROM mission_control.provider_frame
-                WHERE {SCOPE} AND observed_at < $4 AND (NOT closing OR NOT $5)
-                RETURNING closing
+                """
+                SELECT expired_closing
+                FROM mission_control.expire_provider_frames($1, $2)
                 """,
-                *args,
                 cutoff,
                 policy.keep_closing_frames,
             )
-        closing = sum(1 for row in rows if row["closing"])
+        closing = sum(1 for row in rows if row["expired_closing"])
         return FrameExpiryReport(
             request_scope=request_scope,
             cutoff=cutoff,

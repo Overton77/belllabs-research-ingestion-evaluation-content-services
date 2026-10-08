@@ -78,13 +78,20 @@ async def test_migration_0027_objects_force_rls_and_grant_the_capability_roles(
                               'mission_control.context_selection', 'INSERT') AS family_selection,
           has_table_privilege('mission_control_outbox_worker',
                               'mission_control_search.transcript_document', 'INSERT')
-              AS projection_insert
+              AS projection_insert,
+          has_function_privilege('mission_control_runtime',
+              'mission_control.expire_provider_frames(timestamptz, boolean)', 'EXECUTE')
+              AS runtime_expire,
+          has_function_privilege('mission_control_readonly',
+              'mission_control.expire_provider_frames(timestamptz, boolean)', 'EXECUTE')
+              AS readonly_expire
         """,
     )
     granted = dict(privileges[0])
     assert granted == {
         "runtime_insert": True,
-        "runtime_delete": True,
+        # Retention deletes only through mission_control.expire_provider_frames (definer).
+        "runtime_delete": False,
         "runtime_update": False,
         "readonly_select": True,
         "readonly_insert": False,
@@ -92,6 +99,8 @@ async def test_migration_0027_objects_force_rls_and_grant_the_capability_roles(
         "runtime_turn_update": False,
         "family_selection": True,
         "projection_insert": True,
+        "runtime_expire": True,
+        "readonly_expire": False,
     }
 
 
