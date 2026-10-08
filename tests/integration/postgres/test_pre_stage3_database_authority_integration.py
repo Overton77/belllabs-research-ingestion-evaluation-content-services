@@ -33,7 +33,9 @@ NONE: frozenset[str] = frozenset()
 # Support table -> (runtime, family writer, readonly) table-level privileges.
 SUPPORT_TABLES: dict[str, tuple[frozenset[str], frozenset[str], frozenset[str]]] = {
     "run_lifecycle_transition": (SI, SI, S),
-    "effect_ledger": (SIU, frozenset({"SELECT", "UPDATE"}), S),
+    # FT-D2 (ADR-0029, migration 0028): the chain reducer admits the consumer run inside the
+    # family writer's append_events transaction, so the family writer may INSERT ledgers.
+    "effect_ledger": (SIU, SIU, S),
     "effect_ledger_entry": (SI, SI, S),
     "family_admission_head": (S, SIU, S),
     "family_admission_journal": (S, SI, S),
