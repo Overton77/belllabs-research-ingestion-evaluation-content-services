@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BioMCP Disease",
+  "type": "object",
+  "required": ["id", "name"],
+  "properties": {
+    "id": { "type": "string" },
+    "name": { "type": "string" },
+    "definition": { "type": ["string", "null"] },
+    "synonyms": {
+      "type": ["array", "null"],
+      "items": { "type": "string" }
+    },
+    "parents": {
+      "type": ["array", "null"],
+      "items": { "type": "string" }
+    },
+    "top_genes": {
+      "type": ["array", "null"],
+      "items": { "type": "string" }
+    },
+    "associated_genes": {
+      "type": ["array", "null"],
+      "items": { "type": "string" }
+    },
+    "treatment_landscape": {
+      "type": ["array", "null"],
+      "items": { "type": "string" }
+    },
+    "recruiting_trial_count": { "type": ["integer", "number", "null"] },
+    "top_variant": {
+      "type": ["object", "null"],
+      "properties": {
+        "variant": { "type": "string" },
+        "relationship": { "type": ["string", "null"] },
+        "source": { "type": ["string", "null"] },
+        "evidence_count": { "type": ["integer", "null"] }
+      },
+      "required": ["variant"],
+      "additionalProperties": true
+    },
+    "xrefs": { "type": ["object", "null"] },
+    "_meta": {
+      "type": ["object", "null"],
+      "properties": {
+        "evidence_urls": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": { "type": "string" },
+              "url": { "type": "string" }
+            },
+            "required": ["label", "url"],
+            "additionalProperties": true
+          }
+        },
+        "next_commands": {
+          "type": ["array", "null"],
+          "items": { "type": "string" }
+        },
+        "workflow": { "type": ["string", "null"] },
+        "workflow_rationale": { "type": ["string", "null"] },
+        "workflow_playbook": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

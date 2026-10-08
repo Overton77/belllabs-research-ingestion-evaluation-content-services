@@ -1,0 +1,41 @@
+# NCT02576665
+
+Status: TERMINATED | Phase: PHASE1 | Study Type: INTERVENTIONAL | Sponsor: Tocagen Inc.
+
+Title: A Study of Toca 511, a Retroviral Replicating Vector, Combined With Toca FC in Patients With Solid Tumors or Lymphoma (Toca 6)
+Target Enrollment: 21
+Eligible Ages: 18 Years to 75 Years
+Start Date: 2016-07 | Completion Date: 2019-12-20
+
+## Conditions
+- Colorectal Cancer
+- Triple Negative Breast Cancer
+- Pancreatic Cancer
+- Non-Small Cell Lung Cancer
+- Head and Neck Cancer
+- Ovarian Cancer
+- Lymphoma
+- Sarcoma
+- Bladder Cancer
+- Melanoma
+- IDH1 Mutated Solid Tumors
+- IDH1 Mutated or MGMT Methylated Recurrent HGG (Not Recruiting)
+
+## Interventions
+- Toca 511
+- Toca FC
+
+## Summary
+
+The purpose of this trial is to evaluate changes in immune activity relative to baseline following treatment with Toca 511 and Toca FC in patients with solid tumors (including recurrent high grade glioma \[rHGG\]) or lymphoma. This is a multicenter, open-label study of Toca 511 and Toca FC.
+More:  biomcp get trial NCT02576665 eligibility locations outcomes
+All:   biomcp get trial NCT02576665 all
+See also:
+  biomcp search disease --query "Colorectal Cancer"
+  biomcp search article -d "Colorectal Cancer"
+  biomcp search trial -c "Colorectal Cancer"
+  biomcp get drug "Toca 511"
+  biomcp drug trials "Toca 511"
+
+[ClinicalTrials.gov](https://clinicaltrials.gov/study/NCT02576665)
+

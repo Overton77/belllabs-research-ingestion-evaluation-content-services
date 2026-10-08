@@ -1,0 +1,20 @@
+# Drugs: target=BRAF
+
+Found 5 drugs
+
+|Name|Mechanism|Target|
+|---|---|---|
+|tovorafenib|Inhibitor of RAF serine/threonine protei…|BRAF|
+|dabrafenib|Cytochrome P450 3A4 Inducers|BRAF|
+|vemurafenib|Inhibitor of Serine/threonine-protein ki…|BRAF|
+|regorafenib|Inhibitor of Platelet-derived growth fac…|BRAF|
+|sorafenib|Protein Kinase Inhibitors|BRAF|
+
+
+Use `get drug <name>` for full details.
+Filters: --target <gene>, --indication <disease>, --type <class>, --mechanism <text>
+
+
+Showing 1-5 of 5 results.
+
+

@@ -1,0 +1,17 @@
+# Articles: gene=BRAF, disease=melanoma, sort=date
+
+Found 2 articles
+
+> Warning: Date sort replaces relevance ranking; results are ordered by publication date.
+
+Semantic Scholar: enabled
+
+| Identifier | Title | Source(s) | Date | Why | Cit. |
+|---|---|---|---|---|---|
+|PMID 41630477|A data-driven cartography of NSCLC vaccine research|PubTator3|2026-12-01|-|12|
+|DOI 10.1000/example|Origin dictates function|Semantic Scholar|2026|-|8|
+
+Use `get article <identifier>` for details when the row has a PMID, PMCID, or DOI.
+Filters: [query], -k/-q <keyword>, -g <gene>, -d <disease>, --drug <name>, -a <author>, --date-from/--date-to <YYYY|YYYY-MM|YYYY-MM-DD> (alias: --since/--until), --type <research-article|research|review|case-reports|meta-analysis>, --open-access, --exclude-retracted, --sort <date|citations|relevance>, --source <all|pubtator|europepmc|pubmed|semanticscholar|litsense2>
+
+Showing 2 results (total unknown). Use --offset 2 for more.

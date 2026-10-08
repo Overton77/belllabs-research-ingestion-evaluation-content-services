@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://biomcp.org/schemas/workflow-ladder.schema.json",
+  "title": "BioMCP workflow ladder sidecar",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["workflow", "rationale", "playbook", "ladder"],
+  "properties": {
+    "workflow": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+$"
+    },
+    "rationale": {
+      "type": "string",
+      "minLength": 1
+    },
+    "playbook": {
+      "type": "string",
+      "pattern": "^biomcp skill [a-z0-9-]+$"
+    },
+    "ladder": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["step", "command", "what_it_gives"],
+        "properties": {
+          "step": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "command": {
+            "type": "string",
+            "pattern": "^biomcp .+"
+          },
+          "what_it_gives": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

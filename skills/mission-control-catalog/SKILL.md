@@ -76,9 +76,12 @@ candidate to a mission, run its install command or treat its `tools/list` as tru
 
 ## Seeded set
 
-`mcp.tavily`, `mcp.firecrawl`, `mcp.firecrawl-search`, `mcp.pubmed`, `mcp.biomcp`,
-`mcp.edgartools`, `plugin.agent-browser`, `mcp.agent-browser`, `skill.agent-browser`,
-`skill.biomcp`, `skill.edgartools`, `plugin.research-web`, and the five `skill.mission-control-*`
-bundles. Availability: FT-A6 (MCP servers), FT-A7 (skills and plugins). Secret references these
-need (`TAVILY_API_KEY`, `FIRECRAWL_API_KEY`, `NCBI_API_KEY`, `EDGAR_IDENTITY`) are deployment
+Live (FT-A6, FT-A7). Both applications: `mcp.tavily`, `mcp.firecrawl`, `mcp.agent-browser`,
+`skill.agent-browser`, `hook.mc-policy-template`, `plugin.web-research` (members `mcp.tavily`,
+`mcp.firecrawl`, `skill.agent-browser`, optional `mcp.agent-browser`), `skill.mission-control`
+and the five `skill.mission-control-*` bundles. Biotech only: `mcp.pubmed`, `mcp.biomcp`,
+`skill.biomcp`. AI Engineer only: `mcp.edgartools`, `skill.edgartools`. Skill and hook bytes
+live in the `capability-bundles` bucket under their manifest digest paths; pin them with
+`catalog pin` and check members with `catalog inspect --pin`. Secret references these need
+(`TAVILY_API_KEY`, `FIRECRAWL_API_KEY`, `NCBI_API_KEY`, `EDGAR_IDENTITY`) are deployment
 inputs; a manifest names them, never carries them.

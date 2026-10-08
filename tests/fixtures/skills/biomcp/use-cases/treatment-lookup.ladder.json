@@ -1,0 +1,22 @@
+{
+  "workflow": "treatment-lookup",
+  "rationale": "Use structured indication search first, then inspect an approved treatment and confirm with review literature.",
+  "playbook": "biomcp skill treatment-lookup",
+  "ladder": [
+    {
+      "step": 1,
+      "command": "biomcp search drug --indication \"myasthenia gravis\" --limit 5",
+      "what_it_gives": "Structured drug candidates linked to the disease indication."
+    },
+    {
+      "step": 2,
+      "command": "biomcp get drug pyridostigmine",
+      "what_it_gives": "A drug card with label, targets, indications, safety, and follow-up pivots."
+    },
+    {
+      "step": 3,
+      "command": "biomcp search article -d \"myasthenia gravis\" --type review --limit 5",
+      "what_it_gives": "Review literature to confirm treatment context and current clinical framing."
+    }
+  ]
+}

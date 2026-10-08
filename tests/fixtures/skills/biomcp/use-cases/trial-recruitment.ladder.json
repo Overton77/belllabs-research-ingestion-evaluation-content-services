@@ -1,0 +1,27 @@
+{
+  "workflow": "trial-recruitment",
+  "rationale": "Resolve the disease, inspect the disease card, then search recruiting trials and review literature.",
+  "playbook": "biomcp skill trial-recruitment",
+  "ladder": [
+    {
+      "step": 1,
+      "command": "biomcp search disease \"tick-borne encephalitis\" --limit 5",
+      "what_it_gives": "Ontology-backed disease candidates for the condition."
+    },
+    {
+      "step": 2,
+      "command": "biomcp get disease MONDO:0017572",
+      "what_it_gives": "A normalized disease card with identifiers and related pivots."
+    },
+    {
+      "step": 3,
+      "command": "biomcp search trial -c \"tick-borne encephalitis\" --status recruiting --limit 5",
+      "what_it_gives": "Recruiting ClinicalTrials.gov studies for the condition."
+    },
+    {
+      "step": 4,
+      "command": "biomcp search article -d \"tick-borne encephalitis\" --type review --limit 5",
+      "what_it_gives": "Review literature for trial and disease context."
+    }
+  ]
+}

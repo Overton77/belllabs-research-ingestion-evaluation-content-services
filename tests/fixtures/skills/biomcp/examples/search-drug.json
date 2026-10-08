@@ -1,0 +1,59 @@
+{
+  "region": "us",
+  "regions": {
+    "us": {
+      "pagination": {
+        "offset": 0,
+        "limit": 5,
+        "returned": 5,
+        "total": 5,
+        "has_more": false,
+        "next_page_token": null
+      },
+      "count": 5,
+      "results": [
+        {
+          "name": "tovorafenib",
+          "drugbank_id": "DB15266",
+          "drug_type": "small-molecule",
+          "mechanism": "Inhibitor of RAF serine/threonine protein kinase",
+          "target": "BRAF"
+        },
+        {
+          "name": "dabrafenib",
+          "drugbank_id": "DB08912",
+          "drug_type": "small-molecule",
+          "mechanism": "Cytochrome P450 3A4 Inducers",
+          "target": "BRAF"
+        },
+        {
+          "name": "vemurafenib",
+          "drugbank_id": "DB08881",
+          "drug_type": "small-molecule",
+          "mechanism": "Inhibitor of Serine/threonine-protein kinase B-raf",
+          "target": "BRAF"
+        },
+        {
+          "name": "regorafenib",
+          "drugbank_id": "DB08896",
+          "drug_type": "small-molecule",
+          "mechanism": "Inhibitor of Platelet-derived growth factor receptor",
+          "target": "BRAF"
+        },
+        {
+          "name": "sorafenib",
+          "drugbank_id": "DB00398",
+          "drug_type": "small-molecule",
+          "mechanism": "Protein Kinase Inhibitors",
+          "target": "BRAF"
+        }
+      ]
+    }
+  },
+  "_meta": {
+    "next_commands": [
+      "biomcp get drug tovorafenib",
+      "biomcp list drug"
+    ]
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "workflow": "article-follow-up",
+  "rationale": "Use article annotations first, then citation and recommendation graph pivots for efficient literature expansion.",
+  "playbook": "biomcp skill article-follow-up",
+  "ladder": [
+    {
+      "step": 1,
+      "command": "biomcp get article 22663011 annotations",
+      "what_it_gives": "Normalized gene, disease, chemical, and mutation mentions from the article."
+    },
+    {
+      "step": 2,
+      "command": "biomcp article citations 22663011 --limit 5",
+      "what_it_gives": "Forward citations that build on the seed article."
+    },
+    {
+      "step": 3,
+      "command": "biomcp article recommendations 22663011 --limit 5",
+      "what_it_gives": "Semantically related papers for broader follow-up."
+    }
+  ]
+}

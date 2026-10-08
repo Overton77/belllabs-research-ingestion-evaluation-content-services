@@ -57,7 +57,8 @@ async def world() -> dict[str, Any]:
     }
     plugin = PluginDefinition.model_validate(
         {
-            "logical_id": "plugin.web-research",
+            # FT-A7 seeds the real plugin.web-research; this fixture plugin is a separate id.
+            "logical_id": "plugin.fixture-search-pair",
             "title": "Web research",
             "description": "Tavily and Firecrawl together for web research.",
             "manifest": {
@@ -297,9 +298,9 @@ async def test_cli_http_and_mcp_return_identical_hits_and_pins(
             "mc.capability_host_support.v1"
         )
         resource = await mcp.read_resource(
-            f"belllabs://catalog/{DefinitionKind.PLUGIN.value}/plugin.web-research/1"
+            f"belllabs://catalog/{DefinitionKind.PLUGIN.value}/plugin.fixture-search-pair/1"
         )
-        assert "plugin.web-research" in resource[0].text
+        assert "plugin.fixture-search-pair" in resource[0].text
 
 
 @pytest.mark.asyncio

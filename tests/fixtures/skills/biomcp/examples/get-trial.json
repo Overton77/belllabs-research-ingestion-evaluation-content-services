@@ -1,0 +1,100 @@
+{
+  "nct_id": "NCT02576665",
+  "source": "ClinicalTrials.gov",
+  "title": "A Study of Toca 511, a Retroviral Replicating Vector, Combined With Toca FC in Patients With Solid Tumors or Lymphoma (Toca 6)",
+  "status": "TERMINATED",
+  "phase": "PHASE1",
+  "study_type": "INTERVENTIONAL",
+  "eligibility": {
+    "registry_text": "Inclusion Criteria:\n\n1. Patient has given written informed consent.",
+    "age_range": {
+      "minimum": {
+        "kind": "limited",
+        "source": "18 Years",
+        "source_quantity": "18",
+        "source_unit": "years",
+        "bound": "minimum"
+      },
+      "maximum": {
+        "kind": "limited",
+        "source": "75 Years",
+        "source_quantity": "75",
+        "source_unit": "years",
+        "bound": "maximum"
+      }
+    },
+    "sexes": [
+      {
+        "authority": "clinicaltrials.gov",
+        "code": "ALL",
+        "display": "All",
+        "vocabulary_version": null,
+        "recognized_meaning": null
+      }
+    ],
+    "includes_healthy_subjects": false,
+    "criteria": null
+  },
+  "conditions": [
+    "Colorectal Cancer",
+    "Triple Negative Breast Cancer",
+    "Pancreatic Cancer",
+    "Non-Small Cell Lung Cancer",
+    "Head and Neck Cancer",
+    "Ovarian Cancer",
+    "Lymphoma",
+    "Sarcoma",
+    "Bladder Cancer",
+    "Melanoma",
+    "IDH1 Mutated Solid Tumors",
+    "IDH1 Mutated or MGMT Methylated Recurrent HGG (Not Recruiting)"
+  ],
+  "interventions": [
+    {
+      "id": 1,
+      "name": "Toca 511",
+      "type": {
+        "authority": "clinicaltrials.gov",
+        "code": "BIOLOGICAL",
+        "display": "Biological",
+        "vocabulary_version": null,
+        "recognized_meaning": null
+      },
+      "description": null,
+      "other_names": []
+    },
+    {
+      "id": 2,
+      "name": "Toca FC",
+      "type": {
+        "authority": "clinicaltrials.gov",
+        "code": "DRUG",
+        "display": "Drug",
+        "vocabulary_version": null,
+        "recognized_meaning": null
+      },
+      "description": null,
+      "other_names": []
+    }
+  ],
+  "sponsor": "Tocagen Inc.",
+  "enrollment": 21,
+  "summary": "The purpose of this trial is to evaluate changes in immune activity relative to baseline following treatment with Toca 511 and Toca FC in patients with solid tumors (including recurrent high grade glioma \\[rHGG\\]) or lymphoma. This is a mul...",
+  "start_date": "2016-07",
+  "completion_date": "2019-12-20",
+  "_meta": {
+    "evidence_urls": [
+      {
+        "label": "ClinicalTrials.gov",
+        "url": "https://clinicaltrials.gov/study/NCT02576665"
+      }
+    ],
+    "next_commands": [
+      "biomcp search disease --query \"Colorectal Cancer\"",
+      "biomcp search article -d \"Colorectal Cancer\"",
+      "biomcp search trial -c \"Colorectal Cancer\"",
+      "biomcp get drug \"Toca 511\"",
+      "biomcp drug trials \"Toca 511\""
+    ]
+  }
+}

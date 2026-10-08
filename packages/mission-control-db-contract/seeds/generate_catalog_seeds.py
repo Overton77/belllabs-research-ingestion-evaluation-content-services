@@ -461,6 +461,25 @@ def agent_capabilities() -> dict[str, dict[str, Any]]:
     return dict(module.bundles(published, SEED_FORMAT, COMPATIBILITY, SEED_ACTOR))
 
 
+def agent_skills() -> dict[str, dict[str, Any]]:
+    """FT-A7: per-application skill bundles, the policy hook and the web-research plugin."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "mc_seed_agent_skills", SEEDS_ROOT / "agent_skills.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    def published(definition: Any, key_prefix: str, evidence: list[str]) -> list[dict[str, Any]]:
+        return _published_definition_records(
+            definition, key_prefix, evidence, published_at=module.AGENT_SKILL_SEED_TIME
+        )
+
+    return dict(module.bundles(published, SEED_FORMAT, COMPATIBILITY, SEED_ACTOR))
+
+
 def storage_capability_bundles() -> dict[str, Any]:
     """FT-A2 / ADR-0024: the private capability-bundles bucket and its four policies.
 
@@ -528,6 +547,7 @@ def build_bundles() -> dict[str, dict[str, Any]]:
     for app in APPS:
         bundles[f"{app}/mc.app.bindings-{CURRENT_BINDING[0]}.json"] = app_bindings(app)
     bundles.update(agent_capabilities())
+    bundles.update(agent_skills())
     bundles["common/mc.storage.capability-bundles-1.0.0.json"] = storage_capability_bundles()
     return bundles
 

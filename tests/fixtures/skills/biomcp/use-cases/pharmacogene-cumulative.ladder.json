@@ -1,0 +1,27 @@
+{
+  "workflow": "pharmacogene-cumulative",
+  "rationale": "Use the PGx search and detail surfaces before collecting literature for multi-gene drug-response evidence.",
+  "playbook": "biomcp skill pharmacogene-cumulative",
+  "ladder": [
+    {
+      "step": 1,
+      "command": "biomcp search pgx -d warfarin --limit 10",
+      "what_it_gives": "CPIC drug-gene rows for known pharmacogenes."
+    },
+    {
+      "step": 2,
+      "command": "biomcp get pgx warfarin recommendations annotations",
+      "what_it_gives": "PGx recommendations and PharmGKB-style annotations."
+    },
+    {
+      "step": 3,
+      "command": "biomcp search article --drug warfarin -k \"CYP2C9 VKORC1 dose response\" --limit 10",
+      "what_it_gives": "Focused literature for the major pharmacogenes and dose response."
+    },
+    {
+      "step": 4,
+      "command": "biomcp batch article 17048007,19794411,19958090 --mode compact",
+      "what_it_gives": "Batch article details for key supporting papers."
+    }
+  ]
+}

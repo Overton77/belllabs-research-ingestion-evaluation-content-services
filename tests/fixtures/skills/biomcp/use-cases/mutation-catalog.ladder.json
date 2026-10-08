@@ -1,0 +1,27 @@
+{
+  "workflow": "mutation-catalog",
+  "rationale": "Start from the gene, enumerate variants, narrow to a mutation class, then confirm disease literature.",
+  "playbook": "biomcp skill mutation-catalog",
+  "ladder": [
+    {
+      "step": 1,
+      "command": "biomcp get gene PLN",
+      "what_it_gives": "The gene card and related variant/literature pivots."
+    },
+    {
+      "step": 2,
+      "command": "biomcp search variant -g PLN --limit 10",
+      "what_it_gives": "A catalog of variants for the gene."
+    },
+    {
+      "step": 3,
+      "command": "biomcp search variant -g PLN --hgvsp L39X --limit 5",
+      "what_it_gives": "A narrowed search for the mutation of interest."
+    },
+    {
+      "step": 4,
+      "command": "biomcp search article -g PLN -d cardiomyopathy --type review --limit 10",
+      "what_it_gives": "Review literature connecting the gene, variants, and disease."
+    }
+  ]
+}

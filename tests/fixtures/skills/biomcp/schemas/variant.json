@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BioMCP Variant",
+  "type": "object",
+  "required": ["id", "gene"],
+  "properties": {
+    "id": { "type": "string" },
+    "genome_build": { "type": ["string", "null"], "enum": ["GRCh37", "GRCh38", null] },
+    "genome_build_provenance": { "type": ["string", "null"] },
+    "gene": { "type": "string" },
+    "hgvs_p": { "type": ["string", "null"] },
+    "legacy_name": { "type": ["string", "null"] },
+    "hgvs_c": { "type": ["string", "null"] },
+    "rsid": { "type": ["string", "null"] },
+    "cosmic_id": { "type": ["string", "null"] },
+    "significance": { "type": ["string", "null"] },
+    "clinvar_id": { "type": ["string", "null"] },
+    "clinvar_review_status": { "type": ["string", "null"] },
+    "clinvar_review_stars": { "type": ["integer", "null"] },
+    "conditions": {
+      "type": ["array", "null"],
+      "items": { "type": "string" }
+    },
+    "consequence": { "type": ["string", "null"] },
+    "cadd_score": { "type": ["number", "null"] },
+    "polyphen_pred": { "type": ["string", "null"] },
+    "sift_pred": { "type": ["string", "null"] },
+    "conservation": { "type": ["object", "null"] },
+    "expanded_predictions": {
+      "type": ["array", "null"],
+      "items": { "type": "object" }
+    },
+    "population": {
+      "type": ["object", "null"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["data", "missing", "absent", "provider_failure"]
+        },
+        "dataset": { "const": "gnomad_r4" },
+        "release": { "const": "gnomAD v4" },
+        "message": { "type": ["string", "null"] },
+        "exome": { "$ref": "#/$defs/gnomadSequencingPopulation" },
+        "genome": { "$ref": "#/$defs/gnomadSequencingPopulation" },
+        "faf_caveat": { "type": "string" }
+      },
+      "required": ["status", "dataset", "release", "faf_caveat"],
+      "additionalProperties": false
+    },
+    "cosmic_context": { "type": ["object", "null"] },
+    "cgi_associations": {
+      "type": ["array", "null"],
+      "items": { "type": "object" }
+    },
+    "civic": { "type": ["object", "null"] },
+    "clinvar_conditions": {
+      "type": ["array", "null"],
+      "items": { "type": "object" }
+    },
+    "clinvar_condition_reports": { "type": ["integer", "null"] },
+    "top_disease": {
+      "type": ["object", "null"],
+      "properties": {
+        "condition": { "type": "string" },
+        "reports": { "type": "integer" }
+      },
+      "required": ["condition", "reports"],
+      "additionalProperties": true
+    },
+    "cancer_frequencies": {
+      "type": ["array", "null"],
+      "items": { "type": "object" }
+    },
+    "cancer_frequency_source": { "type": ["string", "null"] },
+    "supporting_pmids": {
+      "type": ["array", "null"],
+      "items": { "type": "string" }
+    },
+    "prediction": { "type": ["object", "null"] },
+    "_meta": {
+      "type": ["object", "null"],
+      "properties": {
+        "evidence_urls": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": { "type": "string" },
+              "url": { "type": "string" }
+            },
+            "required": ["label", "url"],
+            "additionalProperties": true
+          }
+        },
+        "next_commands": {
+          "type": ["array", "null"],
+          "items": { "type": "string" }
+        },
+        "workflow": { "type": ["string", "null"] },
+        "workflow_rationale": { "type": ["string", "null"] },
+        "workflow_playbook": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "gnomadSequencingPopulation": {
+      "type": ["object", "null"],
+      "properties": {
+        "allele_frequency": { "type": ["number", "null"] },
+        "ac": { "type": "integer", "minimum": 0 },
+        "an": { "type": "integer", "minimum": 0 },
+        "homozygote_count": { "type": "integer", "minimum": 0 },
+        "hemizygote_count": { "type": "integer", "minimum": 0 },
+        "filters": { "type": "array", "items": { "type": "string" } },
+        "faf95": { "type": ["object", "null"] },
+        "populations": { "type": "array", "items": { "type": "object" } }
+      },
+      "required": ["ac", "an", "homozygote_count", "hemizygote_count", "filters", "populations"],
+      "additionalProperties": false
+    }
+  }
+}

@@ -30,8 +30,11 @@ from mission_control.domain.authoring.contracts import (
 from mission_control.domain.capabilities.bundles import (
     BUNDLE_BUCKET,
     SIGNED_DOWNLOAD_TTL_SECONDS,
+    BundleKind,
     CapabilityBundleManifest,
     CapabilityDrift,
+    build_bundle_manifest,
+    normalize_bundle_path,
     parse_skill_frontmatter,
     sha256_hex,
     verify_bundle_files,
@@ -240,6 +243,70 @@ async def download_bundle(
             raise CapabilityDrift(f"no signed URL for {entry.path}")
         files.append((entry.path, await fetcher.fetch(url)))
     return verify_bundle_files(manifest, files)
+
+
+_BUNDLE_KINDS: dict[str, BundleKind] = {
+    "skill_bundle": "skill_bundle",
+    "hook_script": "hook_script",
+    "subagent_profile": "subagent_profile",
+}
+
+
+def definition_object_prefix(definition: SkillDefinition | HookScriptDefinition) -> str:
+    """The digest path prefix a published bundle definition names (``bundle_ref.uri``)."""
+
+    bundle_ref = definition.bundle_ref
+    if bundle_ref is None or not bundle_ref.uri.startswith(f"{BUNDLE_BUCKET}://"):
+        raise CapabilityDrift(f"{definition.logical_id} has no capability-bundles reference")
+    return bundle_ref.uri.removeprefix(f"{BUNDLE_BUCKET}://")
+
+
+async def fetch_definition_bundle(
+    definition: SkillDefinition | HookScriptDefinition,
+    store: BundleObjectStore,
+    fetcher: BundleFetcher,
+    *,
+    ttl_seconds: int = SIGNED_DOWNLOAD_TTL_SECONDS,
+) -> tuple[CapabilityBundleManifest, tuple[tuple[str, bytes], ...]]:
+    """Materialization of a catalog definition's bytes (FT-A7 consumer of FT-A2 custody).
+
+    The object prefix (``<application>/<kind>/<id>/<version>/<manifest sha256>``) and the
+    definition's file manifest drive one short-lived signed URL per file; every file is
+    verified by size and sha256, the manifest is rebuilt from the bytes and must reproduce
+    the definition's ``manifest_digest`` and prefix. Any difference is ``CAPABILITY_DRIFT``.
+    """
+
+    prefix = definition_object_prefix(definition)
+    parts = prefix.split("/")
+    if len(parts) != 5 or parts[1] not in _BUNDLE_KINDS:
+        raise CapabilityDrift(f"malformed capability bundle prefix: {prefix}")
+    application_id, kind, capability_id, version, digest_hex = parts
+    entries = {normalize_bundle_path(entry.path): entry for entry in definition.file_manifest}
+    paths = [f"{prefix}/{path}" for path in sorted(entries)]
+    urls = await store.signed_download_urls(paths, ttl_seconds)
+    files: list[tuple[str, bytes]] = []
+    for path in sorted(entries):
+        url = urls.get(f"{prefix}/{path}")
+        if url is None:
+            raise CapabilityDrift(f"no signed URL for {path}")
+        content = await fetcher.fetch(url)
+        entry = entries[path]
+        if len(content) != entry.size_bytes or "sha256:" + sha256_hex(content) != entry.digest:
+            raise CapabilityDrift(f"bundle file drifted from its pin: {path}")
+        files.append((path, content))
+    manifest = build_bundle_manifest(
+        files,
+        application_id=application_id,
+        kind=_BUNDLE_KINDS[kind],
+        capability_id=capability_id,
+        version=version,
+        executable=frozenset(path for path, entry in entries.items() if entry.executable),
+    )
+    if manifest.digest != definition.manifest_digest or manifest.object_prefix != prefix:
+        raise CapabilityDrift(
+            f"{definition.logical_id} bytes do not reproduce manifest {digest_hex[:12]}"
+        )
+    return manifest, verify_bundle_files(manifest, files)
 
 
 def bundle_definition(
