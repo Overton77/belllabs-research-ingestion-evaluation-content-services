@@ -277,6 +277,9 @@ class Settings(BaseSettings):
     # FT-G2: Deep Agents units run through the `lane.turn` segment loop instead of
     # `operation.execute` (Cursor units always do). Off until FT-G6 retires the old path.
     mission_control_lane_segment_loop: bool = False
+    # FT-C1: the worker serves `mc.frames_expire.v1` on its maintenance queue and creates (or
+    # updates) the per-application retention Schedule at startup; false skips the Schedule.
+    mission_control_frames_expire_schedule: bool = True
     # FT-G3 cursor_local: where workspace leases (git worktrees) live on the worker, the
     # worker-local checkout used when a binding names no repository, and the loopback port of
     # the Kernel Hook callback listener (127.0.0.1 only; started with the worker).
