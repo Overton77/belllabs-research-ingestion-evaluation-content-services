@@ -15,17 +15,17 @@ command returns an error rather than a partial result. Rows without the marker e
 | --- | --- | --- | --- |
 | Admit run | `run admit --request-file FILE` | `POST /run-requests` | |
 | Launch admitted run | `run start ID --request-file FILE` | `POST /runs/ID/launch` | |
-| Inspect | `run inspect ID [--wait S]` | `GET /runs/ID/inspection` | enriched in FT-F6 |
+| Inspect | `run inspect ID [--wait S]` | `GET /runs/ID/inspection` | enriched (FT-F6, available) |
 | List and query runs | `run list --query 'mc_lane="cursor_local" AND mc_phase="running"'` | `GET /runs?query=` | FT-C4 |
 | Transcript | `run transcript ID --format jsonl\|md [--since CURSOR]` | `GET /runs/ID/transcript` | FT-C3 |
 | Search a run | `run search ID --query TEXT` | `GET /runs/ID/transcript/search?q=` | FT-C4 |
 | Send control | `command send ID --request-file FILE` | `POST /runs/ID/commands` | kinds added in FT-F1, FT-F2, FT-F3 |
-| Queue instruction or context | `command queue ID --file FILE` | same endpoint, `kind: queue_instruction \| add_context` | FT-F1 |
+| Queue instruction or context | `command queue ID --file FILE [--add-context]` | same endpoint, `kind: queue_instruction \| add_context` | available (FT-F1) |
 | Interrupt and inject | `command inject ID --file FILE` | same endpoint, `kind: interrupt_and_inject` | FT-F2 |
 | Cancel | `command cancel ID --urgency normal\|immediate --reason TEXT` | same endpoint, `kind: cancel` | immediate in FT-F3 |
 | Observe controls | `command list ID` | `GET /runs/ID/commands` | |
 | Safe snapshot | `run snapshot ID --request-file FILE` | `POST /runs/ID/snapshots` | |
-| Semantic fork | `run fork ID --request-file FILE` or `run fork ID --from-snapshot SNAPSHOT_ID --instruction-file FILE` | `POST /runs/ID/forks` | flags in FT-F4 |
+| Semantic fork | `run fork ID --request-file FILE` or `run fork ID [--from-snapshot SNAPSHOT_ID] --instruction-file FILE --sponsorship-ref REF` | `POST /runs/ID/forks` | flags available (FT-F4) |
 | Privileged reconciliation | `run reconcile ID --request-file FILE` | `POST /runs/ID/reconcile-unit` | |
 
 ## Missions and chains

@@ -18,6 +18,7 @@ from mission_control.domain.policies.contracts import (
     ResumeDecision,
     RunProjection,
 )
+from mission_control.domain.policies.stop_fence import ImmediateCancelReport
 
 
 class Contract(BaseModel):
@@ -207,6 +208,90 @@ def _absent(value: object) -> bool:
     return value is None
 
 
+class LaneView(Contract):
+    """FT-F6: the lane of the current harness execution (from persisted provider frames)."""
+
+    lane_profile: str = Field(min_length=1)
+    describe_digest: str | None = None
+    qualified: bool | None = None
+    harness_execution_id: str | None = None
+    generation: int | None = Field(default=None, ge=1)
+    native_session_refs: tuple[str, ...] = ()
+
+
+class SessionView(Contract):
+    """One harness execution's agent session(s): turns, tools, last status, usage disposition."""
+
+    harness_execution_id: str = Field(min_length=1)
+    lane_profile: str = Field(min_length=1)
+    generation: int = Field(ge=1)
+    native_session_refs: tuple[str, ...] = ()
+    turn_count: int = Field(ge=0)
+    tool_calls: int = Field(ge=0)
+    last_turn_status: str | None = None
+    usage_disposition: str | None = None
+    last_observed_at: AwareDatetime | None = None
+
+
+class MailboxEntryView(Contract):
+    """A mailbox entry, reference-only: never its content."""
+
+    entry_id: str = Field(min_length=1)
+    command_id: str = Field(min_length=1)
+    kind: str = Field(min_length=1)
+    boundary: str = Field(min_length=1)
+    state: str = Field(min_length=1)
+    generation: int = Field(ge=1)
+    admission_sequence: int = Field(ge=1)
+    content_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+
+
+class CommandDeliveryView(Contract):
+    """Requested and delivered semantics, outcome and native refs of one Command."""
+
+    command_id: str = Field(min_length=1)
+    kind: str = Field(min_length=1)
+    lifecycle: str = Field(min_length=1)
+    outcome: Literal["applied", "failed", "rejected", "expired"] | None = None
+    requested_semantics: str | None = None
+    delivered_semantics: str | None = None
+    observed_outcome: str | None = None
+    emulation_note: str | None = None
+    native_refs: tuple[str, ...] = ()
+
+
+class FramesCursor(Contract):
+    """Where the Run's Transcript stands: pass `transcript_cursor` to `run transcript --since`."""
+
+    frame_count: int = Field(ge=0)
+    last_arrival_ordinal: int | None = Field(default=None, ge=1)
+    transcript_cursor: str | None = None
+
+
+class ChainLinkView(Contract):
+    link_key: str = Field(min_length=1)
+    from_mission_key: str = Field(min_length=1)
+    to_mission_key: str = Field(min_length=1)
+    kind: str = Field(min_length=1)
+    state: str = Field(min_length=1)
+    released_run_id: str | None = None
+
+
+class ChainMembership(Contract):
+    """The Mission Chain this Run's mission belongs to (SPEC-04), with its links."""
+
+    chain_id: str = Field(min_length=1)
+    chain_key: str = Field(min_length=1)
+    lifecycle: str = Field(min_length=1)
+    links: tuple[ChainLinkView, ...] = ()
+
+
+class SubscriptionsView(Contract):
+    """Active Subscriptions targeting this Run or its mission (SPEC-06)."""
+
+    active: int = Field(ge=0)
+
+
 class MissionInspection(Contract):
     """`mc.inspection.v1`. Sections added by SPEC-06 are optional and left out while absent,
     so existing clients keep parsing the same body."""
@@ -221,6 +306,17 @@ class MissionInspection(Contract):
     execution_outcome: str | None
     projection: RunProjection
     lineage: RunLineage | None = Field(default=None, exclude_if=_absent)
+    # FT-F6: reference-only sections, each present only where its source is composed.
+    lane: LaneView | None = Field(default=None, exclude_if=_absent)
+    sessions: tuple[SessionView, ...] | None = Field(default=None, exclude_if=_absent)
+    mailbox: tuple[MailboxEntryView, ...] | None = Field(default=None, exclude_if=_absent)
+    delivery_reports: tuple[CommandDeliveryView, ...] | None = Field(
+        default=None, exclude_if=_absent
+    )
+    frames_cursor: FramesCursor | None = Field(default=None, exclude_if=_absent)
+    chain: ChainMembership | None = Field(default=None, exclude_if=_absent)
+    subscriptions: SubscriptionsView | None = Field(default=None, exclude_if=_absent)
+    stop_fence: ImmediateCancelReport | None = Field(default=None, exclude_if=_absent)
 
 
 class MissionControlRejected(ValueError):

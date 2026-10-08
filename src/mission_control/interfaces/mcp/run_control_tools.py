@@ -3,6 +3,8 @@
 - `mission_command_send(run_id, request)`: the `mc.command.v1` request the HTTP surface takes
   on `POST /runs/{id}/commands` (FT-F1: `queue_instruction`, `add_context`, plus the existing
   kinds), answered with the same `mc.command_receipt.v1` receipt.
+- `mission_run_inspect(run_id)`: `mc.inspection.v1` with the FT-F6 sections (lane, sessions,
+  mailbox, delivery reports, frames cursor, chain, subscriptions, stop fence), read-only.
 - `mission_run_fork(run_id, request)`: the `mc.runtime_fork.v1` request of
   `POST /runs/{id}/forks` (FT-F4: latest safe Snapshot by default, optional instruction),
   answered with the same `mc.runtime_fork_receipt.v1`. Sponsorship and approvals are the
@@ -37,7 +39,8 @@ from mission_control.domain.policies.forks import ForkRejected
 
 COMMAND_SEND_TOOL = "mission_command_send"
 RUN_FORK_TOOL = "mission_run_fork"
-RUN_CONTROL_TOOL_NAMES = (COMMAND_SEND_TOOL, RUN_FORK_TOOL)
+RUN_INSPECT_TOOL = "mission_run_inspect"
+RUN_CONTROL_TOOL_NAMES = (COMMAND_SEND_TOOL, RUN_FORK_TOOL, RUN_INSPECT_TOOL)
 
 
 class RunControlPrincipal(Protocol):
@@ -151,6 +154,16 @@ class ScopedRunControl:
             raise domain_error(error) from None
         return receipt.model_dump(mode="json")
 
+    async def inspect(self, principal: RunControlPrincipal, *, run_id: str) -> dict[str, object]:
+        """FT-F6: `mc.inspection.v1` with the sections the HTTP route returns."""
+
+        service = self.lifecycle(principal)
+        try:
+            inspection = await service.inspect(run_id, self.actor(principal))
+        except (MissionControlRejected, RunControlNotFound) as error:
+            raise domain_error(error) from None
+        return inspection.model_dump(mode="json")
+
     async def fork(
         self, principal: RunControlPrincipal, *, run_id: str, request: Mapping[str, Any]
     ) -> dict[str, object]:
@@ -192,6 +205,13 @@ def register_run_control_tools(
 
         return await call(context, principals, invoke)
 
+    @server.tool(name=RUN_INSPECT_TOOL, annotations={"readOnlyHint": True})
+    async def mission_run_inspect(run_id: str, context: Context) -> dict[str, object]:
+        async def invoke(principal: Any) -> object:
+            return await run_control.inspect(principal, run_id=run_id)
+
+        return await call(context, principals, invoke)
+
     @server.tool(name=RUN_FORK_TOOL)
     async def mission_run_fork(
         run_id: str, request: dict[str, Any], context: Context
@@ -206,6 +226,7 @@ __all__ = [
     "COMMAND_SEND_TOOL",
     "RUN_CONTROL_TOOL_NAMES",
     "RUN_FORK_TOOL",
+    "RUN_INSPECT_TOOL",
     "ScopedRunControl",
     "domain_error",
     "register_run_control_tools",

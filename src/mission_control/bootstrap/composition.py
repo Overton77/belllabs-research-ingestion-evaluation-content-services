@@ -19,11 +19,16 @@ from mission_control.adapters.postgres.async_subagents.async_subagents import (
 from mission_control.adapters.postgres.control_plane.definition_repository import (
     PostgresDefinitionRepository,
 )
+from mission_control.adapters.postgres.frames.repository import PostgresFrameRepository
+from mission_control.adapters.postgres.frames.transcript_reads import PostgresMissionEventReader
 from mission_control.adapters.postgres.orchestration.stagegraph_repository import (
     PostgresStageGraphOperationTemplateRepository,
 )
 from mission_control.adapters.postgres.run_control.inspection_repository import (
     PostgresInspectionReadRepository,
+)
+from mission_control.adapters.postgres.run_control.inspection_sections import (
+    PostgresInspectionSections,
 )
 from mission_control.adapters.postgres.run_control.mailbox import PostgresCommandMailbox
 from mission_control.adapters.postgres.run_control.run_control_repository import (
@@ -57,6 +62,7 @@ from mission_control.application.execution.service import (
     FamilyAdmissionRegistry,
     RunControlService,
 )
+from mission_control.application.frames.transcript import TranscriptService
 from mission_control.application.installations.registry import (
     ApplicationBinding,
     ApplicationRegistry,
@@ -66,6 +72,7 @@ from mission_control.application.installations.registry import (
     request_scope,
 )
 from mission_control.application.missions.admission import MissionAdmissionService
+from mission_control.application.missions.inspection import InspectionSources
 from mission_control.application.missions.runtime import MissionControlRuntimeService
 from mission_control.application.missions.service import MissionControlService
 from mission_control.application.ports.payloads import ContentAddressedPayloadStore
@@ -217,6 +224,15 @@ async def compose_application_services(
             # FT-F1: queue_instruction / add_context admit into the Run's command mailbox.
             mailbox=MailboxDeliveryService(PostgresCommandMailbox(runtime_pool), run_control),
             forks=materializations,
+            # FT-F6: inspection sections from frames, the ledger, chains and subscriptions.
+            inspection=InspectionSources(
+                transcripts=TranscriptService(
+                    PostgresMissionEventReader(runtime_pool),
+                    PostgresFrameRepository(runtime_pool),
+                    request_scope=scope,
+                ),
+                sections=PostgresInspectionSections(runtime_pool),
+            ),
         ),
         runtime=MissionControlRuntimeService(
             snapshots,

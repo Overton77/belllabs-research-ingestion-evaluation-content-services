@@ -19,8 +19,15 @@ missionctl run inspect RUN_ID --wait 60 --json     # block until the next change
 
 Read `version` and `execution_generation` before authoring any command. The inspection carries
 the run projection (waits, pauses, readiness, outputs, async children, reconciliation incidents)
-and, after FT-F6, the lane profile, agent sessions and turns, the command mailbox and delivery
-reports. Done when you can say lifecycle, phase and outcome in one sentence each.
+and optional sections (available, FT-F6): `lane` (profile, describe digest, native session
+refs), `sessions` (turns, tool calls, last status, usage disposition), `mailbox` (kind, boundary,
+state, sequence and digest of each queued entry; never its content), `delivery_reports`
+(requested and delivered semantics, outcome and native refs of every command), `frames_cursor`
+(pass `transcript_cursor` to `run transcript --since`), `chain`, `subscriptions` (active
+count), `lineage` (fork edges) and `stop_fence` (an immediate cancel's four timestamps). A
+section is absent where its source is not composed; nothing in it came from a provider call.
+`--wait` returns as soon as lifecycle, phase or terminal outcome change. Done when you can say
+lifecycle, phase and outcome in one sentence each.
 
 ## 2. List and search runs
 

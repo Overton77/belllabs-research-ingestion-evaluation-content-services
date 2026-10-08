@@ -18,6 +18,7 @@ from mission_control.application.execution.mailbox import (
 )
 from mission_control.application.execution.service import RunControlService
 from mission_control.application.execution.stop_fence import StopFenceRepository
+from mission_control.application.missions.inspection import InspectionSources, enrich_inspection
 from mission_control.application.recovery.run_forks import ForkLineageReader
 from mission_control.contracts.canonical import canonical_digest
 from mission_control.contracts.contracts import (
@@ -70,6 +71,7 @@ class MissionControlService:
         mailbox: MailboxDeliveryService | None = None,
         inline_cap_bytes: int = MAX_INLINE_BYTES,
         forks: ForkLineageReader | None = None,
+        inspection: InspectionSources | None = None,
     ) -> None:
         if not request_scope:
             raise ValueError("an authenticated application/tenant request scope is required")
@@ -83,6 +85,8 @@ class MissionControlService:
         self._inline_cap = inline_cap_bytes
         # FT-F4: fork lineage (source and derived Runs) in inspection.
         self._forks = forks
+        # FT-F6: lane, sessions, mailbox, delivery reports, cursor, chain, subscriptions.
+        self._inspection = inspection
 
     @property
     def request_scope(self) -> str:
@@ -232,7 +236,7 @@ class MissionControlService:
             RunPhase.CANCELLING: "running",
             RunPhase.TERMINAL: "completed",
         }[projection.phase]
-        return MissionInspection(
+        inspection = MissionInspection(
             run_id=run_id,
             version=projection.version,
             execution_generation=(
@@ -245,6 +249,20 @@ class MissionControlService:
             execution_outcome=projection.terminal_outcome,
             projection=projection,
             lineage=await self._lineage(run_id),
+        )
+        if self._stop_fences is not None:
+            inspection = inspection.model_copy(
+                update={"stop_fence": await self._stop_fences.report(self._scope, run_id)}
+            )
+        if self._inspection is None:
+            return inspection
+        return await enrich_inspection(
+            inspection,
+            request_scope=self._scope,
+            actor=actor,
+            sources=self._inspection,
+            commands=await self._interventions.list_commands(self._scope, run_id),
+            mailbox=self._mailbox,
         )
 
     async def _lineage(self, run_id: str) -> RunLineage | None:

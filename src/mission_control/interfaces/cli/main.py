@@ -426,6 +426,17 @@ def watch_events(transport: httpx.Client, client: MissionClient, args: argparse.
     return 0
 
 
+WAIT_POLL_SECONDS = 0.5
+
+
+def inspection_wait_state(result: object) -> tuple[object, ...]:
+    """What `run inspect --wait` watches: lifecycle, phase and the terminal outcome."""
+
+    if not isinstance(result, dict):
+        return (None, None, None)
+    return (result.get("lifecycle"), result.get("phase"), result.get("execution_outcome"))
+
+
 def exit_status(status: int) -> int:
     if 200 <= status < 300:
         return 0
@@ -771,6 +782,9 @@ def main(argv: list[str] | None = None) -> int:
             if args.group == "run" and args.action == "frames":
                 return run_frames_tail(client, args, deadline_seconds)
             deadline = time.monotonic() + (deadline_seconds or 0)
+            # FT-F6: `run inspect --wait` returns early on a lifecycle, phase or terminal
+            # change from the first observation (polled well under a second apart).
+            initial: tuple[object, ...] | None = None
             while True:
                 if deadline_seconds is not None:
                     transport.timeout = httpx.Timeout(
@@ -807,11 +821,17 @@ def main(argv: list[str] | None = None) -> int:
                 if isinstance(result, dict) and result.get("lifecycle") == "completed":
                     print(json.dumps(result, allow_nan=False))
                     return 0 if result.get("execution_outcome") == "completed" else 6
+                observed = inspection_wait_state(result)
+                if initial is None:
+                    initial = observed
+                elif observed != initial:
+                    print(json.dumps(result, allow_nan=False))
+                    return 0
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     print(json.dumps({"error": "wait_timeout", "inspection": result}))
                     return 6
-                time.sleep(min(1, remaining))
+                time.sleep(min(WAIT_POLL_SECONDS, remaining))
     except (ValueError, OSError) as exc:
         print(json.dumps({"error": str(exc)}), file=sys.stderr)
         return 2
