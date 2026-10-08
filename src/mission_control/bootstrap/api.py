@@ -26,6 +26,8 @@ from mission_control.adapters.auth.jwt import (
     MissionAuthenticationRejected,
     MissionTokenVerifier,
 )
+from mission_control.adapters.postgres.frames.repository import PostgresFrameRepository
+from mission_control.adapters.postgres.frames.transcript_reads import PostgresMissionEventReader
 from mission_control.adapters.storage.control_plane_payloads import UnavailablePayloadStore
 from mission_control.adapters.temporal.boundary_commands import TemporalBoundaryCommandTransport
 from mission_control.adapters.temporal.search_attributes import verify_belllabs_search_attributes
@@ -36,6 +38,7 @@ from mission_control.application.execution.service import (
     AdmissionPolicyRegistry,
     FamilyAdmissionRegistry,
 )
+from mission_control.application.frames.transcript import TranscriptService
 from mission_control.application.installations.registry import (
     ApplicationRegistry,
     VerifiedApplicationIdentity,
@@ -57,6 +60,7 @@ from mission_control.interfaces.http.mission_control import (
     get_mission_principal,
     router,
 )
+from mission_control.interfaces.http.transcript import router as transcript_router
 
 
 class TemporalDeployment(BaseModel):
@@ -276,6 +280,14 @@ def create_application(
                                 "catalog composition differs from authenticated scope"
                             )
                         application.state.mission_control_catalog_services[key] = catalog
+                        # SPEC-03 (C3): the run transcript, read under the tenant scope.
+                        application.state.mission_control_transcript_services[key] = (
+                            TranscriptService(
+                                PostgresMissionEventReader(pool),
+                                PostgresFrameRepository(pool),
+                                request_scope=request_scope(identity),
+                            )
+                        )
                 application.state.mission_control_ready = True
                 yield
             finally:
@@ -290,11 +302,13 @@ def create_application(
     application.state.mission_control_runtime_services = {}
     application.state.mission_control_admission_services = {}
     application.state.mission_control_catalog_services = {}
+    application.state.mission_control_transcript_services = {}
     application.state.mission_control_compositions = {}
     application.state.mission_control_ready = False
     install_authentication(application, verifier)
     application.include_router(router)
     application.include_router(catalog_router)
+    application.include_router(transcript_router)
 
     @application.get("/health/live")
     def live() -> dict[str, bool]:

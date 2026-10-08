@@ -15,10 +15,13 @@ from mission_control.adapters.postgres.connections import (
 from mission_control.adapters.postgres.control_plane.definition_repository import (
     PostgresDefinitionRepository,
 )
+from mission_control.adapters.postgres.frames.repository import PostgresFrameRepository
+from mission_control.adapters.postgres.frames.transcript_reads import PostgresMissionEventReader
 from mission_control.application.coordinator.coordinator_facade import (
     CoordinatorLimits,
     ProductionCoordinatorFacade,
 )
+from mission_control.application.frames.transcript import TranscriptService
 from mission_control.bootstrap.coordinator_composition import (
     CoordinatorProductionDependencies,
     ReadOnlyCoordinatorRuntimeReadiness,
@@ -26,11 +29,13 @@ from mission_control.bootstrap.coordinator_composition import (
     load_coordinator_catalog_bindings,
 )
 from mission_control.bootstrap.settings import Settings, get_settings
+from mission_control.contracts.identities import parse_request_scope
 from mission_control.interfaces.mcp.coordinator_server import (
     CoordinatorPrincipal,
     StaticPrincipalResolver,
     create_coordinator_server,
 )
+from mission_control.interfaces.mcp.transcript_tools import ScopedTranscripts
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -110,6 +115,7 @@ async def _serve(args: argparse.Namespace) -> None:
             roles=frozenset({"coordinator_planner", "operator"}),
             permissions=frozenset(
                 {
+                    "workflow_run.read",
                     "catalog.read",
                     "capability.discover",
                     "workflow.design.validate",
@@ -123,6 +129,7 @@ async def _serve(args: argparse.Namespace) -> None:
         server = create_coordinator_server(
             facade,
             StaticPrincipalResolver(principal),
+            transcripts=_transcripts(application_pool, principal.request_scope),
         )
         await server.run_http_async(
             transport="streamable-http",
@@ -133,6 +140,25 @@ async def _serve(args: argparse.Namespace) -> None:
             json_response=True,
             show_banner=True,
         )
+
+
+def _transcripts(application_pool: PostgresPool, request_scope: str) -> ScopedTranscripts | None:
+    """SPEC-03 (C3): the transcript of the principal's canonical tenant scope, if any."""
+
+    try:
+        parse_request_scope(request_scope)
+    except ValueError:
+        return None
+    pool = cast(asyncpg.Pool, application_pool)
+    return ScopedTranscripts(
+        {
+            request_scope: TranscriptService(
+                PostgresMissionEventReader(pool),
+                PostgresFrameRepository(pool),
+                request_scope=request_scope,
+            )
+        }
+    )
 
 
 def main() -> None:

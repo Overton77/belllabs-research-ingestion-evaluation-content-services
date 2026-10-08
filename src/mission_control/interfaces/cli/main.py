@@ -70,6 +70,16 @@ class MissionClient:
             raise ValueError("unknown catalog action")
         return self.client.post(f"{self.prefix}/catalog/{action}", json=body)
 
+    def transcript(self, run_id: str, params: dict[str, Any], *, markdown: bool) -> httpx.Response:
+        return self.client.get(
+            f"{self.prefix}/runs/{self._id(run_id)}/transcript",
+            params=params,
+            headers={"Accept": "text/markdown" if markdown else "application/x-ndjson"},
+        )
+
+    def frames_tail_url(self, run_id: str) -> str:
+        return f"{self.prefix}/runs/{self._id(run_id)}/frames/tail"
+
     @staticmethod
     def _id(value: str) -> str:
         if not value or value in {".", ".."}:
@@ -87,6 +97,103 @@ def exit_status(status: int) -> int:
     if status in {400, 404, 422}:
         return 2
     return 5
+
+
+TRANSCRIPT_NEXT_CURSOR = "x-transcript-next-cursor"
+DEFAULT_FOLLOW_SECONDS = 60.0
+
+
+def _transcript_params(args: argparse.Namespace, since: str | None) -> dict[str, Any]:
+    params: dict[str, Any] = {"limit": args.limit}
+    for name in ("activation", "node", "kinds", "subordinate"):
+        value = getattr(args, name, None)
+        if value:
+            params[name] = value
+    if since:
+        params["since"] = since
+    if args.canonical_only:
+        params["canonical_only"] = "true"
+    if args.full:
+        params["full"] = "true"
+    return params
+
+
+def _transcript_error(response: httpx.Response) -> int:
+    try:
+        detail = response.json().get("detail", {})
+    except ValueError:
+        detail = {}
+    code = detail.get("code") if isinstance(detail, dict) else None
+    print(json.dumps({"error": code or "transcript_failed", "status": response.status_code}))
+    if code == "CURSOR_EXPIRED":
+        return 2
+    return exit_status(response.status_code) or 5
+
+
+def _write_utf8(text: str) -> None:
+    """Transcripts carry ✓ and other non-ASCII text; never depend on the console code page."""
+
+    buffer = getattr(sys.stdout, "buffer", None)
+    if buffer is not None:
+        buffer.write(text.encode("utf-8"))
+        buffer.flush()
+    else:
+        sys.stdout.write(text)
+        sys.stdout.flush()
+
+
+def run_transcript(client: MissionClient, args: argparse.Namespace, wait: float | None) -> int:
+    """`run transcript`: print entries (JSONL or Markdown); `--follow` tails new entries."""
+
+    markdown = args.format == "md"
+    since = args.since
+    deadline = time.monotonic() + (wait or DEFAULT_FOLLOW_SECONDS)
+    first = True
+    while True:
+        response = client.transcript(
+            args.run_id, _transcript_params(args, since), markdown=markdown
+        )
+        if response.status_code != 200:
+            return _transcript_error(response)
+        text = response.text
+        next_cursor = response.headers.get(TRANSCRIPT_NEXT_CURSOR) or since
+        # Follow prints only pages that advanced the cursor (Markdown always has a header).
+        if text and (first or next_cursor != since):
+            _write_utf8(text)
+        first = False
+        since = next_cursor
+        if not args.follow:
+            return 0
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            print(json.dumps({"error": "wait_timeout", "next_cursor": since}), file=sys.stderr)
+            return 6
+        time.sleep(min(1.0, remaining))
+
+
+def run_frames_tail(client: MissionClient, args: argparse.Namespace, wait: float | None) -> int:
+    """`run frames --tail`: the non-canonical SSE tail, printed as JSON lines."""
+
+    seconds = wait or DEFAULT_FOLLOW_SECONDS
+    params: dict[str, Any] = {"timeout": seconds}
+    if args.after:
+        params["after"] = args.after
+    with client.client.stream(
+        "GET", client.frames_tail_url(args.run_id), params=params, timeout=seconds + 30
+    ) as response:
+        if response.status_code != 200:
+            response.read()
+            return _transcript_error(response)
+        event = ""
+        for line in response.iter_lines():
+            if line.startswith("event: "):
+                event = line.removeprefix("event: ")
+            elif line.startswith("data: "):
+                data = json.loads(line.removeprefix("data: "))
+                print(json.dumps({"event": event, **data}, ensure_ascii=False))
+                if event == "end":
+                    return 6 if data.get("reason") == "timeout" and args.until_end else 0
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -108,6 +215,24 @@ def main(argv: list[str] | None = None) -> int:
         operation = run_commands.add_parser(action, parents=[common])
         operation.add_argument("run_id")
         operation.add_argument("--request-file", required=True)
+    # SPEC-03 (C3): the run transcript and the non-canonical frame tail.
+    transcript = run_commands.add_parser("transcript", parents=[common])
+    transcript.add_argument("run_id")
+    transcript.add_argument("--format", choices=("jsonl", "md"), default="jsonl")
+    transcript.add_argument("--since")
+    transcript.add_argument("--activation")
+    transcript.add_argument("--node")
+    transcript.add_argument("--kinds", help="comma-separated entry kinds")
+    transcript.add_argument("--canonical-only", action="store_true")
+    transcript.add_argument("--subordinate")
+    transcript.add_argument("--limit", type=int, default=500)
+    transcript.add_argument("--follow", action="store_true")
+    transcript.add_argument("--full", action="store_true")
+    frames = run_commands.add_parser("frames", parents=[common])
+    frames.add_argument("run_id")
+    frames.add_argument("--tail", action="store_true", required=True)
+    frames.add_argument("--after")
+    frames.add_argument("--until-end", action="store_true", help="exit 6 when the tail times out")
     command = groups.add_parser("command", parents=[common])
     commands = command.add_subparsers(dest="action", required=True)
     send = commands.add_parser("send", parents=[common])
@@ -138,9 +263,12 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("API URL must use HTTPS (HTTP is allowed only for loopback)")
         if deadline_seconds is not None and not 0 < deadline_seconds <= 3600:
             raise ValueError("--wait must be greater than zero and at most 3600 seconds")
-        if deadline_seconds is not None and (args.group != "run" or args.action != "inspect"):
+        if deadline_seconds is not None and (
+            args.group != "run" or args.action not in {"inspect", "transcript", "frames"}
+        ):
             raise ValueError(
-                "--wait is supported on run inspect; command admission is not completion"
+                "--wait is supported on run inspect, transcript and frames; "
+                "command admission is not completion"
             )
         body = strict_object(args.request_file) if hasattr(args, "request_file") else None
         with httpx.Client(
@@ -150,6 +278,10 @@ def main(argv: list[str] | None = None) -> int:
             follow_redirects=False,
         ) as transport:
             client = MissionClient(transport, application)
+            if args.group == "run" and args.action == "transcript":
+                return run_transcript(client, args, deadline_seconds)
+            if args.group == "run" and args.action == "frames":
+                return run_frames_tail(client, args, deadline_seconds)
             deadline = time.monotonic() + (deadline_seconds or 0)
             while True:
                 if deadline_seconds is not None:

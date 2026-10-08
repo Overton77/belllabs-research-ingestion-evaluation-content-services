@@ -26,6 +26,10 @@ from mission_control.interfaces.mcp.coordinator_resources import (
     RESOURCE_TEMPLATE_NAMES,
     register_resources,
 )
+from mission_control.interfaces.mcp.transcript_tools import (
+    ScopedTranscripts,
+    register_transcript_tools,
+)
 
 SCHEMA_VERSION = "1"
 LOGGER = logging.getLogger(__name__)
@@ -235,6 +239,7 @@ def create_coordinator_server(
     principals: PrincipalResolver,
     *,
     auth: AuthProvider | None = None,
+    transcripts: ScopedTranscripts | None = None,
 ) -> FastMCP:
     surface = getattr(
         facade,
@@ -451,6 +456,9 @@ def create_coordinator_server(
 
     register_resources(server, facade, principals)
     register_prompts(server, facade, principals)
+    if transcripts is not None:
+        # SPEC-03 (C3): read-only run transcript tool and resource.
+        register_transcript_tools(server, transcripts, principals, call=_principal_call)
     unavailable_tools = set(PRODUCTION_COORDINATOR_TOOL_NAMES) - set(surface.tools)
     if unavailable_tools:
         server.disable(names=unavailable_tools, components={"tool"})
