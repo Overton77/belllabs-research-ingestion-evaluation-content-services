@@ -28,6 +28,17 @@ from mission_control.application.capabilities.capability_search import (
 from mission_control.application.capabilities.capability_search_repository import (
     CatalogSearchRepository,
 )
+from mission_control.application.capabilities.catalog import (
+    AmbiguousCapability,
+    CapabilityInspection,
+    CapabilityNotFound,
+    PinRequest,
+    PinResolution,
+    PluginMemberView,
+    find_published_by_pin,
+    inspect_pin,
+    resolve_pin,
+)
 from mission_control.application.capabilities.external_candidate_inspection import (
     ExternalCandidateInspectionReport,
     ExternalCandidateInspectionRequest,
@@ -69,6 +80,9 @@ from mission_control.domain.authoring.errors import (
     ReferenceMismatch,
     RetiredDefinition,
 )
+from mission_control.domain.capabilities.catalog_entry import capability_pin
+from mission_control.domain.capabilities.host_support import CapabilityHostSupport, LaneProfile
+from mission_control.domain.capabilities.pins import CapabilityPin, CapabilityPinError
 from mission_control.domain.coordinator.contracts import (
     CapabilitySearchHit,
     CapabilitySearchRequest,
@@ -143,6 +157,12 @@ class CapabilityDetail(FacadeContract):
     published_at: datetime
     definition: dict[str, object]
     token_use: tuple[TokenUseMeasurement, ...]
+    # FT-A8: the same inspection the CLI and HTTP pin routes return.
+    pin: str | None = None
+    host_support: CapabilityHostSupport | None = None
+    supported_profiles: tuple[LaneProfile, ...] = ()
+    secret_refs: tuple[str, ...] = ()
+    plugin_members: tuple[PluginMemberView, ...] = ()
 
 
 class WorkflowDesignValidation(FacadeContract):
@@ -336,6 +356,7 @@ class ProductionCoordinatorFacade:
     ROOT_TOOLS = (
         "coordinator_bootstrap",
         "search_capabilities",
+        "pin_capability",
         "get_capability",
         "discover_mcp_servers",
         "discover_agent_skills",
@@ -515,10 +536,28 @@ class ProductionCoordinatorFacade:
                 if report.tenant_scope != principal.tenant_scope:
                     raise self._not_found("candidate inspection was not found")
                 return report
-            ref = ExactDefinitionRef.model_validate(exact_ref)
+            if "pin" in exact_ref:
+                try:
+                    pin = CapabilityPin.parse(str(exact_ref["pin"]))
+                except CapabilityPinError as error:
+                    raise CoordinatorDomainError(
+                        CoordinatorErrorCode.INVALID_ARGUMENT, str(error)
+                    ) from None
+                found = await find_published_by_pin(self._definitions, pin)
+                if found is None:
+                    raise self._not_found("no published capability for this pin")
+                ref = found.ref
+            else:
+                ref = ExactDefinitionRef.model_validate(exact_ref)
             published = await self._published(ref)
             await self._require_catalog_read(principal, published)
             definition_payload = published.definition.model_dump(mode="json")
+            try:
+                inspection: CapabilityInspection | None = await inspect_pin(
+                    self._definitions, capability_pin(published).render()
+                )
+            except CapabilityNotFound:
+                inspection = None
             return CapabilityDetail(
                 exact_ref=published.ref,
                 lifecycle_status="published",
@@ -528,9 +567,55 @@ class ProductionCoordinatorFacade:
                     published.definition,
                     definition_payload,
                 ),
+                pin=capability_pin(published).render(),
+                host_support=inspection.host_support if inspection else None,
+                supported_profiles=inspection.supported_profiles if inspection else (),
+                secret_refs=inspection.secret_refs if inspection else (),
+                plugin_members=inspection.plugin_members if inspection else (),
             )
 
         return await self._run("get_capability", principal, exact_ref, operation)
+
+    async def pin(
+        self,
+        principal: CoordinatorPrincipalLike,
+        request: dict[str, object],
+    ) -> object:
+        """FT-A8 ``pin_capability``: exactly one Capability Pin, or AMBIGUOUS_CAPABILITY."""
+
+        async def operation() -> PinResolution:
+            self._require_permission(principal, "catalog.read")
+            if not self._flags.capability_search_enabled or self._search is None:
+                raise self._dependency("internal capability search is disabled")
+            parsed = PinRequest.model_validate(request)
+            search_request = parsed.search_request(principal.tenant_scope)
+            if search_request.tenant_scope != principal.tenant_scope:
+                raise self._forbidden("catalog pin scope differs from authenticated tenant")
+            allowed = await self._catalog_authorization.allowed_kinds(
+                principal, search_request.kinds
+            )
+            if not allowed:
+                raise self._forbidden("authenticated principal cannot read these catalog kinds")
+            try:
+                return await resolve_pin(
+                    self._search,
+                    search_request.model_copy(update={"kinds": allowed}),
+                    margin=parsed.margin,
+                )
+            except AmbiguousCapability as error:
+                raise CoordinatorDomainError(
+                    CoordinatorErrorCode.AMBIGUOUS_CAPABILITY,
+                    str(error),
+                    details={
+                        "candidates": ",".join(item.pin for item in error.candidates),
+                    },
+                ) from None
+            except CapabilityNotFound as error:
+                raise CoordinatorDomainError(
+                    CoordinatorErrorCode.CAPABILITY_NOT_FOUND, str(error)
+                ) from None
+
+        return await self._run("pin_capability", principal, request, operation)
 
     async def discover_mcp_servers(
         self,
@@ -1010,6 +1095,7 @@ class ProductionCoordinatorFacade:
         tools = ["coordinator_bootstrap", "get_capability", "validate_workflow_design"]
         if self._flags.capability_search_enabled:
             tools.insert(1, "search_capabilities")
+            tools.insert(2, "pin_capability")
         if self._flags.external_discovery_enabled:
             tools.extend(("discover_mcp_servers", "discover_agent_skills"))
         if self._inspections is not None:

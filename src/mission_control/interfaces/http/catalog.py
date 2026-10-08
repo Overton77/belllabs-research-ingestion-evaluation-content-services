@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from mission_control.application.capabilities.bundle_custody import (
     BundleCustodyConflict,
@@ -15,7 +15,19 @@ from mission_control.application.capabilities.bundle_custody import (
     PublishResult,
 )
 from mission_control.application.capabilities.capability_search import CapabilitySearchResponse
-from mission_control.application.capabilities.catalog import CatalogService
+from mission_control.application.capabilities.catalog import (
+    AmbiguousCapability,
+    CapabilityInspection,
+    CapabilityNotFound,
+    CatalogService,
+    PinRequest,
+    PinResolution,
+    RenderPreview,
+    RenderRequest,
+    inspect_pin,
+    render_pin,
+    resolve_pin,
+)
 from mission_control.application.capabilities.external_candidate_inspection import (
     ExternalCandidateInspectionReport,
     ExternalCandidateInspectionRequest,
@@ -33,6 +45,7 @@ from mission_control.domain.authoring.contracts import ExactDefinitionRef, Publi
 from mission_control.domain.authoring.errors import DefinitionNotFound
 from mission_control.domain.capabilities.bundles import CapabilityDrift
 from mission_control.domain.capabilities.catalog_entry import CatalogEntrySummary, summarize
+from mission_control.domain.capabilities.pins import CapabilityPinError
 from mission_control.domain.coordinator.contracts import CapabilitySearchRequest
 from mission_control.interfaces.http.mission_control import (
     MissionPrincipal,
@@ -119,16 +132,30 @@ async def resolve(
         raise HTTPException(404, detail={"code": "definition_not_found"}) from None
 
 
+def _search_request(raw: dict[str, Any], service: CatalogService) -> CapabilitySearchRequest:
+    """FT-A8: ``tenant_scope`` may be omitted; it defaults to the service's catalog scope."""
+    values = dict(raw)
+    values.setdefault("tenant_scope", service.catalog_scope)
+    try:
+        request = CapabilitySearchRequest.model_validate(values)
+    except ValidationError as error:
+        raise HTTPException(
+            422, detail={"code": "invalid_search_request", "errors": error.errors()}
+        ) from None
+    if request.tenant_scope != service.catalog_scope:
+        raise HTTPException(403, detail={"code": "catalog_scope_denied"})
+    return request
+
+
 @router.post("/search")
 async def search(
-    body: CapabilitySearchRequest, principal: Principal, service: Service
+    body: Annotated[dict[str, Any], Body()], principal: Principal, service: Service
 ) -> CapabilitySearchResponse:
     permitted(principal, "catalog:read")
-    if body.tenant_scope != service.catalog_scope:
-        raise HTTPException(403, detail={"code": "catalog_scope_denied"})
+    request = _search_request(body, service)
     if service.search is None:
         raise HTTPException(503, detail={"code": "catalog_search_unavailable"})
-    return await service.search.search(body)
+    return await service.search.search(request)
 
 
 @router.post("/discover")
@@ -210,4 +237,66 @@ async def publish_complete(
     except ValueError as error:
         raise HTTPException(
             422, detail={"code": "invalid_bundle_definition", "message": str(error)}
+        ) from None
+
+
+@router.post("/pin")
+async def pin(body: PinRequest, principal: Principal, service: Service) -> PinResolution:
+    """FT-A8: exactly one Capability Pin for a query, or AMBIGUOUS_CAPABILITY (422)."""
+    permitted(principal, "catalog:read")
+    if service.search is None:
+        raise HTTPException(503, detail={"code": "catalog_search_unavailable"})
+    request = body.search_request(service.catalog_scope)
+    if request.tenant_scope != service.catalog_scope:
+        raise HTTPException(403, detail={"code": "catalog_scope_denied"})
+    try:
+        return await resolve_pin(service.search, request, margin=body.margin)
+    except AmbiguousCapability as error:
+        raise HTTPException(
+            422,
+            detail={
+                "code": AmbiguousCapability.code,
+                "message": str(error),
+                "candidates": [item.model_dump(mode="json") for item in error.candidates],
+            },
+        ) from None
+    except CapabilityNotFound as error:
+        raise HTTPException(
+            404, detail={"code": CapabilityNotFound.code, "message": str(error)}
+        ) from None
+
+
+@router.get("/pins/{pin:path}")
+async def get_pin(pin: str, principal: Principal, service: Service) -> CapabilityInspection:
+    """The published row a pin names: body, host support, secret ref names, plugin members."""
+    permitted(principal, "catalog:read")
+    try:
+        return await inspect_pin(service.definitions, pin)
+    except CapabilityPinError as error:
+        raise HTTPException(422, detail={"code": "invalid_pin", "message": str(error)}) from None
+    except CapabilityNotFound as error:
+        raise HTTPException(
+            404, detail={"code": CapabilityNotFound.code, "message": str(error)}
+        ) from None
+
+
+@router.post("/render")
+async def render(body: RenderRequest, principal: Principal, service: Service) -> RenderPreview:
+    """Preview what a pin projects into one lane profile's files (A4 Host Projection)."""
+    permitted(principal, "catalog:read")
+    try:
+        return await render_pin(service.definitions, body, custody=service.custody)
+    except CapabilityPinError as error:
+        raise HTTPException(422, detail={"code": "invalid_pin", "message": str(error)}) from None
+    except CapabilityNotFound as error:
+        raise HTTPException(
+            404, detail={"code": CapabilityNotFound.code, "message": str(error)}
+        ) from None
+    except CapabilityDrift as error:
+        raise HTTPException(
+            409, detail={"code": CapabilityDrift.code, "message": str(error)}
+        ) from None
+    except ValueError as error:
+        raise HTTPException(
+            422, detail={"code": "not_projectable", "message": str(error)}
         ) from None

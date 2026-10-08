@@ -136,6 +136,13 @@ class CapabilitySearchService:
     def embeddings_configured(self) -> bool:
         return self._embeddings is not None
 
+    def max_fused_score(self, mode: SearchMode) -> float:
+        """The fused score of a hit ranked first in every list the mode runs."""
+        weights = self._lexical_weight + self._trigram_weight
+        if mode == "hybrid":
+            weights += self._semantic_weight
+        return weights / (self._rrf_k + 1)
+
     async def _query_embedding(self, query: str) -> tuple[float, ...] | None:
         """The query vector, or None when no route is configured or the route fails."""
         if self._embeddings is None:

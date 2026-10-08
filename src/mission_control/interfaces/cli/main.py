@@ -69,9 +69,13 @@ class MissionClient:
             return self.client.get(f"{self.prefix}/catalog/definitions")
         if action == "components":
             return self.client.post(f"{self.prefix}/catalog/components/search", json=body)
-        if action not in {"resolve", "search", "discover", "inspect"}:
+        if action not in {"resolve", "search", "discover", "inspect", "pin", "render"}:
             raise ValueError("unknown catalog action")
         return self.client.post(f"{self.prefix}/catalog/{action}", json=body)
+
+    def catalog_pin(self, pin: str) -> httpx.Response:
+        """FT-A8: inspect one Capability Pin (body, host support, members)."""
+        return self.client.get(f"{self.prefix}/catalog/pins/{quote(pin, safe='')}")
 
     def publish(self, phase: str, body: dict[str, Any]) -> httpx.Response:
         if phase not in {"prepare", "complete"}:
@@ -158,6 +162,40 @@ def publish_bundle(
     return _json(completed), exit_status(completed.status_code)
 
 
+def catalog_flags_body(args: argparse.Namespace) -> dict[str, Any]:
+    """Build a search or pin body from flags (``tenant_scope`` defaults on the server)."""
+    query = getattr(args, "query", None)
+    if not query:
+        raise ValueError("--query or --request-file is required")
+    body: dict[str, Any] = {"query": query}
+    if getattr(args, "kinds", None):
+        body["kinds"] = list(args.kinds)
+    if getattr(args, "hosts", None):
+        body["host_profiles"] = list(args.hosts)
+    if getattr(args, "side_effects", None):
+        body["side_effect_classes"] = list(args.side_effects)
+    if getattr(args, "limit", None) is not None:
+        body["limit"] = args.limit
+    if getattr(args, "margin", None) is not None:
+        body["margin"] = args.margin
+    return body
+
+
+def catalog_response(
+    client: MissionClient, args: argparse.Namespace, body: dict[str, Any] | None
+) -> httpx.Response:
+    action = args.action
+    if action in {"search", "pin"} and body is None:
+        body = catalog_flags_body(args)
+    if action == "inspect" and body is None:
+        if not getattr(args, "pin", None):
+            raise ValueError("catalog inspect needs --pin or --request-file")
+        return client.catalog_pin(args.pin)
+    if action == "render":
+        body = {"pin": args.pin, "host": args.host}
+    return client.catalog(action, body)
+
+
 def _json(response: httpx.Response) -> dict[str, Any]:
     try:
         payload = response.json()
@@ -207,9 +245,26 @@ def main(argv: list[str] | None = None) -> int:
     catalog = groups.add_parser("catalog", parents=[common])
     catalog_commands = catalog.add_subparsers(dest="action", required=True)
     catalog_commands.add_parser("list", parents=[common])
-    for action in ("resolve", "search", "discover", "inspect", "components"):
+    for action in ("resolve", "discover", "components"):
         operation = catalog_commands.add_parser(action, parents=[common])
         operation.add_argument("--request-file", required=True)
+    # FT-A8: search and pin take flags (or a request file); inspect takes --pin or a file.
+    for action in ("search", "pin"):
+        operation = catalog_commands.add_parser(action, parents=[common])
+        operation.add_argument("--request-file")
+        operation.add_argument("--query")
+        operation.add_argument("--kind", action="append", dest="kinds")
+        operation.add_argument("--host", action="append", dest="hosts")
+        operation.add_argument("--side-effect", action="append", dest="side_effects")
+        operation.add_argument("--limit", type=int)
+        if action == "pin":
+            operation.add_argument("--margin", type=float)
+    inspect_catalog = catalog_commands.add_parser("inspect", parents=[common])
+    inspect_catalog.add_argument("--request-file")
+    inspect_catalog.add_argument("--pin")
+    render = catalog_commands.add_parser("render", parents=[common])
+    render.add_argument("--pin", required=True)
+    render.add_argument("--host", required=True)
     publish = catalog_commands.add_parser("publish", parents=[common])
     publish.add_argument("--dir", required=True)
     publish.add_argument(
@@ -239,7 +294,7 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError(
                 "--wait is supported on run inspect; command admission is not completion"
             )
-        body = strict_object(args.request_file) if hasattr(args, "request_file") else None
+        body = strict_object(args.request_file) if getattr(args, "request_file", None) else None
         if args.group == "catalog" and args.action == "publish":
             with (
                 httpx.Client(
@@ -270,7 +325,7 @@ def main(argv: list[str] | None = None) -> int:
                         max(0.001, min(30, deadline - time.monotonic()))
                     )
                 if args.group == "catalog":
-                    response = client.catalog(args.action, body)
+                    response = catalog_response(client, args, body)
                 elif args.action == "inspect":
                     response = client.inspection(args.run_id)
                 elif args.action == "admit" and body is not None:

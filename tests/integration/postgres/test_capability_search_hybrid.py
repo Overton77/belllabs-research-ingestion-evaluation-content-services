@@ -249,3 +249,25 @@ async def test_migration_0026_constraints(catalog_db: CommonDatabase) -> None:
         assert json.loads(json.dumps(sorted(checks)))  # constraint names are plain text
     finally:
         await connection.close()
+
+
+@pytest.mark.asyncio
+async def test_pin_resolution_and_inspection_on_postgres(
+    catalog_db: CommonDatabase, runtime_pool: asyncpg.Pool
+) -> None:
+    """FT-A8: pins resolve through PostgresDefinitionRepository.find_by_pin."""
+    from mission_control.application.capabilities.catalog import inspect_pin
+
+    await _seed(catalog_db)
+    definitions = PostgresDefinitionRepository(runtime_pool, catalog_scope=BIOTECH_CATALOG)
+    published = await definitions.find_by_pin("mcp.pubmed", "sha256:" + "0" * 64)
+    assert published is None
+    listed = {item.ref.logical_id: item for item in await definitions.list_published_definitions()}
+    from mission_control.domain.capabilities.catalog_entry import capability_pin
+
+    pin = capability_pin(listed["mcp.pubmed"]).render()
+    inspection = await inspect_pin(definitions, pin)
+    assert inspection.pin == pin
+    assert set(inspection.secret_refs) == {"NCBI_API_KEY", "NCBI_ADMIN_EMAIL", "UNPAYWALL_EMAIL"}
+    assert inspection.host_support is not None
+    assert inspection.host_support.status("cursor_cloud").value == "unqualified"

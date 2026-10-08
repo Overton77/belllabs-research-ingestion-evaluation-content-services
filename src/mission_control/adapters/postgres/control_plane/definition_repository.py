@@ -404,6 +404,26 @@ class PostgresDefinitionRepository:
             return None
         return PublishedDefinition.model_validate(json_value(row["manifest"]))
 
+    async def find_by_pin(self, logical_id: str, digest: str) -> PublishedDefinition | None:
+        """FT-A8: the newest non-proposed revision with this logical id and definition digest."""
+        async with self._transaction() as connection:
+            row = await connection.fetchrow(
+                """SELECT manifest FROM mission_control.asset_version
+                   WHERE installation_id=$1 AND application_id=$2 AND contract=$3
+                     AND manifest->'ref'->>'logical_id' = $4
+                     AND manifest->'ref'->>'digest' = $5
+                     AND status <> 'proposed'
+                   ORDER BY version::bigint DESC LIMIT 1""",
+                *self._scope,
+                PUBLISHED_DEFINITION_CONTRACT,
+                logical_id,
+                digest,
+            )
+            if row is None:
+                return None
+            publication = PublishedDefinition.model_validate(json_value(row["manifest"]))
+            return await self._get(connection, publication.ref)
+
     async def find_by_reference(
         self, kind: str, logical_id: str, reference: str
     ) -> PublishedDefinition | None:
