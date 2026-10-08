@@ -11,6 +11,7 @@ from mission_control.adapters.temporal.boundary_activities import apply_boundary
 from mission_control.adapters.temporal.registration.activities import coordinator_activities
 from mission_control.adapters.temporal.registration.workflows import coordinator_workflows
 from mission_control.adapters.temporal.workflow_sandbox import coordinator_workflow_runner
+from mission_control.application.context.pack_service import ContextPackRejected
 from mission_control.application.coordinator.coordinator_results import (
     TerminalWorkflowCompletionPort,
 )
@@ -80,10 +81,13 @@ class StageGraphActivities:
         self, request: StageGraphAdmissionActivityRequest
     ) -> StageGraphAdmissionActivityResult:
         if request.operation is None:
-            request = replace(
-                request,
-                operation=await self._operation_materializer.materialize(request),
-            )
+            try:
+                operation = await self._operation_materializer.materialize(request)
+            except ContextPackRejected as error:
+                # FT-B2: a packet that cannot be sealed (for example a mandatory item over
+                # budget) rejects the admission before any provider work; never truncate.
+                raise ApplicationError(str(error), type=error.code, non_retryable=True) from error
+            request = replace(request, operation=operation)
         return await self._canonical_decisions().admit_operation(request)
 
     @activity.defn(name="stagegraph.decide_result")

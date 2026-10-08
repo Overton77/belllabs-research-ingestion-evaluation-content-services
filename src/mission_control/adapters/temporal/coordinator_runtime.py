@@ -19,6 +19,7 @@ from mission_control.adapters.temporal.orchestration_activities import (
     create_stagegraph_worker,
 )
 from mission_control.adapters.temporal.registration.task_queues import BellLabsTaskQueues
+from mission_control.application.context.pack_service import ContextPackService
 from mission_control.application.coordinator.coordinator_results import (
     TerminalWorkflowCompletionPort,
 )
@@ -90,6 +91,8 @@ class GoalDirectedCoordinatorDependencies:
     actor: ActorContext
     # RRM-009: the deployment's heartbeat timeout per operation class (RRM-008 cancel latency).
     operation_heartbeats: OperationHeartbeatPolicy = DEFAULT_OPERATION_HEARTBEATS
+    # FT-B3: when composed, every iteration and role starts from a sealed Context Packet.
+    context_packs: ContextPackService | None = None
 
 
 @dataclass(frozen=True)
@@ -101,6 +104,8 @@ class StageGraphCoordinatorDependencies:
     operation_bindings: SemanticOperationBindingRepository
     templates: StageGraphOperationTemplateProvider
     operation_heartbeats: OperationHeartbeatPolicy = DEFAULT_OPERATION_HEARTBEATS
+    # FT-B2: when composed, every admitted stage starts from a sealed Context Packet.
+    context_packs: ContextPackService | None = None
 
 
 def create_routed_coordinator_activities(
@@ -129,6 +134,7 @@ def create_routed_coordinator_activities(
                 templates=stagegraph.templates,
                 operation_bindings=stagegraph.operation_bindings,
                 heartbeats=stagegraph.operation_heartbeats,
+                context_packs=stagegraph.context_packs,
             ),
             boundary=BoundaryCommandApplicationService(
                 stagegraph.run_control, orchestration_lifecycle_actor()
@@ -146,6 +152,7 @@ def create_routed_coordinator_activities(
                 goal_directed.run_control, orchestration_lifecycle_actor()
             ),
             heartbeats=goal_directed.operation_heartbeats,
+            context_packs=goal_directed.context_packs,
         ),
     )
 

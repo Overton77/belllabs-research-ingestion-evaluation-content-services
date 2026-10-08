@@ -1,0 +1,330 @@
+{
+  "$defs": {
+    "ContextPurpose": {
+      "enum": [
+        "stage_start",
+        "iteration_start",
+        "continuation",
+        "fork",
+        "chain_link",
+        "follow_up_turn"
+      ],
+      "title": "ContextPurpose",
+      "type": "string"
+    },
+    "ContextSourceKind": {
+      "enum": [
+        "accepted_output",
+        "loop_state",
+        "journal_digest",
+        "progress_review",
+        "human_answer",
+        "blocker",
+        "continuation_checkpoint",
+        "chain_supply",
+        "catalog_context",
+        "operating_contract",
+        "goals_and_criteria",
+        "pending_commitments",
+        "budget_remaining",
+        "workspace_map",
+        "queued_instruction"
+      ],
+      "title": "ContextSourceKind",
+      "type": "string"
+    },
+    "ContextTrust": {
+      "enum": [
+        "authoritative",
+        "admitted_input",
+        "untrusted_content"
+      ],
+      "title": "ContextTrust",
+      "type": "string"
+    },
+    "ExpansionTier": {
+      "enum": [
+        "inline",
+        "reference",
+        "materialize",
+        "workspace"
+      ],
+      "title": "ExpansionTier",
+      "type": "string"
+    },
+    "OmissionReason": {
+      "enum": [
+        "budget_exhausted",
+        "trust_filtered",
+        "expired",
+        "duplicate",
+        "not_accepted",
+        "unsupported_media",
+        "policy_denied"
+      ],
+      "title": "OmissionReason",
+      "type": "string"
+    },
+    "OmittedItem": {
+      "additionalProperties": false,
+      "description": "A candidate that did not enter the packet at its requested tier (OmittedItem@1).",
+      "properties": {
+        "bytes": {
+          "minimum": 0,
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "content_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Content Digest",
+          "type": "string"
+        },
+        "downgraded_to": {
+          "default": "none",
+          "enum": [
+            "reference",
+            "none"
+          ],
+          "title": "Downgraded To",
+          "type": "string"
+        },
+        "item_id": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Item Id",
+          "type": "string"
+        },
+        "reason": {
+          "$ref": "#/$defs/OmissionReason"
+        },
+        "source_kind": {
+          "$ref": "#/$defs/ContextSourceKind"
+        },
+        "source_ref": {
+          "minLength": 1,
+          "title": "Source Ref",
+          "type": "string"
+        }
+      },
+      "required": [
+        "item_id",
+        "source_kind",
+        "source_ref",
+        "content_digest",
+        "bytes",
+        "reason"
+      ],
+      "title": "OmittedItem",
+      "type": "object"
+    },
+    "PacketScope": {
+      "additionalProperties": false,
+      "properties": {
+        "application_id": {
+          "minLength": 1,
+          "title": "Application Id",
+          "type": "string"
+        },
+        "installation_id": {
+          "minLength": 1,
+          "title": "Installation Id",
+          "type": "string"
+        },
+        "tenant_id": {
+          "minLength": 1,
+          "title": "Tenant Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "installation_id",
+        "application_id",
+        "tenant_id"
+      ],
+      "title": "PacketScope",
+      "type": "object"
+    },
+    "PacketTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "activation_id": {
+          "minLength": 1,
+          "title": "Activation Id",
+          "type": "string"
+        },
+        "attempt_no": {
+          "minimum": 1,
+          "title": "Attempt No",
+          "type": "integer"
+        },
+        "generation": {
+          "minimum": 0,
+          "title": "Generation",
+          "type": "integer"
+        },
+        "mission_id": {
+          "minLength": 1,
+          "title": "Mission Id",
+          "type": "string"
+        },
+        "node_key": {
+          "minLength": 1,
+          "title": "Node Key",
+          "type": "string"
+        },
+        "purpose": {
+          "$ref": "#/$defs/ContextPurpose"
+        },
+        "revision_id": {
+          "minLength": 1,
+          "title": "Revision Id",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "mission_id",
+        "run_id",
+        "revision_id",
+        "node_key",
+        "activation_id",
+        "attempt_no",
+        "generation",
+        "purpose"
+      ],
+      "title": "PacketTarget",
+      "type": "object"
+    },
+    "SelectedItemRef": {
+      "additionalProperties": false,
+      "properties": {
+        "content_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Content Digest",
+          "type": "string"
+        },
+        "item_id": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Item Id",
+          "type": "string"
+        },
+        "mandatory": {
+          "title": "Mandatory",
+          "type": "boolean"
+        },
+        "source_ref": {
+          "title": "Source Ref",
+          "type": "string"
+        },
+        "tier": {
+          "$ref": "#/$defs/ExpansionTier"
+        },
+        "trust": {
+          "$ref": "#/$defs/ContextTrust"
+        }
+      },
+      "required": [
+        "item_id",
+        "source_ref",
+        "content_digest",
+        "tier",
+        "trust",
+        "mandatory"
+      ],
+      "title": "SelectedItemRef",
+      "type": "object"
+    }
+  },
+  "$id": "mc.context_selection.v1",
+  "additionalProperties": false,
+  "description": "``mc.context_selection.v1``: the authority record whose plan is the packet.",
+  "properties": {
+    "file_plan_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "File Plan Digest",
+      "type": "string"
+    },
+    "model_profile_ref": {
+      "title": "Model Profile Ref",
+      "type": "string"
+    },
+    "omitted": {
+      "items": {
+        "$ref": "#/$defs/OmittedItem"
+      },
+      "title": "Omitted",
+      "type": "array"
+    },
+    "packer_version": {
+      "title": "Packer Version",
+      "type": "string"
+    },
+    "packet_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Packet Digest",
+      "type": "string"
+    },
+    "packet_id": {
+      "minLength": 1,
+      "title": "Packet Id",
+      "type": "string"
+    },
+    "prompt_plan_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Prompt Plan Digest",
+      "type": "string"
+    },
+    "purpose": {
+      "$ref": "#/$defs/ContextPurpose"
+    },
+    "schema_version": {
+      "const": "mc.context_selection.v1",
+      "default": "mc.context_selection.v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "scope": {
+      "$ref": "#/$defs/PacketScope"
+    },
+    "sealed_at": {
+      "format": "date-time",
+      "title": "Sealed At",
+      "type": "string"
+    },
+    "selected": {
+      "items": {
+        "$ref": "#/$defs/SelectedItemRef"
+      },
+      "title": "Selected",
+      "type": "array"
+    },
+    "selection_id": {
+      "minLength": 1,
+      "title": "Selection Id",
+      "type": "string"
+    },
+    "target": {
+      "$ref": "#/$defs/PacketTarget"
+    }
+  },
+  "required": [
+    "selection_id",
+    "packet_id",
+    "packet_digest",
+    "purpose",
+    "scope",
+    "target",
+    "model_profile_ref",
+    "packer_version",
+    "selected",
+    "omitted",
+    "prompt_plan_digest",
+    "file_plan_digest",
+    "sealed_at"
+  ],
+  "title": "ContextSelectionRecord",
+  "type": "object"
+}

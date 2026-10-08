@@ -2,7 +2,8 @@
 
 programs contains family interpretation; execution owns operation/run invariants;
 authoring owns immutable definitions and compilation; composition owns delegated
-run contracts. Policies remain explicit admitted inputs.
+run contracts; context owns the Context Packet (mc.context_packet.v1), the pure
+Context Packer and its renderers (ADR-0027). Policies remain explicit admitted inputs.
 
 Domain imports neither Temporal, database clients, FastAPI nor model/provider SDKs.
 Do not turn interpreter proposals into authoritative lifecycle changes. Preserve

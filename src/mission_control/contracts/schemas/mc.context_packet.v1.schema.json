@@ -1,0 +1,824 @@
+{
+  "$defs": {
+    "ContextItem": {
+      "additionalProperties": false,
+      "description": "One item of a packet (ContextItem@1).",
+      "properties": {
+        "binding_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Binding Name"
+        },
+        "bytes": {
+          "minimum": 0,
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "content_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Content Digest",
+          "type": "string"
+        },
+        "inline": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InlineBody"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "item_id": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Item Id",
+          "type": "string"
+        },
+        "mandatory": {
+          "title": "Mandatory",
+          "type": "boolean"
+        },
+        "materialize": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MaterializeBody"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "media_type": {
+          "minLength": 1,
+          "title": "Media Type",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/ItemProvenance",
+          "default": {
+            "accepted_decision_ref": null,
+            "chain_link_id": null,
+            "iteration_id": null,
+            "producer_activation_id": null,
+            "producer_generation": null,
+            "provisional": false
+          }
+        },
+        "reference": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReferenceBody"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "schema_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Schema Ref"
+        },
+        "source_kind": {
+          "$ref": "#/$defs/ContextSourceKind"
+        },
+        "source_ref": {
+          "minLength": 1,
+          "title": "Source Ref",
+          "type": "string"
+        },
+        "tier": {
+          "$ref": "#/$defs/ExpansionTier"
+        },
+        "trust": {
+          "$ref": "#/$defs/ContextTrust"
+        },
+        "workspace": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkspaceBody"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "item_id",
+        "source_kind",
+        "source_ref",
+        "content_digest",
+        "bytes",
+        "media_type",
+        "trust",
+        "tier",
+        "mandatory"
+      ],
+      "title": "ContextItem",
+      "type": "object"
+    },
+    "ContextPurpose": {
+      "enum": [
+        "stage_start",
+        "iteration_start",
+        "continuation",
+        "fork",
+        "chain_link",
+        "follow_up_turn"
+      ],
+      "title": "ContextPurpose",
+      "type": "string"
+    },
+    "ContextSourceKind": {
+      "enum": [
+        "accepted_output",
+        "loop_state",
+        "journal_digest",
+        "progress_review",
+        "human_answer",
+        "blocker",
+        "continuation_checkpoint",
+        "chain_supply",
+        "catalog_context",
+        "operating_contract",
+        "goals_and_criteria",
+        "pending_commitments",
+        "budget_remaining",
+        "workspace_map",
+        "queued_instruction"
+      ],
+      "title": "ContextSourceKind",
+      "type": "string"
+    },
+    "ContextTrust": {
+      "enum": [
+        "authoritative",
+        "admitted_input",
+        "untrusted_content"
+      ],
+      "title": "ContextTrust",
+      "type": "string"
+    },
+    "ExpansionTier": {
+      "enum": [
+        "inline",
+        "reference",
+        "materialize",
+        "workspace"
+      ],
+      "title": "ExpansionTier",
+      "type": "string"
+    },
+    "InlineBody": {
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "tokens": {
+          "minimum": 0,
+          "title": "Tokens",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "text",
+        "tokens"
+      ],
+      "title": "InlineBody",
+      "type": "object"
+    },
+    "ItemProvenance": {
+      "additionalProperties": false,
+      "properties": {
+        "accepted_decision_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Accepted Decision Ref"
+        },
+        "chain_link_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Chain Link Id"
+        },
+        "iteration_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Iteration Id"
+        },
+        "producer_activation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Producer Activation Id"
+        },
+        "producer_generation": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Producer Generation"
+        },
+        "provisional": {
+          "default": false,
+          "title": "Provisional",
+          "type": "boolean"
+        }
+      },
+      "title": "ItemProvenance",
+      "type": "object"
+    },
+    "MaterializeBody": {
+      "additionalProperties": false,
+      "properties": {
+        "durable_ref": {
+          "minLength": 1,
+          "title": "Durable Ref",
+          "type": "string"
+        },
+        "manifest_entry_ref": {
+          "minLength": 1,
+          "title": "Manifest Entry Ref",
+          "type": "string"
+        },
+        "mode": {
+          "const": "read_only",
+          "default": "read_only",
+          "title": "Mode",
+          "type": "string"
+        },
+        "path": {
+          "pattern": "^/[A-Za-z0-9._/-]+$",
+          "title": "Path",
+          "type": "string"
+        },
+        "summary": {
+          "default": "",
+          "maxLength": 2000,
+          "title": "Summary",
+          "type": "string"
+        },
+        "tokens": {
+          "minimum": 0,
+          "title": "Tokens",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "manifest_entry_ref",
+        "durable_ref",
+        "tokens"
+      ],
+      "title": "MaterializeBody",
+      "type": "object"
+    },
+    "OmissionReason": {
+      "enum": [
+        "budget_exhausted",
+        "trust_filtered",
+        "expired",
+        "duplicate",
+        "not_accepted",
+        "unsupported_media",
+        "policy_denied"
+      ],
+      "title": "OmissionReason",
+      "type": "string"
+    },
+    "OmittedItem": {
+      "additionalProperties": false,
+      "description": "A candidate that did not enter the packet at its requested tier (OmittedItem@1).",
+      "properties": {
+        "bytes": {
+          "minimum": 0,
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "content_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Content Digest",
+          "type": "string"
+        },
+        "downgraded_to": {
+          "default": "none",
+          "enum": [
+            "reference",
+            "none"
+          ],
+          "title": "Downgraded To",
+          "type": "string"
+        },
+        "item_id": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Item Id",
+          "type": "string"
+        },
+        "reason": {
+          "$ref": "#/$defs/OmissionReason"
+        },
+        "source_kind": {
+          "$ref": "#/$defs/ContextSourceKind"
+        },
+        "source_ref": {
+          "minLength": 1,
+          "title": "Source Ref",
+          "type": "string"
+        }
+      },
+      "required": [
+        "item_id",
+        "source_kind",
+        "source_ref",
+        "content_digest",
+        "bytes",
+        "reason"
+      ],
+      "title": "OmittedItem",
+      "type": "object"
+    },
+    "PacketBudget": {
+      "additionalProperties": false,
+      "properties": {
+        "available_input": {
+          "minimum": 0,
+          "title": "Available Input",
+          "type": "integer"
+        },
+        "context_window": {
+          "minimum": 0,
+          "title": "Context Window",
+          "type": "integer"
+        },
+        "control_reserve": {
+          "minimum": 0,
+          "title": "Control Reserve",
+          "type": "integer"
+        },
+        "counting": {
+          "$ref": "#/$defs/TokenCounting"
+        },
+        "fixed_overhead": {
+          "minimum": 0,
+          "title": "Fixed Overhead",
+          "type": "integer"
+        },
+        "inline_allocated": {
+          "minimum": 0,
+          "title": "Inline Allocated",
+          "type": "integer"
+        },
+        "inline_remaining": {
+          "minimum": 0,
+          "title": "Inline Remaining",
+          "type": "integer"
+        },
+        "model_profile_ref": {
+          "minLength": 1,
+          "title": "Model Profile Ref",
+          "type": "string"
+        },
+        "reserved_output": {
+          "minimum": 0,
+          "title": "Reserved Output",
+          "type": "integer"
+        },
+        "safety_margin": {
+          "minimum": 0,
+          "title": "Safety Margin",
+          "type": "integer"
+        },
+        "tokenizer_ref": {
+          "minLength": 1,
+          "title": "Tokenizer Ref",
+          "type": "string"
+        }
+      },
+      "required": [
+        "model_profile_ref",
+        "tokenizer_ref",
+        "context_window",
+        "reserved_output",
+        "fixed_overhead",
+        "control_reserve",
+        "safety_margin",
+        "available_input",
+        "inline_allocated",
+        "inline_remaining",
+        "counting"
+      ],
+      "title": "PacketBudget",
+      "type": "object"
+    },
+    "PacketScope": {
+      "additionalProperties": false,
+      "properties": {
+        "application_id": {
+          "minLength": 1,
+          "title": "Application Id",
+          "type": "string"
+        },
+        "installation_id": {
+          "minLength": 1,
+          "title": "Installation Id",
+          "type": "string"
+        },
+        "tenant_id": {
+          "minLength": 1,
+          "title": "Tenant Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "installation_id",
+        "application_id",
+        "tenant_id"
+      ],
+      "title": "PacketScope",
+      "type": "object"
+    },
+    "PacketTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "activation_id": {
+          "minLength": 1,
+          "title": "Activation Id",
+          "type": "string"
+        },
+        "attempt_no": {
+          "minimum": 1,
+          "title": "Attempt No",
+          "type": "integer"
+        },
+        "generation": {
+          "minimum": 0,
+          "title": "Generation",
+          "type": "integer"
+        },
+        "mission_id": {
+          "minLength": 1,
+          "title": "Mission Id",
+          "type": "string"
+        },
+        "node_key": {
+          "minLength": 1,
+          "title": "Node Key",
+          "type": "string"
+        },
+        "purpose": {
+          "$ref": "#/$defs/ContextPurpose"
+        },
+        "revision_id": {
+          "minLength": 1,
+          "title": "Revision Id",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "mission_id",
+        "run_id",
+        "revision_id",
+        "node_key",
+        "activation_id",
+        "attempt_no",
+        "generation",
+        "purpose"
+      ],
+      "title": "PacketTarget",
+      "type": "object"
+    },
+    "ReferenceBody": {
+      "additionalProperties": false,
+      "properties": {
+        "retrieval": {
+          "$ref": "#/$defs/RetrievalInstruction"
+        },
+        "summary": {
+          "maxLength": 2000,
+          "title": "Summary",
+          "type": "string"
+        },
+        "tokens": {
+          "minimum": 0,
+          "title": "Tokens",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "summary",
+        "tokens",
+        "retrieval"
+      ],
+      "title": "ReferenceBody",
+      "type": "object"
+    },
+    "RetrievalInstruction": {
+      "additionalProperties": false,
+      "description": "How an agent fetches a referenced item (RetrievalInstruction@1).",
+      "properties": {
+        "command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Command"
+        },
+        "kind": {
+          "$ref": "#/$defs/RetrievalKind"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "range_hint": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Range Hint"
+        },
+        "resource_uri": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resource Uri"
+        },
+        "tool": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolRetrieval"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "RetrievalInstruction",
+      "type": "object"
+    },
+    "RetrievalKind": {
+      "enum": [
+        "read_file",
+        "tool_call",
+        "missionctl",
+        "mcp_resource"
+      ],
+      "title": "RetrievalKind",
+      "type": "string"
+    },
+    "TokenCounting": {
+      "enum": [
+        "exact",
+        "conservative_bound"
+      ],
+      "title": "TokenCounting",
+      "type": "string"
+    },
+    "ToolRetrieval": {
+      "additionalProperties": false,
+      "properties": {
+        "args_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Args Digest",
+          "type": "string"
+        },
+        "args_excerpt": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Args Excerpt",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "args_digest"
+      ],
+      "title": "ToolRetrieval",
+      "type": "object"
+    },
+    "WorkspaceBody": {
+      "additionalProperties": false,
+      "properties": {
+        "restore_paths": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Restore Paths",
+          "type": "array"
+        },
+        "snapshot_ref": {
+          "minLength": 1,
+          "title": "Snapshot Ref",
+          "type": "string"
+        },
+        "tokens": {
+          "minimum": 0,
+          "title": "Tokens",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "snapshot_ref",
+        "restore_paths",
+        "tokens"
+      ],
+      "title": "WorkspaceBody",
+      "type": "object"
+    }
+  },
+  "$id": "mc.context_packet.v1",
+  "additionalProperties": false,
+  "description": "The sealed handoff bundle (ContextPacket@1). Immutable once sealed.",
+  "properties": {
+    "budget": {
+      "$ref": "#/$defs/PacketBudget"
+    },
+    "context_selection_ref": {
+      "minLength": 1,
+      "title": "Context Selection Ref",
+      "type": "string"
+    },
+    "items": {
+      "items": {
+        "$ref": "#/$defs/ContextItem"
+      },
+      "title": "Items",
+      "type": "array"
+    },
+    "mandatory_item_ids": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Mandatory Item Ids",
+      "type": "array"
+    },
+    "omitted": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/OmittedItem"
+      },
+      "title": "Omitted",
+      "type": "array"
+    },
+    "packer_version": {
+      "minLength": 1,
+      "title": "Packer Version",
+      "type": "string"
+    },
+    "packet_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Packet Digest",
+      "type": "string"
+    },
+    "packet_id": {
+      "minLength": 1,
+      "title": "Packet Id",
+      "type": "string"
+    },
+    "producer_refs": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Producer Refs",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "mc.context_packet.v1",
+      "default": "mc.context_packet.v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "scope": {
+      "$ref": "#/$defs/PacketScope"
+    },
+    "sealed_at": {
+      "format": "date-time",
+      "title": "Sealed At",
+      "type": "string"
+    },
+    "target": {
+      "$ref": "#/$defs/PacketTarget"
+    },
+    "workspace_snapshot_ref": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Workspace Snapshot Ref"
+    }
+  },
+  "required": [
+    "packet_id",
+    "packer_version",
+    "scope",
+    "target",
+    "budget",
+    "items",
+    "packet_digest",
+    "sealed_at",
+    "context_selection_ref"
+  ],
+  "title": "ContextPacket",
+  "type": "object"
+}

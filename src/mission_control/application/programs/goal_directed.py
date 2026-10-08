@@ -6,6 +6,11 @@ from typing import Literal, Protocol
 
 from pydantic import TypeAdapter
 
+from mission_control.application.context.pack_service import (
+    ContextPackService,
+    SealedPacket,
+    context_packet_ref,
+)
 from mission_control.application.execution.operations.journaled_operation_execution import (
     operation_effect_claim_id,
 )
@@ -35,6 +40,7 @@ from mission_control.domain.execution.contracts import (
     WorkspaceMount,
     WorkspaceOwner,
     WorkspaceOwnerKind,
+    WorkspaceSlotBinding,
     workspace_durable_reference,
 )
 from mission_control.domain.execution.heartbeats import (
@@ -379,6 +385,7 @@ class GoalDirectedOperationPreparationService:
         documents: GoalDirectedDocumentRepository,
         actor: ActorContext,
         heartbeats: OperationHeartbeatPolicy = DEFAULT_OPERATION_HEARTBEATS,
+        context_packs: ContextPackService | None = None,
     ) -> None:
         self._templates = templates
         self._operation_bindings = operation_bindings
@@ -387,6 +394,9 @@ class GoalDirectedOperationPreparationService:
         self._actor = actor
         # RRM-009 (RRM-008 composition): heartbeat timeout per operation class.
         self._heartbeats = heartbeats
+        # FT-B3 (ADR-0027): when composed, each iteration and role starts from a sealed
+        # Context Packet instead of the stringified handoff.
+        self._context_packs = context_packs
 
     async def prepare(self, request: GoalOperationPreparationRequest) -> GoalOperationDispatch:
         if request.operation_role == "executor":
@@ -408,7 +418,25 @@ class GoalDirectedOperationPreparationService:
         # accepted command advances the version by exactly one), as StageGraph does. The
         # journaled effect claim is made at exactly that revision (REQ-CP-EXEC-014).
         bound_revision = request.expected_run_version + 1
-        operation = _instantiate_operation_request(template, request, bound_revision)
+        sealed = None
+        if self._context_packs is not None:
+            role_root = goal_unit_workspace_root(
+                _runtime_unit_for(
+                    request,
+                    OperationAttemptIdentity(
+                        run_id=request.run_id,
+                        operation_id=goal_operation_id(
+                            request.goal_iteration, request.operation_role
+                        ),
+                        operation_attempt=request.operation_attempt,
+                    ),
+                )
+            )
+            assert role_root is not None  # a goal unit always has a role root
+            sealed = await self._context_packs.pack_for_iteration(
+                request, template, role_root=role_root
+            )
+        operation = _instantiate_operation_request(template, request, bound_revision, sealed)
         binding = bind_operation_execution_request(operation)
 
         operation_request_digest = sha256_digest(operation)
@@ -596,6 +624,7 @@ class GoalDirectedOperationResultService:
                     context_selection_policy_ref=request.context_selection_policy_ref or "",
                     context_compaction_policy_ref=request.context_compaction_policy_ref or "",
                     workspace_ref_class=request.workspace_ref_class or "",
+                    context_packet=context_packet_ref(operation.prompt_segments),
                 )
                 if parsed.handoff is not None
                 else None
@@ -778,6 +807,7 @@ def _instantiate_operation_request(
     template: OperationExecutionRequest,
     request: GoalOperationPreparationRequest,
     bound_revision: int,
+    sealed: SealedPacket | None = None,
 ) -> OperationExecutionRequest:
     operation_id = goal_operation_id(request.goal_iteration, request.operation_role)
     identity = OperationAttemptIdentity(
@@ -786,8 +816,17 @@ def _instantiate_operation_request(
         operation_attempt=request.operation_attempt,
     )
     runtime_unit = _runtime_unit_for(request, identity)
-    workspace = _workspace_for(template.workspace, request, runtime_unit)
-    prompt_segments = _prompt_segments(template.prompt_segments, request)
+    workspace = _workspace_for(
+        template.workspace,
+        request,
+        runtime_unit,
+        context_slots=sealed.slot_bindings if sealed is not None else (),
+    )
+    prompt_segments = (
+        (*template.prompt_segments, sealed.prompt_segment)
+        if sealed is not None
+        else _prompt_segments(template.prompt_segments, request)
+    )
     deep_binding = _deep_binding_for(
         template.deep_agent_binding,
         request=request,
@@ -855,8 +894,15 @@ def _bind_handoff(
     context_selection_policy_ref: str,
     context_compaction_policy_ref: str,
     workspace_ref_class: str,
+    context_packet: str | None = None,
 ) -> GoalHandoff:
     provider_content = handoff.model_dump(mode="python")
+    if context_packet is not None:
+        # FT-B3: the packet the iteration consumed leads the selection refs (authority);
+        # model-authored refs follow as data. `goal_handoff_reference` reads it back.
+        provider_content["context_selection_refs"] = tuple(
+            dict.fromkeys((context_packet, *handoff.context_selection_refs))
+        )
     identity_digest = sha256_digest(
         {
             "agent_run_identity": claim.identity.semantic_key,
@@ -947,6 +993,8 @@ def _workspace_for(
     template: WorkspaceContract,
     request: GoalOperationPreparationRequest,
     runtime_unit: RuntimeUnitIdentity,
+    *,
+    context_slots: tuple[WorkspaceSlotBinding, ...] = (),
 ) -> WorkspaceContract:
     role_root = goal_unit_workspace_root(runtime_unit)
     if role_root is None:  # pragma: no cover - `_runtime_unit_for` always builds a goal unit
@@ -994,7 +1042,9 @@ def _workspace_for(
         {
             "namespace_id": namespace_id,
             "workspace_id": request.workspace_id,
-            "slot_bindings": slot_bindings,
+            # FT-B3: the packet's read-only inputs (already under the role root) join the
+            # compiled slots; the verifier's packet and workspace stay independent.
+            "slot_bindings": (*slot_bindings, *context_slots),
             "exclusive_write_paths": writable,
             "read_mounts": read_mounts,
             "restore_snapshot_id": None,

@@ -7,6 +7,7 @@ from typing import Literal, Protocol
 from pydantic import TypeAdapter
 
 from mission_control.application.authoring.service import ControlPlaneService
+from mission_control.application.context.pack_service import ContextPackService
 from mission_control.application.execution.operations.operation_execution import (
     bind_operation_execution_request,
 )
@@ -35,6 +36,7 @@ from mission_control.domain.execution.contracts import (
     OperationExecutionRequest,
     OperationWorkflowRequest,
     PromptSegment,
+    WorkspaceContract,
 )
 from mission_control.domain.execution.heartbeats import (
     DEFAULT_OPERATION_HEARTBEATS,
@@ -964,12 +966,16 @@ class StageGraphOperationPreparationService:
         templates: StageGraphOperationTemplateProvider,
         operation_bindings: SemanticOperationBindingRepository,
         heartbeats: OperationHeartbeatPolicy = DEFAULT_OPERATION_HEARTBEATS,
+        context_packs: ContextPackService | None = None,
     ) -> None:
         self._templates = templates
         self._operation_bindings = operation_bindings
         # RRM-009 (RRM-008 composition): the deployment's heartbeat timeout per operation
         # class, which bounds worker-loss detection and cancel latency of the unit.
         self._heartbeats = heartbeats
+        # FT-B2 (ADR-0027): when composed, every admitted stage starts from a sealed Context
+        # Packet; without it the template's prompt and workspace are used unchanged.
+        self._context_packs = context_packs
 
     async def materialize(
         self,
@@ -988,6 +994,35 @@ class StageGraphOperationPreparationService:
                 "workspace_id": template.workspace.workspace_id.replace("{run_id}", request.run_id),
             }
         )
+        prompt_segments = (
+            template.prompt_segments
+            if proposal.objective_override is None
+            else (
+                *template.prompt_segments,
+                PromptSegment(
+                    source_ref=f"stage-cycle-objective:{proposal.identity.semantic_key}",
+                    source_revision=1,
+                    # The cycle objective is a reducer-admitted run input,
+                    # not a newly published privileged prompt definition.
+                    trust_class="admitted_input",
+                    content=proposal.objective_override,
+                    rendered_digest=sha256_digest(proposal.objective_override),
+                ),
+            )
+        )
+        if self._context_packs is not None:
+            # FT-B2: the packet replaces the ad hoc objective segment (the objective is its
+            # `goals_and_criteria` item); materialized inputs and the `.mission/` files join
+            # the compiled slots as read-only, digest-verified durable inputs.
+            sealed = await self._context_packs.pack_for_stage(request, template)
+            prompt_segments = (*template.prompt_segments, sealed.prompt_segment)
+            if sealed.slot_bindings:
+                workspace = WorkspaceContract.model_validate(
+                    {
+                        **workspace.model_dump(mode="python"),
+                        "slot_bindings": (*workspace.slot_bindings, *sealed.slot_bindings),
+                    }
+                )
         identity = OperationAttemptIdentity(
             run_id=request.run_id,
             operation_id=proposal.identity.operation_id,
@@ -1032,22 +1067,7 @@ class StageGraphOperationPreparationService:
                 "deep_agent_binding": deep_binding,
                 "budget_reservation_id": proposal.reservation_id,
                 "budget_limits": proposal.reservation,
-                "prompt_segments": (
-                    template.prompt_segments
-                    if proposal.objective_override is None
-                    else (
-                        *template.prompt_segments,
-                        PromptSegment(
-                            source_ref=f"stage-cycle-objective:{proposal.identity.semantic_key}",
-                            source_revision=1,
-                            # The cycle objective is a reducer-admitted run input,
-                            # not a newly published privileged prompt definition.
-                            trust_class="admitted_input",
-                            content=proposal.objective_override,
-                            rendered_digest=sha256_digest(proposal.objective_override),
-                        ),
-                    )
-                ),
+                "prompt_segments": prompt_segments,
                 "prior_binding_id": None,
                 "requested_at": request.occurred_at,
                 "idempotency_key": (

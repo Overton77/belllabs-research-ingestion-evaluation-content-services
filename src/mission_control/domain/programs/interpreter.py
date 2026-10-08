@@ -28,6 +28,7 @@ from mission_control.domain.programs.contracts import (
     StageExecutionIdentity,
     StageGraphAcceptedProjection,
     StageGraphCompletionProposal,
+    StageInputBinding,
     StageInstanceProjection,
     StageInvalidationProposal,
     StageOperationAdmissionProposal,
@@ -257,6 +258,9 @@ class StageGraphInterpreter:
                     selected_ring_index=ring_index,
                     next_fairness=fairness,
                     objective_override=instance.objective_override,
+                    frozen_input_bindings=self._input_bindings(
+                        instance.candidate.stage_id, projection
+                    ),
                 )
             )
             remaining -= slots.concurrency_slots
@@ -301,6 +305,7 @@ class StageGraphInterpreter:
             semantic_attempt=proposal.identity.semantic_attempt,
             admitted_operation_request_ref=proposal.exact_operation_request_ref,
             frozen_input_refs=proposal.frozen_input_refs,
+            frozen_input_bindings=proposal.frozen_input_bindings,
         )
         liabilities = dict(projection.producer_liabilities)
         liabilities[proposal.identity.semantic_key] = ProducerLiability(
@@ -868,6 +873,62 @@ class StageGraphInterpreter:
             for evidence_ref in projection.dependencies[edge.dependency_id].evidence_refs
         }
         return tuple(sorted(refs, key=lambda item: item.encode("utf-8")))
+
+    def _input_bindings(
+        self,
+        stage_id: str,
+        projection: StageGraphAcceptedProjection,
+    ) -> tuple[StageInputBinding, ...]:
+        """FT-B2: keep each dependency's `producer_output_slot -> consumer_input_slot` mapping.
+
+        Ordered like the blueprint's dependency declarations (then by ref), so the consumer's
+        bindings arrive in declaration order. A ref carries the producer's accepted result
+        decision when the producer's admitted result is on the projection; otherwise it is
+        unaccepted and the Context Packer omits it (`not_accepted`).
+        """
+
+        bindings: list[StageInputBinding] = []
+        seen: set[tuple[str, str]] = set()
+        for edge in self.blueprint.dependencies:
+            if edge.consumer_stage_id != stage_id:
+                continue
+            dependency = projection.dependencies[edge.dependency_id]
+            accepted = self._accepted_decision_ref(edge.producer_stage_id, projection)
+            for ref in sorted(dependency.evidence_refs, key=lambda item: item.encode("utf-8")):
+                key = (edge.consumer_input_slot_id, ref)
+                if key in seen:
+                    continue
+                seen.add(key)
+                bindings.append(
+                    StageInputBinding(
+                        consumer_input_slot_id=edge.consumer_input_slot_id,
+                        producer_stage_key=edge.producer_stage_id,
+                        producer_output_slot_id=edge.producer_output_slot_id,
+                        artifact_ref=ref,
+                        accepted_decision_ref=(
+                            accepted
+                            if dependency.disposition
+                            in {DependencyDisposition.FULFILLED, DependencyDisposition.DEGRADED}
+                            else None
+                        ),
+                        provisional=False,
+                    )
+                )
+        return tuple(bindings)
+
+    @staticmethod
+    def _accepted_decision_ref(
+        producer_stage_id: str, projection: StageGraphAcceptedProjection
+    ) -> str | None:
+        accepted = [
+            fact
+            for fact in projection.accepted_results
+            if fact.identity.candidate.stage_id == producer_stage_id
+        ]
+        if not accepted:
+            return None
+        latest = max(accepted, key=lambda fact: fact.accepted_at_order)
+        return f"stage-result:{latest.identity.semantic_key}:admit"
 
     def _producer_edges(self, stage_id: str) -> tuple[StageDependency, ...]:
         return tuple(

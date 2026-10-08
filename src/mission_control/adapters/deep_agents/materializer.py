@@ -6,7 +6,7 @@ import importlib.metadata
 import re
 import tempfile
 import types
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, make_dataclass
 from dataclasses import field as dataclass_field
@@ -801,3 +801,29 @@ def _hook_scope(binding: DeepAgentExecutionBinding) -> HookScope:
                 tenant_id=str(scope.tenant_id),
             )
     return HookScope(installation_id="unbound", application_id="unbound")
+
+
+async def seed_backend_files(
+    backend: BackendProtocol, files: Sequence[tuple[str, bytes]]
+) -> dict[str, object]:
+    """FT-B2 (SPEC-02 lane seeding): put Context Packet files where the agent reads them.
+
+    A sandbox or filesystem backend receives them through ``upload_files`` before the first
+    model call; the text-only ``StateBackend`` receives them as invocation-input ``files``
+    (returned here for the caller to merge). Binary content on ``StateBackend`` is refused;
+    the packer already downgrades binary items to references for text-only lanes.
+    """
+
+    if not files:
+        return {}
+    if isinstance(backend, StateBackend):
+        try:
+            return {path: create_file_data(content.decode("utf-8")) for path, content in files}
+        except UnicodeDecodeError as error:
+            raise DeepAgentUnsupportedPlacement(
+                "binary context inputs require a byte-capable sandbox backend"
+            ) from error
+    responses = await backend.aupload_files(list(files))
+    if any(item.error for item in responses):
+        raise DeepAgentMaterializationError("context packet inputs failed sandbox attachment")
+    return {}

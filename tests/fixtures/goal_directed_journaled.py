@@ -588,6 +588,8 @@ async def compose_goal_directed(
     children: Any = None,
     secrets: Mapping[str, str] | None = None,
     template_secret_refs: tuple[SecretRef, ...] = (),
+    context_packs: Any = None,
+    context_inputs: Any = None,
 ) -> GoalComposition:
     """Compose the production GoalDirected activities and operation boundary.
 
@@ -615,6 +617,7 @@ async def compose_goal_directed(
     adapter = DeepAgentRuntimeAdapter(
         ExactDeepAgentMaterializer(deep_agent_registry(binding, bundle, model, saver)),
         async_subagents=async_subagents,
+        context_inputs=context_inputs,
     )
     assets = ConformanceAssetVerifier(
         mcp_schema_digests={"fixture-mcp": MCP_DIGEST},
@@ -655,6 +658,7 @@ async def compose_goal_directed(
         ),
         actor=goal_worker_actor(),
         boundary=BoundaryCommandApplicationService(run_control, orchestration_lifecycle_actor()),
+        context_packs=context_packs,
     )
     return GoalComposition(
         run_control=run_control,

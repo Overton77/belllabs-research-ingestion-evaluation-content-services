@@ -10,7 +10,7 @@
 -- (0003 trigger): a turn row is written once, when its closing turn_ended frame lands,
 -- with the started and ended frame ids; the open turn lives in
 -- harness_execution.native_identity until then. continuation_checkpoint exists in 0003
--- and is not redefined; context_selection (SPEC-02) is absent and is added here.
+-- and is not redefined; context_selection (SPEC-02) is added by the FT-B2 section below.
 -- transcript_document (SPEC-03 run search, ticket C4) is created here so the search
 -- projection needs no further migration.
 --
@@ -132,44 +132,6 @@ CREATE TABLE mission_control.frame_retention_policy (
 );
 
 -- ---------------------------------------------------------------------------------------
--- mc.context_selection.v1 (SPEC-02): the authority record of one sealed Context Packet.
-CREATE TABLE mission_control.context_selection (
-    installation_id uuid NOT NULL,
-    application_id text NOT NULL,
-    tenant_id uuid NOT NULL,
-    selection_id uuid PRIMARY KEY,
-    run_id uuid NOT NULL,
-    activation_id uuid,
-    attempt_no bigint CHECK (attempt_no > 0),
-    generation bigint NOT NULL CHECK (generation > 0),
-    purpose text NOT NULL CHECK (purpose <> ''),
-    packet_digest text NOT NULL CHECK (packet_digest ~ '^sha256:[0-9a-f]{64}$'),
-    packet jsonb NOT NULL CHECK (jsonb_typeof(packet) = 'object'),
-    prompt_plan_digest text CHECK (prompt_plan_digest ~ '^sha256:[0-9a-f]{64}$'),
-    file_plan_digest text CHECK (file_plan_digest ~ '^sha256:[0-9a-f]{64}$'),
-    sealed_at timestamptz NOT NULL,
-    created_at timestamptz NOT NULL,
-    created_by_actor_ref text NOT NULL CHECK (created_by_actor_ref <> ''),
-    UNIQUE (installation_id, application_id, tenant_id, selection_id),
-    UNIQUE NULLS NOT DISTINCT
-        (installation_id, application_id, tenant_id, run_id, activation_id, attempt_no,
-         generation, purpose, packet_digest),
-    FOREIGN KEY (installation_id, application_id, tenant_id)
-        REFERENCES mission_control.tenant (installation_id, application_id, tenant_id),
-    FOREIGN KEY (installation_id, application_id, tenant_id, run_id)
-        REFERENCES mission_control.mission_run (installation_id, application_id, tenant_id, run_id),
-    FOREIGN KEY (installation_id, application_id, tenant_id, activation_id)
-        REFERENCES mission_control.activation (installation_id, application_id, tenant_id, activation_id)
-);
-CREATE INDEX context_selection_run_idx ON mission_control.context_selection
-    (installation_id, application_id, tenant_id, run_id);
-CREATE INDEX context_selection_activation_fk_idx ON mission_control.context_selection
-    (installation_id, application_id, tenant_id, activation_id);
-CREATE TRIGGER context_selection_immutable
-    BEFORE UPDATE OR DELETE ON mission_control.context_selection
-    FOR EACH ROW EXECUTE FUNCTION mission_control.reject_mutation();
-
--- ---------------------------------------------------------------------------------------
 -- Transcript search projection (rebuildable; never an authorization store).
 CREATE TABLE mission_control_search.transcript_document (
     installation_id uuid NOT NULL,
@@ -199,7 +161,7 @@ DO $policies$
 DECLARE
     table_name text;
 BEGIN
-    FOREACH table_name IN ARRAY ARRAY['provider_frame', 'context_selection'] LOOP
+    FOREACH table_name IN ARRAY ARRAY['provider_frame'] LOOP
         EXECUTE pg_catalog.format('ALTER TABLE mission_control.%I ENABLE ROW LEVEL SECURITY', table_name);
         EXECUTE pg_catalog.format('ALTER TABLE mission_control.%I FORCE ROW LEVEL SECURITY', table_name);
         EXECUTE pg_catalog.format(
@@ -233,8 +195,7 @@ CREATE POLICY transcript_document_scope ON mission_control_search.transcript_doc
         AND application_id = mission_control.ctx_application_id()
         AND tenant_id = mission_control.ctx_tenant_id());
 
-REVOKE ALL ON mission_control.provider_frame, mission_control.frame_retention_policy,
-    mission_control.context_selection FROM PUBLIC;
+REVOKE ALL ON mission_control.provider_frame, mission_control.frame_retention_policy FROM PUBLIC;
 REVOKE ALL ON mission_control_search.transcript_document FROM PUBLIC;
 
 -- Worker (runtime) writes frames and the identity records in the frame-append
@@ -249,13 +210,84 @@ GRANT UPDATE (state, checkpoint_ref, transferred_to, ended_at, version, updated_
 ON mission_control.agent_session TO mission_control_runtime;
 GRANT SELECT, INSERT, UPDATE ON mission_control.frame_retention_policy
 TO mission_control_runtime;
-GRANT SELECT, INSERT ON mission_control.context_selection
-TO mission_control_runtime, mission_control_family_writer;
 GRANT SELECT ON mission_control.provider_frame, mission_control.harness_execution,
     mission_control.agent_session, mission_control.session_turn,
-    mission_control.frame_retention_policy, mission_control.context_selection
+    mission_control.frame_retention_policy
 TO mission_control_readonly;
 -- Projection writers rebuild the transcript search documents; readers search them.
 GRANT SELECT, INSERT, UPDATE, DELETE ON mission_control_search.transcript_document
 TO mission_control_runtime, mission_control_outbox_worker;
 GRANT SELECT ON mission_control_search.transcript_document TO mission_control_readonly;
+
+-- section: B2 (FT-B2, OVE-31) context_selection -------------------------------------------
+-- One sealed mc.context_packet.v1 and its mc.context_selection.v1 authority record per
+-- (run, activation, attempt, generation, purpose). The packet is the plan, the selection is
+-- the authority record (SPEC-02 "mc.context_selection.v1 linkage"). Rows are immutable; a
+-- correction is a new packet naming the old packet_id in producer_refs.
+CREATE TABLE mission_control.context_selection (
+    installation_id uuid NOT NULL,
+    application_id text NOT NULL,
+    tenant_id uuid NOT NULL,
+    context_selection_id uuid PRIMARY KEY,
+    selection_key text NOT NULL CHECK (selection_key <> ''),
+    packet_key text NOT NULL CHECK (packet_key <> ''),
+    run_key text NOT NULL CHECK (run_key <> ''),
+    node_key text NOT NULL CHECK (node_key <> ''),
+    activation_key text NOT NULL CHECK (activation_key <> ''),
+    attempt_no integer NOT NULL CHECK (attempt_no > 0),
+    generation integer NOT NULL CHECK (generation >= 0),
+    purpose text NOT NULL CHECK (purpose IN (
+        'stage_start', 'iteration_start', 'continuation', 'fork', 'chain_link',
+        'follow_up_turn'
+    )),
+    packer_version text NOT NULL CHECK (packer_version <> ''),
+    packet_digest text NOT NULL CHECK (packet_digest ~ '^sha256:[0-9a-f]{64}$'),
+    prompt_plan_digest text NOT NULL CHECK (prompt_plan_digest ~ '^sha256:[0-9a-f]{64}$'),
+    file_plan_digest text NOT NULL CHECK (file_plan_digest ~ '^sha256:[0-9a-f]{64}$'),
+    packet jsonb NOT NULL CHECK (jsonb_typeof(packet) = 'object'),
+    selection jsonb NOT NULL CHECK (jsonb_typeof(selection) = 'object'),
+    sealed_at timestamptz NOT NULL,
+    created_at timestamptz NOT NULL,
+    created_by_actor_ref text NOT NULL CHECK (created_by_actor_ref <> ''),
+    CHECK ((packet->>'schema_version' = 'mc.context_packet.v1'
+        AND packet->>'packet_id' = packet_key
+        AND packet->>'packet_digest' = packet_digest
+        AND packet->>'context_selection_ref' = selection_key
+        AND packet->'target'->>'run_id' = run_key
+        AND packet->'target'->>'activation_id' = activation_key
+        AND packet->'target'->'attempt_no' = to_jsonb(attempt_no)
+        AND packet->'target'->'generation' = to_jsonb(generation)
+        AND packet->'target'->>'purpose' = purpose
+        AND selection->>'schema_version' = 'mc.context_selection.v1'
+        AND selection->>'selection_id' = selection_key
+        AND selection->>'packet_digest' = packet_digest
+        AND selection->>'prompt_plan_digest' = prompt_plan_digest
+        AND selection->>'file_plan_digest' = file_plan_digest) IS TRUE),
+    UNIQUE (installation_id, application_id, tenant_id, context_selection_id),
+    UNIQUE (installation_id, application_id, tenant_id, selection_key),
+    UNIQUE (installation_id, application_id, tenant_id, packet_key),
+    UNIQUE (installation_id, application_id, tenant_id, run_key, activation_key, attempt_no,
+        generation, purpose),
+    FOREIGN KEY (installation_id, application_id, tenant_id)
+        REFERENCES mission_control.tenant (installation_id, application_id, tenant_id)
+);
+CREATE INDEX context_selection_run_idx ON mission_control.context_selection
+    (installation_id, application_id, tenant_id, run_key, node_key, sealed_at);
+
+ALTER TABLE mission_control.context_selection ENABLE ROW LEVEL SECURITY;
+ALTER TABLE mission_control.context_selection FORCE ROW LEVEL SECURITY;
+CREATE POLICY context_selection_scope ON mission_control.context_selection
+    USING (installation_id = mission_control.ctx_installation_id()
+        AND application_id = mission_control.ctx_application_id()
+        AND tenant_id = mission_control.ctx_tenant_id())
+    WITH CHECK (installation_id = mission_control.ctx_installation_id()
+        AND application_id = mission_control.ctx_application_id()
+        AND tenant_id = mission_control.ctx_tenant_id());
+CREATE TRIGGER context_selection_immutable
+    BEFORE UPDATE OR DELETE ON mission_control.context_selection
+    FOR EACH ROW EXECUTE FUNCTION mission_control.reject_mutation();
+REVOKE ALL ON mission_control.context_selection FROM PUBLIC;
+GRANT SELECT, INSERT ON mission_control.context_selection
+TO mission_control_runtime, mission_control_family_writer;
+GRANT SELECT ON mission_control.context_selection TO mission_control_readonly;
+-- end section: B2 ----------------------------------------------------------------------------

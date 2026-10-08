@@ -33,6 +33,7 @@ from mission_control.adapters.deep_agents.frames import DeepAgentFrameRecorder
 from mission_control.adapters.deep_agents.materializer import (
     ExactDeepAgentMaterializer,
     MaterializedDeepAgentArguments,
+    seed_backend_files,
 )
 from mission_control.adapters.langsmith.tracing import trace_deep_agent_execute
 from mission_control.application.execution.operations.operation_progress import (
@@ -46,6 +47,8 @@ from mission_control.application.frames.sink import (
 )
 from mission_control.application.frames.writer import FrameWriter
 from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.context.refs import workspace_candidate_ref
+from mission_control.domain.context.render import bytes_digest, is_context_input_slot
 from mission_control.domain.execution.async_subagent_reconciliation import (
     AsyncServedGraphIdentity,
 )
@@ -106,6 +109,12 @@ class WorkspaceOutputCapturePort(Protocol):
     ) -> CapturedWorkspaceCandidate: ...
 
 
+class DurableInputReader(Protocol):
+    """Reads a read-only durable workspace input (``<object_ref>#<sha256>:<size>``)."""
+
+    async def retrieve(self, durable_ref: str) -> bytes: ...
+
+
 MAX_CAPTURED_OUTPUT_FILES = 64
 MAX_CAPTURED_OUTPUT_BYTES = 4_000_000
 MAX_CAPTURE_LISTING_DEPTH = 4
@@ -123,6 +132,8 @@ class DeepAgentRuntimeAdapter:
         frames: FrameStore | None = None,
         frame_excerpt_cap_bytes: int = DEFAULT_EXCERPT_CAP_BYTES,
         frame_facts: FrameFactProjector | None = None,
+        context_inputs: DurableInputReader | None = None,
+        drop_unregistered_output_refs: bool = False,
     ) -> None:
         self._materializer = materializer
         self._async_subagents = async_subagents
@@ -133,6 +144,13 @@ class DeepAgentRuntimeAdapter:
         self._frame_excerpt_cap = frame_excerpt_cap_bytes
         # SPEC-03 (C2): facts derived from the persisted closing frames become mission events.
         self._frame_facts = frame_facts
+        # FT-B2: reads the Context Packet's verified read-only inputs for backend seeding.
+        self._context_inputs = context_inputs
+        # FT-B2: strict mode drops model-emitted output refs that this attempt did not
+        # register; the default keeps them (with provenance warnings) for families and
+        # fixtures that still consume model-emitted refs. Either way the Context Packer only
+        # materializes registered refs.
+        self._drop_unregistered_output_refs = drop_unregistered_output_refs
 
     async def build_hosted_async_subagent_graph(
         self,
@@ -215,6 +233,13 @@ class DeepAgentRuntimeAdapter:
                 **materialized.initial_state,
                 "messages": [{"role": "user", "content": user_prompt}],
             }
+            # FT-B2 (SPEC-02): `/inputs/**` and `.mission/**` are on the backend before the
+            # first model call (sandbox upload, or `files` input on the text-only backend).
+            seeded = await seed_backend_files(
+                materialized.backend, await self._context_seed_files(invocation)
+            )
+            if seeded:
+                state["files"] = {**cast(dict[str, object], state.get("files", {})), **seeded}
             disclosure_observer = _SkillDisclosureObserver(binding)
             model_calls = _ModelCallObserver()
             checkpointer = materialized.checkpointer
@@ -322,9 +347,19 @@ class DeepAgentRuntimeAdapter:
                 # RRM-009 (REQ-CP-DA-014): the agent's writable-slot files become durable
                 # workspace candidates before the result settles; a capture failure after a
                 # terminal checkpoint is classified by the narrowed post-dispatch rule.
-                inspection["workspace_candidates"] = await self._capture_workspace_outputs(
+                captured = await self._capture_workspace_outputs(
                     materialized.backend, invocation.binding, actual_state
                 )
+                inspection["workspace_candidates"] = captured
+                # FT-B2: output refs name only what this attempt registered; model-emitted
+                # refs that are not this attempt's captures are dropped with a warning.
+                output_refs, structured, warnings = _attempt_output_refs(
+                    captured,
+                    structured if isinstance(structured, dict) else None,
+                    drop_unregistered=self._drop_unregistered_output_refs,
+                )
+                if warnings:
+                    inspection["provenance_warnings"] = warnings
                 own_messages = messages[len(prior_messages) :]
                 # REQ-CP-DA-007: in-process sync subagents spend the parent's reservation, so
                 # their model calls (observed at the chat-model boundary; they never enter the
@@ -353,7 +388,8 @@ class DeepAgentRuntimeAdapter:
                     await self._project_frame_facts(recorder, binding)
                 return RuntimeResult(
                     output_text=output_text,
-                    structured_output=structured if isinstance(structured, dict) else None,
+                    structured_output=structured,
+                    output_refs=output_refs,
                     usage=usage,
                     provider_run_id=(str(final.id) if final is not None and final.id else None),
                     event_payloads=(inspection,),
@@ -538,6 +574,33 @@ class DeepAgentRuntimeAdapter:
                 exc_info=True,
             )
 
+    async def _context_seed_files(
+        self, invocation: RuntimeInvocation
+    ) -> tuple[tuple[str, bytes], ...]:
+        """Verified bytes of the Context Packet's read-only slots, by logical path."""
+
+        slots = [
+            slot
+            for slot in invocation.binding.workspace.slot_bindings
+            if is_context_input_slot(slot)
+        ]
+        if not slots:
+            return ()
+        if self._context_inputs is None:
+            raise DeepAgentMaterializationError(
+                "context packet inputs are bound but no durable input reader is composed"
+            )
+        files: list[tuple[str, bytes]] = []
+        for slot in slots:
+            assert slot.durable_ref is not None and slot.content_digest is not None
+            content = await self._context_inputs.retrieve(slot.durable_ref)
+            if bytes_digest(content) != slot.content_digest:
+                raise DeepAgentMaterializationError(
+                    f"context input digest mismatch for {slot.logical_path}"
+                )
+            files.append((slot.logical_path, content))
+        return tuple(files)
+
     async def _capture_workspace_outputs(
         self,
         backend: BackendProtocol,
@@ -605,6 +668,54 @@ async def _invoke(
     if interrupts:
         result["__interrupt__"] = interrupts
     return result
+
+
+def _attempt_output_refs(
+    captured: list[dict[str, object]],
+    structured: dict[str, object] | None,
+    *,
+    drop_unregistered: bool = False,
+) -> tuple[tuple[str, ...], dict[str, object] | None, list[dict[str, object]]]:
+    """This attempt's output refs, the reconciled structured output and provenance warnings.
+
+    Registered refs are the durable refs of the workspace candidates this attempt captured
+    (custody evidence; promotion stays a governed decision). Every model-emitted
+    ``output_refs`` entry that is not one of them gets a provenance warning. With
+    ``drop_unregistered`` the key is rewritten to the registered refs only (so the family's
+    merge of structured output cannot reintroduce unregistered strings); otherwise the
+    structured output is left untouched (a family that reads the model's key keeps reading
+    it) and only ``RuntimeResult.output_refs`` carries the registered refs.
+    """
+
+    own = tuple(
+        sorted(
+            {
+                workspace_candidate_ref(str(item["candidate_id"]))
+                for item in captured
+                if item.get("candidate_id")
+            }
+        )
+    )
+    warnings: list[dict[str, object]] = []
+    if structured is None or "output_refs" not in structured:
+        return own, structured, warnings
+    emitted = structured.get("output_refs")
+    values = emitted if isinstance(emitted, list | tuple) else [emitted]
+    emitted_refs = [str(value) for value in values if value is not None]
+    for value in emitted_refs:
+        if value not in own:
+            warnings.append(
+                {
+                    "kind": "provenance",
+                    ("dropped_output_ref" if drop_unregistered else "unregistered_output_ref"): (
+                        value
+                    ),
+                    "reason": "not_registered_by_this_attempt",
+                }
+            )
+    if drop_unregistered:
+        return own, {**structured, "output_refs": list(own)}, warnings
+    return own, structured, warnings
 
 
 def _effective_permissions(
