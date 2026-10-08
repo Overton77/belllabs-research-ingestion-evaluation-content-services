@@ -2388,6 +2388,19 @@
           "title": "Required",
           "type": "boolean"
         },
+        "schema": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_.-]*@[0-9]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Schema"
+        },
         "value": {
           "default": null,
           "title": "Value"

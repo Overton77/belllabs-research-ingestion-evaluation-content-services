@@ -20,6 +20,11 @@
         },
         {
           "arguments": "",
+          "definition": "CREATE OR REPLACE FUNCTION mission_control.chain_link_transition_guard()\n RETURNS trigger\n LANGUAGE plpgsql\n SET search_path TO 'pg_catalog'\nAS $function$\nBEGIN\n    IF TG_OP = 'DELETE' THEN\n        RAISE EXCEPTION 'mission_control.chain_link rows are never deleted'\n            USING ERRCODE = 'restrict_violation';\n    END IF;\n    IF (NEW.installation_id, NEW.application_id, NEW.tenant_id, NEW.link_id, NEW.chain_id,\n        NEW.link_key, NEW.from_mission_key, NEW.to_mission_key, NEW.from_mission_id,\n        NEW.to_mission_id, NEW.kind, NEW.bindings, NEW.release_condition,\n        NEW.on_upstream_cancel, NEW.on_upstream_not_accepted, NEW.created_at,\n        NEW.created_by_actor_ref)\n       IS DISTINCT FROM\n       (OLD.installation_id, OLD.application_id, OLD.tenant_id, OLD.link_id, OLD.chain_id,\n        OLD.link_key, OLD.from_mission_key, OLD.to_mission_key, OLD.from_mission_id,\n        OLD.to_mission_id, OLD.kind, OLD.bindings, OLD.release_condition,\n        OLD.on_upstream_cancel, OLD.on_upstream_not_accepted, OLD.created_at,\n        OLD.created_by_actor_ref)\n       OR NEW.version <> OLD.version + 1\n       OR NOT (\n           (OLD.state = 'armed' AND NEW.state IN ('released', 'blocked', 'detached', 'cancelled'))\n           OR (OLD.state = 'released' AND NEW.state = 'detached')\n       )\n       OR (OLD.state = 'released' AND (NEW.released_run_id, NEW.released_at, NEW.packet_ref,\n            NEW.packet_digest) IS DISTINCT FROM (OLD.released_run_id, OLD.released_at,\n            OLD.packet_ref, OLD.packet_digest)) THEN\n        RAISE EXCEPTION 'chain links only accept one forward state transition'\n            USING ERRCODE = 'restrict_violation';\n    END IF;\n    RETURN NEW;\nEND;\n$function$\n",
+          "name": "chain_link_transition_guard"
+        },
+        {
+          "arguments": "",
           "definition": "CREATE OR REPLACE FUNCTION mission_control.ctx_actor_ref()\n RETURNS text\n LANGUAGE sql\n STABLE PARALLEL SAFE\n SET search_path TO 'pg_catalog'\nAS $function$\n    SELECT NULLIF(pg_catalog.current_setting('mc.actor_ref', true), '')\n$function$\n",
           "name": "ctx_actor_ref"
         },
@@ -37,6 +42,11 @@
           "arguments": "",
           "definition": "CREATE OR REPLACE FUNCTION mission_control.ctx_tenant_id()\n RETURNS uuid\n LANGUAGE sql\n STABLE PARALLEL SAFE\n SET search_path TO 'pg_catalog'\nAS $function$\n    SELECT NULLIF(pg_catalog.current_setting('mc.tenant_id', true), '')::uuid\n$function$\n",
           "name": "ctx_tenant_id"
+        },
+        {
+          "arguments": "",
+          "definition": "CREATE OR REPLACE FUNCTION mission_control.mission_chain_transition_guard()\n RETURNS trigger\n LANGUAGE plpgsql\n SET search_path TO 'pg_catalog'\nAS $function$\nBEGIN\n    IF TG_OP = 'DELETE' THEN\n        RAISE EXCEPTION 'mission_control.mission_chain rows are never deleted'\n            USING ERRCODE = 'restrict_violation';\n    END IF;\n    IF (NEW.installation_id, NEW.application_id, NEW.tenant_id, NEW.chain_id, NEW.chain_key,\n        NEW.title, NEW.manifest_digest, NEW.members, NEW.created_at, NEW.created_by_actor_ref)\n       IS DISTINCT FROM\n       (OLD.installation_id, OLD.application_id, OLD.tenant_id, OLD.chain_id, OLD.chain_key,\n        OLD.title, OLD.manifest_digest, OLD.members, OLD.created_at, OLD.created_by_actor_ref)\n       OR NEW.version <> OLD.version + 1\n       OR OLD.lifecycle = 'completed'\n       OR NOT (\n           NEW.lifecycle = OLD.lifecycle\n           OR (OLD.lifecycle = 'pending' AND NEW.lifecycle IN ('running', 'completed'))\n           OR (OLD.lifecycle = 'running' AND NEW.lifecycle = 'completed')\n       ) THEN\n        RAISE EXCEPTION 'mission chains only move forward'\n            USING ERRCODE = 'restrict_violation';\n    END IF;\n    RETURN NEW;\nEND;\n$function$\n",
+          "name": "mission_chain_transition_guard"
         },
         {
           "arguments": "",
@@ -133,6 +143,30 @@
           "mission_control_outbox_worker:UPDATE",
           "mission_control_runtime:UPDATE"
         ],
+        "column:chain_link.blocked_reason": [
+          "mission_control_runtime:UPDATE"
+        ],
+        "column:chain_link.packet_digest": [
+          "mission_control_runtime:UPDATE"
+        ],
+        "column:chain_link.packet_ref": [
+          "mission_control_runtime:UPDATE"
+        ],
+        "column:chain_link.released_at": [
+          "mission_control_runtime:UPDATE"
+        ],
+        "column:chain_link.released_run_id": [
+          "mission_control_runtime:UPDATE"
+        ],
+        "column:chain_link.state": [
+          "mission_control_runtime:UPDATE"
+        ],
+        "column:chain_link.updated_at": [
+          "mission_control_runtime:UPDATE"
+        ],
+        "column:chain_link.version": [
+          "mission_control_runtime:UPDATE"
+        ],
         "column:cognitive_namespace.head_checkpoint": [
           "mission_control_runtime:UPDATE"
         ],
@@ -168,6 +202,21 @@
         ],
         "column:command.version": [
           "mission_control_family_writer:UPDATE"
+        ],
+        "column:mission_chain.lifecycle": [
+          "mission_control_runtime:UPDATE"
+        ],
+        "column:mission_chain.phase": [
+          "mission_control_runtime:UPDATE"
+        ],
+        "column:mission_chain.terminal_outcome": [
+          "mission_control_runtime:UPDATE"
+        ],
+        "column:mission_chain.updated_at": [
+          "mission_control_runtime:UPDATE"
+        ],
+        "column:mission_chain.version": [
+          "mission_control_runtime:UPDATE"
         ],
         "column:operation_claim.heartbeat_at": [
           "mission_control_runtime:UPDATE"
@@ -235,6 +284,9 @@
         "function:asset_version_transition_guard()": [
           "$OWNER:EXECUTE"
         ],
+        "function:chain_link_transition_guard()": [
+          "$OWNER:EXECUTE"
+        ],
         "function:ctx_actor_ref()": [
           "$OWNER:EXECUTE",
           "mission_control_catalog_writer:EXECUTE",
@@ -266,6 +318,9 @@
           "mission_control_outbox_worker:EXECUTE",
           "mission_control_readonly:EXECUTE",
           "mission_control_runtime:EXECUTE"
+        ],
+        "function:mission_chain_transition_guard()": [
+          "$OWNER:EXECUTE"
         ],
         "function:reject_mutation()": [
           "$OWNER:EXECUTE"
@@ -445,6 +500,19 @@
           "mission_control_runtime:INSERT",
           "mission_control_runtime:SELECT"
         ],
+        "relation:authoring_provenance": [
+          "$OWNER:DELETE",
+          "$OWNER:INSERT",
+          "$OWNER:MAINTAIN",
+          "$OWNER:REFERENCES",
+          "$OWNER:SELECT",
+          "$OWNER:TRIGGER",
+          "$OWNER:TRUNCATE",
+          "$OWNER:UPDATE",
+          "mission_control_readonly:SELECT",
+          "mission_control_runtime:INSERT",
+          "mission_control_runtime:SELECT"
+        ],
         "relation:authoring_session": [
           "$OWNER:DELETE",
           "$OWNER:INSERT",
@@ -604,6 +672,19 @@
           "mission_control_catalog_writer:INSERT",
           "mission_control_catalog_writer:SELECT",
           "mission_control_outbox_worker:SELECT",
+          "mission_control_readonly:SELECT",
+          "mission_control_runtime:INSERT",
+          "mission_control_runtime:SELECT"
+        ],
+        "relation:chain_link": [
+          "$OWNER:DELETE",
+          "$OWNER:INSERT",
+          "$OWNER:MAINTAIN",
+          "$OWNER:REFERENCES",
+          "$OWNER:SELECT",
+          "$OWNER:TRIGGER",
+          "$OWNER:TRUNCATE",
+          "$OWNER:UPDATE",
           "mission_control_readonly:SELECT",
           "mission_control_runtime:INSERT",
           "mission_control_runtime:SELECT"
@@ -1115,6 +1196,19 @@
           "mission_control_runtime:INSERT",
           "mission_control_runtime:SELECT",
           "mission_control_runtime:UPDATE"
+        ],
+        "relation:mission_chain": [
+          "$OWNER:DELETE",
+          "$OWNER:INSERT",
+          "$OWNER:MAINTAIN",
+          "$OWNER:REFERENCES",
+          "$OWNER:SELECT",
+          "$OWNER:TRIGGER",
+          "$OWNER:TRUNCATE",
+          "$OWNER:UPDATE",
+          "mission_control_readonly:SELECT",
+          "mission_control_runtime:INSERT",
+          "mission_control_runtime:SELECT"
         ],
         "relation:mission_draft": [
           "$OWNER:DELETE",
@@ -1796,6 +1890,10 @@
           "$OWNER:USAGE",
           "PUBLIC:USAGE"
         ],
+        "type:_authoring_provenance": [
+          "$OWNER:USAGE",
+          "PUBLIC:USAGE"
+        ],
         "type:_authoring_session": [
           "$OWNER:USAGE",
           "PUBLIC:USAGE"
@@ -1837,6 +1935,10 @@
           "PUBLIC:USAGE"
         ],
         "type:_catalog_record": [
+          "$OWNER:USAGE",
+          "PUBLIC:USAGE"
+        ],
+        "type:_chain_link": [
           "$OWNER:USAGE",
           "PUBLIC:USAGE"
         ],
@@ -1993,6 +2095,10 @@
           "PUBLIC:USAGE"
         ],
         "type:_mission": [
+          "$OWNER:USAGE",
+          "PUBLIC:USAGE"
+        ],
+        "type:_mission_chain": [
           "$OWNER:USAGE",
           "PUBLIC:USAGE"
         ],
@@ -2240,6 +2346,10 @@
           "$OWNER:USAGE",
           "PUBLIC:USAGE"
         ],
+        "type:authoring_provenance": [
+          "$OWNER:USAGE",
+          "PUBLIC:USAGE"
+        ],
         "type:authoring_session": [
           "$OWNER:USAGE",
           "PUBLIC:USAGE"
@@ -2281,6 +2391,10 @@
           "PUBLIC:USAGE"
         ],
         "type:catalog_record": [
+          "$OWNER:USAGE",
+          "PUBLIC:USAGE"
+        ],
+        "type:chain_link": [
           "$OWNER:USAGE",
           "PUBLIC:USAGE"
         ],
@@ -2437,6 +2551,10 @@
           "PUBLIC:USAGE"
         ],
         "type:mission": [
+          "$OWNER:USAGE",
+          "PUBLIC:USAGE"
+        ],
+        "type:mission_chain": [
           "$OWNER:USAGE",
           "PUBLIC:USAGE"
         ],
@@ -5512,6 +5630,191 @@
           "row_level_security": true,
           "triggers": []
         },
+        "authoring_provenance": {
+          "columns": [
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "installation_id",
+              "not_null": true,
+              "type": "uuid"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "application_id",
+              "not_null": true,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "tenant_id",
+              "not_null": true,
+              "type": "uuid"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "authoring_provenance_id",
+              "not_null": true,
+              "type": "uuid"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "revision_id",
+              "not_null": true,
+              "type": "uuid"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "mission_key",
+              "not_null": true,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "chain_id",
+              "not_null": false,
+              "type": "uuid"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "manifest_digest",
+              "not_null": true,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "manifest_yaml",
+              "not_null": true,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "resolution",
+              "not_null": true,
+              "type": "jsonb"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "created_at",
+              "not_null": true,
+              "type": "timestamp with time zone"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "created_by_actor_ref",
+              "not_null": true,
+              "type": "text"
+            }
+          ],
+          "constraints": [
+            {
+              "definition": "CHECK (created_by_actor_ref <> ''::text)",
+              "name": "authoring_provenance_created_by_actor_ref_check",
+              "type": "c"
+            },
+            {
+              "definition": "FOREIGN KEY (installation_id, application_id, tenant_id, revision_id) REFERENCES mission_control.mission_revision(installation_id, application_id, tenant_id, revision_id)",
+              "name": "authoring_provenance_installation_id_application_id_tenan_fkey1",
+              "type": "f"
+            },
+            {
+              "definition": "FOREIGN KEY (installation_id, application_id, tenant_id, chain_id) REFERENCES mission_control.mission_chain(installation_id, application_id, tenant_id, chain_id)",
+              "name": "authoring_provenance_installation_id_application_id_tenan_fkey2",
+              "type": "f"
+            },
+            {
+              "definition": "UNIQUE (installation_id, application_id, tenant_id, authoring_provenance_id)",
+              "name": "authoring_provenance_installation_id_application_id_tenant__key",
+              "type": "u"
+            },
+            {
+              "definition": "FOREIGN KEY (installation_id, application_id, tenant_id) REFERENCES mission_control.tenant(installation_id, application_id, tenant_id)",
+              "name": "authoring_provenance_installation_id_application_id_tenant_fkey",
+              "type": "f"
+            },
+            {
+              "definition": "UNIQUE (installation_id, application_id, tenant_id, revision_id)",
+              "name": "authoring_provenance_installation_id_application_id_tenant_key1",
+              "type": "u"
+            },
+            {
+              "definition": "CHECK (manifest_digest ~ '^sha256:[0-9a-f]{64}$'::text)",
+              "name": "authoring_provenance_manifest_digest_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (manifest_yaml <> ''::text)",
+              "name": "authoring_provenance_manifest_yaml_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (mission_key <> ''::text)",
+              "name": "authoring_provenance_mission_key_check",
+              "type": "c"
+            },
+            {
+              "definition": "PRIMARY KEY (authoring_provenance_id)",
+              "name": "authoring_provenance_pkey",
+              "type": "p"
+            },
+            {
+              "definition": "CHECK (jsonb_typeof(resolution) = 'object'::text AND (resolution ->> 'schema_version'::text) = 'mc.manifest_resolution.v1'::text)",
+              "name": "authoring_provenance_resolution_check",
+              "type": "c"
+            }
+          ],
+          "force_row_level_security": true,
+          "indexes": [
+            "CREATE INDEX authoring_provenance_chain_id_fk_idx ON mission_control.authoring_provenance USING btree (installation_id, application_id, tenant_id, chain_id)",
+            "CREATE INDEX authoring_provenance_manifest_digest_idx ON mission_control.authoring_provenance USING btree (installation_id, application_id, tenant_id, manifest_digest)",
+            "CREATE UNIQUE INDEX authoring_provenance_installation_id_application_id_tenant__key ON mission_control.authoring_provenance USING btree (installation_id, application_id, tenant_id, authoring_provenance_id)",
+            "CREATE UNIQUE INDEX authoring_provenance_installation_id_application_id_tenant_key1 ON mission_control.authoring_provenance USING btree (installation_id, application_id, tenant_id, revision_id)",
+            "CREATE UNIQUE INDEX authoring_provenance_pkey ON mission_control.authoring_provenance USING btree (authoring_provenance_id)"
+          ],
+          "kind": "r",
+          "policies": [
+            {
+              "command": "*",
+              "name": "authoring_provenance_scope",
+              "permissive": true,
+              "roles": [
+                "PUBLIC"
+              ],
+              "using": "((installation_id = mission_control.ctx_installation_id()) AND (application_id = mission_control.ctx_application_id()) AND (tenant_id = mission_control.ctx_tenant_id()))",
+              "with_check": "((installation_id = mission_control.ctx_installation_id()) AND (application_id = mission_control.ctx_application_id()) AND (tenant_id = mission_control.ctx_tenant_id()))"
+            }
+          ],
+          "row_level_security": true,
+          "triggers": [
+            {
+              "definition": "CREATE TRIGGER authoring_provenance_immutable BEFORE DELETE OR UPDATE ON mission_control.authoring_provenance FOR EACH ROW EXECUTE FUNCTION mission_control.reject_mutation()",
+              "name": "authoring_provenance_immutable"
+            }
+          ]
+        },
         "authoring_session": {
           "columns": [
             {
@@ -7611,6 +7914,372 @@
             {
               "definition": "CREATE TRIGGER catalog_record_immutable BEFORE DELETE OR UPDATE ON mission_control.catalog_record FOR EACH ROW EXECUTE FUNCTION mission_control.reject_mutation()",
               "name": "catalog_record_immutable"
+            }
+          ]
+        },
+        "chain_link": {
+          "columns": [
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "installation_id",
+              "not_null": true,
+              "type": "uuid"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "application_id",
+              "not_null": true,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "tenant_id",
+              "not_null": true,
+              "type": "uuid"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "link_id",
+              "not_null": true,
+              "type": "uuid"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "chain_id",
+              "not_null": true,
+              "type": "uuid"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "link_key",
+              "not_null": true,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "from_mission_key",
+              "not_null": true,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "to_mission_key",
+              "not_null": true,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "from_mission_id",
+              "not_null": true,
+              "type": "uuid"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "to_mission_id",
+              "not_null": true,
+              "type": "uuid"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "kind",
+              "not_null": true,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "bindings",
+              "not_null": true,
+              "type": "jsonb"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "release_condition",
+              "not_null": true,
+              "type": "jsonb"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "on_upstream_cancel",
+              "not_null": true,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "on_upstream_not_accepted",
+              "not_null": true,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "state",
+              "not_null": true,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "released_run_id",
+              "not_null": false,
+              "type": "uuid"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "released_at",
+              "not_null": false,
+              "type": "timestamp with time zone"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "blocked_reason",
+              "not_null": false,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "packet_ref",
+              "not_null": false,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "packet_digest",
+              "not_null": false,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "version",
+              "not_null": true,
+              "type": "bigint"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "created_at",
+              "not_null": true,
+              "type": "timestamp with time zone"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "updated_at",
+              "not_null": true,
+              "type": "timestamp with time zone"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "created_by_actor_ref",
+              "not_null": true,
+              "type": "text"
+            }
+          ],
+          "constraints": [
+            {
+              "definition": "CHECK (jsonb_typeof(bindings) = 'array'::text)",
+              "name": "chain_link_bindings_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (blocked_reason <> ''::text)",
+              "name": "chain_link_blocked_reason_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (from_mission_id <> to_mission_id AND from_mission_key <> to_mission_key)",
+              "name": "chain_link_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK ((kind = 'supplies'::text) = (jsonb_array_length(bindings) > 0))",
+              "name": "chain_link_check1",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK ((state = 'blocked'::text) = (blocked_reason IS NOT NULL))",
+              "name": "chain_link_check2",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (state <> 'released'::text OR released_at IS NOT NULL)",
+              "name": "chain_link_check3",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (created_by_actor_ref <> ''::text)",
+              "name": "chain_link_created_by_actor_ref_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (from_mission_key <> ''::text)",
+              "name": "chain_link_from_mission_key_check",
+              "type": "c"
+            },
+            {
+              "definition": "FOREIGN KEY (installation_id, application_id, tenant_id, chain_id) REFERENCES mission_control.mission_chain(installation_id, application_id, tenant_id, chain_id)",
+              "name": "chain_link_installation_id_application_id_tenant_id_chain__fkey",
+              "type": "f"
+            },
+            {
+              "definition": "UNIQUE (installation_id, application_id, tenant_id, chain_id, link_key)",
+              "name": "chain_link_installation_id_application_id_tenant_id_chain_i_key",
+              "type": "u"
+            },
+            {
+              "definition": "FOREIGN KEY (installation_id, application_id, tenant_id) REFERENCES mission_control.tenant(installation_id, application_id, tenant_id)",
+              "name": "chain_link_installation_id_application_id_tenant_id_fkey",
+              "type": "f"
+            },
+            {
+              "definition": "FOREIGN KEY (installation_id, application_id, tenant_id, from_mission_id) REFERENCES mission_control.mission(installation_id, application_id, tenant_id, mission_id)",
+              "name": "chain_link_installation_id_application_id_tenant_id_from_m_fkey",
+              "type": "f"
+            },
+            {
+              "definition": "UNIQUE (installation_id, application_id, tenant_id, link_id)",
+              "name": "chain_link_installation_id_application_id_tenant_id_link_id_key",
+              "type": "u"
+            },
+            {
+              "definition": "FOREIGN KEY (installation_id, application_id, tenant_id, released_run_id) REFERENCES mission_control.mission_run(installation_id, application_id, tenant_id, run_id)",
+              "name": "chain_link_installation_id_application_id_tenant_id_releas_fkey",
+              "type": "f"
+            },
+            {
+              "definition": "FOREIGN KEY (installation_id, application_id, tenant_id, to_mission_id) REFERENCES mission_control.mission(installation_id, application_id, tenant_id, mission_id)",
+              "name": "chain_link_installation_id_application_id_tenant_id_to_mis_fkey",
+              "type": "f"
+            },
+            {
+              "definition": "CHECK (kind = ANY (ARRAY['supplies'::text, 'depends_on'::text]))",
+              "name": "chain_link_kind_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (link_key <> ''::text)",
+              "name": "chain_link_link_key_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (on_upstream_cancel = ANY (ARRAY['cancel_downstream'::text, 'detach'::text]))",
+              "name": "chain_link_on_upstream_cancel_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (on_upstream_not_accepted = 'stop'::text)",
+              "name": "chain_link_on_upstream_not_accepted_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (packet_digest ~ '^sha256:[0-9a-f]{64}$'::text)",
+              "name": "chain_link_packet_digest_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (packet_ref <> ''::text)",
+              "name": "chain_link_packet_ref_check",
+              "type": "c"
+            },
+            {
+              "definition": "PRIMARY KEY (link_id)",
+              "name": "chain_link_pkey",
+              "type": "p"
+            },
+            {
+              "definition": "CHECK (jsonb_typeof(release_condition) = 'object'::text AND ((release_condition ->> 'kind'::text) = ANY (ARRAY['goal_accepted'::text, 'mission_accepted'::text, 'execution_complete'::text])) AND ((release_condition ->> 'kind'::text) = 'goal_accepted'::text) = (release_condition ? 'goal_key'::text AND (release_condition ->> 'goal_key'::text) <> ''::text))",
+              "name": "chain_link_release_condition_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (state = ANY (ARRAY['armed'::text, 'released'::text, 'blocked'::text, 'detached'::text, 'cancelled'::text]))",
+              "name": "chain_link_state_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (to_mission_key <> ''::text)",
+              "name": "chain_link_to_mission_key_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (version >= 1)",
+              "name": "chain_link_version_check",
+              "type": "c"
+            }
+          ],
+          "force_row_level_security": true,
+          "indexes": [
+            "CREATE INDEX chain_link_chain_id_fk_idx ON mission_control.chain_link USING btree (installation_id, application_id, tenant_id, chain_id)",
+            "CREATE INDEX chain_link_from_mission_id_fk_idx ON mission_control.chain_link USING btree (installation_id, application_id, tenant_id, from_mission_id)",
+            "CREATE INDEX chain_link_released_run_id_fk_idx ON mission_control.chain_link USING btree (installation_id, application_id, tenant_id, released_run_id)",
+            "CREATE INDEX chain_link_to_mission_id_fk_idx ON mission_control.chain_link USING btree (installation_id, application_id, tenant_id, to_mission_id)",
+            "CREATE UNIQUE INDEX chain_link_installation_id_application_id_tenant_id_chain_i_key ON mission_control.chain_link USING btree (installation_id, application_id, tenant_id, chain_id, link_key)",
+            "CREATE UNIQUE INDEX chain_link_installation_id_application_id_tenant_id_link_id_key ON mission_control.chain_link USING btree (installation_id, application_id, tenant_id, link_id)",
+            "CREATE UNIQUE INDEX chain_link_pkey ON mission_control.chain_link USING btree (link_id)"
+          ],
+          "kind": "r",
+          "policies": [
+            {
+              "command": "*",
+              "name": "chain_link_scope",
+              "permissive": true,
+              "roles": [
+                "PUBLIC"
+              ],
+              "using": "((installation_id = mission_control.ctx_installation_id()) AND (application_id = mission_control.ctx_application_id()) AND (tenant_id = mission_control.ctx_tenant_id()))",
+              "with_check": "((installation_id = mission_control.ctx_installation_id()) AND (application_id = mission_control.ctx_application_id()) AND (tenant_id = mission_control.ctx_tenant_id()))"
+            }
+          ],
+          "row_level_security": true,
+          "triggers": [
+            {
+              "definition": "CREATE TRIGGER chain_link_transition_guard BEFORE DELETE OR UPDATE ON mission_control.chain_link FOR EACH ROW EXECUTE FUNCTION mission_control.chain_link_transition_guard()",
+              "name": "chain_link_transition_guard"
             }
           ]
         },
@@ -16163,6 +16832,228 @@
           "row_level_security": true,
           "triggers": []
         },
+        "mission_chain": {
+          "columns": [
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "installation_id",
+              "not_null": true,
+              "type": "uuid"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "application_id",
+              "not_null": true,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "tenant_id",
+              "not_null": true,
+              "type": "uuid"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "chain_id",
+              "not_null": true,
+              "type": "uuid"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "chain_key",
+              "not_null": true,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "title",
+              "not_null": true,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "manifest_digest",
+              "not_null": true,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "lifecycle",
+              "not_null": true,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "phase",
+              "not_null": true,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "terminal_outcome",
+              "not_null": false,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "members",
+              "not_null": true,
+              "type": "jsonb"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "version",
+              "not_null": true,
+              "type": "bigint"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "created_at",
+              "not_null": true,
+              "type": "timestamp with time zone"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "updated_at",
+              "not_null": true,
+              "type": "timestamp with time zone"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "created_by_actor_ref",
+              "not_null": true,
+              "type": "text"
+            }
+          ],
+          "constraints": [
+            {
+              "definition": "CHECK (chain_key ~ '^[a-z0-9][a-z0-9_.-]{0,127}$'::text)",
+              "name": "mission_chain_chain_key_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK ((lifecycle = 'completed'::text) = (terminal_outcome IS NOT NULL))",
+              "name": "mission_chain_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (created_by_actor_ref <> ''::text)",
+              "name": "mission_chain_created_by_actor_ref_check",
+              "type": "c"
+            },
+            {
+              "definition": "UNIQUE (installation_id, application_id, tenant_id, chain_key)",
+              "name": "mission_chain_installation_id_application_id_tenant_id_cha_key1",
+              "type": "u"
+            },
+            {
+              "definition": "UNIQUE (installation_id, application_id, tenant_id, chain_id)",
+              "name": "mission_chain_installation_id_application_id_tenant_id_chai_key",
+              "type": "u"
+            },
+            {
+              "definition": "FOREIGN KEY (installation_id, application_id, tenant_id) REFERENCES mission_control.tenant(installation_id, application_id, tenant_id)",
+              "name": "mission_chain_installation_id_application_id_tenant_id_fkey",
+              "type": "f"
+            },
+            {
+              "definition": "CHECK (lifecycle = ANY (ARRAY['pending'::text, 'running'::text, 'completed'::text]))",
+              "name": "mission_chain_lifecycle_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (manifest_digest ~ '^sha256:[0-9a-f]{64}$'::text)",
+              "name": "mission_chain_manifest_digest_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (jsonb_typeof(members) = 'array'::text AND jsonb_array_length(members) >= 2)",
+              "name": "mission_chain_members_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (phase = ANY (ARRAY['releasing'::text, 'draining'::text, 'blocked'::text]))",
+              "name": "mission_chain_phase_check",
+              "type": "c"
+            },
+            {
+              "definition": "PRIMARY KEY (chain_id)",
+              "name": "mission_chain_pkey",
+              "type": "p"
+            },
+            {
+              "definition": "CHECK (terminal_outcome = ANY (ARRAY['accepted'::text, 'not_accepted'::text, 'cancelled'::text, 'execution_failed'::text]))",
+              "name": "mission_chain_terminal_outcome_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (title <> ''::text)",
+              "name": "mission_chain_title_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (version >= 1)",
+              "name": "mission_chain_version_check",
+              "type": "c"
+            }
+          ],
+          "force_row_level_security": true,
+          "indexes": [
+            "CREATE UNIQUE INDEX mission_chain_installation_id_application_id_tenant_id_cha_key1 ON mission_control.mission_chain USING btree (installation_id, application_id, tenant_id, chain_key)",
+            "CREATE UNIQUE INDEX mission_chain_installation_id_application_id_tenant_id_chai_key ON mission_control.mission_chain USING btree (installation_id, application_id, tenant_id, chain_id)",
+            "CREATE UNIQUE INDEX mission_chain_pkey ON mission_control.mission_chain USING btree (chain_id)"
+          ],
+          "kind": "r",
+          "policies": [
+            {
+              "command": "*",
+              "name": "mission_chain_scope",
+              "permissive": true,
+              "roles": [
+                "PUBLIC"
+              ],
+              "using": "((installation_id = mission_control.ctx_installation_id()) AND (application_id = mission_control.ctx_application_id()) AND (tenant_id = mission_control.ctx_tenant_id()))",
+              "with_check": "((installation_id = mission_control.ctx_installation_id()) AND (application_id = mission_control.ctx_application_id()) AND (tenant_id = mission_control.ctx_tenant_id()))"
+            }
+          ],
+          "row_level_security": true,
+          "triggers": [
+            {
+              "definition": "CREATE TRIGGER mission_chain_transition_guard BEFORE DELETE OR UPDATE ON mission_control.mission_chain FOR EACH ROW EXECUTE FUNCTION mission_control.mission_chain_transition_guard()",
+              "name": "mission_chain_transition_guard"
+            }
+          ]
+        },
         "mission_draft": {
           "columns": [
             {
@@ -16777,7 +17668,7 @@
               "type": "c"
             },
             {
-              "definition": "CHECK (kind = ANY (ARRAY['composition'::text, 'fork'::text, 'dependency'::text]))",
+              "definition": "CHECK (kind = ANY (ARRAY['composition'::text, 'fork'::text, 'dependency'::text, 'supplies'::text, 'depends_on'::text, 'parent_of'::text, 'adopted_from'::text, 'successor_of'::text, 'forked_from'::text]))",
               "name": "mission_relationship_kind_check",
               "type": "c"
             },

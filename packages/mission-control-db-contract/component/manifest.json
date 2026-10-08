@@ -3,7 +3,7 @@
   "component": "mission_control",
   "component_version": "1.0.0",
   "contract_path": "generated/contract.json",
-  "contract_schema_digest": "sha256:dbce50116df01e9a8d814f78e9ff61d91943afdfcc5fcb1a1d2d2001e488ab7f",
+  "contract_schema_digest": "sha256:a6a8305fceed38affabf285534430397a4996f69bb0b1d9e9e3aa11495f316f9",
   "installer_protocol": "mission-control-sql/v2",
   "min_postgres_version": 170000,
   "ordered_migrations": [
@@ -15,7 +15,7 @@
     {
       "key": "0002_authoring",
       "path": "migrations/0002_authoring.sql",
-      "sha256": "fe9f2f9adc7675db24b9458ea9be0d7e32a2c10aa4e708dd069d6a19af49e7b5"
+      "sha256": "0bda2c01feb68a4a3030be57ebedd6ef102cca85ce8baf26dec1ee1ed3207a37"
     },
     {
       "key": "0003_execution",
@@ -25,7 +25,7 @@
     {
       "key": "0004_capability_artifacts",
       "path": "migrations/0004_capability_artifacts.sql",
-      "sha256": "fe33a28c27f4fc9b965c417a407b5e1707a8bf8498c6dbf7b1cf90a47b8dfb07"
+      "sha256": "a1f77703e20207fd03deac5eb4ad45358e8910b822a35d9a9efc20c162f38e38"
     },
     {
       "key": "0005_commands_effects_recovery",
@@ -96,6 +96,11 @@
       "key": "0024_workspace_artifact_custody",
       "path": "migrations/0024_workspace_artifact_custody.sql",
       "sha256": "c6ca8f833dc46c0e055866e491858a565d9721c998e94bb6b3b6f09946581ed9"
+    },
+    {
+      "key": "0028_mission_chains",
+      "path": "migrations/0028_mission_chains.sql",
+      "sha256": "f6155bbf7215dea327fdbecfc3fc923bc085f51292a1e2a2d2176159f1ff9107"
     }
   ],
   "owned_schemas": [
@@ -123,10 +128,10 @@
     "mission_control_outbox_worker",
     "mission_control_readonly"
   ],
-  "schema_fingerprint": "sha256:ef5a9e71c9c4a4fe23f343a5708c476a757bc1c5a61f9aacae3a76577b209c09",
+  "schema_fingerprint": "sha256:1523a3b6efd2b99c946ae9448b9871629a61b01c69e28bb7f108fcf177c86e3e",
   "schema_fingerprint_algorithm": "mc-pg-catalog-v2",
   "schema_fingerprints": {
-    "mission_control": "sha256:461609218ce65a7a7b75072a65484ac479aed55bb3b42ccb37ef81a2dc1d2d29",
+    "mission_control": "sha256:bf2335ef451c889380dcb172170f0fca36820418ef096516a79ec2003a1a9128",
     "mission_control_search": "sha256:1df2cc3c968448828537bd0dc171b97fde614b00c85c6f8b6c9552ab2c796c89"
   },
   "seed_compatibility": {
@@ -142,8 +147,8 @@
     ]
   },
   "source_identity": "mission-control-db-contract",
-  "source_inputs_digest": "sha256:61d1524579ff666c2171585546bf7828cf927c77fab8f6b5a1f630959a8a006e",
-  "source_revision": "git:f6521c128738b4962f22fb7646882950c0b63d7c+inputs:sha256:61d1524579ff666c2171585546bf7828cf927c77fab8f6b5a1f630959a8a006e",
+  "source_inputs_digest": "sha256:56fa4e7cc541a384082db0a95be7a1ac7852fb2a03aedba369c5475f0d9cbdd7",
+  "source_revision": "git:7e5aadf198844fbfbe6849ce3cea5118036f79a1+inputs:sha256:56fa4e7cc541a384082db0a95be7a1ac7852fb2a03aedba369c5475f0d9cbdd7",
   "supported_reader_versions": [
     "mission-control-runtime/1"
   ],

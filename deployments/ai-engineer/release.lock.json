@@ -3,13 +3,13 @@
   "component": "mission_control",
   "component_version": "1.0.0",
   "files": {
-    "generated/contract.json": "dbce50116df01e9a8d814f78e9ff61d91943afdfcc5fcb1a1d2d2001e488ab7f",
-    "generated/contract.md": "49e1927a686a83c8fdaea466d80fafcf06756533bfcf4731f2758bba264fabd4",
-    "manifest.json": "946bc371a7837ef5f52af8c8a7de4eb85aa8b801dd7cb61dab8512f709498a3e",
+    "generated/contract.json": "a6a8305fceed38affabf285534430397a4996f69bb0b1d9e9e3aa11495f316f9",
+    "generated/contract.md": "8b7b17e4998314f510bef2509180f4fe0ad0e41dae5c747e402439e149e8a81a",
+    "manifest.json": "0e633800a8604aefb3207fc6175f6671c51548bf37d739271e296e1be1f8aaae",
     "migrations/0001_foundation.sql": "17fdeed4fd09b2a6ca82fa9dbc5fcb99a5255b25c86c4ac4055a0f4003c5c571",
-    "migrations/0002_authoring.sql": "fe9f2f9adc7675db24b9458ea9be0d7e32a2c10aa4e708dd069d6a19af49e7b5",
+    "migrations/0002_authoring.sql": "0bda2c01feb68a4a3030be57ebedd6ef102cca85ce8baf26dec1ee1ed3207a37",
     "migrations/0003_execution.sql": "fd0f839bd389f66c9dbb139934d7333699718fcfaa143e5757b23fefff947f27",
-    "migrations/0004_capability_artifacts.sql": "fe33a28c27f4fc9b965c417a407b5e1707a8bf8498c6dbf7b1cf90a47b8dfb07",
+    "migrations/0004_capability_artifacts.sql": "a1f77703e20207fd03deac5eb4ad45358e8910b822a35d9a9efc20c162f38e38",
     "migrations/0005_commands_effects_recovery.sql": "db724c6fd630bbe672e8b9f655db908de0c5fe1298d36101f7afb292daa6024e",
     "migrations/0010_run_control_support.sql": "d4db0f9c534decb808e3d1ec29aed1a98a17cbf4f1abc01cdaa4b7bd963f5507",
     "migrations/0011_operation_journal_support.sql": "c053ab24e9f22d4a88005fd510bdbf3f53e3201582888045da187ec0634e39ed",
@@ -24,6 +24,7 @@
     "migrations/0022_capability_search_projection.sql": "2d54d12db628a3015601b3723215f30ef69efdc79c2c15710a27263464f428f5",
     "migrations/0023_capability_discovery_custody.sql": "d2022c5b9b858734fe6e5b2fd72a04dc7a42d264092c3427d91b5a6f317fac23",
     "migrations/0024_workspace_artifact_custody.sql": "c6ca8f833dc46c0e055866e491858a565d9721c998e94bb6b3b6f09946581ed9",
+    "migrations/0028_mission_chains.sql": "f6155bbf7215dea327fdbecfc3fc923bc085f51292a1e2a2d2176159f1ff9107",
     "release-spec.json": "d0487057b6fd48b62fbb4fad84071cb6cdfcb794951117dd8735ab74137104ad"
   },
   "format_version": 2,
@@ -31,6 +32,6 @@
   "release_root": "../../packages/mission-control-db-contract/component",
   "release_uri": "mission-control:../../packages/mission-control-db-contract/component",
   "source_identity": "mission-control-db-contract",
-  "source_revision": "git:f6521c128738b4962f22fb7646882950c0b63d7c+inputs:sha256:61d1524579ff666c2171585546bf7828cf927c77fab8f6b5a1f630959a8a006e",
+  "source_revision": "git:7e5aadf198844fbfbe6849ce3cea5118036f79a1+inputs:sha256:56fa4e7cc541a384082db0a95be7a1ac7852fb2a03aedba369c5475f0d9cbdd7",
   "status": "pinned"
 }

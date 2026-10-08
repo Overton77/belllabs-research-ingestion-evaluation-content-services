@@ -89,21 +89,47 @@ def exit_status(status: int) -> int:
     return 5
 
 
-def mission_local(args: argparse.Namespace) -> int:
-    """Manifest verbs that need no service: the JSON Schema export."""
+def contract_schema_texts() -> dict[str, str]:
+    """Generated JSON Schemas committed under ``src/mission_control/contracts/schemas``."""
 
-    from mission_control.domain.authoring.manifest import manifest_json_schema_text
+    from mission_control.domain.authoring.manifest import (
+        MANIFEST_SCHEMA_ID,
+        manifest_json_schema_text,
+    )
+    from mission_control.domain.composition.chain import chain_contract_schemas
+
+    texts = {MANIFEST_SCHEMA_ID: manifest_json_schema_text()}
+    for name, schema in chain_contract_schemas().items():
+        texts[name] = json.dumps(schema, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    return texts
+
+
+def mission_local(args: argparse.Namespace) -> int:
+    """Manifest verbs that need no service: JSON Schema export and the structural compile.
+
+    ``compile`` validates shape, inheritance and chain links offline and persists nothing;
+    catalog search-to-pin resolution (FT-E2) is reported as deferred.
+    """
 
     try:
-        text = manifest_json_schema_text()
-        if getattr(args, "out", None):
-            Path(args.out).write_text(text, encoding="utf-8", newline="\n")
+        if args.action == "schema":
+            text = contract_schema_texts()[getattr(args, "contract", "mc.mission_manifest.v1")]
+            if getattr(args, "out", None):
+                Path(args.out).write_text(text, encoding="utf-8", newline="\n")
+            else:
+                sys.stdout.write(text)
+            return 0
+        from mission_control.application.chains.service import ManifestStructureService
+
+        report = ManifestStructureService().compile(Path(args.file).read_text(encoding="utf-8"))
+        if getattr(args, "json", False):
+            print(report.model_dump_json(by_alias=True))
         else:
-            sys.stdout.write(text)
+            print(json.dumps(report.model_dump(mode="json", by_alias=True), indent=2))
+        return 0 if report.ok else 2
     except OSError as exc:
         print(json.dumps({"error": str(exc)}), file=sys.stderr)
         return 2
-    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -136,6 +162,13 @@ def main(argv: list[str] | None = None) -> int:
     mission_commands = mission.add_subparsers(dest="action", required=True)
     schema = mission_commands.add_parser("schema", parents=[common])
     schema.add_argument("--out")
+    schema.add_argument(
+        "--contract",
+        choices=("mc.mission_manifest.v1", "mc.chain.v1", "mc.chain_link.v1"),
+        default="mc.mission_manifest.v1",
+    )
+    compile_ = mission_commands.add_parser("compile", parents=[common])
+    compile_.add_argument("file")
     catalog = groups.add_parser("catalog", parents=[common])
     catalog_commands = catalog.add_subparsers(dest="action", required=True)
     catalog_commands.add_parser("list", parents=[common])

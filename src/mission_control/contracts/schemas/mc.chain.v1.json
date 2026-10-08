@@ -1,0 +1,454 @@
+{
+  "$defs": {
+    "ChainBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "expand": {
+          "$ref": "#/$defs/ExpansionTier",
+          "default": "auto"
+        },
+        "input_name": {
+          "minLength": 1,
+          "title": "Input Name",
+          "type": "string"
+        },
+        "output_name": {
+          "minLength": 1,
+          "title": "Output Name",
+          "type": "string"
+        },
+        "schema_ref": {
+          "minLength": 1,
+          "title": "Schema Ref",
+          "type": "string"
+        }
+      },
+      "required": [
+        "output_name",
+        "input_name",
+        "schema_ref"
+      ],
+      "title": "ChainBinding",
+      "type": "object"
+    },
+    "ChainLifecycle": {
+      "enum": [
+        "pending",
+        "running",
+        "completed"
+      ],
+      "title": "ChainLifecycle",
+      "type": "string"
+    },
+    "ChainLink": {
+      "additionalProperties": false,
+      "description": "``mc.chain_link.v1``.",
+      "properties": {
+        "bindings": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ChainBinding"
+          },
+          "title": "Bindings",
+          "type": "array"
+        },
+        "blocked_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Blocked Reason"
+        },
+        "chain_id": {
+          "format": "uuid",
+          "title": "Chain Id",
+          "type": "string"
+        },
+        "from_mission_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "From Mission Id"
+        },
+        "from_mission_key": {
+          "minLength": 1,
+          "title": "From Mission Key",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ChainLinkKind"
+        },
+        "link_id": {
+          "format": "uuid",
+          "title": "Link Id",
+          "type": "string"
+        },
+        "link_key": {
+          "minLength": 1,
+          "title": "Link Key",
+          "type": "string"
+        },
+        "on": {
+          "$ref": "#/$defs/ReleaseCondition"
+        },
+        "on_upstream_cancel": {
+          "$ref": "#/$defs/OnUpstreamCancel",
+          "default": "cancel_downstream"
+        },
+        "on_upstream_not_accepted": {
+          "const": "stop",
+          "default": "stop",
+          "title": "On Upstream Not Accepted",
+          "type": "string"
+        },
+        "packet_digest": {
+          "anyOf": [
+            {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Packet Digest"
+        },
+        "packet_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Packet Ref"
+        },
+        "released_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Released At"
+        },
+        "released_run_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Released Run Id"
+        },
+        "schema_version": {
+          "const": "mc.chain_link.v1",
+          "default": "mc.chain_link.v1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/ChainLinkState",
+          "default": "armed"
+        },
+        "to_mission_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "To Mission Id"
+        },
+        "to_mission_key": {
+          "minLength": 1,
+          "title": "To Mission Key",
+          "type": "string"
+        }
+      },
+      "required": [
+        "link_id",
+        "chain_id",
+        "link_key",
+        "from_mission_key",
+        "to_mission_key",
+        "kind",
+        "on"
+      ],
+      "title": "ChainLink",
+      "type": "object"
+    },
+    "ChainLinkKind": {
+      "enum": [
+        "supplies",
+        "depends_on"
+      ],
+      "title": "ChainLinkKind",
+      "type": "string"
+    },
+    "ChainLinkState": {
+      "enum": [
+        "armed",
+        "released",
+        "blocked",
+        "detached",
+        "cancelled"
+      ],
+      "title": "ChainLinkState",
+      "type": "string"
+    },
+    "ChainMember": {
+      "additionalProperties": false,
+      "properties": {
+        "mission_id": {
+          "format": "uuid",
+          "title": "Mission Id",
+          "type": "string"
+        },
+        "mission_key": {
+          "minLength": 1,
+          "title": "Mission Key",
+          "type": "string"
+        },
+        "order": {
+          "minimum": 0,
+          "title": "Order",
+          "type": "integer"
+        },
+        "revision_id": {
+          "format": "uuid",
+          "title": "Revision Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "mission_key",
+        "mission_id",
+        "revision_id",
+        "order"
+      ],
+      "title": "ChainMember",
+      "type": "object"
+    },
+    "ChainPhase": {
+      "enum": [
+        "releasing",
+        "draining",
+        "blocked"
+      ],
+      "title": "ChainPhase",
+      "type": "string"
+    },
+    "ChainScope": {
+      "additionalProperties": false,
+      "properties": {
+        "application_id": {
+          "minLength": 1,
+          "title": "Application Id",
+          "type": "string"
+        },
+        "installation_id": {
+          "format": "uuid",
+          "title": "Installation Id",
+          "type": "string"
+        },
+        "tenant_id": {
+          "format": "uuid",
+          "title": "Tenant Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "installation_id",
+        "application_id",
+        "tenant_id"
+      ],
+      "title": "ChainScope",
+      "type": "object"
+    },
+    "ChainTerminalOutcome": {
+      "enum": [
+        "accepted",
+        "not_accepted",
+        "cancelled",
+        "execution_failed"
+      ],
+      "title": "ChainTerminalOutcome",
+      "type": "string"
+    },
+    "ExpansionTier": {
+      "enum": [
+        "inline",
+        "reference",
+        "materialize",
+        "auto"
+      ],
+      "title": "ExpansionTier",
+      "type": "string"
+    },
+    "OnUpstreamCancel": {
+      "enum": [
+        "cancel_downstream",
+        "detach"
+      ],
+      "title": "OnUpstreamCancel",
+      "type": "string"
+    },
+    "ReleaseCondition": {
+      "additionalProperties": false,
+      "description": "``goal_accepted{goal_key}`` | ``mission_accepted`` | ``execution_complete``.",
+      "properties": {
+        "goal_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Goal Key"
+        },
+        "kind": {
+          "enum": [
+            "goal_accepted",
+            "mission_accepted",
+            "execution_complete"
+          ],
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "ReleaseCondition",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "``mc.chain.v1``.",
+  "properties": {
+    "chain_id": {
+      "format": "uuid",
+      "title": "Chain Id",
+      "type": "string"
+    },
+    "chain_key": {
+      "pattern": "^[a-z0-9][a-z0-9_.-]{0,127}$",
+      "title": "Chain Key",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "created_by_actor_ref": {
+      "minLength": 1,
+      "title": "Created By Actor Ref",
+      "type": "string"
+    },
+    "lifecycle": {
+      "$ref": "#/$defs/ChainLifecycle",
+      "default": "pending"
+    },
+    "links": {
+      "items": {
+        "$ref": "#/$defs/ChainLink"
+      },
+      "minItems": 1,
+      "title": "Links",
+      "type": "array"
+    },
+    "manifest_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Manifest Digest",
+      "type": "string"
+    },
+    "members": {
+      "items": {
+        "$ref": "#/$defs/ChainMember"
+      },
+      "minItems": 2,
+      "title": "Members",
+      "type": "array"
+    },
+    "phase": {
+      "$ref": "#/$defs/ChainPhase",
+      "default": "releasing"
+    },
+    "schema_version": {
+      "const": "mc.chain.v1",
+      "default": "mc.chain.v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "scope": {
+      "$ref": "#/$defs/ChainScope"
+    },
+    "terminal_outcome": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ChainTerminalOutcome"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "title": {
+      "minLength": 1,
+      "title": "Title",
+      "type": "string"
+    },
+    "version": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "chain_id",
+    "scope",
+    "chain_key",
+    "title",
+    "manifest_digest",
+    "members",
+    "links",
+    "created_at",
+    "created_by_actor_ref"
+  ],
+  "title": "MissionChain",
+  "type": "object"
+}

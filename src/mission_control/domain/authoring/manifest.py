@@ -653,6 +653,7 @@ class InputBinding(ManifestModel):
     from_: OutputRef | None = Field(default=None, alias="from")
     artifact: str | None = Field(default=None, pattern=r"^artifact://\S+$")
     value: Any = None
+    schema_: SchemaRef | None = Field(default=None, alias="schema")
     expand: ExpansionTier = ExpansionTier.AUTO
     required: bool = True
 
