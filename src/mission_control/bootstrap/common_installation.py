@@ -41,6 +41,32 @@ REQUIRED_TABLES = frozenset(
 )
 
 
+def _semver(version: str) -> tuple[int, int, int] | None:
+    parts = version.split(".")
+    if len(parts) != 3 or not all(part.isdigit() for part in parts):
+        return None
+    return int(parts[0]), int(parts[1]), int(parts[2])
+
+
+def receipts_belong_to_release(receipt_versions: set[str], required: str) -> bool:
+    """Whether migration receipts describe an installation of ``required``.
+
+    An installation upgraded in place keeps the receipts of the earlier releases it applied
+    (`mission-db` admits an upgrade only from a compatible previous fingerprint and attests
+    the new version after verifying the result), so receipts of the required version or of
+    an earlier semantic version are its own. Non-semantic versions must match exactly.
+    """
+
+    wanted = _semver(required)
+    if wanted is None:
+        return receipt_versions <= {required}
+    for version in receipt_versions:
+        parsed = _semver(version)
+        if parsed is None or parsed > wanted:
+            return False
+    return True
+
+
 @dataclass(frozen=True)
 class CommonReadiness:
     storage_mode: Literal["production_common"]
@@ -162,9 +188,9 @@ async def inspect_common_installation(
             or READER_VERSION not in attestation["supported_reader_versions"]
         ):
             raise InstallationUnavailable("this build is not an admitted reader/writer")
-        if not receipts or {row["component_version"] for row in receipts} - {
-            binding.required_component_version
-        }:
+        if not receipts or not receipts_belong_to_release(
+            {row["component_version"] for row in receipts}, binding.required_component_version
+        ):
             raise InstallationUnavailable("component receipts do not match the pinned release")
         return CommonReadiness(
             storage_mode="production_common",
