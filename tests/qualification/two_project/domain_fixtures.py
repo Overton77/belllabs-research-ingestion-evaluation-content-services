@@ -28,6 +28,7 @@ DOMAIN_ROLE_KINDS = ("anon", "authenticated", "service")
 _EXTENSIONS = """
 CREATE SCHEMA IF NOT EXISTS extensions;
 CREATE EXTENSION IF NOT EXISTS vector SCHEMA extensions;
+CREATE EXTENSION IF NOT EXISTS pg_trgm SCHEMA extensions;
 GRANT USAGE ON SCHEMA extensions TO PUBLIC;
 """
 

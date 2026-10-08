@@ -43,11 +43,15 @@ from mission_control.application.installations.registry import (
 )
 from mission_control.application.ports.payloads import ContentAddressedPayloadStore
 from mission_control.application.recovery.run_forks import ForkPatchPolicyRegistry
-from mission_control.bootstrap.catalog import compose_catalog_service
+from mission_control.bootstrap.catalog import (
+    compose_catalog_service,
+    configured_catalog_embeddings,
+)
 from mission_control.bootstrap.composition import (
     MissionApplicationServices,
     compose_application_services,
 )
+from mission_control.bootstrap.settings import get_settings
 from mission_control.contracts.json import parse_json_object
 from mission_control.domain.authoring.extensions import ExtensionRegistry
 from mission_control.interfaces.http.catalog import router as catalog_router
@@ -191,6 +195,7 @@ def create_application(
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+        catalog_embeddings = configured_catalog_embeddings(get_settings())
         async with AsyncExitStack() as stack:
             try:
                 for item in deployment.applications:
@@ -260,13 +265,24 @@ def create_application(
                             services.admission
                         )
                         application.state.mission_control_compositions[key] = services
-                        catalog = (options.catalog_factory or compose_catalog_service)(
-                            pool,
-                            request_scope=request_scope(identity),
-                            catalog_scope=(
-                                f"mc/{binding.installation_id}/{binding.application_id}/catalog"
-                            ),
+                        catalog_scope = (
+                            f"mc/{binding.installation_id}/{binding.application_id}/catalog"
                         )
+                        if options.catalog_factory is not None:
+                            catalog = options.catalog_factory(
+                                pool,
+                                request_scope=request_scope(identity),
+                                catalog_scope=catalog_scope,
+                            )
+                        else:
+                            # FT-A3: lexical search always; hybrid when the embedding
+                            # Model Profile and its credential are configured.
+                            catalog = compose_catalog_service(
+                                pool,
+                                request_scope=request_scope(identity),
+                                catalog_scope=catalog_scope,
+                                embeddings=catalog_embeddings,
+                            )
                         if (
                             catalog.request_scope != request_scope(identity)
                             or catalog.catalog_scope

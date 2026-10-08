@@ -8,6 +8,11 @@ legacy ``'global'`` visibility value only means "every scope of this installatio
 Search results additionally require the source definition to be an admitted (or, when
 requested, retired) ``mission_control.asset_version``; revoked or unadmitted documents are
 never returned. Embeddings are never invented here.
+
+FT-A3 (ADR-0013 extended by ADR-0025): embeddings are nullable, so rows rank lexically
+until embedded; ``trigram_search`` ranks near-exact names through pg_trgm word similarity
+over the generated ``name_surface``; every list filters host profiles and side-effect
+classes before ranking.
 """
 
 from __future__ import annotations
@@ -25,6 +30,7 @@ from mission_control.adapters.postgres.control_plane.catalog_assets import (
 )
 from mission_control.adapters.postgres.scope import apply_catalog_scope, parse_catalog_scope
 from mission_control.application.capabilities.capability_search_repository import (
+    TRIGRAM_THRESHOLD,
     CapabilitySearchDocument,
     RankedCapabilityDocument,
 )
@@ -228,13 +234,20 @@ class PostgresCatalogSearchRepository:
                     indexed_at,
                     projection_generation,
                     installation_id,
-                    application_id
+                    application_id,
+                    embedding_model,
+                    embedding_dims,
+                    host_profiles,
+                    side_effect_class,
+                    aliases,
+                    tool_names
                 )
                 VALUES (
                     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
                     $12::extensions.vector, $13, $14, $15, $16, $17, $18,
                     $19, $20, $21, $22, $23, $24, $25::jsonb, $26, $27,
-                    $28, $29, $30, $31, $32, $33, $34
+                    $28, $29, $30, $31, $32, $33, $34,
+                    $35, $36, $37::text[], $38, $39::text[], $40::text[]
                 )
                 ON CONFLICT (
                     installation_id,
@@ -273,7 +286,13 @@ class PostgresCatalogSearchRepository:
                     compatibility_summary = EXCLUDED.compatibility_summary,
                     schema_digest_verified = EXCLUDED.schema_digest_verified,
                     source_published_at = EXCLUDED.source_published_at,
-                    indexed_at = EXCLUDED.indexed_at
+                    indexed_at = EXCLUDED.indexed_at,
+                    embedding_model = EXCLUDED.embedding_model,
+                    embedding_dims = EXCLUDED.embedding_dims,
+                    host_profiles = EXCLUDED.host_profiles,
+                    side_effect_class = EXCLUDED.side_effect_class,
+                    aliases = EXCLUDED.aliases,
+                    tool_names = EXCLUDED.tool_names
                 WHERE (documents.search_document_id, documents.source_digest, documents.status,
                        documents.title, documents.description, documents.search_text,
                        documents.search_text_digest, documents.embedding::text,
@@ -285,7 +304,10 @@ class PostgresCatalogSearchRepository:
                        documents.operation_classes, documents.workflow_type_refs,
                        documents.capability_requirements, documents.compatible_runtimes,
                        documents.compatibility_summary, documents.schema_digest_verified,
-                       documents.source_published_at, documents.indexed_at)
+                       documents.source_published_at, documents.indexed_at,
+                       documents.embedding_model, documents.embedding_dims,
+                       documents.host_profiles, documents.side_effect_class,
+                       documents.aliases, documents.tool_names)
                       IS DISTINCT FROM
                       (EXCLUDED.search_document_id, EXCLUDED.source_digest, EXCLUDED.status,
                        EXCLUDED.title, EXCLUDED.description, EXCLUDED.search_text,
@@ -298,7 +320,10 @@ class PostgresCatalogSearchRepository:
                        EXCLUDED.operation_classes, EXCLUDED.workflow_type_refs,
                        EXCLUDED.capability_requirements, EXCLUDED.compatible_runtimes,
                        EXCLUDED.compatibility_summary, EXCLUDED.schema_digest_verified,
-                       EXCLUDED.source_published_at, EXCLUDED.indexed_at)
+                       EXCLUDED.source_published_at, EXCLUDED.indexed_at,
+                       EXCLUDED.embedding_model, EXCLUDED.embedding_dims,
+                       EXCLUDED.host_profiles, EXCLUDED.side_effect_class,
+                       EXCLUDED.aliases, EXCLUDED.tool_names)
                 RETURNING search_document_id
                 """,
                 document.search_document_id,
@@ -312,7 +337,7 @@ class PostgresCatalogSearchRepository:
                 document.description,
                 document.search_text,
                 document.search_text_digest,
-                _vector_literal(document.embedding),
+                None if document.embedding is None else _vector_literal(document.embedding),
                 document.embedding_model_id,
                 document.embedding_dimensions,
                 document.search_document_format_version,
@@ -347,6 +372,12 @@ class PostgresCatalogSearchRepository:
                 document.projection_generation,
                 installation,
                 app,
+                document.embedding_model,
+                document.embedding_dims,
+                sorted(document.host_profiles),
+                document.side_effect_class,
+                sorted(document.aliases),
+                sorted(document.tool_names),
             )
         return row is not None
 
@@ -416,11 +447,40 @@ class PostgresCatalogSearchRepository:
         query, args = _filtered_query(
             request,
             score_sql=("1 - (embedding OPERATOR(extensions.<=>) $1::extensions.vector)"),
-            match_sql="TRUE",
+            match_sql="documents.embedding IS NOT NULL",
             order_sql=(
                 "embedding OPERATOR(extensions.<=>) $1::extensions.vector, logical_id, revision"
             ),
             tail_args=(_vector_literal(query_embedding), limit),
+            installation=installation,
+        )
+        async with self._scope.session(request.tenant_scope) as (connection, _, _app):
+            rows = await connection.fetch(query, *args)
+        return tuple(
+            RankedCapabilityDocument(
+                document=_document(row),
+                branch_score=float(row["branch_score"]),
+            )
+            for row in rows
+        )
+
+    async def trigram_search(
+        self,
+        request: CapabilitySearchRequest,
+        *,
+        limit: int,
+    ) -> tuple[RankedCapabilityDocument, ...]:
+        """Near-exact names: pg_trgm word similarity of the query against ``name_surface``."""
+        installation = self._scope.installation(request.tenant_scope)
+        query, args = _filtered_query(
+            request,
+            score_sql="extensions.word_similarity(lower($1), documents.name_surface)",
+            match_sql=(
+                f"extensions.word_similarity(lower($1), documents.name_surface) "
+                f">= {TRIGRAM_THRESHOLD}"
+            ),
+            order_sql="branch_score DESC, logical_id, revision",
+            tail_args=(" ".join(request.query.split()), limit),
             installation=installation,
         )
         async with self._scope.session(request.tenant_scope) as (connection, _, _app):
@@ -443,8 +503,9 @@ def _filtered_query(
     tail_args: tuple[object, int],
     installation: tuple[UUID, str] | None = None,
 ) -> tuple[str, tuple[object, ...]]:
-    # $1 is branch-specific input, $9 the branch limit, $10/$11 the installation and
-    # $12 the published-definition asset contract used by the admission filter.
+    # $1 is branch-specific input, $9 the branch limit, $10/$11 the installation,
+    # $12 the published-definition asset contract used by the admission filter, $13 the
+    # required (supported) lane profiles and $14 the allowed side-effect classes.
     workflow_ref = (
         json.dumps(request.workflow_type_ref.model_dump(mode="json"))
         if request.workflow_type_ref is not None
@@ -484,6 +545,11 @@ def _filtered_query(
               $8::jsonb IS NULL
               OR documents.workflow_type_refs @> jsonb_build_array($8::jsonb)
           )
+          AND documents.host_profiles @> $13::text[]
+          AND (
+              cardinality($14::text[]) = 0
+              OR documents.side_effect_class = ANY($14::text[])
+          )
           AND EXISTS (
               SELECT 1
               FROM mission_control.asset_version AS asset
@@ -516,6 +582,8 @@ def _filtered_query(
         installation_id,
         application_id,
         PUBLISHED_DEFINITION_CONTRACT,
+        sorted(profile.value for profile in request.host_profiles),
+        sorted(request.side_effect_classes),
     )
 
 
@@ -534,6 +602,7 @@ def _document(row: Mapping[str, Any]) -> CapabilitySearchDocument:
     embedding = row["embedding"]
     if isinstance(embedding, str):
         embedding = tuple(float(item) for item in embedding.strip("[]").split(",") if item)
+    vector = None if embedding is None else tuple(float(item) for item in embedding)
     return CapabilitySearchDocument(
         search_document_id=row["search_document_id"],
         tenant_scope=str(row["tenant_scope"]),
@@ -546,7 +615,9 @@ def _document(row: Mapping[str, Any]) -> CapabilitySearchDocument:
         description=str(row["description"]),
         search_text=str(row["search_text"]),
         search_text_digest=str(row["search_text_digest"]),
-        embedding=tuple(float(item) for item in embedding),
+        embedding=vector,
+        embedding_model=row.get("embedding_model"),
+        embedding_dims=row.get("embedding_dims"),
         embedding_model_id=str(row["embedding_model_id"]),
         embedding_dimensions=int(row["embedding_dimensions"]),
         search_document_format_version=int(row["search_document_format_version"]),
@@ -557,6 +628,10 @@ def _document(row: Mapping[str, Any]) -> CapabilitySearchDocument:
         workflow_type_refs=frozenset(ExactDefinitionRef.model_validate(item) for item in raw_refs),
         capability_requirements=frozenset(row.get("capability_requirements") or ()),
         compatible_runtimes=frozenset(row.get("compatible_runtimes") or ()),
+        host_profiles=frozenset(row.get("host_profiles") or ()),
+        side_effect_class=row.get("side_effect_class"),
+        aliases=frozenset(row.get("aliases") or ()),
+        tool_names=frozenset(row.get("tool_names") or ()),
         compatibility_summary=str(row["compatibility_summary"]),
         schema_digest_verified=bool(row["schema_digest_verified"]),
         mongodb_collection=str(row["mongodb_collection"]),

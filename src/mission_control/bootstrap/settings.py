@@ -98,6 +98,9 @@ class Settings(BaseSettings):
     coordinator_launch_enabled: bool = False
     capability_embedding_model: Literal["text-embedding-3-small"] = "text-embedding-3-small"
     capability_embedding_dimensions: Literal[1536] = 1536
+    # FT-A3: the Model Profile naming the catalog search embedding route. Unset means the
+    # public catalog search runs lexical-only (never unavailable for a missing route).
+    capability_embedding_profile: Literal["embedding.openai.text-embedding-3-small"] | None = None
     capability_projection_lease_seconds: int = Field(
         default=120,
         ge=15,

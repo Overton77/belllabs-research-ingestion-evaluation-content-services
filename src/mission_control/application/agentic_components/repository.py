@@ -4,6 +4,12 @@ import fnmatch
 from collections.abc import Iterable
 from typing import Protocol
 
+from mission_control.application.capabilities.capability_search_repository import (
+    TRIGRAM_THRESHOLD,
+    lexical_score,
+    query_terms,
+    word_similarity,
+)
 from mission_control.domain.agentic_components.contracts import (
     AgenticComponentRelease,
     ComponentQuery,
@@ -49,8 +55,13 @@ class InMemoryAgenticComponentRepository:
         return self._by_digest.get(digest)
 
     async def search(self, query: ComponentQuery) -> tuple[AgenticComponentRelease, ...]:
-        scored: list[tuple[int, AgenticComponentRelease]] = []
-        text_tokens = tuple((query.text or "").casefold().split())
+        """Kind, trust and host filters first, then the catalog projection's lexical ranking.
+
+        FT-A3 replaced the substring matcher with ``lexical_score`` and trigram word
+        similarity on names, the same ranking the capability search projection uses.
+        """
+        scored: list[tuple[float, AgenticComponentRelease]] = []
+        terms = query_terms(query.text or "")
         for release in self._by_digest.values():
             if query.kinds and release.kind not in query.kinds:
                 continue
@@ -71,19 +82,28 @@ class InMemoryAgenticComponentRepository:
                 continue
             if not query.required_capabilities <= release.description.capabilities:
                 continue
-            haystack = " ".join(
+            text = " ".join(
                 (
-                    release.coordinate.component_id,
-                    release.description.title,
-                    release.description.summary,
                     *sorted(release.description.tags),
                     *sorted(release.description.biotech_domains),
                     *sorted(release.description.capabilities),
                 )
-            ).casefold()
-            if text_tokens and not all(token in haystack for token in text_tokens):
-                continue
-            score = sum(haystack.count(token) for token in text_tokens)
+            )
+            score = 0.0
+            if terms:
+                score = lexical_score(
+                    terms,
+                    identifier=release.coordinate.component_id,
+                    title=release.description.title,
+                    text=text,
+                    description=release.description.summary,
+                )
+                names = f"{release.coordinate.component_id} {release.description.title}"
+                similarity = word_similarity(query.text or "", names)
+                if similarity >= TRIGRAM_THRESHOLD:
+                    score += similarity
+                if score <= 0:
+                    continue
             score += _TRUST_ORDER[release.trust_stage]
             scored.append((score, release))
         scored.sort(

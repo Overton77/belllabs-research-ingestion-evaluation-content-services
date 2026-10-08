@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from pydantic import BaseModel, ConfigDict
 
 from mission_control.domain.authoring.contracts import (
@@ -14,7 +16,7 @@ from mission_control.domain.capabilities.host_support import (
     CapabilityHostSupport,
     LaneProfile,
 )
-from mission_control.domain.capabilities.pins import CapabilityPin
+from mission_control.domain.capabilities.pins import VERSION_PATTERN, CapabilityPin
 
 AGENT_CAPABILITY_KIND: dict[DefinitionKind, AgentCapabilityKind] = {
     DefinitionKind.SKILL: AgentCapabilityKind.SKILL_BUNDLE,
@@ -65,7 +67,12 @@ def capability_pin(published: PublishedDefinition) -> CapabilityPin:
     the pin resolves to exactly one row.
     """
     provenance = getattr(published.definition, "source_provenance", None)
-    version = getattr(provenance, "upstream_version", None) or str(published.ref.revision)
+    upstream = getattr(provenance, "upstream_version", None)
+    version = (
+        upstream
+        if isinstance(upstream, str) and re.fullmatch(VERSION_PATTERN, upstream)
+        else str(published.ref.revision)
+    )
     return CapabilityPin(
         capability_id=published.ref.logical_id,
         version=version,

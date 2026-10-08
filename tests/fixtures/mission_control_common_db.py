@@ -263,6 +263,8 @@ async def create_common_database(
         await connection.execute("CREATE SCHEMA IF NOT EXISTS extensions")
         await connection.execute("CREATE EXTENSION IF NOT EXISTS vector SCHEMA extensions")
         await connection.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA extensions")
+        # Release-spec required extension since migration 0026 (trigram name search).
+        await connection.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm SCHEMA extensions")
         await connection.execute("GRANT USAGE ON SCHEMA extensions TO PUBLIC")
         if legacy_poison:
             await poison_legacy_schemas(connection)

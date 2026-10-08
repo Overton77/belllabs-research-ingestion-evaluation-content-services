@@ -19,10 +19,14 @@ from mission_control.application.capabilities.capability_search_repository impor
 from mission_control.application.capabilities.catalog_projection_metadata import classify_definition
 from mission_control.domain.authoring.canonical import sha256_digest
 from mission_control.domain.authoring.contracts import (
+    Definition,
     ExactDefinitionRef,
+    HookScriptDefinition,
+    MCPServerDefinition,
     MCPToolDefinition,
     PublishedDefinition,
 )
+from mission_control.domain.capabilities.host_support import CapabilityHostSupport
 from mission_control.domain.coordinator.contracts import (
     CatalogAssetStatus,
     SearchDocumentMetadata,
@@ -73,25 +77,36 @@ class _PreparedProjection:
     embedding: tuple[float, ...] | None
 
 
+LEXICAL_ONLY_MODEL_ID = "lexical-only"
+
+
 class CatalogProjector:
-    """Rehydrate Mongo authority before materializing a disposable search row."""
+    """Rehydrate the authoritative definition before materializing a disposable search row.
+
+    FT-A3: lexical columns are written synchronously; embeddings are optional. With
+    ``embeddings=None`` (no route configured) or ``defer_embeddings=True`` rows are written
+    without a vector and ``embed_pending`` fills them later in batches, re-embedding any row
+    whose recorded ``embedding_model``/``embedding_dims`` differ from the configured route.
+    """
 
     def __init__(
         self,
         *,
         definitions: DefinitionRepository,
         search: CatalogSearchRepository,
-        embeddings: CapabilityEmbeddingPort,
+        embeddings: CapabilityEmbeddingPort | None,
         embedding_model_id: str,
         embedding_dimensions: int,
         projection_generation: str,
         clock: Callable[[], datetime] | None = None,
+        defer_embeddings: bool = False,
     ) -> None:
         if not embedding_model_id or embedding_dimensions < 1 or not projection_generation:
             raise ValueError("catalog projection configuration is incomplete")
         self._definitions = definitions
         self._search = search
         self._embeddings = embeddings
+        self._defer_embeddings = defer_embeddings or embeddings is None
         self._embedding_model_id = embedding_model_id
         self._embedding_dimensions = embedding_dimensions
         self._projection_generation = projection_generation
@@ -146,7 +161,7 @@ class CatalogProjector:
                 prepared.append(item)
                 continue
             prepared.append(item)
-            if item.embedding is None:
+            if item.embedding is None and not self._defer_embeddings:
                 embedding_indexes.append(len(prepared) - 1)
                 embedding_inputs.append(item.rendered.search_text)
 
@@ -180,7 +195,7 @@ class CatalogProjector:
             if isinstance(item, CatalogProjectionResult):
                 results.append(item)
                 continue
-            if item.embedding is None:
+            if item.embedding is None and not self._defer_embeddings:
                 raise CatalogProjectionError("projection embedding is unavailable")
             document = self._document(item, tenant_scope)
             changed = await self._search.upsert(document)
@@ -242,12 +257,19 @@ class CatalogProjector:
             reusable is not None
             and reusable.source_digest == ref.digest
             and reusable.search_text_digest == text_digest
-            and reusable.embedding_model_id == self._embedding_model_id
-            and reusable.embedding_dimensions == self._embedding_dimensions
+            and reusable.embedded_with == (self._embedding_model_id, self._embedding_dimensions)
             and reusable.search_document_format_version == SEARCH_DOCUMENT_FORMAT_VERSION
         )
+        lexical_current = (
+            current is not None
+            and current.source_digest == ref.digest
+            and current.search_text_digest == text_digest
+            and current.search_document_format_version == SEARCH_DOCUMENT_FORMAT_VERSION
+            and current.embedding is None
+            and self._defer_embeddings
+        )
         projection_unchanged = (
-            embedding_reusable
+            (embedding_reusable or lexical_current)
             and current is not None
             and current.status == status
             and current.projection_generation == self._projection_generation
@@ -257,6 +279,10 @@ class CatalogProjector:
             and current.workflow_type_refs == workflow_type_refs
             and current.capability_requirements == capability_requirements
             and current.compatible_runtimes == compatible_runtimes
+            and current.host_profiles == _host_profiles(published.definition)
+            and current.aliases == source.aliases
+            and current.tool_names == source.tool_names
+            and current.side_effect_class == _side_effect_class(published.definition)
         )
         if projection_unchanged and current is not None:
             return CatalogProjectionResult(document=current, changed=False)
@@ -303,7 +329,9 @@ class CatalogProjector:
             description=item.source.description,
             search_text=item.rendered.search_text,
             search_text_digest=item.text_digest,
-            embedding=item.embedding or (),
+            embedding=item.embedding,
+            embedding_model=self._embedding_model_id if item.embedding else None,
+            embedding_dims=self._embedding_dimensions if item.embedding else None,
             embedding_model_id=self._embedding_model_id,
             embedding_dimensions=self._embedding_dimensions,
             search_document_format_version=(item.rendered.search_document_format_version),
@@ -314,6 +342,10 @@ class CatalogProjector:
             workflow_type_refs=item.workflow_type_refs,
             capability_requirements=item.capability_requirements,
             compatible_runtimes=item.compatible_runtimes,
+            host_profiles=_host_profiles(item.published.definition),
+            side_effect_class=_side_effect_class(item.published.definition),
+            aliases=item.source.aliases,
+            tool_names=item.source.tool_names,
             compatibility_summary=(
                 item.source.compatibility_summary or "Compatible with the indexed catalog contract."
             ),
@@ -327,6 +359,8 @@ class CatalogProjector:
         self,
         texts: tuple[str, ...],
     ) -> tuple[CapabilityEmbedding, ...]:
+        if self._embeddings is None:
+            raise CatalogProjectionError("no embedding route is configured")
         batch_method = getattr(self._embeddings, "embed_many", None)
         if callable(batch_method):
             method = cast(
@@ -338,6 +372,56 @@ class CatalogProjector:
             )
             return await method(texts)
         return tuple([await self._embeddings.embed(text) for text in texts])
+
+    async def embed_pending(
+        self,
+        *,
+        tenant_scope: str = "global",
+        batch_size: int = 64,
+    ) -> int:
+        """Embed rows of this generation that lack a vector from the configured route.
+
+        Returns how many rows were (re-)embedded. A row embedded by a different model or
+        dimension is re-embedded so spaces never mix. Requires an embedding route.
+        """
+        if self._embeddings is None:
+            raise CatalogProjectionError("no embedding route is configured")
+        if batch_size < 1:
+            raise ValueError("embedding batch size must be positive")
+        route = (self._embedding_model_id, self._embedding_dimensions)
+        pending = [
+            document
+            for document in await self._search.list_generation(
+                tenant_scope, self._projection_generation
+            )
+            if document.embedded_with != route
+        ]
+        done = 0
+        for start in range(0, len(pending), batch_size):
+            batch = pending[start : start + batch_size]
+            embedded = await self._embed_many(tuple(item.search_text for item in batch))
+            if len(embedded) != len(batch):
+                raise CatalogProjectionError("embedding batch response has an invalid item count")
+            for document, vector in zip(batch, embedded, strict=True):
+                if (
+                    vector.model_id,
+                    vector.dimensions,
+                ) != route or vector.input_digest != document.search_text_digest:
+                    raise CatalogProjectionError(
+                        "embedding metadata does not match the projection claim"
+                    )
+                await self._search.upsert(
+                    document.model_copy(
+                        update={
+                            "embedding": vector.vector,
+                            "embedding_model": vector.model_id,
+                            "embedding_dims": vector.dimensions,
+                            "indexed_at": self._clock(),
+                        }
+                    )
+                )
+                done += 1
+        return done
 
     @property
     def projection_generation(self) -> str:
@@ -362,3 +446,26 @@ class CatalogProjector:
 
 def _text_digest(value: str) -> str:
     return f"sha256:{sha256(value.encode()).hexdigest()}"
+
+
+_SEVERITY = {"read_only": 0, "bounded_write": 1, "consequential": 2}
+
+
+def _host_profiles(definition: Definition) -> frozenset[str]:
+    support = getattr(definition, "host_support", None)
+    if not isinstance(support, CapabilityHostSupport):
+        return frozenset()
+    return frozenset(profile.value for profile in support.supported_profiles())
+
+
+def _side_effect_class(definition: Definition) -> str | None:
+    """Tools and hooks declare one; a server reports its most consequential exposed tool."""
+    if isinstance(definition, MCPToolDefinition | HookScriptDefinition):
+        return definition.side_effect_class
+    if isinstance(definition, MCPServerDefinition) and definition.tools:
+        return max(
+            (tool.side_effect_class for tool in definition.exposed_tools()),
+            key=_SEVERITY.__getitem__,
+            default=None,
+        )
+    return None

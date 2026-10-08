@@ -495,6 +495,7 @@ class ProductionCoordinatorFacade:
                     )
                 ),
                 token_use=search_token_use(parsed.query, visible_hits),
+                search_mode=response.search_mode,
             )
 
         return await self._run("search_capabilities", principal, request, operation)

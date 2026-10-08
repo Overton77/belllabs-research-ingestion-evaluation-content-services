@@ -122,6 +122,7 @@ async def prepare_cluster(admin_dsn: str, app: str) -> str:
         await admin.execute(f"GRANT CREATE ON SCHEMA public TO {login}")
         await admin.execute("CREATE SCHEMA IF NOT EXISTS extensions")
         await admin.execute("CREATE EXTENSION IF NOT EXISTS vector SCHEMA extensions")
+        await admin.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm SCHEMA extensions")
         await admin.execute("GRANT USAGE ON SCHEMA extensions TO PUBLIC")
         roles = await create_domain_roles(admin, app.replace("-", ""))
         for role in roles.values():
