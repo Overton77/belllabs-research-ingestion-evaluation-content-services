@@ -41,6 +41,7 @@ if not (PROJECT_ROOT / ".env").exists():
 _PSYCOPG_SELECTOR_MODULES = {
     ("experiments", "test_langgraph_temporal_stagegraph.py"),
     ("deep_agents", "test_checkpoint_lineage_postgres_saver.py"),
+    ("deep_agents", "test_provider_frames_deep_agents.py"),
     ("temporal", "test_rrm_004_worker_restart_recovery.py"),
     ("agent_server", "test_rrm_013_async_subagent_live.py"),
     ("control_plane", "test_rrm_005_inspection.py"),

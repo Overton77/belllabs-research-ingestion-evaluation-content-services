@@ -15,6 +15,7 @@ This adapter is the first execution lane (ADR-0005): bounded operation cognition
 | Checkpoints, lineage and verification | checkpoint_history.py, checkpoint_reads.py, checkpoint_verifier.py; domain/execution/checkpoint_lineage.py |
 | LangGraph saver/store in the runtime schema | persistence.py, runtime_persistence_verifier.py |
 | Capability lineage recorded on the attempt | capability_lineage.py |
+| Provider frames (Native Event Store, SPEC-03) from `astream` v2 parts | frames.py; application/frames |
 | Browser and Docker sandbox tools | browser_tool.py, docker_sandbox.py |
 
 ## Invariants
