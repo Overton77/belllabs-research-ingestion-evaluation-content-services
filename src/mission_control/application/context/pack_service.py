@@ -12,8 +12,9 @@ storage or a tokenizer happens here, through these ports, before packing:
   durable inputs, so they reach the workspace through the same verified path as artifacts.
 - :class:`ModelBudgetProfilePort` resolves the budget terms of the operation's model.
 
-Entry points: :meth:`ContextPackService.pack_for_stage` (FT-B2). ``pack_for_iteration`` (FT-B3)
-and ``pack_for_chain_link`` (FT-D2) build on :meth:`ContextPackService.seal`.
+Entry points: :meth:`ContextPackService.pack_for_stage` (FT-B2). ``pack_for_iteration`` (FT-B3),
+``pack_for_continuation`` (FT-B4) and ``pack_for_chain_link`` (FT-D2) build on
+:meth:`ContextPackService.seal`.
 """
 
 from __future__ import annotations
@@ -21,10 +22,16 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from typing import Protocol
 
 from mission_control.domain.authoring.contracts import StageGraphBlueprint, StageNode
+from mission_control.domain.context.checkpoint import (
+    CONTINUATION_RESTORE_ROOTS,
+    CheckpointBody,
+    checkpoint_sections,
+)
 from mission_control.domain.context.packet import (
     RUN_PLACEHOLDER,
     ConservativeTokenCounter,
@@ -44,6 +51,7 @@ from mission_control.domain.context.packet import (
     PackFailure,
     PackRequest,
     TokenCounter,
+    WorkspaceRestore,
     pack,
 )
 from mission_control.domain.context.render import (
@@ -208,6 +216,32 @@ class SealedPacket:
     prompt_segment: PromptSegment
     slot_bindings: tuple[WorkspaceSlotBinding, ...]
     """Read-only slots: every ``materialize`` item plus the two ``.mission/`` files."""
+
+
+@dataclass(frozen=True, slots=True)
+class ContinuationPackTarget:
+    """Who a continuation packet is for: the fresh session of one logical execution.
+
+    Lane-neutral (SPEC-02 seal step 4): Deep Agents hydrates a new thread from it (B4),
+    Cursor a new agent in a fresh workspace (G4). ``lane`` carries the only lane facts the
+    packer knows; the workspace tier always restores ``/inputs/**``, ``/outputs/**`` and
+    ``/.mission/**`` from ``workspace_snapshot_ref``.
+    """
+
+    request_scope: str
+    run_id: str
+    revision_id: str
+    node_key: str
+    activation_id: str
+    attempt_no: int
+    generation: int
+    sealed_at: datetime
+    profile: ModelBudgetProfile
+    workspace_manifest_digest: str
+    """Digest of the snapshot's restorable file manifest (path -> content digest)."""
+    workspace_bytes: int = 0
+    lane: LaneFileSupport = field(default_factory=LaneFileSupport)
+    mission_id: str | None = None
 
 
 # --------------------------------------------------------------------------------------
@@ -439,6 +473,109 @@ class ContextPackService:
             ),
             request_scope=scope_key,
             owner=owner,
+        )
+
+    # -- continuation (FT-B4) --------------------------------------------------------------
+
+    async def pack_for_continuation(
+        self,
+        body: CheckpointBody,
+        target: ContinuationPackTarget,
+        *,
+        owner: WorkspaceOwner | None = None,
+        extra_candidates: Sequence[PackCandidate] = (),
+    ) -> SealedPacket:
+        """Build the ``continuation`` packet a fresh session hydrates from (SPEC-02 seal).
+
+        Exactly one ``workspace`` item restores ``/inputs/**``, ``/outputs/**`` candidates and
+        ``/.mission/**`` from the checkpoint's workspace snapshot; the checkpoint's bounded
+        fields (goals and criteria, pending commitments and held commands, budgets and
+        governors, typed state, decisions and next actions) are inline and mandatory, and the
+        typed state is also a reference the agent can fetch. ``body.context_packet_ref`` is
+        ignored: the checkpoint names this packet after it is sealed.
+        """
+
+        scope_key = target.request_scope
+        run_id = target.run_id
+        semantic = (
+            f"{run_id}:continuation:{body.identities.logical_execution_id}:{body.checkpoint_id}"
+        )
+        base = f"checkpoint://{run_id}/{body.checkpoint_id}"
+        kinds = {
+            "goals_and_criteria": ContextSourceKind.GOALS_AND_CRITERIA,
+            "pending_commitments": ContextSourceKind.PENDING_COMMITMENTS,
+            "budget_remaining": ContextSourceKind.BUDGET_REMAINING,
+            "loop_state": ContextSourceKind.CONTINUATION_CHECKPOINT,
+        }
+        candidates: list[PackCandidate] = [
+            _text_candidate(kinds[name], f"{base}/{name}", text)
+            for name, text in checkpoint_sections(body).items()
+        ]
+        candidates.append(
+            PackCandidate(
+                source_kind=ContextSourceKind.LOOP_STATE,
+                source_ref=body.typed_state.state_ref,
+                content_digest=body.typed_state.state_digest,
+                bytes=0,
+                media_type="application/json",
+                schema_ref=body.typed_state.schema_ref,
+                trust=ContextTrust.AUTHORITATIVE,
+                mandatory=True,
+                expand=ExpandMode.REFERENCE,
+                summary=(
+                    f"typed state {body.typed_state.schema_ref} v{body.typed_state.state_version}"
+                    f" at the seal of checkpoint {body.checkpoint_id}"
+                ),
+            )
+        )
+        candidates.append(
+            PackCandidate(
+                source_kind=ContextSourceKind.WORKSPACE_MAP,
+                source_ref=f"snapshot://{body.workspace_snapshot_ref}",
+                content_digest=target.workspace_manifest_digest,
+                bytes=target.workspace_bytes,
+                media_type="application/x-mission-workspace-snapshot",
+                trust=ContextTrust.AUTHORITATIVE,
+                mandatory=True,
+                summary=(
+                    "workspace restored from the checkpoint snapshot: /inputs read-only, "
+                    "/outputs candidates read-write, .mission read-only"
+                ),
+                workspace=WorkspaceRestore(
+                    snapshot_ref=body.workspace_snapshot_ref,
+                    restore_paths=CONTINUATION_RESTORE_ROOTS,
+                ),
+            )
+        )
+        candidates.extend(extra_candidates)
+        return await self.seal(
+            PackRequest(
+                packet_id=_stable_uuid("packet", scope_key, semantic),
+                sealed_at=target.sealed_at,
+                context_selection_ref=(
+                    "context_selection:" + _stable_uuid("selection", scope_key, semantic)
+                ),
+                scope=_packet_scope(scope_key),
+                target=PacketTarget(
+                    mission_id=target.mission_id or run_id,
+                    run_id=run_id,
+                    revision_id=target.revision_id,
+                    node_key=target.node_key,
+                    activation_id=target.activation_id,
+                    attempt_no=target.attempt_no,
+                    generation=target.generation,
+                    purpose=ContextPurpose.CONTINUATION,
+                ),
+                producer_refs=(f"checkpoint:{body.checkpoint_id}",),
+                profile=target.profile,
+                candidates=tuple(candidates),
+                policy=self._policy,
+                lane=target.lane,
+            ),
+            request_scope=scope_key,
+            owner=owner
+            or WorkspaceOwner(kind=WorkspaceOwnerKind.AGENT, owner_id=target.activation_id),
+            materialize_files=target.lane.writable_workspace,
         )
 
     async def _handoff_candidates(

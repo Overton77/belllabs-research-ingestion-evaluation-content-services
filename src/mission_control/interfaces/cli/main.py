@@ -96,6 +96,18 @@ class MissionClient:
             headers={"Accept": "text/markdown" if markdown else "application/x-ndjson"},
         )
 
+    def checkpoints(
+        self, run_id: str, checkpoint_id: str | None = None, *, full: bool = False
+    ) -> httpx.Response:
+        """FT-B4: `run checkpoint RUN_ID --list|--get ID [--full]`."""
+
+        base = f"{self.prefix}/runs/{self._id(run_id)}/checkpoints"
+        if checkpoint_id is None:
+            return self.client.get(base)
+        return self.client.get(
+            f"{base}/{self._id(checkpoint_id)}", params={"full": "true"} if full else None
+        )
+
     def frames_tail_url(self, run_id: str) -> str:
         return f"{self.prefix}/runs/{self._id(run_id)}/frames/tail"
 
@@ -477,6 +489,13 @@ def main(argv: list[str] | None = None) -> int:
     frames.add_argument("--tail", action="store_true", required=True)
     frames.add_argument("--after")
     frames.add_argument("--until-end", action="store_true", help="exit 6 when the tail times out")
+    # SPEC-02 (B4): sealed continuation checkpoints of a run.
+    checkpoint = run_commands.add_parser("checkpoint", parents=[common])
+    checkpoint.add_argument("run_id")
+    checkpoint_mode = checkpoint.add_mutually_exclusive_group(required=True)
+    checkpoint_mode.add_argument("--list", action="store_true", dest="list_checkpoints")
+    checkpoint_mode.add_argument("--get", dest="checkpoint_id")
+    checkpoint.add_argument("--full", action="store_true", help="bodies above 4 KiB unredacted")
     command = groups.add_parser("command", parents=[common])
     commands = command.add_subparsers(dest="action", required=True)
     send = commands.add_parser("send", parents=[common])
@@ -621,6 +640,12 @@ def main(argv: list[str] | None = None) -> int:
                 elif args.group == "subscribe":
                     response = client.subscriptions(
                         args.action, body, getattr(args, "subscription_id", None)
+                    )
+                elif args.group == "run" and args.action == "checkpoint":
+                    response = client.checkpoints(
+                        args.run_id,
+                        getattr(args, "checkpoint_id", None),
+                        full=getattr(args, "full", False),
                     )
                 elif args.action == "inspect":
                     response = client.inspection(args.run_id)

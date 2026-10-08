@@ -6,7 +6,7 @@ claim that the inherited GoalDirected executor implements every GENERAL Goal Loo
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -62,6 +62,15 @@ class InstructionPayload(Contract):
     boundary: Literal["next_turn", "next_iteration"]
 
 
+class ContinuationRequestPayload(Contract):
+    """``request_continuation`` (SPEC-02/SPEC-06, FT-B4): seal and transfer at the next turn
+    boundary. ``activation_id`` names the operation whose session continues; omitted, the
+    run's most recently active session is chosen."""
+
+    activation_id: str | None = Field(default=None, min_length=1, max_length=256)
+    boundary: Literal["next_turn"] = "next_turn"
+
+
 class MissionCommandRequest(Contract):
     schema_version: Literal["mc.command.v1"] = "mc.command.v1"
     request_id: UUID
@@ -69,10 +78,34 @@ class MissionCommandRequest(Contract):
     expected_generation: int = Field(ge=1)
     target: CommandTarget
     kind: Literal[
-        "pause", "resume", "cancel", "satisfy_wait", "queue_instruction", "interrupt_and_inject"
+        "pause",
+        "resume",
+        "cancel",
+        "satisfy_wait",
+        "queue_instruction",
+        "interrupt_and_inject",
+        "request_continuation",
     ]
-    payload: PausePayload | ResumePayload | CancelPayload | WaitPayload | InstructionPayload
+    payload: (
+        PausePayload
+        | ResumePayload
+        | CancelPayload
+        | WaitPayload
+        | InstructionPayload
+        | ContinuationRequestPayload
+    )
     reason: str = Field(min_length=1, max_length=4096)
+
+    @model_validator(mode="before")
+    @classmethod
+    def payload_by_kind(cls, value: Any) -> Any:
+        # All-default payloads (`cancel`, `request_continuation`) are ambiguous in a union;
+        # the command kind selects the payload model.
+        if isinstance(value, dict) and value.get("kind") == "request_continuation":
+            payload = value.get("payload")
+            if isinstance(payload, dict):
+                return {**value, "payload": ContinuationRequestPayload.model_validate(payload)}
+        return value
 
     @model_validator(mode="after")
     def payload_matches_kind(self) -> MissionCommandRequest:
@@ -83,6 +116,7 @@ class MissionCommandRequest(Contract):
             "satisfy_wait": WaitPayload,
             "queue_instruction": InstructionPayload,
             "interrupt_and_inject": InstructionPayload,
+            "request_continuation": ContinuationRequestPayload,
         }[self.kind]
         if not isinstance(self.payload, expected):
             raise ValueError(f"{self.kind} requires {expected.__name__}")

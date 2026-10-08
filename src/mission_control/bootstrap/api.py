@@ -26,6 +26,10 @@ from mission_control.adapters.auth.jwt import (
     MissionAuthenticationRejected,
     MissionTokenVerifier,
 )
+from mission_control.adapters.postgres.context.continuation_repository import (
+    PostgresCheckpointRepository,
+    PostgresContinuationRepository,
+)
 from mission_control.adapters.postgres.frames.repository import PostgresFrameRepository
 from mission_control.adapters.postgres.frames.transcript_reads import PostgresMissionEventReader
 from mission_control.adapters.postgres.subscriptions.store import PostgresSubscriptionStore
@@ -36,6 +40,7 @@ from mission_control.adapters.temporal.search_attributes import verify_belllabs_
 from mission_control.adapters.temporal.submission import TemporalWorkflowSubmitter
 from mission_control.adapters.temporal.unit_reconciliation import TemporalUnitReconciliationNudge
 from mission_control.application.capabilities.catalog import CatalogService
+from mission_control.application.context.continuation import CheckpointReadService
 from mission_control.application.execution.harness.registry import describe_only_registry
 from mission_control.application.execution.service import (
     AdmissionPolicyRegistry,
@@ -66,6 +71,7 @@ from mission_control.bootstrap.subscriptions import (
 from mission_control.contracts.json import parse_json_object
 from mission_control.domain.authoring.extensions import ExtensionRegistry
 from mission_control.interfaces.http.catalog import router as catalog_router
+from mission_control.interfaces.http.continuation import router as continuation_router
 from mission_control.interfaces.http.lanes import router as lanes_router
 from mission_control.interfaces.http.middleware.body_limit import BodySizeLimitMiddleware
 from mission_control.interfaces.http.mission_control import (
@@ -324,6 +330,14 @@ def create_application(
                                 request_scope=request_scope(identity),
                             )
                         )
+                        # SPEC-02 (B4): sealed continuation checkpoints, read under scope.
+                        application.state.mission_control_checkpoint_services[key] = (
+                            CheckpointReadService(
+                                PostgresCheckpointRepository(pool),
+                                PostgresContinuationRepository(pool),
+                                request_scope=request_scope(identity),
+                            )
+                        )
                         subscriptions = compose_subscription_service(pool, request_scope(identity))
                         application.state.mission_control_subscription_services[key] = subscriptions
                         subscription_stores.append(
@@ -350,6 +364,7 @@ def create_application(
     application.state.mission_control_admission_services = {}
     application.state.mission_control_catalog_services = {}
     application.state.mission_control_transcript_services = {}
+    application.state.mission_control_checkpoint_services = {}
     application.state.mission_control_subscription_services = {}
     application.state.mission_control_compositions = {}
     application.state.mission_control_ready = False
@@ -365,6 +380,7 @@ def create_application(
     application.include_router(lanes_router)
     application.include_router(stop_fence_router)
     application.include_router(transcript_router)
+    application.include_router(continuation_router)
     application.include_router(subscriptions_router)
 
     @application.get("/health/live")

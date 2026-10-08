@@ -52,6 +52,7 @@ from mission_control.domain.policies.contracts import (
     ProposeContinuationAction,
     ReconcileUnitAction,
     RecordAsyncChildFactAction,
+    RecordContinuationAction,
     RecordFinalizationResultAction,
     RecordObligationEvidenceAction,
     RecordOperationSettlementEvidenceAction,
@@ -59,6 +60,7 @@ from mission_control.domain.policies.contracts import (
     RecordReadinessAction,
     RecordUsageAction,
     RegisterAsyncChildAction,
+    RequestContinuationAction,
     ReserveBudgetAction,
     ResumeAction,
     ResumeDecision,
@@ -130,6 +132,9 @@ ACTION_PERMISSIONS: dict[str, str] = {
     "observe_quiescence": "workflow_run.observe_wait",
     # SPEC-03 (C2): mission state derived from closing provider frames.
     "apply_frame_facts": "workflow_run.apply_frame_facts",
+    # SPEC-02 (B4): continuation checkpoints sealed and sessions transferred.
+    "record_continuation": "workflow_run.record_continuation",
+    "request_continuation": "workflow_run.request_continuation",
 }
 LIFECYCLE_ACTION_KINDS = frozenset((*ACTION_PERMISSIONS, "apply_authority_batch"))
 AUTHORITY_BATCH_ACTION_TYPES = (
@@ -205,6 +210,10 @@ def reduce_lifecycle(
         )
     if isinstance(action, ApplyFrameFactsAction):
         return _reduce_frame_facts(
+            projection, budget, effects, command, command_fingerprint, action
+        )
+    if isinstance(action, RecordContinuationAction | RequestContinuationAction):
+        return _reduce_continuation(
             projection, budget, effects, command, command_fingerprint, action
         )
     phase = projection.phase
@@ -1731,4 +1740,99 @@ def _evidence_frontier(
                 for item in sorted(output_evidence, key=lambda item: item.output_ref)
             ],
         }
+    )
+
+
+CONTINUATION_EVENT_TYPES: dict[str, str] = {
+    "requested": "session.continuation_requested",
+    "checkpoint_sealed": "session.checkpoint_sealed",
+    "transferred": "session.transferred",
+    "continuation_failed": "session.continuation_failed",
+}
+
+
+def _reduce_continuation(
+    projection: RunProjection,
+    budget: BudgetState,
+    effects: EffectLedgerState,
+    command: LifecycleCommand,
+    command_fingerprint: str,
+    action: RecordContinuationAction | RequestContinuationAction,
+) -> Reduction:
+    """SPEC-02 (B4): one ``session.*`` continuation event; the run phase never moves.
+
+    Exactly-once is the command identity's job: the recorder issues one command id per
+    (transfer, event), and a stale version is never persisted (``BOUNDARY_FACT_KINDS``).
+    """
+
+    event_name = action.event if isinstance(action, RecordContinuationAction) else "requested"
+    version = projection.version + 1
+    next_projection = projection.model_copy(
+        update={"version": version, "updated_at": command.occurred_at}
+    )
+    next_projection = RunProjection.model_validate(next_projection.model_dump(mode="python"))
+    transition = LifecycleTransitionRecord(
+        transition_id=stable_id("transition", projection.run_id, str(version)),
+        run_id=projection.run_id,
+        command_id=command.command_id,
+        prior_version=projection.version,
+        resulting_version=version,
+        prior_phase=projection.phase,
+        resulting_phase=projection.phase,
+        prior_projection=projection,
+        resulting_projection=next_projection,
+        actor=command.actor,
+        reason=command.reason,
+        evidence_refs=command.evidence_refs,
+        occurred_at=command.occurred_at,
+        correlation_id=command.correlation_id,
+        causation_id=command.causation_id,
+    )
+    result = CommandResult(
+        command_id=command.command_id,
+        idempotency_issuer=command.idempotency_issuer,
+        run_id=projection.run_id,
+        command_fingerprint=command_fingerprint,
+        status=CommandStatus.ACCEPTED,
+        resulting_run_version=version,
+        phase=projection.phase,
+        terminal_outcome=projection.terminal_outcome,
+        reason_code="accepted",
+        reason=f"continuation {event_name} recorded",
+        recorded_at=command.occurred_at,
+    )
+    event_type = CONTINUATION_EVENT_TYPES[event_name]
+    payload = action.model_dump(mode="json", exclude={"kind", "event"}, exclude_none=True)
+    payload["execution"] = {
+        "activation_id": action.activation_id,
+        "logical_execution_id": action.logical_execution_id,
+        "lane_profile": action.lane_profile,
+    }
+    payload["source"] = {
+        "kind": "mission_control",
+        "native_event_ref": f"continuation_transfer:{action.transfer_id}",
+    }
+    event = DomainEventEnvelope(
+        event_id=stable_id("event", projection.run_id, str(version), event_type, "1"),
+        event_type=event_type,
+        aggregate_id=projection.run_id,
+        aggregate_version=version,
+        sequence=1,
+        is_version_final=True,
+        occurred_at=command.occurred_at,
+        recorded_at=command.occurred_at,
+        actor=command.actor,
+        correlation_id=command.correlation_id,
+        causation_id=command.causation_id or command.command_id,
+        payload=payload,
+    )
+    return Reduction(
+        projection=next_projection,
+        budget=budget,
+        effects=effects,
+        transition=transition,
+        result=result,
+        ledger_entries=(),
+        effect_entries=(),
+        events=(event,),
     )
