@@ -201,8 +201,10 @@ class BoundaryInterventionService:
         self._run_control = run_control
         self._delivery = delivery
 
-    async def execute(self, command: LifecycleCommand) -> CommandResult:
-        result = await self._run_control.execute(command)
+    async def execute(
+        self, command: LifecycleCommand, *, mailbox_text: str | None = None
+    ) -> CommandResult:
+        result = await self._run_control.execute(command, mailbox_text=mailbox_text)
         if result.status == CommandStatus.ACCEPTED and self._delivery is not None:
             await self._delivery.deliver_pending(command.request_scope, command.run_id)
         return result

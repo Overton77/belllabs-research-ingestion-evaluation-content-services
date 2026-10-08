@@ -25,6 +25,7 @@ from mission_control.adapters.postgres.orchestration.stagegraph_repository impor
 from mission_control.adapters.postgres.run_control.inspection_repository import (
     PostgresInspectionReadRepository,
 )
+from mission_control.adapters.postgres.run_control.mailbox import PostgresCommandMailbox
 from mission_control.adapters.postgres.run_control.run_control_repository import (
     PostgresRunControlRepository,
 )
@@ -44,6 +45,7 @@ from mission_control.application.execution.boundary_interventions import (
     BoundaryCommandTransport,
     BoundaryInterventionService,
 )
+from mission_control.application.execution.mailbox import MailboxDeliveryService
 from mission_control.application.execution.operations.unit_reconciliation import (
     AcceptedCheckpointVerifier,
     UnitReconciliationNudge,
@@ -211,6 +213,8 @@ async def compose_application_services(
             interventions,
             request_scope=scope,
             stop_fences=PostgresStopFenceRepository(runtime_pool),
+            # FT-F1: queue_instruction / add_context admit into the Run's command mailbox.
+            mailbox=MailboxDeliveryService(PostgresCommandMailbox(runtime_pool), run_control),
         ),
         runtime=MissionControlRuntimeService(
             snapshots, forks, request_scope=scope, reconciliation_service=recovery.reconciliation

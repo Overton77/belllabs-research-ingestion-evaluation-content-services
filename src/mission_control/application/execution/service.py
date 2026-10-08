@@ -25,6 +25,7 @@ from mission_control.domain.policies.boundary_commands import (
     boundary_target_for,
     is_boundary_command,
     is_family_boundary_command,
+    is_mailbox_command,
     receipt,
     rejection_reason_for,
     run_control_boundary_receipts,
@@ -509,15 +510,25 @@ class RunControlService:
             return await self._repository.commit_admission(AdmissionMutation(decision=rejected))
 
     async def execute(
-        self, command: LifecycleCommand, *, self_issued: bool = False
+        self,
+        command: LifecycleCommand,
+        *,
+        self_issued: bool = False,
+        mailbox_text: str | None = None,
     ) -> CommandResult:
         """Execute one lifecycle command. `self_issued` marks a boundary command the family
         issues to itself (a policy pause): accepted and applied at that boundary without
-        delivery, sequenced outside the root's `execution` space (review N1)."""
+        delivery, sequenced outside the root's `execution` space (review N1).
+
+        `mailbox_text` (FT-F1) is the bounded inline body of a `queue_instruction` or
+        `add_context` command; the command binds it by digest and the body is stored only in
+        the mailbox entry written by the admitting commit."""
 
         for _attempt in range(8):
             try:
-                return await self._execute_once(command, self_issued=self_issued)
+                return await self._execute_once(
+                    command, self_issued=self_issued, mailbox_text=mailbox_text
+                )
             except (RunVersionConflict, AuthorityStateConflict):
                 continue
         raise AuthorityStateConflict(
@@ -525,9 +536,15 @@ class RunControlService:
         )
 
     async def _execute_once(
-        self, command: LifecycleCommand, *, self_issued: bool = False
+        self,
+        command: LifecycleCommand,
+        *,
+        self_issued: bool = False,
+        mailbox_text: str | None = None,
     ) -> CommandResult:
         command = self._validated_lifecycle_command(command)
+        if mailbox_text is not None and not is_mailbox_command(command.action):
+            raise CommandRejected("only a mailbox command carries mailbox text")
         try:
             required_permissions = required_action_permissions(command.action)
         except ValueError as error:
@@ -622,6 +639,18 @@ class RunControlService:
                 # reduction above validated it against the exact version it binds.
                 return await self._commit_pending_boundary_command(
                     command, fingerprint, projection, budget, effects, record
+                )
+            if is_mailbox_command(command.action):
+                # FT-F1: accepted and queued without a transition; the family boundary
+                # delivers the mailbox entry written in this same commit.
+                return await self._commit_pending_boundary_command(
+                    command,
+                    fingerprint,
+                    projection,
+                    budget,
+                    effects,
+                    record,
+                    mailbox_text=mailbox_text,
                 )
             boundary_records = (record,)
             boundary_receipts = run_control_boundary_receipts(
@@ -875,22 +904,37 @@ class RunControlService:
         budget: BudgetState,
         effects: EffectLedgerState,
         record: BoundaryCommandRecord,
+        *,
+        mailbox_text: str | None = None,
     ) -> CommandResult:
-        accepted = receipt(
-            command,
-            ordinal=1,
-            state=ReceiptState.ACCEPTED,
-            recorded_by=RUN_CONTROL_RECORDER,
-            recorded_at=command.occurred_at,
+        mailbox = is_mailbox_command(command.action)
+        receipts = (
+            run_control_boundary_receipts(
+                command, target=record.target, resulting_run_version=projection.version
+            )
+            if mailbox
+            else (
+                receipt(
+                    command,
+                    ordinal=1,
+                    state=ReceiptState.ACCEPTED,
+                    recorded_by=RUN_CONTROL_RECORDER,
+                    recorded_at=command.occurred_at,
+                ),
+            )
         )
         result = self._non_transition_result(
             command,
             fingerprint,
             projection,
             CommandStatus.ACCEPTED,
-            "accepted_pending_application",
-            f"accepted; pending delivery to the {record.target.kind} boundary "
-            f"{record.target.target_ref}",
+            "accepted_queued" if mailbox else "accepted_pending_application",
+            (
+                f"accepted; queued in {record.target.sequence_space} for the next family boundary"
+                if mailbox
+                else f"accepted; pending delivery to the {record.target.kind} boundary "
+                f"{record.target.target_ref}"
+            ),
         )
         return await self._repository.commit_command(
             CommandMutation(
@@ -900,7 +944,10 @@ class RunControlService:
                 expected_budget_digest=authority_state_digest(budget),
                 expected_effects_digest=authority_state_digest(effects),
                 boundary_commands=(record,),
-                boundary_receipts=(accepted,),
+                boundary_receipts=receipts,
+                mailbox_inline=(
+                    {record.command_id: mailbox_text} if mailbox_text is not None else {}
+                ),
             )
         )
 
@@ -1067,6 +1114,21 @@ class RunControlService:
         for status in await self._repository.list_boundary_commands(
             command.request_scope, command.run_id
         ):
+            if status.state in {ReceiptState.QUEUED, ReceiptState.OBSERVED}:
+                # FT-F1: a mailbox command the run ended before (queued) or while its turn
+                # ran (observed) completes `expired` with the terminal reason.
+                receipts.append(
+                    receipt(
+                        status.command,
+                        ordinal=1,
+                        state=ReceiptState.EXPIRED,
+                        recorded_by=RUN_CONTROL_RECORDER,
+                        detail=f"run terminalized {outcome.value} before the turn settled it",
+                        boundary_state={"expired_reason": "terminal_run"},
+                        recorded_at=command.occurred_at,
+                    )
+                )
+                continue
             if status.state not in {ReceiptState.ACCEPTED, ReceiptState.DELIVERED}:
                 continue
             cancel_applied = status.command.kind == "cancel" and outcome == RunOutcome.CANCELLED

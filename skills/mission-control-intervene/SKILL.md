@@ -21,8 +21,8 @@ has real values.
 
 | Intent | Command | Delivered as |
 | --- | --- | --- |
-| Add guidance without stopping | `command queue` with `kind: queue_instruction`, `boundary: next_turn \| next_iteration` | `turn_boundary_guaranteed` or `wait_then_send`; consumed once into the next Context Packet. Availability: FT-F1 |
-| Add a document or artifact to context | `command queue` with `kind: add_context` and an artifact ref | same. Availability: FT-F1 |
+| Add guidance without stopping | `command queue` (`kind: queue_instruction`), `boundary: next_turn \| next_iteration` | `turn_boundary_guaranteed` (Deep Agents) or `wait_then_send` (Cursor); consumed once into the next Context Packet. Available (FT-F1) |
+| Add a document or artifact to context | `command queue --add-context` (`kind: add_context`) with a short note or an artifact ref | same. Available (FT-F1) |
 | Stop the current turn and redirect | `command inject` with `kind: interrupt_and_inject` | `cooperative_inject` where native, otherwise `cancel_and_replace` after uncertain effects settle. Availability: FT-F2 |
 | Stop releasing new work | `command send` with `kind: pause` | quiescence at the next safe boundary; the run parks |
 | Continue | `command send` with `kind: resume` (optionally with an instruction) | never new authority or budget |
@@ -33,14 +33,27 @@ has real values.
 ```text
 missionctl command send RUN_ID --request-file command.json --json
 missionctl command queue RUN_ID --file queue.json --json
+missionctl command queue RUN_ID --file note.md --add-context --boundary next_iteration --json
 missionctl command inject RUN_ID --file inject.json --json
 missionctl command cancel RUN_ID --urgency immediate --reason "…" --json
 ```
 
+`command queue` reads the run's `version` and `execution_generation` itself and sends a
+fresh `request_id` (or the file's). Its `--file` is either JSON (`text` or `content`,
+`boundary`, `node_key`, `expand`, `deadline`, `reason`, `request_id`) or plain text that
+becomes the instruction. Inline text is capped at 8 KiB (`content_too_large`, exit 2); put
+larger content in an artifact and send its ref. Without a `node_key` a Goal Loop delivers to
+the next executor turn (the verifier stays independent); StageGraph delivers to the next
+admitted stage. A cancel admitted first expires the entry (`superseded`), and a Generation
+that moved on expires it (`stale_generation`).
+
 ## 3. Confirm
 
 `missionctl command list RUN_ID --json` shows receipts; `run inspect` shows the effect. A
-command is done when its receipt is `applied` and the Delivery Report names the semantics the
+queued command reads `accepted, queued`, then `delivered` when a boundary takes it into a
+packet, `observed` when the carrying turn starts, and `applied` (or `failed`) when that turn
+settles; `command.delivered` and `command.completed` mission events carry the Delivery Report.
+A command is done when its receipt is `applied` and the Delivery Report names the semantics the
 lane used. Report `requested` and `delivered` separately; `emulated` carries a note.
 
 ## 4. Branch

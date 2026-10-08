@@ -11,6 +11,7 @@ from mission_control.application.context.pack_service import (
     SealedPacket,
     context_packet_ref,
 )
+from mission_control.application.execution.mailbox import MailboxDeliveryService
 from mission_control.application.execution.operations.journaled_operation_execution import (
     operation_effect_claim_id,
 )
@@ -26,6 +27,7 @@ from mission_control.application.execution.service import (
     RunControlService,
 )
 from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.context.packet import PackCandidate
 from mission_control.domain.execution.checkpoint_lineage import cognitive_session_namespace
 from mission_control.domain.execution.contracts import (
     DeepAgentExecutionBinding,
@@ -386,6 +388,7 @@ class GoalDirectedOperationPreparationService:
         actor: ActorContext,
         heartbeats: OperationHeartbeatPolicy = DEFAULT_OPERATION_HEARTBEATS,
         context_packs: ContextPackService | None = None,
+        mailbox: MailboxDeliveryService | None = None,
     ) -> None:
         self._templates = templates
         self._operation_bindings = operation_bindings
@@ -397,6 +400,9 @@ class GoalDirectedOperationPreparationService:
         # FT-B3 (ADR-0027): when composed, each iteration and role starts from a sealed
         # Context Packet instead of the stringified handoff.
         self._context_packs = context_packs
+        # FT-F1: the iteration boundary delivers queued instructions and context into the
+        # executor's packet (the verifier only takes entries that name `goal/verifier`).
+        self._mailbox = mailbox
 
     async def prepare(self, request: GoalOperationPreparationRequest) -> GoalOperationDispatch:
         if request.operation_role == "executor":
@@ -433,8 +439,31 @@ class GoalDirectedOperationPreparationService:
                 )
             )
             assert role_root is not None  # a goal unit always has a role root
+            queued: tuple[PackCandidate, ...] = ()
+            if self._mailbox is not None:
+                identity = OperationAttemptIdentity(
+                    run_id=request.run_id,
+                    operation_id=goal_operation_id(request.goal_iteration, request.operation_role),
+                    operation_attempt=request.operation_attempt,
+                )
+                entries = await self._mailbox.deliver(
+                    request.request_scope,
+                    request.run_id,
+                    # The bound operation's idempotency key: a re-admission or a retried
+                    # preparation re-reads exactly the entries this attempt took.
+                    delivery_key=(
+                        f"goal:{identity.semantic_key}:generation:{request.execution_generation}"
+                    ),
+                    family="GoalDirected",
+                    node_key=f"goal/{request.operation_role}",
+                    iteration_start=request.operation_attempt == 1,
+                    lane_profile=template.lane_profile or "deep_agents",
+                )
+                queued = await self._context_packs.queued_candidates(
+                    entries, request_scope=request.request_scope
+                )
             sealed = await self._context_packs.pack_for_iteration(
-                request, template, role_root=role_root
+                request, template, role_root=role_root, extra_candidates=queued
             )
         operation = _instantiate_operation_request(template, request, bound_revision, sealed)
         binding = bind_operation_execution_request(operation)

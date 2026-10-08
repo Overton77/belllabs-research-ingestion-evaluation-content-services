@@ -64,6 +64,7 @@ from mission_control.domain.execution.contracts import (
 )
 from mission_control.domain.graph_runtime.contracts import GoalHandoffReference
 from mission_control.domain.graph_runtime.identities import GoalHandoffCheckpointKey
+from mission_control.domain.policies.mailbox import MailboxEntry
 from mission_control.domain.programs.contracts import (
     GoalHandoff,
     StageGraphAdmissionActivityRequest,
@@ -592,6 +593,94 @@ class ContextPackService:
             durable_ref=captured.durable_ref,
             provenance=provenance,
         )
+
+    # -- queued instructions and context (FT-F1) -------------------------------------------
+
+    async def queued_candidates(
+        self, entries: Sequence[MailboxEntry], *, request_scope: str
+    ) -> tuple[PackCandidate, ...]:
+        """Mailbox entries a boundary delivers, as mandatory ``queued_instruction`` items.
+
+        Operator content is admitted input: data with provenance, never authority
+        (ADR-0027). A ``queue_instruction`` is inline; an ``add_context`` follows its
+        ``expand`` hint (``materialize`` degrades to a reference where the lane cannot write
+        files, so it is not mandatory). An artifact reference that cannot be captured, or
+        whose bytes differ from the commanded digest, stays a non-mandatory reference.
+        """
+
+        candidates: list[PackCandidate] = []
+        for entry in entries:
+            label = (
+                f"{'instruction' if entry.kind == 'queue_instruction' else 'added context'} "
+                f"queued by command {entry.command_id} ({entry.boundary}, "
+                f"#{entry.admission_sequence})"
+            )
+            hint = ExpandMode(entry.expand) if entry.expand is not None else ExpandMode.INLINE
+            provenance = ItemProvenance(
+                producer_generation=entry.generation, accepted_decision_ref=entry.command_id
+            )
+            source_ref = f"mailbox://{entry.command_id}"
+            if entry.content_inline is not None:
+                durable_ref = await self._staging.stage(
+                    request_scope=request_scope,
+                    name=f"mailbox/{entry.content_digest}",
+                    content=entry.content_inline.encode("utf-8"),
+                    media_type=entry.media_type,
+                )
+                candidates.append(
+                    PackCandidate(
+                        source_kind=ContextSourceKind.QUEUED_INSTRUCTION,
+                        source_ref=source_ref,
+                        content_digest=entry.content_digest,
+                        bytes=entry.content_bytes,
+                        media_type=entry.media_type,
+                        trust=ContextTrust.ADMITTED_INPUT,
+                        mandatory=hint != ExpandMode.MATERIALIZE,
+                        expand=hint,
+                        text=entry.content_inline,
+                        summary=label,
+                        file_name=f"queued-{entry.admission_sequence}.md",
+                        durable_ref=durable_ref,
+                        provenance=provenance,
+                    )
+                )
+                continue
+            captured = await self._artifacts.capture(
+                entry.content_ref, request_scope=request_scope, max_text_bytes=self._max_text_bytes
+            )
+            if captured is None or captured.content_digest != entry.content_digest:
+                candidates.append(
+                    PackCandidate(
+                        source_kind=ContextSourceKind.QUEUED_INSTRUCTION,
+                        source_ref=entry.content_ref,
+                        content_digest=entry.content_digest,
+                        bytes=0,
+                        media_type="application/x-mission-control-ref",
+                        trust=ContextTrust.ADMITTED_INPUT,
+                        expand=ExpandMode.REFERENCE,
+                        summary=f"unresolved {label}",
+                        provenance=provenance,
+                    )
+                )
+                continue
+            candidates.append(
+                PackCandidate(
+                    source_kind=ContextSourceKind.QUEUED_INSTRUCTION,
+                    source_ref=entry.content_ref,
+                    content_digest=captured.content_digest,
+                    bytes=captured.size_bytes,
+                    media_type=captured.media_type,
+                    trust=ContextTrust.ADMITTED_INPUT,
+                    mandatory=hint != ExpandMode.MATERIALIZE,
+                    expand=hint if captured.text is not None else ExpandMode.AUTO,
+                    text=captured.text,
+                    summary=captured.summary or label,
+                    file_name=captured.file_name,
+                    durable_ref=captured.durable_ref,
+                    provenance=provenance,
+                )
+            )
+        return tuple(candidates)
 
     # -- shared sealing -------------------------------------------------------------------
 

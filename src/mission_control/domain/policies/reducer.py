@@ -13,6 +13,7 @@ from mission_control.domain.policies.contracts import (
     AcceptedObligationEvidence,
     AcceptedOutputEvidence,
     AcceptFinalizationPlanAction,
+    AddContextAction,
     ApplyAuthorityBatchAction,
     ApplyBoundaryCommandAction,
     ApplyFrameFactsAction,
@@ -50,6 +51,7 @@ from mission_control.domain.policies.contracts import (
     PauseAction,
     PauseDecision,
     ProposeContinuationAction,
+    QueueInstructionAction,
     ReconcileUnitAction,
     RecordAsyncChildFactAction,
     RecordFinalizationResultAction,
@@ -130,6 +132,9 @@ ACTION_PERMISSIONS: dict[str, str] = {
     "observe_quiescence": "workflow_run.observe_wait",
     # SPEC-03 (C2): mission state derived from closing provider frames.
     "apply_frame_facts": "workflow_run.apply_frame_facts",
+    # SPEC-06 (FT-F1): mailbox-bound interventions (`mission.command` scope).
+    "queue_instruction": "workflow_run.control",
+    "add_context": "workflow_run.control",
 }
 LIFECYCLE_ACTION_KINDS = frozenset((*ACTION_PERMISSIONS, "apply_authority_batch"))
 AUTHORITY_BATCH_ACTION_TYPES = (
@@ -305,6 +310,20 @@ def reduce_lifecycle(
         phase = _progress_phase(action.runnable_work_remains, waits, pauses)
     elif isinstance(action, CancelAction):
         phase = RunPhase.CANCELLING
+    elif isinstance(action, QueueInstructionAction | AddContextAction):
+        # FT-F1 (SPEC-06): admission validates a mailbox command against the exact version
+        # it binds; it never moves the phase. Run control records it as a pending command
+        # whose mailbox entry the family boundary delivers.
+        if phase == RunPhase.CANCELLING:
+            raise ReductionRejected(
+                "run_is_cancelling", "a cancelling run takes no queued instruction or context"
+            )
+        generation = execution_target.execution_generation if execution_target is not None else 1
+        if action.generation != generation:
+            raise ReductionRejected(
+                "stale_generation",
+                f"the command targets generation {action.generation}; current is {generation}",
+            )
     elif isinstance(action, ReserveBudgetAction):
         next_budget, entry = _reserve(next_budget, action, command)
         ledger.append(entry)

@@ -105,6 +105,7 @@ from mission_control.adapters.postgres.orchestration.orchestration_binding_repos
 from mission_control.adapters.postgres.orchestration.stagegraph_repository import (
     PostgresStageGraphOperationTemplateRepository,
 )
+from mission_control.adapters.postgres.run_control.mailbox import PostgresCommandMailbox
 from mission_control.adapters.postgres.run_control.run_control_repository import (
     PostgresRunControlRepository,
 )
@@ -161,6 +162,7 @@ from mission_control.application.coordinator.coordinator_results import (
 from mission_control.application.execution.harness.deep_agents_harness import DeepAgentsHarness
 from mission_control.application.execution.harness.protocol import AgentHarness
 from mission_control.application.execution.harness.registry import LaneRegistry
+from mission_control.application.execution.mailbox import MailboxDeliveryService
 from mission_control.application.execution.operations.checkpoint_lineage import DEFAULT_CLAIM_LEASE
 from mission_control.application.execution.operations.journaled_operation_execution import (
     JournaledOperationExecutionCoordinator,
@@ -710,10 +712,20 @@ class ProductionWorkerActivityCompositionFactory:
         secrets = EnvironmentSecretResolver()
         # FT-G1: the lane registry is built once per worker (SPEC-07 section 3).
         lanes = compose_lane_registry(settings, DeepAgentsHarness(adapter, secrets))
+        # FT-F1: the command mailbox; Delivery Reports name what the registered lane declares.
+        mailbox = MailboxDeliveryService(
+            PostgresCommandMailbox(postgres_pool),
+            run_control,
+            describe=lambda profile: (
+                lanes.describe(profile) if profile in lanes.profiles() else None
+            ),
+        )
         service = OperationExecutionService(
             lanes=lanes,
             # FT-F3: immediate-cancel Delivery Report milestones on the run's Stop Fence.
             stop_fences=PostgresStopFenceRepository(postgres_pool),
+            # FT-F1: delivered mailbox entries are consumed when their turn starts.
+            mailbox=mailbox,
             authority=RunControlOperationAuthority(run_control, control_plane),
             bindings=bindings,
             runtime=adapter,
@@ -781,6 +793,7 @@ class ProductionWorkerActivityCompositionFactory:
                 ),
                 operation_heartbeats=heartbeats,
                 context_packs=context_packs,
+                mailbox=mailbox,
             ),
             stagegraph=StageGraphCoordinatorDependencies(
                 run_control=run_control,
@@ -789,6 +802,7 @@ class ProductionWorkerActivityCompositionFactory:
                 templates=PostgresStageGraphOperationTemplateRepository(postgres_pool),
                 operation_heartbeats=heartbeats,
                 context_packs=context_packs,
+                mailbox=mailbox,
             ),
             completion=completion,
         )

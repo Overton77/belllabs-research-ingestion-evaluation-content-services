@@ -4,7 +4,7 @@ Replace every `REPLACE_*` value from `missionctl run inspect RUN_ID --json`. Gen
 UUID per new action; keep the same UUID when retrying a lost write. Exact payload schemas come
 from OpenAPI; these are the shapes.
 
-## queue_instruction (FT-F1)
+## queue_instruction (FT-F1, available)
 
 ```json
 {
@@ -14,15 +14,26 @@ from OpenAPI; these are the shapes.
   "expected_generation": 1,
   "target": {"kind": "run", "id": "REPLACE_RUN_ID"},
   "kind": "queue_instruction",
-  "payload": {"content_ref": "artifact://…/note.md", "content_digest": "sha256:…", "boundary": "next_turn"},
+  "payload": {"boundary": "next_turn", "content": {"text": "Prefer primary literature."}},
   "reason": "Owner asked to prefer primary literature"
 }
 ```
 
-`boundary` is `next_turn` or `next_iteration`. The instruction becomes an `inline` item of the
-next Context Packet and is consumed once.
+`boundary` is `next_turn` or `next_iteration`; optional `node_key` (a stage id, or
+`goal/executor` / `goal/verifier`) and `deadline`. `content` is either `{"text": ...}` (at most
+8 KiB of UTF-8; an optional `content_digest` is verified) or
+`{"artifact_ref": "artifact://…/note.md", "content_digest": "sha256:…", "media_type": ...}`.
+The instruction becomes an admitted-input item of the next Context Packet and is consumed once.
+The pre-FT-F1 flat form `{"content_ref", "content_digest", "boundary"}` is still accepted.
 
-## add_context (FT-F1)
+`missionctl command queue RUN_ID --file queue.json` builds this body for you from a file such as:
+
+```json
+{"boundary": "next_iteration", "text": "Also update the README with the new flag",
+ "reason": "Owner asked for docs"}
+```
+
+## add_context (FT-F1, available)
 
 ```json
 {
@@ -32,11 +43,14 @@ next Context Packet and is consumed once.
   "expected_generation": 1,
   "target": {"kind": "run", "id": "REPLACE_RUN_ID"},
   "kind": "add_context",
-  "payload": {"artifact_ref": "artifact://…/review-notes.md", "content_digest": "sha256:…",
-              "expand": "materialize", "boundary": "next_iteration"},
+  "payload": {"boundary": "next_iteration", "expand": "materialize",
+              "content": {"artifact_ref": "artifact://…/review-notes.md", "content_digest": "sha256:…"}},
   "reason": "Reviewer notes from the first pass"
 }
 ```
+
+`expand` is `inline`, `reference`, `materialize` or `auto` (default). A `materialize` item
+degrades to a reference on a lane that cannot write files.
 
 ## interrupt_and_inject (FT-F2)
 

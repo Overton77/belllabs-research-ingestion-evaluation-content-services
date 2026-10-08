@@ -231,8 +231,13 @@ def _error(exc: Exception) -> HTTPException:
             "unavailable": 503,
             "stale_version": 409,
             "stale_generation": 409,
+            # SPEC-06: inline mailbox content above the cap is a typed 413.
+            "content_too_large": 413,
         }.get(exc.code, 422)
-        return HTTPException(status_code=status, detail={"code": exc.code, "message": str(exc)})
+        detail: dict[str, object] = {"code": exc.code, "message": str(exc)}
+        if exc.frontier is not None:
+            detail["frontier"] = exc.frontier
+        return HTTPException(status_code=status, detail=detail)
     if isinstance(exc, (RunControlNotFound, ForkSnapshotNotFound)):
         return HTTPException(status_code=404, detail={"code": "resource_not_found"})
     if isinstance(exc, (IdempotencyConflict, RunVersionConflict)):

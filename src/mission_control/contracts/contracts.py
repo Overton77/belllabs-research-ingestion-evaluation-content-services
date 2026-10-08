@@ -6,10 +6,10 @@ claim that the inherited GoalDirected executor implements every GENERAL Goal Loo
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 from mission_control.domain.policies.contracts import (
     BoundaryCommandStatus,
@@ -57,9 +57,81 @@ class WaitPayload(Contract):
 
 
 class InstructionPayload(Contract):
+    """The flat pre-SPEC-06 instruction form (an artifact ref); still accepted."""
+
     content_ref: str = Field(min_length=1)
     content_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     boundary: Literal["next_turn", "next_iteration"]
+
+
+class ContentRef(Contract):
+    """SPEC-06: content held as an artifact, bound by digest."""
+
+    artifact_ref: str = Field(min_length=1, max_length=2048)
+    content_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    media_type: str = Field(default="text/markdown", min_length=1, max_length=128)
+    size_bytes: int = Field(default=0, ge=0)
+
+
+class InlineText(Contract):
+    """SPEC-06: a short text carried inline. The mailbox cap (default 8 KiB of UTF-8) is
+    enforced by the service with a typed `content_too_large` rejection (HTTP 413)."""
+
+    text: str = Field(min_length=1, max_length=1_048_576)
+    # Optional; when given it must equal sha256 over the UTF-8 text.
+    content_digest: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
+    media_type: str = Field(default="text/markdown", min_length=1, max_length=128)
+
+
+MailboxContent = ContentRef | InlineText
+
+
+class QueueInstructionPayload(Contract):
+    """`queue_instruction`: read at the next turn or iteration boundary, exactly once."""
+
+    boundary: Literal["next_turn", "next_iteration"] = "next_turn"
+    content: MailboxContent
+    deadline: AwareDatetime | None = None
+    node_key: str | None = Field(default=None, min_length=1, max_length=256)
+
+
+class AddContextPayload(Contract):
+    """`add_context`: an artifact or short note added to the next Context Packet."""
+
+    boundary: Literal["next_turn", "next_iteration"] = "next_turn"
+    content: MailboxContent
+    expand: Literal["inline", "reference", "materialize", "auto"] = "auto"
+    deadline: AwareDatetime | None = None
+    node_key: str | None = Field(default=None, min_length=1, max_length=256)
+
+
+class InterruptAndInjectPayload(Contract):
+    """`interrupt_and_inject`: the lane's declared semantics deliver the content now."""
+
+    content: MailboxContent
+    settle_uncertain_effects: Literal[True] = True
+    node_key: str | None = Field(default=None, min_length=1, max_length=256)
+
+
+CommandPayload = (
+    PausePayload
+    | ResumePayload
+    | CancelPayload
+    | WaitPayload
+    | QueueInstructionPayload
+    | AddContextPayload
+    | InterruptAndInjectPayload
+    | InstructionPayload
+)
+_PAYLOADS_BY_KIND: dict[str, tuple[type[Contract], ...]] = {
+    "pause": (PausePayload,),
+    "resume": (ResumePayload,),
+    "cancel": (CancelPayload,),
+    "satisfy_wait": (WaitPayload,),
+    "queue_instruction": (QueueInstructionPayload, InstructionPayload),
+    "add_context": (AddContextPayload,),
+    "interrupt_and_inject": (InterruptAndInjectPayload, InstructionPayload),
+}
 
 
 class MissionCommandRequest(Contract):
@@ -69,23 +141,40 @@ class MissionCommandRequest(Contract):
     expected_generation: int = Field(ge=1)
     target: CommandTarget
     kind: Literal[
-        "pause", "resume", "cancel", "satisfy_wait", "queue_instruction", "interrupt_and_inject"
+        "pause",
+        "resume",
+        "cancel",
+        "satisfy_wait",
+        "queue_instruction",
+        "add_context",
+        "interrupt_and_inject",
     ]
-    payload: PausePayload | ResumePayload | CancelPayload | WaitPayload | InstructionPayload
+    payload: CommandPayload
     reason: str = Field(min_length=1, max_length=4096)
+
+    @model_validator(mode="before")
+    @classmethod
+    def payload_for_kind(cls, data: Any) -> Any:
+        """Validate the payload as its kind's contract: the payload shapes are not mutually
+        exclusive (`queue_instruction` and `add_context` share fields), so the kind decides."""
+
+        if not isinstance(data, dict):
+            return data
+        payload = data.get("payload")
+        options = _PAYLOADS_BY_KIND.get(str(data.get("kind")))
+        if not isinstance(payload, dict) or options is None:
+            return data
+        first = options[0]
+        if len(options) > 1 and "content" not in payload:
+            # The flat legacy InstructionPayload (content_ref, content_digest, boundary).
+            first = options[1]
+        return {**data, "payload": first.model_validate(payload)}
 
     @model_validator(mode="after")
     def payload_matches_kind(self) -> MissionCommandRequest:
-        expected = {
-            "pause": PausePayload,
-            "resume": ResumePayload,
-            "cancel": CancelPayload,
-            "satisfy_wait": WaitPayload,
-            "queue_instruction": InstructionPayload,
-            "interrupt_and_inject": InstructionPayload,
-        }[self.kind]
+        expected = _PAYLOADS_BY_KIND[self.kind]
         if not isinstance(self.payload, expected):
-            raise ValueError(f"{self.kind} requires {expected.__name__}")
+            raise ValueError(f"{self.kind} requires {expected[0].__name__}")
         return self
 
 
@@ -110,6 +199,11 @@ class MissionInspection(Contract):
 
 
 class MissionControlRejected(ValueError):
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(
+        self, code: str, message: str, *, frontier: dict[str, object] | None = None
+    ) -> None:
         super().__init__(message)
         self.code = code
+        # SPEC-06: a stale `expected_version` / `expected_generation` is answered with the
+        # current frontier so the caller can re-read and retry deliberately.
+        self.frontier = dict(frontier) if frontier is not None else None

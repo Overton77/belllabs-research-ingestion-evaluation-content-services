@@ -65,11 +65,11 @@ from mission_control.domain.graph_runtime.kernel import (
     ProviderQualifiedLineageRecord,
 )
 from mission_control.domain.policies.contracts import (
+    COMPLETED_RECEIPT_STATES,
     ActorContext,
     BoundaryCommandStatus,
     BudgetEnvelope,
     DecisionStatus,
-    ReceiptState,
     RunPhase,
     RunRequest,
 )
@@ -115,7 +115,8 @@ FORK_WORKFLOW_IMPLEMENTATION_REF = "belllabs.semantic-fork.v1"
 # `blocked` stage held back by a declared wait has no admitted work and is not active.
 ACTIVE_STAGE_STATUSES = frozenset({"reserved", "running", "waiting", "paused"})
 FORK_REQUEST_MARKER_PREFIX = "fork-request:"
-SETTLED_RECEIPT_STATES = frozenset({ReceiptState.APPLIED, ReceiptState.REJECTED})
+# FT-F1: every completed outcome (applied, rejected, expired, failed) is settled.
+SETTLED_RECEIPT_STATES = COMPLETED_RECEIPT_STATES
 SETTLED_STATUSES = frozenset({"completed", "failed", "cancelled", "timed_out"})
 MAX_SNAPSHOT_READ_ATTEMPTS = 3
 

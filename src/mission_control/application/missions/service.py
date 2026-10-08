@@ -11,28 +11,44 @@ import json
 from datetime import UTC, datetime
 
 from mission_control.application.execution.boundary_interventions import BoundaryInterventionService
+from mission_control.application.execution.mailbox import MailboxDeliveryService
 from mission_control.application.execution.service import RunControlService
 from mission_control.application.execution.stop_fence import StopFenceRepository
 from mission_control.contracts.canonical import canonical_digest
 from mission_control.contracts.contracts import (
+    AddContextPayload,
     CancelPayload,
+    ContentRef,
+    InlineText,
+    InstructionPayload,
     MissionCommandReceipt,
     MissionCommandRequest,
     MissionControlRejected,
     MissionInspection,
     PausePayload,
+    QueueInstructionPayload,
     ResumePayload,
     WaitPayload,
 )
 from mission_control.domain.policies.contracts import (
     ActorContext,
+    AddContextAction,
     BoundaryCommandStatus,
     CancelAction,
+    CommandStatus,
     LifecycleCommand,
     PauseAction,
+    QueueInstructionAction,
     ResumeAction,
     RunPhase,
     SatisfyWaitAction,
+)
+from mission_control.domain.policies.mailbox import (
+    MAX_INLINE_BYTES,
+    MailboxContentTooLarge,
+    check_inline_text,
+    content_digest,
+    inline_content_ref,
 )
 from mission_control.domain.policies.reducer import required_action_permissions
 from mission_control.domain.policies.stop_fence import (
@@ -50,6 +66,8 @@ class MissionControlService:
         *,
         request_scope: str,
         stop_fences: StopFenceRepository | None = None,
+        mailbox: MailboxDeliveryService | None = None,
+        inline_cap_bytes: int = MAX_INLINE_BYTES,
     ) -> None:
         if not request_scope:
             raise ValueError("an authenticated application/tenant request scope is required")
@@ -58,6 +76,9 @@ class MissionControlService:
         self._scope = request_scope
         # FT-F3: an immediate cancel is admitted only where its Stop Fence can be persisted.
         self._stop_fences = stop_fences
+        # FT-F1: queued content is admitted only where a mailbox can deliver it.
+        self._mailbox = mailbox
+        self._inline_cap = inline_cap_bytes
 
     @property
     def request_scope(self) -> str:
@@ -70,7 +91,11 @@ class MissionControlService:
         request = MissionCommandRequest.model_validate(request.model_dump(mode="python"))
         if request.target.id != run_id:
             raise MissionControlRejected("target_mismatch", "command target differs from route run")
-        action = self._action(request)
+        action, mailbox_text = self._action(request, inline_cap=self._inline_cap)
+        if isinstance(action, QueueInstructionAction | AddContextAction) and self._mailbox is None:
+            raise MissionControlRejected(
+                "unsupported_control", "queued content requires a command mailbox composition"
+            )
         if isinstance(action, CancelAction) and action.urgency == "immediate":
             if self._stop_fences is None:
                 raise MissionControlRejected(
@@ -91,31 +116,51 @@ class MissionControlService:
                 if projection.execution_target is not None
                 else 1
             )
+            frontier: dict[str, object] = {
+                "version": projection.version,
+                "execution_generation": generation,
+                "phase": projection.phase.value,
+            }
             if request.expected_generation != generation:
-                raise MissionControlRejected("stale_generation", "execution generation changed")
+                raise MissionControlRejected(
+                    "stale_generation", "execution generation changed", frontier=frontier
+                )
             # The reducer transaction validates this version again. Checking it here
             # ensures generation was read from the exact same optimistic version.
             if request.expected_version != projection.version:
-                raise MissionControlRejected("stale_version", "run version changed")
+                raise MissionControlRejected(
+                    "stale_version", "run version changed", frontier=frontier
+                )
         if isinstance(action, CancelAction) and action.urgency == "immediate":
             await self._fence(run_id, command_id, request, actor)
-        result = await self._interventions.execute(
-            LifecycleCommand(
-                command_id=command_id,
-                idempotency_issuer=issuer,
-                request_scope=self._scope,
-                run_id=run_id,
-                expected_run_version=request.expected_version,
-                actor=actor,
-                action=action,
-                reason=request.reason,
-                # Bind all public fields (including expected generation) to the durable
-                # command fingerprint so a changed-body replay cannot escape validation.
-                evidence_refs=(f"mc-request:{canonical_digest(request)}",),
-                occurred_at=datetime.now(UTC),
-                correlation_id=command_id,
-            )
+        lifecycle_command = LifecycleCommand(
+            command_id=command_id,
+            idempotency_issuer=issuer,
+            request_scope=self._scope,
+            run_id=run_id,
+            expected_run_version=request.expected_version,
+            actor=actor,
+            action=action,
+            reason=request.reason,
+            # Bind all public fields (including expected generation) to the durable
+            # command fingerprint so a changed-body replay cannot escape validation.
+            evidence_refs=(f"mc-request:{canonical_digest(request)}",),
+            occurred_at=datetime.now(UTC),
+            correlation_id=command_id,
         )
+        result = (
+            await self._interventions.execute(lifecycle_command, mailbox_text=mailbox_text)
+            if mailbox_text is not None
+            else await self._interventions.execute(lifecycle_command)
+        )
+        if (
+            isinstance(action, CancelAction)
+            and result.status == CommandStatus.ACCEPTED
+            and self._mailbox is not None
+        ):
+            # SPEC-06: a cancel admitted before delivery supersedes every pending entry; the
+            # agent never reads an instruction after a stop. Idempotent on replay.
+            await self._mailbox.supersede(self._scope, run_id, superseded_by=command_id)
         delivery = await self._run_control.get_boundary_command(
             self._scope, run_id, issuer, command_id
         )
@@ -208,18 +253,85 @@ class MissionControlService:
 
     @staticmethod
     def _action(
-        request: MissionCommandRequest,
-    ) -> PauseAction | ResumeAction | CancelAction | SatisfyWaitAction:
+        request: MissionCommandRequest, *, inline_cap: int = MAX_INLINE_BYTES
+    ) -> tuple[
+        PauseAction
+        | ResumeAction
+        | CancelAction
+        | SatisfyWaitAction
+        | QueueInstructionAction
+        | AddContextAction,
+        str | None,
+    ]:
+        """The Reducer action of a public command, plus a mailbox command's inline body."""
+
         payload = request.payload
         if isinstance(payload, PausePayload):
-            return PauseAction(**payload.model_dump(mode="python"))
+            return PauseAction(**payload.model_dump(mode="python")), None
         if isinstance(payload, ResumePayload):
-            return ResumeAction(**payload.model_dump(mode="python"))
+            return ResumeAction(**payload.model_dump(mode="python")), None
         if isinstance(payload, WaitPayload):
-            return SatisfyWaitAction(**payload.model_dump(mode="python"))
+            return SatisfyWaitAction(**payload.model_dump(mode="python")), None
         if isinstance(payload, CancelPayload):
-            return CancelAction(urgency=payload.urgency)
+            return CancelAction(urgency=payload.urgency), None
+        if request.kind in {"queue_instruction", "add_context"} and isinstance(
+            payload, QueueInstructionPayload | AddContextPayload | InstructionPayload
+        ):
+            return _mailbox_action(request, payload, inline_cap=inline_cap)
         raise MissionControlRejected(
             "unsupported_control",
             "control requires a qualified delivery boundary or immediate-interruption profile",
         )
+
+
+def _mailbox_action(
+    request: MissionCommandRequest,
+    payload: QueueInstructionPayload | AddContextPayload | InstructionPayload,
+    *,
+    inline_cap: int,
+) -> tuple[QueueInstructionAction | AddContextAction, str | None]:
+    """FT-F1: `queue_instruction` / `add_context` as a mailbox action for the expected
+    Generation. Inline text is capped (typed `content_too_large`) and bound by digest."""
+
+    text: str | None = None
+    if isinstance(payload, InstructionPayload):
+        content: ContentRef | InlineText = ContentRef(
+            artifact_ref=payload.content_ref, content_digest=payload.content_digest
+        )
+    else:
+        content = payload.content
+    if isinstance(content, InlineText):
+        try:
+            size = check_inline_text(content.text, cap=inline_cap)
+        except MailboxContentTooLarge as error:
+            raise MissionControlRejected(error.code, str(error)) from None
+        digest = content_digest(content.text)
+        if content.content_digest is not None and content.content_digest != digest:
+            raise MissionControlRejected(
+                "content_digest_mismatch", "inline content_digest differs from the text"
+            )
+        text = content.text
+        fields: dict[str, object] = {
+            "content_ref": inline_content_ref(digest),
+            "content_digest": digest,
+            "media_type": content.media_type,
+            "content_bytes": size,
+            "inline": True,
+        }
+    else:
+        fields = {
+            "content_ref": content.artifact_ref,
+            "content_digest": content.content_digest,
+            "media_type": content.media_type,
+            "content_bytes": content.size_bytes,
+        }
+    common: dict[str, object] = {
+        **fields,
+        "boundary": payload.boundary,
+        "generation": request.expected_generation,
+        "node_key": getattr(payload, "node_key", None),
+        "deadline": getattr(payload, "deadline", None),
+    }
+    if isinstance(payload, AddContextPayload):
+        return AddContextAction.model_validate({**common, "expand": payload.expand}), text
+    return QueueInstructionAction.model_validate(common), text

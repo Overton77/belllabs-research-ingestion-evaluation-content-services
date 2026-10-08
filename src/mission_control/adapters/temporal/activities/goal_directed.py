@@ -19,6 +19,7 @@ from mission_control.application.coordinator.coordinator_results import (
 from mission_control.application.execution.boundary_interventions import (
     BoundaryCommandApplicationService,
 )
+from mission_control.application.execution.mailbox import MailboxDeliveryService
 from mission_control.application.execution.operations.semantic_operation_bindings import (
     SemanticOperationBindingRepository,
 )
@@ -176,6 +177,7 @@ def compose_goal_directed_activities(
     boundary: BoundaryCommandApplicationService | None = None,
     heartbeats: OperationHeartbeatPolicy = DEFAULT_OPERATION_HEARTBEATS,
     context_packs: ContextPackService | None = None,
+    mailbox: MailboxDeliveryService | None = None,
 ) -> GoalDirectedActivities:
     """Wire production GoalDirected activities on the OperationWorkflow path."""
 
@@ -188,6 +190,7 @@ def compose_goal_directed_activities(
             actor=actor,
             heartbeats=heartbeats,
             context_packs=context_packs,
+            mailbox=mailbox,
         ),
         # RRM-016: the family consumes each operation's journaled run-control settlement.
         results=GoalDirectedOperationResultService(

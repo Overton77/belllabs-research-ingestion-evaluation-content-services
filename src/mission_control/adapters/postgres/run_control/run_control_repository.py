@@ -19,6 +19,7 @@ import asyncpg
 
 from mission_control.adapters.postgres.run_control import canonical as mc
 from mission_control.adapters.postgres.run_control.canonical import SCOPE, scoped
+from mission_control.adapters.postgres.run_control.mailbox import insert_mailbox_entry
 from mission_control.application.execution.run_control_repository import (
     AdmissionMutation,
     CommandMutation,
@@ -28,6 +29,7 @@ from mission_control.application.execution.run_control_repository import (
     authority_state_digest,
 )
 from mission_control.contracts.identities import uuid7
+from mission_control.domain.policies.boundary_commands import is_mailbox_command
 from mission_control.domain.policies.budget import roll_up_child_budget
 from mission_control.domain.policies.contracts import (
     CANCEL_SEQUENCE_SPACE,
@@ -50,6 +52,7 @@ from mission_control.domain.policies.contracts import (
     LifecycleTransitionRecord,
     OutboxCursor,
     OutboxRecord,
+    ReceiptState,
     RunProjection,
 )
 from mission_control.domain.policies.errors import (
@@ -63,6 +66,7 @@ from mission_control.domain.policies.family_admission import (
     FamilyAdmissionReceipt,
     FamilyVersionConflict,
 )
+from mission_control.domain.policies.mailbox import entry_for
 
 FailureHook = Callable[[str], Awaitable[None] | None]
 M = TypeVar("M", bound=AtomicFamilyMutation)
@@ -461,7 +465,20 @@ class PostgresRunControlRepository:
             sequenced = record.model_copy(update={"target_sequence": sequence})
             # Validate the chain before writing it; the contract enforces the state machine.
             BoundaryCommandStatus(command=sequenced, receipts=own)
-            await _insert_command(connection, args, run, sequenced, own)
+            command_row_id = await _insert_command(connection, args, run, sequenced, own)
+            if is_mailbox_command(record.action) and _was_accepted(own):
+                # FT-F1: the mailbox entry commits with the command that admits it.
+                await insert_mailbox_entry(
+                    connection,
+                    args,
+                    run=run,
+                    command_row_id=command_row_id,
+                    entry=entry_for(
+                        sequenced,
+                        content_inline=mutation.mailbox_inline.get(record.command_id),
+                        accepted_at=record.recorded_at,
+                    ),
+                )
         for item in mutation.boundary_receipts:
             if (item.idempotency_issuer, item.command_id) in new_ids:
                 continue
@@ -1162,7 +1179,7 @@ async def _insert_command(
     run: asyncpg.Record,
     record: BoundaryCommandRecord,
     receipts: tuple[BoundaryCommandReceipt, ...],
-) -> None:
+) -> UUID:
     """The accepted (or rejected-at-acceptance) command, then its later receipts."""
 
     first, *later = receipts
@@ -1205,6 +1222,22 @@ async def _insert_command(
     )
     for receipt in later:
         await _insert_report(connection, args, command_id, receipt)
+    return command_id
+
+
+# The Delivery Report vocabulary of `delivery_report.observed_outcome` for each receipt
+# state (FT-F1): a queued command has not been observed yet; an expired or failed one ends
+# without an applied observation. The receipt itself keeps the exact state in `detail`.
+_OBSERVED_OUTCOME: dict[ReceiptState, str] = {
+    ReceiptState.ACCEPTED: "unknown",
+    ReceiptState.QUEUED: "unknown",
+    ReceiptState.DELIVERED: "delivered",
+    ReceiptState.OBSERVED: "delivered",
+    ReceiptState.APPLIED: "applied",
+    ReceiptState.REJECTED: "rejected",
+    ReceiptState.EXPIRED: "rejected",
+    ReceiptState.FAILED: "rejected",
+}
 
 
 async def _append_receipt(
@@ -1229,14 +1262,28 @@ async def _insert_report(
     """A delivery report per delivered/applied/rejected receipt; the command lifecycle
     advances in the same transaction. Accepted, delivered and applied stay distinct."""
 
+    report = receipt.delivery_report
+    native_refs = [receipt.transport_ref] if receipt.transport_ref else []
+    if report is not None:
+        native_refs.extend(
+            ref
+            for ref in (
+                report.native_refs.session_ref,
+                report.native_refs.turn_ref,
+                report.native_refs.cancelled_turn_ref,
+                report.native_refs.replacement_turn_ref,
+            )
+            if ref
+        )
     await connection.execute(
         """
         INSERT INTO mission_control.delivery_report (
             installation_id, application_id, tenant_id, delivery_report_id, command_id,
             report_key, delivery_semantics, reported_at, native_refs, observed_outcome, detail,
-            created_at, created_by_actor_ref
+            created_at, created_by_actor_ref, requested_semantics, emulation_note,
+            replacement_turn_ref
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $8, $12)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $8, $12, $13, $14, $15)
         """,
         *args,
         uuid7(),
@@ -1248,12 +1295,15 @@ async def _insert_report(
             receipt.command_id,
             receipt.ordinal,
         ),
-        BOUNDARY_RECEIPT_SEMANTICS,
+        report.delivered_semantics if report is not None else BOUNDARY_RECEIPT_SEMANTICS,
         receipt.recorded_at,
-        [receipt.transport_ref] if receipt.transport_ref else [],
-        receipt.state.value,
+        native_refs,
+        report.observed_outcome if report is not None else _OBSERVED_OUTCOME[receipt.state],
         mc.dump(receipt.model_dump(mode="json")),
         receipt.recorded_by,
+        report.requested_semantics if report is not None else None,
+        report.emulation_note if report is not None else None,
+        report.native_refs.replacement_turn_ref if report is not None else None,
     )
     await connection.execute(
         f"""

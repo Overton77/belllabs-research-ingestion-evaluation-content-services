@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit
@@ -257,6 +258,94 @@ def subscription_body(args: argparse.Namespace) -> dict[str, Any]:
     return body
 
 
+MAILBOX_FILE_FIELDS = frozenset(
+    {
+        "kind",
+        "boundary",
+        "text",
+        "content",
+        "content_ref",
+        "content_digest",
+        "media_type",
+        "size_bytes",
+        "expand",
+        "node_key",
+        "deadline",
+        "reason",
+        "request_id",
+    }
+)
+
+
+def mailbox_payload(path: str, args: argparse.Namespace) -> tuple[str, dict[str, Any], str, str]:
+    """`command queue --file`: a JSON object (`text` or `content`, `boundary`, `node_key`,
+    `expand`, `deadline`, `reason`, `request_id`) or any other file read as instruction text.
+
+    Returns (kind, payload, reason, request_id). Flags override nothing the file states.
+    """
+
+    raw = Path(path).read_text(encoding="utf-8")
+    spec: dict[str, Any] | None = None
+    if raw.lstrip().startswith("{"):
+        spec = parse_json_object(raw)
+        unknown = set(spec) - MAILBOX_FILE_FIELDS
+        if unknown:
+            raise ValueError(f"unknown queue file fields: {sorted(unknown)}")
+    spec = spec or {"text": raw}
+    kind = str(spec.get("kind") or ("add_context" if args.add_context else "queue_instruction"))
+    if kind not in {"queue_instruction", "add_context"}:
+        raise ValueError("command queue sends queue_instruction or add_context")
+    if "content" in spec:
+        content = spec["content"]
+    elif "text" in spec:
+        content = {"text": spec["text"]}
+        if "media_type" in spec:
+            content["media_type"] = spec["media_type"]
+    elif "content_ref" in spec:
+        content = {
+            "artifact_ref": spec["content_ref"],
+            "content_digest": spec.get("content_digest"),
+            "media_type": spec.get("media_type", "text/markdown"),
+            "size_bytes": spec.get("size_bytes", 0),
+        }
+    else:
+        raise ValueError("a queue file needs text, content or content_ref")
+    payload: dict[str, Any] = {
+        "boundary": spec.get("boundary") or args.boundary,
+        "content": content,
+    }
+    node_key = spec.get("node_key") or args.node_key
+    if node_key:
+        payload["node_key"] = node_key
+    if spec.get("deadline"):
+        payload["deadline"] = spec["deadline"]
+    if kind == "add_context":
+        payload["expand"] = spec.get("expand") or args.expand
+    reason = str(spec.get("reason") or args.reason)
+    request_id = str(spec.get("request_id") or args.request_id or uuid.uuid4())
+    return kind, payload, reason, request_id
+
+
+def queue_command_body(client: MissionClient, args: argparse.Namespace) -> dict[str, Any]:
+    """Bind the queued command to the Run's current version and Generation (read first)."""
+
+    kind, payload, reason, request_id = mailbox_payload(args.file, args)
+    inspection = client.inspection(args.run_id)
+    if inspection.status_code >= 300:
+        raise ValueError(f"run inspection failed with HTTP {inspection.status_code}")
+    current = _json(inspection)
+    return {
+        "schema_version": "mc.command.v1",
+        "request_id": request_id,
+        "expected_version": current["version"],
+        "expected_generation": current["execution_generation"],
+        "target": {"kind": "run", "id": args.run_id},
+        "kind": kind,
+        "payload": payload,
+        "reason": reason,
+    }
+
+
 def watch_events(transport: httpx.Client, client: MissionClient, args: argparse.Namespace) -> int:
     """Print each mission event as one JSON line; exit 6 on resync_required."""
 
@@ -295,7 +384,7 @@ def exit_status(status: int) -> int:
         return 3
     if status == 409:
         return 4
-    if status in {400, 404, 422}:
+    if status in {400, 404, 413, 422}:
         return 2
     return 5
 
@@ -484,6 +573,18 @@ def main(argv: list[str] | None = None) -> int:
     send.add_argument("--request-file", required=True)
     listing = commands.add_parser("list", parents=[common])
     listing.add_argument("run_id")
+    # FT-F1: queue an instruction (or, with --add-context, context) for the next boundary.
+    queue = commands.add_parser("queue", parents=[common])
+    queue.add_argument("run_id")
+    queue.add_argument("--file", required=True)
+    queue.add_argument("--add-context", action="store_true")
+    queue.add_argument("--boundary", choices=("next_turn", "next_iteration"), default="next_turn")
+    queue.add_argument("--node-key")
+    queue.add_argument(
+        "--expand", choices=("inline", "reference", "materialize", "auto"), default="auto"
+    )
+    queue.add_argument("--reason", default="queued by missionctl")
+    queue.add_argument("--request-id")
     mission = groups.add_parser("mission", parents=[common])
     mission_commands = mission.add_subparsers(dest="action", required=True)
     schema = mission_commands.add_parser("schema", parents=[common])
@@ -602,6 +703,8 @@ def main(argv: list[str] | None = None) -> int:
             follow_redirects=False,
         ) as transport:
             client = MissionClient(transport, application)
+            if args.group == "command" and args.action == "queue":
+                body = queue_command_body(client, args)
             if args.group == "run" and args.action == "transcript":
                 return run_transcript(client, args, deadline_seconds)
             if args.group == "run" and args.action == "frames":

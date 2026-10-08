@@ -573,10 +573,30 @@ class UnitReconciliationDecision(Contract):
 
 # --- Boundary commands and receipts (RRM-007, CON-CP-WORKFLOW-MESSAGE-V1) -----------------
 
-BoundaryCommandKind = Literal["pause", "resume", "satisfy_wait", "cancel", "reconcile_unit"]
+BoundaryCommandKind = Literal[
+    "pause",
+    "resume",
+    "satisfy_wait",
+    "cancel",
+    "reconcile_unit",
+    "queue_instruction",
+    "add_context",
+]
 BOUNDARY_COMMAND_KINDS: frozenset[str] = frozenset(
-    {"pause", "resume", "satisfy_wait", "cancel", "reconcile_unit"}
+    {
+        "pause",
+        "resume",
+        "satisfy_wait",
+        "cancel",
+        "reconcile_unit",
+        "queue_instruction",
+        "add_context",
+    }
 )
+# FT-F1 (SPEC-06): the mailbox-bound kinds. They are family-applicable, but the family pulls
+# them from the Run's command mailbox at its next boundary (StageGraph admission, GoalDirected
+# iteration) instead of receiving them through the root's `execution` transport.
+MAILBOX_COMMAND_KINDS: frozenset[str] = frozenset({"queue_instruction", "add_context"})
 # The kinds a family boundary applies; `cancel` is applied by the terminal outcome
 # (RRM-008 owns its delivery) and `reconcile_unit` by the operation boundary.
 FAMILY_BOUNDARY_COMMAND_KINDS: frozenset[str] = frozenset({"pause", "resume", "satisfy_wait"})
@@ -593,11 +613,31 @@ def self_issued_sequence_space(family_workflow_id: str) -> str:
     return f"boundary:{family_workflow_id}"
 
 
+def mailbox_sequence_space(generation: int) -> str:
+    """FT-F1: queued content is sequenced per Generation, never in the boundary spaces, so a
+    queued instruction can never open a gap in the root's `execution` sequence."""
+
+    return f"mailbox:{generation}"
+
+
 class ReceiptState(StrEnum):
+    """The receipt ledger of a Command (workflow-types/09 five-state vocabulary, SPEC-06).
+
+    `accepted -> delivered -> applied` (or `rejected`) is the RRM-007 chain of the boundary
+    commands; FT-F1 adds `queued` (a mailbox-bound command waiting for its boundary),
+    `observed` (the lane reported the Delivery Report), and the terminal outcomes `expired`
+    (superseded by a cancel or a stale Generation) and `failed` (the carrying turn failed).
+    `applied`, `rejected`, `expired` and `failed` are `completed` with that outcome.
+    """
+
     ACCEPTED = "accepted"
+    QUEUED = "queued"
     DELIVERED = "delivered"
+    OBSERVED = "observed"
     APPLIED = "applied"
     REJECTED = "rejected"
+    EXPIRED = "expired"
+    FAILED = "failed"
 
 
 BoundaryRejectionReason = Literal[
@@ -613,11 +653,115 @@ BoundaryRejectionReason = Literal[
 # A command rejected at acceptance has `rejected` as its only receipt.
 RECEIPT_TRANSITIONS: dict[ReceiptState | None, frozenset[ReceiptState]] = {
     None: frozenset({ReceiptState.ACCEPTED, ReceiptState.REJECTED}),
-    ReceiptState.ACCEPTED: frozenset({ReceiptState.DELIVERED, ReceiptState.REJECTED}),
-    ReceiptState.DELIVERED: frozenset({ReceiptState.APPLIED, ReceiptState.REJECTED}),
+    ReceiptState.ACCEPTED: frozenset(
+        {ReceiptState.QUEUED, ReceiptState.DELIVERED, ReceiptState.REJECTED}
+    ),
+    # FT-F1: a mailbox-bound command waits `queued` until its boundary takes it, or expires.
+    ReceiptState.QUEUED: frozenset(
+        {ReceiptState.DELIVERED, ReceiptState.REJECTED, ReceiptState.EXPIRED}
+    ),
+    ReceiptState.DELIVERED: frozenset(
+        {
+            ReceiptState.OBSERVED,
+            ReceiptState.APPLIED,
+            ReceiptState.REJECTED,
+            ReceiptState.EXPIRED,
+            ReceiptState.FAILED,
+        }
+    ),
+    ReceiptState.OBSERVED: frozenset(
+        {ReceiptState.APPLIED, ReceiptState.REJECTED, ReceiptState.EXPIRED, ReceiptState.FAILED}
+    ),
     ReceiptState.APPLIED: frozenset(),
     ReceiptState.REJECTED: frozenset(),
+    ReceiptState.EXPIRED: frozenset(),
+    ReceiptState.FAILED: frozenset(),
 }
+# `completed` in the five-state vocabulary: the receipt states that end a command.
+COMPLETED_RECEIPT_STATES: frozenset[ReceiptState] = frozenset(
+    {ReceiptState.APPLIED, ReceiptState.REJECTED, ReceiptState.EXPIRED, ReceiptState.FAILED}
+)
+
+
+MailboxBoundary = Literal["next_turn", "next_iteration"]
+MailboxExpand = Literal["inline", "reference", "materialize", "auto"]
+# The content ref of a bounded inline text: the text lives in the mailbox entry only, never in
+# the command record, which binds it by digest.
+MAILBOX_INLINE_REF_PREFIX = "mailbox-inline:"
+
+
+class MailboxCommandAction(Contract):
+    """FT-F1: the shape `queue_instruction` and `add_context` share (SPEC-06 Contracts).
+
+    The command binds its content by `content_digest`: an artifact reference, or a bounded
+    inline text whose bytes are stored only in the Run's mailbox entry (`content_ref` is then
+    `mailbox-inline:<digest>`). `generation` is the Run Generation the entry targets; a later
+    Generation expires it (`stale_generation`), never redirects it.
+    """
+
+    boundary: MailboxBoundary = "next_turn"
+    generation: int = Field(ge=1)
+    content_ref: str = Field(min_length=1, max_length=2048)
+    content_digest: str = Field(pattern=DIGEST_PATTERN)
+    media_type: str = Field(default="text/markdown", min_length=1, max_length=128)
+    content_bytes: int = Field(ge=0)
+    inline: bool = False
+    node_key: str | None = Field(default=None, min_length=1, max_length=256)
+    deadline: AwareDatetime | None = None
+
+    @model_validator(mode="after")
+    def inline_ref_names_its_digest(self) -> MailboxCommandAction:
+        expected = f"{MAILBOX_INLINE_REF_PREFIX}{self.content_digest}"
+        if self.inline != (self.content_ref == expected):
+            raise ValueError("inline content is referenced exactly as mailbox-inline:<digest>")
+        return self
+
+
+class QueueInstructionAction(MailboxCommandAction):
+    """Rendered into the next packet as an `admitted_input` instruction (data, not authority)."""
+
+    kind: Literal["queue_instruction"] = "queue_instruction"
+
+
+class AddContextAction(MailboxCommandAction):
+    """A packet item with its own expansion hint for the Context Packer."""
+
+    kind: Literal["add_context"] = "add_context"
+    expand: MailboxExpand = "auto"
+
+
+DeliveryObservedOutcome = Literal["delivered", "applied", "rejected", "emulated", "unknown"]
+
+
+class DeliveryNativeRefs(Contract):
+    """Native identity of what carried a Command on its lane (never a credential)."""
+
+    lane_profile: str = Field(min_length=1, max_length=64)
+    session_ref: str | None = Field(default=None, max_length=512)
+    turn_ref: str | None = Field(default=None, max_length=512)
+    cancelled_turn_ref: str | None = Field(default=None, max_length=512)
+    replacement_turn_ref: str | None = Field(default=None, max_length=512)
+
+
+class DeliveryReport(Contract):
+    """SPEC-06 Delivery Report: the semantics requested at admission (the lane's `describe`)
+    and the semantics the lane actually delivered, with its native refs."""
+
+    command_id: str = Field(min_length=1)
+    requested_semantics: str | None = Field(default=None, max_length=64)
+    delivered_semantics: str = Field(min_length=1, max_length=64)
+    emulation_note: str | None = Field(default=None, max_length=512)
+    native_refs: DeliveryNativeRefs
+    observed_outcome: DeliveryObservedOutcome
+    # FT-F2 (cancel_and_replace): effect ids settled or still pending before the replacement.
+    settled_effect_ids: tuple[str, ...] = ()
+    pending_effect_ids: tuple[str, ...] = ()
+    replacement_generation: int | None = Field(default=None, ge=1)
+    recorded_at: AwareDatetime
+
+
+def _no_delivery_report(value: object) -> bool:
+    return value is None
 
 
 class BoundaryTarget(Contract):
@@ -634,7 +778,13 @@ class BoundaryTarget(Contract):
 
 
 BoundaryCommandAction = Annotated[
-    PauseAction | ResumeAction | SatisfyWaitAction | CancelAction | ReconcileUnitAction,
+    PauseAction
+    | ResumeAction
+    | SatisfyWaitAction
+    | CancelAction
+    | ReconcileUnitAction
+    | QueueInstructionAction
+    | AddContextAction,
     Field(discriminator="kind"),
 ]
 
@@ -681,6 +831,9 @@ class BoundaryCommandReceipt(Contract):
     applied_run_version: int | None = Field(default=None, ge=1)
     # The boundary state the application bound (for example a durable paused state).
     boundary_state: dict[str, object] = Field(default_factory=dict)
+    # FT-F1: the lane's Delivery Report for this transition (left out of dumps while absent,
+    # so every receipt recorded before FT-F1 keeps its bytes).
+    delivery_report: DeliveryReport | None = Field(default=None, exclude_if=_no_delivery_report)
     recorded_at: AwareDatetime
 
     @model_validator(mode="after")
@@ -1039,7 +1192,9 @@ LifecycleAction = Annotated[
     | ReconcileUnitAction
     | ApplyBoundaryCommandAction
     | ObserveQuiescenceAction
-    | ApplyFrameFactsAction,
+    | ApplyFrameFactsAction
+    | QueueInstructionAction
+    | AddContextAction,
     Field(discriminator="kind"),
 ]
 

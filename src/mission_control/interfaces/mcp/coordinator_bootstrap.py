@@ -14,6 +14,7 @@ from mission_control.interfaces.mcp.coordinator_server import (
     PrincipalResolver,
     create_coordinator_server,
 )
+from mission_control.interfaces.mcp.run_control_tools import ScopedRunControl
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,7 @@ def create_coordinator_http_deployment(
     auth: AuthProvider | None,
     mount_path: str = "/mcp/coordinator",
     principals: PrincipalResolver | None = None,
+    run_control: ScopedRunControl | None = None,
 ) -> CoordinatorHttpDeployment:
     """Build authenticated Streamable HTTP without creating a second control plane."""
     if not settings.coordinator_mcp_enabled:
@@ -50,6 +52,7 @@ def create_coordinator_http_deployment(
         facade,
         principals or VerifiedAccessTokenPrincipalResolver(),
         auth=auth,
+        run_control=run_control,
     )
     app = server.http_app(
         path="/",

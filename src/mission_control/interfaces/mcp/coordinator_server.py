@@ -27,6 +27,10 @@ from mission_control.interfaces.mcp.coordinator_resources import (
     RESOURCE_TEMPLATE_NAMES,
     register_resources,
 )
+from mission_control.interfaces.mcp.run_control_tools import (
+    ScopedRunControl,
+    register_run_control_tools,
+)
 from mission_control.interfaces.mcp.subscriptions import (
     McpSubscriptionBridge,
     register_subscription_tools,
@@ -253,6 +257,7 @@ def create_coordinator_server(
     auth: AuthProvider | None = None,
     transcripts: ScopedTranscripts | None = None,
     subscriptions: McpSubscriptionBridge | None = None,
+    run_control: ScopedRunControl | None = None,
 ) -> FastMCP:
     surface = getattr(
         facade,
@@ -516,6 +521,9 @@ def create_coordinator_server(
     if transcripts is not None:
         # SPEC-03 (C3): read-only run transcript tool and resource.
         register_transcript_tools(server, transcripts, principals, call=_principal_call)
+    if run_control is not None:
+        # SPEC-06: run commands, forks and inspection over the same application services.
+        register_run_control_tools(server, run_control, principals, call=_principal_call)
     unavailable_tools = set(PRODUCTION_COORDINATOR_TOOL_NAMES) - set(surface.tools)
     if unavailable_tools:
         server.disable(names=unavailable_tools, components={"tool"})
