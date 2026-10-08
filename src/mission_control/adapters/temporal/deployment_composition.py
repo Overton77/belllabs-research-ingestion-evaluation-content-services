@@ -160,6 +160,7 @@ from mission_control.application.coordinator.coordinator_results import (
     TerminalWorkflowCompletionService,
 )
 from mission_control.application.execution.harness.deep_agents_harness import DeepAgentsHarness
+from mission_control.application.execution.harness.inject import InterruptAndInjectService
 from mission_control.application.execution.harness.protocol import AgentHarness
 from mission_control.application.execution.harness.registry import LaneRegistry
 from mission_control.application.execution.mailbox import MailboxDeliveryService
@@ -728,6 +729,8 @@ class ProductionWorkerActivityCompositionFactory:
             stop_fences=PostgresStopFenceRepository(postgres_pool),
             # FT-F1: delivered mailbox entries are consumed when their turn starts.
             mailbox=mailbox,
+            # FT-F2: interrupt_and_inject by the lane's declared semantics.
+            injections=InterruptAndInjectService(mailbox, packs=context_packs),
             authority=RunControlOperationAuthority(run_control, control_plane),
             bindings=bindings,
             runtime=adapter,

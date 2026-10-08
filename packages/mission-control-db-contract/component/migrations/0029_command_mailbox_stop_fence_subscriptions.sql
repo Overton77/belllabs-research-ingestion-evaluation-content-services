@@ -22,7 +22,7 @@ CREATE TABLE mission_control.command_mailbox (
     command_id text NOT NULL CHECK (command_id <> ''),
     command_issuer text NOT NULL CHECK (command_issuer <> ''),
     generation integer NOT NULL CHECK (generation >= 1),
-    kind text NOT NULL CHECK (kind IN ('queue_instruction', 'add_context')),
+    kind text NOT NULL CHECK (kind IN ('queue_instruction', 'add_context', 'interrupt_and_inject')),
     boundary text NOT NULL CHECK (boundary IN ('next_turn', 'next_iteration')),
     node_key text CHECK (node_key <> ''),
     content_ref text NOT NULL CHECK (content_ref <> ''),
@@ -37,7 +37,10 @@ CREATE TABLE mission_control.command_mailbox (
     delivery_key text CHECK (delivery_key <> ''),
     superseded_by text CHECK (superseded_by <> ''),
     expired_reason text CHECK (
-        expired_reason IN ('superseded', 'stale_generation', 'deadline_passed', 'terminal_run')
+        expired_reason IN (
+            'superseded', 'stale_generation', 'deadline_passed', 'terminal_run',
+            'unsupported_by_lane'
+        )
     ),
     accepted_at timestamptz NOT NULL,
     delivered_at timestamptz,

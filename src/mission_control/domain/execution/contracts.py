@@ -1458,6 +1458,9 @@ class RuntimeInvocation(Contract):
     resolved_secret_names: tuple[str, ...] = ()
     # REQ-CP-DA-016/017: namespace, pinned expected source, and stamps for cognition.
     checkpoint_plan: CheckpointInvocationPlan | None = None
+    # FT-F2 (cancel_and_replace): the replacement turn's injected item, one more admitted
+    # user message on the same session after the interrupted turn's durable state.
+    follow_up: PromptSegment | None = Field(default=None, exclude_if=_absent)
 
 
 class RuntimeUsage(Contract):

@@ -28,6 +28,7 @@ from mission_control.contracts.contracts import (
     ForkLineageRef,
     InlineText,
     InstructionPayload,
+    InterruptAndInjectPayload,
     MissionCommandReceipt,
     MissionCommandRequest,
     MissionControlRejected,
@@ -44,6 +45,7 @@ from mission_control.domain.policies.contracts import (
     BoundaryCommandStatus,
     CancelAction,
     CommandStatus,
+    InterruptAndInjectAction,
     LifecycleCommand,
     PauseAction,
     QueueInstructionAction,
@@ -100,7 +102,10 @@ class MissionControlService:
         if request.target.id != run_id:
             raise MissionControlRejected("target_mismatch", "command target differs from route run")
         action, mailbox_text = self._action(request, inline_cap=self._inline_cap)
-        if isinstance(action, QueueInstructionAction | AddContextAction) and self._mailbox is None:
+        if (
+            isinstance(action, QueueInstructionAction | AddContextAction | InterruptAndInjectAction)
+            and self._mailbox is None
+        ):
             raise MissionControlRejected(
                 "unsupported_control", "queued content requires a command mailbox composition"
             )
@@ -301,7 +306,8 @@ class MissionControlService:
         | CancelAction
         | SatisfyWaitAction
         | QueueInstructionAction
-        | AddContextAction,
+        | AddContextAction
+        | InterruptAndInjectAction,
         str | None,
     ]:
         """The Reducer action of a public command, plus a mailbox command's inline body."""
@@ -315,8 +321,16 @@ class MissionControlService:
             return SatisfyWaitAction(**payload.model_dump(mode="python")), None
         if isinstance(payload, CancelPayload):
             return CancelAction(urgency=payload.urgency), None
-        if request.kind in {"queue_instruction", "add_context"} and isinstance(
-            payload, QueueInstructionPayload | AddContextPayload | InstructionPayload
+        if request.kind in {
+            "queue_instruction",
+            "add_context",
+            "interrupt_and_inject",
+        } and isinstance(
+            payload,
+            QueueInstructionPayload
+            | AddContextPayload
+            | InterruptAndInjectPayload
+            | InstructionPayload,
         ):
             return _mailbox_action(request, payload, inline_cap=inline_cap)
         raise MissionControlRejected(
@@ -327,10 +341,13 @@ class MissionControlService:
 
 def _mailbox_action(
     request: MissionCommandRequest,
-    payload: QueueInstructionPayload | AddContextPayload | InstructionPayload,
+    payload: QueueInstructionPayload
+    | AddContextPayload
+    | InterruptAndInjectPayload
+    | InstructionPayload,
     *,
     inline_cap: int,
-) -> tuple[QueueInstructionAction | AddContextAction, str | None]:
+) -> tuple[QueueInstructionAction | AddContextAction | InterruptAndInjectAction, str | None]:
     """FT-F1: `queue_instruction` / `add_context` as a mailbox action for the expected
     Generation. Inline text is capped (typed `content_too_large`) and bound by digest."""
 
@@ -342,9 +359,10 @@ def _mailbox_action(
         content = payload.content
     try:
         return mailbox_command_action(
-            "add_context" if isinstance(payload, AddContextPayload) else "queue_instruction",
+            request.kind,
             content,
-            boundary=payload.boundary,
+            # FT-F2: an injected item rides the replacement turn (or the next one).
+            boundary=getattr(payload, "boundary", "next_turn"),
             generation=request.expected_generation,
             expand=payload.expand if isinstance(payload, AddContextPayload) else "auto",
             node_key=getattr(payload, "node_key", None),

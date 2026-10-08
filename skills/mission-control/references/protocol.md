@@ -21,7 +21,7 @@ command returns an error rather than a partial result. Rows without the marker e
 | Search a run | `run search ID --query TEXT` | `GET /runs/ID/transcript/search?q=` | FT-C4 |
 | Send control | `command send ID --request-file FILE` | `POST /runs/ID/commands` | kinds added in FT-F1, FT-F2, FT-F3 |
 | Queue instruction or context | `command queue ID --file FILE [--add-context]` | same endpoint, `kind: queue_instruction \| add_context` | available (FT-F1) |
-| Interrupt and inject | `command inject ID --file FILE` | same endpoint, `kind: interrupt_and_inject` | FT-F2 |
+| Interrupt and inject | `command inject ID --file FILE` | same endpoint, `kind: interrupt_and_inject` | available (FT-F2) |
 | Cancel | `command cancel ID --urgency normal\|immediate --reason TEXT` | same endpoint, `kind: cancel` | immediate in FT-F3 |
 | Observe controls | `command list ID` | `GET /runs/ID/commands` | |
 | Safe snapshot | `run snapshot ID --request-file FILE` | `POST /runs/ID/snapshots` | |

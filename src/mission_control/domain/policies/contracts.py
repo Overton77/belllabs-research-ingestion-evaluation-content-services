@@ -581,6 +581,7 @@ BoundaryCommandKind = Literal[
     "reconcile_unit",
     "queue_instruction",
     "add_context",
+    "interrupt_and_inject",
 ]
 BOUNDARY_COMMAND_KINDS: frozenset[str] = frozenset(
     {
@@ -591,12 +592,17 @@ BOUNDARY_COMMAND_KINDS: frozenset[str] = frozenset(
         "reconcile_unit",
         "queue_instruction",
         "add_context",
+        "interrupt_and_inject",
     }
 )
 # FT-F1 (SPEC-06): the mailbox-bound kinds. They are family-applicable, but the family pulls
 # them from the Run's command mailbox at its next boundary (StageGraph admission, GoalDirected
 # iteration) instead of receiving them through the root's `execution` transport.
-MAILBOX_COMMAND_KINDS: frozenset[str] = frozenset({"queue_instruction", "add_context"})
+# FT-F2: `interrupt_and_inject` rides the same mailbox; the running turn's lane boundary takes
+# it at once (cancel_and_replace / cooperative_inject), else the next turn's boundary does.
+MAILBOX_COMMAND_KINDS: frozenset[str] = frozenset(
+    {"queue_instruction", "add_context", "interrupt_and_inject"}
+)
 # The kinds a family boundary applies; `cancel` is applied by the terminal outcome
 # (RRM-008 owns its delivery) and `reconcile_unit` by the operation boundary.
 FAMILY_BOUNDARY_COMMAND_KINDS: frozenset[str] = frozenset({"pause", "resume", "satisfy_wait"})
@@ -732,6 +738,15 @@ class AddContextAction(MailboxCommandAction):
     expand: MailboxExpand = "auto"
 
 
+class InterruptAndInjectAction(MailboxCommandAction):
+    """FT-F2: interrupt the running turn and continue with the injected content. The lane's
+    `describe` decides the semantics (`cooperative_inject` where native, otherwise
+    `cancel_and_replace` after every uncertain effect settled); uncertain effects are always
+    settled first (`settle_uncertain_effects` is fixed true in the public payload)."""
+
+    kind: Literal["interrupt_and_inject"] = "interrupt_and_inject"
+
+
 DeliveryObservedOutcome = Literal["delivered", "applied", "rejected", "emulated", "unknown"]
 
 
@@ -786,7 +801,8 @@ BoundaryCommandAction = Annotated[
     | CancelAction
     | ReconcileUnitAction
     | QueueInstructionAction
-    | AddContextAction,
+    | AddContextAction
+    | InterruptAndInjectAction,
     Field(discriminator="kind"),
 ]
 
@@ -1196,7 +1212,8 @@ LifecycleAction = Annotated[
     | ObserveQuiescenceAction
     | ApplyFrameFactsAction
     | QueueInstructionAction
-    | AddContextAction,
+    | AddContextAction
+    | InterruptAndInjectAction,
     Field(discriminator="kind"),
 ]
 

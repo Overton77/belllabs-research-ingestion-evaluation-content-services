@@ -591,6 +591,7 @@ async def compose_goal_directed(
     context_packs: Any = None,
     context_inputs: Any = None,
     mailbox: Any = None,
+    injections: Any = None,
 ) -> GoalComposition:
     """Compose the production GoalDirected activities and operation boundary.
 
@@ -649,6 +650,8 @@ async def compose_goal_directed(
         children=children,
         # FT-F1: the lane boundary consumes delivered mailbox entries at turn start.
         mailbox=mailbox,
+        # FT-F2: interrupt_and_inject at the lane boundary.
+        injections=injections,
     )
     documents = documents or RecordingGoalDocuments()
     family = compose_goal_directed_activities(

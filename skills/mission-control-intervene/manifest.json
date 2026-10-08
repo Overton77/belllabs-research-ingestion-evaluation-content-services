@@ -1,10 +1,10 @@
 {
   "schema_version": "mc.skill_bundle.v1",
   "name": "mission-control-intervene",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "service_contract_range": ">=0.1.0,<0.2.0",
   "files": {
-    "SKILL.md": "sha256:325c87968628f1119a664b928d09d80a192d0f929db09797d1d6a969a9bf190a",
-    "references/command-templates.md": "sha256:0653a972f67ef704f0fa4da17e25772574cffe3a2355a8262372189bcc1770c3"
+    "SKILL.md": "sha256:c027ce45879a87b3ff40474df59f0580d1ee3e235ac09cee28ebb5aa44acc63d",
+    "references/command-templates.md": "sha256:925b397d070b0941d5a4e74af577bbafc4ea9826b4a9d251f37c9cea831a3ca0"
   }
 }

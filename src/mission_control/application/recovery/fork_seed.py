@@ -30,7 +30,7 @@ from mission_control.domain.policies.contracts import (
     CommandResult,
     CommandStatus,
     LifecycleCommand,
-    QueueInstructionAction,
+    MailboxCommandAction,
 )
 from mission_control.domain.policies.forks import RunForkReceipt, RunSnapshotManifest
 
@@ -153,7 +153,7 @@ class ForkSeedService:
         command_id: str,
         issuer: str,
         actor: ActorContext,
-        build: Callable[[int], tuple[QueueInstructionAction | AddContextAction, str | None]],
+        build: Callable[[int], tuple[MailboxCommandAction, str | None]],
         reason: str,
         fork_request_id: str,
     ) -> CommandResult:

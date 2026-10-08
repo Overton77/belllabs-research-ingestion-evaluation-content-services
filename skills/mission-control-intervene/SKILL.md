@@ -23,7 +23,7 @@ has real values.
 | --- | --- | --- |
 | Add guidance without stopping | `command queue` (`kind: queue_instruction`), `boundary: next_turn \| next_iteration` | `turn_boundary_guaranteed` (Deep Agents) or `wait_then_send` (Cursor); consumed once into the next Context Packet. Available (FT-F1) |
 | Add a document or artifact to context | `command queue --add-context` (`kind: add_context`) with a short note or an artifact ref | same. Available (FT-F1) |
-| Stop the current turn and redirect | `command inject` with `kind: interrupt_and_inject` | `cooperative_inject` where native, otherwise `cancel_and_replace` after uncertain effects settle. Availability: FT-F2 |
+| Stop the current turn and redirect | `command inject` (`kind: interrupt_and_inject`) | `cooperative_inject` where native (no first-wave lane), otherwise `cancel_and_replace`: the turn is cancelled, uncertain effects settle, and a replacement turn continues the same session with your item; an effect that never settles parks the unit `in_doubt` (reconcile, then the item rides the next turn). A lane reporting `unsupported` rejects it. Available (FT-F2) for Deep Agents; Cursor lanes use the same protocol path with FT-G4 |
 | Stop releasing new work | `command send` with `kind: pause` | quiescence at the next safe boundary; the run parks |
 | Continue | `command send` with `kind: resume` (optionally with an instruction) | never new authority or budget |
 | Stop | `command cancel --urgency normal` | settlement after children, effects and usage reconcile |

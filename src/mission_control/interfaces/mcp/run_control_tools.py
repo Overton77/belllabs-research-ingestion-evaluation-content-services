@@ -1,8 +1,9 @@
 """Run control on the coordinator MCP server (SPEC-06 Interfaces).
 
 - `mission_command_send(run_id, request)`: the `mc.command.v1` request the HTTP surface takes
-  on `POST /runs/{id}/commands` (FT-F1: `queue_instruction`, `add_context`, plus the existing
-  kinds), answered with the same `mc.command_receipt.v1` receipt.
+  on `POST /runs/{id}/commands` (FT-F1: `queue_instruction`, `add_context`; FT-F2:
+  `interrupt_and_inject`; plus the existing kinds), answered with the same
+  `mc.command_receipt.v1` receipt.
 - `mission_run_inspect(run_id)`: `mc.inspection.v1` with the FT-F6 sections (lane, sessions,
   mailbox, delivery reports, frames cursor, chain, subscriptions, stop fence), read-only.
 - `mission_run_fork(run_id, request)`: the `mc.runtime_fork.v1` request of

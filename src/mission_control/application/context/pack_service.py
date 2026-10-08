@@ -22,6 +22,7 @@ import json
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from typing import Protocol
 
 from mission_control.domain.authoring.contracts import StageGraphBlueprint, StageNode
@@ -705,6 +706,58 @@ class ContextPackService:
                 )
             )
         return tuple(candidates)
+
+    async def pack_follow_up(
+        self,
+        request: OperationExecutionRequest,
+        candidates: Sequence[PackCandidate],
+        *,
+        delivery_key: str,
+        sealed_at: datetime,
+    ) -> SealedPacket:
+        """FT-F2: the `follow_up_turn` packet a replacement turn carries: the injected items
+        (no files; the replacement continues the same session and workspace)."""
+
+        unit = request.runtime_unit
+        node_key = (
+            str(getattr(unit.location, "stage_id", None) or unit.semantic_operation_id)
+            if unit is not None and unit.family == "stage_graph"
+            else f"goal/{getattr(unit.location, 'operation_role', 'executor')}"
+            if unit is not None
+            else request.identity.operation_id
+        )
+        deep = request.deep_agent_binding
+        semantic = f"{request.identity.semantic_key}:follow-up:{delivery_key}"
+        return await self.seal(
+            PackRequest(
+                packet_id=_stable_uuid("packet", request.request_scope, semantic),
+                sealed_at=sealed_at,
+                context_selection_ref=(
+                    "context_selection:"
+                    + _stable_uuid("selection", request.request_scope, semantic)
+                ),
+                scope=_packet_scope(request.request_scope),
+                target=PacketTarget(
+                    mission_id=request.identity.run_id,
+                    run_id=request.identity.run_id,
+                    revision_id=request.effective_configuration_digest,
+                    node_key=node_key,
+                    activation_id=request.identity.operation_id,
+                    attempt_no=request.identity.operation_attempt,
+                    generation=deep.execution_generation if deep is not None else 1,
+                    purpose=ContextPurpose.FOLLOW_UP_TURN,
+                ),
+                profile=self._profiles.profile_for(request),
+                candidates=tuple(candidates),
+                policy=self._policy,
+                lane=LaneFileSupport(writable_workspace=False),
+            ),
+            request_scope=request.request_scope,
+            owner=WorkspaceOwner(
+                kind=WorkspaceOwnerKind.STAGE, owner_id=request.identity.operation_id
+            ),
+            materialize_files=False,
+        )
 
     # -- shared sealing -------------------------------------------------------------------
 

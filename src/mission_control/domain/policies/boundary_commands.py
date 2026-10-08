@@ -26,6 +26,7 @@ from mission_control.domain.policies.contracts import (
     BoundaryRejectionReason,
     BoundaryTarget,
     CancelAction,
+    InterruptAndInjectAction,
     LifecycleCommand,
     PauseAction,
     QueueInstructionAction,
@@ -47,6 +48,7 @@ BoundaryAction = (
     | ReconcileUnitAction
     | QueueInstructionAction
     | AddContextAction
+    | InterruptAndInjectAction
 )
 
 # Reducer rejection codes mapped onto the closed rejection-reason set. Anything else that
@@ -106,7 +108,7 @@ def boundary_target_for(
             sequence_space=f"unit:{action.unit_key}:gen:{action.execution_generation}",
         )
     target = projection.execution_target
-    if isinstance(action, QueueInstructionAction | AddContextAction):
+    if isinstance(action, QueueInstructionAction | AddContextAction | InterruptAndInjectAction):
         # FT-F1: the family boundary of the targeted Generation takes the entry; before the
         # family's start fact binds a target, the entry waits for the first boundary.
         return BoundaryTarget(

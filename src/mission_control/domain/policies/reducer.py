@@ -43,6 +43,7 @@ from mission_control.domain.policies.contracts import (
     EffectSettlement,
     ExecutionTarget,
     FrameFactCursor,
+    InterruptAndInjectAction,
     LifecycleCommand,
     LifecycleTransitionRecord,
     ObserveEffectAction,
@@ -135,6 +136,7 @@ ACTION_PERMISSIONS: dict[str, str] = {
     # SPEC-06 (FT-F1): mailbox-bound interventions (`mission.command` scope).
     "queue_instruction": "workflow_run.control",
     "add_context": "workflow_run.control",
+    "interrupt_and_inject": "workflow_run.control",
 }
 LIFECYCLE_ACTION_KINDS = frozenset((*ACTION_PERMISSIONS, "apply_authority_batch"))
 AUTHORITY_BATCH_ACTION_TYPES = (
@@ -310,7 +312,7 @@ def reduce_lifecycle(
         phase = _progress_phase(action.runnable_work_remains, waits, pauses)
     elif isinstance(action, CancelAction):
         phase = RunPhase.CANCELLING
-    elif isinstance(action, QueueInstructionAction | AddContextAction):
+    elif isinstance(action, QueueInstructionAction | AddContextAction | InterruptAndInjectAction):
         # FT-F1 (SPEC-06): admission validates a mailbox command against the exact version
         # it binds; it never moves the phase. Run control records it as a pending command
         # whose mailbox entry the family boundary delivers.

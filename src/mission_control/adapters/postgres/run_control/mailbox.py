@@ -23,6 +23,7 @@ from mission_control.application.execution.mailbox import MailboxClaim, queued_e
 from mission_control.contracts.identities import uuid7
 from mission_control.domain.policies.contracts import DomainEventEnvelope
 from mission_control.domain.policies.mailbox import (
+    ExpiredReason,
     MailboxBoundaryPoint,
     MailboxEntry,
     MailboxState,
@@ -347,6 +348,34 @@ class PostgresCommandMailbox:
                 await self._update(connection, args, entry, now)
                 superseded.append(entry)
             return tuple(superseded)
+
+    async def expire(
+        self,
+        request_scope: str,
+        run_id: str,
+        *,
+        entry_id: str,
+        reason: ExpiredReason,
+        now: datetime,
+    ) -> MailboxEntry | None:
+        async with self._pool.acquire() as connection, connection.transaction():
+            args = await mc.begin(connection, request_scope)
+            await mc.advisory_lock(connection, _lock_key(request_scope, run_id))
+            for row in await self._rows(connection, args, run_id, lock=True):
+                entry = _entry(row, request_scope)
+                if entry.entry_id != entry_id:
+                    continue
+                if entry.pending:
+                    entry = entry.model_copy(
+                        update={
+                            "state": MailboxState.EXPIRED,
+                            "expired_reason": reason,
+                            "expired_at": now,
+                        }
+                    )
+                    await self._update(connection, args, entry, now)
+                return entry
+            return None
 
     async def append_events(
         self, request_scope: str, run_id: str, events: Sequence[DomainEventEnvelope]

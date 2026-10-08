@@ -292,9 +292,16 @@ def mailbox_payload(path: str, args: argparse.Namespace) -> tuple[str, dict[str,
         if unknown:
             raise ValueError(f"unknown queue file fields: {sorted(unknown)}")
     spec = spec or {"text": raw}
-    kind = str(spec.get("kind") or ("add_context" if args.add_context else "queue_instruction"))
-    if kind not in {"queue_instruction", "add_context"}:
-        raise ValueError("command queue sends queue_instruction or add_context")
+    inject = getattr(args, "action", None) == "inject"
+    default_kind = (
+        "interrupt_and_inject"
+        if inject
+        else ("add_context" if getattr(args, "add_context", False) else "queue_instruction")
+    )
+    kind = str(spec.get("kind") or default_kind)
+    allowed = {"interrupt_and_inject"} if inject else {"queue_instruction", "add_context"}
+    if kind not in allowed:
+        raise ValueError(f"this command sends {' or '.join(sorted(allowed))}")
     if "content" in spec:
         content = spec["content"]
     elif "text" in spec:
@@ -310,15 +317,15 @@ def mailbox_payload(path: str, args: argparse.Namespace) -> tuple[str, dict[str,
         }
     else:
         raise ValueError("a queue file needs text, content or content_ref")
-    payload: dict[str, Any] = {
-        "boundary": spec.get("boundary") or args.boundary,
-        "content": content,
-    }
+    payload: dict[str, Any] = {"content": content}
+    if not inject:
+        # An injected item rides the replacement turn; it has no boundary or deadline.
+        payload["boundary"] = spec.get("boundary") or args.boundary
+        if spec.get("deadline"):
+            payload["deadline"] = spec["deadline"]
     node_key = spec.get("node_key") or args.node_key
     if node_key:
         payload["node_key"] = node_key
-    if spec.get("deadline"):
-        payload["deadline"] = spec["deadline"]
     if kind == "add_context":
         payload["expand"] = spec.get("expand") or args.expand
     reason = str(spec.get("reason") or args.reason)
@@ -655,6 +662,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     queue.add_argument("--reason", default="queued by missionctl")
     queue.add_argument("--request-id")
+    # FT-F2: interrupt the running turn and continue with the injected content.
+    inject = commands.add_parser("inject", parents=[common])
+    inject.add_argument("run_id")
+    inject.add_argument("--file", required=True)
+    inject.add_argument("--node-key")
+    inject.add_argument("--reason", default="injected by missionctl")
+    inject.add_argument("--request-id")
     mission = groups.add_parser("mission", parents=[common])
     mission_commands = mission.add_subparsers(dest="action", required=True)
     schema = mission_commands.add_parser("schema", parents=[common])
@@ -775,7 +789,7 @@ def main(argv: list[str] | None = None) -> int:
             follow_redirects=False,
         ) as transport:
             client = MissionClient(transport, application)
-            if args.group == "command" and args.action == "queue":
+            if args.group == "command" and args.action in {"queue", "inject"}:
                 body = queue_command_body(client, args)
             if args.group == "run" and args.action == "transcript":
                 return run_transcript(client, args, deadline_seconds)

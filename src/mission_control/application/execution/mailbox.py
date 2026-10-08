@@ -31,9 +31,11 @@ from mission_control.domain.policies.contracts import (
     AddContextAction,
     BoundaryCommandReceipt,
     BoundaryCommandStatus,
+    BoundaryRejectionReason,
     DeliveryObservedOutcome,
     DeliveryReport,
     DomainEventEnvelope,
+    InterruptAndInjectAction,
     MailboxBoundary,
     MailboxExpand,
     QueueInstructionAction,
@@ -44,6 +46,7 @@ from mission_control.domain.policies.errors import RunControlNotFound
 from mission_control.domain.policies.mailbox import (
     COMMAND_COMPLETED_EVENT,
     COMMAND_DELIVERED_EVENT,
+    COMMAND_IN_DOUBT_EVENT,
     COMMAND_QUEUED_EVENT,
     MAX_INLINE_BYTES,
     ExpiredReason,
@@ -84,7 +87,7 @@ def mailbox_command_action(
     node_key: str | None = None,
     deadline: datetime | None = None,
     inline_cap: int = MAX_INLINE_BYTES,
-) -> tuple[QueueInstructionAction | AddContextAction, str | None]:
+) -> tuple[QueueInstructionAction | AddContextAction | InterruptAndInjectAction, str | None]:
     """The Reducer action of a mailbox command and its inline body (FT-F1, FT-F4).
 
     Inline text is capped (`content_too_large`) and bound by digest; an artifact reference is
@@ -126,6 +129,8 @@ def mailbox_command_action(
     }
     if kind == "add_context":
         return AddContextAction.model_validate({**common, "expand": expand}), text
+    if kind == "interrupt_and_inject":
+        return InterruptAndInjectAction.model_validate(common), text
     if kind != "queue_instruction":
         raise ValueError(f"{kind} is not a mailbox command")
     return QueueInstructionAction.model_validate(common), text
@@ -170,6 +175,16 @@ class CommandMailboxRepository(Protocol):
         superseded_by: str,
         now: datetime,
     ) -> tuple[MailboxEntry, ...]: ...
+
+    async def expire(
+        self,
+        request_scope: str,
+        run_id: str,
+        *,
+        entry_id: str,
+        reason: ExpiredReason,
+        now: datetime,
+    ) -> MailboxEntry | None: ...
 
     async def append_events(
         self, request_scope: str, run_id: str, events: Sequence[DomainEventEnvelope]
@@ -365,6 +380,30 @@ class InMemoryCommandMailbox:
                 superseded.append(entry)
             return tuple(deepcopy(superseded))
 
+    async def expire(
+        self,
+        request_scope: str,
+        run_id: str,
+        *,
+        entry_id: str,
+        reason: ExpiredReason,
+        now: datetime,
+    ) -> MailboxEntry | None:
+        async with self._lock:
+            entry = self._entries.get(entry_id)
+            if entry is None or entry.request_scope != request_scope or entry.run_id != run_id:
+                return None
+            if entry.pending:
+                entry = entry.model_copy(
+                    update={
+                        "state": MailboxState.EXPIRED,
+                        "expired_reason": reason,
+                        "expired_at": now,
+                    }
+                )
+                self._entries[entry_id] = entry
+            return deepcopy(entry)
+
     async def append_events(
         self, request_scope: str, run_id: str, events: Sequence[DomainEventEnvelope]
     ) -> None:
@@ -380,6 +419,7 @@ class InMemoryCommandMailbox:
 
 # The receipt states a target state requires first (catch-up after a crash between steps).
 _RECEIPT_PATH: dict[ReceiptState, tuple[ReceiptState, ...]] = {
+    ReceiptState.REJECTED: (ReceiptState.REJECTED,),
     ReceiptState.DELIVERED: (ReceiptState.DELIVERED,),
     ReceiptState.OBSERVED: (ReceiptState.DELIVERED, ReceiptState.OBSERVED),
     ReceiptState.APPLIED: (ReceiptState.DELIVERED, ReceiptState.OBSERVED, ReceiptState.APPLIED),
@@ -433,6 +473,8 @@ class MailboxDeliveryService:
         iteration_start: bool,
         lane_profile: str,
         unit_key: str | None = None,
+        kinds: tuple[str, ...] = (),
+        cancelled_turn_ref: str | None = None,
     ) -> tuple[MailboxEntry, ...]:
         """Claim what this boundary takes; record `delivered` (or `expired`) receipts.
 
@@ -457,6 +499,7 @@ class MailboxDeliveryService:
                 else 1
             ),
             iteration_start=iteration_start,
+            kinds=kinds,
         )
         claim = await self._mailbox.claim(
             request_scope,
@@ -484,6 +527,14 @@ class MailboxDeliveryService:
                 observed_outcome="delivered",
                 recorded_at=entry.delivered_at or self._clock(),
             )
+            if cancelled_turn_ref is not None:
+                report = report.model_copy(
+                    update={
+                        "native_refs": report.native_refs.model_copy(
+                            update={"cancelled_turn_ref": cancelled_turn_ref}
+                        )
+                    }
+                )
             status = await self._advance(
                 request_scope,
                 entry,
@@ -579,6 +630,148 @@ class MailboxDeliveryService:
 
         return await self._mailbox.release(request_scope, run_id, delivery_key=delivery_key)
 
+    # -- interrupt_and_inject (FT-F2) -----------------------------------------------------
+
+    async def inject_replaced(
+        self,
+        request_scope: str,
+        run_id: str,
+        *,
+        delivery_key: str,
+        lane_profile: str,
+        delivered_semantics: str,
+        cancelled_turn_ref: str | None,
+        replacement_turn_ref: str,
+        settled_effect_ids: tuple[str, ...] = (),
+        session_ref: str | None = None,
+    ) -> tuple[MailboxEntry, ...]:
+        """The replacement turn carrying the injected content starts: consume once and record
+        what the lane did (semantics, cancelled and replacement turns, settled effects)."""
+
+        consumed = await self._mailbox.consume(
+            request_scope, run_id, delivery_key=delivery_key, now=self._clock()
+        )
+        for entry in consumed:
+            report = delivery_report(
+                entry,
+                lane_profile=lane_profile,
+                requested=self.semantics(lane_profile, entry.kind),
+                delivered=delivered_semantics,
+                observed_outcome="delivered",
+                recorded_at=entry.consumed_at or self._clock(),
+                session_ref=session_ref,
+                turn_ref=replacement_turn_ref,
+            )
+            report = report.model_copy(
+                update={
+                    "native_refs": report.native_refs.model_copy(
+                        update={
+                            "cancelled_turn_ref": cancelled_turn_ref,
+                            "replacement_turn_ref": replacement_turn_ref,
+                        }
+                    ),
+                    "settled_effect_ids": settled_effect_ids,
+                }
+            )
+            await self._advance(
+                request_scope,
+                entry,
+                ReceiptState.OBSERVED,
+                report=report,
+                detail=f"{delivered_semantics}: the replacement turn started",
+                transport_ref=delivery_key,
+            )
+        return consumed
+
+    async def inject_parked(
+        self,
+        request_scope: str,
+        run_id: str,
+        *,
+        delivery_key: str,
+        lane_profile: str,
+        cancelled_turn_ref: str | None,
+        pending_effect_ids: tuple[str, ...],
+    ) -> tuple[MailboxEntry, ...]:
+        """The interrupted turn left effects whose outcome is unknown: no replacement runs.
+
+        The entries return to `queued` (the next turn after operator reconciliation takes
+        them) and a `command.in_doubt` event carries the pending effect ids.
+        """
+
+        released = await self._mailbox.release(request_scope, run_id, delivery_key=delivery_key)
+        for entry in released:
+            report = delivery_report(
+                entry,
+                lane_profile=lane_profile,
+                requested=self.semantics(lane_profile, entry.kind),
+                delivered="cancel_and_replace",
+                observed_outcome="unknown",
+                recorded_at=self._clock(),
+            )
+            report = report.model_copy(
+                update={
+                    "native_refs": report.native_refs.model_copy(
+                        update={"cancelled_turn_ref": cancelled_turn_ref}
+                    ),
+                    "pending_effect_ids": pending_effect_ids,
+                }
+            )
+            await self._mailbox.append_events(
+                request_scope,
+                run_id,
+                (
+                    DomainEventEnvelope(
+                        event_id=f"{COMMAND_IN_DOUBT_EVENT}:{entry.command_id}:{delivery_key}",
+                        event_type=COMMAND_IN_DOUBT_EVENT,
+                        aggregate_id=f"command:{entry.command_id}:{delivery_key}",
+                        aggregate_version=1,
+                        sequence=1,
+                        occurred_at=report.recorded_at,
+                        recorded_at=report.recorded_at,
+                        actor=MAILBOX_ACTOR,
+                        correlation_id=entry.command_id,
+                        causation_id=entry.command_id,
+                        payload=mailbox_event_payload(
+                            entry, report, delivery_key=delivery_key, outcome="in_doubt"
+                        ),
+                    ),
+                ),
+            )
+        return released
+
+    async def inject_unsupported(
+        self, request_scope: str, entry: MailboxEntry, *, lane_profile: str
+    ) -> None:
+        """A lane whose `describe` reports `interrupt_and_inject: unsupported` refuses the
+        Command with a typed Delivery Report; the running turn is never interrupted."""
+
+        expired = await self._mailbox.expire(
+            request_scope,
+            entry.run_id,
+            entry_id=entry.entry_id,
+            reason="unsupported_by_lane",
+            now=self._clock(),
+        )
+        if expired is None:
+            return
+        report = delivery_report(
+            expired,
+            lane_profile=lane_profile,
+            requested="unsupported",
+            delivered="unsupported",
+            observed_outcome="rejected",
+            recorded_at=expired.expired_at or self._clock(),
+        )
+        await self._complete(
+            request_scope,
+            expired,
+            ReceiptState.REJECTED,
+            report=report,
+            detail=f"lane profile {lane_profile} does not support interrupt_and_inject",
+            rejection_reason="not_applicable",
+        )
+
     # -- supersession ---------------------------------------------------------------------
 
     async def supersede(
@@ -612,6 +805,7 @@ class MailboxDeliveryService:
         detail: str,
         transport_ref: str | None = None,
         boundary_state: dict[str, object] | None = None,
+        rejection_reason: BoundaryRejectionReason | None = None,
     ) -> None:
         status = await self._advance(
             request_scope,
@@ -621,6 +815,7 @@ class MailboxDeliveryService:
             detail=detail,
             transport_ref=transport_ref,
             boundary_state=boundary_state,
+            rejection_reason=rejection_reason,
         )
         extra: dict[str, object] = {}
         if status is not None:
@@ -641,6 +836,7 @@ class MailboxDeliveryService:
         detail: str,
         transport_ref: str | None = None,
         boundary_state: dict[str, object] | None = None,
+        rejection_reason: BoundaryRejectionReason | None = None,
     ) -> BoundaryCommandStatus | None:
         status = await self._receipts.get_boundary_command(
             request_scope, entry.run_id, entry.command_issuer, entry.command_id
@@ -662,6 +858,7 @@ class MailboxDeliveryService:
                     request_scope=request_scope,
                     ordinal=len(status.receipts) + 1,
                     state=step,
+                    rejection_reason=rejection_reason if step == ReceiptState.REJECTED else None,
                     recorded_by=MAILBOX_RECORDER,
                     detail=detail[:1024],
                     transport_ref=transport_ref,

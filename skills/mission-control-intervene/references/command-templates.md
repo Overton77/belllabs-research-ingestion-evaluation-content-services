@@ -62,13 +62,19 @@ degrades to a reference on a lane that cannot write files.
   "expected_generation": 1,
   "target": {"kind": "run", "id": "REPLACE_RUN_ID"},
   "kind": "interrupt_and_inject",
-  "payload": {"content_ref": "artifact://…/redirect.md", "content_digest": "sha256:…",
-              "accept_emulated": true},
+  "payload": {"content": {"text": "Wrong branch: continue on release/2.3."},
+              "settle_uncertain_effects": true},
   "reason": "Wrong repository branch; redirect to release/2.3"
 }
 ```
 
-`accept_emulated: false` rejects the command when the lane can only `cancel_and_replace`.
+`content` is `{"text": ...}` (8 KiB cap) or `{"artifact_ref": ..., "content_digest": ...}`;
+optional `node_key` targets one stage or `goal/executor`. `missionctl command inject RUN_ID
+--file redirect.json` builds the body (a plain-text file is the text). The receipts read
+`accepted, queued, delivered, observed, applied`; the Delivery Report names the semantics the
+lane used, the cancelled and replacement turn refs and the settled effect ids. A
+`command.in_doubt` event with `pending_effect_ids` means no replacement ran (FT-F2,
+available).
 
 ## pause / resume
 

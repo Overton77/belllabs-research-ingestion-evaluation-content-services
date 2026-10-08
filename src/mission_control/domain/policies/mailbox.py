@@ -33,6 +33,7 @@ from mission_control.domain.policies.contracts import (
     DeliveryNativeRefs,
     DeliveryObservedOutcome,
     DeliveryReport,
+    InterruptAndInjectAction,
     MailboxBoundary,
     MailboxExpand,
     QueueInstructionAction,
@@ -40,12 +41,14 @@ from mission_control.domain.policies.contracts import (
 
 # SPEC-06: inline text is bounded (default 8 KiB); larger content travels as an artifact ref.
 MAX_INLINE_BYTES: Final = 8 * 1024
-MAILBOX_KIND = Literal["queue_instruction", "add_context"]
+MAILBOX_KIND = Literal["queue_instruction", "add_context", "interrupt_and_inject"]
 # The two mission events whose payload carries the Delivery Report (SPEC-06 acceptance).
 COMMAND_DELIVERED_EVENT: Final = "command.delivered"
 COMMAND_COMPLETED_EVENT: Final = "command.completed"
 COMMAND_QUEUED_EVENT: Final = "command.queued"
 COMMAND_OBSERVED_EVENT: Final = "command.observed"
+# FT-F2: an interrupted turn whose uncertain effects did not settle parks the unit in_doubt.
+COMMAND_IN_DOUBT_EVENT: Final = "command.in_doubt"
 # Lanes that report nothing for a command kind deliver it at the turn boundary.
 DEFAULT_MAILBOX_SEMANTICS: Final = "turn_boundary_guaranteed"
 
@@ -58,7 +61,9 @@ class MailboxState(StrEnum):
     EXPIRED = "expired"
 
 
-ExpiredReason = Literal["superseded", "stale_generation", "deadline_passed", "terminal_run"]
+ExpiredReason = Literal[
+    "superseded", "stale_generation", "deadline_passed", "terminal_run", "unsupported_by_lane"
+]
 MailboxFamily = Literal["StageGraph", "GoalDirected"]
 GOAL_EXECUTOR_NODE: Final = "goal/executor"
 GOAL_VERIFIER_NODE: Final = "goal/verifier"
@@ -172,8 +177,8 @@ def entry_for(
     """The mailbox entry an accepted, sequenced mailbox command writes."""
 
     action = record.action
-    if not isinstance(action, QueueInstructionAction | AddContextAction):
-        raise ValueError("only queue_instruction and add_context write mailbox entries")
+    if not isinstance(action, QueueInstructionAction | AddContextAction | InterruptAndInjectAction):
+        raise ValueError("only mailbox commands write mailbox entries")
     if action.inline != (content_inline is not None):
         raise ValueError("inline mailbox commands carry their text; references carry none")
     if record.target_sequence < 1:
@@ -214,6 +219,9 @@ class MailboxBoundaryPoint(Contract):
     node_key: str = Field(min_length=1)
     generation: int = Field(ge=1)
     iteration_start: bool = True
+    # FT-F2: a running turn's lane boundary takes only `interrupt_and_inject` entries. Left
+    # out of the recorded boundary point while empty (every pre-FT-F2 claim).
+    kinds: tuple[str, ...] = Field(default=(), exclude_if=lambda value: not value)
 
 
 ClaimDecision = Literal["claim", "wait", "stale_generation", "deadline_passed"]
@@ -233,6 +241,8 @@ def claim_decision(
     """
 
     if entry.state != MailboxState.QUEUED:
+        return "wait"
+    if point.kinds and entry.kind not in point.kinds:
         return "wait"
     if entry.generation < point.generation:
         return "stale_generation"
