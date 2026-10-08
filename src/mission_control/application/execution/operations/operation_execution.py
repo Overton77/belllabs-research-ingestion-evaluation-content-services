@@ -3,14 +3,18 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
 from contextvars import ContextVar
 from copy import deepcopy
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import Literal, Protocol
 
 from mission_control.application.authoring.service import ControlPlaneService
+from mission_control.application.execution.harness.deep_agents_harness import DeepAgentsHarness
+from mission_control.application.execution.harness.protocol import OperationLane
+from mission_control.application.execution.harness.registry import LaneRegistry
 from mission_control.application.execution.operations.checkpoint_lineage import (
     CheckpointLineageService,
     UnitAttempt,
@@ -21,6 +25,7 @@ from mission_control.application.execution.operations.operation_progress import 
     report_phase,
 )
 from mission_control.application.execution.service import RunControlService
+from mission_control.application.execution.stop_fence import StopFenceRepository
 from mission_control.domain.authoring.canonical import contract_fingerprint, sha256_digest
 from mission_control.domain.authoring.contracts import DefinitionKind, SecretRef
 from mission_control.domain.authoring.identity import stable_id
@@ -74,6 +79,8 @@ from mission_control.domain.programs.runtime_units import (
     goal_unit_operation_id,
     goal_unit_workspace_root,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 # The lease deadline of the attempt holding the claim lease, so that a cancellation raised
 # by the deadline is told apart from a Temporal cancel delivered through the heartbeat.
@@ -618,10 +625,17 @@ class OperationExecutionService:
         lineage: CheckpointLineageService | None = None,
         fork_reuse: ForkReusePort | None = None,
         children: AsyncChildCancellationPort | None = None,
+        lanes: LaneRegistry | None = None,
+        stop_fences: StopFenceRepository | None = None,
     ) -> None:
         self._authority = authority
         self._bindings = bindings
         self._runtime = runtime
+        # FT-G1: dispatch by lane. Without an explicit registry the given runtime is the
+        # `deep_agents` lane, exactly as before.
+        self._lanes = lanes if lanes is not None else LaneRegistry([DeepAgentsHarness(runtime)])
+        # FT-F3: the immediate cancel's Delivery Report milestones (no-op without a fence).
+        self._stop_fences = stop_fences
         self._sandbox = sandbox
         self._assets = assets
         self._mcp = mcp
@@ -643,7 +657,8 @@ class OperationExecutionService:
 
         if self._lineage is not None and attempt is None:
             raise ValueError("lineage-qualified execution requires the Activity attempt (EXEC-014)")
-        if request.execution_runtime == "deep_agent" and self._lineage is None:
+        lane = self._lanes.lane_for(request)
+        if lane.requires_checkpoint_lineage(request) and self._lineage is None:
             raise ValueError(
                 "Deep Agent execution requires checkpoint lineage composition (REQ-CP-DA-016)"
             )
@@ -703,6 +718,9 @@ class OperationExecutionService:
                 "settlement is visible or explicitly reconcile the claim"
             )
         return await self._dispatch_and_settle(request, binding, claim, attempt=attempt)
+
+    def _lane(self, binding: OperationExecutionBinding) -> OperationLane:
+        return self._lanes.lane_for(binding)
 
     async def _execute_unit(
         self,
@@ -1029,7 +1047,7 @@ class OperationExecutionService:
     async def _observe_latest(
         self, invocation: RuntimeInvocation, resolved_secrets: Mapping[str, str]
     ) -> RuntimeResult:
-        observe = getattr(self._runtime, "observe_latest", None)
+        observe = getattr(self._lanes.lane_for(invocation.binding), "observe_latest", None)
         if observe is None:
             raise CheckpointLineageInDoubt(
                 "the runtime cannot report the latest durable checkpoint of a cancelled unit",
@@ -1076,6 +1094,8 @@ class OperationExecutionService:
 
         report_phase("settling")
         started_at = datetime.now(UTC)
+        # FT-F3: the lane stopped cognition for this unit (the provider acknowledged).
+        await self._fence_milestone(binding, "provider_acknowledged")
         children = await self._cancel_children(binding, started_at)
         if self._journal is not None and claim is not None:
             # Step 5 (REQ-CP-RUN-007 narrowed): a consequential effect the unit claimed and
@@ -1117,7 +1137,7 @@ class OperationExecutionService:
             ),
             result_checkpoint=capture.result_key if capture is not None else None,
         )
-        return await self._settle(
+        result = await self._settle(
             binding,
             claim,
             settlement,
@@ -1127,6 +1147,27 @@ class OperationExecutionService:
             plan=plan if capture is not None else None,
             capture=capture,
         )
+        await self._fence_milestone(binding, "settled")
+        return result
+
+    async def _fence_milestone(
+        self,
+        binding: OperationExecutionBinding,
+        milestone: Literal["provider_acknowledged", "settled"],
+    ) -> None:
+        if self._stop_fences is None:
+            return
+        try:
+            await self._stop_fences.record_milestone(
+                binding.request_scope,
+                binding.run_id,
+                None,
+                milestone,
+                unit_key=binding.binding_id,
+            )
+        except Exception:
+            # Report evidence only: the settlement above is the authority.
+            _LOGGER.warning("stop fence milestone %s was not recorded", milestone, exc_info=True)
 
     async def _settle_superseded(
         self,
@@ -1236,7 +1277,7 @@ class OperationExecutionService:
             runtime_invoked = True
             report_phase("cognition")
             try:
-                runtime_result = await self._runtime.execute(invocation, resolved_secrets)
+                runtime_result = await self._lane(binding).execute(invocation, resolved_secrets)
             except asyncio.CancelledError:
                 # REQ-CP-EXEC-008 step 3: a requested Temporal cancel reached this Activity
                 # through its heartbeat and interrupted the in-flight step. The holder
@@ -1810,6 +1851,8 @@ def _binding_for(request: OperationExecutionRequest, fingerprint: str) -> Operat
         execution_runtime=request.execution_runtime,
         native_placement=request.native_placement,
         deep_agent_binding=request.deep_agent_binding,
+        lane_profile=request.lane_profile,
+        cursor_binding=request.cursor_binding,
         side_effect_key=request.idempotency_key,
         bound_at=request.requested_at,
         runtime_unit=request.runtime_unit,

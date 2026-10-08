@@ -11,7 +11,9 @@ from temporalio.exceptions import ApplicationError
 with workflow.unsafe.imports_passed_through():
     from mission_control.adapters.temporal.search_attributes import (
         ensure_workflow_search_attributes,
+        operation_visibility,
         operation_workflow_search_attributes,
+        upsert_mission_visibility,
     )
     from mission_control.contracts.identities import mission_operation_id
     from mission_control.domain.execution.contracts import (
@@ -19,6 +21,10 @@ with workflow.unsafe.imports_passed_through():
         MAX_ASYNC_CHILD_ID_LENGTH,
         OperationWorkflowRequest,
         OperationWorkflowResult,
+    )
+    from mission_control.domain.programs.search_attributes import (
+        MissionPhase,
+        phase_for_disposition,
     )
 
 PARK_IN_DOUBT_PATCH = "rrm-004-park-in-doubt-units"
@@ -129,10 +135,34 @@ class OperationWorkflow:
         self._active_async_child_ids: tuple[str, ...] = ()
         self._reconciliation_nudges = 0
         self._nudges_seen = 0
+        self._stop_fence_command_id: str | None = None
 
     @workflow.signal
     def request_cancel(self) -> None:
         self._cancel_requested = True
+
+    @workflow.signal
+    def request_immediate_cancel(self, command_id: str) -> None:
+        """FT-F3 immediate branch: the run's Stop Fence for `command_id` is already persisted
+        (Kernel Hooks deny new effects from that moment); the in-flight attempt is cancelled
+        at once and `operation.cancel` settles the unit. No command differs from a normal
+        cancel, so histories with or without this signal replay identically."""
+
+        if not command_id:
+            raise ApplicationError(
+                "immediate cancel names its fencing command",
+                type="invalid_immediate_cancel",
+                non_retryable=True,
+            )
+        if self._stop_fence_command_id is None:
+            self._stop_fence_command_id = command_id
+        self._cancel_requested = True
+
+    @workflow.query
+    def stop_fence_command(self) -> str | None:
+        """The immediate cancel that fenced this unit, if any (diagnostic)."""
+
+        return self._stop_fence_command_id
 
     @workflow.signal
     def unit_reconciliation_recorded(self, decision_ref: str) -> None:
@@ -203,6 +233,8 @@ class OperationWorkflow:
             seen_ids.add(child_execution_id)
         self._active_async_child_ids = tuple(merged_ids)
         if workflow.patched(CANCELLATION_SAGA_PATCH):
+            # FT-G7: `mc_run_id`, `mc_lane` and `mc_phase` at the first segment boundary.
+            self._visibility(request, "executing")
             result = await self._run_governed(request)
         else:
             legacy = await self._run_legacy(request)
@@ -211,7 +243,17 @@ class OperationWorkflow:
             result = legacy
         status = result.get("status", "completed")
         disposition = status if status in TERMINAL_DISPOSITIONS else "failed"
+        self._visibility(request, phase_for_disposition(str(disposition)))
         return self._result(request, str(disposition), result)
+
+    @staticmethod
+    def _visibility(request: OperationWorkflowRequest, phase: MissionPhase) -> None:
+        """Segment-boundary listing attributes; no command under `disabled` or on replay of
+        a history recorded before the FT-G7 marker (never per frame)."""
+
+        upsert_mission_visibility(
+            request.search_attribute_policy, operation_visibility(request, phase)
+        )
 
     def _result(
         self, request: OperationWorkflowRequest, disposition: str, result: dict[str, object] | None
@@ -243,9 +285,11 @@ class OperationWorkflow:
                     result = await self._execute_cancellable(request)
             except _CancellationRequested:
                 cancel_mode = True
+                self._visibility(request, "cancelling")
                 continue
             if not _parks(result):
                 return result
+            self._visibility(request, "in_doubt")
             # REQ-CP-RUN-007 / REQ-CP-DA-018: an `in_doubt` unit keeps its claim unsettled
             # and waits durably for operator reconciliation. A cancel reaches it here; it
             # is never re-executed speculatively, and after a cancel every wake-up runs the

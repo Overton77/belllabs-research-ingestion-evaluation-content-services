@@ -5,7 +5,7 @@ from typing import Any, Protocol
 
 from temporalio import activity
 from temporalio.client import Client
-from temporalio.worker import Worker
+from temporalio.worker import Worker, WorkerDeploymentConfig
 
 from mission_control.adapters.temporal.workflow_sandbox import coordinator_workflow_runner
 from mission_control.application.programs.linked_runs import LinkedRunService
@@ -186,6 +186,7 @@ def create_linked_run_worker(
     *,
     task_queue: str,
     activities: LinkedRunActivities,
+    deployment_config: WorkerDeploymentConfig | None = None,
 ) -> Worker:
     from mission_control.adapters.temporal.linked_run_workflow import (
         LinkedRunObserverWorkflow,
@@ -201,4 +202,5 @@ def create_linked_run_worker(
             activities.resolve_execution_binding,
             activities.resolve_child_observation,
         ],
+        deployment_config=deployment_config,
     )

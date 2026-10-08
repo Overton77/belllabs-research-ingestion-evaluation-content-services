@@ -52,7 +52,7 @@ endif
 .PHONY: help \
 	install install-all lock lock-check lock-upgrade outdated tree hooks doctor env-check \
 	infra-up infra-down infra-restart infra-ps infra-logs infra-pull infra-config wait \
-	db-up redis-up temporal-up temporal-only-up temporal-only-down temporal-ui temporal \
+	db-up redis-up temporal-up temporal-search-attributes temporal-only-up temporal-only-down temporal-ui temporal \
 	psql psql-temporal redis-cli \
 	preflight server worker agent-server mcp-server health openapi socketio-smoke missionctl \
 	mission-db db-inspect db-plan db-verify db-runtime-plan db-seed-plan db-snapshot db-apply \
@@ -144,8 +144,12 @@ db-up: ## Start only the application PostgreSQL
 redis-up: ## Start only Redis
 	$(COMPOSE) up -d redis
 
-temporal-up: ## Start the Temporal stack (server, schema job, namespace job, UI)
+temporal-up: ## Start the Temporal stack (server, schema job, namespace job, UI) and register Search Attributes
 	$(COMPOSE) up -d temporal temporal-create-namespace temporal-ui
+	$(MAKE) temporal-search-attributes
+
+temporal-search-attributes: ## Register (idempotent) and list Mission Control Search Attributes on the local server
+	$(RUN) python scripts/dev/temporal_search_attributes.py --address 127.0.0.1:7233 --namespace default
 
 temporal-only-up: ## Start the isolated Temporal-only stack (docker-compose.temporal.yml)
 	$(COMPOSE_TEMPORAL_ONLY) up -d

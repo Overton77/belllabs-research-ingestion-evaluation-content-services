@@ -19,7 +19,6 @@ from urllib.parse import parse_qsl, urlsplit
 import asyncpg
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from temporalio.client import Client
 
 from mission_control.adapters.auth.jwt import (
     ApplicationAuthentication,
@@ -28,10 +27,12 @@ from mission_control.adapters.auth.jwt import (
 )
 from mission_control.adapters.storage.control_plane_payloads import UnavailablePayloadStore
 from mission_control.adapters.temporal.boundary_commands import TemporalBoundaryCommandTransport
+from mission_control.adapters.temporal.client import connect_temporal, resolve_temporal_connection
 from mission_control.adapters.temporal.search_attributes import verify_belllabs_search_attributes
 from mission_control.adapters.temporal.submission import TemporalWorkflowSubmitter
 from mission_control.adapters.temporal.unit_reconciliation import TemporalUnitReconciliationNudge
 from mission_control.application.capabilities.catalog import CatalogService
+from mission_control.application.execution.harness.registry import describe_only_registry
 from mission_control.application.execution.service import (
     AdmissionPolicyRegistry,
     FamilyAdmissionRegistry,
@@ -48,15 +49,18 @@ from mission_control.bootstrap.composition import (
     MissionApplicationServices,
     compose_application_services,
 )
+from mission_control.bootstrap.settings import get_settings
 from mission_control.contracts.json import parse_json_object
 from mission_control.domain.authoring.extensions import ExtensionRegistry
 from mission_control.interfaces.http.catalog import router as catalog_router
+from mission_control.interfaces.http.lanes import router as lanes_router
 from mission_control.interfaces.http.middleware.body_limit import BodySizeLimitMiddleware
 from mission_control.interfaces.http.mission_control import (
     MissionPrincipal,
     get_mission_principal,
     router,
 )
+from mission_control.interfaces.http.stop_fence import router as stop_fence_router
 
 
 class TemporalDeployment(BaseModel):
@@ -210,10 +214,13 @@ def create_application(
                     transport = submitter = nudge = None
                     if item.temporal is not None:
                         temporal = item.temporal
-                        client = await Client.connect(
-                            temporal.address, namespace=temporal.namespace
+                        # FT-G7: local server by default; Temporal Cloud only when
+                        # TEMPORAL_TARGET=cloud (api key + TLS).
+                        connection = resolve_temporal_connection(
+                            get_settings(), address=temporal.address, namespace=temporal.namespace
                         )
-                        await verify_belllabs_search_attributes(client, temporal.namespace)
+                        client = await connect_temporal(connection)
+                        await verify_belllabs_search_attributes(client, connection.namespace)
                         transport = TemporalBoundaryCommandTransport(client)
                         nudge = TemporalUnitReconciliationNudge(client)
                         submitter = TemporalWorkflowSubmitter.for_production(
@@ -292,9 +299,17 @@ def create_application(
     application.state.mission_control_catalog_services = {}
     application.state.mission_control_compositions = {}
     application.state.mission_control_ready = False
+    # FT-G1: the API lists and describes lanes; workers execute them.
+    lane_settings = get_settings()
+    application.state.mission_control_lanes = describe_only_registry(
+        cursor_bound=lane_settings.cursor_api_key is not None,
+        allow_unqualified=lane_settings.allow_unqualified_lanes,
+    )
     install_authentication(application, verifier)
     application.include_router(router)
     application.include_router(catalog_router)
+    application.include_router(lanes_router)
+    application.include_router(stop_fence_router)
 
     @application.get("/health/live")
     def live() -> dict[str, bool]:

@@ -9,7 +9,11 @@ from temporalio.client import Client
 from temporalio.common import WorkflowIDConflictPolicy, WorkflowIDReusePolicy
 from temporalio.exceptions import WorkflowAlreadyStartedError
 
-from mission_control.adapters.temporal.search_attributes import child_search_attributes
+from mission_control.adapters.temporal.search_attributes import (
+    child_search_attributes,
+    merged_search_attributes,
+    mission_visibility_attributes,
+)
 from mission_control.adapters.temporal.workflows.belllabs_run import BellLabsRunWorkflow
 from mission_control.adapters.temporal.workflows.mission_run import MissionRunWorkflow
 from mission_control.contracts.canonical import canonical_digest
@@ -25,6 +29,8 @@ from mission_control.domain.programs.contracts import (
     StageGraphRunInput,
 )
 from mission_control.domain.programs.search_attributes import (
+    SEARCH_ATTRIBUTES_REQUIRED,
+    MissionVisibilityValues,
     SearchAttributePolicy,
     require_production_search_attribute_policy,
     run_search_attributes,
@@ -95,8 +101,13 @@ class TemporalWorkflowSubmitter:
         workflow_id: str,
         blueprint_family: BlueprintFamily,
         parent_run_id: str | None = None,
+        mission_id: str | None = None,
     ) -> WorkflowSubmission:
-        """Start the admitted run's root; `parent_run_id` marks a fork's source run."""
+        """Start the admitted run's root; `parent_run_id` marks a fork's source run.
+
+        FT-G7: under the `required` policy the root also starts with `mc_run_id`,
+        `mc_mission_id` (when the caller knows the mission) and `ForkedFromRunId`.
+        """
 
         del workflow_id  # Callers cannot override the admitted BellLabs root identity.
         if blueprint_family == BlueprintFamily.STAGE_GRAPH:
@@ -149,6 +160,17 @@ class TemporalWorkflowSubmitter:
                 parent_run_id=parent_run_id,
             ),
         )
+        if self._search_attribute_policy == SEARCH_ATTRIBUTES_REQUIRED:
+            root_attributes = merged_search_attributes(
+                root_attributes,
+                mission_visibility_attributes(
+                    MissionVisibilityValues(
+                        run_id=root_input.run_id,
+                        mission_id=mission_id,
+                        forked_from_run_ids=(parent_run_id,) if parent_run_id else (),
+                    )
+                ),
+            )
         root_queue = self._root_task_queue or family_queue
         try:
             handle = await self._client.start_workflow(

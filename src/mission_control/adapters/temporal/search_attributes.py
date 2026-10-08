@@ -9,6 +9,13 @@ Three concerns live here, all keyed by `BELLLABS_SEARCH_ATTRIBUTES`:
   and every captured history) it emits no command at all;
 * the administrative registration step and the read-only worker readiness check. Neither
   ever reads Temporal's persistence database; both use the Operator service API.
+
+FT-G7 adds the fast-track listing attributes (`mc_mission_id`, `mc_run_id`, `mc_lane`,
+`mc_phase`, `ForkedFromRunId`; `MISSION_VISIBILITY_SEARCH_ATTRIBUTES`). The client sets
+them on a root at start; inside workflows they are written only behind the
+`MC_VISIBILITY_PATCH` marker and only under the `required` policy, so histories recorded
+before the upgrade (and every `disabled` history) replay the exact earlier commands.
+`mc_phase` is upserted at operation segment boundaries, never per frame.
 """
 
 from __future__ import annotations
@@ -28,15 +35,23 @@ from temporalio.common import SearchAttributeKey, SearchAttributePair, TypedSear
 from mission_control.domain.execution.contracts import OperationWorkflowRequest
 from mission_control.domain.programs.search_attributes import (
     BELLLABS_SEARCH_ATTRIBUTES,
+    MC_MISSION_ID,
     SEARCH_ATTRIBUTES_REQUIRED,
     BellLabsSearchAttributeValues,
+    MissionPhase,
+    MissionVisibilityValues,
+    lane_for_runtime,
     operation_search_attributes,
 )
 
 _INDEXED_TYPES = {
     "keyword": IndexedValueType.INDEXED_VALUE_TYPE_KEYWORD,
     "int": IndexedValueType.INDEXED_VALUE_TYPE_INT,
+    "keyword_list": IndexedValueType.INDEXED_VALUE_TYPE_KEYWORD_LIST,
 }
+# FT-G7: new executions write the fast-track attributes; replays of earlier histories,
+# which carry no marker, take the old branch and emit no new command.
+MC_VISIBILITY_PATCH = "ft-g7-mc-visibility"
 
 
 class SearchAttributeRegistrationError(RuntimeError):
@@ -47,6 +62,8 @@ def _key(name: str) -> SearchAttributeKey[Any]:
     kind = BELLLABS_SEARCH_ATTRIBUTES[name]
     if kind == "int":
         return SearchAttributeKey.for_int(name)
+    if kind == "keyword_list":
+        return SearchAttributeKey.for_keyword_list(name)
     return SearchAttributeKey.for_keyword(name)
 
 
@@ -59,6 +76,27 @@ def typed_search_attributes(values: BellLabsSearchAttributeValues) -> TypedSearc
     return TypedSearchAttributes(
         [SearchAttributePair(_key(name), value) for name, value in values.as_mapping().items()]
     )
+
+
+def mission_visibility_attributes(values: MissionVisibilityValues) -> TypedSearchAttributes:
+    return TypedSearchAttributes(
+        [SearchAttributePair(_key(name), value) for name, value in values.as_mapping().items()]
+    )
+
+
+def merged_search_attributes(
+    *attributes: TypedSearchAttributes | None,
+) -> TypedSearchAttributes | None:
+    """One start payload from several typed sets; `None` when every part is `None`."""
+
+    parts = [part for part in attributes if part is not None]
+    if not parts:
+        return None
+    pairs: dict[str, SearchAttributePair[Any]] = {}
+    for part in parts:
+        for pair in part.search_attributes:
+            pairs[pair.key.name] = pair
+    return TypedSearchAttributes(list(pairs.values()))
 
 
 def child_search_attributes(
@@ -86,6 +124,59 @@ def ensure_workflow_search_attributes(policy: str, values: BellLabsSearchAttribu
         workflow.upsert_search_attributes(updates)
 
 
+def child_mission_visibility(
+    policy: str, attributes: TypedSearchAttributes | None, run_id: str
+) -> TypedSearchAttributes | None:
+    """Inside a parent workflow: add `mc_run_id` (and the parent's `mc_mission_id`) to a
+    child's start attributes, for new executions only (`MC_VISIBILITY_PATCH`)."""
+
+    if (
+        policy != SEARCH_ATTRIBUTES_REQUIRED
+        or attributes is None
+        or not workflow.patched(MC_VISIBILITY_PATCH)
+    ):
+        return attributes
+    mission_id = workflow.info().typed_search_attributes.get(_key(MC_MISSION_ID))
+    return merged_search_attributes(
+        attributes,
+        mission_visibility_attributes(MissionVisibilityValues(run_id, mission_id=mission_id)),
+    )
+
+
+def upsert_mission_visibility(policy: str, values: MissionVisibilityValues) -> None:
+    """Inside a workflow, at a boundary: upsert the changed fast-track attributes.
+
+    No command under `disabled`, and none when replaying a history recorded before
+    `MC_VISIBILITY_PATCH` (the marker is only written for new executions).
+    """
+
+    if policy != SEARCH_ATTRIBUTES_REQUIRED or not workflow.patched(MC_VISIBILITY_PATCH):
+        return
+    current = workflow.info().typed_search_attributes
+    updates = [
+        key.value_set(value)
+        for name, value in values.as_mapping().items()
+        if current.get(key := _key(name)) != value
+    ]
+    if updates:
+        workflow.upsert_search_attributes(updates)
+
+
+def operation_visibility(
+    request: OperationWorkflowRequest, phase: MissionPhase
+) -> MissionVisibilityValues:
+    """`mc_run_id`, `mc_lane` and `mc_phase` of an operation execution at a boundary."""
+
+    operation = request.operation
+    return MissionVisibilityValues(
+        run_id=operation.identity.run_id,
+        lane=lane_for_runtime(
+            operation.execution_runtime, getattr(operation, "lane_profile", None)
+        ),
+        phase=phase,
+    )
+
+
 def operation_workflow_search_attributes(
     request: OperationWorkflowRequest,
     *,
@@ -107,10 +198,10 @@ def operation_workflow_search_attributes(
     )
 
 
-def visible_values(attributes: TypedSearchAttributes) -> dict[str, str | int]:
+def visible_values(attributes: TypedSearchAttributes) -> dict[str, str | int | list[str]]:
     """Decode the BellLabs attributes of a Visibility row (unknown attributes are ignored)."""
 
-    values: dict[str, str | int] = {}
+    values: dict[str, str | int | list[str]] = {}
     for key in BELLLABS_SEARCH_ATTRIBUTE_KEYS:
         value = attributes.get(key)
         if value is not None:

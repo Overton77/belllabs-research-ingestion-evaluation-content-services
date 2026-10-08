@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 
 from mission_control.application.execution.boundary_interventions import BoundaryInterventionService
 from mission_control.application.execution.service import RunControlService
+from mission_control.application.execution.stop_fence import StopFenceRepository
 from mission_control.contracts.canonical import canonical_digest
 from mission_control.contracts.contracts import (
     CancelPayload,
@@ -34,6 +35,11 @@ from mission_control.domain.policies.contracts import (
     SatisfyWaitAction,
 )
 from mission_control.domain.policies.reducer import required_action_permissions
+from mission_control.domain.policies.stop_fence import (
+    ImmediateCancelReport,
+    StopFence,
+    immediate_cancel_permissions,
+)
 
 
 class MissionControlService:
@@ -43,12 +49,15 @@ class MissionControlService:
         interventions: BoundaryInterventionService,
         *,
         request_scope: str,
+        stop_fences: StopFenceRepository | None = None,
     ) -> None:
         if not request_scope:
             raise ValueError("an authenticated application/tenant request scope is required")
         self._run_control = run_control
         self._interventions = interventions
         self._scope = request_scope
+        # FT-F3: an immediate cancel is admitted only where its Stop Fence can be persisted.
+        self._stop_fences = stop_fences
 
     @property
     def request_scope(self) -> str:
@@ -62,6 +71,12 @@ class MissionControlService:
         if request.target.id != run_id:
             raise MissionControlRejected("target_mismatch", "command target differs from route run")
         action = self._action(request)
+        if isinstance(action, CancelAction) and action.urgency == "immediate":
+            if self._stop_fences is None:
+                raise MissionControlRejected(
+                    "unsupported_control",
+                    "immediate cancel requires a Stop Fence store in this composition",
+                )
         if not required_action_permissions(action).issubset(actor.permissions):
             raise MissionControlRejected("unauthorized", "actor lacks control permission")
         # JSON tuple encoding avoids ambiguous scope delimiters. Action and actor are part
@@ -82,6 +97,8 @@ class MissionControlService:
             # ensures generation was read from the exact same optimistic version.
             if request.expected_version != projection.version:
                 raise MissionControlRejected("stale_version", "run version changed")
+        if isinstance(action, CancelAction) and action.urgency == "immediate":
+            await self._fence(run_id, command_id, request, actor)
         result = await self._interventions.execute(
             LifecycleCommand(
                 command_id=command_id,
@@ -108,6 +125,52 @@ class MissionControlService:
             admission=result,
             delivery=delivery,
         )
+
+    async def _fence(
+        self,
+        run_id: str,
+        command_id: str,
+        request: MissionCommandRequest,
+        actor: ActorContext,
+    ) -> StopFence:
+        """ADR-0008: persist the Stop Fence before the cancel reaches Temporal or a provider.
+
+        `mission.admin` (`workflow_run.admin`) is required while side-effecting work may be
+        active, `mission.command` otherwise. A replayed request finds the same fence.
+        """
+
+        assert self._stop_fences is not None
+        projection = await self._run_control.get_run(self._scope, run_id)
+        if not immediate_cancel_permissions(projection.phase.value).issubset(actor.permissions):
+            raise MissionControlRejected(
+                "unauthorized", "immediate cancel of active work requires workflow_run.admin"
+            )
+        generation = (
+            projection.execution_target.execution_generation
+            if projection.execution_target is not None
+            else 1
+        )
+        return await self._stop_fences.persist(
+            StopFence(
+                request_scope=self._scope,
+                run_id=run_id,
+                generation=generation,
+                command_id=command_id,
+                reason=request.reason[:2048],
+                requested_at=datetime.now(UTC),
+            )
+        )
+
+    async def stop_fence_report(
+        self, run_id: str, actor: ActorContext
+    ) -> ImmediateCancelReport | None:
+        """The immediate cancel's Delivery Report: requested, fence persisted, provider
+        acknowledged and settled, as separate timestamps."""
+
+        self._authorize_read(actor)
+        if self._stop_fences is None:
+            return None
+        return await self._stop_fences.report(self._scope, run_id)
 
     async def inspect(self, run_id: str, actor: ActorContext) -> MissionInspection:
         self._authorize_read(actor)
@@ -154,8 +217,8 @@ class MissionControlService:
             return ResumeAction(**payload.model_dump(mode="python"))
         if isinstance(payload, WaitPayload):
             return SatisfyWaitAction(**payload.model_dump(mode="python"))
-        if isinstance(payload, CancelPayload) and payload.urgency == "normal":
-            return CancelAction()
+        if isinstance(payload, CancelPayload):
+            return CancelAction(urgency=payload.urgency)
         raise MissionControlRejected(
             "unsupported_control",
             "control requires a qualified delivery boundary or immediate-interruption profile",

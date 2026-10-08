@@ -3,7 +3,7 @@ from __future__ import annotations
 from temporalio import activity
 from temporalio.client import Client
 from temporalio.exceptions import ApplicationError
-from temporalio.worker import Worker
+from temporalio.worker import Worker, WorkerDeploymentConfig
 
 from mission_control.adapters.temporal.boundary_activities import apply_boundary_fact
 from mission_control.adapters.temporal.registration.activities import coordinator_activities
@@ -194,6 +194,7 @@ def create_goal_directed_worker(
     *,
     task_queue: str,
     activities: GoalDirectedActivities,
+    deployment_config: WorkerDeploymentConfig | None = None,
 ) -> Worker:
     return Worker(
         client,
@@ -201,6 +202,7 @@ def create_goal_directed_worker(
         workflows=coordinator_workflows("GoalDirected"),
         workflow_runner=coordinator_workflow_runner(),
         activities=coordinator_activities("GoalDirected", activities),
+        deployment_config=deployment_config,
     )
 
 

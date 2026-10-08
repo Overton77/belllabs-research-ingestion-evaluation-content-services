@@ -28,6 +28,7 @@ from mission_control.adapters.postgres.run_control.inspection_repository import 
 from mission_control.adapters.postgres.run_control.run_control_repository import (
     PostgresRunControlRepository,
 )
+from mission_control.adapters.postgres.run_control.stop_fence import PostgresStopFenceRepository
 from mission_control.adapters.postgres.runtime.run_forks import (
     PostgresForkMaterializationStore,
     PostgresForkSourceReader,
@@ -205,7 +206,12 @@ async def compose_application_services(
         catalog_scope=catalog_scope,
         control_plane=catalog,
         run_control=run_control,
-        lifecycle=MissionControlService(run_control, interventions, request_scope=scope),
+        lifecycle=MissionControlService(
+            run_control,
+            interventions,
+            request_scope=scope,
+            stop_fences=PostgresStopFenceRepository(runtime_pool),
+        ),
         runtime=MissionControlRuntimeService(
             snapshots, forks, request_scope=scope, reconciliation_service=recovery.reconciliation
         ),

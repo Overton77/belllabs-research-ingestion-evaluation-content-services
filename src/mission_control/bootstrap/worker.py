@@ -12,7 +12,6 @@ from urllib.parse import urlsplit
 
 import asyncpg
 from pydantic import SecretStr
-from temporalio.client import Client
 from temporalio.worker import Worker
 
 from mission_control.adapters.deep_agents.persistence import RuntimeConninfoError
@@ -34,6 +33,7 @@ from mission_control.adapters.storage.control_plane_payloads import (
     S3PayloadStore,
     UnavailablePayloadStore,
 )
+from mission_control.adapters.temporal.client import connect_temporal, resolve_temporal_connection
 from mission_control.adapters.temporal.coordinator_runtime import coordinator_task_queues
 from mission_control.adapters.temporal.deployment_composition import (
     ProductionWorkerActivityCompositionFactory,
@@ -46,6 +46,10 @@ from mission_control.adapters.temporal.linked_run_activities import (
     create_linked_run_worker,
 )
 from mission_control.adapters.temporal.search_attributes import verify_belllabs_search_attributes
+from mission_control.adapters.temporal.versioning import (
+    promote_worker_deployment_version,
+    worker_deployment_config,
+)
 from mission_control.adapters.temporal.worker import (
     WorkerActivityCompositionFactory,
     compose_worker_run_control_service,
@@ -261,8 +265,13 @@ async def run_worker(
         configure_langsmith_tracing(settings)
         temporal = prepared.application.temporal
         assert temporal is not None
-        client = await Client.connect(temporal.address, namespace=temporal.namespace)
-        await verify_belllabs_search_attributes(client, temporal.namespace)
+        connection = resolve_temporal_connection(
+            settings, address=temporal.address, namespace=temporal.namespace
+        )
+        client = await connect_temporal(connection)
+        await verify_belllabs_search_attributes(client, connection.namespace)
+        # FT-G7: every worker of this release polls as one Worker Deployment Version.
+        deployment_config = worker_deployment_config(settings)
         configured_options = load_runtime_options(deployment) if runtime_options is None else None
         options = runtime_options or (configured_options or {}).get(application_id)
         payloads = (
@@ -301,7 +310,9 @@ async def run_worker(
         )
         if composition.resources is not None:
             stack.push_async_callback(composition.resources.aclose)
-        production = await production_workers_or_close(client, settings, composition)
+        production = await production_workers_or_close(
+            client, settings, composition, deployment_config=deployment_config
+        )
         workers = list(production.workers)
         if temporal.root_task_queue not in {
             temporal.stagegraph_task_queue,
@@ -313,6 +324,7 @@ async def run_worker(
                     task_queue=temporal.root_task_queue,
                     workflows=[MissionRunWorkflow],
                     workflow_runner=coordinator_workflow_runner(),
+                    deployment_config=deployment_config,
                 )
             )
         linked = LinkedRunDecisionGateway(
@@ -330,10 +342,16 @@ async def run_worker(
                 client,
                 task_queue=f"{settings.temporal_task_queue}-linked-runs",
                 activities=LinkedRunActivities(linked),
+                deployment_config=deployment_config,
             )
         )
         for worker in workers:
             await stack.enter_async_context(worker)
+        if deployment_config is not None and settings.temporal_promote_on_start:
+            # A versioned worker receives new executions only once its version is current.
+            await promote_worker_deployment_version(
+                client, connection.namespace, deployment_config.version
+            )
         await (stop or asyncio.Event()).wait()
 
 

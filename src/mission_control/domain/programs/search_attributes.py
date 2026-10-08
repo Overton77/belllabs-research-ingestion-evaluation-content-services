@@ -12,11 +12,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha256
 from types import MappingProxyType
-from typing import Final, Literal
+from typing import Final, Literal, cast
 
 SearchAttributePolicy = Literal["required", "disabled"]
 WorkflowKind = Literal["root", "family", "operation"]
 SearchAttributeFamily = Literal["stage_graph", "goal_directed"]
+SearchAttributeKind = Literal["keyword", "int", "keyword_list"]
+MissionLane = Literal["deep_agents", "cursor_local", "cursor_cloud"]
+MissionPhase = Literal["executing", "cancelling", "in_doubt", "completed", "cancelled", "failed"]
 
 SEARCH_ATTRIBUTES_REQUIRED: Final = "required"
 SEARCH_ATTRIBUTES_DISABLED: Final = "disabled"
@@ -31,22 +34,64 @@ UNIT_KEY: Final = "BellLabsUnitKey"
 UNIT_KIND: Final = "BellLabsUnitKind"
 EXECUTION_GENERATION: Final = "BellLabsExecutionGeneration"
 
-# 7 Keyword and 2 Int custom attributes: within the postgres12 SQL visibility store's
-# pre-allocated 10 Keyword / 3 Int columns per namespace. The semantic attempt is read
-# from the PostgreSQL unit record, not from Visibility.
-BELLLABS_SEARCH_ATTRIBUTES: Final = MappingProxyType(
-    {
-        RUN_ID: "keyword",
-        SCOPE_HASH: "keyword",
-        WORKFLOW_KIND: "keyword",
-        FAMILY: "keyword",
-        EXECUTION_EPOCH: "int",
-        PARENT_RUN_ID: "keyword",
-        UNIT_KEY: "keyword",
-        UNIT_KIND: "keyword",
-        EXECUTION_GENERATION: "int",
-    }
+# FT-G7 (SPEC-07 section 4.5): the fast-track listing attributes (`missionctl run list
+# --query "mc_lane='cursor_local' AND mc_phase='executing'"`). Identifiers only, never
+# prompts, scopes or secrets.
+MC_MISSION_ID: Final = "mc_mission_id"
+MC_RUN_ID: Final = "mc_run_id"
+MC_LANE: Final = "mc_lane"
+MC_PHASE: Final = "mc_phase"
+FORKED_FROM_RUN_ID: Final = "ForkedFromRunId"
+
+MC_LANES: Final[tuple[MissionLane, ...]] = ("deep_agents", "cursor_local", "cursor_cloud")
+MC_PHASES: Final[tuple[MissionPhase, ...]] = (
+    "executing",
+    "cancelling",
+    "in_doubt",
+    "completed",
+    "cancelled",
+    "failed",
 )
+
+# Slot budget. The postgres12 (and SQLite) SQL visibility store pre-allocates, per
+# namespace, 10 Keyword, 3 KeywordList and 3 Int custom columns (verified on the local
+# Temporal 1.31 schema: keyword01..10, keywordlist01..03, int01..03). The BellLabs core
+# takes 7 Keyword + 2 Int; the fast-track keys take the 3 remaining Keyword columns
+# (`mc_mission_id`, `mc_lane`, `mc_phase`) and 2 KeywordList columns. `mc_run_id` is a
+# single-element KeywordList (equality and IN filters behave as on a Keyword) and
+# `ForkedFromRunId` holds the fork lineage, nearest source first, so
+# `ForkedFromRunId = 'X'` lists every fork of X. One KeywordList column remains free.
+BELLLABS_CORE_SEARCH_ATTRIBUTES: Final[MappingProxyType[str, SearchAttributeKind]] = (
+    MappingProxyType(
+        {
+            RUN_ID: "keyword",
+            SCOPE_HASH: "keyword",
+            WORKFLOW_KIND: "keyword",
+            FAMILY: "keyword",
+            EXECUTION_EPOCH: "int",
+            PARENT_RUN_ID: "keyword",
+            UNIT_KEY: "keyword",
+            UNIT_KIND: "keyword",
+            EXECUTION_GENERATION: "int",
+        }
+    )
+)
+MISSION_VISIBILITY_SEARCH_ATTRIBUTES: Final[MappingProxyType[str, SearchAttributeKind]] = (
+    MappingProxyType(
+        {
+            MC_MISSION_ID: "keyword",
+            MC_RUN_ID: "keyword_list",
+            MC_LANE: "keyword",
+            MC_PHASE: "keyword",
+            FORKED_FROM_RUN_ID: "keyword_list",
+        }
+    )
+)
+# The registry the operator path registers and workers verify (core + fast-track keys).
+BELLLABS_SEARCH_ATTRIBUTES: Final[MappingProxyType[str, SearchAttributeKind]] = MappingProxyType(
+    {**BELLLABS_CORE_SEARCH_ATTRIBUTES, **MISSION_VISIBILITY_SEARCH_ATTRIBUTES}
+)
+SQL_VISIBILITY_SLOTS: Final = MappingProxyType({"keyword": 10, "keyword_list": 3, "int": 3})
 
 _WORKFLOW_FAMILIES: Final = MappingProxyType(
     {
@@ -169,6 +214,60 @@ def operation_search_attributes(
         unit_kind=unit_kind,
         execution_generation=execution_generation,
     )
+
+
+def lane_for_runtime(execution_runtime: str, lane_profile: str | None = None) -> MissionLane | None:
+    """`mc_lane` of an operation: its Lane Profile, or `deep_agents` for the Deep Agents
+    runtime; native (deterministic) operations run on no lane and carry no `mc_lane`."""
+
+    if lane_profile is not None:
+        if lane_profile not in MC_LANES:
+            raise ValueError(f"undeclared lane profile: {lane_profile}")
+        return lane_profile
+    if execution_runtime == "deep_agent":
+        return "deep_agents"
+    return None
+
+
+def phase_for_disposition(disposition: str) -> MissionPhase:
+    """`mc_phase` written at an operation's closing boundary."""
+
+    if disposition in {"completed", "cancelled", "failed", "in_doubt"}:
+        return cast(MissionPhase, disposition)
+    return "failed"
+
+
+@dataclass(frozen=True)
+class MissionVisibilityValues:
+    """The fast-track listing attributes one execution carries (FT-G7)."""
+
+    run_id: str
+    mission_id: str | None = None
+    lane: MissionLane | None = None
+    phase: MissionPhase | None = None
+    forked_from_run_ids: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.run_id:
+            raise ValueError("visibility attributes require a run id")
+        if self.mission_id is not None and not self.mission_id:
+            raise ValueError("mission id must be non-empty when set")
+        if self.lane is not None and self.lane not in MC_LANES:
+            raise ValueError(f"undeclared lane: {self.lane}")
+        if self.phase is not None and self.phase not in MC_PHASES:
+            raise ValueError(f"undeclared phase: {self.phase}")
+        if self.run_id in self.forked_from_run_ids or not all(self.forked_from_run_ids):
+            raise ValueError("fork lineage names other, non-empty runs")
+
+    def as_mapping(self) -> dict[str, str | list[str]]:
+        values: dict[str, str | list[str] | None] = {
+            MC_RUN_ID: [self.run_id],
+            MC_MISSION_ID: self.mission_id,
+            MC_LANE: self.lane,
+            MC_PHASE: self.phase,
+            FORKED_FROM_RUN_ID: list(self.forked_from_run_ids) or None,
+        }
+        return {name: value for name, value in values.items() if value is not None}
 
 
 def visibility_run_query(run_id: str, request_scope: str) -> str:

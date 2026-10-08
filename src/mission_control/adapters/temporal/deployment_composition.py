@@ -44,6 +44,7 @@ from mission_control.adapters.capabilities.capability_bundles import (
     DirectoryBundleStore,
 )
 from mission_control.adapters.capabilities.capability_pins import CapabilityPins
+from mission_control.adapters.cursor import cursor_lane_stubs
 from mission_control.adapters.deep_agents import (
     DeepAgentRuntimeAdapter,
     DeepAgentsAsyncSubagentAdapter,
@@ -102,6 +103,7 @@ from mission_control.adapters.postgres.orchestration.stagegraph_repository impor
 from mission_control.adapters.postgres.run_control.run_control_repository import (
     PostgresRunControlRepository,
 )
+from mission_control.adapters.postgres.run_control.stop_fence import PostgresStopFenceRepository
 from mission_control.adapters.postgres.runtime.run_forks import PostgresForkMaterializationStore
 from mission_control.adapters.postgres.workspace_candidate_contents import (
     PostgresWorkspaceCandidateContents,
@@ -149,6 +151,9 @@ from mission_control.application.authoring.service import ControlPlaneService
 from mission_control.application.coordinator.coordinator_results import (
     TerminalWorkflowCompletionService,
 )
+from mission_control.application.execution.harness.deep_agents_harness import DeepAgentsHarness
+from mission_control.application.execution.harness.protocol import AgentHarness
+from mission_control.application.execution.harness.registry import LaneRegistry
 from mission_control.application.execution.operations.checkpoint_lineage import DEFAULT_CLAIM_LEASE
 from mission_control.application.execution.operations.journaled_operation_execution import (
     JournaledOperationExecutionCoordinator,
@@ -410,6 +415,17 @@ class ProductionAsyncChildCancellation:
         return await service.cancel_children(binding, reason=reason, requested_at=requested_at)
 
 
+def compose_lane_registry(settings: Settings, deep_agents: DeepAgentsHarness) -> LaneRegistry:
+    """`deep_agents` always; the Cursor profiles (unqualified stubs until FT-G3/FT-G5) when a
+    Cursor credential is bound. Unqualified lanes are admitted only under the application's
+    local-proof policy (`MISSION_CONTROL_ALLOW_UNQUALIFIED_LANES`)."""
+
+    harnesses: list[AgentHarness] = [deep_agents]
+    if settings.cursor_api_key is not None:
+        harnesses.extend(cursor_lane_stubs())
+    return LaneRegistry(harnesses, allow_unqualified=settings.allow_unqualified_lanes)
+
+
 class DeploymentOperationRuntime:
     """The deployment's operation runtime around the canonical Deep Agent adapter.
 
@@ -669,7 +685,12 @@ class ProductionWorkerActivityCompositionFactory:
             launch_verifier=verifier,
         )
         secrets = EnvironmentSecretResolver()
+        # FT-G1: the lane registry is built once per worker (SPEC-07 section 3).
+        lanes = compose_lane_registry(settings, DeepAgentsHarness(adapter, secrets))
         service = OperationExecutionService(
+            lanes=lanes,
+            # FT-F3: immediate-cancel Delivery Report milestones on the run's Stop Fence.
+            stop_fences=PostgresStopFenceRepository(postgres_pool),
             authority=RunControlOperationAuthority(run_control, control_plane),
             bindings=bindings,
             runtime=adapter,
