@@ -107,7 +107,9 @@ class BundleFile(BaseModel):
     mode: Literal["read_only"] = "read_only"
 
 
-def file_manifest(files: tuple[tuple[str, bytes], ...]) -> tuple[BundleFile, ...]:
+def file_manifest(
+    files: tuple[tuple[str, bytes], ...], *, require_skill_md: bool = True
+) -> tuple[BundleFile, ...]:
     seen: set[str] = set()
     entries: list[BundleFile] = []
     if len(files) > MAX_FILES or sum(len(content) for _, content in files) > MAX_BUNDLE_BYTES:
@@ -122,13 +124,15 @@ def file_manifest(files: tuple[tuple[str, bytes], ...]) -> tuple[BundleFile, ...
     for path in seen:
         if any("/".join(path.split("/")[:i]) in seen for i in range(1, len(path.split("/")))):
             raise BundleError("bundle file/directory collision")
-    if not any(entry.path == "SKILL.md" for entry in entries):
+    if require_skill_md and not any(entry.path == "SKILL.md" for entry in entries):
         raise BundleError("bundle must contain SKILL.md")
     return tuple(entries)
 
 
-def bundle_digest(files: tuple[tuple[str, bytes], ...]) -> str:
-    return sha256_digest([stable_json_dump(entry) for entry in file_manifest(files)])
+def bundle_digest(files: tuple[tuple[str, bytes], ...], *, require_skill_md: bool = True) -> str:
+    """Digest of the per-file manifest; hook script directories pass ``require_skill_md=False``."""
+    entries = file_manifest(files, require_skill_md=require_skill_md)
+    return sha256_digest([stable_json_dump(entry) for entry in entries])
 
 
 class BundleManifest(BaseModel):

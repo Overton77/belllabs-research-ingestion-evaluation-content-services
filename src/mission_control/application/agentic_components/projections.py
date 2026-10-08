@@ -18,7 +18,7 @@ import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from hashlib import sha256
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 from mission_control.domain.agentic_components.contracts import (
     AgentHost,
@@ -286,7 +286,17 @@ def _hook_slug(logical_id: str) -> str:
     return re.sub(r"[^a-z0-9._-]", "-", logical_id)
 
 
-def _write_hook_scripts(hooks: Sequence[ResolvedCapability], state: _State) -> None:
+HOOK_RUNNER_SOURCE = Path(__file__).with_name("hook_runner.py")
+
+
+def _write_hook_scripts(
+    hooks: Sequence[ResolvedCapability], state: _State, *, runner: bool = True
+) -> None:
+    """Hook directories, their ``hook.json`` descriptors and (file lanes) the hook runner."""
+    if hooks and runner:
+        # Normalized to LF so the projection is byte-identical on every checkout.
+        source = HOOK_RUNNER_SOURCE.read_bytes().replace(b"\r\n", b"\n")
+        state.write(HOOK_RUNNER_SCRIPT, source, _EXEC)
     for row in hooks:
         definition = row.definition
         assert isinstance(definition, HookScriptDefinition)
@@ -299,6 +309,20 @@ def _write_hook_scripts(hooks: Sequence[ResolvedCapability], state: _State) -> N
             state.write(
                 f"{_hook_dir(row)}/{item.path}", item.content, _EXEC if executable else _FILE
             )
+        if runner:
+            descriptor = {
+                "schema_version": "mc.hook_descriptor.v1",
+                "hook_id": definition.logical_id,
+                "pin": row.pin.render(),
+                "lane_profile": state.lane.value,
+                "events": [event.value for event in definition.events],
+                "interpreter": definition.interpreter.value,
+                "entrypoint": definition.entrypoint,
+                "timeout_seconds": definition.timeout_seconds,
+                "fail_closed": definition.fail_closed,
+                "callback": definition.callback.value,
+            }
+            state.write(f"{_hook_dir(row)}/hook.json", _dumps(descriptor))
 
 
 def _report_hook_events(row: ResolvedCapability, lane: LaneProfile, state: _State) -> None:
@@ -778,7 +802,7 @@ def _deep_agents(
             for row in scoped:
                 for path, content, mode in _skill_files(row):
                     state.write(f"skills/{scope}/{_skill_name(row)}/{path}", content, mode)
-    _write_hook_scripts(hooks, state)
+    _write_hook_scripts(hooks, state, runner=False)
     connections: dict[str, dict[str, object]] = {}
     for row in servers:
         launch = _launch(row, lane)

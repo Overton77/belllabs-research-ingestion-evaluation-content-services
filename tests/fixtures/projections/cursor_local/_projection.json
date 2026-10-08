@@ -7,7 +7,9 @@
     ".cursor/rules/mc-mission.mdc": "0o644",
     ".cursor/skills/agent-browser/SKILL.md": "0o644",
     ".cursor/skills/agent-browser/scripts/open.sh": "0o755",
+    ".mission/hooks/hook.mc-policy-template/hook.json": "0o644",
     ".mission/hooks/hook.mc-policy-template/policy.py": "0o755",
+    ".mission/hooks/run.py": "0o755",
     "AGENTS.md": "0o644"
   },
   "in_process": null,

@@ -6,7 +6,9 @@
     ".codex/agents/verifier.md": "0o644",
     ".codex/config.toml": "0o644",
     ".codex/hooks.json": "0o644",
+    ".mission/hooks/hook.mc-policy-template/hook.json": "0o644",
     ".mission/hooks/hook.mc-policy-template/policy.py": "0o755",
+    ".mission/hooks/run.py": "0o755",
     "AGENTS.md": "0o644"
   },
   "in_process": null,

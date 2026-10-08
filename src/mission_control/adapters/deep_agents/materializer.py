@@ -3,12 +3,14 @@ from __future__ import annotations
 import asyncio
 import copy
 import importlib.metadata
+import re
+import tempfile
 import types
 from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, make_dataclass
 from dataclasses import field as dataclass_field
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, ClassVar, cast
 
 from deepagents import DeepAgentState
@@ -33,7 +35,21 @@ from mission_control.adapters.capabilities.capability_bundles import (
     file_manifest,
     safe_relative_path,
 )
+from mission_control.adapters.deep_agents.hooks import (
+    HookContext,
+    HookDispatcher,
+    HookScriptMiddleware,
+    HookScriptRunner,
+    KernelHookPorts,
+    MissionSummarizationMiddleware,
+    ResolvedHookScript,
+    SubprocessHookScriptRunner,
+)
+from mission_control.contracts.hooks import HookScope
+from mission_control.contracts.identities import parse_request_scope
 from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.capabilities.hooks import HookEvent
+from mission_control.domain.capabilities.host_support import LaneProfile
 from mission_control.domain.execution.contracts import (
     CognitiveChannelDefinition,
     CognitiveRuntimeContextSchema,
@@ -104,6 +120,21 @@ class ResolvedSkillBundle:
 
 
 @dataclass(frozen=True)
+class ResolvedHookScriptBundle:
+    """Verified bytes of one catalog hook script directory, keyed by its manifest digest."""
+
+    manifest_digest: str
+    files: tuple[tuple[str, bytes], ...]
+
+    def verify(self) -> None:
+        try:
+            if bundle_digest(self.files, require_skill_md=False) != self.manifest_digest:
+                raise DeepAgentRuntimeDrift("Hook script bundle drifted from the exact binding")
+        except BundleError as error:
+            raise DeepAgentRuntimeDrift(str(error)) from error
+
+
+@dataclass(frozen=True)
 class ExactComponentRegistry:
     """Run-local exact revisions; keys are immutable definition digests, never aliases."""
 
@@ -118,6 +149,11 @@ class ExactComponentRegistry:
     structured_output_schemas: Mapping[str, type[Any] | dict[str, Any]] = dataclass_field(
         default_factory=dict
     )
+    # FT-A5: catalog hook script bytes (manifest digest -> files), the kernel hook ports and
+    # the subprocess runner. Kernel hooks are always composed; the ports default to no-ops.
+    hook_scripts: Mapping[str, ResolvedHookScriptBundle] = dataclass_field(default_factory=dict)
+    kernel_hooks: KernelHookPorts = dataclass_field(default_factory=KernelHookPorts)
+    hook_runner: HookScriptRunner = dataclass_field(default_factory=SubprocessHookScriptRunner)
 
 
 @dataclass(frozen=True)
@@ -271,9 +307,19 @@ class ExactDeepAgentMaterializer:
             ]
             mcp_tools = await self._load_mcp_tools(binding.mcp_servers, secrets)
             tools.extend(mcp_tools)
-            middleware = tuple(
+            catalog_middleware = tuple(
                 _exact(self._registry.middleware, item.ref.digest, "middleware")
                 for item in binding.middleware
+            )
+            dispatcher = self._hook_dispatcher(binding, stack)
+            # Mission Control's hook middleware (kernel hooks first, then catalog hooks) and
+            # the compaction wrapper lead every attempt; no binding field can remove them.
+            middleware = (
+                HookScriptMiddleware(
+                    dispatcher, mcp_tools=frozenset(tool.name for tool in mcp_tools)
+                ),
+                MissionSummarizationMiddleware.from_default(model, backend, dispatcher),
+                *catalog_middleware,
             )
             subagents = self._materialize_subagents(binding, secrets, skill_sources)
             # A hosted graph's checkpointer and store are the Agent Server's (REQ-CP-DA-019).
@@ -338,6 +384,57 @@ class ExactDeepAgentMaterializer:
                 ),
                 response_format=response_format,
             )
+
+    def _hook_dispatcher(
+        self, binding: DeepAgentExecutionBinding, stack: AsyncExitStack
+    ) -> HookDispatcher:
+        scripts: list[ResolvedHookScript] = []
+        root: Path | None = None
+        for component in sorted(binding.hook_scripts, key=lambda item: item.order):
+            bundle = _exact(self._registry.hook_scripts, component.manifest_digest, "hook script")
+            if bundle.manifest_digest != component.manifest_digest:
+                raise DeepAgentRuntimeDrift("resolved hook script identity drift")
+            bundle.verify()
+            if root is None:
+                root = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="mc-hooks-")))
+            directory = root / re.sub(r"[^a-z0-9._-]", "-", component.hook_id)
+            for relative, content in bundle.files:
+                target = directory / safe_relative_path(relative)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(content)
+            entrypoint = directory / safe_relative_path(component.entrypoint)
+            if not entrypoint.is_file():
+                raise DeepAgentRuntimeDrift("hook script entrypoint is not in its bundle")
+            scripts.append(
+                ResolvedHookScript(
+                    hook_id=component.hook_id,
+                    events=frozenset(HookEvent(event) for event in component.events),
+                    interpreter=component.interpreter,
+                    entrypoint=entrypoint,
+                    timeout_seconds=component.timeout_seconds,
+                    fail_closed=component.fail_closed,
+                    matcher=component.matcher,
+                    callback=component.callback == "service",
+                )
+            )
+        ports = self._registry.kernel_hooks
+        context = HookContext(
+            scope=_hook_scope(binding),
+            lane_profile=LaneProfile.DEEP_AGENTS,
+            run_id=binding.run_id,
+            activation_id=binding.operation_id,
+            attempt_no=binding.operation_attempt,
+            generation=binding.execution_generation,
+            harness_execution_id=binding.binding_id,
+        )
+        return HookDispatcher(
+            context=context,
+            kernel_hooks=ports.build(LaneProfile.DEEP_AGENTS),
+            scripts=tuple(scripts),
+            runner=self._registry.hook_runner,
+            frames=ports.frames,
+            cwd=root,
+        )
 
     def _materialize_subagents(
         self,
@@ -687,3 +784,20 @@ def _context_instance(
                 f"runtime context field {context_field.name!r} does not match its frozen value kind"
             )
     return context_type(**values)
+
+
+def _hook_scope(binding: DeepAgentExecutionBinding) -> HookScope:
+    """The installation/application/tenant scope hooks see; never credentials."""
+    unit = binding.runtime_unit
+    if unit is not None:
+        try:
+            scope = parse_request_scope(unit.request_scope)
+        except ValueError:
+            pass
+        else:
+            return HookScope(
+                installation_id=str(scope.installation_id),
+                application_id=scope.application_id,
+                tenant_id=str(scope.tenant_id),
+            )
+    return HookScope(installation_id="unbound", application_id="unbound")
