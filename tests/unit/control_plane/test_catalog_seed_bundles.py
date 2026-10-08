@@ -21,6 +21,7 @@ EXPECTED = {
     ("mc.catalog.workflow-parity", "1.0.0"),
     ("mc.catalog.runtime-profiles", "1.0.0"),
     ("mc.catalog.approved-assets", "1.0.0"),
+    ("mc.catalog.approved-assets", "1.0.1"),
     ("mc.catalog.agent-capabilities", "1.0.0"),
     ("mc.storage.capability-bundles", "1.0.0"),
     ("mc.qualification.parity", "1.0.0"),
@@ -74,7 +75,10 @@ def test_each_app_installation_set_is_valid_and_dependency_closed(app: str) -> N
     # FT-A7: skills, the policy hook and the plugin are per application.
     skills = [(f"mc.app.{app}.agent-skills", "1.0.0")]
     storage = [("mc.storage.capability-bundles", "1.0.0")]
-    assert sorted(keys) == sorted(base + agent + skills + storage)
+    # Succession of the applied, frozen approved-assets@1.0.0 (new logical keys only).
+    successors = [("mc.catalog.approved-assets", "1.0.1")]
+    assert sorted(keys) == sorted(base + agent + skills + storage + successors)
+    assert position_of(keys, successors[0]) > position_of(keys, base[2])
     assert [key for key in keys if key in base] == base
     position = {key: index for index, key in enumerate(keys)}
     assert (
@@ -98,6 +102,33 @@ def test_each_app_installation_set_is_valid_and_dependency_closed(app: str) -> N
         for item in bundles
         if item["seed_key"]
         not in {"mc.app.bindings", APP_AGENT_KEYS[app], f"mc.app.{app}.agent-skills"}
+    ]
+
+
+def position_of(keys: list[tuple[str, str]], key: tuple[str, str]) -> int:
+    return keys.index(key)
+
+
+def test_approved_assets_successor_never_rewrites_an_applied_logical_key() -> None:
+    (frozen,) = [
+        b
+        for b in _bundles("common")
+        if (b["seed_key"], b["seed_version"]) == ("mc.catalog.approved-assets", "1.0.0")
+    ]
+    (successor,) = [
+        b
+        for b in _bundles("common")
+        if (b["seed_key"], b["seed_version"]) == ("mc.catalog.approved-assets", "1.0.1")
+    ]
+    # The live 2026-10-03 receipts record this digest for 1.0.0; its bytes are immutable.
+    assert frozen["seed_digest"] == (
+        "sha256:f45e04f9a68ad5569304691fab2de48befa6dc017076b9bc8c3c557d5a1d3dd6"
+    )
+    held = {record["logical_key"] for record in frozen["records"]}
+    assert successor["records"]
+    assert not held & {record["logical_key"] for record in successor["records"]}
+    assert {"seed_key": "mc.catalog.approved-assets", "seed_version": "1.0.0"} in successor[
+        "depends_on"
     ]
 
 
