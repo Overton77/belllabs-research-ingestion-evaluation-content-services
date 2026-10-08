@@ -5,7 +5,7 @@
   "service_contract_range": ">=0.1.0,<0.2.0",
   "files": {
     "SKILL.md": "sha256:6a418dc30a26ae0c17c0c64fdddd5cec7cdf14573ccfabc7670b4c513115e1d2",
-    "references/manifest-cheatsheet.md": "sha256:df1c23eb452f963f88637985d47b67e6ab4164ae1f288674bbaff8d256629c06",
-    "references/validation-report.md": "sha256:5d3627e22a698dcc79930be2188f57a42cd91e58491b4d2ce77c6c6e8b0664da"
+    "references/manifest-cheatsheet.md": "sha256:f72f76df52b7ec3fefdb50e81524376fea63ef252def877b38968f1d3489019a",
+    "references/validation-report.md": "sha256:25ec3a69e247bb033a84bcc90eec5d948a506cefa14d47c1555da71686008ba4"
   }
 }

@@ -5,6 +5,6 @@
   "service_contract_range": ">=0.1.0,<0.2.0",
   "files": {
     "SKILL.md": "sha256:5916f0707451b4ed0e12f5c96c18edf7f61500a0ec82f6fb980ff0e2a5672817",
-    "references/kinds-and-projections.md": "sha256:3360f49c9f6b1bf4b6fb3ac8b6445c6c658c3151232e313066fba75af516abd9"
+    "references/kinds-and-projections.md": "sha256:74fcaaf6ade072d4b9738104a2559877473b8d390eb060210c3fae8bb80693d2"
   }
 }
