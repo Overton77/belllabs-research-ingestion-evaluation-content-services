@@ -24,5 +24,6 @@ Owner interview 2026-10-07; recommendations accepted outright. Decisions live in
 | 11 | [missions/](missions/) | The three owner missions as manifests (acceptance fixtures) |
 | 12 | [issues/](issues/) | One draft per ticket, mirrored in Linear |
 | 13 | [research/](research/) | Primary-source notes: codebase map, Cursor platform, Temporal lifecycle, Deep Agents middleware, seed capabilities and formats |
+| 14 | [OWNER-FIXTURE-RUNBOOK.md](OWNER-FIXTURE-RUNBOOK.md) | How the owner runs the three mission fixtures (I1 to I3) on the local real stack: readiness, blockers, release 1.1.0 install, commands, success criteria, budget, stopping, open decisions |
 
 Precedence on conflict: spec pack (`../mission-control-general`), then `docs/adr`, then this packet, then `docs/knowledge`, then implementation status. Report conflicts in the ticket rather than choosing silently.
