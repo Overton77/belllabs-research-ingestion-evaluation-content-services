@@ -23,6 +23,7 @@ from uuid import UUID, uuid5
 import asyncpg
 
 from mission_control.adapters.postgres.run_control.canonical import SCOPE
+from mission_control.domain.frames.body import frame_body_object
 from mission_control.domain.frames.contracts import FrameKind, ProviderFrame, native_event_ref
 from mission_control.domain.frames.usage import usage_report
 
@@ -54,13 +55,7 @@ def turn_id_for(session_id: UUID, turn_no: int) -> UUID:
 def body_object(frame: ProviderFrame) -> dict[str, Any]:
     """The frame body when its excerpt holds the whole canonical JSON object, else {}."""
 
-    if len(frame.body_excerpt.encode("utf-8")) < frame.body_bytes:
-        return {}
-    try:
-        value = json.loads(frame.body_excerpt)
-    except ValueError:
-        return {}
-    return value if isinstance(value, dict) else {}
+    return frame_body_object(frame.body_excerpt, frame.body_bytes)
 
 
 def _identity(value: Any) -> dict[str, Any]:

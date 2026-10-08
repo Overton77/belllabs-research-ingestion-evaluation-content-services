@@ -161,3 +161,106 @@ def turn_observations(turn: str = "turn-1", *, tool_call: str = "call-1") -> lis
 
 def fresh_run_key() -> str:
     return f"run-{uuid4()}"
+
+
+K = FrameKind
+FIXTURE_HARNESS = UUID("7d4f0c1e-1111-4a2b-9c3d-000000000001")
+FIXTURE_RUN = UUID("7d4f0c1e-1111-4a2b-9c3d-000000000002")
+FIXTURE_ACTIVATION = UUID("7d4f0c1e-1111-4a2b-9c3d-000000000003")
+
+
+def provider_frame(
+    ordinal: int,
+    kind: FrameKind,
+    body: Any = None,
+    *,
+    raw_kind: str | None = None,
+    lane: LaneProfile = LaneProfile.DEEP_AGENTS,
+    generation: int = 1,
+    session: str = "thread-1",
+    turn: str | None = "turn-1",
+    tool_call_ref: str | None = None,
+    subordinate_ref: str | None = None,
+    harness: UUID = FIXTURE_HARNESS,
+) -> Any:
+    """A persisted-shape ProviderFrame built through the real body handling."""
+
+    from mission_control.domain.frames.body import frame_body
+    from mission_control.domain.frames.contracts import FrameScope, ProviderFrame, is_closing
+
+    payload = frame_body(body if body is not None else {"ordinal": ordinal})
+    return ProviderFrame(
+        frame_id=uuid5(harness, f"{generation}:{ordinal}"),
+        scope=FrameScope.from_request_scope(SCOPE),
+        run_id=FIXTURE_RUN,
+        activation_id=FIXTURE_ACTIVATION,
+        attempt_no=1,
+        harness_execution_id=harness,
+        generation=generation,
+        lane_profile=lane,
+        native_session_ref=session,
+        native_turn_ref=turn,
+        provider_key=f"{generation}:{ordinal}:{kind.value}",
+        arrival_ordinal=ordinal,
+        observed_at=FRAME_NOW + timedelta(seconds=ordinal),
+        kind=kind,
+        closing=is_closing(kind),
+        subordinate_ref=subordinate_ref,
+        tool_call_ref=tool_call_ref,
+        body_digest=payload.digest,
+        body_bytes=payload.body_bytes,
+        body_media_type="application/json",
+        body_excerpt=payload.excerpt,
+        redactions=payload.redactions,
+        raw_kind=raw_kind or f"fixture.{kind.value}",
+    )
+
+
+def deep_agents_turn_frames(generation: int = 1) -> list[Any]:
+    """The frame sequence a Deep Agents invocation persists (C1 writer shape)."""
+
+    return [
+        provider_frame(1, K.SESSION_INIT, {"thread_id": "thread-1"}, generation=generation),
+        provider_frame(2, K.TURN_STARTED, {"invocation_id": "turn-1"}, generation=generation),
+        provider_frame(3, K.MESSAGE_DELTA, {"text": "Looking"}, generation=generation),
+        provider_frame(4, K.MESSAGE, {"type": "ai", "id": "m1"}, generation=generation),
+        provider_frame(
+            5,
+            K.TOOL_CALL_STARTED,
+            {"tool_call_id": "call-1", "name": "read_file"},
+            tool_call_ref="call-1",
+            generation=generation,
+        ),
+        provider_frame(
+            6,
+            K.USAGE,
+            {"input_tokens": 3, "output_tokens": 1, "total_tokens": 4},
+            generation=generation,
+        ),
+        provider_frame(
+            7,
+            K.TOOL_CALL_COMPLETED,
+            {
+                "tool_call_id": "call-1",
+                "name": "read_file",
+                "status": "success",
+                "result_digest": "sha256:" + "1" * 64,
+            },
+            tool_call_ref="call-1",
+            generation=generation,
+        ),
+        provider_frame(8, K.MESSAGE, {"type": "ai", "id": "m2"}, generation=generation),
+        provider_frame(
+            9,
+            K.USAGE,
+            {"input_tokens": 5, "output_tokens": 2, "total_tokens": 7},
+            generation=generation,
+        ),
+        provider_frame(
+            10,
+            K.TURN_ENDED,
+            {"outcome": "succeeded", "stop_reason": "end_turn", "input_tokens": 8},
+            generation=generation,
+        ),
+        provider_frame(11, K.RUN_RESULT, {"status": "finished"}, generation=generation),
+    ]

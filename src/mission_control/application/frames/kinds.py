@@ -80,6 +80,7 @@ DEEP_AGENTS_KINDS: dict[str, KindRule] = {
     "updates.tool_message": _TOOL_RESULT_STATUS,
     "checkpoint_backfill": _TOOL_RESULT_STATUS,
     "updates.interrupt": K.APPROVAL_REQUESTED,
+    "updates.interrupt.session_state": K.SESSION_STATE,
     "updates.summarization_event": K.AFTER_COMPACTION,
     "custom.mc.before_compaction": K.BEFORE_COMPACTION,
     "custom.mc.after_compaction": K.AFTER_COMPACTION,
@@ -122,6 +123,7 @@ CURSOR_LOCAL_KINDS: dict[str, KindRule] = {
     "tool_call": _TOOL_STATUS,
     "request": K.APPROVAL_REQUESTED,
     "request.resolved": K.APPROVAL_RESOLVED,
+    "session_state": K.SESSION_STATE,
     "TurnEndedUpdate": K.TURN_ENDED,
     "usage": K.USAGE,
     "RunResult": K.RUN_RESULT,
@@ -135,6 +137,7 @@ CURSOR_LOCAL_KINDS: dict[str, KindRule] = {
 CURSOR_CLOUD_KINDS: dict[str, KindRule] = {
     "agent.created": K.SESSION_INIT,
     "run.created": K.TURN_STARTED,
+    "session_state": K.SESSION_STATE,
     "status": K.STATUS,
     "assistant": K.MESSAGE_DELTA,
     "thinking": K.THINKING_DELTA,

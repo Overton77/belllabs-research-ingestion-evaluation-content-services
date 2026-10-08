@@ -46,6 +46,7 @@ from mission_control.domain.frames.body import jsonable
 from mission_control.domain.frames.contracts import (
     AppendReceipt,
     FrameObservation,
+    HarnessExecutionHandle,
     LaneProfile,
 )
 
@@ -162,6 +163,10 @@ class DeepAgentFrameRecorder:
     @property
     def receipt(self) -> AppendReceipt:
         return self._writer.receipt
+
+    @property
+    def handle(self) -> HarnessExecutionHandle:
+        return self._writer.handle
 
     # --- observation building ---------------------------------------------------------
 
@@ -403,6 +408,19 @@ class DeepAgentFrameRecorder:
                         item_id=",".join(str(item["id"]) for item in interrupts)
                         or _digest(interrupts),
                         body={"interrupts": interrupts},
+                        ns=ns,
+                    )
+                )
+                # The closing evidence the reducer reads: the session now requires action.
+                observations.append(
+                    self._observation(
+                        "updates.interrupt.session_state",
+                        item_id=",".join(str(item["id"]) for item in interrupts)
+                        or _digest(interrupts),
+                        body={
+                            "state": "requires_action",
+                            "request_ref": ",".join(str(item["id"]) for item in interrupts),
+                        },
                         ns=ns,
                     )
                 )

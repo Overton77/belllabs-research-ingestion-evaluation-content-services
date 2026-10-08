@@ -221,6 +221,7 @@ async def test_stream_parts_map_to_frames_with_subordinate_attribution() -> None
         FrameKind.TOOL_CALL_FAILED,
         FrameKind.AFTER_COMPACTION,
         FrameKind.APPROVAL_REQUESTED,
+        FrameKind.SESSION_STATE,
         FrameKind.HOOK_RESULT,
         FrameKind.UNKNOWN,
     ]

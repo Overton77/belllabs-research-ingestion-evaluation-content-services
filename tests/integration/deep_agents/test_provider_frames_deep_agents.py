@@ -10,6 +10,7 @@ re-observing the same unit adds zero rows; another tenant reads nothing.
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -31,12 +32,13 @@ from tests.fixtures.mission_control_common_db import (
     provision_runtime,
 )
 from tests.integration.postgres.runtime_common import common_db as common_db
+from tests.integration.postgres.runtime_common import owner_rows
 from tests.unit.operations.test_operation_execution import (
     MCP_DIGEST,
     SKILL_DIGEST,
     operation_request,
 )
-from tests.unit.run_control.test_run_control import actor, command
+from tests.unit.run_control.test_run_control import ALL_PERMISSIONS, actor, command
 from tests.unit.run_control.test_run_control import request as run_request
 from tests.unit.run_control.test_run_control import service as run_control_service
 
@@ -79,6 +81,7 @@ from mission_control.application.execution.operations.operation_journal import (
     OperationJournalService,
 )
 from mission_control.application.execution.service import RunControlService
+from mission_control.application.frames.reducer import FrameFactProjector
 from mission_control.domain.execution.checkpoint_lineage import OperationActivityAttempt
 from mission_control.domain.execution.contracts import (
     DeepAgentExecutionBinding,
@@ -205,6 +208,13 @@ async def stack(common_db: CommonDatabase) -> AsyncIterator[Stack]:
                     )
                 ),
                 frames=frames,
+                frame_facts=FrameFactProjector(
+                    frames,
+                    run_control,
+                    actor=actor().model_copy(
+                        update={"permissions": ALL_PERMISSIONS | {"workflow_run.apply_frame_facts"}}
+                    ),
+                ),
             )
             coordinator = JournaledOperationExecutionCoordinator(
                 journal=OperationJournalService(PostgresAtomicOperationJournalRepository(pool)),
@@ -334,6 +344,37 @@ async def test_local_model_unit_leaves_ordered_deduplicated_frames(
     again = await stack.service.execute(request, delivery(2, unit))
     assert again.status == "completed"
     assert len(await stack.frames.frames_for_run(SCOPE, run_uuid)) == len(frames)
+
+    # C2: the closing frames became mission events citing their frames; a provider
+    # `finished` is not an attempt outcome here (the operation settlement owns it).
+    events = await owner_rows(
+        common_db,
+        "SELECT e.event_type, e.payload FROM mission_control.mission_event e "
+        "JOIN mission_control.mission_run r ON r.run_id = e.run_id "
+        "WHERE r.run_key = $1 ORDER BY e.seq",
+        stack.run_id,
+    )
+    frame_events = [
+        row["event_type"]
+        for row in events
+        if row["event_type"].startswith("session.") or row["event_type"].startswith("tool_call.")
+    ]
+    assert frame_events == [
+        "session.started",
+        "session.turn_started",
+        "tool_call.completed",
+        "session.turn_completed",
+        "session.ended",
+    ]
+    assert "attempt.completed" not in [row["event_type"] for row in events]
+    stored = {str(frame.frame_id) for frame in frames}
+    for row in events:
+        payload = json.loads(row["payload"])["payload"]
+        ref = (
+            payload.get("source", {}).get("native_event_ref") if isinstance(payload, dict) else None
+        )
+        if ref is not None:
+            assert ref.removeprefix("provider_frame:") in stored
 
     # Another tenant reads nothing (forced RLS).
     assert await stack.frames.frames_for_run(canonical_scope("tenant-2"), run_uuid) == ()

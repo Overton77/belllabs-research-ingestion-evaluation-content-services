@@ -7,12 +7,15 @@ from pydantic import ValidationError
 
 from mission_control.domain.authoring.canonical import sha256_digest
 from mission_control.domain.authoring.identity import stable_id
+from mission_control.domain.frames.contracts import LaneProfile
+from mission_control.domain.frames.facts import fact_events
 from mission_control.domain.policies.contracts import (
     AcceptedObligationEvidence,
     AcceptedOutputEvidence,
     AcceptFinalizationPlanAction,
     ApplyAuthorityBatchAction,
     ApplyBoundaryCommandAction,
+    ApplyFrameFactsAction,
     AsyncChildAuthorityState,
     AsyncChildDecisionOutcome,
     AsyncChildDependencyClass,
@@ -38,6 +41,7 @@ from mission_control.domain.policies.contracts import (
     EffectObservation,
     EffectSettlement,
     ExecutionTarget,
+    FrameFactCursor,
     LifecycleCommand,
     LifecycleTransitionRecord,
     ObserveEffectAction,
@@ -124,6 +128,8 @@ ACTION_PERMISSIONS: dict[str, str] = {
     # RRM-007: the family boundary's application and quiescence facts.
     "apply_boundary_command": "workflow_run.apply_boundary_command",
     "observe_quiescence": "workflow_run.observe_wait",
+    # SPEC-03 (C2): mission state derived from closing provider frames.
+    "apply_frame_facts": "workflow_run.apply_frame_facts",
 }
 LIFECYCLE_ACTION_KINDS = frozenset((*ACTION_PERMISSIONS, "apply_authority_batch"))
 AUTHORITY_BATCH_ACTION_TYPES = (
@@ -196,6 +202,10 @@ def reduce_lifecycle(
             command,
             command_fingerprint,
             action,
+        )
+    if isinstance(action, ApplyFrameFactsAction):
+        return _reduce_frame_facts(
+            projection, budget, effects, command, command_fingerprint, action
         )
     phase = projection.phase
     waits = list[WaitCondition](projection.active_waits)
@@ -719,6 +729,134 @@ def _reduce_authority_batch(
         ledger_entries=tuple(ledger_entries),
         effect_entries=tuple(effect_entries),
         events=(event,),
+    )
+
+
+def _reduce_frame_facts(
+    projection: RunProjection,
+    budget: BudgetState,
+    effects: EffectLedgerState,
+    command: LifecycleCommand,
+    command_fingerprint: str,
+    action: ApplyFrameFactsAction,
+) -> Reduction:
+    """SPEC-03 (C2): the only place frames change run state; one mission event per fact.
+
+    Facts apply exactly once per (harness execution, generation): the cursor rejects a
+    replay, and a generation older than one already applied for the same execution yields
+    no facts. The run phase is not moved by frames; activation phase changes, session and
+    tool-call facts are mission events that cite their frames by `native_event_ref`.
+    """
+
+    try:
+        lane = LaneProfile(action.lane_profile)
+    except ValueError as error:
+        raise ReductionRejected("unknown_lane_profile", str(error)) from error
+    cursors = list(projection.frame_fact_cursors)
+    prior = next(
+        (
+            item
+            for item in cursors
+            if item.harness_execution_id == action.harness_execution_id
+            and item.generation == action.generation
+        ),
+        None,
+    )
+    if any(
+        item.harness_execution_id == action.harness_execution_id
+        and item.generation > action.generation
+        for item in cursors
+    ):
+        raise ReductionRejected(
+            "stale_generation", "frames of a superseded generation produce no facts"
+        )
+    if prior is not None and action.facts[0].arrival_ordinal <= prior.through_ordinal:
+        raise ReductionRejected(
+            "frame_facts_already_applied",
+            f"facts through ordinal {prior.through_ordinal} were already applied",
+        )
+    cursor = FrameFactCursor(
+        harness_execution_id=action.harness_execution_id,
+        generation=action.generation,
+        through_ordinal=action.through_ordinal,
+    )
+    cursors = [item for item in cursors if item is not prior] + [cursor]
+    cursors.sort(key=lambda item: (item.harness_execution_id, item.generation))
+    version = projection.version + 1
+    next_projection = projection.model_copy(
+        update={
+            "version": version,
+            "frame_fact_cursors": tuple(cursors),
+            "updated_at": command.occurred_at,
+        }
+    )
+    next_projection = RunProjection.model_validate(next_projection.model_dump(mode="python"))
+    transition = LifecycleTransitionRecord(
+        transition_id=stable_id("transition", projection.run_id, str(version)),
+        run_id=projection.run_id,
+        command_id=command.command_id,
+        prior_version=projection.version,
+        resulting_version=version,
+        prior_phase=projection.phase,
+        resulting_phase=projection.phase,
+        prior_projection=projection,
+        resulting_projection=next_projection,
+        actor=command.actor,
+        reason=command.reason,
+        evidence_refs=command.evidence_refs,
+        occurred_at=command.occurred_at,
+        correlation_id=command.correlation_id,
+        causation_id=command.causation_id,
+    )
+    result = CommandResult(
+        command_id=command.command_id,
+        idempotency_issuer=command.idempotency_issuer,
+        run_id=projection.run_id,
+        command_fingerprint=command_fingerprint,
+        status=CommandStatus.ACCEPTED,
+        resulting_run_version=version,
+        phase=projection.phase,
+        terminal_outcome=projection.terminal_outcome,
+        reason_code="accepted",
+        reason="frame facts applied",
+        recorded_at=command.occurred_at,
+    )
+    produced = [
+        item
+        for fact in action.facts
+        for item in fact_events(
+            fact,
+            lane_profile=lane,
+            activation_id=action.activation_id,
+            attempt_no=action.attempt_no,
+        )
+    ]
+    events = tuple(
+        DomainEventEnvelope(
+            event_id=stable_id("event", projection.run_id, str(version), event_type, str(index)),
+            event_type=event_type,
+            aggregate_id=projection.run_id,
+            aggregate_version=version,
+            sequence=index,
+            is_version_final=index == len(produced),
+            occurred_at=command.occurred_at,
+            recorded_at=command.occurred_at,
+            actor=command.actor,
+            correlation_id=command.correlation_id,
+            causation_id=command.causation_id or command.command_id,
+            payload=payload,
+        )
+        for index, (event_type, payload) in enumerate(produced, start=1)
+    )
+    return Reduction(
+        projection=next_projection,
+        budget=budget,
+        effects=effects,
+        transition=transition,
+        result=result,
+        ledger_entries=(),
+        effect_entries=(),
+        events=events,
     )
 
 

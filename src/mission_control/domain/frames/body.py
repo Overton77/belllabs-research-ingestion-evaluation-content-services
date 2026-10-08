@@ -263,3 +263,15 @@ def frame_body(
         redactions=found,
         canonical=payload,
     )
+
+
+def frame_body_object(body_excerpt: str, body_bytes: int) -> dict[str, Any]:
+    """The stored body as an object when the excerpt holds the whole canonical JSON, else {}."""
+
+    if len(body_excerpt.encode("utf-8")) < body_bytes:
+        return {}
+    try:
+        value = json.loads(body_excerpt)
+    except ValueError:
+        return {}
+    return value if isinstance(value, dict) else {}

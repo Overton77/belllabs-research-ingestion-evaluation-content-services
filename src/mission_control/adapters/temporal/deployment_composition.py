@@ -164,6 +164,7 @@ from mission_control.application.execution.operations.operation_journal import (
     OperationJournalService,
 )
 from mission_control.application.execution.service import RunControlService
+from mission_control.application.frames.reducer import FrameFactProjector
 from mission_control.application.programs.orchestration_routing import SemanticHandlerRegistry
 from mission_control.application.programs.service import (
     F1OrchestrationBindingVerifier,
@@ -662,8 +663,12 @@ class ProductionWorkerActivityCompositionFactory:
                 ExactDeepAgentMaterializer(capabilities.registry),
                 async_subagents=children,
                 workspace_outputs=candidates,
-                # SPEC-03 (C1): provider frames persist before any derivation.
+                # SPEC-03 (C1): provider frames persist before any derivation; (C2) their
+                # closing facts become mission events through run control.
                 frames=PostgresFrameRepository(postgres_pool),
+                frame_facts=FrameFactProjector(
+                    PostgresFrameRepository(postgres_pool), run_control, actor=actor
+                ),
             ),
             children,
             pool=postgres_pool,

@@ -13,6 +13,7 @@ from pydantic import (
 
 from mission_control.domain.authoring.canonical import canonical_json, sha256_digest
 from mission_control.domain.authoring.contracts import ExactDefinitionRef, RunInputManifestRef
+from mission_control.domain.frames.facts import FrameFact
 from mission_control.domain.graph_runtime.identities import UNIT_KEY_PATTERN, QualifiedCheckpointKey
 
 DIGEST_PATTERN = r"^sha256:[0-9a-f]{64}$"
@@ -753,6 +754,49 @@ BOUNDARY_FACT_KINDS: frozenset[str] = frozenset(
 )
 
 
+MAX_FRAME_FACTS_PER_ACTION = 128
+
+
+class FrameFactCursor(Contract):
+    """SPEC-03: the last frame arrival ordinal whose facts this run has applied."""
+
+    harness_execution_id: str = Field(min_length=1, max_length=64)
+    generation: int = Field(ge=1)
+    through_ordinal: int = Field(ge=1)
+
+
+class ApplyFrameFactsAction(Contract):
+    """SPEC-03 (C2): mission state from closing provider frames of one harness execution.
+
+    Facts are derived only from persisted closing frames of the execution's current
+    generation, in arrival order; `through_ordinal` is the last frame they cover. The
+    reducer records the cursor so a fact is applied exactly once, and writes one mission
+    event per fact whose `source.native_event_ref` points at its frame.
+    """
+
+    kind: Literal["apply_frame_facts"] = "apply_frame_facts"
+    harness_execution_id: str = Field(min_length=1, max_length=64)
+    generation: int = Field(ge=1)
+    lane_profile: str = Field(min_length=1, max_length=64)
+    activation_id: str = Field(min_length=1, max_length=64)
+    attempt_no: int = Field(ge=1)
+    through_ordinal: int = Field(ge=1)
+    facts: tuple[FrameFact, ...] = Field(min_length=1, max_length=MAX_FRAME_FACTS_PER_ACTION)
+
+    @model_validator(mode="after")
+    def facts_belong_to_this_execution(self) -> ApplyFrameFactsAction:
+        ordinals = [fact.arrival_ordinal for fact in self.facts]
+        if ordinals != sorted(ordinals) or ordinals[-1] > self.through_ordinal:
+            raise ValueError("frame facts must be in arrival order and covered by the cursor")
+        for fact in self.facts:
+            if (
+                str(fact.harness_execution_id) != self.harness_execution_id
+                or fact.generation != self.generation
+            ):
+                raise ValueError("frame facts belong to exactly one execution generation")
+        return self
+
+
 class ObserveQuiescenceAction(Contract):
     """The family boundary's fact that admissible work ran out (or returned) under the
     currently applied scoped waits and pauses, so the aggregate phase stays accurate."""
@@ -986,7 +1030,8 @@ LifecycleAction = Annotated[
     | RecordReadinessAction
     | ReconcileUnitAction
     | ApplyBoundaryCommandAction
-    | ObserveQuiescenceAction,
+    | ObserveQuiescenceAction
+    | ApplyFrameFactsAction,
     Field(discriminator="kind"),
 ]
 
@@ -1047,6 +1092,11 @@ class RunProjection(Contract):
     unit_reconciliations: tuple[UnitReconciliationDecision, ...] = ()
     # RRM-007: the macro execution that applies boundary commands, declared at `start`.
     execution_target: ExecutionTarget | None = None
+    # SPEC-03 (C2): frame-fact cursors per harness execution generation; omitted from JSON
+    # dumps while empty so runs without provider frames keep their persisted form.
+    frame_fact_cursors: tuple[FrameFactCursor, ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
     updated_at: AwareDatetime
 
     @model_validator(mode="after")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 from collections.abc import Mapping
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
@@ -37,6 +38,7 @@ from mission_control.adapters.langsmith.tracing import trace_deep_agent_execute
 from mission_control.application.execution.operations.operation_progress import (
     register_checkpoint_reader,
 )
+from mission_control.application.frames.reducer import FrameFactProjector, FrameFactTarget
 from mission_control.application.frames.sink import (
     FrameStore,
     HarnessExecutionNotFound,
@@ -78,6 +80,8 @@ from mission_control.domain.frames.contracts import (
 )
 from mission_control.domain.graph_runtime.identities import QualifiedCheckpointKey
 
+logger = logging.getLogger(__name__)
+
 
 class AsyncSubagentMiddlewareFactory(Protocol):
     """Builds the governed async-subagent middleware for one parent operation binding."""
@@ -118,6 +122,7 @@ class DeepAgentRuntimeAdapter:
         workspace_outputs: WorkspaceOutputCapturePort | None = None,
         frames: FrameStore | None = None,
         frame_excerpt_cap_bytes: int = DEFAULT_EXCERPT_CAP_BYTES,
+        frame_facts: FrameFactProjector | None = None,
     ) -> None:
         self._materializer = materializer
         self._async_subagents = async_subagents
@@ -126,6 +131,8 @@ class DeepAgentRuntimeAdapter:
         # `astream` v2 and every observed provider event is persisted before derivation.
         self._frames = frames
         self._frame_excerpt_cap = frame_excerpt_cap_bytes
+        # SPEC-03 (C2): facts derived from the persisted closing frames become mission events.
+        self._frame_facts = frame_facts
 
     async def build_hosted_async_subagent_graph(
         self,
@@ -343,6 +350,7 @@ class DeepAgentRuntimeAdapter:
                         structured_keys=sorted(structured) if isinstance(structured, dict) else (),
                         checkpoint_id=capture.result_key.checkpoint_id,
                     )
+                    await self._project_frame_facts(recorder, binding)
                 return RuntimeResult(
                     output_text=output_text,
                     structured_output=structured if isinstance(structured, dict) else None,
@@ -354,10 +362,12 @@ class DeepAgentRuntimeAdapter:
             except CheckpointLineageError as error:
                 if recorder is not None:
                     await recorder.fail(error, unknown_state=True)
+                    await self._project_frame_facts(recorder, binding)
                 raise
             except Exception as error:
                 if recorder is not None:
                     await recorder.fail(error, unknown_state=False)
+                    await self._project_frame_facts(recorder, binding)
                 # REQ-CP-RUN-007 (narrowed): report whether a terminal result exists after the
                 # failure, so the boundary settles `failed` only when none does. RRM-008: the
                 # latest durable checkpoint of a unique stamped lineage travels with the
@@ -502,6 +512,31 @@ class DeepAgentRuntimeAdapter:
         return DeepAgentFrameRecorder(
             writer, thread_id=plan.namespace, invocation_id=plan.invocation_id
         )
+
+    async def _project_frame_facts(
+        self, recorder: DeepAgentFrameRecorder, binding: DeepAgentExecutionBinding
+    ) -> None:
+        """Apply this attempt's closing-frame facts to run state, best effort.
+
+        Frames are already durable, so a projection failure only delays the derived mission
+        events: the next projection re-derives every fact from the frames and applies the
+        unapplied ones. The attempt outcome of a provider `finished` is deferred to the
+        operation settlement, which owns the Deep Agents Completion Candidate.
+        """
+
+        unit = binding.runtime_unit
+        if self._frame_facts is None or unit is None:
+            return
+        try:
+            await self._frame_facts.project(
+                FrameFactTarget.from_handle(recorder.handle, run_key=unit.belllabs_run_id),
+                completion_policy="deferred",
+            )
+        except Exception:
+            logger.warning(
+                "frame facts were not applied; the next projection re-derives them",
+                exc_info=True,
+            )
 
     async def _capture_workspace_outputs(
         self,
