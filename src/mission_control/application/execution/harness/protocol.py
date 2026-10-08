@@ -20,6 +20,7 @@ from mission_control.domain.execution.contracts import (
     RuntimeInvocation,
     RuntimeResult,
 )
+from mission_control.domain.execution.lane_turns import ClosingFacts
 from mission_control.domain.execution.lanes import (
     CancelReceipt,
     CancelTurnRequest,
@@ -30,12 +31,14 @@ from mission_control.domain.execution.lanes import (
     ObserveRequest,
     PreparedSession,
     PrepareRequest,
+    ProviderStatus,
     ReattachRequest,
     SendTurnRequest,
     SessionHandle,
     SnapshotManifest,
     SnapshotRequest,
     StartRequest,
+    StatusRequest,
     TurnHandle,
     UsageReport,
     UsageRequest,
@@ -50,6 +53,13 @@ class HarnessUnsupported(NotImplementedError):
         self.operation = operation
         self.lane_profile = lane_profile
         self.reason = reason
+
+
+class NativeTurnLost(LookupError):
+    """The provider no longer knows the native turn (a local bridge or its store is gone).
+
+    `lane.turn` never re-sends a lost turn: the unit becomes `in_doubt` and reconciliation
+    decides (SPEC-07 section 4.1 step 2)."""
 
 
 @runtime_checkable
@@ -73,6 +83,23 @@ class AgentHarness(Protocol):
     async def usage(self, request: UsageRequest) -> UsageReport: ...
 
     async def end_session(self, request: EndSessionRequest) -> CleanupReceipt: ...
+
+
+@runtime_checkable
+class SessionLane(AgentHarness, Protocol):
+    """A lane `lane.turn` drives through the protocol itself, segment by segment (FT-G2).
+
+    Beside the ten operations it reads its provider's terminal frame into `ClosingFacts`,
+    reconciles a session by native identity (`lane.status`), and turns a persisted frame's
+    provider key back into its resumable cursor, so a resumed segment observes from the
+    persisted frames (the truth) rather than from a throttled heartbeat (a hint).
+    """
+
+    def closing_facts(self, turn: TurnHandle, frame: LaneFrame) -> ClosingFacts: ...
+
+    async def status(self, request: StatusRequest) -> ProviderStatus: ...
+
+    def resume_cursor(self, provider_key: str) -> str | None: ...
 
 
 class OperationLane(AgentHarness, Protocol):
@@ -164,7 +191,9 @@ __all__ = [
     "HARNESS_PROTOCOL_METHODS",
     "AgentHarness",
     "HarnessUnsupported",
+    "NativeTurnLost",
     "OperationLane",
+    "SessionLane",
     "UnsupportedHarnessOperations",
     "implements",
 ]

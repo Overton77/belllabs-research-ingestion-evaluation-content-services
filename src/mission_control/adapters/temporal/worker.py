@@ -95,6 +95,7 @@ def operation_heartbeat_policy(settings: Settings) -> OperationHeartbeatPolicy:
             settings.operation_async_children_heartbeat_timeout_seconds
         ),
         bound_seconds=settings.operation_bound_heartbeat_timeout_seconds,
+        deep_agent_segment_loop=settings.mission_control_lane_segment_loop,
     )
 
 

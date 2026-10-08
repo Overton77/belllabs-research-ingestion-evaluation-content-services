@@ -90,6 +90,9 @@ from mission_control.adapters.postgres.coordinator.workflow_result_repository im
     PostgresWorkflowResultRepository,
 )
 from mission_control.adapters.postgres.frames.repository import PostgresFrameRepository
+from mission_control.adapters.postgres.lanes.execution_state import (
+    PostgresLaneExecutionStateStore,
+)
 from mission_control.adapters.postgres.operations.operation_binding_repository import (
     PostgresOperationBindingRepository,
 )
@@ -159,6 +162,7 @@ from mission_control.application.coordinator.coordinator_results import (
     TerminalWorkflowCompletionService,
 )
 from mission_control.application.execution.harness.deep_agents_harness import DeepAgentsHarness
+from mission_control.application.execution.harness.lane_turns import LaneTurnService
 from mission_control.application.execution.harness.protocol import AgentHarness
 from mission_control.application.execution.harness.registry import LaneRegistry
 from mission_control.application.execution.operations.checkpoint_lineage import DEFAULT_CLAIM_LEASE
@@ -742,6 +746,18 @@ class ProductionWorkerActivityCompositionFactory:
                 children, PostgresAsyncSubagentAuthority(postgres_pool), secrets
             ),
         )
+        # FT-G2: `lane.turn`, `lane.status`, `lane.cancel` on the cognitive queues. Session
+        # Lanes persist frames through the FrameSink and lane state on harness_execution;
+        # the Deep Agents lane runs its governed body through `lane.turn` unchanged.
+        frame_store = PostgresFrameRepository(postgres_pool)
+        lane_turns = LaneTurnService(
+            lanes=lanes,
+            boundary=service,
+            frames=frame_store,
+            states=PostgresLaneExecutionStateStore(postgres_pool),
+            secrets=secrets,
+            frame_facts=FrameFactProjector(frame_store, run_control, actor=actor),
+        )
         self.operation = ProductionOperationComposition(
             service=service,
             recovery=recovery,
@@ -794,7 +810,9 @@ class ProductionWorkerActivityCompositionFactory:
         )
         return WorkerActivityComposition(
             coordinator=coordinator,
-            operation=OperationExecutionActivities(service, worker_identity=self._worker_identity),
+            operation=OperationExecutionActivities(
+                service, worker_identity=self._worker_identity, lane_turns=lane_turns
+            ),
             artifacts=ArtifactPromotionActivities(service=promotion, candidates=candidates),
             resources=resources,
         )

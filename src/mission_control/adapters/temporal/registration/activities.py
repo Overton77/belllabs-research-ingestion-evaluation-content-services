@@ -57,7 +57,10 @@ def agent_cognitive_activities(activities: Any) -> Sequence[ActivityCallable]:
 
     `operation.execute` runs one Activity attempt of a unit; `operation.cancel` (RRM-008,
     REQ-CP-EXEC-008) settles a unit the cancellation saga reached, never dispatching
-    cognition. Both are served by the same `OperationExecutionActivities` instance.
+    cognition. Both are served by the same `OperationExecutionActivities` instance, and so
+    are the lane activities when a lane turn service is composed (FT-G2).
     """
 
-    return (activities.execute, activities.cancel)
+    lanes = getattr(activities, "lane_activities", None)
+    # FT-G2: `lane.turn`, `lane.status` and `lane.cancel` share the operation's queue.
+    return (activities.execute, activities.cancel, *(lanes() if callable(lanes) else ()))

@@ -62,3 +62,27 @@ ALTER TABLE mission_control.execution_binding
         CHECK (lane_profile NOT IN ('cursor_local', 'cursor_cloud') OR lane_binding IS NOT NULL);
 CREATE INDEX execution_binding_lane_profile_idx
     ON mission_control.execution_binding (lane_profile);
+
+-- section: G2 (FT-G2, OVE-51) harness_execution lane state --------------------------------
+-- `lane.turn` records the native session and turn on the harness execution before it
+-- observes (a recorded turn is never sent again), the provider cursor and segment time at
+-- every segment boundary, and the usage disposition at settlement. The Cursor profiles'
+-- pinned versions, bridge state root and cloud branch/agent URL are recorded alongside.
+-- The row itself is opened by the frame store (0027); these columns are nullable and
+-- additive, so existing rows and the Deep Agents writer are unchanged.
+ALTER TABLE mission_control.harness_execution
+    ADD COLUMN IF NOT EXISTS native_session_ref text CHECK (native_session_ref <> ''),
+    ADD COLUMN IF NOT EXISTS native_turn_ref text CHECK (native_turn_ref <> ''),
+    ADD COLUMN IF NOT EXISTS provider_cursor text CHECK (provider_cursor <> ''),
+    ADD COLUMN IF NOT EXISTS cursor_sdk_version text CHECK (cursor_sdk_version <> ''),
+    ADD COLUMN IF NOT EXISTS bridge_state_root text CHECK (bridge_state_root <> ''),
+    ADD COLUMN IF NOT EXISTS cloud_branch text CHECK (cloud_branch <> ''),
+    ADD COLUMN IF NOT EXISTS cloud_agent_url text CHECK (cloud_agent_url <> ''),
+    ADD COLUMN IF NOT EXISTS usage_disposition text
+        CHECK (usage_disposition IN ('estimated', 'settled', 'unknown')),
+    ADD COLUMN IF NOT EXISTS last_segment_at timestamptz;
+
+GRANT UPDATE (native_session_ref, native_turn_ref, provider_cursor, cursor_sdk_version,
+    bridge_state_root, cloud_branch, cloud_agent_url, usage_disposition, last_segment_at)
+ON mission_control.harness_execution TO mission_control_runtime;
+-- end section: G2

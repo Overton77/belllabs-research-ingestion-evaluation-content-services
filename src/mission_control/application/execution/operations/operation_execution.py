@@ -14,7 +14,10 @@ from typing import Literal, Protocol
 from mission_control.application.authoring.service import ControlPlaneService
 from mission_control.application.execution.harness.deep_agents_harness import DeepAgentsHarness
 from mission_control.application.execution.harness.protocol import OperationLane
-from mission_control.application.execution.harness.registry import LaneRegistry
+from mission_control.application.execution.harness.registry import (
+    LaneRegistry,
+    lane_profile_for,
+)
 from mission_control.application.execution.operations.checkpoint_lineage import (
     CheckpointLineageService,
     UnitAttempt,
@@ -64,6 +67,7 @@ from mission_control.domain.execution.errors import (
     UnsupportedRuntimePolicy,
 )
 from mission_control.domain.execution.journal import OperationClaimResult, OperationEffectClaim
+from mission_control.domain.execution.lane_turns import ClosingFacts
 from mission_control.domain.graph_runtime.identities import QualifiedCheckpointKey
 from mission_control.domain.policies.contracts import (
     ActorContext,
@@ -842,6 +846,138 @@ class OperationExecutionService:
             admitted,
             lineage,
             lambda: self._cancel_or_settle(request, binding, claim, admitted, lineage),
+        )
+
+    # --- FT-G2: protocol lanes driven by `lane.turn` (SPEC-07 section 4.1) ------------------
+
+    async def admit_lane_session(self, request: OperationExecutionRequest) -> LaneSessionAdmission:
+        """Bind, authorize and claim a protocol-lane attempt before any provider work.
+
+        A Session Lane (Cursor) keeps its provider session across `lane.turn` segments, so
+        the attempt is admitted once and settled once: the binding and the run-control
+        effect claim exist before the first `send`, and a resumed segment re-admits the same
+        binding (idempotent). A settled attempt returns its settlement and no provider work.
+        """
+
+        self._lanes.admit(lane_profile_for(request))
+        fingerprint = contract_fingerprint(request, exclude={"requested_at"})
+        prior = await self._bindings.get_binding(
+            request.identity.semantic_key, request_scope=request.request_scope
+        )
+        if prior is not None:
+            if prior.request_fingerprint != fingerprint:
+                raise IdempotencyConflict(
+                    "semantic operation attempt was reused with conflicting execution intent"
+                )
+            settlement = await self._get_settlement(prior)
+            if settlement is not None:
+                await self._complete_post_effects(prior, settlement)
+                return LaneSessionAdmission(prior, _public_result(prior, settlement))
+            binding = prior
+            await self._authority.verify_continuation(request, binding)
+        else:
+            await self._authority.verify(request)
+            binding = await self._bindings.create_binding(
+                _binding_for(request, fingerprint), request_scope=request.request_scope
+            )
+            await self._authority.verify(request)
+        self._validate_policy_support(request)
+        await self._assets.verify(binding)
+        await self._mcp.verify_servers(binding)
+        await self._lane_claim(binding)
+        return LaneSessionAdmission(binding, None)
+
+    async def _lane_claim(self, binding: OperationExecutionBinding) -> OperationEffectClaim | None:
+        if self._journal is None:
+            # The side-effect key belongs to this binding; a resumed segment owns it already.
+            await self._bindings.claim_execution(binding)
+            return None
+        claim_result = await self._journal.acquire(binding, claimed_by=self._journal_claimed_by)
+        if claim_result.claim is None:
+            raise OperationExecutionInProgress(
+                f"lane session claim was not acquired ({claim_result.reason}); retry"
+            )
+        return claim_result.claim
+
+    async def lane_settlement(
+        self, request: OperationExecutionRequest
+    ) -> OperationExecutionResult | None:
+        """The attempt's settled public result, if it settled (`lane.status`)."""
+
+        binding = await self._bindings.get_binding(
+            request.identity.semantic_key, request_scope=request.request_scope
+        )
+        if binding is None:
+            return None
+        settlement = await self._get_settlement(binding)
+        return None if settlement is None else _public_result(binding, settlement)
+
+    async def settle_lane_session(
+        self,
+        request: OperationExecutionRequest,
+        facts: ClosingFacts,
+        *,
+        attempt: OperationActivityAttempt | None = None,
+        native_turn_ref: str | None = None,
+        cancelled_by_command: bool = False,
+    ) -> OperationExecutionResult:
+        """Settle a protocol-lane attempt once from its closing facts (never from deltas).
+
+        A provider `finished` completes the operation (acceptance stays with the Completion
+        Contract); `error` and `expired` fail it; `cancelled` settles `cancelled` and, for a
+        command, records the Stop Fence milestones. Usage dimensions the binding bounds are
+        settled; the full lane usage and the closing facts travel in the event payload.
+        """
+
+        binding = await self._bindings.get_binding(
+            request.identity.semantic_key, request_scope=request.request_scope
+        )
+        if binding is None:
+            raise ValueError("a lane session settles only an admitted binding")
+        settlement = await self._get_settlement(binding)
+        if settlement is not None:
+            await self._complete_post_effects(binding, settlement)
+            return _public_result(binding, settlement)
+        if not facts.terminal:
+            raise ValueError("a lane session settles only from terminal closing facts")
+        claim = await self._lane_claim(binding)
+        if cancelled_by_command:
+            await self._fence_milestone(binding, "provider_acknowledged")
+        settlement = _lane_settlement(binding, facts, native_turn_ref=native_turn_ref)
+        result = await self._settle(
+            binding,
+            claim,
+            settlement,
+            started_at=datetime.now(UTC),
+            attempt=attempt,
+            admitted=None,
+        )
+        if cancelled_by_command:
+            await self._fence_milestone(binding, "settled")
+        return result
+
+    async def lane_in_doubt(
+        self, request: OperationExecutionRequest, *, reason: str
+    ) -> OperationExecutionResult:
+        """The attempt's `in_doubt` disposition when the provider state cannot be known
+        (native turn lost, status unresolved after the poll bound). Nothing settles; the
+        claim stays unsettled for operator reconciliation."""
+
+        binding = await self._bindings.get_binding(
+            request.identity.semantic_key, request_scope=request.request_scope
+        )
+        if binding is None:
+            binding = bind_operation_execution_request(request)
+        settlement = await self._get_settlement(binding)
+        if settlement is not None:
+            return _public_result(binding, settlement)
+        return OperationExecutionResult(
+            binding_id=binding.binding_id,
+            semantic_attempt_key=binding.semantic_attempt_key,
+            status="in_doubt",
+            failure_code=reason,
+            failure_message="lane provider state is unknown; the unit awaits reconciliation",
+            unit_key=binding.runtime_unit.unit_key if binding.runtime_unit is not None else None,
         )
 
     async def _hold_lease(
@@ -1670,6 +1806,78 @@ class OperationExecutionService:
                 raise ValueError(
                     f"unsupported runtime policy lacks authored degradation: {unsupported.policy}"
                 )
+
+
+class LaneSessionAdmission:
+    """An admitted protocol-lane attempt: its binding, or its settled result."""
+
+    __slots__ = ("binding", "settled")
+
+    def __init__(
+        self, binding: OperationExecutionBinding, settled: OperationExecutionResult | None
+    ) -> None:
+        self.binding = binding
+        self.settled = settled
+
+
+_LANE_STATUS: dict[str, Literal["completed", "failed", "cancelled"]] = {
+    "finished": "completed",
+    "error": "failed",
+    "expired": "failed",
+    "cancelled": "cancelled",
+}
+
+
+def _lane_settlement(
+    binding: OperationExecutionBinding,
+    facts: ClosingFacts,
+    *,
+    native_turn_ref: str | None,
+) -> OperationSettlement:
+    status = _LANE_STATUS[facts.native_status]
+    amounts = {
+        "tokens.input": facts.usage.input_tokens,
+        "tokens.output": facts.usage.output_tokens,
+        "tokens.total": facts.usage.total_tokens,
+    }
+    bound = {
+        dimension: amount
+        for dimension, amount in amounts.items()
+        if dimension in binding.budget_limits and facts.usage.disposition != "unknown"
+    }
+    failure_code: str | None = None
+    if facts.native_status == "expired":
+        failure_code = "timeout"
+    elif facts.native_status == "error":
+        failure_code = "capacity" if facts.error_code == "capacity" else "provider_error"
+    elif facts.native_status == "cancelled":
+        failure_code = "cancelled"
+    refs = tuple(
+        dict.fromkeys(
+            (
+                *facts.output_refs,
+                *((facts.patch_ref,) if facts.patch_ref else ()),
+                *((facts.result_text_ref,) if facts.result_text_ref else ()),
+            )
+        )
+    )
+    return OperationSettlement(
+        settlement_id=operation_settlement_id(binding.binding_id),
+        binding_id=binding.binding_id,
+        status=status,
+        output_text=facts.result_excerpt,
+        output_refs=refs,
+        usage=RuntimeUsage(amounts=bound),
+        provider_run_id=native_turn_ref,
+        event_payloads=({"lane_closing_facts": facts.model_dump(mode="json")},),
+        failure_code=failure_code,
+        failure_message=(
+            None
+            if failure_code is None
+            else f"lane reported {facts.native_status} at governed operation boundary"
+        ),
+        settled_at=datetime.now(UTC),
+    )
 
 
 class InMemoryOperationBindingRepository:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import timedelta
+from functools import partial
 from typing import Any
 
 from temporalio import workflow
@@ -22,6 +23,18 @@ with workflow.unsafe.imports_passed_through():
         OperationWorkflowRequest,
         OperationWorkflowResult,
     )
+    from mission_control.domain.execution.lane_turns import (
+        LANE_COMMAND_SEMANTICS,
+        LaneCancelRequest,
+        LaneCommandReceipt,
+        LaneStatusRequest,
+        LaneStatusResult,
+        LaneTurnRequest,
+        LaneTurnResult,
+        NativeRefs,
+        default_lane_profile,
+    )
+    from mission_control.domain.execution.lanes import LaneResumePoint, LaneSegmentBounds
     from mission_control.domain.programs.search_attributes import (
         MissionPhase,
         phase_for_disposition,
@@ -34,7 +47,25 @@ PARK_IN_DOUBT_PATCH = "rrm-004-park-in-doubt-units"
 # the patch replay the exact earlier command sequence.
 CANCELLATION_SAGA_PATCH = "rrm-008-operation-cancellation-saga"
 NUDGE_SNAPSHOT_PATCH = "rrm-008-nudge-snapshot-before-activity"
+# FT-G2 (SPEC-07 section 4.2): a segment-driven unit (any `cursor` operation, or one whose
+# family passed `segments`) runs as a loop of `lane.turn` segments with the lane cancel path.
+# Requests without the new fields never reach the marker, so every earlier history replays.
+SEGMENT_LOOP_PATCH = "ft-g2-segment-loop"
 TERMINAL_DISPOSITIONS = frozenset({"completed", "cancelled", "failed", "in_doubt"})
+# `lane.turn` retries infrastructure failures (a lost worker, a heartbeat timeout) only:
+# rejections are non-retryable application errors raised by the activity.
+LANE_TURN_RETRY = RetryPolicy(
+    initial_interval=timedelta(seconds=1),
+    maximum_interval=timedelta(seconds=30),
+    backoff_coefficient=2.0,
+    maximum_attempts=5,
+)
+LANE_CONTROL_RETRY = RetryPolicy(
+    initial_interval=timedelta(seconds=1),
+    maximum_interval=timedelta(seconds=15),
+    backoff_coefficient=2.0,
+    maximum_attempts=10,
+)
 
 
 def _parks(result: dict[str, object]) -> bool:
@@ -101,6 +132,32 @@ async def settle_superseded_generation(
     )
 
 
+class _SegmentLoop:
+    """Where the segment loop of one workflow run stands (deterministic, in-memory)."""
+
+    def __init__(self, request: OperationWorkflowRequest) -> None:
+        self.bounds = request.segments or LaneSegmentBounds()
+        self.lane_profile: str = default_lane_profile(request.operation)
+        point = request.lane_resume or LaneResumePoint()
+        self.phase = point.phase
+        self.cursor = point.cursor
+        self.segment_no = point.segment_no
+        self.turn_no = point.turn_no
+        self.native = NativeRefs()
+        self.capacity_exhausted = False
+        if request.operation.execution_runtime == "cursor":
+            self.start_to_close = timedelta(seconds=self.bounds.start_to_close_s)
+            self.heartbeat_timeout = timedelta(seconds=self.bounds.heartbeat_timeout_s)
+        else:
+            # The governed Deep Agents body keeps its own claim-lease deadline and heartbeat.
+            self.start_to_close = timedelta(seconds=request.timeout_seconds)
+            self.heartbeat_timeout = timedelta(seconds=request.heartbeat_timeout_seconds)
+
+    @classmethod
+    def start(cls, request: OperationWorkflowRequest) -> _SegmentLoop:
+        return cls(request)
+
+
 class _CancellationRequested(Exception):
     """The unit's cancellation was requested while its attempt was in flight."""
 
@@ -129,13 +186,21 @@ class OperationWorkflow:
     of reconciliation.
     """
 
-    def __init__(self) -> None:
+    @workflow.init
+    def __init__(self, request: OperationWorkflowRequest) -> None:
         self._cancel_requested = False
         self._execution_generation = 1
         self._active_async_child_ids: tuple[str, ...] = ()
         self._reconciliation_nudges = 0
         self._nudges_seen = 0
         self._stop_fence_command_id: str | None = None
+        # FT-G2 (SPEC-07 section 4.4): command ids applied by this workflow id, carried
+        # across continue-as-new; validators reject a repeat within and across runs.
+        self._seen_cmds: set[str] = set(request.seen_cmds)
+        self._command_receipts: list[dict[str, Any]] = []
+        self._cancel_urgency = "normal"
+        self._cancel_command_id: str | None = None
+        self._terminal = False
 
     @workflow.signal
     def request_cancel(self) -> None:
@@ -157,6 +222,51 @@ class OperationWorkflow:
         if self._stop_fence_command_id is None:
             self._stop_fence_command_id = command_id
         self._cancel_requested = True
+
+    @workflow.update(name="cancel_command")
+    async def cancel_command(
+        self, command_id: str, urgency: str = "normal", reason: str = "command"
+    ) -> dict[str, Any]:
+        """FT-G2 cancel Update (SPEC-07 section 4.3): the handler records the command and
+        sets the flag; the segment loop does the work (activity cancel, `lane.cancel`,
+        `lane.status`, settlement). Its receipt names the lane's delivery semantics."""
+
+        del reason
+        self._seen_cmds.add(command_id)
+        self._cancel_urgency = urgency
+        self._cancel_command_id = command_id
+        self._cancel_requested = True
+        receipt = LaneCommandReceipt(
+            command_id=command_id,
+            kind="cancel",
+            delivery_semantics=LANE_COMMAND_SEMANTICS["cancel"],
+        ).model_dump(mode="json")
+        self._command_receipts.append(receipt)
+        return receipt
+
+    @cancel_command.validator
+    def _validate_cancel_command(
+        self, command_id: str, urgency: str = "normal", reason: str = "command"
+    ) -> None:
+        del reason
+        if not command_id or len(command_id) > 512:
+            raise ValueError("a cancel command names its command id")
+        if command_id in self._seen_cmds:
+            raise ValueError(f"command {command_id} was already applied to this unit")
+        if urgency not in {"normal", "immediate"}:
+            raise ValueError("cancel urgency is normal or immediate")
+        if self._terminal:
+            raise ValueError("the unit is terminal; a cancel has nothing to stop")
+
+    @workflow.query
+    def seen_commands(self) -> list[str]:
+        return sorted(self._seen_cmds)
+
+    @workflow.query
+    def command_receipts(self) -> list[dict[str, Any]]:
+        """The Delivery Report seeds of the commands this unit accepted."""
+
+        return list(self._command_receipts)
 
     @workflow.query
     def stop_fence_command(self) -> str | None:
@@ -235,7 +345,10 @@ class OperationWorkflow:
         if workflow.patched(CANCELLATION_SAGA_PATCH):
             # FT-G7: `mc_run_id`, `mc_lane` and `mc_phase` at the first segment boundary.
             self._visibility(request, "executing")
-            result = await self._run_governed(request)
+            if request.segment_driven and workflow.patched(SEGMENT_LOOP_PATCH):
+                result = await self._run_segments(request)
+            else:
+                result = await self._run_governed(request)
         else:
             legacy = await self._run_legacy(request)
             if legacy is None:
@@ -243,7 +356,11 @@ class OperationWorkflow:
             result = legacy
         status = result.get("status", "completed")
         disposition = status if status in TERMINAL_DISPOSITIONS else "failed"
+        self._terminal = True
         self._visibility(request, phase_for_disposition(str(disposition)))
+        if request.segment_driven:
+            # Handlers mutate state only; none may be cut off by completion (SPEC-07 4.4).
+            await workflow.wait_condition(workflow.all_handlers_finished)
         return self._result(request, str(disposition), result)
 
     @staticmethod
@@ -267,6 +384,234 @@ class OperationWorkflow:
             effect_frontier=request.effect_frontier,
             active_async_child_ids=self._active_async_child_ids,
         )
+
+    # --- FT-G2 segment loop (SPEC-07 sections 4.2 to 4.4) -------------------------------------
+
+    async def _run_segments(self, request: OperationWorkflowRequest) -> dict[str, object]:
+        """`lane.turn` segments until the turn settles; the cancel path once a cancel lands.
+
+        An `in_doubt` settlement parks exactly like the governed path: the unit waits for an
+        operator `reconcile_unit` hint (then the next segment classifies again) or a cancel
+        (then the lane cancel path runs again); nothing is re-sent speculatively.
+        """
+
+        loop = _SegmentLoop.start(request)
+        while True:
+            if self._cancel_requested:
+                outcome: dict[str, object] | None = await self._lane_cancel_and_settle(
+                    request, loop
+                )
+            else:
+                outcome = await self._next_segment(request, loop)
+                if outcome is None:
+                    continue
+            assert outcome is not None
+            if not _parks(outcome):
+                return outcome
+            self._visibility(request, "in_doubt")
+            cancelling = self._cancel_requested
+            seen = self._reconciliation_nudges
+
+            def woken(cancelling: bool = cancelling, seen: int = seen) -> bool:
+                return self._reconciliation_nudges > seen or (
+                    self._cancel_requested and not cancelling
+                )
+
+            try:
+                await workflow.wait_condition(woken)
+            except asyncio.CancelledError:
+                self._cancel_requested = True
+                _uncancel()
+            self._nudges_seen = self._reconciliation_nudges
+            loop.phase = "start"
+
+    async def _next_segment(
+        self, request: OperationWorkflowRequest, loop: _SegmentLoop
+    ) -> dict[str, object] | None:
+        """One `lane.turn` segment: its settled result, or None to continue the loop."""
+
+        bounds = loop.bounds
+        if loop.segment_no > bounds.max_segments:
+            # A turn that never closes within its segment budget is not guessed at.
+            return await self._lane_in_doubt(request, loop)
+        turn = LaneTurnRequest(
+            operation=request.operation,
+            lane_profile=loop.lane_profile,
+            generation=request.execution_generation,
+            phase=loop.phase,
+            cursor=loop.cursor,
+            turn_no=loop.turn_no,
+            segment_no=loop.segment_no,
+            segment=bounds,
+            capacity_exhausted=loop.capacity_exhausted,
+        )
+        handle = workflow.start_activity(
+            "lane.turn",
+            turn.model_dump(mode="json"),
+            result_type=dict,
+            task_queue=request.activity_task_queue,
+            start_to_close_timeout=loop.start_to_close,
+            heartbeat_timeout=loop.heartbeat_timeout,
+            retry_policy=LANE_TURN_RETRY,
+            cancellation_type=workflow.ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
+        )
+        try:
+            await workflow.wait_condition(partial(self._turn_ended_or_cancelled, handle))
+        except asyncio.CancelledError:
+            self._cancel_requested = True
+            _uncancel()
+        if self._cancel_requested and not handle.done():
+            # The activity's cleanup (the provider cancel, when this is a requested cancel)
+            # completes before the saga continues (WAIT_CANCELLATION_COMPLETED).
+            handle.cancel()
+            try:
+                await handle
+            except (Exception, asyncio.CancelledError):
+                _uncancel()
+            return None
+        result = LaneTurnResult.model_validate(handle.result())
+        if result.native.session_ref is not None:
+            loop.native = result.native
+        if result.done:
+            assert result.operation_result is not None
+            return dict(result.operation_result)
+        if result.busy:
+            # `wait_then_send`: nothing was sent; wait for the agent to be idle.
+            loop.capacity_exhausted = not await self._wait_until_idle(request, loop)
+            return None
+        loop.cursor, loop.phase = result.cursor, "resume"
+        loop.segment_no += 1
+        self._visibility(request, "executing")
+        await self._deliver_mailbox_at_boundary(request)
+        if workflow.info().is_continue_as_new_suggested():
+            await workflow.wait_condition(workflow.all_handlers_finished)
+            workflow.continue_as_new(
+                request.model_copy(
+                    update={
+                        "seen_cmds": tuple(sorted(self._seen_cmds)),
+                        "lane_resume": LaneResumePoint(
+                            phase=loop.phase,
+                            cursor=loop.cursor,
+                            segment_no=loop.segment_no,
+                            turn_no=loop.turn_no,
+                        ),
+                        "active_async_child_ids": self._active_async_child_ids,
+                    }
+                )
+            )
+        return None
+
+    def _turn_ended_or_cancelled(self, handle: workflow.ActivityHandle[Any]) -> bool:
+        return handle.done() or self._cancel_requested
+
+    async def _deliver_mailbox_at_boundary(self, request: OperationWorkflowRequest) -> None:
+        """Segment boundary hook for `next_turn` mailbox items (FT-F1 fills it). The mailbox
+        stays in PostgreSQL; a continue-as-new never loses an instruction."""
+
+        del request
+
+    @staticmethod
+    def _lane_payload(request: OperationWorkflowRequest, loop: _SegmentLoop) -> dict[str, object]:
+        return {
+            "operation": request.operation,
+            "lane_profile": loop.lane_profile,
+            "generation": request.execution_generation,
+            "native": loop.native,
+        }
+
+    async def _lane_status(
+        self, request: OperationWorkflowRequest, loop: _SegmentLoop
+    ) -> LaneStatusResult:
+        status: dict[str, object] = await workflow.execute_activity(
+            "lane.status",
+            LaneStatusRequest.model_validate(self._lane_payload(request, loop)).model_dump(
+                mode="json"
+            ),
+            result_type=dict,
+            task_queue=request.activity_task_queue,
+            start_to_close_timeout=timedelta(seconds=60),
+            retry_policy=LANE_CONTROL_RETRY,
+        )
+        return LaneStatusResult.model_validate(status)
+
+    async def _lane_cancel(
+        self,
+        request: OperationWorkflowRequest,
+        loop: _SegmentLoop,
+        *,
+        in_doubt: bool = False,
+    ) -> dict[str, object]:
+        cancel = LaneCancelRequest.model_validate(
+            {
+                **self._lane_payload(request, loop),
+                "reason": "command",
+                "urgency": self._cancel_urgency,
+                "command_id": self._cancel_command_id or self._stop_fence_command_id,
+                "in_doubt": in_doubt,
+            }
+        )
+        outcome: dict[str, object] = await workflow.execute_activity(
+            "lane.cancel",
+            cancel.model_dump(mode="json"),
+            result_type=dict,
+            task_queue=request.activity_task_queue,
+            start_to_close_timeout=timedelta(seconds=120),
+            retry_policy=LANE_CONTROL_RETRY,
+        )
+        return outcome
+
+    async def _lane_cancel_and_settle(
+        self, request: OperationWorkflowRequest, loop: _SegmentLoop
+    ) -> dict[str, object]:
+        """`lane.cancel` (idempotent), then `lane.status` until the provider is terminal and
+        the unit settles `cancelled`; after the poll bound the unit is `in_doubt`."""
+
+        self._visibility(request, "cancelling")
+        bounds = loop.bounds
+        polls = 0
+        while True:
+            outcome = await self._lane_cancel(request, loop)
+            settled = outcome.get("operation_result")
+            if isinstance(settled, dict):
+                return dict(settled)
+            while True:
+                status = await self._lane_status(request, loop)
+                if status.operation_result is not None:
+                    return dict(status.operation_result)
+                if status.terminal:
+                    break
+                polls += 1
+                if polls >= bounds.status_poll_limit:
+                    return await self._lane_in_doubt(request, loop)
+                await workflow.sleep(
+                    timedelta(seconds=bounds.status_poll_interval_s * min(2 ** (polls - 1), 8))
+                )
+
+    async def _lane_in_doubt(
+        self, request: OperationWorkflowRequest, loop: _SegmentLoop
+    ) -> dict[str, object]:
+        self._visibility(request, "in_doubt")
+        outcome = await self._lane_cancel(request, loop, in_doubt=True)
+        result = outcome.get("operation_result")
+        if not isinstance(result, dict):
+            raise ApplicationError(
+                "lane.cancel did not report the in_doubt disposition",
+                type="lane_in_doubt_unrecorded",
+                non_retryable=True,
+            )
+        return dict(result)
+
+    async def _wait_until_idle(self, request: OperationWorkflowRequest, loop: _SegmentLoop) -> bool:
+        """Poll `lane.status` until the agent is idle within `busy_wait_s` (False after)."""
+
+        bounds = loop.bounds
+        deadline = workflow.now() + timedelta(seconds=bounds.busy_wait_s)
+        while workflow.now() < deadline and not self._cancel_requested:
+            status = await self._lane_status(request, loop)
+            if status.idle:
+                return True
+            await workflow.sleep(timedelta(seconds=bounds.status_poll_interval_s))
+        return self._cancel_requested
 
     # --- RRM-008 governed path ----------------------------------------------------------------
 
@@ -392,6 +737,7 @@ class OperationWorkflow:
 
 __all__: tuple[str, ...] = (
     "CANCELLATION_SAGA_PATCH",
+    "SEGMENT_LOOP_PATCH",
     "OperationWorkflow",
     "settle_superseded_generation",
     "superseded_generation",

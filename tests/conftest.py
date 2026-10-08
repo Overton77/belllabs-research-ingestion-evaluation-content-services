@@ -55,6 +55,7 @@ _PSYCOPG_SELECTOR_MODULES = {
     ("control_plane", "test_rrm_008_cancellation_demo.py"),
     ("control_plane", "test_rrm_010_combined_smoke.py"),
     ("mission_control", "test_postgres_runtime_parity.py"),
+    ("mission_control", "test_ft_g2_segment_loop.py"),
     ("mission_control", "test_postgres_children_and_artifacts.py"),
     ("mission_control", "test_authenticated_scoped_runtime.py"),
     ("postgres", "test_mission_worker_startup.py"),

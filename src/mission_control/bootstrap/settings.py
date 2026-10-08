@@ -274,6 +274,9 @@ class Settings(BaseSettings):
     # lanes are admitted only when this local-proof policy is explicitly enabled.
     cursor_api_key: SecretStr | None = None
     mission_control_allow_unqualified_lanes: bool = False
+    # FT-G2: Deep Agents units run through the `lane.turn` segment loop instead of
+    # `operation.execute` (Cursor units always do). Off until FT-G6 retires the old path.
+    mission_control_lane_segment_loop: bool = False
 
     @property
     def allow_unqualified_lanes(self) -> bool:
