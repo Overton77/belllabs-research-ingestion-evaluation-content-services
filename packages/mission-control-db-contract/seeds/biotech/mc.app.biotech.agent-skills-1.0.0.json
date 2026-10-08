@@ -1360,10 +1360,10 @@
             ],
             "body_summary": "Change a running Mission Control run with missionctl commands - queue an instruction or context for the next turn or iteration, interrupt and inject, pause, resume, cancel (normal or immediate), snapshot, fork from a snapshot with an instruction, or reconcile an in-doubt unit. Use when a human wants to steer, stop, branch or repair a run that is already running.",
             "bundle_ref": {
-              "digest": "sha256:f0a97ee3b087cc38f3037a2387e818263efb05108285c8e72c506d4cc06b9b4c",
+              "digest": "sha256:807466c4c8fa676a470abf112a0a3db684f189d8a049a3bd6601e6cb88744aa8",
               "media_type": "application/vnd.mc.capability-bundle+json",
-              "size_bytes": 12358,
-              "uri": "capability-bundles://biotech/skill_bundle/skill.mission-control-intervene/0.4.0/f0a97ee3b087cc38f3037a2387e818263efb05108285c8e72c506d4cc06b9b4c"
+              "size_bytes": 12742,
+              "uri": "capability-bundles://biotech/skill_bundle/skill.mission-control-intervene/0.5.0/807466c4c8fa676a470abf112a0a3db684f189d8a049a3bd6601e6cb88744aa8"
             },
             "compatibility": {
               "executables": [],
@@ -1378,13 +1378,13 @@
             "description": "Change a running Mission Control run with missionctl commands - queue an instruction or context for the next turn or iteration, interrupt and inject, pause, resume, cancel (normal or immediate), snapshot, fork from a snapshot with an instruction, or reconcile an in-doubt unit. Use when a human wants to steer, stop, branch or repair a run that is already running.",
             "file_manifest": [
               {
-                "digest": "sha256:c027ce45879a87b3ff40474df59f0580d1ee3e235ac09cee28ebb5aa44acc63d",
+                "digest": "sha256:f87f86b35d84efcc11a18c3c7bc9a609ac9520fb8dae171b0e3a220cd01179aa",
                 "executable": false,
                 "path": "SKILL.md",
-                "size_bytes": 6269
+                "size_bytes": 6653
               },
               {
-                "digest": "sha256:e1a66331dfb460d97b3520b20795a78ab76853cbf584dcf8f5908166a0dd4b95",
+                "digest": "sha256:c92b740983ee554b4b5b876ab059387f6f98ec9160a0eb332bf82c65248c8f26",
                 "executable": false,
                 "path": "manifest.json",
                 "size_bytes": 374
@@ -1432,7 +1432,7 @@
             },
             "kind": "skill",
             "logical_id": "skill.mission-control-intervene",
-            "manifest_digest": "sha256:f0a97ee3b087cc38f3037a2387e818263efb05108285c8e72c506d4cc06b9b4c",
+            "manifest_digest": "sha256:807466c4c8fa676a470abf112a0a3db684f189d8a049a3bd6601e6cb88744aa8",
             "maturity": "qualified",
             "required_capabilities": [],
             "review_status": "approved",
@@ -1444,14 +1444,14 @@
               "locator": "repo://skills/mission-control-intervene",
               "source": "local",
               "upstream_identity": "skill.mission-control-intervene",
-              "upstream_version": "0.4.0"
+              "upstream_version": "0.5.0"
             },
             "title": "mission-control-intervene"
           },
           "published_at": "2026-10-08T00:00:00Z",
           "published_by": "seed:mission-control-catalog",
           "ref": {
-            "digest": "sha256:ec468632c9bcbb56062c5bbadc71a5a75108253290640edf8eda332cfb3a84bf",
+            "digest": "sha256:b98854a1dccbb85511c00ba17a75e215154bdafc67482b78e03b44507da16eb1",
             "kind": "skill",
             "lifecycle_status": "published",
             "logical_id": "skill.mission-control-intervene",
@@ -1461,7 +1461,7 @@
           },
           "retired_at": null
         },
-        "manifest_digest": "sha256:d3fef9400567193a26a713bd97481e015192fbd520b2a1014e047e4b79a2f102",
+        "manifest_digest": "sha256:7df09509ae544c068424cf7267c43425ce856a7fff3c1d5ac3391d2f83958f89",
         "manifest_ref": "mc-catalog://definition/skill/skill.mission-control-intervene/1",
         "required_compatibility": [
           ">=1.0.0 <2.0.0"

@@ -76,6 +76,10 @@ class ClosingFacts(Contract):
     error_message: str | None = Field(default=None, max_length=1_024)
     duration_ms: int | None = Field(default=None, ge=0)
     model: str | None = Field(default=None, min_length=1, max_length=256)
+    # FT-G4: declared outputs (`/outputs/...`) the finished session did not register. A
+    # native `finished` with missing outputs is never acceptance: it settles
+    # `not_accepted(outputs_missing)`. Left out of dumps and digests while empty.
+    missing_outputs: tuple[str, ...] = Field(default=(), exclude_if=lambda value: not value)
 
     @property
     def terminal(self) -> bool:
@@ -178,22 +182,79 @@ LANE_COMMAND_SEMANTICS: Final[dict[str, str]] = {
 }
 
 
+# FT-G4: what `pause` and `resume` do on every lane profile (00-ARCHITECTURE section 6;
+# the describe-honesty tests hold each declared matrix to it). `unsupported` pause means the
+# lane cannot pause mid-run: a pause is refused while a turn runs and applies at the run
+# boundary only (no new segment starts until resume).
+LANE_PAUSE_SEMANTICS: Final[dict[str, str]] = {
+    "deep_agents": "pause_at_tool_gate",
+    "cursor_local": "unsupported",
+    "cursor_cloud": "unsupported",
+}
+LANE_RESUME_SEMANTICS: Final[dict[str, str]] = {
+    "deep_agents": "turn_boundary_guaranteed",
+    "cursor_local": "wait_then_send",
+    "cursor_cloud": "wait_then_send",
+}
+UNSUPPORTED_CONTROL: Final = "unsupported_control"
+
+
+class ControlDecision(Contract):
+    """What a lane does with a control right now (the Delivery Report's semantics)."""
+
+    accepted: bool
+    delivery_semantics: str = Field(min_length=1, max_length=64)
+    reason_code: str | None = Field(default=None, min_length=1, max_length=64)
+    detail: str = Field(default="", max_length=512)
+
+
+def pause_decision_for(
+    lane_profile: str, pause_semantics: str, *, turn_in_flight: bool
+) -> ControlDecision:
+    """SPEC-07 section 7 `pause`: as declared where the lane pauses mid-run; otherwise a typed
+    `unsupported_control` rejection while a turn runs and a boundary-only pause."""
+
+    if pause_semantics != "unsupported":
+        return ControlDecision(accepted=True, delivery_semantics=pause_semantics)
+    if turn_in_flight:
+        return ControlDecision(
+            accepted=False,
+            delivery_semantics="unsupported",
+            reason_code=UNSUPPORTED_CONTROL,
+            detail=(
+                f"pause is unsupported mid-run on lane profile {lane_profile}; "
+                "it applies at the run boundary only"
+            ),
+        )
+    return ControlDecision(
+        accepted=True,
+        delivery_semantics="turn_boundary_guaranteed",
+        detail="applied at the run boundary",
+    )
+
+
 class LaneCommandReceipt(Contract):
     """What a command Update on the operation workflow returns (its Delivery Report seed)."""
 
     command_id: str = Field(min_length=1, max_length=512)
-    kind: Literal["cancel", "interrupt_and_inject"]
+    kind: Literal["cancel", "interrupt_and_inject", "pause", "resume"]
     accepted: bool = True
     delivery_semantics: str = Field(min_length=1, max_length=64)
+    # FT-G4: what the lane did with a boundary-only control (left out while empty).
+    detail: str = Field(default="", max_length=512, exclude_if=lambda value: not value)
 
 
 __all__ = [
     "CLOSING_FACTS_SCHEMA",
     "LANE_COMMAND_SEMANTICS",
+    "LANE_PAUSE_SEMANTICS",
+    "LANE_RESUME_SEMANTICS",
     "LANE_TURN_REQUEST_SCHEMA",
     "LANE_TURN_RESULT_SCHEMA",
     "TERMINAL_NATIVE_STATUSES",
+    "UNSUPPORTED_CONTROL",
     "ClosingFacts",
+    "ControlDecision",
     "LaneCancelRequest",
     "LaneCancelResult",
     "LaneCommandReceipt",
@@ -208,4 +269,5 @@ __all__ = [
     "NativeStatus",
     "TurnPhase",
     "default_lane_profile",
+    "pause_decision_for",
 ]

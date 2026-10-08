@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -25,6 +26,7 @@ from mission_control.adapters.temporal.registration.activities import agent_cogn
 from mission_control.adapters.temporal.search_attributes import BELLLABS_SEARCH_ATTRIBUTE_KEYS
 from mission_control.adapters.temporal.workflow_sandbox import coordinator_workflow_runner
 from mission_control.adapters.temporal.workflows.operation import (
+    LANE_PAUSE_PATCH,
     SEGMENT_LOOP_PATCH,
     OperationWorkflow,
 )
@@ -439,3 +441,203 @@ async def test_continue_as_new_carries_commands_and_cursor_and_phases_upsert_at_
     # attributes carry over continue-as-new), then the closing disposition; never per frame.
     assert _mc_phases(first) == ["executing"]
     assert _mc_phases(latest) == ["completed"]
+
+
+# --- FT-G4: Cursor lane controls through the segment loop -------------------------------------
+
+
+class _GatedStatusLane(ScriptedSessionLane):
+    """Busy at the first send; `lane.status` blocks until the test opens the gate."""
+
+    def __init__(self) -> None:
+        super().__init__(frames=scripted_frames(), busy_sends=1)
+        self.status_entered = asyncio.Event()
+        self.status_gate = asyncio.Event()
+
+    async def status(self, request: Any) -> Any:
+        from mission_control.domain.execution.lanes import ProviderStatus
+
+        self.calls.append("status")
+        self.status_entered.set()
+        await self.status_gate.wait()
+        return ProviderStatus(status="idle", terminal=True, idle=True)
+
+
+@pytest.mark.asyncio
+async def test_pause_mid_run_is_a_typed_rejection_on_a_cursor_unit() -> None:
+    env = await _time_skipping()
+    async with env:
+        lane = ScriptedSessionLane(frames=scripted_frames(), hold_after=1)
+        stack = lane_stack(lane)
+        workflow_worker, activity_worker = _workers(env, stack)
+        request = _request(segments=SMALL.model_copy(update={"max_frames": 50}))
+        async with workflow_worker, activity_worker:
+            handle = await _start(env, request, "ft-g4-pause-mid-run")
+            await asyncio.wait_for(lane.held.wait(), timeout=60)
+            with pytest.raises(WorkflowUpdateFailedError) as rejected:
+                await handle.execute_update("pause_command", args=["pause-1"])
+            assert not await handle.query(OperationWorkflow.paused)
+            lane.released.set()
+            result = await asyncio.wait_for(handle.result(), timeout=120)
+            history = await _replays(handle)
+
+    cause = rejected.value.cause
+    assert getattr(cause, "type", None) == "unsupported_control"
+    assert result.disposition == "completed"
+    assert len(lane.sends) == 1
+    assert LANE_PAUSE_PATCH not in patch_ids(history)
+
+
+@pytest.mark.asyncio
+async def test_pause_at_the_run_boundary_holds_the_next_segment_until_resume() -> None:
+    env = await _time_skipping()
+    async with env:
+        lane = _GatedStatusLane()
+        stack = lane_stack(lane)
+        workflow_worker, activity_worker = _workers(env, stack)
+        request = _request(segments=SMALL.model_copy(update={"max_frames": 50}))
+        async with workflow_worker, activity_worker:
+            handle = await _start(env, request, "ft-g4-pause-boundary")
+            # The first send found the agent busy: nothing is in flight (a run boundary).
+            await asyncio.wait_for(lane.status_entered.wait(), timeout=60)
+            receipt = await handle.execute_update("pause_command", args=["pause-1"])
+            lane.status_gate.set()
+            await asyncio.sleep(2)
+            assert await handle.query(OperationWorkflow.paused)
+            assert lane.sends == [], "no new segment starts while paused"
+            resumed = await handle.execute_update("resume_command", args=["resume-1"])
+            result = await asyncio.wait_for(handle.result(), timeout=120)
+            history = await _replays(handle)
+
+    assert receipt["kind"] == "pause"
+    assert receipt["delivery_semantics"] == "turn_boundary_guaranteed"
+    assert resumed["delivery_semantics"] == "wait_then_send"
+    assert result.disposition == "completed"
+    assert len(lane.sends) == 1
+    assert _scheduled(history) == ["lane.turn", "lane.status", "lane.turn"]
+    assert LANE_PAUSE_PATCH in patch_ids(history)
+
+
+def _control_workers(env: WorkflowEnvironment, stack: Any) -> tuple[Worker, Worker]:
+    activities = OperationExecutionActivities(
+        stack.lanes.boundary, worker_identity="ft-g4-worker", lane_turns=stack.service
+    )
+    return (
+        Worker(
+            env.client,
+            task_queue=WORKFLOW_QUEUE,
+            workflows=[OperationWorkflow],
+            workflow_runner=coordinator_workflow_runner(),
+        ),
+        Worker(
+            env.client, task_queue=LANE_QUEUE, activities=agent_cognitive_activities(activities)
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_inject_on_cursor_local_cancels_and_replaces_inside_the_segment_loop(
+    tmp_path: Path,
+) -> None:
+    from tests.fixtures.cursor_controls import control_stack, states
+
+    env = await _time_skipping()
+    async with env:
+        stack = await control_stack(
+            tmp_path, "inject_run", launcher_changes={"hold_at": 6}, declared_outputs=("report.md",)
+        )
+        launcher = stack.local.launcher
+        workflow_worker, activity_worker = _control_workers(env, stack)
+        request = _request(stack.operation, segments=SMALL.model_copy(update={"max_frames": 50}))
+        async with workflow_worker, activity_worker:
+            handle = await _start(env, request, "ft-g4-inject")
+            await asyncio.wait_for(launcher.held.wait(), timeout=60)
+            receipt = await stack.command("interrupt_and_inject", "Use release/2.3.")
+            result = await asyncio.wait_for(handle.result(), timeout=120)
+            history = await _replays(handle)
+
+    assert result.disposition == "completed"
+    assert _scheduled(history) == ["lane.turn"], "replaced inside one segment"
+    run_a, run_b = launcher.first_run, launcher.meta["later_runs"][0]
+    assert run_a in launcher.cancelled_runs and launcher.runs == [run_a, run_b]
+    assert "Use release/2.3." in launcher.sends[1][1]
+    status = await stack.status(receipt)
+    assert states(status)[-1] == "applied"
+    report = status.receipts[3].delivery_report
+    assert report is not None and report.delivered_semantics == "cancel_and_replace"
+
+
+@pytest.mark.asyncio
+async def test_fork_runs_its_first_segment_in_a_fresh_lease_restored_from_the_snapshot(
+    tmp_path: Path,
+) -> None:
+    from mission_control.domain.execution.lanes import SnapshotRequest
+    from tests.fixtures.cursor_controls import (
+        fork_stack_from,
+        harness_fields,
+        register_run,
+        started_session,
+    )
+    from tests.fixtures.cursor_local import local_stack
+
+    source = local_stack(tmp_path / "source")
+    register_run(source)
+    heid, session = await started_session(source)
+    root = Path(source.harness.lease_path(heid))
+    (root / "src").mkdir(exist_ok=True)
+    restored_name = "src/forked_module.py"
+    (root / restored_name).write_bytes(b"FORKED = 1\n")
+    manifest = await source.harness.snapshot(
+        SnapshotRequest(**harness_fields(source.operation, heid), session=session, reason="fork")
+    )
+    source_agent = session.native_session_ref
+    env = await _time_skipping()
+    async with env:
+        fork, _inputs = fork_stack_from(
+            tmp_path / "fork", source, manifest.refs[0], agent_base="agent-forked-0002"
+        )
+        lanes = lane_stack(fork.harness, frames=fork.frames, operation=fork.operation)
+        workflow_worker, activity_worker = _workers(env, lanes)
+        request = _request(fork.operation, segments=SMALL.model_copy(update={"max_frames": 50}))
+        async with workflow_worker, activity_worker:
+            handle = await _start(env, request, "ft-g4-fork")
+            result = await asyncio.wait_for(handle.result(), timeout=120)
+            history = await _replays(handle)
+
+    assert result.disposition == "completed"
+    settled = parse_operation_result(result.result)
+    assert fork.launcher.created and fork.launcher.agents[0] != source_agent
+    patch = next(
+        content
+        for ref, (name, content, _media) in fork.artifacts.staged.items()
+        if ref in settled.output_refs and name.endswith("patch.diff")
+    )
+    assert restored_name.encode("utf-8") in patch, "the derived run's patch carries the fork"
+    assert _scheduled(history) == ["lane.turn"]
+
+
+@pytest.mark.asyncio
+async def test_request_continuation_hands_the_next_turn_to_a_hydrated_agent(
+    tmp_path: Path,
+) -> None:
+    from tests.fixtures.cursor_controls import control_stack, seal_and_transfer
+
+    env = await _time_skipping()
+    async with env:
+        stack = await control_stack(tmp_path, "inject_run", launcher_changes={"hold_at": 6})
+        launcher = stack.local.launcher
+        workflow_worker, activity_worker = _control_workers(env, stack)
+        request = _request(stack.operation, segments=SMALL.model_copy(update={"max_frames": 50}))
+        async with workflow_worker, activity_worker:
+            handle = await _start(env, request, "ft-g4-continuation")
+            await asyncio.wait_for(launcher.held.wait(), timeout=60)
+            wired, outcome = await seal_and_transfer(stack)
+            launcher.release.set()
+            result = await asyncio.wait_for(handle.result(), timeout=120)
+            history = await _replays(handle)
+
+    assert result.disposition == "completed"
+    assert outcome.receipt is not None
+    assert launcher.sent_to == [launcher.meta["agent_id"], outcome.receipt.target_session_ref]
+    assert [item.event for item in wired["events"].actions][-1] == "transferred"
+    assert _scheduled(history) == ["lane.turn"]

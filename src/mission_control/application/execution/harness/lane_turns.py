@@ -30,6 +30,21 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 from uuid import UUID
 
+from mission_control.application.execution.harness.controls import (
+    SessionHandover,
+    SessionHandoverLane,
+    TurnTextStaging,
+    open_tool_calls,
+    usage_from_frames,
+)
+from mission_control.application.execution.harness.inject import (
+    INJECT_KIND,
+    InjectionParked,
+    InterruptAndInjectService,
+    cancel_and_replace_turn,
+    interrupt_semantics,
+    unit_boundary,
+)
 from mission_control.application.execution.harness.protocol import (
     NativeTurnLost,
     SessionLane,
@@ -40,9 +55,10 @@ from mission_control.application.execution.harness.state import (
     LaneExecutionUpdate,
     segment_update,
 )
+from mission_control.application.execution.mailbox import MailboxDeliveryService
 from mission_control.application.frames.kinds import classify
 from mission_control.application.frames.reducer import FrameFactProjector, FrameFactTarget
-from mission_control.application.frames.sink import FrameStore, harness_execution_id
+from mission_control.application.frames.sink import FrameReader, FrameStore, harness_execution_id
 from mission_control.application.frames.writer import FrameWriter
 from mission_control.contracts.identities import parse_request_scope
 from mission_control.domain.authoring.contracts import SecretRef
@@ -75,14 +91,18 @@ from mission_control.domain.execution.lanes import (
     StartRequest,
     StatusRequest,
     TurnHandle,
+    UsageReport,
     UsageRequest,
 )
 from mission_control.domain.frames.contracts import (
+    FrameKind,
     FrameObservation,
     HarnessExecutionHandle,
     HarnessExecutionStart,
     LaneProfile,
+    ProviderFrame,
 )
+from mission_control.domain.policies.mailbox import MailboxEntry, MailboxState
 
 _LOGGER = logging.getLogger(__name__)
 LANE_ACTOR = "mission-control-lane-turn"
@@ -243,7 +263,20 @@ class LaneTurnService:
         frame_facts: FrameFactProjector | None = None,
         clock: Callable[[], datetime] = _utc_now,
         excerpt_cap_bytes: int = 8_192,
+        mailbox: MailboxDeliveryService | None = None,
+        injections: InterruptAndInjectService | None = None,
+        frame_reader: FrameReader | None = None,
     ) -> None:
+        # FT-G4: the mailbox consumes queued content at the send that carries it
+        # (`wait_then_send`) and settles it with the turn; `injections` watches a running
+        # turn for `interrupt_and_inject` (`cancel_and_replace`); the frame reader names the
+        # turn's Uncertain Effects and its last reported usage.
+        self._mailbox = mailbox
+        self._injections = injections
+        reader = frame_reader
+        if reader is None and hasattr(frames, "frames_for_execution"):
+            reader = frames  # type: ignore[assignment]
+        self._reader: FrameReader | None = reader
         self._lanes = lanes
         self._boundary = boundary
         self._frames = frames
@@ -329,6 +362,8 @@ class LaneTurnService:
         fields = self._fields(operation, identity, request.generation, f"turn:{request.turn_no}")
         sent = state is not None and state.native_turn_ref is not None
         if request.capacity_exhausted:
+            if not sent:
+                await self._turn_not_started(operation)
             return await self._settle(
                 request,
                 harness,
@@ -439,6 +474,7 @@ class LaneTurnService:
         await self._states.record(
             scope, heid, LaneExecutionUpdate(native_turn_ref=turn.native_turn_ref)
         )
+        await self._turn_started(operation, harness, session, turn)
         return session, turn
 
     async def _resume_cursor(
@@ -474,35 +510,56 @@ class LaneTurnService:
         attempt: OperationActivityAttempt | None,
     ) -> LaneTurnResult:
         bounds = request.segment
-        persisted = duplicates = observed = 0
+        progress = _SegmentProgress(cursor=cursor, max_frames=bounds.max_frames)
         terminal: LaneFrame | None = None
-        native = NativeRefs(
-            session_ref=turn.session.native_session_ref, turn_ref=turn.native_turn_ref
-        )
-        last_cursor = cursor
         ticker = asyncio.create_task(
-            _heartbeat_ticker(signals, lambda: (last_cursor, persisted), bounds.heartbeat_timeout_s)
-        )
-        stream: AsyncIterator[LaneFrame] = harness.observe(
-            ObserveRequest(**fields, turn=turn, after=cursor, max_frames=bounds.max_frames)
+            _heartbeat_ticker(
+                signals, lambda: (progress.cursor, progress.persisted), bounds.heartbeat_timeout_s
+            )
         )
         try:
-            async with aclosing(stream) as frames:  # type: ignore[type-var]
-                with suppress(TimeoutError):
-                    async with asyncio.timeout(bounds.max_duration_s):
-                        async for frame in frames:
-                            receipt = await writer.write([self._observation(frame, identity)])
-                            persisted += receipt.new
-                            duplicates += receipt.duplicate
-                            observed += 1
-                            last_cursor = frame.cursor
-                            # Persisted first, then the heartbeat (the resume hint).
-                            signals.heartbeat(last_cursor, persisted)
-                            if frame.terminal:
-                                terminal = frame
-                                break
-                            if observed >= bounds.max_frames:
-                                break
+            with suppress(TimeoutError):
+                async with asyncio.timeout(bounds.max_duration_s):
+                    while True:
+                        pumped = await self._pump(
+                            request, harness, identity, fields, turn, writer, signals, progress
+                        )
+                        if pumped.injection is not None:
+                            replaced = await self._interrupt(
+                                request,
+                                harness,
+                                identity,
+                                fields,
+                                turn,
+                                pumped.injection,
+                                writer,
+                                signals,
+                                progress,
+                                cancel_first=True,
+                            )
+                            if isinstance(replaced, LaneTurnResult):
+                                return replaced
+                            turn = replaced
+                            continue
+                        if pumped.terminal is None:
+                            break
+                        following = await self._after_terminal(
+                            request,
+                            harness,
+                            identity,
+                            fields,
+                            turn,
+                            pumped.terminal,
+                            writer,
+                            signals,
+                            progress,
+                        )
+                        if isinstance(following, LaneTurnResult):
+                            return following
+                        if following is None:
+                            terminal = pumped.terminal
+                            break
+                        turn = following
         except asyncio.CancelledError:
             if signals.cancel_requested():
                 # A requested cancel, not a worker shutdown, pause or reset.
@@ -517,20 +574,23 @@ class LaneTurnService:
             ticker.cancel()
             with suppress(asyncio.CancelledError):
                 await ticker
+        native = NativeRefs(
+            session_ref=turn.session.native_session_ref, turn_ref=turn.native_turn_ref
+        )
         now = self._clock()
         await self._states.record(
             identity.request_scope,
             identity.harness_execution_id,
-            segment_update(last_cursor, now),
+            segment_update(progress.cursor, now),
         )
         if terminal is None:
             await self._project(writer.handle, identity)
             return LaneTurnResult(
                 done=False,
-                cursor=last_cursor,
+                cursor=progress.cursor,
                 segment_no=request.segment_no,
-                frames_persisted=persisted,
-                frames_duplicate=duplicates,
+                frames_persisted=progress.persisted,
+                frames_duplicate=progress.duplicates,
                 native=native,
             )
         facts = harness.closing_facts(turn, terminal)
@@ -542,13 +602,486 @@ class LaneTurnService:
             facts,
             attempt=attempt,
             native=native,
-            cursor=last_cursor,
-            persisted=persisted,
-            duplicates=duplicates,
+            cursor=progress.cursor,
+            persisted=progress.persisted,
+            duplicates=progress.duplicates,
             handle=writer.handle,
         )
 
-    def _observation(self, frame: LaneFrame, identity: LaneExecutionIdentity) -> FrameObservation:
+    async def _pump(
+        self,
+        request: LaneTurnRequest,
+        harness: SessionLane,
+        identity: LaneExecutionIdentity,
+        fields: dict[str, Any],
+        turn: TurnHandle,
+        writer: FrameWriter,
+        signals: TurnSignals,
+        progress: _SegmentProgress,
+    ) -> _Pumped:
+        """Observe the turn from the progress cursor, persisting before each heartbeat, until
+        a terminal frame, the frame bound, the end of the stream, or an injected command."""
+
+        bounds = request.segment
+        stream: AsyncIterator[LaneFrame] = harness.observe(
+            ObserveRequest(**fields, turn=turn, after=progress.cursor, max_frames=bounds.max_frames)
+        )
+        watch = self._watch(request)
+        try:
+            async with aclosing(stream) as frames:  # type: ignore[type-var]
+                iterator = aiter(frames)
+                if watch is None:
+                    while True:
+                        try:
+                            frame = await anext(iterator)
+                        except StopAsyncIteration:
+                            return _Pumped()
+                        ended = await self._take(frame, identity, writer, signals, turn, progress)
+                        if ended is not None:
+                            return ended
+                pending: asyncio.Future[LaneFrame] | None = None
+                try:
+                    while True:
+                        pending = asyncio.ensure_future(anext(iterator))
+                        await asyncio.wait({pending, watch}, return_when=asyncio.FIRST_COMPLETED)
+                        if not pending.done():
+                            return _Pumped(injection=watch.result())
+                        done, pending = pending, None
+                        try:
+                            frame = done.result()
+                        except StopAsyncIteration:
+                            return _Pumped()
+                        ended = await self._take(frame, identity, writer, signals, turn, progress)
+                        if ended is not None:
+                            return ended
+                finally:
+                    # The stream is closed only once no read of it is in flight.
+                    if pending is not None and not pending.done():
+                        pending.cancel()
+                        with suppress(asyncio.CancelledError, StopAsyncIteration, Exception):
+                            await pending
+        finally:
+            if watch is not None:
+                watch.cancel()
+                with suppress(asyncio.CancelledError, Exception):
+                    await watch
+
+    async def _take(
+        self,
+        frame: LaneFrame,
+        identity: LaneExecutionIdentity,
+        writer: FrameWriter,
+        signals: TurnSignals,
+        turn: TurnHandle,
+        progress: _SegmentProgress,
+    ) -> _Pumped | None:
+        await self._persist(frame, identity, writer, turn, progress)
+        # Persisted first, then the heartbeat (the resume hint).
+        signals.heartbeat(progress.cursor, progress.persisted)
+        if frame.terminal:
+            return _Pumped(terminal=frame)
+        if progress.max_frames and progress.observed >= progress.max_frames:
+            return _Pumped()
+        return None
+
+    async def _persist(
+        self,
+        frame: LaneFrame,
+        identity: LaneExecutionIdentity,
+        writer: FrameWriter,
+        turn: TurnHandle,
+        progress: _SegmentProgress,
+    ) -> None:
+        receipt = await writer.write(
+            [self._observation(frame, identity, session_ref=turn.session.native_session_ref)]
+        )
+        progress.persisted += receipt.new
+        progress.duplicates += receipt.duplicate
+        progress.observed += 1
+        progress.cursor = frame.cursor
+
+    # --- FT-G4 interrupt_and_inject: cancel_and_replace on a Session Lane ---------------------
+
+    def _watch(self, request: LaneTurnRequest) -> asyncio.Task[MailboxEntry] | None:
+        """Watch the mailbox for an `interrupt_and_inject` this turn would take."""
+
+        if self._injections is None or self._mailbox is None:
+            return None
+        node = unit_boundary(request.operation)
+        if node is None:
+            return None
+        injections = self._injections
+
+        async def poll() -> MailboxEntry:
+            while True:
+                entry = await injections.pending(request.operation, node)
+                if entry is not None:
+                    return entry
+                await asyncio.sleep(injections.settings.poll_seconds)
+
+        return asyncio.create_task(poll())
+
+    def _inject_prefix(self, operation: OperationExecutionRequest) -> str:
+        return f"{operation.idempotency_key}:inject:"
+
+    async def _claimed_injection(self, operation: OperationExecutionRequest) -> MailboxEntry | None:
+        """An injected command this turn claimed but never replaced (a retried replacement)."""
+
+        if self._mailbox is None:
+            return None
+        prefix = self._inject_prefix(operation)
+        for entry in await self._mailbox.list_entries(
+            operation.request_scope, operation.identity.run_id
+        ):
+            if (
+                entry.kind == INJECT_KIND
+                and entry.state == MailboxState.DELIVERED
+                and (entry.delivery_key or "").startswith(prefix)
+            ):
+                return entry
+        return None
+
+    async def _interrupt(
+        self,
+        request: LaneTurnRequest,
+        harness: SessionLane,
+        identity: LaneExecutionIdentity,
+        fields: dict[str, Any],
+        turn: TurnHandle,
+        entry: MailboxEntry,
+        writer: FrameWriter,
+        signals: TurnSignals,
+        progress: _SegmentProgress,
+        *,
+        cancel_first: bool,
+    ) -> TurnHandle | LaneTurnResult:
+        """SPEC-07 section 7 `interrupt_and_inject` on a lane without a native steer: cancel
+        the running turn, settle its Uncertain Effects (a running tool call without a
+        completion parks the unit `in_doubt`), then send a replacement turn carrying the
+        injected item; the Delivery Report says `cancel_and_replace`."""
+
+        assert self._mailbox is not None and self._injections is not None
+        operation = request.operation
+        describe = harness.describe()
+        lane_profile = describe.lane_profile
+        node = unit_boundary(operation)
+        semantics = interrupt_semantics(describe)
+        scope, run_id = operation.request_scope, operation.identity.run_id
+        if node is None or semantics != "cancel_and_replace":
+            await self._mailbox.inject_unsupported(scope, entry, lane_profile=lane_profile)
+            return turn  # the running turn is never interrupted
+        old_ref = turn.native_turn_ref
+        key = f"{self._inject_prefix(operation)}{entry.command_id}"
+        delivered = await self._mailbox.deliver(
+            scope,
+            run_id,
+            delivery_key=key,
+            family=node[0],
+            node_key=node[1],
+            iteration_start=False,
+            lane_profile=lane_profile,
+            kinds=(INJECT_KIND,),
+            cancelled_turn_ref=old_ref,
+        )
+        if not delivered:
+            return turn  # another boundary took it first; keep observing this turn
+        follow_up = await self._injections.follow_up_segment(operation, delivered, key)
+        if isinstance(harness, TurnTextStaging):
+            harness.stage_turn(fields["harness_execution_id"], key, follow_up.content)
+        replacement = SendTurnRequest(
+            **{
+                **fields,
+                "idempotency_key": (
+                    f"{identity.harness_execution_id}:{request.generation}:replace:{old_ref}"
+                ),
+            },
+            session=turn.session,
+            turn_no=turn.turn_no + 1,
+            instruction_ref=key,
+        )
+
+        async def unsettled() -> tuple[str, ...]:
+            return await self._open_effects(identity, request.generation, old_ref)
+
+        async def persist(frame: LaneFrame) -> None:
+            await self._persist(frame, identity, writer, turn, progress)
+            signals.heartbeat(progress.cursor, progress.persisted)
+
+        # The interrupted turn's Uncertain Effects, before the cancel (reported as settled).
+        uncertain = await unsettled()
+        try:
+            replaced = await cancel_and_replace_turn(
+                harness,
+                cancel=CancelTurnRequest(**fields, turn=turn, reason="interrupt_and_inject"),
+                replacement=replacement,
+                unsettled=unsettled,
+                settings=self._injections.settings,
+                after=progress.cursor,
+                on_frame=persist,
+                cancel_first=cancel_first,
+            )
+        except InjectionParked as parked:
+            await self._mailbox.inject_parked(
+                scope,
+                run_id,
+                delivery_key=key,
+                lane_profile=lane_profile,
+                cancelled_turn_ref=old_ref,
+                pending_effect_ids=parked.pending_effect_ids,
+            )
+            result = await self._boundary.lane_in_doubt(operation, reason="unsettled_effect_claims")
+            return LaneTurnResult(
+                done=True,
+                cursor=progress.cursor,
+                segment_no=request.segment_no,
+                frames_persisted=progress.persisted,
+                frames_duplicate=progress.duplicates,
+                native=NativeRefs(session_ref=turn.session.native_session_ref, turn_ref=old_ref),
+                closing_facts=ClosingFacts(
+                    native_status="in_doubt", error_code="unsettled_effect_claims"
+                ),
+                operation_result=result.model_dump(mode="json"),
+            )
+        new_turn = replaced.handle
+        if new_turn.status == "busy" or new_turn.native_turn_ref is None:
+            new_turn = await self._send_when_idle(harness, fields, replacement)
+        await self._states.record(
+            identity.request_scope,
+            identity.harness_execution_id,
+            LaneExecutionUpdate(
+                native_turn_ref=new_turn.native_turn_ref, supersedes_turn_ref=old_ref
+            ),
+        )
+        await self._mailbox.inject_replaced(
+            scope,
+            run_id,
+            delivery_key=key,
+            lane_profile=lane_profile,
+            delivered_semantics="cancel_and_replace",
+            cancelled_turn_ref=old_ref,
+            replacement_turn_ref=new_turn.native_turn_ref or f"turn:{new_turn.turn_no}",
+            settled_effect_ids=tuple(dict.fromkeys((*uncertain, *replaced.settled_effect_ids))),
+            session_ref=turn.session.native_session_ref,
+        )
+        # The replacement turn is observed from its start (its own provider keys).
+        progress.cursor = None
+        signals.heartbeat(None, progress.persisted)
+        return new_turn
+
+    async def _send_when_idle(
+        self, harness: SessionLane, fields: dict[str, Any], request: SendTurnRequest
+    ) -> TurnHandle:
+        """A cancelled run can take a moment to release the agent (`409 agent_busy`)."""
+
+        session = request.session
+        for _attempt in range(30):
+            observed = await harness.status(StatusRequest(**fields, session=session))
+            if observed.idle or observed.terminal:
+                sent = await harness.send_turn(request)
+                if sent.status != "busy" and sent.native_turn_ref is not None:
+                    return sent
+            await asyncio.sleep(0.5)
+        raise NativeTurnLost("the agent never became idle for the replacement turn")
+
+    async def _frames_of(
+        self, identity: LaneExecutionIdentity, generation: int
+    ) -> tuple[ProviderFrame, ...]:
+        if self._reader is None:
+            return ()
+        return await self._reader.frames_for_execution(
+            identity.request_scope, identity.harness_execution_id, generation, limit=10_000
+        )
+
+    async def _open_effects(
+        self, identity: LaneExecutionIdentity, generation: int, turn_ref: str | None
+    ) -> tuple[str, ...]:
+        return open_tool_calls(await self._frames_of(identity, generation), turn_ref)
+
+    async def _turn_usage(
+        self, identity: LaneExecutionIdentity, generation: int, turn_ref: str | None
+    ) -> UsageReport:
+        """The cancelled turn's usage from its last `TurnEndedUpdate` (`estimated`)."""
+
+        return usage_from_frames(await self._frames_of(identity, generation), turn_ref)
+
+    # --- terminal frame: retried replacement, continuation handover ---------------------------
+
+    async def _after_terminal(
+        self,
+        request: LaneTurnRequest,
+        harness: SessionLane,
+        identity: LaneExecutionIdentity,
+        fields: dict[str, Any],
+        turn: TurnHandle,
+        frame: LaneFrame,
+        writer: FrameWriter,
+        signals: TurnSignals,
+        progress: _SegmentProgress,
+    ) -> TurnHandle | LaneTurnResult | None:
+        """The turn after a terminal frame, if any: the replacement of an injection claimed
+        before a lost worker (the cancelled turn is already terminal), or the continuation
+        turn on a freshly hydrated agent. None settles the session."""
+
+        facts = harness.closing_facts(turn, frame)
+        if facts.native_status == "cancelled":
+            claimed = await self._claimed_injection(request.operation)
+            if claimed is not None and self._injections is not None:
+                return await self._interrupt(
+                    request,
+                    harness,
+                    identity,
+                    fields,
+                    turn,
+                    claimed,
+                    writer,
+                    signals,
+                    progress,
+                    cancel_first=False,
+                )
+        if facts.native_status != "finished" or not isinstance(harness, SessionHandoverLane):
+            return None
+        handover = await harness.pending_handover(fields["harness_execution_id"])
+        if handover is None:
+            return None
+        return await self._hand_over(
+            request, harness, identity, fields, turn, handover, writer, progress
+        )
+
+    async def _hand_over(
+        self,
+        request: LaneTurnRequest,
+        harness: SessionLane,
+        identity: LaneExecutionIdentity,
+        fields: dict[str, Any],
+        turn: TurnHandle,
+        handover: SessionHandover,
+        writer: FrameWriter,
+        progress: _SegmentProgress,
+    ) -> TurnHandle:
+        """SPEC-07 section 7 `request_continuation` (emulated): the next turn runs the fresh
+        agent a sealed Continuation Checkpoint hydrated; the native session moves by an
+        explicit supersession and the new session's `session_init` frame confirms it."""
+
+        assert isinstance(harness, SessionHandoverLane)
+        new_session = handover.session
+        await writer.write(
+            [
+                FrameObservation(
+                    provider_key=(
+                        f"continuation:{handover.transfer_id}:{new_session.native_session_ref}"
+                    )[:512],
+                    raw_kind="agent.created",
+                    kind=FrameKind.SESSION_INIT,
+                    body={
+                        "agentId": new_session.native_session_ref,
+                        "transfer_id": handover.transfer_id,
+                        "source_session_ref": handover.source_session_ref,
+                    },
+                    native_session_ref=new_session.native_session_ref,
+                )
+            ]
+        )
+        sent = await harness.send_turn(
+            SendTurnRequest(
+                **{
+                    **fields,
+                    "idempotency_key": (
+                        f"{identity.harness_execution_id}:{request.generation}:"
+                        f"continuation:{handover.transfer_id}"
+                    ),
+                },
+                session=new_session,
+                turn_no=turn.turn_no + 1,
+                instruction_ref=handover.instruction_ref,
+            )
+        )
+        if sent.native_turn_ref is None:
+            raise NativeTurnLost("the continuation turn was not accepted")
+        await self._states.record(
+            identity.request_scope,
+            identity.harness_execution_id,
+            LaneExecutionUpdate(
+                native_session_ref=new_session.native_session_ref,
+                supersedes_session_ref=turn.session.native_session_ref,
+                native_turn_ref=sent.native_turn_ref,
+                supersedes_turn_ref=turn.native_turn_ref,
+            ),
+        )
+        await harness.complete_handover(fields["harness_execution_id"], handover.transfer_id)
+        progress.cursor = None
+        return sent
+
+    # --- FT-G4 wait_then_send: the mailbox at the send that carries it -------------------------
+
+    async def _turn_started(
+        self,
+        operation: OperationExecutionRequest,
+        harness: SessionLane,
+        session: SessionHandle,
+        turn: TurnHandle,
+    ) -> None:
+        """The send carrying the delivered entries was accepted: consume them once. Content
+        queued while a turn runs waits for the following boundary (`wait_then_send`)."""
+
+        if self._mailbox is None:
+            return
+        await self._mailbox.turn_started(
+            operation.request_scope,
+            operation.identity.run_id,
+            delivery_key=operation.idempotency_key,
+            lane_profile=harness.describe().lane_profile,
+            session_ref=session.native_session_ref,
+            turn_ref=turn.native_turn_ref,
+        )
+
+    async def _turn_not_started(self, operation: OperationExecutionRequest) -> None:
+        if self._mailbox is None:
+            return
+        await self._mailbox.turn_not_started(
+            operation.request_scope,
+            operation.identity.run_id,
+            delivery_key=operation.idempotency_key,
+        )
+
+    async def _turns_settled(
+        self,
+        operation: OperationExecutionRequest,
+        lane_profile: str,
+        result: OperationExecutionResult,
+        turn_ref: str | None,
+    ) -> None:
+        if self._mailbox is None:
+            return
+        succeeded = result.status == "completed"
+        prefix = self._inject_prefix(operation)
+        keys = {operation.idempotency_key}
+        try:
+            for entry in await self._mailbox.list_entries(
+                operation.request_scope, operation.identity.run_id
+            ):
+                key = entry.delivery_key or ""
+                if entry.state == MailboxState.CONSUMED and key.startswith(prefix):
+                    keys.add(key)
+            for key in sorted(keys):
+                await self._mailbox.turn_settled(
+                    operation.request_scope,
+                    operation.identity.run_id,
+                    delivery_key=key,
+                    lane_profile=lane_profile,
+                    succeeded=succeeded,
+                    turn_ref=turn_ref,
+                )
+        except Exception:
+            # Receipts are evidence of an already settled unit (FT-F1 rule).
+            _LOGGER.exception("mailbox settlement receipts were not recorded")
+
+    def _observation(
+        self,
+        frame: LaneFrame,
+        identity: LaneExecutionIdentity,
+        *,
+        session_ref: str | None = None,
+    ) -> FrameObservation:
         lane = LaneProfile(identity.lane_profile)
         raw_kind = frame.raw_kind or frame.kind
         body = frame.body if frame.body is not None else {"excerpt": frame.excerpt}
@@ -560,6 +1093,7 @@ class LaneTurnService:
             native_turn_ref=frame.native_turn_ref,
             tool_call_ref=frame.tool_call_ref,
             provider_timestamp=frame.provider_timestamp,
+            native_session_ref=session_ref,
         )
 
     async def _settle(
@@ -595,6 +1129,10 @@ class LaneTurnService:
             identity.harness_execution_id,
             LaneExecutionUpdate(usage_disposition=facts.cost_disposition),
         )
+        if turn is not None or cancelled_by_command:
+            await self._turns_settled(
+                operation, harness.describe().lane_profile, result, native.turn_ref
+            )
         if handle is not None:
             await self._project(handle, identity, cancelled_by_command=cancelled_by_command)
         return LaneTurnResult(
@@ -792,12 +1330,18 @@ class LaneTurnService:
             generation=request.generation,
             phase="resume",
         )
+        usage = await self._turn_usage(identity, request.generation, turn_ref)
         cancelled = await self._settle(
             turn_request,
             harness,
             identity,
             turn,
-            ClosingFacts(native_status="cancelled", error_code="cancelled_by_command"),
+            ClosingFacts(
+                native_status="cancelled",
+                error_code="cancelled_by_command",
+                usage=usage,
+                cost_disposition="estimated" if usage.disposition != "unknown" else "unknown",
+            ),
             attempt=attempt,
             native=NativeRefs(session_ref=session_ref, turn_ref=turn_ref),
             cancelled_by_command=True,
@@ -805,6 +1349,21 @@ class LaneTurnService:
         return LaneCancelResult(
             receipt=receipt, settled=True, operation_result=cancelled.operation_result
         )
+
+
+@dataclass
+class _SegmentProgress:
+    cursor: str | None = None
+    max_frames: int = 0
+    persisted: int = 0
+    duplicates: int = 0
+    observed: int = 0
+
+
+@dataclass(frozen=True)
+class _Pumped:
+    terminal: LaneFrame | None = None
+    injection: MailboxEntry | None = None
 
 
 async def _heartbeat_ticker(

@@ -36,7 +36,7 @@ from mission_control.application.frames.kinds import classify, hook_key
 from mission_control.application.frames.sink import FrameStore
 from mission_control.application.frames.writer import FrameWriter
 from mission_control.contracts.hooks import HookInput, HookResult, HookScope
-from mission_control.domain.authoring.canonical import stable_json_digest
+from mission_control.domain.authoring.canonical import sha256_digest, stable_json_digest
 from mission_control.domain.capabilities.hooks import HookDecision, HookEvent
 from mission_control.domain.frames.contracts import (
     FrameObservation,
@@ -143,6 +143,19 @@ class NativeHookMapper(Protocol):
     ) -> tuple[str, EffectKind] | None: ...
 
 
+class StopFollowUpPolicy(Protocol):
+    """FT-G4 `missing_output_policy`: the follow-up a session that stops without its declared
+    outputs receives once (Cursor `stop` hook `followup_message`); None when nothing is
+    missing or the policy is `not_accepted`."""
+
+    async def stop_followup(
+        self, context: HookTokenContext, payload: Mapping[str, Any]
+    ) -> str | None: ...
+
+
+STOP_FOLLOWUP_EFFECT: Final = "stop:followup"
+
+
 class HookCallbackRejected(Exception):
     def __init__(self, status_code: int, code: str) -> None:
         super().__init__(code)
@@ -224,8 +237,10 @@ class HookCallbackService:
         fences: KernelHookFenceGate | None = None,
         frames: FrameStore | None = None,
         context_reader: Callable[[HookTokenContext], str | None] | None = None,
+        stop_policy: StopFollowUpPolicy | None = None,
         clock: Callable[[], datetime] = _utc_now,
     ) -> None:
+        self._stop_policy = stop_policy
         self._tokens = tokens
         self._intents = intents
         self._mapper = mapper
@@ -359,8 +374,53 @@ class HookCallbackService:
                     return HookResult(additional_context=index[:MAX_CONTEXT_CHARS]), {}
             return HookResult.allow(), {}
         if hook == "mc.usage":
+            if call.event == HookEvent.STOP:
+                return await self._stop_followup(call, context, hook_input)
             return HookResult.allow(), {}
         return HookResult.deny(f"unknown kernel hook {hook}"), {}
+
+    def set_stop_policy(self, policy: StopFollowUpPolicy | None) -> None:
+        """Compose the lane that knows the declared outputs (it is built after the service)."""
+
+        self._stop_policy = policy
+
+    async def _stop_followup(
+        self, call: KernelHookCall, context: HookTokenContext, hook_input: HookInput
+    ) -> tuple[HookResult, dict[str, Any]]:
+        """At most one follow-up per generation: the provider's `loop_count` must be 0 and
+        the follow-up is recorded once in the intent ledger before it is answered."""
+
+        if self._stop_policy is None:
+            return HookResult.allow(), {}
+        loop_count = call.payload.get("loop_count", call.payload.get("loopCount", 0))
+        if isinstance(loop_count, int) and loop_count > 0:
+            return HookResult.allow(), {"followup": "loop_limit"}
+        message = await self._stop_policy.stop_followup(context, call.payload)
+        if not message:
+            return HookResult.allow(), {}
+        nonce = secrets.token_hex(8)
+        intent = HookEffectIntent(
+            request_scope=context.request_scope,
+            run_id=context.run_id,
+            generation=context.generation,
+            harness_execution_id=context.harness_execution_id,
+            effect_ref=STOP_FOLLOWUP_EFFECT,
+            effect_kind="model",
+            hook_event=call.event.value,
+            lane_profile=context.lane_profile,
+            input_digest=sha256_digest(
+                {"hook_input": stable_json_digest(hook_input), "nonce": nonce}
+            ),
+            recorded_at=self._clock(),
+        )
+        stored = await self._intents.record(intent)
+        if stored.input_digest != intent.input_digest:
+            # The one follow-up of this generation was already given.
+            return HookResult.allow(), {"followup": "already_given"}
+        return (
+            HookResult(followup_message=message[:MAX_CONTEXT_CHARS]),
+            {"followup": "outputs_missing", "intent": STOP_FOLLOWUP_EFFECT},
+        )
 
     async def _persist(
         self,
@@ -419,6 +479,7 @@ __all__ = [
     "DISALLOWED_TOOL",
     "GATED_EVENTS",
     "KERNEL_HOOK_CALL_SCHEMA",
+    "STOP_FOLLOWUP_EFFECT",
     "HookCallbackRejected",
     "HookCallbackService",
     "HookEffectIntent",
@@ -430,5 +491,6 @@ __all__ = [
     "InMemoryHookTokenStore",
     "KernelHookCall",
     "NativeHookMapper",
+    "StopFollowUpPolicy",
     "token_digest",
 ]

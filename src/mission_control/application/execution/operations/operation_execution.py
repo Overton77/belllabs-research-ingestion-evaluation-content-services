@@ -1996,7 +1996,12 @@ def _lane_settlement(
         if dimension in binding.budget_limits and facts.usage.disposition != "unknown"
     }
     failure_code: str | None = None
-    if facts.native_status == "expired":
+    if facts.native_status == "finished" and facts.missing_outputs:
+        # FT-G4: a native `finished` without the declared outputs is not acceptance
+        # (`not_accepted(outputs_missing)`, after the one follow-up turn the lane allowed).
+        status = "failed"
+        failure_code = "outputs_missing"
+    elif facts.native_status == "expired":
         failure_code = "timeout"
     elif facts.native_status == "error":
         failure_code = "capacity" if facts.error_code == "capacity" else "provider_error"
@@ -2024,7 +2029,11 @@ def _lane_settlement(
         failure_message=(
             None
             if failure_code is None
-            else f"lane reported {facts.native_status} at governed operation boundary"
+            else (
+                "declared outputs were not registered: " + ", ".join(facts.missing_outputs)[:900]
+                if failure_code == "outputs_missing"
+                else f"lane reported {facts.native_status} at governed operation boundary"
+            )
         ),
         settled_at=datetime.now(UTC),
     )

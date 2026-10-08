@@ -545,6 +545,8 @@ def compose_cursor_local(
             default_repository=settings.cursor_local_repository,
         ),
     )
+    # FT-G4: the `stop` hook's one `missing_output_policy` follow-up knows the declared outputs.
+    hooks.set_stop_policy(harness)
     return harness, hooks
 
 
@@ -847,6 +849,7 @@ class ProductionWorkerActivityCompositionFactory:
             # FT-F4: a unit a fork reuses runs no turn and takes no queued content.
             reuse=ForkReuseOracle(PostgresForkMaterializationStore(postgres_pool)),
         )
+        injections = InterruptAndInjectService(mailbox, packs=context_packs)
         service = OperationExecutionService(
             lanes=lanes,
             # FT-F3: immediate-cancel Delivery Report milestones on the run's Stop Fence.
@@ -854,7 +857,7 @@ class ProductionWorkerActivityCompositionFactory:
             # FT-F1: delivered mailbox entries are consumed when their turn starts.
             mailbox=mailbox,
             # FT-F2: interrupt_and_inject by the lane's declared semantics.
-            injections=InterruptAndInjectService(mailbox, packs=context_packs),
+            injections=injections,
             authority=RunControlOperationAuthority(run_control, control_plane),
             bindings=bindings,
             runtime=adapter,
@@ -894,6 +897,12 @@ class ProductionWorkerActivityCompositionFactory:
             states=PostgresLaneExecutionStateStore(postgres_pool),
             secrets=secrets,
             frame_facts=FrameFactProjector(frame_store, run_control, actor=actor),
+            # FT-G4: queued content rides the next send (`wait_then_send`), an injected
+            # command replaces the running turn (`cancel_and_replace`), and the frames name
+            # a cancelled turn's usage and its Uncertain Effects.
+            mailbox=mailbox,
+            injections=injections,
+            frame_reader=frame_store,
         )
         self.operation = ProductionOperationComposition(
             service=service,

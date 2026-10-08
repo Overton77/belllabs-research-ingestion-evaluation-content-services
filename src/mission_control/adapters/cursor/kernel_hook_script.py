@@ -46,6 +46,9 @@ def native_output(event: str, result: dict[str, Any]) -> tuple[str, int]:
         out["updated_input"] = result["updated_input"]
     if result.get("additional_context"):
         out["additional_context"] = result["additional_context"]
+    if event == "stop" and not refused and result.get("followup_message"):
+        # The kernel's one `missing_output_policy` follow-up turn (FT-G4).
+        out["followup_message"] = result["followup_message"]
     return json.dumps(out), 2 if refused and event in PERMISSION_EVENTS else 0
 
 
