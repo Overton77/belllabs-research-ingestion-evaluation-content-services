@@ -1,0 +1,267 @@
+{
+  "$defs": {
+    "ChainBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "expand": {
+          "$ref": "#/$defs/ExpansionTier",
+          "default": "auto"
+        },
+        "input_name": {
+          "minLength": 1,
+          "title": "Input Name",
+          "type": "string"
+        },
+        "output_name": {
+          "minLength": 1,
+          "title": "Output Name",
+          "type": "string"
+        },
+        "schema_ref": {
+          "minLength": 1,
+          "title": "Schema Ref",
+          "type": "string"
+        }
+      },
+      "required": [
+        "output_name",
+        "input_name",
+        "schema_ref"
+      ],
+      "title": "ChainBinding",
+      "type": "object"
+    },
+    "ChainLinkKind": {
+      "enum": [
+        "supplies",
+        "depends_on"
+      ],
+      "title": "ChainLinkKind",
+      "type": "string"
+    },
+    "ChainLinkState": {
+      "enum": [
+        "armed",
+        "released",
+        "blocked",
+        "detached",
+        "cancelled"
+      ],
+      "title": "ChainLinkState",
+      "type": "string"
+    },
+    "ExpansionTier": {
+      "enum": [
+        "inline",
+        "reference",
+        "materialize",
+        "auto"
+      ],
+      "title": "ExpansionTier",
+      "type": "string"
+    },
+    "OnUpstreamCancel": {
+      "enum": [
+        "cancel_downstream",
+        "detach"
+      ],
+      "title": "OnUpstreamCancel",
+      "type": "string"
+    },
+    "ReleaseCondition": {
+      "additionalProperties": false,
+      "description": "``goal_accepted{goal_key}`` | ``mission_accepted`` | ``execution_complete``.",
+      "properties": {
+        "goal_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Goal Key"
+        },
+        "kind": {
+          "enum": [
+            "goal_accepted",
+            "mission_accepted",
+            "execution_complete"
+          ],
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "ReleaseCondition",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "``mc.chain_link.v1``.",
+  "properties": {
+    "bindings": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ChainBinding"
+      },
+      "title": "Bindings",
+      "type": "array"
+    },
+    "blocked_reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Blocked Reason"
+    },
+    "chain_id": {
+      "format": "uuid",
+      "title": "Chain Id",
+      "type": "string"
+    },
+    "from_mission_id": {
+      "anyOf": [
+        {
+          "format": "uuid",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "From Mission Id"
+    },
+    "from_mission_key": {
+      "minLength": 1,
+      "title": "From Mission Key",
+      "type": "string"
+    },
+    "kind": {
+      "$ref": "#/$defs/ChainLinkKind"
+    },
+    "link_id": {
+      "format": "uuid",
+      "title": "Link Id",
+      "type": "string"
+    },
+    "link_key": {
+      "minLength": 1,
+      "title": "Link Key",
+      "type": "string"
+    },
+    "on": {
+      "$ref": "#/$defs/ReleaseCondition"
+    },
+    "on_upstream_cancel": {
+      "$ref": "#/$defs/OnUpstreamCancel",
+      "default": "cancel_downstream"
+    },
+    "on_upstream_not_accepted": {
+      "const": "stop",
+      "default": "stop",
+      "title": "On Upstream Not Accepted",
+      "type": "string"
+    },
+    "packet_digest": {
+      "anyOf": [
+        {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Packet Digest"
+    },
+    "packet_ref": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Packet Ref"
+    },
+    "released_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Released At"
+    },
+    "released_run_id": {
+      "anyOf": [
+        {
+          "format": "uuid",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Released Run Id"
+    },
+    "schema_version": {
+      "const": "mc.chain_link.v1",
+      "default": "mc.chain_link.v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "state": {
+      "$ref": "#/$defs/ChainLinkState",
+      "default": "armed"
+    },
+    "to_mission_id": {
+      "anyOf": [
+        {
+          "format": "uuid",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "To Mission Id"
+    },
+    "to_mission_key": {
+      "minLength": 1,
+      "title": "To Mission Key",
+      "type": "string"
+    }
+  },
+  "required": [
+    "link_id",
+    "chain_id",
+    "link_key",
+    "from_mission_key",
+    "to_mission_key",
+    "kind",
+    "on"
+  ],
+  "title": "ChainLink",
+  "type": "object"
+}

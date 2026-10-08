@@ -1,0 +1,52 @@
+# yaml-language-server: $schema=../../../src/mission_control/contracts/schemas/mc.mission_manifest.v1.json
+# Minimal single-mission manifest used by tests/unit/authoring (FT-E1).
+manifest: mission/v1
+mission:
+  key: minimal-sweep
+  title: Minimal literature sweep
+  application: biotech
+  goals:
+    - key: evidence_map
+      description: Map the evidence
+      objectives:
+        - { key: find_trials, description: Find the trials }
+      criteria:
+        - key: coverage
+          description: Every study has a claim
+          evidence: [claims]
+          acceptance:
+            all:
+              - { schema: claim_table@1 }
+              - { human: review_accept }
+  environment:
+    lane: deep_agents
+    model: { profile: frontier.default, settings: { temperature: 0.2, reasoning: { effort: high } } }
+    sandbox: { profile: research.standard, egress: [pubmed] }
+    capabilities:
+      - { search: "pubmed literature retrieval", kind: mcp_server, as: pubmed, tools: [search_articles] }
+    budget: { usd: 25.50, tokens: 2000000, wall_clock: 4h, tool_calls: 100 }
+    governors: { depth: 2, fan_out: 4, iterations: 8, patience: 2 }
+    side_effects: [read_only, workspace_write]
+  program:
+    key: root
+    behavior: stage_graph
+    objectives: [evidence_map]
+    nodes:
+      - key: collect
+        behavior: goal_loop
+        objective: find_trials
+        action_space: [pubmed]
+        environment: { budget: { usd: 10 }, governors: { iterations: 5 } }
+        outputs: [ { name: sources, schema: source_manifest@1 } ]
+      - key: synthesize
+        behavior: agent_executor
+        objectives: [evidence_map]
+        depends_on: [collect]
+        inputs: [ { name: sources, from: collect.sources, expand: materialize } ]
+        instruction: .mission/instructions/synthesize.md
+        environment: { model: { profile: frontier.long_context } }
+        outputs: [ { name: claims, schema: claim_table@1 } ]
+  controls:
+    commands_allowed: [pause, resume, cancel]
+    subscriptions:
+      - { events: [run.completed], channel: stream }

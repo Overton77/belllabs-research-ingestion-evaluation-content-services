@@ -27,6 +27,10 @@ from mission_control.interfaces.mcp.coordinator_resources import (
     RESOURCE_TEMPLATE_NAMES,
     register_resources,
 )
+from mission_control.interfaces.mcp.subscriptions import (
+    McpSubscriptionBridge,
+    register_subscription_tools,
+)
 from mission_control.interfaces.mcp.transcript_tools import (
     ScopedTranscripts,
     register_transcript_tools,
@@ -248,6 +252,7 @@ def create_coordinator_server(
     *,
     auth: AuthProvider | None = None,
     transcripts: ScopedTranscripts | None = None,
+    subscriptions: McpSubscriptionBridge | None = None,
 ) -> FastMCP:
     surface = getattr(
         facade,
@@ -499,6 +504,13 @@ def create_coordinator_server(
             lambda principal: facade.get_workflow_result(principal, run_id),
         )
 
+    if subscriptions is not None:
+        register_subscription_tools(
+            server,
+            subscriptions,
+            principals.resolve,
+            _call,
+        )
     register_resources(server, facade, principals)
     register_prompts(server, facade, principals)
     if transcripts is not None:
