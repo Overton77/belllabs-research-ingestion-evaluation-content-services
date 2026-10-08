@@ -81,6 +81,10 @@ from mission_control.adapters.postgres.async_subagents.async_subagents import (
     PostgresAsyncSubagentAuthority,
 )
 from mission_control.adapters.postgres.capability_bundles import PostgresCapabilityBundleAdmissions
+from mission_control.adapters.postgres.context.artifact_bytes import PostgresArtifactBytes
+from mission_control.adapters.postgres.context.selection_repository import (
+    PostgresContextSelectionRepository,
+)
 from mission_control.adapters.postgres.coordinator.workflow_result_repository import (
     PostgresWorkflowResultRepository,
 )
@@ -116,6 +120,7 @@ from mission_control.adapters.postgres.workspaces.workspace_manifest_repository 
     PostgresWorkspaceManifestRepository,
 )
 from mission_control.adapters.storage.artifact_payloads import S3ArtifactPayloadStore
+from mission_control.adapters.storage.context_files import PayloadContextFiles
 from mission_control.adapters.storage.filesystem_workspace import FilesystemWorkspaceProvisioner
 from mission_control.adapters.supabase_storage.bundles import configured_supabase_bundle_reader
 from mission_control.adapters.temporal.artifact_activities import ArtifactPromotionActivities
@@ -146,6 +151,7 @@ from mission_control.application.artifacts.workspace_materialization import (
     WorkspaceMaterializationService,
 )
 from mission_control.application.authoring.service import ControlPlaneService
+from mission_control.application.context.pack_service import ContextPackService
 from mission_control.application.coordinator.coordinator_results import (
     TerminalWorkflowCompletionService,
 )
@@ -656,11 +662,20 @@ class ProductionWorkerActivityCompositionFactory:
                 self._additional.mcp_servers if self._additional is not None else None
             ),
         )
+        # FT-B2 (ADR-0027): Context Packet files are content-addressed in the payload store;
+        # the packer captures producer outputs from custody records and seals into PostgreSQL.
+        context_files = PayloadContextFiles(payloads)
+        context_packs = ContextPackService(
+            artifacts=PostgresArtifactBytes(postgres_pool, payloads),
+            selections=PostgresContextSelectionRepository(postgres_pool),
+            staging=context_files,
+        )
         adapter = DeploymentOperationRuntime(
             DeepAgentRuntimeAdapter(
                 ExactDeepAgentMaterializer(capabilities.registry),
                 async_subagents=children,
                 workspace_outputs=candidates,
+                context_inputs=context_files,
             ),
             children,
             pool=postgres_pool,
@@ -743,6 +758,7 @@ class ProductionWorkerActivityCompositionFactory:
                 operation_bindings=bindings,
                 templates=PostgresStageGraphOperationTemplateRepository(postgres_pool),
                 operation_heartbeats=heartbeats,
+                context_packs=context_packs,
             ),
             completion=completion,
         )
@@ -762,7 +778,8 @@ class _DurableInputsFromPayloads:
 
     async def retrieve(self, durable_ref: str) -> bytes:
         object_ref, _, rest = durable_ref.partition("#")
-        digest, _, size = rest.partition(":")
+        # FT-B2: the digest itself contains ':' (`sha256:<hex>`); the size is the last field.
+        digest, _, size = rest.rpartition(":")
         if not digest or not size.isdigit():
             raise ValueError(
                 "durable workspace input must be addressed as <object_ref>#<sha256>:<size>"

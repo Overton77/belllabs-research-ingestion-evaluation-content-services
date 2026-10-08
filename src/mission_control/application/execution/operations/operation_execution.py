@@ -24,6 +24,7 @@ from mission_control.application.execution.service import RunControlService
 from mission_control.domain.authoring.canonical import contract_fingerprint, sha256_digest
 from mission_control.domain.authoring.contracts import DefinitionKind, SecretRef
 from mission_control.domain.authoring.identity import stable_id
+from mission_control.domain.context.render import is_context_input_slot
 from mission_control.domain.execution.checkpoint_lineage import (
     CheckpointCapture,
     CheckpointInvocationPlan,
@@ -287,9 +288,12 @@ class RunControlOperationAuthority:
             (slot.name, f"{slot_root}{slot.path}", slot.access)
             for slot in configuration.workflow_workspace_contract.slots
         }
+        # FT-B2 (ADR-0027): read-only, digest-bound Context Packet inputs join the compiled
+        # slots; they cannot write and cannot overlap a compiled path (WorkspaceContract).
         bound_slots = {
             (slot.slot_name, slot.logical_path, slot.access)
             for slot in request.workspace.slot_bindings
+            if not is_context_input_slot(slot)
         }
         if configured_slots != bound_slots:
             raise ValueError("operation workspace slots do not exactly match the compiled contract")

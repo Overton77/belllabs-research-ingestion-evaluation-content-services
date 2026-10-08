@@ -35,7 +35,7 @@
   },
   "items": [
     {
-      "item_id": "sha256:1ae436d27f175ae48545482b56063630e5349d82eed3067d05129a4ee50aa08f",
+      "item_id": "sha256:b4e8b65335b25fbaa81abceb0eb9b206bbf739dec6f37863c69fbd2d90edc355",
       "binding_name": null,
       "source_kind": "operating_contract",
       "source_ref": "state://run-1/synthesize/operating_contract",
@@ -63,7 +63,7 @@
       }
     },
     {
-      "item_id": "sha256:98f721296b48dcfeaa1bfefa0b2e7ab5ab73587388c8005783516173a9f0e159",
+      "item_id": "sha256:0c87b26ac6f69b2639cf460cd2ce890cb96ac1e141b0e57aa04e20e9c63625d8",
       "binding_name": null,
       "source_kind": "pending_commitments",
       "source_ref": "state://run-1/pending_commitments",
@@ -91,7 +91,7 @@
       }
     },
     {
-      "item_id": "sha256:db21044225df3bfb8fc48aae4dfce3bcbafe1a4652d963b2979f5353741406f0",
+      "item_id": "sha256:99483f46b47b7a2bcb68f97124f01009ba264faab675b1c6d84c1c401ea2d1ca",
       "binding_name": null,
       "source_kind": "budget_remaining",
       "source_ref": "state://run-1/budget_remaining",
@@ -155,7 +155,7 @@
       }
     },
     {
-      "item_id": "sha256:8c5306d1582cf33735aa05fe9a0cdd433b74ef6c491475240992512d46981a8a",
+      "item_id": "sha256:6df0c020ee97171c21b811dcbc359263047872722ffc5e5aa9ae8d442d201f73",
       "binding_name": null,
       "source_kind": "workspace_map",
       "source_ref": "state://run-1/synthesize/workspace_map",
@@ -183,7 +183,7 @@
       }
     },
     {
-      "item_id": "sha256:de95362a444a3c06ea1d386335a6aeb8be228f1f15516da23af6dfceb7cd7f11",
+      "item_id": "sha256:b6d868abae55a6d5be0b357c521997177660440a195ac1b255103f685f0ff6f7",
       "binding_name": "sources",
       "source_kind": "accepted_output",
       "source_ref": "artifact://inst-1/run-1/source-manifest",
@@ -199,7 +199,7 @@
       "materialize": {
         "path": "/inputs/sources/source_manifest.json",
         "mode": "read_only",
-        "manifest_entry_ref": ".mission/inputs.json#sha256:de95362a444a3c06ea1d386335a6aeb8be228f1f15516da23af6dfceb7cd7f11",
+        "manifest_entry_ref": ".mission/inputs.json#sha256:b6d868abae55a6d5be0b357c521997177660440a195ac1b255103f685f0ff6f7",
         "durable_ref": "payload://objects/source-manifest#sha256:168b5aa3a40e6c735a763bc2dd27b75e2a9c8e66942ff9a337ba14e3db856231:215040",
         "summary": "180 PubMed records with abstracts",
         "tokens": 22
@@ -215,7 +215,7 @@
       }
     },
     {
-      "item_id": "sha256:0f99d377846aa72d785b69bb9ac70c5b7a06ba7ce86865b9c41ed68bf1a95d63",
+      "item_id": "sha256:2951de9ad1208bf45c76b8e32d2a8266a9b30e47a3093e77002887728203b393",
       "binding_name": "coverage",
       "source_kind": "accepted_output",
       "source_ref": "artifact://inst-1/run-1/coverage-review",
@@ -285,14 +285,14 @@
   ],
   "omitted": [],
   "mandatory_item_ids": [
-    "sha256:1ae436d27f175ae48545482b56063630e5349d82eed3067d05129a4ee50aa08f",
-    "sha256:98f721296b48dcfeaa1bfefa0b2e7ab5ab73587388c8005783516173a9f0e159",
-    "sha256:db21044225df3bfb8fc48aae4dfce3bcbafe1a4652d963b2979f5353741406f0",
+    "sha256:b4e8b65335b25fbaa81abceb0eb9b206bbf739dec6f37863c69fbd2d90edc355",
+    "sha256:0c87b26ac6f69b2639cf460cd2ce890cb96ac1e141b0e57aa04e20e9c63625d8",
+    "sha256:99483f46b47b7a2bcb68f97124f01009ba264faab675b1c6d84c1c401ea2d1ca",
     "sha256:27a649a72965746b5d9282a29ec39423e420c042e7e49ebcd1245aeb1b9d6cea",
-    "sha256:8c5306d1582cf33735aa05fe9a0cdd433b74ef6c491475240992512d46981a8a"
+    "sha256:6df0c020ee97171c21b811dcbc359263047872722ffc5e5aa9ae8d442d201f73"
   ],
   "workspace_snapshot_ref": null,
-  "packet_digest": "sha256:74993de91293a2ddcafb17e7d6805f4bbe659dbbc3d0be22377fd9fe952fd9a3",
+  "packet_digest": "sha256:ca45ef0f8390e508b4d098a3bb3af3e54e0dbf37826092a0fe5661b363e62be4",
   "sealed_at": "2026-10-07T12:00:00Z",
   "context_selection_ref": "context_selection:0199b8f0-0000-7000-8000-0000000000aa"
 }

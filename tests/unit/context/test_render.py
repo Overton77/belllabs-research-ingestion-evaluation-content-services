@@ -103,7 +103,7 @@ def test_untrusted_items_render_as_fenced_data_blocks_never_instructions():
     assert isinstance(result, ContextPacket)
     index = render_context_index(result)
     opening = (
-        "````data source=artifact://inst-1/run-1/handoff-draft "
+        "````data source=artifact://inst-1/{run_id}/handoff-draft "
         "trust=untrusted_content kind=progress_review\n"
     )
     assert opening in index

@@ -478,6 +478,23 @@ class StageExecutionIdentity:
 
 
 @dataclass(frozen=True)
+class StageInputBinding:
+    """FT-B2 (SPEC-02): one producer output delivered to one consumer input slot.
+
+    ``frozen_input_refs`` keeps the flat sorted refs for identity and digest compatibility;
+    the bindings keep the ``producer_output_slot -> consumer_input_slot`` mapping the Context
+    Packer needs.
+    """
+
+    consumer_input_slot_id: str
+    producer_stage_key: str
+    producer_output_slot_id: str
+    artifact_ref: str
+    accepted_decision_ref: str | None = None
+    provisional: bool = False
+
+
+@dataclass(frozen=True)
 class DependencyProjection:
     dependency_id: str
     generation: int = 1
@@ -526,6 +543,8 @@ class StageInstanceProjection:
     wait_condition_id: str | None = None
     pause_decision_id: str | None = None
     objective_override: str | None = None
+    # FT-B2: additive; excluded from the projection digest while empty.
+    frozen_input_bindings: tuple[StageInputBinding, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -553,6 +572,11 @@ class StageGraphAcceptedProjection:
     def digest(self) -> str:
         payload = asdict(self)
         payload.pop("run_version")
+        # FT-B2: an empty `frozen_input_bindings` leaves the pre-packet digest unchanged, so
+        # persisted family heads and snapshot digests of existing runs still match.
+        for stage in payload["stages"].values():
+            if not stage.get("frozen_input_bindings"):
+                stage.pop("frozen_input_bindings", None)
         return sha256_digest(payload)
 
 
@@ -568,6 +592,8 @@ class StageOperationAdmissionProposal:
     selected_ring_index: int
     next_fairness: FairnessCursorState
     objective_override: str | None = None
+    # FT-B2: the slot mapping behind `frozen_input_refs` (additive).
+    frozen_input_bindings: tuple[StageInputBinding, ...] = ()
 
 
 @dataclass(frozen=True)

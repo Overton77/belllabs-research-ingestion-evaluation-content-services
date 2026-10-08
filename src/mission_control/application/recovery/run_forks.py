@@ -44,6 +44,7 @@ from mission_control.application.recovery.runtime_recovery import (
     RuntimeForkService,
 )
 from mission_control.domain.authoring.canonical import sha256_digest, stable_json_dump
+from mission_control.domain.context.render import MISSION_FILE_SLOT_NAMES
 from mission_control.domain.execution.async_subagent_reconciliation import (
     AsyncChildLifecycleSubject,
     classify_async_children_for_fork,
@@ -1363,11 +1364,33 @@ def reuse_compatibility_digest(binding: OperationExecutionBinding) -> str:
     """
 
     content = stable_json_dump(binding, exclude=set(_RUN_SCOPED_BINDING_FIELDS))
+    _drop_derived_context_files(content.get("workspace"))
     deep = content.get("deep_agent_binding")
     if isinstance(deep, dict):
         for name in _RUN_SCOPED_DEEP_FIELDS:
             deep.pop(name, None)
+    if isinstance(deep, dict):
+        _drop_derived_context_files(deep.get("workspace"))
     return sha256_digest(_replace_text(content, binding.run_id, "{run_id}"))
+
+
+MISSION_FILE_SLOT_NAMES_SET = frozenset(MISSION_FILE_SLOT_NAMES.values())
+
+
+def _drop_derived_context_files(workspace: Any) -> None:
+    """FT-B2: the `.mission/` files are a pure rendering of the Context Packet, whose
+    run-relative digest is already compared through its prompt segment; their content
+    addresses embed the run id inside a hash, so they are not compared themselves."""
+
+    if not isinstance(workspace, dict):
+        return
+    slots = workspace.get("slot_bindings")
+    if isinstance(slots, list):
+        workspace["slot_bindings"] = [
+            slot
+            for slot in slots
+            if not (isinstance(slot, dict) and slot.get("slot_name") in MISSION_FILE_SLOT_NAMES_SET)
+        ]
 
 
 def _replace_text(value: Any, old: str, new: str) -> Any:

@@ -21,20 +21,22 @@ Public API (consumed by stage handoff, Goal Loop iterations, chains, the mailbox
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
-from typing import Literal, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
-from mission_control.contracts.canonical import canonical_digest
+from mission_control.contracts.canonical import canonical_bytes, canonical_digest
 
 PACKET_SCHEMA_VERSION: Literal["mc.context_packet.v1"] = "mc.context_packet.v1"
 PACKER_VERSION = "mc.context_packer/1"
 DIGEST_PATTERN = r"^sha256:[0-9a-f]{64}$"
+RUN_PLACEHOLDER = "{run_id}"
 
 DEFAULT_AUTO_INLINE_CAP = 4_000
 DEFAULT_AUTO_MATERIALIZE_FLOOR = 65_536
@@ -327,8 +329,6 @@ class ContextItem(_Contract):
             raise ValueError("item carries a body of another tier")
         if self.mandatory and self.provenance.provisional:
             raise ValueError("a provisional item can never be mandatory")
-        if self.item_id != context_item_id(self.source_kind, self.source_ref, self.binding_name):
-            raise ValueError("item_id does not match its source identity")
         return self
 
     @property
@@ -376,6 +376,13 @@ class ContextPacket(_Contract):
         item_ids = [item.item_id for item in self.items]
         if len(item_ids) != len(set(item_ids)):
             raise ValueError("packet items require unique item ids")
+        run_id = self.target.run_id
+        if any(
+            item.item_id
+            != context_item_id(item.source_kind, item.source_ref, item.binding_name, run_id=run_id)
+            for item in self.items
+        ):
+            raise ValueError("item_id does not match its source identity")
         mandatory = tuple(item.item_id for item in self.items if item.mandatory)
         if self.mandatory_item_ids != mandatory:
             raise ValueError("mandatory_item_ids must list the mandatory items in packet order")
@@ -392,7 +399,12 @@ class ContextPacket(_Contract):
 
 
 def packet_digest(packet: ContextPacket | dict[str, object]) -> str:
-    """Seal digest over canonical JSON of every field but id, seal time and selection ref."""
+    """Seal digest over canonical JSON of every field but id, seal time and selection ref.
+
+    Run-relative: every occurrence of the target's ``run_id`` is normalized to ``{run_id}``
+    before hashing, so a fork's packet over the same content has the same digest as its
+    source's (REQ-CP-EXEC-012 reuse compatibility compares bindings modulo the run id).
+    """
 
     if isinstance(packet, ContextPacket):
         fields: dict[str, object] = {
@@ -406,16 +418,46 @@ def packet_digest(packet: ContextPacket | dict[str, object]) -> str:
             for name, value in packet.items()
             if name not in _DIGEST_EXCLUDED_FIELDS and name != "packet_digest"
         }
-    return canonical_digest(fields)
+    target = fields.get("target")
+    run_id = (
+        target.run_id
+        if isinstance(target, PacketTarget)
+        else str(target.get("run_id", ""))
+        if isinstance(target, dict)
+        else ""
+    )
+    return canonical_digest(run_relative(json.loads(canonical_bytes(fields)), run_id))
+
+
+def run_relative(value: Any, run_id: str) -> Any:
+    """Replace ``run_id`` inside every string of a JSON value by ``{run_id}``."""
+
+    if not run_id:
+        return value
+    if isinstance(value, str):
+        return value.replace(run_id, RUN_PLACEHOLDER)
+    if isinstance(value, dict):
+        return {key: run_relative(item, run_id) for key, item in value.items()}
+    if isinstance(value, list):
+        return [run_relative(item, run_id) for item in value]
+    return value
 
 
 def context_item_id(
-    source_kind: ContextSourceKind, source_ref: str, binding_name: str | None
+    source_kind: ContextSourceKind,
+    source_ref: str,
+    binding_name: str | None,
+    *,
+    run_id: str = "",
 ) -> str:
-    """Stable item identity: sha256 over (source_kind, source_ref, binding_name)."""
+    """Stable item identity: sha256 over (source_kind, run-relative source_ref, binding_name)."""
 
     return canonical_digest(
-        {"source_kind": source_kind.value, "source_ref": source_ref, "binding_name": binding_name}
+        {
+            "source_kind": source_kind.value,
+            "source_ref": run_relative(source_ref, run_id),
+            "binding_name": binding_name,
+        }
     )
 
 
@@ -545,6 +587,8 @@ class LaneFileSupport(_Contract):
     writable_workspace: bool = True
     text_only_files: bool = False
     """True for a text-only backend such as Deep Agents ``StateBackend``."""
+    mount_root: str = Field(default="", pattern=r"^(/[A-Za-z0-9._-]+)*$")
+    """Prefix of default materialization paths (a GoalDirected role root, for example)."""
 
 
 class ContextBinding(_Contract):
@@ -573,7 +617,8 @@ class PackCandidate(_Contract):
     trust: ContextTrust
     mandatory: bool = False
     expand: ExpandMode | None = None
-    """Used when no binding of ``binding_name`` exists; bindings take precedence."""
+    """Used when no binding of ``binding_name`` exists; bindings take precedence, except
+    that ``reference`` here always wins (capture found nothing to inline or materialize)."""
     text: str | None = None
     """Pre-fetched text; required for an inline tier."""
     summary: str | None = None
@@ -725,8 +770,12 @@ class _Packer:
         order = {binding.binding_name: index for index, binding in enumerate(self.request.bindings)}
         for candidate in self.request.candidates:
             binding = bindings.get(candidate.binding_name) if candidate.binding_name else None
+            # Bindings choose the tier, except that capture may pin a candidate to reference
+            # (it has no bytes the lane could materialize or inline).
             expand = (
-                binding.expand
+                ExpandMode.REFERENCE
+                if candidate.expand == ExpandMode.REFERENCE
+                else binding.expand
                 if binding is not None
                 else candidate.expand
                 if candidate.expand is not None
@@ -738,7 +787,10 @@ class _Packer:
             yield _Prepared(
                 candidate=candidate,
                 item_id=context_item_id(
-                    candidate.source_kind, candidate.source_ref, candidate.binding_name
+                    candidate.source_kind,
+                    candidate.source_ref,
+                    candidate.binding_name,
+                    run_id=self.request.target.run_id,
                 ),
                 expand=expand,
                 mandatory=mandatory,
@@ -992,7 +1044,7 @@ class _Packer:
             name = _sanitize_segment(
                 candidate.file_name or candidate.source_ref.rstrip("/").rsplit("/", 1)[-1]
             )
-            path = f"/inputs/{folder}/{name}"
+            path = f"{self.lane.mount_root}/inputs/{folder}/{name}"
         if path in self.paths:
             stem, dot, extension = path.rpartition(".")
             suffix = entry.item_id.removeprefix("sha256:")[:12]
@@ -1127,6 +1179,7 @@ def default_retrieval(source_kind: ContextSourceKind, source_ref: str) -> Retrie
     scheme = source_ref.split("://", 1)[0] if "://" in source_ref else ""
     command = {
         "artifact": f"missionctl artifact get {source_ref}",
+        "workspace-candidate": f"missionctl artifact get {source_ref}",
         "journal": f"missionctl journal read {source_ref}",
         "checkpoint": f"missionctl run checkpoint --get {source_ref}",
         "catalog": f"missionctl catalog get {source_ref}",

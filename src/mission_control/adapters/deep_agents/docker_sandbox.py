@@ -16,6 +16,7 @@ from deepagents.backends.protocol import (
 from deepagents.backends.sandbox import BaseSandbox
 
 from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.context.render import is_context_input_slot
 from mission_control.domain.execution.contracts import DeepAgentExecutionBinding
 from mission_control.domain.execution.errors import DeepAgentUnsupportedPlacement
 
@@ -168,6 +169,10 @@ class DockerSandboxFactory:
                         f"type=bind,source={workspace_path},target={target}",
                     )
                 )
+            # FT-B2: the root filesystem is read-only, so the Context Packet's inputs
+            # (`/inputs/**`, `/.mission/**`) get a small tmpfs the adapter uploads into.
+            for root in _context_input_roots(binding):
+                mounts.extend(("--tmpfs", f"{root}:rw,nosuid,nodev,size=64m"))
             started = _docker(
                 "run",
                 "--detach",
@@ -241,6 +246,25 @@ class DockerSandboxFactory:
                 "Docker sandbox read mount is not a governed workspace reference"
             )
         return self._workspace_root / identity
+
+
+_RESERVED_ROOTS: Final = frozenset({"/workspace", "/skills", "/tmp"})
+
+
+def _context_input_roots(binding: DeepAgentExecutionBinding) -> tuple[str, ...]:
+    writable = tuple(binding.workspace.exclusive_write_paths)
+    roots = {
+        "/" + slot.logical_path.strip("/").split("/", 1)[0]
+        for slot in binding.workspace.slot_bindings
+        if is_context_input_slot(slot)
+    }
+    return tuple(
+        sorted(
+            root
+            for root in roots - _RESERVED_ROOTS
+            if not any(path == root or path.startswith(root + "/") for path in writable)
+        )
+    )
 
 
 def _docker(

@@ -640,3 +640,27 @@ def test_item_body_must_match_its_tier():
     data["tier"] = "reference"
     with pytest.raises(ValidationError, match="reference body"):
         ContextItem.model_validate(data)
+
+
+def test_packet_identity_is_run_relative_for_fork_reuse():
+    def for_run(run_id: str) -> ContextPacket:
+        base = worked_example_request()
+        candidates = tuple(
+            candidate.model_copy(
+                update={"source_ref": candidate.source_ref.replace("run-1", run_id)}
+            )
+            for candidate in base.candidates
+        )
+        return _packet(
+            base.model_copy(
+                update={
+                    "candidates": candidates,
+                    "target": base.target.model_copy(update={"run_id": run_id}),
+                }
+            )
+        )
+
+    source, fork = for_run("run-aaaa"), for_run("run-bbbb")
+    assert source.packet_digest == fork.packet_digest
+    assert [item.item_id for item in source.items] == [item.item_id for item in fork.items]
+    assert source.items[0].source_ref != fork.items[0].source_ref
