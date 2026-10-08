@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "service_contract_range": ">=0.1.0,<0.2.0",
   "files": {
-    "references/chain-patterns.md": "sha256:d91b8fd8d44c6ac8f1dc1fe9fb6a1ff9477681cc62bde9ac60976178c3b943c0",
-    "SKILL.md": "sha256:c9a793cac72745acae28c2784dfe7656751bdd81db459fa26fdb1a2d9b04963e"
+    "SKILL.md": "sha256:d48ca772a714971f454a5fec8bccdf15ad7f48dbe4af14033799ddaadbe6219c",
+    "references/chain-patterns.md": "sha256:baf0133956fa32b488a5c46f0b90baa66adbc07feb9637f10fef43c8a9b1d4ef"
   }
 }

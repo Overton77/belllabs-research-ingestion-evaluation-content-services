@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -51,7 +52,7 @@ def bundle_files(bundle: Path) -> dict[str, str]:
         if relative == MANIFEST_NAME:
             continue
         files[relative] = sha256_file(path)
-    return files
+    return dict(sorted(files.items()))
 
 
 def discover_bundles(root: Path, only: set[str] | None) -> list[Path]:
@@ -63,6 +64,28 @@ def discover_bundles(root: Path, only: set[str] | None) -> list[Path]:
             continue
         bundles.append(child)
     return bundles
+
+
+NAME_RULE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+
+
+def frontmatter_problem(bundle: Path) -> str | None:
+    """Return why ``SKILL.md`` frontmatter breaks the Agent Skills rules, or None."""
+    text = (bundle / "SKILL.md").read_text(encoding="utf-8")
+    match = re.match(r"---\r?\n(.*?)\r?\n---\r?\n", text, re.DOTALL)
+    if match is None:
+        return "SKILL.md has no frontmatter block"
+    fields = dict(
+        line.split(":", 1) for line in match.group(1).splitlines() if ":" in line and line[0] != " "
+    )
+    name = fields.get("name", "").strip()
+    if name != bundle.name:
+        return f"frontmatter name {name!r} differs from directory {bundle.name!r}"
+    if len(name) > 64 or not NAME_RULE.match(name):
+        return f"frontmatter name {name!r} breaks the Agent Skills name rule"
+    if not fields.get("description", "").strip():
+        return "frontmatter description is empty"
+    return None
 
 
 def load_manifest(bundle: Path) -> dict | None:
@@ -105,6 +128,10 @@ def check(bundles: list[Path]) -> int:
             print(f"MISSING  {bundle.name}: no {MANIFEST_NAME}")
             failures += 1
             continue
+        problem = frontmatter_problem(bundle)
+        if problem:
+            print(f"FRONT    {bundle.name}: {problem}")
+            failures += 1
         expected = build_manifest(bundle, existing)
         if existing.get("name") != bundle.name:
             print(
@@ -122,7 +149,7 @@ def check(bundles: list[Path]) -> int:
         elif existing.get("operation_catalog_digest") != expected.get("operation_catalog_digest"):
             print(f"DRIFT    {bundle.name}: operation_catalog_digest")
             failures += 1
-        else:
+        elif not problem:
             print(f"ok       {bundle.name} ({len(expected['files'])} files)")
     return 1 if failures else 0
 

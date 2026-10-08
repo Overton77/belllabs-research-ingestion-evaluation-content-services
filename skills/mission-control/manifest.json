@@ -4,9 +4,9 @@
   "version": "0.2.0",
   "service_contract_range": ">=0.1.0,<0.2.0",
   "files": {
+    "SKILL.md": "sha256:33889c268afb6cb62c3f49fb4b5fcad7d282978209ad231d428620ee72ee0f2f",
     "references/operations.json": "sha256:8f8fe121ad9166d6c1838c1a81d52173dd81b47f21e592df427916a8fc7a1dfb",
-    "references/protocol.md": "sha256:3ef89f7689095a7902f1f37fd11a91e04d65ae2609a969d93bc1cba4dd5b8531",
-    "SKILL.md": "sha256:cccfb371f1f9566500d391c9a726eaec103575e4698e7a5cf16686bf1fe2c795"
+    "references/protocol.md": "sha256:4979ac28316a597b64d812c9cc76ea5a21bfaf8b8a9e25aecdcf83070d8e79ca"
   },
   "operation_catalog_digest": "sha256:8f8fe121ad9166d6c1838c1a81d52173dd81b47f21e592df427916a8fc7a1dfb"
 }

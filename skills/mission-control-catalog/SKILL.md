@@ -13,21 +13,23 @@ canonical in the catalog (ADR-0020); the ones you compose into missions are desc
 ## 1. Search
 
 ```text
-missionctl catalog search "pubmed literature retrieval" --kind mcp_server --host deep_agents --json
+missionctl catalog search --query "pubmed literature retrieval" --kind mcp_server --host deep_agents --json
 ```
 
 Availability: FT-A8 (today use `catalog search --request-file search.json` with
-`{query, kinds, hosts, limit}`). Search is hybrid: a lexical and a vector ranking fused after
+`{query, kinds, hosts, limit}`; `--kind` and `--host` repeat). Search is hybrid: a lexical and a vector ranking fused after
 grant and `host_support` filtering; `search_mode: lexical` means no embedding route was
-configured. Each hit carries `ref`, `kind`, `score`, `rank_provenance`, `availability`
-(`available | unavailable | gated`), `host_support` and a safe excerpt. Done when you have
+configured. Each hit carries `ref`, `kind`, `score`, `pin`, `rank_provenance`,
+`availability` (`available | unavailable | gated`), `host_support` and a safe excerpt. Done when you have
 one to three candidates whose `availability` is `available` for the mission's lane.
 
 ## 2. Inspect
 
 ```text
-missionctl catalog inspect --request-file inspect.json --json
+missionctl catalog inspect --pin mcp.pubmed@0.1.0#sha256:… --json
 ```
+
+Availability of `--pin`: FT-A8 (today `catalog inspect --request-file inspect.json`).
 
 Read the capability's inputs, side-effect class, secret references (names only), tool list
 (for an MCP server) and host overlays. Done when you can state what the capability does, what it
@@ -36,10 +38,13 @@ may touch and which lanes can run it.
 ## 3. Pin
 
 ```text
-missionctl catalog pin mcp.tavily@0.2.22#sha256:… --json
+missionctl catalog pin --query "web search" --kind mcp_server --host cursor_cloud --json
 ```
 
-Availability: FT-A8 (today `catalog resolve --request-file ref.json`). A pin names version and
+Availability: FT-A8 (today `catalog resolve --request-file ref.json` with an exact ref). `catalog
+pin` returns exactly one pin or exits 2 with `AMBIGUOUS_CAPABILITY` and the candidates; choose one
+and pin it by its full string. `catalog render --pin PIN --host HOST` (FT-A8) previews the files a
+host projection would write. A pin names version and
 digest; `latest` is never resolved after admission. Selecting an MCP server never selects every
 tool: freeze an explicit tool allowlist in the manifest entry (`tools: [tavily_search]`).
 

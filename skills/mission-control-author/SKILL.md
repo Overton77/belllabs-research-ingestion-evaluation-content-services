@@ -68,10 +68,11 @@ is a new revision proposal.
 ## 5. Start
 
 ```text
-missionctl mission start MISSION_ID --json
+missionctl mission start RUN_ID --json
 ```
 
-Availability: FT-E3. Start is a separate authorized action; only run it when the human asked
+Availability: FT-E3. `RUN_ID` is the admitted run from the submit output (the HTTP alias
+`POST /missions/MISSION_ID/runs` starts the head revision's admitted run). Start is a separate authorized action; only run it when the human asked
 for the start and holds `mission.start`. Then hand over to `mission-control-observe` to watch
 the run, and register a subscription if the human wants callbacks.
 

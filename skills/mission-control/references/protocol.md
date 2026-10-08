@@ -18,14 +18,14 @@ command returns an error rather than a partial result. Rows without the marker e
 | Inspect | `run inspect ID [--wait S]` | `GET /runs/ID/inspection` | enriched in FT-F6 |
 | List and query runs | `run list --query 'mc_lane="cursor_local" AND mc_phase="running"'` | `GET /runs?query=` | FT-C4 |
 | Transcript | `run transcript ID --format jsonl\|md [--since CURSOR]` | `GET /runs/ID/transcript` | FT-C3 |
-| Search a run | `run search ID --query TEXT` | `GET /runs/ID/search?query=` | FT-C4 |
+| Search a run | `run search ID --query TEXT` | `GET /runs/ID/transcript/search?q=` | FT-C4 |
 | Send control | `command send ID --request-file FILE` | `POST /runs/ID/commands` | kinds added in FT-F1, FT-F2, FT-F3 |
-| Queue instruction or context | `command queue ID --request-file FILE` | same endpoint, `kind: queue_instruction \| add_context` | FT-F1 |
-| Interrupt and inject | `command inject ID --request-file FILE` | same endpoint, `kind: interrupt_and_inject` | FT-F2 |
+| Queue instruction or context | `command queue ID --file FILE` | same endpoint, `kind: queue_instruction \| add_context` | FT-F1 |
+| Interrupt and inject | `command inject ID --file FILE` | same endpoint, `kind: interrupt_and_inject` | FT-F2 |
 | Cancel | `command cancel ID --urgency normal\|immediate --reason TEXT` | same endpoint, `kind: cancel` | immediate in FT-F3 |
 | Observe controls | `command list ID` | `GET /runs/ID/commands` | |
 | Safe snapshot | `run snapshot ID --request-file FILE` | `POST /runs/ID/snapshots` | |
-| Semantic fork | `run fork ID --request-file FILE` or `run fork ID --from-snapshot SNAPSHOT_ID [--instruction-file FILE]` | `POST /runs/ID/forks` | flags in FT-F4 |
+| Semantic fork | `run fork ID --request-file FILE` or `run fork ID --from-snapshot SNAPSHOT_ID --instruction-file FILE` | `POST /runs/ID/forks` | flags in FT-F4 |
 | Privileged reconciliation | `run reconcile ID --request-file FILE` | `POST /runs/ID/reconcile-unit` | |
 
 ## Missions and chains
@@ -34,7 +34,7 @@ command returns an error rather than a partial result. Rows without the marker e
 | --- | --- | --- | --- |
 | Compile a manifest | `mission compile FILE --json` | `POST /missions:compile` | FT-E2 |
 | Submit (commit revision, admit run or chain) | `mission submit FILE --json` | `POST /missions:submit` | FT-E3 |
-| Start a submitted mission | `mission start MISSION_ID --json` | `POST /missions/MISSION_ID/runs` | FT-E3 |
+| Start the admitted run | `mission start RUN_ID --json` | `POST /missions/MISSION_ID/runs` (alias for the head revision's admitted run) | FT-E3 |
 | Inspect a chain | `chain inspect CHAIN_ID --json` | `GET /chains/CHAIN_ID` | FT-D2 |
 
 ## Events and subscriptions
@@ -42,7 +42,8 @@ command returns an error rather than a partial result. Rows without the marker e
 | Operation | CLI | HTTP | Availability |
 | --- | --- | --- | --- |
 | Watch events | `events watch MISSION_ID --after-seq N` | `GET /missions/MISSION_ID/events?after_seq=` (SSE) | FT-F5 |
-| Subscribe | `subscribe --mission MISSION_ID --events TYPES --webhook URL \| --stream` | `POST /subscriptions` | FT-F5 |
+| Subscribe | `subscribe --run RUN_ID \| --mission MISSION_ID --events TYPES --webhook URL --secret-ref REF` | `POST /subscriptions` (channels `webhook`, `stream_ticket`, `mcp_session`) | FT-F5 |
+| List and close subscriptions | `subscribe list`, `subscribe close ID` | `GET /subscriptions`, `DELETE /subscriptions/ID` | FT-F5 |
 
 ## Catalog
 
@@ -50,11 +51,12 @@ command returns an error rather than a partial result. Rows without the marker e
 | --- | --- | --- | --- |
 | List definitions | `catalog list` | `GET /catalog/definitions` | |
 | Resolve exact ref | `catalog resolve --request-file FILE` | `POST /catalog/resolve` | |
-| Search | `catalog search --request-file FILE` or `catalog search QUERY --kind KIND --host HOST --json` | `POST /catalog/search` | flags in FT-A8 |
+| Search | `catalog search --request-file FILE` or `catalog search --query TEXT --kind KIND --host HOST --limit N --json` | `POST /catalog/search` | flags in FT-A8 |
 | Discover (quarantined) | `catalog discover --request-file FILE` | `POST /catalog/discover` | |
 | Inspect candidate | `catalog inspect --request-file FILE` | `POST /catalog/inspect` | |
 | Components | `catalog components --request-file FILE` | `POST /catalog/components/search` | |
-| Pin | `catalog pin ID@VERSION#sha256:DIGEST --json` | `POST /catalog/resolve` (exact) | FT-A8 |
+| Pin | `catalog pin --query TEXT --kind KIND --host HOST --json` (one pin or `AMBIGUOUS_CAPABILITY`); exact ref today via `catalog resolve` | `GET /catalog/pins/PIN` | FT-A8 |
+| Inspect pin, preview projection | `catalog inspect --pin PIN`, `catalog render --pin PIN --host HOST` | `GET /catalog/pins/PIN` | FT-A8 |
 | Publish a bundle | `catalog publish --dir PATH --kind skill_bundle --json` | `POST /catalog/publish` | FT-A2 |
 
 ## Request conventions
