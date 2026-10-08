@@ -67,6 +67,8 @@ class RunLaunchRequest(BaseModel):
     goal_directed: dict[str, Any] | None = None
     # A fork launch names the source run's templates, which the patch is applied to.
     source_semantic_input_binding_ref: str | None = Field(default=None, min_length=1)
+    # FT-E3/G7: the mission the run executes; the root then starts with `mc_mission_id`.
+    mission_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class RunLaunchReceipt(BaseModel):
@@ -91,6 +93,7 @@ class RunWorkflowSubmitter(Protocol):
         workflow_id: str,
         blueprint_family: BlueprintFamily,
         parent_run_id: str | None = None,
+        mission_id: str | None = None,
     ) -> WorkflowSubmission: ...
 
 
@@ -152,11 +155,15 @@ class RunLaunchService:
             parent_run_id = receipt.source_run_id
             await self._apply_fork(request, fork_request, workflow_input)
         try:
+            extra: dict[str, str] = (
+                {"mission_id": request.mission_id} if request.mission_id is not None else {}
+            )
             submission = await self._submitter.submit(
                 workflow_input,
                 workflow_id=f"belllabs-run/{run.run_id}",
                 blueprint_family=family,
                 parent_run_id=parent_run_id,
+                **extra,
             )
         except LaunchIdempotencyConflict as error:
             raise RunLaunchRejected(error.code, str(error)) from error

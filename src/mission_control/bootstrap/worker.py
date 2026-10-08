@@ -20,6 +20,7 @@ from mission_control.adapters.deep_agents.runtime_persistence_verifier import (
     verify_runtime_persistence,
 )
 from mission_control.adapters.langsmith.tracing import configure_langsmith_tracing
+from mission_control.adapters.postgres.chains.store import install_chain_release_hook
 from mission_control.adapters.postgres.control_plane.definition_repository import (
     PostgresDefinitionRepository,
 )
@@ -289,6 +290,8 @@ async def run_worker(
             payloads,
             externalize_above_bytes=256_000 if settings.s3_bucket else 15_000_000,
         )
+        # FT-D2: family commits (terminalization, evidence) release chain links in-transaction.
+        install_chain_release_hook()
         runs = compose_worker_run_control_service(
             PostgresRunControlRepository(
                 prepared.runtime_pool, family_writer_pool=prepared.family_pool

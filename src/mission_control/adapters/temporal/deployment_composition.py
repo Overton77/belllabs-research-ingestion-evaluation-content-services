@@ -82,6 +82,7 @@ from mission_control.adapters.postgres.async_subagents.async_subagents import (
     PostgresAsyncSubagentAuthority,
 )
 from mission_control.adapters.postgres.capability_bundles import PostgresCapabilityBundleAdmissions
+from mission_control.adapters.postgres.chains.store import PostgresChainSupplies
 from mission_control.adapters.postgres.context.artifact_bytes import PostgresArtifactBytes
 from mission_control.adapters.postgres.context.selection_repository import (
     PostgresContextSelectionRepository,
@@ -687,6 +688,8 @@ class ProductionWorkerActivityCompositionFactory:
             artifacts=PostgresArtifactBytes(postgres_pool, payloads),
             selections=PostgresContextSelectionRepository(postgres_pool),
             staging=context_files,
+            # FT-D2: a released chain consumer's first packet carries its supplies.
+            chain_supplies=PostgresChainSupplies(postgres_pool),
         )
         adapter = DeploymentOperationRuntime(
             DeepAgentRuntimeAdapter(

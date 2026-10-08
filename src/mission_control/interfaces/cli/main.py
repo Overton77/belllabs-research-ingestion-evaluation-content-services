@@ -43,6 +43,11 @@ class MissionClient:
     def commands(self, run_id: str) -> httpx.Response:
         return self.client.get(f"{self.prefix}/runs/{self._id(run_id)}/commands")
 
+    def chain(self, chain_id: str) -> httpx.Response:
+        """FT-D2: the ``mc.chain.v1`` projection with each member's run."""
+
+        return self.client.get(f"{self.prefix}/chains/{self._id(chain_id)}")
+
     def admit(self, body: dict[str, Any]) -> httpx.Response:
         return self.client.post(
             f"{self.prefix}/run-requests",
@@ -495,6 +500,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     compile_ = mission_commands.add_parser("compile", parents=[common])
     compile_.add_argument("file")
+    # FT-D2: Mission Chains (read-only; members are cancelled individually in v1).
+    chain = groups.add_parser("chain", parents=[common])
+    chain_commands = chain.add_subparsers(dest="action", required=True)
+    chain_inspect = chain_commands.add_parser("inspect", parents=[common])
+    chain_inspect.add_argument("chain_id")
     subscribe = groups.add_parser("subscribe", parents=[common])
     subscribe.add_argument("action", nargs="?", choices=("create", "list", "close"))
     subscribe.add_argument("subscription_id", nargs="?")
@@ -567,11 +577,12 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("API URL must use HTTPS (HTTP is allowed only for loopback)")
         if deadline_seconds is not None and not 0 < deadline_seconds <= 3600:
             raise ValueError("--wait must be greater than zero and at most 3600 seconds")
-        if deadline_seconds is not None and (
-            args.group != "run" or args.action not in {"inspect", "transcript", "frames"}
+        if deadline_seconds is not None and not (
+            (args.group == "run" and args.action in {"inspect", "transcript", "frames"})
+            or (args.group == "chain" and args.action == "inspect")
         ):
             raise ValueError(
-                "--wait is supported on run inspect, transcript and frames; "
+                "--wait is supported on run inspect, transcript, frames and chain inspect; "
                 "command admission is not completion"
             )
         body = strict_object(args.request_file) if getattr(args, "request_file", None) else None
@@ -622,6 +633,8 @@ def main(argv: list[str] | None = None) -> int:
                     response = client.subscriptions(
                         args.action, body, getattr(args, "subscription_id", None)
                     )
+                elif args.group == "chain":
+                    response = client.chain(args.chain_id)
                 elif args.action == "inspect":
                     response = client.inspection(args.run_id)
                 elif args.action == "admit" and body is not None:
@@ -643,6 +656,10 @@ def main(argv: list[str] | None = None) -> int:
                 if isinstance(result, dict) and result.get("lifecycle") == "completed":
                     print(json.dumps(result, allow_nan=False))
                     return 0 if result.get("execution_outcome") == "completed" else 6
+                chain_state = result.get("chain") if isinstance(result, dict) else None
+                if isinstance(chain_state, dict) and chain_state.get("lifecycle") == "completed":
+                    print(json.dumps(result, allow_nan=False))
+                    return 0 if chain_state.get("terminal_outcome") == "accepted" else 6
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     print(json.dumps({"error": "wait_timeout", "inspection": result}))

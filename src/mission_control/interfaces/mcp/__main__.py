@@ -8,6 +8,7 @@ from typing import cast
 import asyncpg
 
 from mission_control.adapters.postgres.capability.capability_search_repository import PostgresPool
+from mission_control.adapters.postgres.chains.store import PostgresChainReader
 from mission_control.adapters.postgres.connections import (
     create_application_postgres_pool,
     create_postgres_pool,
@@ -17,6 +18,7 @@ from mission_control.adapters.postgres.control_plane.definition_repository impor
 )
 from mission_control.adapters.postgres.frames.repository import PostgresFrameRepository
 from mission_control.adapters.postgres.frames.transcript_reads import PostgresMissionEventReader
+from mission_control.application.chains.service import ChainInspectionService
 from mission_control.application.coordinator.coordinator_facade import (
     CoordinatorLimits,
     ProductionCoordinatorFacade,
@@ -35,6 +37,7 @@ from mission_control.interfaces.mcp.coordinator_server import (
     StaticPrincipalResolver,
     create_coordinator_server,
 )
+from mission_control.interfaces.mcp.mission_tools import ScopedChains
 from mission_control.interfaces.mcp.transcript_tools import ScopedTranscripts
 
 
@@ -130,6 +133,7 @@ async def _serve(args: argparse.Namespace) -> None:
             facade,
             StaticPrincipalResolver(principal),
             transcripts=_transcripts(application_pool, principal.request_scope),
+            chains=_chains(application_pool, principal.request_scope),
         )
         await server.run_http_async(
             transport="streamable-http",
@@ -156,6 +160,23 @@ def _transcripts(application_pool: PostgresPool, request_scope: str) -> ScopedTr
                 PostgresMissionEventReader(pool),
                 PostgresFrameRepository(pool),
                 request_scope=request_scope,
+            )
+        }
+    )
+
+
+def _chains(application_pool: PostgresPool, request_scope: str) -> ScopedChains | None:
+    """SPEC-04 (FT-D2): the Mission Chains of the principal's canonical tenant scope."""
+
+    try:
+        parse_request_scope(request_scope)
+    except ValueError:
+        return None
+    pool = cast(asyncpg.Pool, application_pool)
+    return ScopedChains(
+        {
+            request_scope: ChainInspectionService(
+                PostgresChainReader(pool), request_scope=request_scope
             )
         }
     )

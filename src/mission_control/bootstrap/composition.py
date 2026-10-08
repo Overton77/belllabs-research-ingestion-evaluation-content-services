@@ -16,6 +16,7 @@ import asyncpg
 from mission_control.adapters.postgres.async_subagents.async_subagents import (
     PostgresAsyncSubagentAuthority,
 )
+from mission_control.adapters.postgres.chains.store import install_chain_release_hook
 from mission_control.adapters.postgres.control_plane.definition_repository import (
     PostgresDefinitionRepository,
 )
@@ -154,6 +155,8 @@ async def compose_application_services(
         payload_store,
         externalize_above_bytes=externalize_above_bytes,
     )
+    # FT-D2: chain links release inside the ledger commit that satisfies them.
+    install_chain_release_hook()
     repository = PostgresRunControlRepository(runtime_pool, family_writer_pool=family_writer_pool)
     run_control = RunControlService(
         repository, F1RunConfigurationVerifier(catalog), admission_policies, family_admissions
