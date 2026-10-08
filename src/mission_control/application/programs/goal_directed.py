@@ -458,6 +458,7 @@ class GoalDirectedOperationPreparationService:
                     node_key=f"goal/{request.operation_role}",
                     iteration_start=request.operation_attempt == 1,
                     lane_profile=template.lane_profile or "deep_agents",
+                    unit_key=_runtime_unit_for(request, identity).unit_key,
                 )
                 queued = await self._context_packs.queued_candidates(
                     entries, request_scope=request.request_scope

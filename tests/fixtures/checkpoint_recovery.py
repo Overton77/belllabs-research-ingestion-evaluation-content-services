@@ -519,6 +519,7 @@ class RecoveryHarness:
         return OperationExecutionRequest.model_validate(
             {
                 **operation_request().model_dump(mode="python"),
+                "request_scope": self.request_scope,
                 "workspace": workspace,
                 "identity": OperationAttemptIdentity(
                     run_id=self.run_id,

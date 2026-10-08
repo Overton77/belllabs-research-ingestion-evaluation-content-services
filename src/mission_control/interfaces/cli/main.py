@@ -326,6 +326,55 @@ def mailbox_payload(path: str, args: argparse.Namespace) -> tuple[str, dict[str,
     return kind, payload, reason, request_id
 
 
+def instruction_content(path: str) -> dict[str, Any]:
+    """An instruction file: JSON `content` / `text` / `content_ref`, or plain text."""
+
+    raw = Path(path).read_text(encoding="utf-8")
+    if not raw.lstrip().startswith("{"):
+        return {"text": raw}
+    spec = parse_json_object(raw)
+    if "content" in spec:
+        content = spec["content"]
+        if not isinstance(content, dict):
+            raise ValueError("instruction content must be an object")
+        return content
+    if "text" in spec:
+        return {
+            "text": spec["text"],
+            **({"media_type": spec["media_type"]} if "media_type" in spec else {}),
+        }
+    if "content_ref" in spec:
+        return {
+            "artifact_ref": spec["content_ref"],
+            "content_digest": spec.get("content_digest"),
+            "media_type": spec.get("media_type", "text/markdown"),
+            "size_bytes": spec.get("size_bytes", 0),
+        }
+    raise ValueError("an instruction file needs text, content or content_ref")
+
+
+def fork_body(args: argparse.Namespace, body: dict[str, Any] | None) -> dict[str, Any]:
+    """`run fork`: the request file (if any) plus the FT-F4 flags; flags fill what it omits."""
+
+    fork = dict(body or {})
+    fork.setdefault("schema_version", "mc.runtime_fork.v1")
+    fork.setdefault("request_id", args.fork_request_id or str(uuid.uuid4()))
+    if args.from_snapshot:
+        fork["snapshot_id"] = args.from_snapshot
+    if args.instruction_file:
+        fork["instruction"] = instruction_content(args.instruction_file)
+    if args.sponsorship_ref:
+        fork["sponsorship_ref"] = args.sponsorship_ref
+    if args.approval_refs:
+        fork["approval_refs"] = list(args.approval_refs)
+    if args.reason:
+        fork["reason"] = args.reason
+    fork.setdefault("reason", "forked by missionctl")
+    if "sponsorship_ref" not in fork:
+        raise ValueError("run fork needs --sponsorship-ref (or a request file naming it)")
+    return fork
+
+
 def queue_command_body(client: MissionClient, args: argparse.Namespace) -> dict[str, Any]:
     """Bind the queued command to the Run's current version and Generation (read first)."""
 
@@ -544,10 +593,20 @@ def main(argv: list[str] | None = None) -> int:
     inspect.add_argument("run_id")
     admission = run_commands.add_parser("admit", parents=[common])
     admission.add_argument("--request-file", required=True)
-    for action in ("snapshot", "fork", "reconcile", "start"):
+    for action in ("snapshot", "reconcile", "start"):
         operation = run_commands.add_parser(action, parents=[common])
         operation.add_argument("run_id")
         operation.add_argument("--request-file", required=True)
+    # FT-F4: fork from a Snapshot (default: the latest safe one) with a queued instruction.
+    fork = run_commands.add_parser("fork", parents=[common])
+    fork.add_argument("run_id")
+    fork.add_argument("--request-file")
+    fork.add_argument("--from-snapshot", dest="from_snapshot")
+    fork.add_argument("--instruction-file", dest="instruction_file")
+    fork.add_argument("--sponsorship-ref", dest="sponsorship_ref")
+    fork.add_argument("--approval-ref", dest="approval_refs", action="append")
+    fork.add_argument("--reason")
+    fork.add_argument("--request-id", dest="fork_request_id")
     # SPEC-03 (C3): the run transcript and the non-canonical frame tail.
     transcript = run_commands.add_parser("transcript", parents=[common])
     transcript.add_argument("run_id")
@@ -676,6 +735,8 @@ def main(argv: list[str] | None = None) -> int:
                 "command admission is not completion"
             )
         body = strict_object(args.request_file) if getattr(args, "request_file", None) else None
+        if args.group == "run" and args.action == "fork":
+            body = fork_body(args, body)
         if args.group == "catalog" and args.action == "publish":
             with (
                 httpx.Client(

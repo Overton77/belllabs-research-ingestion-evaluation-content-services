@@ -65,6 +65,9 @@ class CoordinatorPrincipal:
     roles: frozenset[str]
     permissions: frozenset[str]
     request_scope: str = ""
+    # FT-F4: the sponsorships and approvals the verified identity holds (forks admit runs).
+    sponsorship_refs: frozenset[str] = frozenset()
+    approval_refs: frozenset[str] = frozenset()
 
 
 class PrincipalResolver(Protocol):

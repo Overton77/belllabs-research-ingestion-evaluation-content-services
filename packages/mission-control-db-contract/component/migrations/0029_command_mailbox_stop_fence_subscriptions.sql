@@ -30,7 +30,7 @@ CREATE TABLE mission_control.command_mailbox (
     content_digest text NOT NULL CHECK (content_digest ~ '^sha256:[0-9a-f]{64}$'),
     media_type text NOT NULL CHECK (media_type <> ''),
     content_bytes integer NOT NULL CHECK (content_bytes >= 0),
-    expand text CHECK (expand IN ('inline', 'reference', 'materialize', 'auto')),
+    expand text CHECK (expand IN ('inline', 'reference', 'materialize', 'auto', 'workspace')),
     admission_sequence integer NOT NULL CHECK (admission_sequence >= 1),
     deadline timestamptz,
     state text NOT NULL CHECK (state IN ('queued', 'delivered', 'consumed', 'superseded', 'expired')),

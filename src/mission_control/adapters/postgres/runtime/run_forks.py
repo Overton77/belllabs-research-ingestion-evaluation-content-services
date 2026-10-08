@@ -72,6 +72,29 @@ class PostgresRunSnapshotRepository:
             )
         return RunSnapshotManifest.model_validate(_load(payload)) if payload else None
 
+    async def latest(self, request_scope: str, run_id: str) -> RunSnapshotManifest | None:
+        """FT-F4: the newest sealed Snapshot of a run (highest version, then latest taken)."""
+
+        async with self._pool.acquire() as connection, connection.transaction():
+            args = await mc.begin(connection, request_scope)
+            payload = await connection.fetchval(
+                f"""
+                SELECT checkpoint.manifest
+                FROM mission_control.run_snapshot snapshot
+                JOIN mission_control.continuation_checkpoint checkpoint
+                  ON checkpoint.installation_id = snapshot.installation_id
+                 AND checkpoint.application_id = snapshot.application_id
+                 AND checkpoint.tenant_id = snapshot.tenant_id
+                 AND checkpoint.checkpoint_id = snapshot.checkpoint_id
+                WHERE {scoped("snapshot")} AND snapshot.source_run_key = $4
+                ORDER BY snapshot.projection_version DESC, snapshot.taken_at DESC
+                LIMIT 1
+                """,
+                *args,
+                run_id,
+            )
+        return RunSnapshotManifest.model_validate(_load(payload)) if payload else None
+
     async def put(self, snapshot: RunSnapshotManifest) -> RunSnapshotManifest:
         async with self._pool.acquire() as connection, connection.transaction():
             args = await mc.begin(connection, snapshot.request_scope)
@@ -298,6 +321,39 @@ class PostgresForkMaterializationStore:
                     request.actor_id,
                 )
             await append_lineage_in_transaction(connection, execution_lineage)
+            # FT-F4: the fork edge in the Mission Graph (`mission_relationship` kind `fork`).
+            source = await mc.require_run(connection, args, request.source_run_id)
+            derived = await mc.require_run(connection, args, request.derived_run_id)
+            await connection.execute(
+                """
+                INSERT INTO mission_control.mission_relationship (
+                    installation_id, application_id, tenant_id, relationship_id,
+                    relationship_key, source_run_id, target_run_id, kind, invocation_ref,
+                    grant_ref, projected_output_policy, detail, version, updated_at, created_at,
+                    created_by_actor_ref
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, 'fork', $8, NULL, '{}'::jsonb, $9::jsonb,
+                        1, $10, $10, $11)
+                ON CONFLICT (installation_id, application_id, tenant_id, relationship_key)
+                DO NOTHING
+                """,
+                *args,
+                uuid7(),
+                f"fork:{request.request_id}",
+                source["run_id"],
+                derived["run_id"],
+                f"fork-request:{request.request_id}",
+                _dump(
+                    {
+                        "fork_request_id": request.request_id,
+                        "snapshot_id": request.snapshot_id,
+                        "snapshot_digest": request.snapshot_digest,
+                        "patch_digest": request.patch.patch_digest,
+                    }
+                ),
+                request.requested_at,
+                request.actor_id,
+            )
             await connection.execute(
                 f"""
                 UPDATE mission_control.fork_request
@@ -324,6 +380,28 @@ class PostgresForkMaterializationStore:
                 request_id,
             )
         return ForkLineageManifest.model_validate(_load(payload)) if payload else None
+
+    async def lineage_of_run(
+        self, request_scope: str, run_id: str
+    ) -> tuple[ForkLineageManifest, ...]:
+        """FT-F4: materialized forks a run is the source or the target of."""
+
+        async with self._pool.acquire() as connection, connection.transaction():
+            args = await mc.begin(connection, request_scope)
+            rows = await connection.fetch(
+                f"""
+                SELECT materialization_payload FROM mission_control.fork_request
+                WHERE {SCOPE} AND (source_run_key = $4 OR target_run_key = $4)
+                  AND materialization_payload IS NOT NULL
+                ORDER BY requested_at, request_key
+                """,
+                *args,
+                run_id,
+            )
+        return tuple(
+            ForkLineageManifest.model_validate(_load(row["materialization_payload"]))
+            for row in rows
+        )
 
     async def fork_of_run(self, request_scope: str, derived_run_id: str) -> ForkOfRun | None:
         async with self._pool.acquire() as connection, connection.transaction():

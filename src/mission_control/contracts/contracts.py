@@ -186,7 +186,31 @@ class MissionCommandReceipt(Contract):
     delivery: BoundaryCommandStatus | None = None
 
 
+class ForkLineageRef(Contract):
+    """One fork edge: the source Run, the Snapshot it was taken at and the derived Run."""
+
+    fork_request_id: str = Field(min_length=1)
+    source_run_id: str = Field(min_length=1)
+    target_run_id: str = Field(min_length=1)
+    snapshot_id: str = Field(min_length=1)
+    snapshot_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+
+
+class RunLineage(Contract):
+    """FT-F4: fork lineage of a Run, read from `mission_relationship` and the fork records."""
+
+    forked_from: ForkLineageRef | None = None
+    forks: tuple[ForkLineageRef, ...] = ()
+
+
+def _absent(value: object) -> bool:
+    return value is None
+
+
 class MissionInspection(Contract):
+    """`mc.inspection.v1`. Sections added by SPEC-06 are optional and left out while absent,
+    so existing clients keep parsing the same body."""
+
     schema_version: Literal["mc.inspection.v1"] = "mc.inspection.v1"
     run_id: str
     version: int = Field(ge=1)
@@ -196,6 +220,7 @@ class MissionInspection(Contract):
     # This is execution outcome, not generalized mission acceptance.
     execution_outcome: str | None
     projection: RunProjection
+    lineage: RunLineage | None = Field(default=None, exclude_if=_absent)
 
 
 class MissionControlRejected(ValueError):

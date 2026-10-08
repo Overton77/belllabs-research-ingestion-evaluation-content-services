@@ -684,7 +684,9 @@ COMPLETED_RECEIPT_STATES: frozenset[ReceiptState] = frozenset(
 
 
 MailboxBoundary = Literal["next_turn", "next_iteration"]
-MailboxExpand = Literal["inline", "reference", "materialize", "auto"]
+# `workspace` (FT-F4) is kernel-issued only: a fork's Snapshot restore for the derived Run's
+# first packet; public `add_context` payloads cannot name it.
+MailboxExpand = Literal["inline", "reference", "materialize", "auto", "workspace"]
 # The content ref of a bounded inline text: the text lives in the mailbox entry only, never in
 # the command record, which binds it by digest.
 MAILBOX_INLINE_REF_PREFIX = "mailbox-inline:"

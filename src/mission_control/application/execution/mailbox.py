@@ -23,15 +23,20 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol
 
+from mission_control.contracts.contracts import ContentRef, InlineText
 from mission_control.domain.execution.lanes import LaneDescribe
 from mission_control.domain.policies.contracts import (
     COMPLETED_RECEIPT_STATES,
     ActorContext,
+    AddContextAction,
     BoundaryCommandReceipt,
     BoundaryCommandStatus,
     DeliveryObservedOutcome,
     DeliveryReport,
     DomainEventEnvelope,
+    MailboxBoundary,
+    MailboxExpand,
+    QueueInstructionAction,
     ReceiptState,
     RunProjection,
 )
@@ -40,13 +45,18 @@ from mission_control.domain.policies.mailbox import (
     COMMAND_COMPLETED_EVENT,
     COMMAND_DELIVERED_EVENT,
     COMMAND_QUEUED_EVENT,
+    MAX_INLINE_BYTES,
     ExpiredReason,
     MailboxBoundaryPoint,
+    MailboxContentTooLarge,
     MailboxEntry,
     MailboxFamily,
     MailboxState,
+    check_inline_text,
     claim_decision,
+    content_digest,
     delivery_report,
+    inline_content_ref,
     mailbox_event_payload,
     requested_semantics,
 )
@@ -54,6 +64,71 @@ from mission_control.domain.policies.mailbox import (
 Clock = Callable[[], datetime]
 MAILBOX_RECORDER = "mailbox-boundary"
 MAILBOX_ACTOR = ActorContext(actor_id=MAILBOX_RECORDER)
+
+
+class MailboxContentRejected(ValueError):
+    """Queued content refused before admission (`content_too_large`, digest mismatch)."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def mailbox_command_action(
+    kind: str,
+    content: ContentRef | InlineText,
+    *,
+    boundary: MailboxBoundary,
+    generation: int,
+    expand: MailboxExpand = "auto",
+    node_key: str | None = None,
+    deadline: datetime | None = None,
+    inline_cap: int = MAX_INLINE_BYTES,
+) -> tuple[QueueInstructionAction | AddContextAction, str | None]:
+    """The Reducer action of a mailbox command and its inline body (FT-F1, FT-F4).
+
+    Inline text is capped (`content_too_large`) and bound by digest; an artifact reference is
+    bound by the digest the caller states. The body travels beside the action, never in it.
+    """
+
+    text: str | None = None
+    if isinstance(content, InlineText):
+        try:
+            size = check_inline_text(content.text, cap=inline_cap)
+        except MailboxContentTooLarge as error:
+            raise MailboxContentRejected(error.code, str(error)) from None
+        digest = content_digest(content.text)
+        if content.content_digest is not None and content.content_digest != digest:
+            raise MailboxContentRejected(
+                "content_digest_mismatch", "inline content_digest differs from the text"
+            )
+        text = content.text
+        fields: dict[str, object] = {
+            "content_ref": inline_content_ref(digest),
+            "content_digest": digest,
+            "media_type": content.media_type,
+            "content_bytes": size,
+            "inline": True,
+        }
+    else:
+        fields = {
+            "content_ref": content.artifact_ref,
+            "content_digest": content.content_digest,
+            "media_type": content.media_type,
+            "content_bytes": content.size_bytes,
+        }
+    common: dict[str, object] = {
+        **fields,
+        "boundary": boundary,
+        "generation": generation,
+        "node_key": node_key,
+        "deadline": deadline,
+    }
+    if kind == "add_context":
+        return AddContextAction.model_validate({**common, "expand": expand}), text
+    if kind != "queue_instruction":
+        raise ValueError(f"{kind} is not a mailbox command")
+    return QueueInstructionAction.model_validate(common), text
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +188,12 @@ class BoundaryReceiptLedger(Protocol):
     async def record_boundary_receipt(
         self, request_scope: str, receipt: BoundaryCommandReceipt
     ) -> BoundaryCommandStatus: ...
+
+
+class ReusedUnitOracle(Protocol):
+    """FT-F4: whether a fork-derived Run settles a unit by reference (no turn runs)."""
+
+    async def reused(self, request_scope: str, run_id: str, unit_key: str) -> bool: ...
 
 
 class InMemoryCommandMailbox:
@@ -317,11 +398,14 @@ class MailboxDeliveryService:
         *,
         describe: Callable[[str], LaneDescribe | None] | None = None,
         clock: Clock = lambda: datetime.now(UTC),
+        reuse: ReusedUnitOracle | None = None,
     ) -> None:
         self._mailbox = mailbox
         self._receipts = receipts
         self._describe = describe or _declared_describe
         self._clock = clock
+        # A unit a fork reuses runs no turn: it must not take queued content.
+        self._reuse = reuse
 
     @property
     def mailbox(self) -> CommandMailboxRepository:
@@ -348,13 +432,21 @@ class MailboxDeliveryService:
         node_key: str,
         iteration_start: bool,
         lane_profile: str,
+        unit_key: str | None = None,
     ) -> tuple[MailboxEntry, ...]:
         """Claim what this boundary takes; record `delivered` (or `expired`) receipts.
 
         The boundary stands at the Run's current Generation (the execution target's): an
-        entry admitted for an earlier Generation expires here with `stale_generation`.
+        entry admitted for an earlier Generation expires here with `stale_generation`. A unit
+        a fork settles by reference (`unit_key` reused) takes nothing: no turn would read it.
         """
 
+        if (
+            self._reuse is not None
+            and unit_key is not None
+            and await self._reuse.reused(request_scope, run_id, unit_key)
+        ):
+            return ()
         projection = await self._receipts.get_run(request_scope, run_id)
         point = MailboxBoundaryPoint(
             family=family,

@@ -70,6 +70,7 @@ from mission_control.application.missions.runtime import MissionControlRuntimeSe
 from mission_control.application.missions.service import MissionControlService
 from mission_control.application.ports.payloads import ContentAddressedPayloadStore
 from mission_control.application.programs.fork_templates import StageGraphForkTemplateDerivation
+from mission_control.application.recovery.fork_seed import ForkSeedService
 from mission_control.application.recovery.run_forks import (
     ForkPatchPolicyRegistry,
     LedgerPendingCommands,
@@ -215,9 +216,15 @@ async def compose_application_services(
             stop_fences=PostgresStopFenceRepository(runtime_pool),
             # FT-F1: queue_instruction / add_context admit into the Run's command mailbox.
             mailbox=MailboxDeliveryService(PostgresCommandMailbox(runtime_pool), run_control),
+            forks=materializations,
         ),
         runtime=MissionControlRuntimeService(
-            snapshots, forks, request_scope=scope, reconciliation_service=recovery.reconciliation
+            snapshots,
+            forks,
+            request_scope=scope,
+            reconciliation_service=recovery.reconciliation,
+            # FT-F4: the forked Run's mailbox gets the Snapshot restore and the instruction.
+            seeds=ForkSeedService(run_control),
         ),
         admission=MissionAdmissionService(run_control, request_scope=scope, launch_service=launch),
         launch=launch,

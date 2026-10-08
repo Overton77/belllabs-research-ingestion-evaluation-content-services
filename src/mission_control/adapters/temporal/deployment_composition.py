@@ -184,7 +184,7 @@ from mission_control.application.programs.service import (
     RunControlLifecycleGateway,
     orchestration_lifecycle_actor,
 )
-from mission_control.application.recovery.run_forks import ForkReuseResolver
+from mission_control.application.recovery.run_forks import ForkReuseOracle, ForkReuseResolver
 from mission_control.application.subordinates.parent_completion import (
     AdmissionRule,
     AsyncChildCompletion,
@@ -719,6 +719,8 @@ class ProductionWorkerActivityCompositionFactory:
             describe=lambda profile: (
                 lanes.describe(profile) if profile in lanes.profiles() else None
             ),
+            # FT-F4: a unit a fork reuses runs no turn and takes no queued content.
+            reuse=ForkReuseOracle(PostgresForkMaterializationStore(postgres_pool)),
         )
         service = OperationExecutionService(
             lanes=lanes,

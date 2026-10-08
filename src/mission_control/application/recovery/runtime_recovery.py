@@ -411,6 +411,9 @@ class RuntimeForkService:
         async with self._repository.guard(request):
             return await self._fork_guarded(request)
 
+    async def persisted_request(self, request_scope: str, request_id: str) -> RunForkRequest | None:
+        return await self._repository.get_request(request_scope, request_id)
+
     async def _fork_guarded(self, request: RunForkRequest) -> RunForkReceipt:
         created = await self._repository.reserve(request)
         if not created:

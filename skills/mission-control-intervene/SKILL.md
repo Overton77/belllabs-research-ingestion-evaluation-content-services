@@ -60,13 +60,22 @@ lane used. Report `requested` and `delivered` separately; `emulated` carries a n
 
 ```text
 missionctl run snapshot RUN_ID --request-file snapshot.json --json
-missionctl run fork RUN_ID --from-snapshot SNAPSHOT_ID --instruction-file note.json --json
+missionctl run fork RUN_ID --from-snapshot SNAPSHOT_ID --instruction-file note.json \
+  --sponsorship-ref SPONSORSHIP --json
+missionctl run fork RUN_ID --instruction-file note.md --sponsorship-ref SPONSORSHIP --json
 ```
 
-A snapshot captures a safe boundary and fails elsewhere. A fork admits a new run seeded from the
-snapshot's Context Packet (workspace tier restores files); it never clones in-flight commands or
-active children and never launches by itself. Start the fork with `run start`. Availability of
-the `--from-snapshot` and `--instruction-file` flags: FT-F4 (today `run fork --request-file`).
+A snapshot captures a safe boundary and fails elsewhere. Without `--from-snapshot` the fork uses
+the run's latest safe Snapshot (taking one now if none was sealed); a run with no safe boundary
+is refused `CHECKPOINT_INVALID`. The fork admits a new run whose first Context Packet restores
+the Snapshot as its `workspace` item; the instruction (`--instruction-file`, text or JSON
+`text`/`content`) is the new run's first mailbox entry (`queued`, `next_turn`) and needs the
+`workflow_run.control` grant. It never clones the source's mailbox, in-flight commands or active
+children, and never launches by itself: start the fork with `run start`. `run inspect` of both
+runs shows the lineage (`lineage.forked_from`, `lineage.forks`); `run list --query
+"ForkedFromRunId = 'RUN_ID'"` finds the branch once it started. A retry with the same
+`--request-id` returns the same forked run. Available (FT-F4); `--request-file` still works and
+the flags fill what it omits.
 
 ## 5. Repair
 

@@ -1033,6 +1033,7 @@ class StageGraphOperationPreparationService:
                     node_key=stage.stage_id,
                     iteration_start=True,
                     lane_profile=template.lane_profile or "deep_agents",
+                    unit_key=stage_runtime_unit(request.request_scope, stage).unit_key,
                 )
                 queued = await self._context_packs.queued_candidates(
                     entries, request_scope=request.request_scope

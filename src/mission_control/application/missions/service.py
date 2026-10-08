@@ -11,14 +11,20 @@ import json
 from datetime import UTC, datetime
 
 from mission_control.application.execution.boundary_interventions import BoundaryInterventionService
-from mission_control.application.execution.mailbox import MailboxDeliveryService
+from mission_control.application.execution.mailbox import (
+    MailboxContentRejected,
+    MailboxDeliveryService,
+    mailbox_command_action,
+)
 from mission_control.application.execution.service import RunControlService
 from mission_control.application.execution.stop_fence import StopFenceRepository
+from mission_control.application.recovery.run_forks import ForkLineageReader
 from mission_control.contracts.canonical import canonical_digest
 from mission_control.contracts.contracts import (
     AddContextPayload,
     CancelPayload,
     ContentRef,
+    ForkLineageRef,
     InlineText,
     InstructionPayload,
     MissionCommandReceipt,
@@ -28,6 +34,7 @@ from mission_control.contracts.contracts import (
     PausePayload,
     QueueInstructionPayload,
     ResumePayload,
+    RunLineage,
     WaitPayload,
 )
 from mission_control.domain.policies.contracts import (
@@ -43,13 +50,7 @@ from mission_control.domain.policies.contracts import (
     RunPhase,
     SatisfyWaitAction,
 )
-from mission_control.domain.policies.mailbox import (
-    MAX_INLINE_BYTES,
-    MailboxContentTooLarge,
-    check_inline_text,
-    content_digest,
-    inline_content_ref,
-)
+from mission_control.domain.policies.mailbox import MAX_INLINE_BYTES
 from mission_control.domain.policies.reducer import required_action_permissions
 from mission_control.domain.policies.stop_fence import (
     ImmediateCancelReport,
@@ -68,6 +69,7 @@ class MissionControlService:
         stop_fences: StopFenceRepository | None = None,
         mailbox: MailboxDeliveryService | None = None,
         inline_cap_bytes: int = MAX_INLINE_BYTES,
+        forks: ForkLineageReader | None = None,
     ) -> None:
         if not request_scope:
             raise ValueError("an authenticated application/tenant request scope is required")
@@ -79,6 +81,8 @@ class MissionControlService:
         # FT-F1: queued content is admitted only where a mailbox can deliver it.
         self._mailbox = mailbox
         self._inline_cap = inline_cap_bytes
+        # FT-F4: fork lineage (source and derived Runs) in inspection.
+        self._forks = forks
 
     @property
     def request_scope(self) -> str:
@@ -240,6 +244,25 @@ class MissionControlService:
             phase=projection.phase.value,
             execution_outcome=projection.terminal_outcome,
             projection=projection,
+            lineage=await self._lineage(run_id),
+        )
+
+    async def _lineage(self, run_id: str) -> RunLineage | None:
+        if self._forks is None:
+            return None
+        edges = [
+            ForkLineageRef(
+                fork_request_id=item.fork_request_id,
+                source_run_id=item.source_run_id,
+                target_run_id=item.derived_run_id,
+                snapshot_id=item.snapshot_id,
+                snapshot_digest=item.snapshot_digest,
+            )
+            for item in await self._forks.lineage_of_run(self._scope, run_id)
+        ]
+        return RunLineage(
+            forked_from=next((edge for edge in edges if edge.target_run_id == run_id), None),
+            forks=tuple(edge for edge in edges if edge.source_run_id == run_id),
         )
 
     async def commands(self, run_id: str, actor: ActorContext) -> tuple[BoundaryCommandStatus, ...]:
@@ -293,45 +316,22 @@ def _mailbox_action(
     """FT-F1: `queue_instruction` / `add_context` as a mailbox action for the expected
     Generation. Inline text is capped (typed `content_too_large`) and bound by digest."""
 
-    text: str | None = None
     if isinstance(payload, InstructionPayload):
         content: ContentRef | InlineText = ContentRef(
             artifact_ref=payload.content_ref, content_digest=payload.content_digest
         )
     else:
         content = payload.content
-    if isinstance(content, InlineText):
-        try:
-            size = check_inline_text(content.text, cap=inline_cap)
-        except MailboxContentTooLarge as error:
-            raise MissionControlRejected(error.code, str(error)) from None
-        digest = content_digest(content.text)
-        if content.content_digest is not None and content.content_digest != digest:
-            raise MissionControlRejected(
-                "content_digest_mismatch", "inline content_digest differs from the text"
-            )
-        text = content.text
-        fields: dict[str, object] = {
-            "content_ref": inline_content_ref(digest),
-            "content_digest": digest,
-            "media_type": content.media_type,
-            "content_bytes": size,
-            "inline": True,
-        }
-    else:
-        fields = {
-            "content_ref": content.artifact_ref,
-            "content_digest": content.content_digest,
-            "media_type": content.media_type,
-            "content_bytes": content.size_bytes,
-        }
-    common: dict[str, object] = {
-        **fields,
-        "boundary": payload.boundary,
-        "generation": request.expected_generation,
-        "node_key": getattr(payload, "node_key", None),
-        "deadline": getattr(payload, "deadline", None),
-    }
-    if isinstance(payload, AddContextPayload):
-        return AddContextAction.model_validate({**common, "expand": payload.expand}), text
-    return QueueInstructionAction.model_validate(common), text
+    try:
+        return mailbox_command_action(
+            "add_context" if isinstance(payload, AddContextPayload) else "queue_instruction",
+            content,
+            boundary=payload.boundary,
+            generation=request.expected_generation,
+            expand=payload.expand if isinstance(payload, AddContextPayload) else "auto",
+            node_key=getattr(payload, "node_key", None),
+            deadline=getattr(payload, "deadline", None),
+            inline_cap=inline_cap,
+        )
+    except MailboxContentRejected as error:
+        raise MissionControlRejected(error.code, str(error)) from None

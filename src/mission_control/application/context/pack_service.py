@@ -44,6 +44,7 @@ from mission_control.domain.context.packet import (
     PackFailure,
     PackRequest,
     TokenCounter,
+    WorkspaceRestore,
     pack,
 )
 from mission_control.domain.context.render import (
@@ -274,7 +275,8 @@ class ContextPackService:
             activation_id=identity.operation_id,
             attempt_no=identity.semantic_attempt,
             generation=identity.execution_generation,
-            purpose=ContextPurpose.STAGE_START,
+            # FT-F4: the derived Run's first packet carries the fork's workspace restore.
+            purpose=_purpose(extra_candidates, ContextPurpose.STAGE_START),
         )
         candidates: list[PackCandidate] = [
             *self._stage_contract_candidates(request, template, mount_root=mount_root),
@@ -425,7 +427,7 @@ class ContextPackService:
                     activation_id=operation_id,
                     attempt_no=request.operation_attempt,
                     generation=request.execution_generation,
-                    purpose=ContextPurpose.ITERATION_START,
+                    purpose=_purpose(extra_candidates, ContextPurpose.ITERATION_START),
                 ),
                 producer_refs=tuple(producer_refs),
                 profile=self._profiles.profile_for(template),
@@ -610,6 +612,28 @@ class ContextPackService:
 
         candidates: list[PackCandidate] = []
         for entry in entries:
+            if entry.expand == "workspace":
+                # FT-F4: a fork's Snapshot, restored by the lane before the first turn.
+                candidates.append(
+                    PackCandidate(
+                        source_kind=ContextSourceKind.CONTINUATION_CHECKPOINT,
+                        source_ref=entry.content_ref,
+                        content_digest=entry.content_digest,
+                        bytes=entry.content_bytes,
+                        media_type=entry.media_type,
+                        trust=ContextTrust.AUTHORITATIVE,
+                        mandatory=True,
+                        summary=f"fork workspace restored from {entry.content_ref}",
+                        workspace=WorkspaceRestore(
+                            snapshot_ref=entry.content_ref, restore_paths=FORK_RESTORE_PATHS
+                        ),
+                        provenance=ItemProvenance(
+                            producer_generation=entry.generation,
+                            accepted_decision_ref=entry.command_id,
+                        ),
+                    )
+                )
+                continue
             label = (
                 f"{'instruction' if entry.kind == 'queue_instruction' else 'added context'} "
                 f"queued by command {entry.command_id} ({entry.boundary}, "
@@ -790,6 +814,20 @@ class ContextPackService:
                 )
             )
         return candidates
+
+
+# The whole lane workspace is restored from the Snapshot (lanes map `/` to their root).
+FORK_RESTORE_PATHS: tuple[str, ...] = ("/",)
+
+
+def _purpose(candidates: Sequence[PackCandidate], default: ContextPurpose) -> ContextPurpose:
+    """`fork` when a workspace restore rides the packet (exactly one is allowed)."""
+
+    return (
+        ContextPurpose.FORK
+        if any(candidate.workspace is not None for candidate in candidates)
+        else default
+    )
 
 
 def _text_candidate(

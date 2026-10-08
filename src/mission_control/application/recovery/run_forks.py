@@ -70,6 +70,7 @@ from mission_control.domain.policies.contracts import (
     BoundaryCommandStatus,
     BudgetEnvelope,
     DecisionStatus,
+    ReceiptState,
     RunPhase,
     RunRequest,
 )
@@ -267,13 +268,17 @@ class LedgerPendingCommands:
             sorted(
                 f"{item.command.idempotency_issuer}:{item.command.command_id}:{item.state.value}"
                 for item in await self._ledger.list_boundary_commands(request_scope, run_id)
-                if item.state not in SETTLED_RECEIPT_STATES
+                # FT-F1/F4: a `queued` mailbox entry waits for a boundary that has not been
+                # reached; it is mailbox content of this run (never copied), not in-flight work.
+                if item.state not in SETTLED_RECEIPT_STATES and item.state != ReceiptState.QUEUED
             )
         )
 
 
 class RunSnapshotRepository(Protocol):
     async def get(self, request_scope: str, snapshot_id: str) -> RunSnapshotManifest | None: ...
+
+    async def latest(self, request_scope: str, run_id: str) -> RunSnapshotManifest | None: ...
 
     async def put(self, snapshot: RunSnapshotManifest) -> RunSnapshotManifest: ...
 
@@ -285,6 +290,18 @@ class InMemoryRunSnapshotRepository:
 
     async def get(self, request_scope: str, snapshot_id: str) -> RunSnapshotManifest | None:
         return deepcopy(self.snapshots.get((request_scope, snapshot_id)))
+
+    async def latest(self, request_scope: str, run_id: str) -> RunSnapshotManifest | None:
+        """FT-F4: the newest sealed Snapshot of a run (highest version, then latest taken)."""
+
+        candidates = [
+            item
+            for (scope, _), item in self.snapshots.items()
+            if scope == request_scope and item.source_run_id == run_id
+        ]
+        if not candidates:
+            return None
+        return deepcopy(max(candidates, key=lambda item: (item.projection_version, item.taken_at)))
 
     async def put(self, snapshot: RunSnapshotManifest) -> RunSnapshotManifest:
         key = (snapshot.request_scope, snapshot.snapshot_id)
@@ -755,6 +772,24 @@ class RunSnapshotService:
             raise ForkSnapshotNotFound("run snapshot not found")
         return snapshot
 
+    async def latest_or_take(self, request_scope: str, run_id: str) -> RunSnapshotManifest:
+        """FT-F4: the latest safe Snapshot of the run, taking one at the current boundary
+        when none was sealed; a run with no safe boundary is `CHECKPOINT_INVALID`."""
+
+        latest = await self._snapshots.latest(request_scope, run_id)
+        if latest is not None:
+            return latest
+        try:
+            return await self.take(request_scope, run_id)
+        except ForkRejected as error:
+            if error.code in {"stale_expected_version", "snapshot_source_moving"}:
+                raise
+            raise ForkRejected(
+                "CHECKPOINT_INVALID",
+                "the run has no safe Snapshot to fork from",
+                reasons=(error.code, *error.reasons),
+            ) from error
+
 
 # --- Fork command, policy registry, admission compilation ---------------------------------
 
@@ -935,6 +970,11 @@ class SemanticForkService:
     async def fork(self, command: ForkCommand) -> RunForkReceipt:
         return await self._saga.fork(await self.prepare(command))
 
+    async def persisted_request(self, request_scope: str, request_id: str) -> RunForkRequest | None:
+        """The fork already reserved under this id (a retry reuses its Snapshot)."""
+
+        return await self._saga.persisted_request(request_scope, request_id)
+
 
 # --- Admission authority over run control -------------------------------------------------
 
@@ -1028,6 +1068,12 @@ class RunControlForkAuthority:
 class ForkOfRun:
     fork_request_id: str
     materialized: bool
+
+
+class ForkLineageReader(Protocol):
+    async def lineage_of_run(
+        self, request_scope: str, run_id: str
+    ) -> tuple[ForkLineageManifest, ...]: ...
 
 
 class ForkMaterializationStore(Protocol):
@@ -1124,6 +1170,17 @@ class InMemoryForkMaterializationStore:
         self, request_scope: str, request_id: str
     ) -> ForkLineageManifest | None:
         return deepcopy(self.materializations.get((request_scope, request_id)))
+
+    async def lineage_of_run(
+        self, request_scope: str, run_id: str
+    ) -> tuple[ForkLineageManifest, ...]:
+        """FT-F4: materialized forks a run is the source or the target of."""
+
+        return tuple(
+            deepcopy(item)
+            for (scope, _), item in sorted(self.materializations.items())
+            if scope == request_scope and run_id in {item.source_run_id, item.derived_run_id}
+        )
 
     async def fork_of_run(self, request_scope: str, derived_run_id: str) -> ForkOfRun | None:
         request = next(
@@ -1402,6 +1459,18 @@ def _replace_text(value: Any, old: str, new: str) -> Any:
     if isinstance(value, list):
         return [_replace_text(item, old, new) for item in value]
     return value
+
+
+class ForkReuseOracle:
+    """FT-F4: the fork's recorded reuse decision for a derived unit (mailbox delivery skips a
+    unit settled by reference, so queued content reaches the first executed turn)."""
+
+    def __init__(self, store: ForkMaterializationStore) -> None:
+        self._store = store
+
+    async def reused(self, request_scope: str, run_id: str, unit_key: str) -> bool:
+        decision = await self._store.get_reuse_decision(request_scope, run_id, unit_key)
+        return decision is not None and decision.decision == "reuse"
 
 
 class ForkReuseResolver:

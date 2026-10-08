@@ -111,15 +111,21 @@ receipt reports `fence_persisted_at` and, later, `settled_at`.
  "reason": "Branch point before the synthesis rewrite"}
 ```
 
-## fork (`mc.runtime_fork.v1`; FT-F4 adds the CLI flags)
+## fork (`mc.runtime_fork.v1`; FT-F4, available)
 
 ```json
 {"schema_version": "mc.runtime_fork.v1", "request_id": "REPLACE_UUID",
- "snapshot_id": "REPLACE_SNAPSHOT_ID", "snapshot_digest": "sha256:…",
- "changes": [{"kind": "queue_instruction", "content_ref": "artifact://…/note.md", "content_digest": "sha256:…"}],
- "invalidation_frontier": [], "sponsorship_ref": "REPLACE_SPONSORSHIP", "approval_refs": [],
+ "from_snapshot_id": "REPLACE_SNAPSHOT_ID_OR_OMIT",
+ "instruction": {"text": "Retry with the integration tests enabled."},
+ "changes": [], "invalidation_frontier": [], "baseline_reservations": {},
+ "sponsorship_ref": "REPLACE_SPONSORSHIP", "approval_refs": [],
  "reason": "Try the alternative extraction schema"}
 ```
+
+`from_snapshot_id` (alias of `snapshot_id`) and `snapshot_digest` are optional: omitted, the
+latest safe Snapshot is used. `instruction` is `{"text": ...}` (8 KiB cap) or
+`{"artifact_ref": ..., "content_digest": ...}`. The receipt's `seed` names the forked run and
+the command ids of its seeded instruction and workspace restore.
 
 ## reconcile (`mc.unit_reconciliation.v1`)
 

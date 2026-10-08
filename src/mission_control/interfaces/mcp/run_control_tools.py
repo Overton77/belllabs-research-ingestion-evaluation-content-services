@@ -3,6 +3,10 @@
 - `mission_command_send(run_id, request)`: the `mc.command.v1` request the HTTP surface takes
   on `POST /runs/{id}/commands` (FT-F1: `queue_instruction`, `add_context`, plus the existing
   kinds), answered with the same `mc.command_receipt.v1` receipt.
+- `mission_run_fork(run_id, request)`: the `mc.runtime_fork.v1` request of
+  `POST /runs/{id}/forks` (FT-F4: latest safe Snapshot by default, optional instruction),
+  answered with the same `mc.runtime_fork_receipt.v1`. Sponsorship and approvals are the
+  principal's own (`sponsorship_refs` / `approval_refs` claims), never the request's word.
 
 Every tool calls the same application services as HTTP and CLI for the principal's verified
 tenant scope, so the three surfaces answer one request identically. A principal from
@@ -18,8 +22,10 @@ from fastmcp import Context, FastMCP
 
 from mission_control.application.missions.runtime import MissionControlRuntimeService
 from mission_control.application.missions.service import MissionControlService
+from mission_control.application.recovery.run_forks import ForkSnapshotNotFound
 from mission_control.contracts.contracts import MissionCommandRequest, MissionControlRejected
 from mission_control.contracts.identities import parse_request_scope
+from mission_control.contracts.runtime_contracts import MissionForkRequest
 from mission_control.domain.coordinator.errors import CoordinatorDomainError, CoordinatorErrorCode
 from mission_control.domain.policies.contracts import ActorContext
 from mission_control.domain.policies.errors import (
@@ -27,9 +33,11 @@ from mission_control.domain.policies.errors import (
     RunControlNotFound,
     RunVersionConflict,
 )
+from mission_control.domain.policies.forks import ForkRejected
 
 COMMAND_SEND_TOOL = "mission_command_send"
-RUN_CONTROL_TOOL_NAMES = (COMMAND_SEND_TOOL,)
+RUN_FORK_TOOL = "mission_run_fork"
+RUN_CONTROL_TOOL_NAMES = (COMMAND_SEND_TOOL, RUN_FORK_TOOL)
 
 
 class RunControlPrincipal(Protocol):
@@ -63,8 +71,20 @@ def domain_error(error: Exception) -> CoordinatorDomainError:
             message=str(error),
             details=details,
         )
-    if isinstance(error, RunControlNotFound):
-        return CoordinatorDomainError(code=CoordinatorErrorCode.NOT_FOUND, message="run not found")
+    if isinstance(error, RunControlNotFound | ForkSnapshotNotFound):
+        return CoordinatorDomainError(
+            code=CoordinatorErrorCode.NOT_FOUND, message="run or snapshot not found"
+        )
+    if isinstance(error, ForkRejected):
+        return CoordinatorDomainError(
+            code=(
+                CoordinatorErrorCode.FORBIDDEN
+                if error.code == "unauthorized"
+                else CoordinatorErrorCode.CONFLICT
+            ),
+            message=str(error),
+            details={"code": error.code},
+        )
     if isinstance(error, IdempotencyConflict | RunVersionConflict):
         return CoordinatorDomainError(
             code=CoordinatorErrorCode.IDEMPOTENCY_CONFLICT, message="request conflict"
@@ -131,6 +151,28 @@ class ScopedRunControl:
             raise domain_error(error) from None
         return receipt.model_dump(mode="json")
 
+    async def fork(
+        self, principal: RunControlPrincipal, *, run_id: str, request: Mapping[str, Any]
+    ) -> dict[str, object]:
+        service = self.runtime(principal)
+        try:
+            receipt = await service.fork(
+                run_id,
+                MissionForkRequest.model_validate(dict(request)),
+                self.actor(principal),
+                sponsorship_refs=frozenset(getattr(principal, "sponsorship_refs", frozenset())),
+                approval_refs=frozenset(getattr(principal, "approval_refs", frozenset())),
+            )
+        except (
+            MissionControlRejected,
+            RunControlNotFound,
+            IdempotencyConflict,
+            ForkRejected,
+            ForkSnapshotNotFound,
+        ) as error:
+            raise domain_error(error) from None
+        return receipt.model_dump(mode="json")
+
 
 def register_run_control_tools(
     server: FastMCP,
@@ -150,10 +192,20 @@ def register_run_control_tools(
 
         return await call(context, principals, invoke)
 
+    @server.tool(name=RUN_FORK_TOOL)
+    async def mission_run_fork(
+        run_id: str, request: dict[str, Any], context: Context
+    ) -> dict[str, object]:
+        async def invoke(principal: Any) -> object:
+            return await run_control.fork(principal, run_id=run_id, request=request)
+
+        return await call(context, principals, invoke)
+
 
 __all__ = [
     "COMMAND_SEND_TOOL",
     "RUN_CONTROL_TOOL_NAMES",
+    "RUN_FORK_TOOL",
     "ScopedRunControl",
     "domain_error",
     "register_run_control_tools",
