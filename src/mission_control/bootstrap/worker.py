@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 import asyncpg
+import uvicorn
 from pydantic import SecretStr
 from temporalio.worker import Worker
 
@@ -58,6 +59,7 @@ from mission_control.adapters.temporal.worker import (
 from mission_control.adapters.temporal.workflow_sandbox import coordinator_workflow_runner
 from mission_control.adapters.temporal.workflows.mission_run import MissionRunWorkflow
 from mission_control.application.authoring.service import ControlPlaneService
+from mission_control.application.execution.harness.hook_callbacks import HookCallbackService
 from mission_control.application.execution.service import (
     AdmissionPolicyRegistry,
     F1RunConfigurationVerifier,
@@ -84,6 +86,7 @@ from mission_control.bootstrap.composition import inspect_family_writer_installa
 from mission_control.bootstrap.settings import Settings, get_settings
 from mission_control.domain.authoring.extensions import ExtensionRegistry
 from mission_control.domain.policies.contracts import ActorContext
+from mission_control.interfaces.http.hook_callback import create_hook_callback_app
 
 
 @dataclass(frozen=True)
@@ -310,6 +313,11 @@ async def run_worker(
         )
         if composition.resources is not None:
             stack.push_async_callback(composition.resources.aclose)
+        if composition.hook_callbacks is not None:
+            # FT-G3: the Kernel Hook callback listener, loopback only, lives with the worker.
+            await start_hook_callback_listener(
+                stack, composition.hook_callbacks, port=settings.mission_control_hook_callback_port
+            )
         production = await production_workers_or_close(
             client, settings, composition, deployment_config=deployment_config
         )
@@ -353,6 +361,37 @@ async def run_worker(
                 client, connection.namespace, deployment_config.version
             )
         await (stop or asyncio.Event()).wait()
+
+
+async def start_hook_callback_listener(
+    stack: AsyncExitStack, service: HookCallbackService, *, port: int
+) -> uvicorn.Server:
+    """Serve `POST /v1/applications/{app}/internal/hook-callback` on 127.0.0.1 only; the
+    server stops with the worker (SPEC-07 section 5.5)."""
+
+    server = uvicorn.Server(
+        uvicorn.Config(
+            create_hook_callback_app(service),
+            host="127.0.0.1",
+            port=port,
+            log_level="warning",
+            lifespan="off",
+        )
+    )
+    serving = asyncio.create_task(server.serve())
+
+    async def stop() -> None:
+        server.should_exit = True
+        await serving
+
+    stack.push_async_callback(stop)
+    for _ in range(200):
+        if server.started or serving.done():
+            break
+        await asyncio.sleep(0.05)
+    if serving.done():
+        serving.result()
+    return server
 
 
 async def main(

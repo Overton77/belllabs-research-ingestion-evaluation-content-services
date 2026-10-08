@@ -28,6 +28,7 @@ from mission_control.adapters.temporal.registration.task_queues import (
     generic_artifact_task_queue,
 )
 from mission_control.application.authoring.service import ControlPlaneService
+from mission_control.application.execution.harness.hook_callbacks import HookCallbackService
 from mission_control.application.execution.run_control_repository import RunControlRepository
 from mission_control.application.execution.service import (
     AdmissionPolicyRegistry,
@@ -56,6 +57,9 @@ class WorkerActivityComposition:
     operation: OperationExecutionActivities
     artifacts: ArtifactPromotionActivities | None = None
     resources: AsyncExitStack | None = None
+    # FT-G3: the Kernel Hook callback service the worker serves on its loopback listener
+    # (present when a file-based lane such as `cursor_local` is composed).
+    hook_callbacks: HookCallbackService | None = None
 
 
 class WorkerActivityCompositionFactory(Protocol):

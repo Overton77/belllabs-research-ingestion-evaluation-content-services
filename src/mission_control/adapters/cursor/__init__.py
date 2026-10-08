@@ -1,10 +1,11 @@
 """Cursor lane family (ADR-0030; SPEC-07 sections 5 and 6).
 
-FT-G1 registers the two Cursor Lane Profiles as stubs: their declared matrices are published
-through `describe` (every control `unqualified`, `qualified=False`) so the registry, `lane list`
-and admission can name them, and every operation raises `HarnessUnsupported`. The bridge
-(`cursor_local`, FT-G3) and Cloud Agents API (`cursor_cloud`, FT-G5) harnesses replace these
-stubs; no Cursor SDK is imported or called here.
+`cursor_local` (FT-G3) is `local.CursorLocalHarness`: the pinned `cursor-sdk` bridge on the
+worker behind the `bridge.CursorBridgeLauncher` port, git worktree leases, Host Projections
+with fail-closed Kernel Hooks calling the worker back, frames keyed by bridge offset. The
+`cursor_cloud` profile (FT-G5) is registered as an unqualified stub until its harness lands.
+Both stay `qualified=False` until FT-G6 records a qualification. Importing this package
+imports no SDK; the SDK loads lazily inside the bridge adapter.
 """
 
 from __future__ import annotations

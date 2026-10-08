@@ -128,6 +128,7 @@ class ScriptedSessionLane:
     cancel_delay_s: float = 0.0
     fail_at: int | None = None
     calls: list[str] = field(default_factory=list)
+    staged: dict[str, OperationExecutionRequest] = field(default_factory=dict)
     sends: list[str] = field(default_factory=list)
     cancels: list[str] = field(default_factory=list)
     released: asyncio.Event = field(default_factory=asyncio.Event)
@@ -136,6 +137,9 @@ class ScriptedSessionLane:
 
     def describe(self) -> LaneDescribe:
         return self.describe_matrix
+
+    def stage(self, harness_execution_id: str, operation: OperationExecutionRequest) -> None:
+        self.staged[harness_execution_id] = operation
 
     async def prepare(self, request: PrepareRequest) -> PreparedSession:
         self.calls.append("prepare")
@@ -311,13 +315,20 @@ class LaneStack:
     bindings: InMemoryOperationBindingRepository
     frames: InMemoryFrameStore
     states: InMemoryLaneExecutionStateStore
-    lane: ScriptedSessionLane
+    lane: Any
     budget: ConformanceBudgetAuthority
 
 
-def lane_stack(lane: ScriptedSessionLane | None = None) -> LaneStack:
+def lane_stack(
+    lane: Any = None,
+    *,
+    frames: InMemoryFrameStore | None = None,
+    operation: OperationExecutionRequest | None = None,
+) -> LaneStack:
+    """The lane turn service over a governed in-memory boundary and `lane` (a Session Lane)."""
+
     lane = lane or ScriptedSessionLane(frames=scripted_frames())
-    request = cursor_operation()
+    request = operation or cursor_operation()
     runtime = ConformanceRuntime()
     registry = LaneRegistry([DeepAgentsHarness(runtime), lane], allow_unqualified=True)
     bindings = InMemoryOperationBindingRepository()
@@ -343,7 +354,7 @@ def lane_stack(lane: ScriptedSessionLane | None = None) -> LaneStack:
         budget=budget,
         lanes=registry,
     )
-    frames = InMemoryFrameStore()
+    frames = frames or InMemoryFrameStore()
     frames.register_run(
         SCOPE,
         request.identity.run_id,

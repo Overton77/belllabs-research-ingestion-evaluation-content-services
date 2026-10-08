@@ -944,6 +944,18 @@ class OperationExecutionService:
         if cancelled_by_command:
             await self._fence_milestone(binding, "provider_acknowledged")
         settlement = _lane_settlement(binding, facts, native_turn_ref=native_turn_ref)
+        try:
+            _validate_bound_usage(binding, settlement.usage)
+        except OperationBudgetViolation as violation:
+            # The lane ran past the bound budget: the attempt fails `budget_exceeded`, with the
+            # observed usage recorded (never counted as zero).
+            settlement = settlement.model_copy(
+                update={
+                    "status": "failed",
+                    "failure_code": "budget_exceeded",
+                    "failure_message": f"{type(violation).__name__} at governed operation boundary",
+                }
+            )
         result = await self._settle(
             binding,
             claim,

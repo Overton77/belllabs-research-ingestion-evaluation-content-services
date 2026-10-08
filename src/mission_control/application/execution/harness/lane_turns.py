@@ -86,6 +86,9 @@ from mission_control.domain.frames.contracts import (
 
 _LOGGER = logging.getLogger(__name__)
 LANE_ACTOR = "mission-control-lane-turn"
+_RECORDED_DETAILS = frozenset(
+    {"cursor_sdk_version", "bridge_state_root", "cloud_branch", "cloud_agent_url"}
+)
 
 
 class LaneSessionAdmissionView(Protocol):
@@ -199,6 +202,33 @@ def _binding_digest(operation: OperationExecutionRequest) -> str:
     return operation.effective_configuration_digest
 
 
+def execution_start(
+    operation: OperationExecutionRequest,
+    identity: LaneExecutionIdentity,
+    generation: int,
+    session_ref: str,
+) -> HarnessExecutionStart:
+    """The harness execution a Session Lane's frames (provider and hook) are written under."""
+
+    placement = "cloud" if identity.lane_profile == "cursor_cloud" else "worker_hosted"
+    return HarnessExecutionStart(
+        harness_execution_id=identity.harness_execution_id,
+        request_scope=identity.request_scope,
+        run_key=identity.run_key,
+        activation_key=identity.activation_key,
+        attempt_no=identity.attempt_no,
+        generation=generation,
+        lane_profile=LaneProfile(identity.lane_profile),
+        native_session_ref=session_ref,
+        runtime_kind=operation.execution_runtime,
+        provider_kind=identity.lane_profile,
+        placement_kind=placement,
+        intended_binding_digest=_binding_digest(operation),
+        launch_key=f"{identity.harness_execution_id}:{generation}",
+        native_identity={"operation_id": operation.identity.operation_id},
+    )
+
+
 class LaneTurnService:
     """Drives a Session Lane through `lane.turn` segments, `lane.status` and `lane.cancel`."""
 
@@ -230,10 +260,14 @@ class LaneTurnService:
 
         return not isinstance(self._lanes.for_profile(lane_profile), SessionLane)
 
-    def _session_lane(self, lane_profile: str) -> SessionLane:
+    def _session_lane(
+        self, lane_profile: str, operation: OperationExecutionRequest, generation: int
+    ) -> SessionLane:
         harness = self._lanes.admit(lane_profile)
         if not isinstance(harness, SessionLane):
             raise LaneNotSessionDriven(f"lane profile {lane_profile} is governed, not driven")
+        identity = LaneExecutionIdentity.of(operation, lane_profile, generation)
+        harness.stage(str(identity.harness_execution_id), operation)
         return harness
 
     # --- shared request fields --------------------------------------------------------------
@@ -267,24 +301,8 @@ class LaneTurnService:
         generation: int,
         session_ref: str,
     ) -> HarnessExecutionHandle:
-        placement = "cloud" if identity.lane_profile == "cursor_cloud" else "worker_hosted"
         return await self._frames.open_execution(
-            HarnessExecutionStart(
-                harness_execution_id=identity.harness_execution_id,
-                request_scope=identity.request_scope,
-                run_key=identity.run_key,
-                activation_key=identity.activation_key,
-                attempt_no=identity.attempt_no,
-                generation=generation,
-                lane_profile=LaneProfile(identity.lane_profile),
-                native_session_ref=session_ref,
-                runtime_kind=operation.execution_runtime,
-                provider_kind=identity.lane_profile,
-                placement_kind=placement,
-                intended_binding_digest=_binding_digest(operation),
-                launch_key=f"{identity.harness_execution_id}:{generation}",
-                native_identity={"operation_id": operation.identity.operation_id},
-            )
+            execution_start(operation, identity, generation, session_ref)
         )
 
     # --- lane.turn --------------------------------------------------------------------------
@@ -296,8 +314,8 @@ class LaneTurnService:
         *,
         attempt: OperationActivityAttempt | None = None,
     ) -> LaneTurnResult:
-        harness = self._session_lane(request.lane_profile)
         operation = request.operation
+        harness = self._session_lane(request.lane_profile, operation, request.generation)
         admission = await self._boundary.admit_lane_session(operation)
         if admission.settled is not None:
             return LaneTurnResult(
@@ -389,8 +407,15 @@ class LaneTurnService:
                 raise ValueError("a Session Lane start returns the native session identity")
             # Native identity first, then observation (SPEC-07 section 5.2).
             await self._open(operation, identity, request.generation, session.native_session_ref)
+            details = {
+                key: value
+                for key, value in session.native_details.items()
+                if key in _RECORDED_DETAILS and value
+            }
             await self._states.record(
-                scope, heid, LaneExecutionUpdate(native_session_ref=session.native_session_ref)
+                scope,
+                heid,
+                LaneExecutionUpdate(native_session_ref=session.native_session_ref, **details),
             )
         turn = await harness.send_turn(
             SendTurnRequest(
@@ -617,8 +642,12 @@ class LaneTurnService:
         receipt = await harness.end_session(
             EndSessionRequest(**fields, session=session, reason=facts.native_status)
         )
-        refs = tuple(dict.fromkeys((*facts.output_refs, *receipt.artifact_refs)))
-        patch = next((ref for ref in receipt.artifact_refs if "patch" in ref), facts.patch_ref)
+        refs = tuple(
+            ref
+            for ref in dict.fromkeys((*facts.output_refs, *receipt.artifact_refs))
+            if ref != receipt.patch_ref
+        )
+        patch = receipt.patch_ref or facts.patch_ref
         return facts.model_copy(update={"output_refs": refs, "patch_ref": patch})
 
     async def _lost(
@@ -665,7 +694,7 @@ class LaneTurnService:
                 idle=True,
                 operation_result=settled.model_dump(mode="json"),
             )
-        harness = self._session_lane(request.lane_profile)
+        harness = self._session_lane(request.lane_profile, request.operation, request.generation)
         identity = LaneExecutionIdentity.of(
             request.operation, request.lane_profile, request.generation
         )
@@ -716,7 +745,7 @@ class LaneTurnService:
                 settled=True,
                 operation_result=settled.model_dump(mode="json"),
             )
-        harness = self._session_lane(request.lane_profile)
+        harness = self._session_lane(request.lane_profile, request.operation, request.generation)
         identity = LaneExecutionIdentity.of(
             request.operation, request.lane_profile, request.generation
         )
@@ -799,5 +828,6 @@ __all__ = [
     "LaneNotSessionDriven",
     "LaneTurnService",
     "TurnSignals",
+    "execution_start",
     "harness_scope",
 ]

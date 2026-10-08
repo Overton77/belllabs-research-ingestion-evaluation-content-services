@@ -286,6 +286,9 @@ class SessionHandle(LaneContract):
     harness_execution_id: str = Field(min_length=1)
     generation: int = Field(ge=1)
     native_session_ref: str | None = Field(default=None, min_length=1)
+    # FT-G3: secret-free placement facts the lane records with the native identity
+    # (`cursor_sdk_version`, `bridge_state_root`, `cloud_branch`, `cloud_agent_url`).
+    native_details: dict[str, str] = Field(default_factory=dict)
 
 
 class ReattachRequest(HarnessRequest):
@@ -392,6 +395,9 @@ class EndSessionRequest(HarnessRequest):
 class CleanupReceipt(LaneContract):
     released: bool
     artifact_refs: tuple[str, ...] = ()
+    # FT-G3: the session's patch artifact (git diff plus untracked files), stored before the
+    # workspace lease was released.
+    patch_ref: str | None = None
 
 
 class StatusRequest(HarnessRequest):

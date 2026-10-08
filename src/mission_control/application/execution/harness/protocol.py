@@ -95,6 +95,11 @@ class SessionLane(AgentHarness, Protocol):
     persisted frames (the truth) rather than from a throttled heartbeat (a hint).
     """
 
+    def stage(self, harness_execution_id: str, operation: OperationExecutionRequest) -> None:
+        """Hand the lane the bound operation (binding, packet slots, prompt) of an execution
+        before any operation on it; idempotent for the same operation."""
+        ...
+
     def closing_facts(self, turn: TurnHandle, frame: LaneFrame) -> ClosingFacts: ...
 
     async def status(self, request: StatusRequest) -> ProviderStatus: ...
