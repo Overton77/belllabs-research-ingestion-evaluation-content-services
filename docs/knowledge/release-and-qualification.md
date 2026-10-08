@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: Release gates and proof status
-description: The four proof statuses, the G0 to G7 release gates, the C0 to C4 compute profiles and ProofBudget, and what is live today against the still-not-done list.
+description: The four proof statuses, the G0 to G7 release gates, the C0 to C4 compute profiles and ProofBudget, what is live today against the still-not-done list, and the 2026-10-08 fast-track position - release 1.1.0 and the Cursor lane qualification, both proven only on disposable infrastructure, with no live mission run.
 tags: [mission-control, release, qualification, gates, compute, evidence]
 ---
 
@@ -70,6 +70,33 @@ a verified recovery point; paid-provider and semantic-search qualification. The
 installer's own tests, the independent two-project suite and the real-stack acceptance
 run are the recorded evidence; restore remains unproven.
 
+## Fast-track position (2026-10-08)
+
+The fast-track packet is implemented and merged to `main` at `f8d325a`. Its evidence is local:
+
+- **Release 1.1.0** (migrations 0025-0030) is built, locked for both applications and proven on
+  scratch databases (upgrade from 1.0.0 and fresh install, both with seeds). It is **not applied to
+  either live Supabase project**. Preconditions are owner decisions: `pg_trgm` in schema
+  `extensions` on both projects, the storage claim name for the bundle bucket policies
+  (`mc_capability_role`), approval on OVE-23 for the bucket seed, and a security review of the
+  family-writer INSERT widening ([persistence](persistence.md)).
+- **Lane qualification.** `lane_profile.qualified` is `true` only for `deep_agents`. `cursor_local`
+  and `cursor_cloud` stay `false`: nothing flips it except a reviewed release that cites a
+  live-drill record under `docs/qualification/lanes/`, and no drill has run. The offline evidence
+  (`make lane-qualify PROFILE=...`: fixture replay through the real adapter and reducer,
+  describe-honesty tests, Temporal replay of the captured lane histories) never flips the flag.
+  Admission refuses an unqualified profile unless `MISSION_CONTROL_ALLOW_UNQUALIFIED_LANES=true`,
+  a local-proof override ([cursor lane](cursor-lane.md)).
+- **No live mission.** Tickets I1, I2 and I3 (the three owner missions) have not run. A live start
+  is blocked by B1 to B7 in the owner runbook (no production launch input author, missing
+  capabilities in the production seeds, a narrow worker pin file and a drifted `agent-browser`
+  skill pin, unqualified Cursor lanes, a Windows event loop limit for `cursor_local`, and the
+  subscription event-name gap). The only paid step that is ready is the Cursor lane drill.
+- **Temporal.** `temporalio` is 1.34 with Worker Deployment versioning; the server in compose is
+  1.31. Captured histories replay on the current worker.
+
+The evidence by spec is in `docs/MISSION_CONTROL_IMPLEMENTATION_STATUS.md` (fast-track section).
+
 ## A self-contradiction in the status document
 
 The header of the status document states the release is installed live in both
@@ -89,9 +116,14 @@ not edit the status document.
   [0017](../adr/0017-agent-server-runtime-persistence-separate-database.md),
   [0003](../adr/0003-common-sql-owned-by-db-contract-package.md).
 - Status and evidence: `docs/MISSION_CONTROL_IMPLEMENTATION_STATUS.md`;
+  [lane qualification](../qualification/lanes/README.md);
+  [owner runbook](../specs/fast-track-2026-10/OWNER-FIXTURE-RUNBOOK.md);
   `docs/qualification/two-project/LIVE_PLAN.md`;
   `docs/qualification/two-project/comparison-20261003-live-r1.json`;
   `packages/mission-control-db-contract/runtime/AGENT_SERVER_TOPOLOGY.md`.
-- Tests: [two-project release parity](../../tests/qualification/two_project/test_release_parity.py),
+- Tests: [lane qualification fixtures](../../tests/unit/harness/test_lane_qualification_fixtures.py),
+  [describe honesty](../../tests/unit/harness/test_describe_honesty.py),
+  [lane replay histories](../../tests/integration/temporal/test_lane_replay_histories.py),
+  [two-project release parity](../../tests/qualification/two_project/test_release_parity.py),
   [two-project fixtures](../../tests/qualification/two_project/conftest.py),
   [PostgreSQL runtime acceptance](../../tests/acceptance/mission_control/test_postgres_runtime_parity.py).

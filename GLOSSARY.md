@@ -207,11 +207,11 @@ The typed result of an assessment that a completion contract can reference.
 ### Execution, effects and settlement
 
 **Harness**:
-The provider-neutral protocol every execution lane implements: prepare, start, send_turn, cancel_turn, observe, snapshot, usage, end_session.
+The provider-neutral protocol every execution lane implements: describe, then prepare, start, reattach, send_turn, cancel_turn, observe, snapshot, usage, end_session.
 _Avoid_: adapter (the code's word), driver
 
 **Lane**:
-One qualified harness implementation: Deep Agents, Cursor Cloud, Claude Agent SDK, Codex or Direct Model.
+One harness implementation. Deep Agents and Cursor exist; Claude Agent SDK, Codex and Direct Model are specified only. A lane runs unqualified work only under an explicit local-proof policy.
 _Avoid_: runtime kind, provider, host
 
 **Agent Host**:
@@ -288,8 +288,20 @@ How one item of a context packet reaches the agent: inline (bytes in the prompt)
 The deterministic function that builds a context packet from accepted outputs, state, checkpoints and selected context under a model profile's budget.
 
 **Lane Profile**:
-One placement of a lane with its own qualified control matrix and workspace contract, for example Cursor Local or Cursor Cloud.
+One placement of a lane with its own qualified control matrix and workspace contract: `deep_agents`, `cursor_local` (Cursor Local) or `cursor_cloud` (Cursor Cloud).
 _Avoid_: runtime mode, deployment target
+
+**Harness Execution**:
+The recorded native identity of one lane run of an attempt generation: provider session and turn refs, provider cursor and usage disposition. Provider frames are keyed by it.
+_Avoid_: run (that is a mission run), job
+
+**Lane Describe**:
+A lane profile's declared control matrix (`mc.lane_describe.v1`): each control native, emulated, unsupported or unqualified, the delivery semantics per command, hooks, identity map and placement. Tests hold each lane to it.
+_Avoid_: capability list, feature flags
+
+**Lane Qualification**:
+The recorded evidence, from a live drill, that flips a lane profile's `qualified` flag through a reviewed release. Offline fixtures never flip it.
+_Avoid_: certification, approval
 
 ### Control and recovery
 
@@ -305,7 +317,7 @@ The durable, per-run and per-generation holding area for queued instructions and
 _Avoid_: queue (ambiguous with Temporal task queues), inbox
 
 **Stop Fence**:
-The persisted marker that rejects new effect claims after an urgent stop.
+The persisted, insert-only marker written before any provider cancel of an immediate cancel; every later effect admission for that run and generation is denied. It does not halt a tool already dispatched.
 
 **Intervention**:
 A privileged operator command: cancel, resume, satisfy a wait, fork from a checkpoint or reconcile.
@@ -431,7 +443,7 @@ The few lane-profile-specific fields a capability row carries beside its provide
 _Avoid_: override, variant
 
 **Hybrid Search**:
-Capability search that fuses a lexical ranking and a vector ranking after grant and compatibility filtering.
+Capability search that fuses full-text, name-trigram and vector rankings after grant and compatibility filtering, and falls back to lexical-only when no embedding route works.
 
 ### Authoring and coordination
 

@@ -26,4 +26,6 @@ Owner interview 2026-10-07; recommendations accepted outright. Decisions live in
 | 13 | [research/](research/) | Primary-source notes: codebase map, Cursor platform, Temporal lifecycle, Deep Agents middleware, seed capabilities and formats |
 | 14 | [OWNER-FIXTURE-RUNBOOK.md](OWNER-FIXTURE-RUNBOOK.md) | How the owner runs the three mission fixtures (I1 to I3) on the local real stack: readiness, blockers, release 1.1.0 install, commands, success criteria, budget, stopping, open decisions |
 
+Status (2026-10-08): the 36 tickets A1 to H1 and a readiness pass are implemented and merged to `main` at `f8d325a`; no live mission has run (I1 to I3 are owner-run) and a live start is blocked (runbook section 1). The per-spec position and the remaining gates are in [../../MISSION_CONTROL_IMPLEMENTATION_STATUS.md](../../MISSION_CONTROL_IMPLEMENTATION_STATUS.md); the retrievable concepts are in [../../knowledge/index.md](../../knowledge/index.md).
+
 Precedence on conflict: spec pack (`../mission-control-general`), then `docs/adr`, then this packet, then `docs/knowledge`, then implementation status. Report conflicts in the ticket rather than choosing silently.

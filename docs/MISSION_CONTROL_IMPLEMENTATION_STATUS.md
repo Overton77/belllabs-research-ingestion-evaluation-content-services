@@ -1,7 +1,7 @@
 ---
 type: Implementation Evidence
 title: Mission Control implementation and parity evidence
-description: "mission_control component, qualified on two local disposable databases and installed live in both Supabase projects (release 1.0.0, owner-approved 2026-10-03; no application traffic yet — see common component status and…"
+description: "mission_control component, qualified on two local disposable databases and installed live in both Supabase projects (release 1.0.0, owner-approved 2026-10-03; no application traffic yet), plus the 2026-10-08 fast-track packet status per specification (merged at f8d325a, release 1.1.0 built but not applied live, no live mission run). See the fast-track and common component sections."
 tags: [mission-control, status, evidence]
 ---
 # Mission Control implementation and parity evidence
@@ -24,6 +24,67 @@ This file distinguishes implemented local behavior from production qualification
 No live migration, Mongo data deletion, paid provider experiment, deployment, or commit
 was performed. Existing unrelated working-tree changes are preserved.
 
+## Fast-track packet status (2026-10-08)
+
+The fast-track packet (`docs/specs/fast-track-2026-10/`, SPEC-01 to SPEC-08, ADR-0023 to
+ADR-0034) is implemented and merged to `main` at `f8d325a`: 36 tickets (A1-A8, B1-B4, C1-C4,
+D1-D3, E1-E3, F1-F6, G1-G7, H1) and a readiness pass (component release 1.1.0, wiring fixes, the
+[owner fixture runbook](specs/fast-track-2026-10/OWNER-FIXTURE-RUNBOOK.md)). **No live mission has
+run.** Tickets I1 to I3 (the three owner missions) are owner-run and unrun, and a live start is
+blocked (see below). Everything below is local disposable proof (unit, `common_db` on a disposable
+PostgreSQL 17 with pgvector, Temporal replay), recorded by the readiness pass and its handoffs; it
+is not a live installation and not production parity. The 2026-10-03 counts in the rest of this
+file are older baselines and are not re-stated for the packet.
+
+Per specification. Layers: **unit** (`make test-unit`), **common_db** (real PostgreSQL 17, fails
+without `MISSION_CONTROL_TEST_ADMIN_DSN`), **Temporal** (real server or captured-history replay).
+"Wired" means composed by the configured API or worker, not only constructible.
+
+| Spec (tickets) | Implemented and proven | Wired in production | Open |
+| --- | --- | --- | --- |
+| SPEC-01 capabilities (A1-A8) | unit: host projection, bundle custody, hybrid search, catalog CLI, seeds, hook runner. common_db: hybrid search, bundle publish and materialization | catalog kinds, `search`, `pin`, `render` routes; search is lexical unless `CAPABILITY_EMBEDDING_PROFILE` names an embedding route; Deep Agents hook middleware and host projection for the lanes | catalog custody service not composed (`publish:*` answer 503); seeds and the bucket are in release 1.1.0, not live; production seeds lack the capabilities the manifests search for (B2); worker pin file narrow and drifted (B3, B4) |
+| SPEC-02 context packet (B1-B4) | unit: packer, renderers, stage and iteration handoff, continuation checkpoint, service, activities. common_db: selection ledger, handoff, continuation. Deep Agents local-model integration: packet seeding, continuation | packer composed in the worker for stage, iteration, chain and inject; checkpoint read routes | `ContinuationService` not composed, `continuation.*` activities registered on no worker, no workflow calls them; no context-health trigger source |
+| SPEC-03 frames, transcript (C1-C4) | unit and common_db: frame store, closing-frame facts, usage dispositions, transcript, search. Temporal: frame expiry workflow, run list over Visibility, visibility attributes | Deep Agents and Cursor frame writers, reducer projector, `frames.expire` on the worker maintenance queue with a daily Schedule, transcript and run routes | `transcript.project` registered on no worker (search refreshes its own run); `run transcript --full` answers 501 (no `ArtifactBodyReader`) |
+| SPEC-04 chains (D1-D3) | unit: compile, reducer, interfaces. common_db: tables, release in the ledger transaction. Temporal: idempotent chain start. Acceptance: two linked Goal Loops with a test launch author | release hook installed on the ledger writer (API and worker); chain read routes | `ChainIntentRelay` and a production `ChainLaunchInputPort` not composed: a released link leaves a start intent nobody delivers (B1) |
+| SPEC-05 manifest (E1-E3) | unit: schema, compile, interfaces. common_db: submit. Acceptance: manifest lifecycle. Dry run: all three owner manifests compile and submit on a scratch 1.1.0 installation (with the test stand-in rows) | compile, submit and start routes, CLI and MCP tools | `start` answers `409 start_unavailable`: no production launch input author (B1), which blocks every owner mission |
+| SPEC-06 interventions (F1-F6) | unit and common_db: mailbox, inject, stop fence, fork instruction, inspection, subscriptions. Temporal: mailbox, inject, immediate cancel | mailbox, stop fence and continuation commands composed in the API; subscription relay opt-in (`MISSION_CONTROL_SUBSCRIPTION_RELAY=1`); SSE `events watch`; `command queue|inject|cancel` | manifest subscription names `activation.completed`, `human_task.opened`, `run.completed` are never emitted (B7); `request_continuation` records only; no WebSocket adapter |
+| SPEC-07 harness, Cursor lanes (G1-G7) | unit: protocol, registry, dispatch, `lane.turn`, describe honesty, both Cursor harnesses against replaying fakes and recorded-shape fixtures. common_db: lane state, bindings, leases, lane controls. Temporal: `lane.turn`, captured lane histories, worker versioning, visibility. `temporalio` 1.34 | registry, `lane.turn` activities, Cursor harnesses (when `CURSOR_API_KEY` is bound), hook callback listener, Worker Deployment versioning | both Cursor profiles `qualified=False`; the paid drill has not run (B5); `cursor_local` needs a Proactor or Unix event loop (B6); `cursor_cloud` fork restore lacks a recorded branch ref |
+| SPEC-08 skills (H1) | unit: manifest digests (`make skills-check`) | router skill and five bundles in the repository and in the common seed | H3 (OVE-58, the headless-agent walkthrough) is blocked by I1 and has not run |
+
+Readiness-pass evidence (owner runbook section 9, recorded at the readiness head, not re-run for
+this documentation update): `pytest -m common_db` over `tests/integration/postgres`,
+`tests/qualification` and three acceptance suites, 176 passed with two failures and five errors
+that all trace to the drifted workspace `agent-browser` pin (B4); Temporal replay and lane suites,
+65 passed, 4 skipped (the paid live drills); `make lane-qualify` offline for both profiles passed;
+`make check` lint, format, ty, deptry and architecture passed; unit suite 1916 passed and 8
+failed (seven environmental: the missing sibling `../biotech-kg` and the B4 pin; one pre-existing).
+Two scratch proofs on the disposable server (databases dropped): 1.0.0 to 1.1.0 upgrade, and a fresh
+1.1.0 install, each with seeds and replay.
+
+Blockers that stop a live run, from the runbook (each needs the named closure):
+
+| # | Blocker | Closure |
+| --- | --- | --- |
+| B1 | No production author of lane execution templates (`LaunchInputPort`, `ChainLaunchInputPort`); `mission start` is unavailable for all three missions | A follow-up ticket plus owner decisions on model, sandbox and secret-ref mappings |
+| B2 | Production seeds lack capabilities the manifests search for | Publish reviewed definitions; the Biotech `kg_ingest` tool is app-owned |
+| B3 | Worker launches only components in its pin file | Extend the pin file together with B1 |
+| B4 | `agent-browser` workspace skill drifted from its pin; worker startup fails | Restore the pinned bytes or re-pin in a reviewed change |
+| B5 | Cursor lanes unqualified | Run the paid drill, then a reviewed release; local proof only with `MISSION_CONTROL_ALLOW_UNQUALIFIED_LANES=true` |
+| B6 | `cursor_local` cannot launch on the Windows selector loop | Run the worker on WSL or Linux |
+| B7 | Subscription event-name gap | Emit the SPEC-06 names or alias them |
+
+Owner decisions still open: `pg_trgm` on both Supabase projects and the approval to apply release
+1.1.0 (the plan admits the live 1.0.0 fingerprint); the storage claim name for the bundle bucket
+and OVE-23 approval; a revision 2 of the coordinator skill after the approved-assets 1.0.1
+succession; a security review of the family-writer INSERT widening (migration 0028); real
+`NCBI_API_KEY` and `EDGAR_IDENTITY` secret refs; a dedicated clone and worker host for Mission 3;
+PostgreSQL 17 for the compose database (compose runs 16). The runbook lists them in full.
+
+What remains after the owner's mission runs (ticket I4 owns the evidence half): the three mission
+acceptance results with passed, failed, blocked and unrun checks per mission, the lane
+qualification records, and any ADR or glossary corrections they force. Release 1.1.0 is **not
+applied** to either live Supabase project; the live state is still release 1.0.0.
+
 ## Executable entrypoints
 
 - API: `uv run uvicorn mission_control.bootstrap.api:create_app --factory`.
@@ -34,7 +95,11 @@ was performed. Existing unrelated working-tree changes are preserved.
   `mission-control-db-contract`, CLI `mission-db`); app targets in `deployments/<app>/`.
   The sibling `../biotech-postgres-db-contract` (`biotech-db`) is superseded and pending
   its reviewed thin-wrapper replacement.
-- Operator setup: [MISSION_CONTROL_LOCAL_API.md](MISSION_CONTROL_LOCAL_API.md).
+- Operator setup: [MISSION_CONTROL_LOCAL_API.md](MISSION_CONTROL_LOCAL_API.md); owner mission
+  runs: [OWNER-FIXTURE-RUNBOOK.md](specs/fast-track-2026-10/OWNER-FIXTURE-RUNBOOK.md).
+- Fast-track tooling: `make lane-qualify PROFILE=cursor_local|cursor_cloud [LIVE=1]`,
+  `make skills-check`, `make skills-manifest`, `make seeds-validate`,
+  `scripts/fast_track_dry_run.py`.
 
 The configured API/worker live under `mission_control.bootstrap`. Source imports
 use `src/mission_control`; old application imports and startup aliases are not the
@@ -129,7 +194,7 @@ local Temporal dev server (`.scratch/two-project-rollout-checkpoint/final-verifi
 | New workflow contract names | `mc.mission_run.v1`, `mc.operation.v1`, scoped IDs, preserved old replay registrations | `test_temporal_identities.py`; signed JWT scoped API drove both families to completion and replayed root/operation histories in `test_authenticated_scoped_runtime.py` |
 | Lifecycle commands | Real reducer, durable command ledger, authorization, generation/version guards, accepted/delivered/applied distinctions | Mission lifecycle/composition PostgreSQL tests and existing run-control/Temporal suites |
 | Pause/resume and restart relay | Queued boundary delivery with persisted receipts | StageGraph acceptance proof passed across actual Temporal stop/restart |
-| Cancellation | Scoped normal-urgency cancellation admission and existing active-operation/family settlement; expanded immediate-urgency requests reject explicitly | Existing RRM008 tests; new PostgreSQL-only cancel-at-wait proof passed with preserved receipts and zero reserved budget |
+| Cancellation | Scoped normal-urgency cancellation admission and existing active-operation/family settlement; expanded immediate-urgency requests reject explicitly (as of 2026-10-03; immediate cancel with a persisted Stop Fence is now implemented, see the fast-track section) | Existing RRM008 tests; new PostgreSQL-only cancel-at-wait proof passed with preserved receipts and zero reserved budget |
 | Inspect/checkpoints/snapshots | Actual repositories and safe-boundary manifest construction | Runtime unit/acceptance suites; StageGraph proof persisted 45 saver checkpoints |
 | Semantic forks | Immutable snapshot admission, patch policies, reuse only unaffected work | StageGraph source+fork acceptance proof: unchanged draft reused, changed review rerun |
 | Generic artifact promotion | Captured immutable candidates, durable artifact reference and content, idempotent activity replay | Real production artifact workflow passed; promotion replay kept four revisions, same artifact and no additional model calls |

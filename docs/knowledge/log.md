@@ -57,3 +57,42 @@
   projects (Biotech first, then Blue Ocean); both verified with identical fingerprints and
   clean protected-object comparisons. See [qualification](qualification.md) and
   `docs/qualification/two-project/comparison-20261003-live-r1.json`.
+
+## 2026-10-08
+
+Reconciled the bundle with the fast-track packet merged at `f8d325a` (tickets A1 to H1, release
+1.1.0, readiness pass). Documentation only; nothing in this entry is live proof, and no live
+mission has run (I1 to I3 are owner-run).
+
+- Added [cursor-lane](cursor-lane.md), [mission-chains](mission-chains.md),
+  [mission-manifest](mission-manifest.md), [provider-frames-and-transcript](provider-frames-and-transcript.md),
+  [interventions](interventions.md), [continuation-checkpoint](continuation-checkpoint.md),
+  [deep-agents-lane](deep-agents-lane.md) and [capability-seeds](capability-seeds.md). The last six
+  hold detail split out of the updated concepts so each stays under the 160-line validator cap
+  (30 concepts now).
+- Rewrote [lanes-and-harness](lanes-and-harness.md) (the AgentHarness protocol, registry, describe
+  matrices, `lane.turn` segment loop and qualification flag now exist; it had said no harness
+  exists) and [capabilities](capabilities.md) (kinds, host support, pins, bundle custody, hybrid
+  search, host projection, hooks, subagent profiles, plugins, seeds, skill bundles).
+- Rewrote [context-and-continuation](context-and-continuation.md) (Context Packet, tiers,
+  stage and iteration handoff, continuation checkpoint and service; recorded the limitation that
+  the service and its activities are neither composed nor registered) and
+  [events-and-commands](events-and-commands.md) (provider frames, reducer derivation, transcript,
+  run search, SSE and subscriptions, the five-state receipt vocabulary, mailbox,
+  interrupt_and_inject, immediate cancel with a persisted Stop Fence).
+- Extended [interfaces](interfaces.md), [authoring](authoring.md) (Mission Manifest v1; blocker
+  B1), [recovery](recovery.md) (fork with instruction and Cursor Local snapshot),
+  [persistence](persistence.md) (release 1.1.0, migrations 0025 to 0030, byte-exact 0002 and 0004,
+  approved-assets 1.0.1), [release-and-qualification](release-and-qualification.md),
+  [qualification](qualification.md) and [operations](operations.md).
+- Corrected stale statements: "nothing serves SSE" (now `GET /missions/{id}/events`),
+  "four receipt states" (now the five-state vocabulary), "`queue_instruction` and
+  `interrupt_and_inject` are rejected" and "no persisted stop fence" (both built), and the
+  catalog skill manifest version (0.3.0).
+- Spec versus code, reported not resolved: SPEC-07 names the Cursor kernel hook script
+  `.mission/bin/mc_hook.py`, the code writes `.mission/hooks/kernel.py`; the manifests subscribe to
+  `activation.completed`, `human_task.opened` and `run.completed`, which no writer emits (owner
+  runbook B7); ADR-0021 still says `status: proposed` although the OKF bundle and the generated
+  index exist (left for the owner; ADR bodies are not rewritten).
+- Not done here (belongs after the owner's mission runs): the three mission acceptance results for
+  I1 to I3, flipping lane qualification, and applying release 1.1.0 to the live projects.

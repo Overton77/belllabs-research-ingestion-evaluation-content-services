@@ -133,6 +133,18 @@ that deletes volumes.
 `PLAN_DIGEST=...` and `CONFIRM_TARGET=<project_ref>:<installation_id>`; it still requires
 owner authorization as described in the operator guide.
 
+### Fast-track targets
+
+`make skills-check` (part of `make check`) fails when a `skills/*/manifest.json` digest drifted from
+the files on disk; `make skills-manifest` rewrites them. `make seeds-validate` fails when a seed
+Capability Pin does not parse or a tools/list digest drifted. `make lane-qualify PROFILE=cursor_local`
+(or `cursor_cloud`) runs the offline Cursor lane suites; `LIVE=1` adds the paid drill and needs
+`CURSOR_API_KEY` and a finite `MC_PAID_BUDGET_USD` (see
+[lane qualification](qualification/lanes/README.md)). Tests marked `common_db` need a disposable
+PostgreSQL 17 with pgvector through `MISSION_CONTROL_TEST_ADMIN_DSN` (the compose
+`application-postgres` is PostgreSQL 16 and cannot install release 1.1.0). The owner mission
+procedure is in the [owner fixture runbook](specs/fast-track-2026-10/OWNER-FIXTURE-RUNBOOK.md).
+
 ## Helper scripts (`scripts/dev/`)
 
 | Script | Purpose |

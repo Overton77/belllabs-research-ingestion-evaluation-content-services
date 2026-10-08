@@ -18,7 +18,11 @@ fingerprint, this build's writer version (`mission-control-runtime/1`) and the
 restricted pool roles (`bootstrap/common_installation.py`), and fails closed otherwise.
 There is no transitional fallback. Release 1.0.0 is qualified on two local disposable
 databases and **installed in both Supabase projects** (owner-approved 2026-10-03; see
-[implementation status](MISSION_CONTROL_IMPLEMENTATION_STATUS.md)).
+[implementation status](MISSION_CONTROL_IMPLEMENTATION_STATUS.md)). Release 1.1.0 (the fast-track
+migrations 0025 to 0030, PostgreSQL 17 required) is built and proven on scratch databases only; a
+binding must pin `required_component_version="1.1.0"` to run against it, and it is not applied to
+either live project. The three fast-track owner missions have not run; for them follow the
+[owner fixture runbook](specs/fast-track-2026-10/OWNER-FIXTURE-RUNBOOK.md).
 
 Operator-relative assets resolve from `MISSION_CONTROL_HOME`, defaulting to the
 current working directory, rather than the installed package directory.
@@ -323,13 +327,76 @@ The worker uses a Psycopg-compatible selector event loop on Windows. The configu
 entrypoint has been exercised with real PostgreSQL and Temporal, including root,
 both family and linked-run pollers, without creating schema during startup.
 
+## Fast-track entrypoints and configuration
+
+This section lists names only. Values come from the process environment, `mission-control/.env` or
+the operator's secret manager; never write a value into a manifest, seed, deployment file under
+version control, Linear comment or document. Settings names are case-insensitive environment
+variables (`bootstrap/settings.py`).
+
+**API process** (`make server`):
+
+| Name | Effect |
+| --- | --- |
+| `MISSION_CONTROL_SUBSCRIPTION_RELAY` | `1` starts the subscription relay (webhook and MCP delivery) inside the API; SSE `events watch` needs no relay |
+| `CURSOR_API_KEY`, `MISSION_CONTROL_ALLOW_UNQUALIFIED_LANES` | only so `lane list` and `lane describe` show the Cursor profiles and mirror the worker's admission policy |
+| `CAPABILITY_EMBEDDING_PROFILE` | unset: capability search is lexical-only; `embedding.openai.text-embedding-3-small` embeds each query (needs `OPENAI_API_KEY`, a small paid effect) |
+| `MISSION_CONTROL_CATALOG_SCOPE` | installation catalog scope used by the projection scripts (`mc/<installation>/<app>/catalog`) |
+| `CAPABILITY_BUNDLE_BACKEND`, `CAPABILITY_BUNDLE_NAMESPACE`, `CAPABILITY_BUNDLE_LOCAL_ROOT`, `CAPABILITY_BUNDLE_PUBLISHER_TOKEN`, `CAPABILITY_BUNDLE_READER_TOKEN` | bundle custody backend (`local` or `supabase`) and its publisher or reader credentials, never the service key; the configured API does not yet expose publish routes |
+
+**Worker process** (`make worker`; Mission 3 needs WSL or Linux because `cursor_local` cannot launch
+on the Windows selector event loop):
+
+| Name | Effect |
+| --- | --- |
+| `CURSOR_API_KEY` | registers the `cursor_local` and `cursor_cloud` lane profiles |
+| `MISSION_CONTROL_ALLOW_UNQUALIFIED_LANES` | `true` admits unqualified lanes for a local proof; both Cursor profiles are unqualified, and the refusal names this flag |
+| `MISSION_CONTROL_LANE_SEGMENT_LOOP` | default `false`; `true` moves Deep Agents units onto `lane.turn` (Cursor units always use it) |
+| `MISSION_CONTROL_FRAMES_EXPIRE_SCHEDULE` | default `true`: serve `mc.frames_expire.v1` on `<base>-maintenance` and keep the daily retention Schedule |
+| `CURSOR_LEASE_ROOT`, `CURSOR_LOCAL_REPOSITORY` | where `cursor_local` leases git worktrees, and the worker-local checkout used when a binding names no repository |
+| `MISSION_CONTROL_HOOK_CALLBACK_PORT` | loopback port (default 47555) of the Kernel Hook callback listener |
+| `CAPABILITY_PINS_PATH`, `WEB_RESEARCH_AGENT_BROWSER_NODE` | the worker's pin file of launchable components and the node binary for the pinned `agent-browser` tool |
+| `TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE`, `TEMPORAL_TARGET`, `TEMPORAL_CLOUD_API_KEY` | `TEMPORAL_TARGET` is `local` by default (the `make temporal-up` server); `cloud` only on purpose |
+| `TEMPORAL_WORKER_VERSIONING`, `TEMPORAL_DEPLOYMENT_NAME`, `TEMPORAL_BUILD_ID`, `TEMPORAL_PROMOTE_ON_START` | Worker Deployment versioning (`temporalio` 1.34): default on, deployment `mission-control`, build id defaults to the package version, promote on start; production operators may set promotion off and promote deliberately |
+| `OPENAI_API_KEY`, `TAVILY_API_KEY`, `FIRECRAWL_API_KEY` | Mission 1 model and retrieval secrets (paid) |
+| `NCBI_API_KEY`, `EDGAR_IDENTITY` | secret references for the PubMed and EDGAR MCP seeds; not set today (keyless PubMed works at a low rate; EDGAR is unused by the three missions) |
+
+Capability bundle tokens, webhook secrets and MCP secrets are referenced by name
+(`environment:<NAME>` for a subscription webhook) and resolved at the point of use.
+
+**Client** (`missionctl`): `MISSION_CONTROL_URL`, `MISSION_CONTROL_APPLICATION_ID`,
+`MISSION_CONTROL_TOKEN` (an issuer-signed token; load it from a file without echoing it). New
+groups: `mission compile|submit|start|schema`, `chain inspect`, `subscribe`, `events watch`,
+`lane list|describe`, `run transcript|frames|list|search|checkpoint|fork`,
+`command queue|inject|cancel`, `catalog pin|render|publish`
+([interfaces](knowledge/interfaces.md)). `mission start` answers `409 start_unavailable` in the
+configured deployment until a production launch input author is composed (blocker B1).
+
+**Make targets and scripts:**
+
+| Command | Purpose |
+| --- | --- |
+| `make lane-qualify PROFILE=cursor_local\|cursor_cloud` | offline fixture, describe-honesty and replay suites; `LIVE=1` adds the paid drill (`CURSOR_API_KEY`, finite `MC_PAID_BUDGET_USD`, for cloud `MC_CURSOR_CLOUD_REPO`; optional `MC_LANE_DRILL_APPROVAL_URL`); see [lane qualification](qualification/lanes/README.md) |
+| `make skills-check` / `make skills-manifest` | fail on, or rewrite, drifted `skills/*/manifest.json` digests (LF-canonical) |
+| `make seeds-validate` | fail if a seed Capability Pin does not parse or a tools/list digest drifted |
+| `make temporal-up`, `make temporal-search-attributes` | start the local Temporal stack and register the Search Attributes (`mc_mission_id`, `mc_run_id`, `mc_lane`, `mc_phase`, `ForkedFromRunId` among them) |
+| `scripts/rebuild_capability_search_projection.py --tenant <scope> --lexical-only` | build the capability search projection without a paid embedding batch |
+| `scripts/fast_track_dry_run.py [--with-fixture-rows]` | unpaid dry run on scratch installs (`MISSION_CONTROL_TEST_ADMIN_DSN` names the loopback admin DSN; refuses while `CAPABILITY_EMBEDDING_PROFILE` is set) |
+
+Installing release 1.1.0 uses the `mission-db` commands above against a local target outside
+version control for fixtures (never the live `deployments/<app>` targets), after `vector` and
+`pg_trgm` exist in schema `extensions`. The exact local-stack procedure, the mission commands, the
+paid-unit budget policy, how to stop safely and the open owner decisions are in the
+[owner fixture runbook](specs/fast-track-2026-10/OWNER-FIXTURE-RUNBOOK.md).
+
 ## Operational capability catalog
 
 The configured API includes the application catalog at
 `/v1/applications/{application_id}/catalog`: GET `definitions` and POST `resolve`,
-`search`, `discover`, `inspect` and `components/search`. `missionctl catalog`
-provides corresponding `list`, `resolve`, `search`, `discover`, `inspect` and
-`components` commands. Requests use the same trusted installation/tenant identity;
+`search`, `discover`, `inspect` and `components/search`; the fast-track surface adds `pin`,
+`render`, `publish:prepare`/`publish:complete` and `GET pins/{pin}`. `missionctl catalog`
+provides corresponding `list`, `resolve`, `search`, `discover`, `inspect`, `components`, `pin`,
+`render` and `publish` commands. Requests use the same trusted installation/tenant identity;
 permissions remain explicit (`catalog:read`, `catalog:discover`, `catalog:inspect`).
 
 Default composition supports list/resolve over the admitted application catalog

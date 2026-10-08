@@ -27,6 +27,17 @@ topology/license, live storage policies, operating-system enforced executable mo
 and provider-specific qualification. These are explicit limits, not default
 skips hidden behind a green headline.
 
+The fast-track packet added layers to the same ladder. `common_db`-marked tests
+(`tests/integration/postgres`, `tests/qualification`, the manifest, chain and
+Postgres-parity acceptance suites) need a disposable PostgreSQL 17 with pgvector through
+`MISSION_CONTROL_TEST_ADMIN_DSN` and fail, never skip, without it. Temporal replay suites
+(`tests/integration/temporal/test_replay_histories.py`, `test_lane_replay_histories.py`) replay
+captured histories on the current worker. `make lane-qualify` runs the offline lane suites, and
+`LIVE=1` adds the paid Cursor drill, which has not run. `scripts/fast_track_dry_run.py` installs
+release 1.1.0 and the seeds on scratch databases and compiles and submits the three fixture
+manifests without Temporal. None of these is a live mission; see
+[release and qualification](release-and-qualification.md).
+
 Broad Knowledge Services generalization is deferred (the shared contracts are required scope; see [knowledge-services](knowledge-services.md)). Removing a legacy adapter is
 a clean-break source decision, not a migration of historical data or a claim that
 every future general Mission Control workflow type is implemented.
@@ -37,4 +48,5 @@ every future general Mission Control workflow type is implemented.
 - [Authenticated scoped runtime acceptance](../../tests/acceptance/mission_control/test_authenticated_scoped_runtime.py).
 - [Independent two-project qualification](../../tests/qualification/two_project/conftest.py).
 - Exact suite results: `docs/MISSION_CONTROL_IMPLEMENTATION_STATUS.md`.
+- [Lane qualification](../qualification/lanes/README.md); [dry run](../../scripts/fast_track_dry_run.py).
 - Changed paths, recovery and removals: `docs/REMOVAL_GUIDE.md`.

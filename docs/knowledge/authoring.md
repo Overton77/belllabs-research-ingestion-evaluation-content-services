@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: Coordinator authoring and launch
-description: How a coordinator takes a mission from interview to an explicit start, and which of those steps the coordinator MCP server and application services implement today.
+description: How a coordinator or a human takes a mission from description to an explicit start - the coordinator MCP launch path and the Mission Manifest v1 compile, submit and start path - and which steps run today; mission start is blocked in the configured deployment by blocker B1 (no production launch input author).
 tags: [mission-control, authoring, coordinator, mcp, implementation]
 ---
 
@@ -48,7 +48,9 @@ the `mission_*` family (`mission_create`, `mission_validate`, `mission_proposal_
 ## Implemented today: the coordinator MCP server
 
 `create_coordinator_server` in `src/mission_control/interfaces/mcp/coordinator_server.py`
-builds a FastMCP server ("BellLabs Coordinator") whose production tools are exactly:
+builds a FastMCP server ("BellLabs Coordinator"). The coordinator launch path uses these
+tools (the manifest, run-control, transcript, chain and subscription tools registered on the
+same server are listed in [interfaces](interfaces.md)):
 
 `coordinator_bootstrap`, `search_capabilities`, `get_capability`,
 `discover_mcp_servers`, `discover_agent_skills`, `inspect_external_candidate`,
@@ -89,18 +91,34 @@ grant per operation, rate limits, audits and never touches the database directly
   reducer, authors the exact semantic binding, submits the Temporal root and consumes
   the ticket.
 
+## Mission Manifest v1 (compile, submit, start)
+
+ADR-0022 and ADR-0034, SPEC-05. A `mission.yml` (`mc.mission_manifest.v1`) is compiled
+deterministically into a typed `MissionDefinition@1`, a Compiled Program and a Validation Report
+(`compile`, nothing persisted), committed as a revision with the admitted run or chain
+(`submit`, nothing started), and launched by a separate authorized `start`. The verbs are on
+`missionctl mission`, `/missions:compile|submit|start` and MCP `mission_manifest_*` /
+`mission_run_start`. Detail is in [mission manifest](mission-manifest.md).
+
+**Mission start is blocked (B1).** The API composes the manifest service with
+`launch_inputs=None`, so `start` answers `409 start_unavailable`; only a test author of the lane
+execution templates exists. Closing it needs owner decisions (model, sandbox and secret-ref
+mappings) and a production launch input author for the run and the chain relay
+([owner runbook](../specs/fast-track-2026-10/OWNER-FIXTURE-RUNBOOK.md)).
+
 ## Specified only
 
 No `AuthoringSession@1` record, interview budget, `mission_*` draft or proposal tools,
-context-pack selection operation, JSON-pointer validation report, or
-commit-then-activate-then-start sequence exists in `src/`; the code's path is
-validate design, prepare ticket, launch. The only drafts are catalog definition drafts
+or context-pack selection operation exists in `src/`; the coordinator path is validate
+design, prepare ticket, launch, and the manifest path is compile, submit, start (the
+manifest Validation Report does carry JSON pointers). The only drafts are catalog definition drafts
 (`ControlPlaneService.save_draft`, `publish_draft` and `AuthoringHead` with
 `draft_revision` and `published_revision`), not mission drafts. Remote MCP onboarding
 with resource-bound OAuth (ADR-0015) lives in `coordinator_auth.py`, outside this concept.
 
 # Citations
 
+- [SPEC-05](../specs/fast-track-2026-10/SPEC-05-mission-manifest.md), [ADR-0022](../adr/0022-mission-manifest-yaml-authoring-surface.md), [ADR-0034](../adr/0034-mission-manifest-v1-settled-environment-inheritance-chains-agents-hooks.md).
 - `../mission-control-general/general-mission-control/SPECIFICATION.md` ("Coordinator interaction and authoring", "Public skill CLI MCP and dashboard contract").
 - `../mission-control-general/workflow-types/07-MISSION_REVISION_AND_RUNTIME_EVOLUTION.md` (section 3).
 - [ADR-0015](../adr/0015-remote-mcp-oauth-no-jwt-forwarding.md).
@@ -117,4 +135,5 @@ with resource-bound OAuth (ADR-0015) lives in `coordinator_auth.py`, outside thi
   [facade tests](../../tests/unit/coordinator/test_coordinator_facade.py),
   [MCP surface tests](../../tests/unit/coordinator/test_coordinator_mcp_read_surface.py),
   [control-plane tests](../../tests/unit/control_plane/test_control_plane.py).
+- Manifest: [mission manifest](mission-manifest.md).
 - [`0016_coordinator_support.sql`](../../packages/mission-control-db-contract/component/migrations/0016_coordinator_support.sql).

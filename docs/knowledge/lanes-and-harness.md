@@ -1,117 +1,122 @@
 ---
 type: Concept
 title: Lanes and the harness protocol
-description: The provider-neutral harness every lane must implement, the Deep Agents lane as it exists, the agent-host configuration generator, and the proposed coding lanes that have no code yet.
+description: The provider-neutral AgentHarness protocol and lane registry, the lane.turn segment loop that drives every lane, the Deep Agents lane behind it, the lane describe matrices and qualification flag, and the Agent Host configuration generator. Cursor profiles are in cursor-lane.
 tags: [mission-control, harness, lanes, deep-agents, agent-host, implementation]
 ---
 
 # Lanes and the harness protocol
 
 A [Harness](../../GLOSSARY.md) is the protocol; a [Lane](../../GLOSSARY.md) is one
-qualified implementation of it; an [Agent Host](../../GLOSSARY.md) is a tool a human
+qualified implementation of it; a [Lane Profile](../../GLOSSARY.md) is one placement of a
+lane with its own control matrix; an [Agent Host](../../GLOSSARY.md) is a tool a human
 works in that reads generated configuration. A host is where authoring happens; a lane
 is where mission work executes. Keep the three apart when reading code, because the
-package directory for lanes is called `adapters`.
+package directory for the Deep Agents lane is called `adapters`.
 
-## The protocol as specified
+## The protocol as implemented
 
-RUNTIME-CONTRACTS.md defines `AgentHarness` as `describe`, `prepare`, `start`,
-`reattach`, `send_turn`, `cancel_turn`, `observe`, `snapshot`, `usage` and `end_session`
-(the glossary names the eight without `describe` and `reattach`). Every mutation carries
-scope, binding digest, idempotency key, generation, fenced lease and deadline; handles
-carry no secret; `describe` reports each control as `native`, `emulated`, `unsupported`
-or `unqualified`; `UsageReport` has a settled, estimated or unknown disposition per
-dimension; a successful HTTP cancel is not a `CleanupReceipt`. Workflow-types/05 adds
-the identity hierarchy (activation, attempt, agent session, session turn, harness
-execution), the native identity mapping for `deep_agents`, `cursor_cloud` and
-`direct_model`, and the rule that an agent session serves only consecutive attempts of
-one activation lineage.
+`application/execution/harness/protocol.py::AgentHarness` is `describe` plus nine
+operations: `prepare`, `start`, `reattach`, `send_turn`, `cancel_turn`, `observe`,
+`snapshot`, `usage`, `end_session`. A lane that declares an operation `unsupported` or
+`unqualified` in its describe raises `HarnessUnsupported` for it; any other error from
+such an operation is a conformance failure. `observe` resumes from an opaque lane cursor
+(LangGraph checkpoint id, bridge offset, SSE event id). The wire contracts are in
+`domain/execution/lanes.py`: `mc.lane_describe.v1`, the request and handle contracts and
+`mc.cursor_binding.v1`. Handles carry native identity, never credentials. The values are
+`LaneName` (`deep_agents`, `cursor`) and `LaneProfileName` (`deep_agents`, `cursor_local`,
+`cursor_cloud`); the profile literal set in capability host support also names
+`claude_agent_sdk` and `codex`, which have no harness.
 
-No `AgentHarness` protocol with those method names exists in `src/mission_control`.
+`application/execution/harness/describe.py` holds the declared matrix of each profile
+(`DEEP_AGENTS_DESCRIBE`, `CURSOR_LOCAL_DESCRIBE`, `CURSOR_CLOUD_DESCRIBE`): each control is
+`native`, `emulated`, `unsupported` or `unqualified`, with per-command delivery
+semantics, identity map, hook mechanism and events, instruction channels, subagent form,
+usage dispositions and placement. `GET /v1/applications/{app}/lanes[/{profile}]`
+(`interfaces/http/lanes.py`) and `missionctl lane list|describe` read them.
 
-## The Deep Agents lane as implemented
+## Registry, admission and qualification
+
+`application/execution/harness/registry.py::LaneRegistry` maps a profile to its harness
+and caches describes. The worker composition (`adapters/temporal/deployment_composition.py`)
+registers `deep_agents` always and the two Cursor profiles only when `CURSOR_API_KEY` is
+bound; the API registers describe-only entries so `lane list` works without executing.
+Admission refuses a profile whose describe is not `qualified` unless policy allows
+unqualified lanes (`MISSION_CONTROL_ALLOW_UNQUALIFIED_LANES`, a local-proof flag), and
+the refusal names that remedy. Only `deep_agents` is `qualified=True` (WP-CP-040 parity
+suite). Both Cursor profiles are `qualified=False`: nothing but a reviewed release citing a
+live-drill record under `docs/qualification/lanes/` may flip that
+([release-and-qualification](release-and-qualification.md)). Lane profile rows live in
+`mission_control.lane_profile` (migration 0030), seeded unqualified for Cursor.
+
+## One lifecycle synthesis: lane.turn
+
+ADR-0031: the operation workflow schedules `lane.turn` segments, with `lane.status` to
+reconcile and `lane.cancel` (idempotent) to stop. `application/execution/harness/lane_turns.py`
+(`LaneTurnService`) admits the attempt at the operation boundary, then on `start` prepares,
+starts and sends the turn, recording the native session and turn on the harness execution
+before observing (`adapters/postgres/lanes/execution_state.py`, migration 0030); on
+`resume` it reattaches and never sends again, because a lost native turn makes the unit
+`in_doubt`. Every observed [Provider Frame](../../GLOSSARY.md) is persisted through the
+FrameSink before the provider cursor is heartbeated, so persisted frames are the resume
+truth and the throttled heartbeat only a hint
+([events-and-commands](events-and-commands.md)). A segment ends at its bound or at a
+terminal frame whose closing facts end the session and settle the operation once. The
+activities are `adapters/temporal/activities/lane_turn.py`, registered on the
+`-agent-cognitive` queue beside `operation.execute` and `operation.cancel`.
+
+Cursor units always run through the segment loop (`OperationWorkflowRequest.segment_driven`,
+`adapters/temporal/workflows/operation.py`). Deep Agents units still run `operation.execute`
+unless `MISSION_CONTROL_LANE_SEGMENT_LOOP=true`, which moves them onto `lane.turn` with the
+governed body unchanged (`OperationExecutionActivities.run_governed`); the default is
+`false` (`bootstrap/settings.py`). Replay histories of the lane activities are captured under
+`tests/integration/temporal/histories/ft_lanes/` and replayed by
+`test_lane_replay_histories.py`.
+
+## The Deep Agents lane
 
 `adapters/deep_agents/adapter.py::DeepAgentRuntimeAdapter` is the sole production
-`create_deep_agent` composition root. `execute(invocation, resolved_secrets)` validates
-the exact binding, materializes it, classifies the unit generation from the checkpointer
-before any provider work ([context and continuation](context-and-continuation.md)), then
-submits, resumes or fails closed; `observe_latest` reads the latest durable checkpoint
-and incurred usage of a unit being cancelled without invoking cognition;
-`build_hosted_async_subagent_graph` compiles a graph the Agent Server serves.
+`create_deep_agent` composition root and `DeepAgentsHarness` wraps it behind the protocol
+without changing behavior. Materialization, frames, hook middleware, compaction observation,
+hosted subordinates and the generated Agent Host configuration are in
+[Deep Agents lane](deep-agents-lane.md).
 
-`adapters/deep_agents/materializer.py::ExactDeepAgentMaterializer.prepare` resolves every
-component by digest from an `ExactComponentRegistry` (model factory, sandbox factory,
-tools, MCP servers, middleware, subordinate profiles, checkpointer and store), mounts
-skill bundles, verifies the installed runtime version and rejects mismatches. A `hosted`
-binding leaves checkpointer and store to the Agent Server. Sandbox factories are the
-in-memory `StateBackend`, `LangSmithSandbox` and a network-isolated `DockerSandbox`
-(`docker_sandbox.py`); placements are `local_in_worker` or
-`remote_langsmith_deployment` (`domain/execution/contracts.py`), and an unqualified
-placement raises `DeepAgentUnsupportedPlacement` rather than falling back. The LangGraph
-saver and store bind to the private `mission_control_runtime` schema
-(`persistence.py`; [persistence](persistence.md), ADR-0017).
+## Specified only
 
-`adapters/deep_agents/async_subagents.py` holds two pieces: `DeepAgentsAsyncSubagentAdapter`
-starts, checks, updates, cancels and lists hosted subordinate runs on the Agent Server,
-verifies the served graph identity before submission and on reconnect, uses the child
-execution id as the provider thread with a spawn key so an existing run is found before
-one is created, and records cancellation as `provider_acknowledged` or `ambiguous`;
-`BellLabsAsyncSubagentMiddleware` presents the stock tool names to the parent agent while
-routing each call through the governed service so the child is reserved and linked
-before any provider submission (ADR-0006).
-
-## Agent Host configuration generation
-
-`domain/agentic_components/contracts.py` defines `AgentHost` (`cursor`, `codex`,
-`claude_code`, `agent_framework`), `ComponentKind` (`plugin`, `mcp_server`, `skill`,
-`agent_component`, `sandbox_snapshot`, `workspace_setup`, `diff_codec`), `TrustStage`
-(`quarantined`, `reviewed`, `qualified`, `accepted`), an `AgenticComponentRelease` that
-must carry exactly the typed binding of its kind, `MaterializationRequest`,
-`MaterializationPlan` with contiguous steps (`retrieve`, `verify`, `stage`,
-`inject_secrets`, `configure_host`, `provision_workspace`, `start_server`,
-`probe_readiness`, `seal_snapshot`) and `ReadinessReceipt`.
-`application/agentic_components/projections.py` renders `.codex/config.toml`,
-`.cursor/mcp.json` or `.mcp.json` for MCP releases and places skills under
-`.agents/skills`, `.cursor/skills` or `.claude/skills`; `materialization.py` compiles a
-non-secret replayable plan; `repository.py` is the port with an in-memory implementation
-and `adapters/capabilities/agentic_components/filesystem_repository.py` the file-backed
-one. This generates host configuration; it does not execute mission work.
-
-## Proposed coding lanes (not accepted, no code)
-
-ADR-0018 (status proposed) wants Claude Code, Codex and Cursor controllable as lanes
-behind the same protocol, qualified after Deep Agents in the order Claude Agent SDK, Cursor
-Cloud, Codex, with per-profile delivery semantics. ADR-0019 (proposed) wants each coding
-lane's first profile worker-hosted as a managed local process with a leased workspace
-and cloud placement as a second profile. Both reverse the canonical pack:
-RUNTIME-CONTRACTS.md says "first qualify cloud placement" and "local Cursor placement is
-not a required lane", and workflow-types/05 says "no Cursor local lane is required".
-Searching the kernel for `cursor_cloud`, `claude_code`, `codex` or `direct_model` finds
-only the `AgentHost` enum and coordinator surface promotion, so these lanes exist as
-decisions awaiting the next interview, not as implementations.
+Claude Agent SDK, Codex and Direct Model lanes. ADR-0018 accepts the Cursor lanes through
+ADR-0030 and leaves Claude and Codex proposed, with no harness in `src/mission_control`.
+The production semantic input binding that authors lane execution templates is also not
+built, so `mission start` stays blocked (see [authoring](authoring.md)).
 
 # Citations
 
-- Spec: `../mission-control-general/general-mission-control/RUNTIME-CONTRACTS.md`
-  (harness interface); `../mission-control-general/workflow-types/05-EXECUTORS_AND_DURABLE_CONTROLS.md`
-  (sections 2 and 3.3); `../mission-control-general/general-mission-control/SPECIFICATION.md`
-  (exact agent and sandbox binding; harness continuation and subordinates).
+- Spec: [fast-track SPEC-07](../specs/fast-track-2026-10/SPEC-07-harness-and-cursor-lane.md);
+  `../mission-control-general/general-mission-control/RUNTIME-CONTRACTS.md`
+  (harness interface); `../mission-control-general/workflow-types/05-EXECUTORS_AND_DURABLE_CONTROLS.md`.
 - ADRs: [0005](../adr/0005-deep-agents-first-extend-not-fork.md),
   [0006](../adr/0006-agent-server-required-execution-host-not-scheduler.md),
   [0017](../adr/0017-agent-server-runtime-persistence-separate-database.md),
   [0018](../adr/0018-coding-agents-are-execution-lanes.md),
-  [0019](../adr/0019-coding-lanes-worker-hosted-local-first.md).
-- Code: [Deep Agents lane](../../src/mission_control/adapters/deep_agents/adapter.py),
-  [materializer](../../src/mission_control/adapters/deep_agents/materializer.py),
-  [async subordinates](../../src/mission_control/adapters/deep_agents/async_subagents.py),
-  [Docker sandbox](../../src/mission_control/adapters/deep_agents/docker_sandbox.py),
-  [runtime persistence](../../src/mission_control/adapters/deep_agents/persistence.py),
-  [component contracts](../../src/mission_control/domain/agentic_components/contracts.py),
-  [host projections](../../src/mission_control/application/agentic_components/projections.py),
-  [materialization planner](../../src/mission_control/application/agentic_components/materialization.py),
-  [component repository](../../src/mission_control/application/agentic_components/repository.py),
-  [filesystem repository](../../src/mission_control/adapters/capabilities/agentic_components/filesystem_repository.py).
-- Tests: [agentic components](../../tests/unit/agentic_components/test_harness.py),
-  [Deep Agents operation proof](../../tests/acceptance/control_plane/test_wp_cp_040.py),
-  [subordinate submission fence](../../tests/unit/integrations/test_async_subagent_submission_fence.py),
-  [canonical Agent Server profiles](../../tests/integration/agent_server/test_canonical_server_local.py).
+  [0019](../adr/0019-coding-lanes-worker-hosted-local-first.md),
+  [0030](../adr/0030-cursor-lane-two-profiles-reducer-from-frames-hydrated-fork.md),
+  [0031](../adr/0031-temporal-lifecycle-synthesis-observe-activity-updates-seeded-forks.md).
+- Code: [protocol](../../src/mission_control/application/execution/harness/protocol.py),
+  [describe matrices](../../src/mission_control/application/execution/harness/describe.py),
+  [registry](../../src/mission_control/application/execution/harness/registry.py),
+  [lane turns](../../src/mission_control/application/execution/harness/lane_turns.py),
+  [lane contracts](../../src/mission_control/domain/execution/lanes.py),
+  [lane turn payloads](../../src/mission_control/domain/execution/lane_turns.py),
+  [lane activities](../../src/mission_control/adapters/temporal/activities/lane_turn.py),
+  [lane state store](../../src/mission_control/adapters/postgres/lanes/execution_state.py),
+  [lane routes](../../src/mission_control/interfaces/http/lanes.py),
+  [worker lane composition](../../src/mission_control/adapters/temporal/deployment_composition.py).
+- Tests: [lane contracts](../../tests/unit/harness/test_lane_contracts.py),
+  [registry](../../tests/unit/harness/test_lane_registry.py),
+  [dispatch](../../tests/unit/harness/test_lane_dispatch.py),
+  [lane turn service](../../tests/unit/harness/test_lane_turn_service.py),
+  [describe honesty](../../tests/unit/harness/test_describe_honesty.py),
+  [lane state in PostgreSQL](../../tests/integration/postgres/test_lane_execution_state.py),
+  [lane bindings in PostgreSQL](../../tests/integration/postgres/test_lane_bindings.py),
+  [lane turn on Temporal](../../tests/integration/temporal/test_lane_turn.py),
+  [lane replay histories](../../tests/integration/temporal/test_lane_replay_histories.py),
+  [segment loop acceptance](../../tests/acceptance/mission_control/test_ft_g2_segment_loop.py).
