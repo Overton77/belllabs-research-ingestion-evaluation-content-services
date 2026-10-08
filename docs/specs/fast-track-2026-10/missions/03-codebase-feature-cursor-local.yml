@@ -46,7 +46,7 @@ mission:
     workspace:
       repo: { path: C:\Users\Pinda\Proyectos\Biotech\mission-control, ref: main }   # git worktree at ref; branch mc/<run>
       context:
-        - { artifact: "artifact://ai-engineer/issues/FT-C3.md", expand: inline }    # the issue text as admitted input
+        - { artifact: "artifact://ai-engineer/issues/FT-C3.md", as: issue, expand: inline }   # the issue text; bound below as root.issue
       skills:
         - { pin: "skill.mission-control-observe@0.2.0#sha256:0000000000000000000000000000000000000000000000000000000000000000" }
     plugins:

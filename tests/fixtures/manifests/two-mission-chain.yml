@@ -1,0 +1,47 @@
+# Minimal Mission Chain (missions + links) used by tests/unit/authoring and tests/unit/chains.
+manifest: mission/v1
+missions:
+  - key: research
+    title: Research
+    application: biotech
+    goals:
+      - key: evidence_map
+        description: Map the evidence
+        criteria:
+          - { key: cited, description: Every claim is cited, evidence: [evidence_map], acceptance: { schema: claim_table@1 } }
+    environment:
+      lane: deep_agents
+      model: { profile: frontier.default }
+      sandbox: { profile: research.standard }
+      budget: { usd: 10 }
+      governors: { iterations: 4, patience: 2 }
+    program:
+      key: root
+      behavior: goal_loop
+      objective: evidence_map
+      action_space: [search]
+      outputs: [ { name: evidence_map, schema: claim_table@1 } ]
+  - key: ingestion
+    title: Ingestion
+    application: biotech
+    goals:
+      - key: ingested
+        description: Claims are ingested
+        criteria:
+          - { key: receipt, description: Receipts exist, evidence: [ingestion_receipt], acceptance: { schema: ingestion_receipt@1 } }
+    environment:
+      lane: deep_agents
+      model: { profile: frontier.default }
+      sandbox: { profile: ingestion.standard }
+      budget: { usd: 5 }
+      governors: { iterations: 3, patience: 1 }
+    program:
+      key: root
+      behavior: goal_loop
+      objective: ingested
+      action_space: [kg_ingest]
+      inputs: [ { name: evidence_map, from: research.evidence_map, expand: materialize } ]
+      outputs: [ { name: ingestion_receipt, schema: ingestion_receipt@1 } ]
+links:
+  - { from: research, to: ingestion, kind: supplies, outputs: [evidence_map], on: { goal_accepted: { goal_key: evidence_map } } }
+  - { from: research, to: ingestion, kind: depends_on, on: execution_complete }

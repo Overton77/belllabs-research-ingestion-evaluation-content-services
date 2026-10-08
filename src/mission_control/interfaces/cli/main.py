@@ -89,6 +89,23 @@ def exit_status(status: int) -> int:
     return 5
 
 
+def mission_local(args: argparse.Namespace) -> int:
+    """Manifest verbs that need no service: the JSON Schema export."""
+
+    from mission_control.domain.authoring.manifest import manifest_json_schema_text
+
+    try:
+        text = manifest_json_schema_text()
+        if getattr(args, "out", None):
+            Path(args.out).write_text(text, encoding="utf-8", newline="\n")
+        else:
+            sys.stdout.write(text)
+    except OSError as exc:
+        print(json.dumps({"error": str(exc)}), file=sys.stderr)
+        return 2
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     # Common options at every depth allow flags before or after subcommands.
     common = argparse.ArgumentParser(add_help=False, argument_default=argparse.SUPPRESS)
@@ -115,6 +132,10 @@ def main(argv: list[str] | None = None) -> int:
     send.add_argument("--request-file", required=True)
     listing = commands.add_parser("list", parents=[common])
     listing.add_argument("run_id")
+    mission = groups.add_parser("mission", parents=[common])
+    mission_commands = mission.add_subparsers(dest="action", required=True)
+    schema = mission_commands.add_parser("schema", parents=[common])
+    schema.add_argument("--out")
     catalog = groups.add_parser("catalog", parents=[common])
     catalog_commands = catalog.add_subparsers(dest="action", required=True)
     catalog_commands.add_parser("list", parents=[common])
@@ -122,6 +143,8 @@ def main(argv: list[str] | None = None) -> int:
         operation = catalog_commands.add_parser(action, parents=[common])
         operation.add_argument("--request-file", required=True)
     args = parser.parse_args(argv)
+    if args.group == "mission":
+        return mission_local(args)
     application = getattr(args, "application", os.environ.get("MISSION_CONTROL_APPLICATION_ID"))
     base_url = getattr(args, "url", os.environ.get("MISSION_CONTROL_URL", "http://127.0.0.1:8000"))
     token = os.environ.get("MISSION_CONTROL_TOKEN")
