@@ -26,6 +26,7 @@ from mission_control.adapters.auth.jwt import (
     MissionAuthenticationRejected,
     MissionTokenVerifier,
 )
+from mission_control.adapters.postgres.chains.store import PostgresChainReader
 from mission_control.adapters.postgres.context.continuation_repository import (
     PostgresCheckpointRepository,
     PostgresContinuationRepository,
@@ -44,6 +45,7 @@ from mission_control.adapters.temporal.submission import TemporalWorkflowSubmitt
 from mission_control.adapters.temporal.unit_reconciliation import TemporalUnitReconciliationNudge
 from mission_control.adapters.temporal.visibility import TemporalRunVisibility
 from mission_control.application.capabilities.catalog import CatalogService
+from mission_control.application.chains.service import ChainInspectionService
 from mission_control.application.context.continuation import CheckpointReadService
 from mission_control.application.execution.harness.registry import describe_only_registry
 from mission_control.application.execution.service import (
@@ -67,6 +69,7 @@ from mission_control.bootstrap.composition import (
     MissionApplicationServices,
     compose_application_services,
 )
+from mission_control.bootstrap.manifests import compose_manifest_service
 from mission_control.bootstrap.settings import get_settings
 from mission_control.bootstrap.subscriptions import (
     compose_subscription_service,
@@ -76,6 +79,7 @@ from mission_control.bootstrap.subscriptions import (
 from mission_control.contracts.json import parse_json_object
 from mission_control.domain.authoring.extensions import ExtensionRegistry
 from mission_control.interfaces.http.catalog import router as catalog_router
+from mission_control.interfaces.http.chains import router as chains_router
 from mission_control.interfaces.http.continuation import router as continuation_router
 from mission_control.interfaces.http.lanes import router as lanes_router
 from mission_control.interfaces.http.middleware.body_limit import BodySizeLimitMiddleware
@@ -84,6 +88,7 @@ from mission_control.interfaces.http.mission_control import (
     get_mission_principal,
     router,
 )
+from mission_control.interfaces.http.missions import router as missions_router
 from mission_control.interfaces.http.stop_fence import router as stop_fence_router
 from mission_control.interfaces.http.subscriptions import router as subscriptions_router
 from mission_control.interfaces.http.transcript import router as transcript_router
@@ -356,6 +361,26 @@ def create_application(
                         )
                         subscriptions = compose_subscription_service(pool, request_scope(identity))
                         application.state.mission_control_subscription_services[key] = subscriptions
+                        # FT-E2/E3: Mission Manifest compile, submit and start for the tenant.
+                        application.state.mission_control_manifest_services[key] = (
+                            compose_manifest_service(
+                                pool,
+                                request_scope=request_scope(identity),
+                                catalog=catalog,
+                                extensions=options.extensions,
+                                payload_store=options.payload_store,
+                                run_control=services.run_control,
+                                admission_policies=options.admission_policies,
+                                launches=services.launch,
+                                subscriptions=subscriptions,
+                            )
+                        )
+                        # FT-D2: the Mission Chain projection, read under the tenant scope.
+                        application.state.mission_control_chain_services[key] = (
+                            ChainInspectionService(
+                                PostgresChainReader(pool), request_scope=request_scope(identity)
+                            )
+                        )
                         subscription_stores.append(
                             PostgresSubscriptionStore(pool, request_scope(identity))
                         )
@@ -384,6 +409,8 @@ def create_application(
     application.state.mission_control_run_list_services = {}
     application.state.mission_control_transcript_search_services = {}
     application.state.mission_control_subscription_services = {}
+    application.state.mission_control_chain_services = {}
+    application.state.mission_control_manifest_services = {}
     application.state.mission_control_compositions = {}
     application.state.mission_control_ready = False
     # FT-G1: the API lists and describes lanes; workers execute them.
@@ -400,6 +427,8 @@ def create_application(
     application.include_router(transcript_router)
     application.include_router(continuation_router)
     application.include_router(subscriptions_router)
+    application.include_router(chains_router)
+    application.include_router(missions_router)
 
     @application.get("/health/live")
     def live() -> dict[str, bool]:

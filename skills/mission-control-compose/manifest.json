@@ -1,10 +1,10 @@
 {
   "schema_version": "mc.skill_bundle.v1",
   "name": "mission-control-compose",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "service_contract_range": ">=0.1.0,<0.2.0",
   "files": {
-    "SKILL.md": "sha256:d48ca772a714971f454a5fec8bccdf15ad7f48dbe4af14033799ddaadbe6219c",
+    "SKILL.md": "sha256:84373df07b780ba821e45fd612c043fc227b53a8a9305b20db74b08aada26ff1",
     "references/chain-patterns.md": "sha256:d91b8fd8d44c6ac8f1dc1fe9fb6a1ff9477681cc62bde9ac60976178c3b943c0"
   }
 }

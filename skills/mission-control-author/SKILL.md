@@ -49,7 +49,8 @@ Done when the file parses as YAML and every `search:` has a `kind` and an `as` a
 missionctl mission compile mission.yml --json
 ```
 
-Availability: FT-E2. Read the report with [validation-report.md](references/validation-report.md).
+Available (FT-E2); `--offline` compiles against the local fixture catalog without a server.
+Read the report with [validation-report.md](references/validation-report.md).
 Done when `blockers` is empty; warnings are allowed and must be shown to the human. Fix the
 file, never the report. The report's `resolutions` show the exact pin each `search:` became;
 copy a resolution into the file as a `pin:` when the human wants it frozen.
@@ -60,10 +61,13 @@ copy a resolution into the file as a `pin:` when the human wants it frozen.
 missionctl mission submit mission.yml --json
 ```
 
-Availability: FT-E3. Submit commits the revision and admits the run (or the chain) without
-starting anything. Record the returned `mission_id`, `revision_id`, `run_id` (or `chain_id` and
-each `mission_id`). Submitting the same file twice returns the same identities; a changed file
-is a new revision proposal.
+Available (FT-E3); needs `mission.author` (or `workflow_run.admit`). Submit compiles again,
+commits the revision with its provenance (manifest digest, resolutions, actor) and admits the
+run (or the chain) without starting anything. Record the returned `mission_id`, `revision_id`,
+`run_id` (or `chain_id` and each `mission_id`). `--request-id` makes the call idempotent: the
+same id and file return the same identities, the same id with another file is
+`IDEMPOTENCY_CONFLICT` (exit 4). Submitting an unchanged file returns the head revision
+(`unchanged: true`); a changed file is a new revision. Blockers exit 2 and write nothing.
 
 ## 5. Start
 
@@ -71,10 +75,14 @@ is a new revision proposal.
 missionctl mission start RUN_ID --json
 ```
 
-Availability: FT-E3. `RUN_ID` is the admitted run from the submit output (the HTTP alias
-`POST /missions/MISSION_ID/runs` starts the head revision's admitted run). Start is a separate authorized action; only run it when the human asked
-for the start and holds `mission.start`. Then hand over to `mission-control-observe` to watch
-the run, and register a subscription if the human wants callbacks.
+Available (FT-E3). `RUN_ID` is the admitted run from the submit output (the HTTP alias
+`POST /missions/MISSION_ID/runs` starts the head revision's admitted run). Start is a separate
+authorized action; only run it when the human asked for the start and holds `mission.start`
+(or `workflow_run.start`). It registers the manifest's `controls.subscriptions` first, then
+launches; `--wait` polls the inspection after the 202. A Goal Loop run may need its family
+input (`--request-file` with the initial goal) when the deployment has no default. Then hand
+over to `mission-control-observe` to watch the run, and register a subscription if the human
+wants callbacks.
 
 ## Boundaries
 

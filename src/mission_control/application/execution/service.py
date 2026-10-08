@@ -353,13 +353,7 @@ class RunControlService:
             return prior
 
         try:
-            if not request.delegation_authority_refs <= request.actor.authority_refs:
-                raise AdmissionRejected("requested delegation exceeds the actor authority context")
-            configuration = await self._configuration_verifier.verify(request)
-            self._validate_configuration_binding(request, configuration)
-            self._validate_budget_envelope(request, configuration)
-            await self._validate_parent_binding(request)
-            await self._policies.validate(request, configuration)
+            configuration = await self.verify_admission(request)
         except (AdmissionRejected, ConfigurationVerificationFailed) as error:
             decision = AdmissionDecision(
                 request_scope=request.request_scope,
@@ -373,130 +367,10 @@ class RunControlService:
             )
             return await self._repository.commit_admission(AdmissionMutation(decision=decision))
 
-        run_id = run_identity_for(
-            request.request_scope,
-            request.idempotency_issuer,
-            request.request_id,
-        )
-        account_id = stable_id("budget-account", run_id)
-        projection = RunProjection(
-            run_id=run_id,
-            request_scope=request.request_scope,
-            idempotency_issuer=request.idempotency_issuer,
-            request_id=request.request_id,
-            version=1,
-            phase=RunPhase.PENDING,
-            effective_configuration_digest=request.effective_configuration_digest,
-            workflow_type_ref=request.workflow_type_ref,
-            input_manifest=request.input_manifest,
-            obligation_revision=configuration.obligation_revision,
-            required_obligation_refs=configuration.required_obligation_refs,
-            evidence_frontier_digest=sha256_digest(
-                {
-                    "input_manifest_digest": request.input_manifest.digest,
-                    "obligation_evidence": [],
-                    "output_evidence": [],
-                }
-            ),
-            updated_at=request.requested_at,
-        )
-        reservations = (
-            {"baseline": dict(request.budget_envelope.baseline_reservations)}
-            if request.budget_envelope.baseline_reservations
-            else {}
-        )
-        budget = BudgetState(
-            account_id=account_id,
-            run_id=run_id,
-            parent_account_id=request.budget_envelope.parent_account_id,
-            limits=request.budget_envelope.dimensions,
-            reserved=dict(request.budget_envelope.baseline_reservations),
-            reservations=reservations,
-        )
-        effects = EffectLedgerState(run_id=run_id)
-        ledger = (
-            BudgetLedgerEntry(
-                entry_id=stable_id("ledger", account_id, "baseline"),
-                account_id=account_id,
-                run_id=run_id,
-                kind=BudgetLedgerKind.RESERVATION,
-                idempotency_id="baseline",
-                amounts=dict(request.budget_envelope.baseline_reservations),
-                occurred_at=request.requested_at,
-                parent_account_id=request.budget_envelope.parent_account_id,
-            ),
-        )
-        actor = request.actor
-        transition = LifecycleTransitionRecord(
-            transition_id=stable_id("transition", run_id, "1"),
-            run_id=run_id,
-            command_id=f"admission:{request.request_id}",
-            prior_version=0,
-            resulting_version=1,
-            prior_phase=None,
-            resulting_phase=RunPhase.PENDING,
-            prior_projection=None,
-            resulting_projection=projection,
-            actor=actor,
-            reason="Run Request admitted",
-            evidence_refs=request.admission_evidence_refs,
-            occurred_at=request.requested_at,
-            correlation_id=request.correlation_id,
-            causation_id=request.causation_id,
-        )
-        events = (
-            _event(
-                run_id,
-                1,
-                1,
-                "workflow_run.admitted",
-                request.requested_at,
-                actor,
-                request.correlation_id,
-                request.causation_id or request.request_id,
-                {
-                    "request_scope": request.request_scope,
-                    "request_id": request.request_id,
-                    "phase": RunPhase.PENDING.value,
-                    "effective_configuration_digest": request.effective_configuration_digest,
-                },
-                is_version_final=False,
-            ),
-            _event(
-                run_id,
-                1,
-                2,
-                "workflow_run.start_requested",
-                request.requested_at,
-                actor,
-                request.correlation_id,
-                request.request_id,
-                {"run_id": run_id, "expected_run_version": 1},
-            ),
-        )
-        decision = AdmissionDecision(
-            request_scope=request.request_scope,
-            idempotency_issuer=request.idempotency_issuer,
-            request_id=request.request_id,
-            request_fingerprint=fingerprint,
-            status=DecisionStatus.ACCEPTED,
-            run_id=run_id,
-            reason_code="accepted",
-            reason="Run Request admitted",
-            recorded_at=request.requested_at,
-        )
+        mutation = accepted_admission_mutation(request, configuration)
+        decision = mutation.decision
         try:
-            return await self._repository.commit_admission(
-                AdmissionMutation(
-                    decision=decision,
-                    projection=projection,
-                    budget=budget,
-                    effects=effects,
-                    transition=transition,
-                    ledger_entries=ledger,
-                    events=events,
-                )
-            )
+            return await self._repository.commit_admission(mutation)
         except ReductionRejected as error:
             rejected = decision.model_copy(
                 update={
@@ -507,6 +381,22 @@ class RunControlService:
                 }
             )
             return await self._repository.commit_admission(AdmissionMutation(decision=rejected))
+
+    async def verify_admission(self, request: RunRequest) -> VerifiedRunConfiguration:
+        """Every admission check except idempotency, without writing anything.
+
+        FT-D2/E3: a chain consumer is verified when the chain is submitted and admitted later,
+        in the ledger transaction that releases its link, from the same frozen request.
+        """
+
+        if not request.delegation_authority_refs <= request.actor.authority_refs:
+            raise AdmissionRejected("requested delegation exceeds the actor authority context")
+        configuration = await self._configuration_verifier.verify(request)
+        self._validate_configuration_binding(request, configuration)
+        self._validate_budget_envelope(request, configuration)
+        await self._validate_parent_binding(request)
+        await self._policies.validate(request, configuration)
+        return configuration
 
     async def execute(
         self, command: LifecycleCommand, *, self_issued: bool = False
@@ -1399,6 +1289,139 @@ class RunControlService:
         )
         if request.budget_envelope.parent_account_id != parent_budget.account_id:
             raise AdmissionRejected("parent budget account does not match parent run")
+
+
+def accepted_admission_mutation(
+    request: RunRequest, configuration: VerifiedRunConfiguration
+) -> AdmissionMutation:
+    """The accepted admission of a verified Run Request: projection, budget, transition, events.
+
+    Pure: the same request and configuration always produce the same mutation, so the chain
+    reducer (FT-D2) admits a consumer through exactly the path ``RunControlService.admit`` uses.
+    """
+
+    fingerprint = _fingerprint(request, exclude={"requested_at"})
+    run_id = run_identity_for(
+        request.request_scope,
+        request.idempotency_issuer,
+        request.request_id,
+    )
+    account_id = stable_id("budget-account", run_id)
+    projection = RunProjection(
+        run_id=run_id,
+        request_scope=request.request_scope,
+        idempotency_issuer=request.idempotency_issuer,
+        request_id=request.request_id,
+        version=1,
+        phase=RunPhase.PENDING,
+        effective_configuration_digest=request.effective_configuration_digest,
+        workflow_type_ref=request.workflow_type_ref,
+        input_manifest=request.input_manifest,
+        obligation_revision=configuration.obligation_revision,
+        required_obligation_refs=configuration.required_obligation_refs,
+        evidence_frontier_digest=sha256_digest(
+            {
+                "input_manifest_digest": request.input_manifest.digest,
+                "obligation_evidence": [],
+                "output_evidence": [],
+            }
+        ),
+        updated_at=request.requested_at,
+    )
+    reservations = (
+        {"baseline": dict(request.budget_envelope.baseline_reservations)}
+        if request.budget_envelope.baseline_reservations
+        else {}
+    )
+    budget = BudgetState(
+        account_id=account_id,
+        run_id=run_id,
+        parent_account_id=request.budget_envelope.parent_account_id,
+        limits=request.budget_envelope.dimensions,
+        reserved=dict(request.budget_envelope.baseline_reservations),
+        reservations=reservations,
+    )
+    effects = EffectLedgerState(run_id=run_id)
+    ledger = (
+        BudgetLedgerEntry(
+            entry_id=stable_id("ledger", account_id, "baseline"),
+            account_id=account_id,
+            run_id=run_id,
+            kind=BudgetLedgerKind.RESERVATION,
+            idempotency_id="baseline",
+            amounts=dict(request.budget_envelope.baseline_reservations),
+            occurred_at=request.requested_at,
+            parent_account_id=request.budget_envelope.parent_account_id,
+        ),
+    )
+    actor = request.actor
+    transition = LifecycleTransitionRecord(
+        transition_id=stable_id("transition", run_id, "1"),
+        run_id=run_id,
+        command_id=f"admission:{request.request_id}",
+        prior_version=0,
+        resulting_version=1,
+        prior_phase=None,
+        resulting_phase=RunPhase.PENDING,
+        prior_projection=None,
+        resulting_projection=projection,
+        actor=actor,
+        reason="Run Request admitted",
+        evidence_refs=request.admission_evidence_refs,
+        occurred_at=request.requested_at,
+        correlation_id=request.correlation_id,
+        causation_id=request.causation_id,
+    )
+    events = (
+        _event(
+            run_id,
+            1,
+            1,
+            "workflow_run.admitted",
+            request.requested_at,
+            actor,
+            request.correlation_id,
+            request.causation_id or request.request_id,
+            {
+                "request_scope": request.request_scope,
+                "request_id": request.request_id,
+                "phase": RunPhase.PENDING.value,
+                "effective_configuration_digest": request.effective_configuration_digest,
+            },
+            is_version_final=False,
+        ),
+        _event(
+            run_id,
+            1,
+            2,
+            "workflow_run.start_requested",
+            request.requested_at,
+            actor,
+            request.correlation_id,
+            request.request_id,
+            {"run_id": run_id, "expected_run_version": 1},
+        ),
+    )
+    decision = AdmissionDecision(
+        request_scope=request.request_scope,
+        idempotency_issuer=request.idempotency_issuer,
+        request_id=request.request_id,
+        request_fingerprint=fingerprint,
+        status=DecisionStatus.ACCEPTED,
+        run_id=run_id,
+        reason_code="accepted",
+        reason="Run Request admitted",
+        recorded_at=request.requested_at,
+    )
+    return AdmissionMutation(
+        decision=decision,
+        projection=projection,
+        budget=budget,
+        effects=effects,
+        transition=transition,
+        ledger_entries=ledger,
+        events=events,
+    )
 
 
 def _fingerprint(value: object, *, exclude: set[str]) -> str:

@@ -10,9 +10,10 @@ effect.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, Protocol
 from uuid import UUID
 
 import asyncpg
@@ -398,6 +399,70 @@ async def insert_admitted_run(
     return mission_id, run_id
 
 
+async def insert_run_for_mission(
+    connection: asyncpg.Connection,
+    args: tuple[Any, ...],
+    projection: RunProjection,
+    actor_ref: str,
+    *,
+    mission_id: UUID,
+    revision_id: UUID,
+) -> UUID:
+    """Insert the admitted run of an existing mission and revision (FT-D2, FT-E3).
+
+    A manifest submit commits the mission, its definition snapshot, revision and compiled
+    program first; the run that executes that revision is inserted here, in the same
+    transaction as its admission (or, for a chain consumer, its link release).
+    """
+
+    run_id = uuid7()
+    phase, lifecycle, outcome = lifecycle_columns(projection)
+    target = projection.execution_target
+    manifest = projection.input_manifest
+    ref = projection.workflow_type_ref
+    at = projection.updated_at
+    await connection.execute(
+        """
+        INSERT INTO mission_control.mission_run (
+            installation_id, application_id, tenant_id, run_id, run_key, mission_id,
+            revision_id, scheduling_revision_id, request_key, input_manifest_ref, input_digest,
+            admission_binding_ref, admission_binding_digest, workflow_family, phase, lifecycle,
+            terminal_outcome, execution_epoch, execution_generation, technical_segment,
+            admitted_policy_ref, admitted_build_ref, projection_contract, projection, version,
+            admitted_at, updated_at, created_at, created_by_actor_ref
+        )
+        VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
+            $18, 1, $19, $20, $21, $22::jsonb, $23, $24, $24, $24, $25
+        )
+        """,
+        *args,
+        run_id,
+        projection.run_id,
+        mission_id,
+        revision_id,
+        json_key(projection.idempotency_issuer, projection.request_id),
+        f"{manifest.manifest_id}@{manifest.revision}",
+        manifest.digest,
+        f"{ref.kind}:{ref.logical_id}@{ref.revision}",
+        ref.digest,
+        target.family if target is not None else None,
+        phase,
+        lifecycle,
+        outcome,
+        target.execution_epoch if target is not None else 1,
+        target.execution_generation if target is not None else 1,
+        projection.obligation_revision,
+        WRITER_REF,
+        PROJECTION_CONTRACT,
+        dump(projection),
+        projection.version,
+        at,
+        actor_ref,
+    )
+    return run_id
+
+
 # --- Events: ledger commit + contiguous mission events + outbox --------------------------
 
 
@@ -410,12 +475,18 @@ async def append_events(
     expected_versions: dict[str, int],
     events: Sequence[DomainEventEnvelope],
     actor_ref: str,
+    run_hooks: bool = True,
 ) -> UUID | None:
     """Append one ledger commit with contiguous mission events and their outbox rows.
 
     Sequences are allocated under the mission row lock; mission.next_event_seq and
     last_event_seq advance in the same statement set. Re-appending an already recorded
     envelope is accepted only when it is identical.
+
+    FT-D2: after the rows are written, every registered post-append hook runs on the same
+    connection, inside the caller's transaction (the chain reducer releases links there);
+    a hook that raises rolls the whole commit back. ``run_hooks=False`` is for writes a
+    hook itself makes.
     """
 
     if not events:
@@ -532,6 +603,157 @@ async def append_events(
         """,
         *args,
         run["mission_id"],
+        last + 1,
+        last,
+        recorded,
+    )
+    if run_hooks and _POST_APPEND_HOOKS:
+        appended = AppendedEvents(
+            run_key=run_key,
+            run_id=run["run_id"],
+            mission_id=run["mission_id"],
+            ledger_commit_id=commit_id,
+            events=tuple(pending),
+            actor_ref=actor_ref,
+        )
+        for hook in tuple(_POST_APPEND_HOOKS.values()):
+            await hook(connection, args, appended)
+    return commit_id
+
+
+# --- Post-append hooks (FT-D2, SPEC-04 "Chain reducer") ----------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class AppendedEvents:
+    """The rows one ``append_events`` call wrote, handed to post-append hooks."""
+
+    run_key: str
+    run_id: UUID
+    mission_id: UUID
+    ledger_commit_id: UUID
+    events: tuple[DomainEventEnvelope, ...]
+    actor_ref: str
+
+
+class PostAppendHook(Protocol):
+    async def __call__(
+        self, connection: asyncpg.Connection, args: tuple[Any, ...], appended: AppendedEvents
+    ) -> None: ...
+
+
+_POST_APPEND_HOOKS: dict[str, PostAppendHook] = {}
+
+
+def register_post_append_hook(name: str, hook: PostAppendHook) -> Callable[[], None]:
+    """Register ``hook`` under ``name`` (re-registering replaces it); returns an unregister."""
+
+    if not name:
+        raise ValueError("post-append hooks are registered under a non-empty name")
+    _POST_APPEND_HOOKS[name] = hook
+
+    def unregister() -> None:
+        if _POST_APPEND_HOOKS.get(name) is hook:
+            del _POST_APPEND_HOOKS[name]
+
+    return unregister
+
+
+def registered_post_append_hooks() -> tuple[str, ...]:
+    return tuple(sorted(_POST_APPEND_HOOKS))
+
+
+async def append_mission_events(
+    connection: asyncpg.Connection,
+    args: tuple[Any, ...],
+    *,
+    mission_id: UUID,
+    run_id: UUID | None,
+    commit_key: str,
+    events: Sequence[DomainEventEnvelope],
+    actor_ref: str,
+) -> UUID | None:
+    """Append contiguous events to one mission's stream without outbox rows or hooks.
+
+    Used for events that belong to several streams at once (chain events carry one envelope
+    ``event_id`` in every member mission, SPEC-04 "Events"); idempotent on ``commit_key``.
+    """
+
+    if not events:
+        return None
+    prior = await connection.fetchval(
+        f"SELECT ledger_commit_id FROM mission_control.ledger_commit "
+        f"WHERE {SCOPE} AND commit_key = $4",
+        *args,
+        commit_key,
+    )
+    if prior is not None:
+        return UUID(str(prior))
+    next_seq = await connection.fetchval(
+        f"""
+        SELECT next_event_seq FROM mission_control.mission
+        WHERE {SCOPE} AND mission_id = $4 FOR UPDATE
+        """,
+        *args,
+        mission_id,
+    )
+    if next_seq is None:
+        raise RunControlNotFound(f"mission not found: {mission_id}")
+    first = int(next_seq)
+    last = first + len(events) - 1
+    commit_id = uuid7()
+    recorded = events[-1].recorded_at
+    await connection.execute(
+        """
+        INSERT INTO mission_control.ledger_commit (
+            installation_id, application_id, tenant_id, ledger_commit_id, mission_id,
+            commit_key, expected_versions, first_event_seq, last_event_seq, result_ref,
+            created_at, created_by_actor_ref
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, '{}'::jsonb, $7, $8, NULL, $9, $10)
+        """,
+        *args,
+        commit_id,
+        mission_id,
+        commit_key,
+        first,
+        last,
+        recorded,
+        actor_ref,
+    )
+    for offset, event in enumerate(events):
+        await connection.execute(
+            """
+            INSERT INTO mission_control.mission_event (
+                installation_id, application_id, tenant_id, event_id, mission_id, seq,
+                ledger_commit_id, event_type, event_version, actor_ref, run_id, activation_id,
+                happened_at, recorded_at, causation_ref, payload, payload_ref, created_at,
+                created_by_actor_ref
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, $9, $10, NULL, $11, $12, $13,
+                    $14::jsonb, NULL, $12, $9)
+            """,
+            *args,
+            uuid7(),
+            mission_id,
+            first + offset,
+            commit_id,
+            event.event_type,
+            actor_ref,
+            run_id,
+            event.occurred_at,
+            event.recorded_at,
+            event.causation_id,
+            dump(event),
+        )
+    await connection.execute(
+        f"""
+        UPDATE mission_control.mission
+        SET next_event_seq = $5, last_event_seq = $6, version = version + 1, updated_at = $7
+        WHERE {SCOPE} AND mission_id = $4
+        """,
+        *args,
+        mission_id,
         last + 1,
         last,
         recorded,

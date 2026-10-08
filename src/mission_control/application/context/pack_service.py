@@ -148,6 +148,20 @@ class ModelBudgetProfilePort(Protocol):
     def profile_for(self, operation: OperationExecutionRequest) -> ModelBudgetProfile: ...
 
 
+@dataclass(frozen=True, slots=True)
+class ChainSupply:
+    """The released chain packet of a consumer run, re-expressed as packer inputs (FT-D2)."""
+
+    bindings: tuple[ContextBinding, ...]
+    candidates: tuple[PackCandidate, ...]
+
+
+class ChainSupplyPort(Protocol):
+    async def supply_for(self, run_id: str, *, request_scope: str) -> ChainSupply | None:
+        """The sealed ``chain_link`` packet of ``run_id`` (a released chain consumer), if any."""
+        ...
+
+
 class StaticTokenCounters:
     """A :class:`TokenCounterPort` over a fixed mapping; unknown tokenizers get the bound."""
 
@@ -260,8 +274,11 @@ class ContextPackService:
         profiles: ModelBudgetProfilePort | None = None,
         policy: ContextPackPolicy | None = None,
         max_text_bytes: int = DEFAULT_MAX_TEXT_BYTES,
+        chain_supplies: ChainSupplyPort | None = None,
     ) -> None:
         self._artifacts = artifacts
+        # FT-D2: a chain consumer's first packet carries what its released links supplied.
+        self._chain_supplies = chain_supplies
         self._selections = selections
         self._staging = staging
         self._counters = token_counters or StaticTokenCounters()
@@ -313,6 +330,12 @@ class ContextPackService:
             *self._stage_contract_candidates(request, template, mount_root=mount_root),
         ]
         bindings: dict[str, ContextBinding] = {}
+        if not proposal.frozen_input_bindings:
+            supply = await self._chain_supply(request.run_id, request.request_scope)
+            if supply is not None:
+                for chain_binding in supply.bindings:
+                    bindings.setdefault(chain_binding.binding_name, chain_binding)
+                candidates.extend(supply.candidates)
         for binding in proposal.frozen_input_bindings:
             bindings.setdefault(
                 binding.consumer_input_slot_id,
@@ -404,6 +427,11 @@ class ContextPackService:
                         label=f"executor output of iteration {request.goal_iteration}",
                     )
                 )
+        elif request.handoff is None:
+            supply = await self._chain_supply(request.run_id, scope_key)
+            if supply is not None:
+                bindings.extend(supply.bindings)
+                candidates.extend(supply.candidates)
         elif request.handoff is not None:
             handoff = request.handoff
             producer_refs.append(handoff.handoff_id)
@@ -730,6 +758,11 @@ class ContextPackService:
             provenance=provenance,
         )
 
+    async def _chain_supply(self, run_id: str, request_scope: str) -> ChainSupply | None:
+        if self._chain_supplies is None:
+            return None
+        return await self._chain_supplies.supply_for(run_id, request_scope=request_scope)
+
     # -- shared sealing -------------------------------------------------------------------
 
     async def seal(
@@ -1018,3 +1051,61 @@ def goal_handoff_reference(
         artifact_ref=f"context-packet://{digest}",
         content_digest=digest,
     )
+
+
+def chain_supply_from_packet(packet: ContextPacket) -> ChainSupply:
+    """Re-express a sealed ``chain_link`` packet as packer inputs for the consumer's packet.
+
+    Materialized items keep their bytes locator and file name but not their path, so the
+    consumer's packer places them under its own mount root (``<root>/inputs/<binding>/``);
+    inline and reference items keep their text, summary and retrieval instruction.
+    """
+
+    bindings: dict[str, ContextBinding] = {}
+    candidates: list[PackCandidate] = []
+    for item in packet.items:
+        expand = {
+            "inline": ExpandMode.INLINE,
+            "reference": ExpandMode.REFERENCE,
+            "materialize": ExpandMode.MATERIALIZE,
+        }.get(item.tier.value, ExpandMode.REFERENCE)
+        if item.binding_name is not None:
+            bindings.setdefault(
+                item.binding_name,
+                ContextBinding(
+                    binding_name=item.binding_name, expand=expand, mandatory=item.mandatory
+                ),
+            )
+        text = item.inline.text if item.inline is not None else None
+        summary = (
+            item.reference.summary
+            if item.reference is not None
+            else item.materialize.summary
+            if item.materialize is not None
+            else None
+        )
+        candidates.append(
+            PackCandidate(
+                source_kind=item.source_kind,
+                source_ref=item.source_ref,
+                binding_name=item.binding_name,
+                content_digest=item.content_digest,
+                bytes=item.bytes,
+                media_type=item.media_type,
+                schema_ref=item.schema_ref,
+                trust=item.trust,
+                mandatory=item.mandatory,
+                expand=expand,
+                text=text,
+                summary=summary or None,
+                file_name=(
+                    item.materialize.path.rsplit("/", 1)[-1]
+                    if item.materialize is not None
+                    else None
+                ),
+                durable_ref=item.materialize.durable_ref if item.materialize is not None else None,
+                retrieval=item.reference.retrieval if item.reference is not None else None,
+                provenance=item.provenance,
+            )
+        )
+    return ChainSupply(bindings=tuple(bindings.values()), candidates=tuple(candidates))

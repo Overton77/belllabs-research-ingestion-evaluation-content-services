@@ -1,0 +1,1126 @@
+{
+ "actor_ref": "owner",
+ "application_id": "biotech",
+ "blockers": [],
+ "capabilities": [
+  {
+   "capabilities": [
+    {
+     "alias": "lit_review",
+     "attributes": {},
+     "kind": "skill_bundle",
+     "pin": null,
+     "pointer": "/missions/0/environment/workspace/skills/0",
+     "resolved": {
+      "capability_id": "skill.biotech-literature-review",
+      "digest": "sha256:a5f52a8d5b4dab28700851bbdcc04c03e330fe0f0d860bea38498b41345aae48",
+      "version": "1.0.0"
+     },
+     "role": "skill",
+     "search": {
+      "query": "biotech literature review procedure",
+      "require": []
+     }
+    },
+    {
+     "alias": null,
+     "attributes": {},
+     "kind": null,
+     "pin": {
+      "capability_id": "skill.mission-control-observe",
+      "digest": null,
+      "version": "latest"
+     },
+     "pointer": "/missions/0/environment/workspace/skills/1",
+     "resolved": {
+      "capability_id": "skill.mission-control-observe",
+      "digest": "sha256:7bad40eb43cbd0bc4397b8a0426bbf43bd9a4ac63bdd47e91c1ffd2dabeacc57",
+      "version": "0.2.0"
+     },
+     "role": "skill",
+     "search": null
+    },
+    {
+     "alias": "pubmed",
+     "attributes": {},
+     "kind": "mcp_server",
+     "pin": null,
+     "pointer": "/missions/0/environment/capabilities/0",
+     "resolved": {
+      "capability_id": "mcp.pubmed-remote",
+      "digest": "sha256:48ad50c40d11a6152e8694ebb2a806c87a3cc297573ff4c4bac60e0b39d20257",
+      "version": "2.10.20"
+     },
+     "role": "capability",
+     "search": {
+      "query": "pubmed literature retrieval",
+      "require": [
+       "cursor_cloud"
+      ]
+     }
+    },
+    {
+     "alias": "tavily",
+     "attributes": {},
+     "kind": "mcp_server",
+     "pin": null,
+     "pointer": "/missions/0/environment/capabilities/1",
+     "resolved": {
+      "capability_id": "mcp.tavily",
+      "digest": "sha256:0ddb64e0269e50f242bd52ca3dbb0eaea8ce6bebf28d3a52b5692829f50785f2",
+      "version": "0.2.22"
+     },
+     "role": "capability",
+     "search": {
+      "query": "tavily web search extract",
+      "require": [
+       "cursor_cloud"
+      ]
+     }
+    },
+    {
+     "alias": "literature_verifier",
+     "attributes": {
+      "overlay": {
+       "is_background": false,
+       "model": "inherit",
+       "readonly": true
+      }
+     },
+     "kind": "subagent_profile",
+     "pin": null,
+     "pointer": "/missions/0/environment/agents/0",
+     "resolved": {
+      "capability_id": "subagent.literature-verifier",
+      "digest": "sha256:a199f70434ebb93d7ffb69ad1cfe790b1c160f126fa66b4b6b036e513f6854fb",
+      "version": "1"
+     },
+     "role": "agent",
+     "search": {
+      "query": "literature verifier subagent",
+      "require": []
+     }
+    },
+    {
+     "alias": "citation_check",
+     "attributes": {
+      "events": [
+       "after_file_edit",
+       "stop"
+      ],
+      "fail_closed": false
+     },
+     "kind": "hook_script",
+     "pin": null,
+     "pointer": "/missions/0/environment/hooks/0",
+     "resolved": {
+      "capability_id": "hook.citation-check",
+      "digest": "sha256:e5193e46c79a029cc40d6c22bdccd1060ecc94618c1c1224c2f5292368841216",
+      "version": "1"
+     },
+     "role": "hook",
+     "search": {
+      "query": "citation presence check",
+      "require": []
+     }
+    },
+    {
+     "alias": "coverage_check",
+     "attributes": {},
+     "kind": "assessment",
+     "pin": null,
+     "pointer": "/missions/0/goals/0/criteria/0/acceptance/assessment/capability",
+     "resolved": {
+      "capability_id": "assessment.evidence-coverage",
+      "digest": "sha256:4b957b843d033debe5c2fc5039c6d9d50324968ac38bbbd757ef310494d4b575",
+      "version": "1"
+     },
+     "role": "assessment",
+     "search": {
+      "query": "evidence coverage assessment claim table",
+      "require": []
+     }
+    }
+   ],
+   "mission_key": "research"
+  },
+  {
+   "capabilities": [
+    {
+     "alias": "schema_context",
+     "attributes": {},
+     "kind": "context_bundle",
+     "pin": null,
+     "pointer": "/missions/1/environment/workspace/context/0",
+     "resolved": {
+      "capability_id": "context.biotech-schema-muscle-aging",
+      "digest": "sha256:192f1b52c6ee91dd730862e7d1ed5843c89003a5e383a267adbf12584cb5eeec",
+      "version": "1.0.0"
+     },
+     "role": "context",
+     "search": {
+      "query": "biotech schema context muscle aging",
+      "require": []
+     }
+    },
+    {
+     "alias": "kg_ingest",
+     "attributes": {},
+     "kind": "mcp_tool",
+     "pin": null,
+     "pointer": "/missions/1/environment/capabilities/0",
+     "resolved": {
+      "capability_id": "mcp.biotech-kg.tool.kg-ingest",
+      "digest": "sha256:8e3bd986500c150e4eb5ce0089ba5c9d8cd5964351f56e868bfeebb356b55018",
+      "version": "1"
+     },
+     "role": "capability",
+     "search": {
+      "query": "knowledge graph ingestion claims",
+      "require": []
+     }
+    },
+    {
+     "alias": "validate_claims",
+     "attributes": {},
+     "kind": "deterministic_executor",
+     "pin": null,
+     "pointer": "/missions/1/environment/capabilities/1",
+     "resolved": {
+      "capability_id": "executor.claim-schema-validation",
+      "digest": "sha256:40ff1df93ddfdf01cbbaeaa5ef1829c95c0a77a59fb5ac1f2828508ff6c516f9",
+      "version": "1"
+     },
+     "role": "capability",
+     "search": {
+      "query": "claim schema validation",
+      "require": []
+     }
+    }
+   ],
+   "mission_key": "ingestion"
+  }
+ ],
+ "catalog_resolution": "resolved",
+ "chain": {
+  "links": [
+   {
+    "bindings": [
+     {
+      "expand": "materialize",
+      "input_name": "evidence_map",
+      "output_name": "evidence_map",
+      "schema_ref": "claim_table@1"
+     }
+    ],
+    "from_mission_key": "research",
+    "kind": "supplies",
+    "link_key": "research->ingestion:supplies",
+    "on": {
+     "goal_key": "evidence_map",
+     "kind": "goal_accepted"
+    },
+    "on_upstream_cancel": "cancel_downstream",
+    "on_upstream_not_accepted": "stop",
+    "pointer": "/links/0",
+    "to_mission_key": "ingestion"
+   },
+   {
+    "bindings": [],
+    "from_mission_key": "research",
+    "kind": "depends_on",
+    "link_key": "research->ingestion:depends_on",
+    "on": {
+     "goal_key": null,
+     "kind": "execution_complete"
+    },
+    "on_upstream_cancel": "cancel_downstream",
+    "on_upstream_not_accepted": "stop",
+    "pointer": "/links/1",
+    "to_mission_key": "ingestion"
+   }
+  ],
+  "order": [
+   "research",
+   "ingestion"
+  ]
+ },
+ "hook_events": [
+  {
+   "event": "after_file_edit",
+   "hook_alias": "citation_check",
+   "lane": "cursor_cloud",
+   "mission_key": "research",
+   "native_event": "afterFileEdit",
+   "node_key": "root",
+   "unsupported_on_lane": false
+  },
+  {
+   "event": "stop",
+   "hook_alias": "citation_check",
+   "lane": "cursor_cloud",
+   "mission_key": "research",
+   "native_event": "stop",
+   "node_key": "root",
+   "unsupported_on_lane": false
+  },
+  {
+   "event": "after_file_edit",
+   "hook_alias": "citation_check",
+   "lane": "deep_agents",
+   "mission_key": "research",
+   "native_event": "wrap_tool_call",
+   "node_key": "root",
+   "unsupported_on_lane": false
+  },
+  {
+   "event": "stop",
+   "hook_alias": "citation_check",
+   "lane": "deep_agents",
+   "mission_key": "research",
+   "native_event": "after_agent",
+   "node_key": "root",
+   "unsupported_on_lane": false
+  }
+ ],
+ "lane_support": [
+  {
+   "behavior": "goal_loop",
+   "lane": "cursor_cloud",
+   "mission_key": "research",
+   "node_key": "root",
+   "reason": null,
+   "role": "node",
+   "supported": true
+  },
+  {
+   "behavior": "goal_loop",
+   "lane": "deep_agents",
+   "mission_key": "research",
+   "node_key": "root",
+   "reason": null,
+   "role": "verifier",
+   "supported": true
+  },
+  {
+   "behavior": "goal_loop",
+   "lane": "deep_agents",
+   "mission_key": "ingestion",
+   "node_key": "root",
+   "reason": null,
+   "role": "node",
+   "supported": true
+  }
+ ],
+ "lowering": [
+  {
+   "blueprint_digest": "sha256:e0528bcce68a33d239c809d5622df767e0bf5066f872641fcb1a4321d62deb3a",
+   "definition_digest": "sha256:3a5662f8b9dfa10c0ac51c0969834a3c8de97291c6be13aa5a13f9cbf7dbbed3",
+   "family": "GoalDirected",
+   "lowering_version": "mc.manifest-lowering/1",
+   "mission_key": "research",
+   "runtime_profile_digest": "sha256:d03fc884b5b4e9def1a4c631a256b390a25162f3e1ffc4d375df6a0b32b98ae8"
+  },
+  {
+   "blueprint_digest": "sha256:52857a51fcbb3e60c4359103edf4784bfcb5ec0702c16ef06da7c2f2954c4a63",
+   "definition_digest": "sha256:4a0de6f2e337ec8187f0e92b5b72fe636a8a8f6f4a726e48049779354bc408f8",
+   "family": "GoalDirected",
+   "lowering_version": "mc.manifest-lowering/1",
+   "mission_key": "ingestion",
+   "runtime_profile_digest": "sha256:065ab8b3d6e7ebd44032768d81d6ed2315dffc90960196406604a048489d70d0"
+  }
+ ],
+ "manifest_digest": "sha256:e837e6b20196ee9ea737d702fe67ba8769dd13a8e247dc4162c034f8bc7879f2",
+ "nodes": [
+  {
+   "effective_environment": {
+    "agents": [
+     {
+      "as": "literature_verifier",
+      "kind": "subagent_profile",
+      "overlay": {
+       "is_background": false,
+       "model": "inherit",
+       "readonly": true
+      },
+      "pin": null,
+      "require": null,
+      "search": "literature verifier subagent"
+     }
+    ],
+    "budget": {
+     "tokens": 2500000,
+     "tool_calls": 400,
+     "usd": "30",
+     "wall_clock": 18000
+    },
+    "capabilities": [
+     {
+      "as": "pubmed",
+      "kind": "mcp_server",
+      "pin": null,
+      "require": [
+       "cursor_cloud"
+      ],
+      "search": "pubmed literature retrieval",
+      "tools": null
+     },
+     {
+      "as": "tavily",
+      "kind": "mcp_server",
+      "pin": null,
+      "require": [
+       "cursor_cloud"
+      ],
+      "search": "tavily web search extract",
+      "tools": null
+     }
+    ],
+    "governors": {
+     "depth": 1,
+     "fan_out": 2,
+     "iterations": 8,
+     "patience": 2,
+     "rounds": null,
+     "transfers": 3
+    },
+    "hooks": [
+     {
+      "as": "citation_check",
+      "events": [
+       "after_file_edit",
+       "stop"
+      ],
+      "fail_closed": false,
+      "kind": "hook_script",
+      "matcher": null,
+      "pin": null,
+      "require": null,
+      "search": "citation presence check"
+     }
+    ],
+    "lane": "cursor_cloud",
+    "model": {
+     "profile": "cursor.default",
+     "settings": null
+    },
+    "plugins": null,
+    "sandbox": null,
+    "side_effects": [
+     "read_only",
+     "workspace_write",
+     "external_write_reversible"
+    ],
+    "workspace": {
+     "context": null,
+     "repo": {
+      "path": null,
+      "ref": "main",
+      "url": "https://github.com/Overton77/biotech-research-notes"
+     },
+     "skills": [
+      {
+       "as": "lit_review",
+       "kind": "skill_bundle",
+       "pin": null,
+       "require": null,
+       "search": "biotech literature review procedure"
+      },
+      {
+       "as": null,
+       "kind": null,
+       "pin": "skill.mission-control-observe@latest",
+       "require": null,
+       "search": null
+      }
+     ]
+    }
+   },
+   "field_provenance": {
+    "agents": "inherited",
+    "budget.tokens": "inherited",
+    "budget.tool_calls": "inherited",
+    "budget.usd": "inherited",
+    "budget.wall_clock": "inherited",
+    "capabilities": "inherited",
+    "governors.depth": "inherited",
+    "governors.fan_out": "inherited",
+    "governors.iterations": "inherited",
+    "governors.patience": "inherited",
+    "governors.transfers": "inherited",
+    "hooks": "inherited",
+    "lane": "inherited",
+    "model.profile": "inherited",
+    "side_effects": "inherited",
+    "workspace.repo.ref": "inherited",
+    "workspace.repo.url": "inherited",
+    "workspace.skills": "inherited"
+   },
+   "lane": "cursor_cloud",
+   "lane_changed_from": null,
+   "mission_key": "research",
+   "node_key": "root",
+   "pointer": "/missions/0/program",
+   "role": "node"
+  },
+  {
+   "effective_environment": {
+    "agents": [
+     {
+      "as": "literature_verifier",
+      "kind": "subagent_profile",
+      "overlay": {
+       "is_background": false,
+       "model": "inherit",
+       "readonly": true
+      },
+      "pin": null,
+      "require": null,
+      "search": "literature verifier subagent"
+     }
+    ],
+    "budget": {
+     "tokens": 2500000,
+     "tool_calls": 400,
+     "usd": "30",
+     "wall_clock": 18000
+    },
+    "capabilities": [
+     {
+      "as": "pubmed",
+      "kind": "mcp_server",
+      "pin": null,
+      "require": [
+       "cursor_cloud"
+      ],
+      "search": "pubmed literature retrieval",
+      "tools": null
+     },
+     {
+      "as": "tavily",
+      "kind": "mcp_server",
+      "pin": null,
+      "require": [
+       "cursor_cloud"
+      ],
+      "search": "tavily web search extract",
+      "tools": null
+     }
+    ],
+    "governors": {
+     "depth": 1,
+     "fan_out": 2,
+     "iterations": 8,
+     "patience": 2,
+     "rounds": null,
+     "transfers": 3
+    },
+    "hooks": [
+     {
+      "as": "citation_check",
+      "events": [
+       "after_file_edit",
+       "stop"
+      ],
+      "fail_closed": false,
+      "kind": "hook_script",
+      "matcher": null,
+      "pin": null,
+      "require": null,
+      "search": "citation presence check"
+     }
+    ],
+    "lane": "deep_agents",
+    "model": {
+     "profile": "frontier.default",
+     "settings": null
+    },
+    "plugins": null,
+    "sandbox": null,
+    "side_effects": [
+     "read_only",
+     "workspace_write",
+     "external_write_reversible"
+    ],
+    "workspace": {
+     "context": null,
+     "repo": {
+      "path": null,
+      "ref": "main",
+      "url": "https://github.com/Overton77/biotech-research-notes"
+     },
+     "skills": [
+      {
+       "as": "lit_review",
+       "kind": "skill_bundle",
+       "pin": null,
+       "require": null,
+       "search": "biotech literature review procedure"
+      },
+      {
+       "as": null,
+       "kind": null,
+       "pin": "skill.mission-control-observe@latest",
+       "require": null,
+       "search": null
+      }
+     ]
+    }
+   },
+   "field_provenance": {
+    "agents": "inherited",
+    "budget.tokens": "inherited",
+    "budget.tool_calls": "inherited",
+    "budget.usd": "inherited",
+    "budget.wall_clock": "inherited",
+    "capabilities": "inherited",
+    "governors.depth": "inherited",
+    "governors.fan_out": "inherited",
+    "governors.iterations": "inherited",
+    "governors.patience": "inherited",
+    "governors.transfers": "inherited",
+    "hooks": "inherited",
+    "lane": "overlay",
+    "model.profile": "overlay",
+    "side_effects": "inherited",
+    "workspace.repo.ref": "inherited",
+    "workspace.repo.url": "inherited",
+    "workspace.skills": "inherited"
+   },
+   "lane": "deep_agents",
+   "lane_changed_from": "cursor_cloud",
+   "mission_key": "research",
+   "node_key": "root",
+   "pointer": "/missions/0/program/verifier",
+   "role": "verifier"
+  },
+  {
+   "effective_environment": {
+    "agents": null,
+    "budget": {
+     "tokens": 1500000,
+     "tool_calls": 300,
+     "usd": "15",
+     "wall_clock": 10800
+    },
+    "capabilities": [
+     {
+      "as": "kg_ingest",
+      "kind": "mcp_tool",
+      "pin": null,
+      "require": null,
+      "search": "knowledge graph ingestion claims",
+      "tools": null
+     },
+     {
+      "as": "validate_claims",
+      "kind": "deterministic_executor",
+      "pin": null,
+      "require": null,
+      "search": "claim schema validation",
+      "tools": null
+     }
+    ],
+    "governors": {
+     "depth": 1,
+     "fan_out": 1,
+     "iterations": 6,
+     "patience": 2,
+     "rounds": null,
+     "transfers": 2
+    },
+    "hooks": null,
+    "lane": "deep_agents",
+    "model": {
+     "profile": "frontier.default",
+     "settings": null
+    },
+    "plugins": null,
+    "sandbox": {
+     "egress": [],
+     "profile": "ingestion.standard"
+    },
+    "side_effects": [
+     "read_only",
+     "workspace_write",
+     "external_write_reversible"
+    ],
+    "workspace": {
+     "context": [
+      {
+       "artifact": null,
+       "as": "schema_context",
+       "expand": null,
+       "kind": "context_bundle",
+       "path": null,
+       "pin": null,
+       "search": "biotech schema context muscle aging"
+      }
+     ],
+     "repo": null,
+     "skills": null
+    }
+   },
+   "field_provenance": {
+    "budget.tokens": "inherited",
+    "budget.tool_calls": "inherited",
+    "budget.usd": "inherited",
+    "budget.wall_clock": "inherited",
+    "capabilities": "inherited",
+    "governors.depth": "inherited",
+    "governors.fan_out": "inherited",
+    "governors.iterations": "inherited",
+    "governors.patience": "inherited",
+    "governors.transfers": "inherited",
+    "lane": "inherited",
+    "model.profile": "inherited",
+    "sandbox.egress": "inherited",
+    "sandbox.profile": "inherited",
+    "side_effects": "inherited",
+    "workspace.context": "inherited"
+   },
+   "lane": "deep_agents",
+   "lane_changed_from": null,
+   "mission_key": "ingestion",
+   "node_key": "root",
+   "pointer": "/missions/1/program",
+   "role": "node"
+  }
+ ],
+ "plugins": [],
+ "resolved": [
+  {
+   "alias": "lit_review",
+   "blocker": null,
+   "candidates": [
+    "skill.biotech-literature-review@1.0.0#sha256:a5f52a8d5b4dab28700851bbdcc04c03e330fe0f0d860bea38498b41345aae48",
+    "context.biotech-schema-muscle-aging@1.0.0#sha256:192f1b52c6ee91dd730862e7d1ed5843c89003a5e383a267adbf12584cb5eeec",
+    "skill.agent-browser@0.38.2#sha256:54eb438f62e33a505a1157021ea5b10c52eb9fa6cd0508ede0d81b9d533f219f",
+    "skill.biomcp@0.9.1#sha256:bf0c38d379bb838c460c62e1550ecd8824c341cd667311e3e8371821521680c6"
+   ],
+   "lanes": [
+    "cursor_cloud",
+    "deep_agents"
+   ],
+   "mission_key": "research",
+   "pointer": "/missions/0/environment/workspace/skills/0",
+   "provenance": null,
+   "request": {
+    "kind": "skill",
+    "search": "biotech literature review procedure"
+   },
+   "result": {
+    "capability_id": "skill.biotech-literature-review",
+    "digest": "sha256:a5f52a8d5b4dab28700851bbdcc04c03e330fe0f0d860bea38498b41345aae48",
+    "exact_ref": {
+     "digest": "sha256:a5f52a8d5b4dab28700851bbdcc04c03e330fe0f0d860bea38498b41345aae48",
+     "kind": "skill",
+     "lifecycle_status": "published",
+     "logical_id": "skill.biotech-literature-review",
+     "payload_ref": null,
+     "revision": 1,
+     "schema_version": "1"
+    },
+    "kind": "skill",
+    "pin": "skill.biotech-literature-review@1.0.0#sha256:a5f52a8d5b4dab28700851bbdcc04c03e330fe0f0d860bea38498b41345aae48",
+    "supported_profiles": [
+     "deep_agents",
+     "cursor_local",
+     "cursor_cloud"
+    ],
+    "version": "1.0.0"
+   },
+   "role": "skill"
+  },
+  {
+   "alias": null,
+   "blocker": null,
+   "candidates": [],
+   "lanes": [
+    "cursor_cloud",
+    "deep_agents"
+   ],
+   "mission_key": "research",
+   "pointer": "/missions/0/environment/workspace/skills/1",
+   "provenance": null,
+   "request": {
+    "kind": "skill",
+    "pin": "skill.mission-control-observe@latest"
+   },
+   "result": {
+    "capability_id": "skill.mission-control-observe",
+    "digest": "sha256:7bad40eb43cbd0bc4397b8a0426bbf43bd9a4ac63bdd47e91c1ffd2dabeacc57",
+    "exact_ref": {
+     "digest": "sha256:7bad40eb43cbd0bc4397b8a0426bbf43bd9a4ac63bdd47e91c1ffd2dabeacc57",
+     "kind": "skill",
+     "lifecycle_status": "published",
+     "logical_id": "skill.mission-control-observe",
+     "payload_ref": null,
+     "revision": 1,
+     "schema_version": "1"
+    },
+    "kind": "skill",
+    "pin": "skill.mission-control-observe@0.2.0#sha256:7bad40eb43cbd0bc4397b8a0426bbf43bd9a4ac63bdd47e91c1ffd2dabeacc57",
+    "supported_profiles": [
+     "deep_agents",
+     "cursor_local",
+     "cursor_cloud",
+     "claude_agent_sdk",
+     "codex"
+    ],
+    "version": "0.2.0"
+   },
+   "role": "skill"
+  },
+  {
+   "alias": "pubmed",
+   "blocker": null,
+   "candidates": [
+    "mcp.pubmed-remote@2.10.20#sha256:48ad50c40d11a6152e8694ebb2a806c87a3cc297573ff4c4bac60e0b39d20257",
+    "mcp.firecrawl@3.28.2#sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf"
+   ],
+   "lanes": [
+    "cursor_cloud"
+   ],
+   "mission_key": "research",
+   "pointer": "/missions/0/environment/capabilities/0",
+   "provenance": null,
+   "request": {
+    "kind": "mcp_server",
+    "require": [
+     "cursor_cloud"
+    ],
+    "search": "pubmed literature retrieval"
+   },
+   "result": {
+    "capability_id": "mcp.pubmed-remote",
+    "digest": "sha256:48ad50c40d11a6152e8694ebb2a806c87a3cc297573ff4c4bac60e0b39d20257",
+    "exact_ref": {
+     "digest": "sha256:48ad50c40d11a6152e8694ebb2a806c87a3cc297573ff4c4bac60e0b39d20257",
+     "kind": "mcp_server",
+     "lifecycle_status": "published",
+     "logical_id": "mcp.pubmed-remote",
+     "payload_ref": null,
+     "revision": 1,
+     "schema_version": "1"
+    },
+    "kind": "mcp_server",
+    "pin": "mcp.pubmed-remote@2.10.20#sha256:48ad50c40d11a6152e8694ebb2a806c87a3cc297573ff4c4bac60e0b39d20257",
+    "supported_profiles": [
+     "deep_agents",
+     "cursor_local",
+     "cursor_cloud"
+    ],
+    "version": "2.10.20"
+   },
+   "role": "capability"
+  },
+  {
+   "alias": "tavily",
+   "blocker": null,
+   "candidates": [
+    "mcp.tavily@0.2.22#sha256:0ddb64e0269e50f242bd52ca3dbb0eaea8ce6bebf28d3a52b5692829f50785f2",
+    "mcp.firecrawl@3.28.2#sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+    "mcp.pubmed-remote@2.10.20#sha256:48ad50c40d11a6152e8694ebb2a806c87a3cc297573ff4c4bac60e0b39d20257"
+   ],
+   "lanes": [
+    "cursor_cloud"
+   ],
+   "mission_key": "research",
+   "pointer": "/missions/0/environment/capabilities/1",
+   "provenance": null,
+   "request": {
+    "kind": "mcp_server",
+    "require": [
+     "cursor_cloud"
+    ],
+    "search": "tavily web search extract"
+   },
+   "result": {
+    "capability_id": "mcp.tavily",
+    "digest": "sha256:0ddb64e0269e50f242bd52ca3dbb0eaea8ce6bebf28d3a52b5692829f50785f2",
+    "exact_ref": {
+     "digest": "sha256:0ddb64e0269e50f242bd52ca3dbb0eaea8ce6bebf28d3a52b5692829f50785f2",
+     "kind": "mcp_server",
+     "lifecycle_status": "published",
+     "logical_id": "mcp.tavily",
+     "payload_ref": null,
+     "revision": 1,
+     "schema_version": "1"
+    },
+    "kind": "mcp_server",
+    "pin": "mcp.tavily@0.2.22#sha256:0ddb64e0269e50f242bd52ca3dbb0eaea8ce6bebf28d3a52b5692829f50785f2",
+    "supported_profiles": [
+     "deep_agents",
+     "cursor_local",
+     "cursor_cloud",
+     "claude_agent_sdk",
+     "codex"
+    ],
+    "version": "0.2.22"
+   },
+   "role": "capability"
+  },
+  {
+   "alias": "literature_verifier",
+   "blocker": null,
+   "candidates": [
+    "subagent.literature-verifier@1#sha256:a199f70434ebb93d7ffb69ad1cfe790b1c160f126fa66b4b6b036e513f6854fb",
+    "subagent.code-verifier@1#sha256:1d68913fb018220a94afc9031bd57f79d9a9745b04ec27e972de6624c810cb81"
+   ],
+   "lanes": [
+    "cursor_cloud",
+    "deep_agents"
+   ],
+   "mission_key": "research",
+   "pointer": "/missions/0/environment/agents/0",
+   "provenance": null,
+   "request": {
+    "kind": "subagent_profile",
+    "search": "literature verifier subagent"
+   },
+   "result": {
+    "capability_id": "subagent.literature-verifier",
+    "digest": "sha256:a199f70434ebb93d7ffb69ad1cfe790b1c160f126fa66b4b6b036e513f6854fb",
+    "exact_ref": {
+     "digest": "sha256:a199f70434ebb93d7ffb69ad1cfe790b1c160f126fa66b4b6b036e513f6854fb",
+     "kind": "subagent_profile",
+     "lifecycle_status": "published",
+     "logical_id": "subagent.literature-verifier",
+     "payload_ref": null,
+     "revision": 1,
+     "schema_version": "1"
+    },
+    "kind": "subagent_profile",
+    "pin": "subagent.literature-verifier@1#sha256:a199f70434ebb93d7ffb69ad1cfe790b1c160f126fa66b4b6b036e513f6854fb",
+    "supported_profiles": [
+     "deep_agents",
+     "cursor_local",
+     "cursor_cloud"
+    ],
+    "version": "1"
+   },
+   "role": "agent"
+  },
+  {
+   "alias": "citation_check",
+   "blocker": null,
+   "candidates": [
+    "hook.citation-check@1#sha256:e5193e46c79a029cc40d6c22bdccd1060ecc94618c1c1224c2f5292368841216"
+   ],
+   "lanes": [
+    "cursor_cloud",
+    "deep_agents"
+   ],
+   "mission_key": "research",
+   "pointer": "/missions/0/environment/hooks/0",
+   "provenance": null,
+   "request": {
+    "kind": "hook_script",
+    "search": "citation presence check"
+   },
+   "result": {
+    "capability_id": "hook.citation-check",
+    "digest": "sha256:e5193e46c79a029cc40d6c22bdccd1060ecc94618c1c1224c2f5292368841216",
+    "exact_ref": {
+     "digest": "sha256:e5193e46c79a029cc40d6c22bdccd1060ecc94618c1c1224c2f5292368841216",
+     "kind": "hook_script",
+     "lifecycle_status": "published",
+     "logical_id": "hook.citation-check",
+     "payload_ref": null,
+     "revision": 1,
+     "schema_version": "1"
+    },
+    "kind": "hook_script",
+    "pin": "hook.citation-check@1#sha256:e5193e46c79a029cc40d6c22bdccd1060ecc94618c1c1224c2f5292368841216",
+    "supported_profiles": [
+     "deep_agents",
+     "cursor_local",
+     "cursor_cloud"
+    ],
+    "version": "1"
+   },
+   "role": "hook"
+  },
+  {
+   "alias": "coverage_check",
+   "blocker": null,
+   "candidates": [
+    "assessment.evidence-coverage@1#sha256:4b957b843d033debe5c2fc5039c6d9d50324968ac38bbbd757ef310494d4b575",
+    "assessment.code-change-verification@1#sha256:852724a28fb42c8d2025f22a95442f294c32911b9055961ba6f1d3acbccc8213",
+    "executor.claim-schema-validation@1#sha256:40ff1df93ddfdf01cbbaeaa5ef1829c95c0a77a59fb5ac1f2828508ff6c516f9"
+   ],
+   "lanes": [
+    "cursor_cloud"
+   ],
+   "mission_key": "research",
+   "pointer": "/missions/0/goals/0/criteria/0/acceptance/assessment/capability",
+   "provenance": null,
+   "request": {
+    "kind": "tool",
+    "search": "evidence coverage assessment claim table"
+   },
+   "result": {
+    "capability_id": "assessment.evidence-coverage",
+    "digest": "sha256:4b957b843d033debe5c2fc5039c6d9d50324968ac38bbbd757ef310494d4b575",
+    "exact_ref": {
+     "digest": "sha256:4b957b843d033debe5c2fc5039c6d9d50324968ac38bbbd757ef310494d4b575",
+     "kind": "tool",
+     "lifecycle_status": "published",
+     "logical_id": "assessment.evidence-coverage",
+     "payload_ref": null,
+     "revision": 1,
+     "schema_version": "1"
+    },
+    "kind": "tool",
+    "pin": "assessment.evidence-coverage@1#sha256:4b957b843d033debe5c2fc5039c6d9d50324968ac38bbbd757ef310494d4b575",
+    "supported_profiles": [],
+    "version": "1"
+   },
+   "role": "assessment"
+  },
+  {
+   "alias": "schema_context",
+   "blocker": null,
+   "candidates": [
+    "context.biotech-schema-muscle-aging@1.0.0#sha256:192f1b52c6ee91dd730862e7d1ed5843c89003a5e383a267adbf12584cb5eeec",
+    "skill.biotech-literature-review@1.0.0#sha256:a5f52a8d5b4dab28700851bbdcc04c03e330fe0f0d860bea38498b41345aae48",
+    "skill.biomcp@0.9.1#sha256:bf0c38d379bb838c460c62e1550ecd8824c341cd667311e3e8371821521680c6",
+    "skill.mission-control-compose@0.2.0#sha256:5f2bd8ec85e952cfd27b1a6512885273567d020f5a3e49b11f8b5d6c2fbe321c",
+    "skill.mission-control-intervene@0.1.0#sha256:300a72b104003885265139deba17fb099a7b2b60f6d7a28811949327c3abc5e1"
+   ],
+   "lanes": [
+    "deep_agents"
+   ],
+   "mission_key": "ingestion",
+   "pointer": "/missions/1/environment/workspace/context/0",
+   "provenance": null,
+   "request": {
+    "kind": "skill",
+    "search": "biotech schema context muscle aging"
+   },
+   "result": {
+    "capability_id": "context.biotech-schema-muscle-aging",
+    "digest": "sha256:192f1b52c6ee91dd730862e7d1ed5843c89003a5e383a267adbf12584cb5eeec",
+    "exact_ref": {
+     "digest": "sha256:192f1b52c6ee91dd730862e7d1ed5843c89003a5e383a267adbf12584cb5eeec",
+     "kind": "skill",
+     "lifecycle_status": "published",
+     "logical_id": "context.biotech-schema-muscle-aging",
+     "payload_ref": null,
+     "revision": 1,
+     "schema_version": "1"
+    },
+    "kind": "skill",
+    "pin": "context.biotech-schema-muscle-aging@1.0.0#sha256:192f1b52c6ee91dd730862e7d1ed5843c89003a5e383a267adbf12584cb5eeec",
+    "supported_profiles": [
+     "deep_agents",
+     "cursor_local",
+     "cursor_cloud"
+    ],
+    "version": "1.0.0"
+   },
+   "role": "context"
+  },
+  {
+   "alias": "kg_ingest",
+   "blocker": null,
+   "candidates": [
+    "mcp.biotech-kg.tool.kg-ingest@1#sha256:8e3bd986500c150e4eb5ce0089ba5c9d8cd5964351f56e868bfeebb356b55018"
+   ],
+   "lanes": [
+    "deep_agents"
+   ],
+   "mission_key": "ingestion",
+   "pointer": "/missions/1/environment/capabilities/0",
+   "provenance": null,
+   "request": {
+    "kind": "mcp_tool",
+    "search": "knowledge graph ingestion claims"
+   },
+   "result": {
+    "capability_id": "mcp.biotech-kg.tool.kg-ingest",
+    "digest": "sha256:8e3bd986500c150e4eb5ce0089ba5c9d8cd5964351f56e868bfeebb356b55018",
+    "exact_ref": {
+     "digest": "sha256:8e3bd986500c150e4eb5ce0089ba5c9d8cd5964351f56e868bfeebb356b55018",
+     "kind": "mcp_tool",
+     "lifecycle_status": "published",
+     "logical_id": "mcp.biotech-kg.tool.kg-ingest",
+     "payload_ref": null,
+     "revision": 1,
+     "schema_version": "1"
+    },
+    "kind": "mcp_tool",
+    "pin": "mcp.biotech-kg.tool.kg-ingest@1#sha256:8e3bd986500c150e4eb5ce0089ba5c9d8cd5964351f56e868bfeebb356b55018",
+    "supported_profiles": [],
+    "version": "1"
+   },
+   "role": "capability"
+  },
+  {
+   "alias": "validate_claims",
+   "blocker": null,
+   "candidates": [
+    "executor.claim-schema-validation@1#sha256:40ff1df93ddfdf01cbbaeaa5ef1829c95c0a77a59fb5ac1f2828508ff6c516f9",
+    "assessment.evidence-coverage@1#sha256:4b957b843d033debe5c2fc5039c6d9d50324968ac38bbbd757ef310494d4b575"
+   ],
+   "lanes": [
+    "deep_agents"
+   ],
+   "mission_key": "ingestion",
+   "pointer": "/missions/1/environment/capabilities/1",
+   "provenance": null,
+   "request": {
+    "kind": "tool",
+    "search": "claim schema validation"
+   },
+   "result": {
+    "capability_id": "executor.claim-schema-validation",
+    "digest": "sha256:40ff1df93ddfdf01cbbaeaa5ef1829c95c0a77a59fb5ac1f2828508ff6c516f9",
+    "exact_ref": {
+     "digest": "sha256:40ff1df93ddfdf01cbbaeaa5ef1829c95c0a77a59fb5ac1f2828508ff6c516f9",
+     "kind": "tool",
+     "lifecycle_status": "published",
+     "logical_id": "executor.claim-schema-validation",
+     "payload_ref": null,
+     "revision": 1,
+     "schema_version": "1"
+    },
+    "kind": "tool",
+    "pin": "executor.claim-schema-validation@1#sha256:40ff1df93ddfdf01cbbaeaa5ef1829c95c0a77a59fb5ac1f2828508ff6c516f9",
+    "supported_profiles": [],
+    "version": "1"
+   },
+   "role": "capability"
+  }
+ ],
+ "resolved_at": "2026-10-08T12:00:00Z",
+ "schema_version": "mc.manifest_resolution.v1",
+ "tenant_id": "9287e246-224b-5814-bc00-44bb5396e0c5",
+ "warnings": [
+  {
+   "code": "INVALID_DEFINITION",
+   "message": "deep_agents node without a sandbox profile uses the deployment default",
+   "pointer": "/missions/0/program/verifier/environment/sandbox",
+   "reason": "sandbox_defaulted"
+  },
+  {
+   "code": "CAPABILITY_UNAVAILABLE",
+   "message": "search 'tavily web search extract' is ambiguous between mcp.tavily@0.2.22#sha256:0ddb64e0269e50f242bd52ca3dbb0eaea8ce6bebf28d3a52b5692829f50785f2 and mcp.firecrawl@3.28.2#sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf; the top hit was pinned",
+   "pointer": "/missions/0/environment/capabilities/1",
+   "reason": "ambiguous_search"
+  },
+  {
+   "code": "CAPABILITY_UNAVAILABLE",
+   "message": "search 'literature verifier subagent' is ambiguous between subagent.literature-verifier@1#sha256:a199f70434ebb93d7ffb69ad1cfe790b1c160f126fa66b4b6b036e513f6854fb and subagent.code-verifier@1#sha256:1d68913fb018220a94afc9031bd57f79d9a9745b04ec27e972de6624c810cb81; the top hit was pinned",
+   "pointer": "/missions/0/environment/agents/0",
+   "reason": "ambiguous_search"
+  },
+  {
+   "code": "UNSUPPORTED_BEHAVIOR",
+   "message": "subagent literature_verifier: readonly/is_background are not supported inline on cursor_cloud; projected as a file",
+   "pointer": "/missions/0/program/environment/agents/0/overlay",
+   "reason": "projected_as_file"
+  }
+ ]
+}

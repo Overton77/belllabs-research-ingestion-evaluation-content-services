@@ -48,7 +48,7 @@ mission:
       context:
         - { artifact: "artifact://ai-engineer/issues/FT-C3.md", as: issue, expand: inline }   # the issue text; bound below as root.issue
       skills:
-        - { pin: "skill.mission-control-observe@0.2.0#sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+        - { pin: "skill.mission-control-observe@latest" }
     plugins:
       - { search: "agent-browser browser automation", kind: plugin, as: agent_browser }   # expands to skill + mcp + binary pin
     agents:

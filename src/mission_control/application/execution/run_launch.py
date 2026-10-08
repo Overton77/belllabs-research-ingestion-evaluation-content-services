@@ -67,6 +67,8 @@ class RunLaunchRequest(BaseModel):
     goal_directed: dict[str, Any] | None = None
     # A fork launch names the source run's templates, which the patch is applied to.
     source_semantic_input_binding_ref: str | None = Field(default=None, min_length=1)
+    # FT-E3/G7: the mission the run executes; the root then starts with `mc_mission_id`.
+    mission_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class RunLaunchReceipt(BaseModel):
@@ -160,27 +162,19 @@ class RunLaunchService:
             fork_request_id = fork_request.request_id
             parent_run_id = receipt.source_run_id
             await self._apply_fork(request, fork_request, workflow_input)
-        mission_id = (
-            await self._mission_ids(request.request_scope, run.run_id)
-            if self._mission_ids is not None
-            else None
-        )
+        # FT-E3 passes the mission explicitly; otherwise FT-C4 looks it up for visibility.
+        mission_id = request.mission_id
+        if mission_id is None and self._mission_ids is not None:
+            mission_id = await self._mission_ids(request.request_scope, run.run_id)
         try:
-            if mission_id is not None:
-                submission = await self._submitter.submit(
-                    workflow_input,
-                    workflow_id=f"belllabs-run/{run.run_id}",
-                    blueprint_family=family,
-                    parent_run_id=parent_run_id,
-                    mission_id=mission_id,
-                )
-            else:
-                submission = await self._submitter.submit(
-                    workflow_input,
-                    workflow_id=f"belllabs-run/{run.run_id}",
-                    blueprint_family=family,
-                    parent_run_id=parent_run_id,
-                )
+            extra: dict[str, str] = {"mission_id": mission_id} if mission_id is not None else {}
+            submission = await self._submitter.submit(
+                workflow_input,
+                workflow_id=f"belllabs-run/{run.run_id}",
+                blueprint_family=family,
+                parent_run_id=parent_run_id,
+                **extra,
+            )
         except LaunchIdempotencyConflict as error:
             raise RunLaunchRejected(error.code, str(error)) from error
         return RunLaunchReceipt(

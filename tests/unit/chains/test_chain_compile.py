@@ -324,7 +324,7 @@ def test_structural_report_on_unparseable_manifest():
 
 
 def test_missionctl_mission_compile(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
-    assert missionctl(["mission", "compile", str(MISSION_2), "--json"]) == 0
+    assert missionctl(["mission", "compile", str(MISSION_2), "--json", "--offline"]) == 0
     printed = json.loads(capsys.readouterr().out)
     assert printed["ok"] is True
     assert printed["resolution"]["chain"]["order"] == ["research", "ingestion"]
@@ -335,7 +335,7 @@ def test_missionctl_mission_compile(tmp_path: Path, capsys: pytest.CaptureFixtur
         ),
         encoding="utf-8",
     )
-    assert missionctl(["mission", "compile", str(broken), "--json"]) == 2
+    assert missionctl(["mission", "compile", str(broken), "--json", "--offline"]) == 2
     printed = json.loads(capsys.readouterr().out)
     assert {"pointer": "/links/0/outputs/0", "reason": "unbound_chain_output"}.items() <= printed[
         "blockers"

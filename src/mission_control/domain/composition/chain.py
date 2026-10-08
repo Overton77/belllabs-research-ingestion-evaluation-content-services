@@ -30,6 +30,7 @@ from mission_control.domain.authoring.manifest import (
     find_cycle,
     walk_program,
 )
+from mission_control.domain.policies.contracts import RunRequest, VerifiedRunConfiguration
 
 CHAIN_SCHEMA_VERSION = "mc.chain.v1"
 CHAIN_LINK_SCHEMA_VERSION = "mc.chain_link.v1"
@@ -216,9 +217,12 @@ class ChainEvent(ChainContract):
         "chain_link.released",
         "chain_link.blocked",
         "chain_link.detached",
+        "chain_link.cancelled",
         "chain.completed",
     ]
     payload: dict[str, object]
+    link_id: UUID | None = None
+    """The link the event is about (absent for chain-level events)."""
 
 
 class LinkUpdate(ChainContract):
@@ -251,6 +255,9 @@ class ConsumerAdmission(ChainContract):
 class ConsumerCancellation(ChainContract):
     chain_id: UUID
     run_id: UUID
+    run_key: str = Field(min_length=1)
+    """The consumer run's run-control identity (the key commands address)."""
+    link_id: UUID
     reason: Literal["upstream_cancelled"] = "upstream_cancelled"
 
 
@@ -278,6 +285,34 @@ class ChainTransition(ChainContract):
 
 def link_transition_allowed(current: ChainLinkState, target: ChainLinkState) -> bool:
     return target in LINK_TRANSITIONS[current]
+
+
+ChainFamily = Literal["StageGraph", "GoalDirected"]
+
+
+class ChainMemberAdmission(ChainContract):
+    """A member's Run Request, verified at submit and admitted later by the chain reducer.
+
+    ``verified_configuration`` is what ``RunControlService.verify_admission`` returned when the
+    chain was submitted; the reducer replays ``accepted_admission_mutation`` from these two
+    values inside the ledger transaction that releases the member's last incoming link.
+    """
+
+    chain_id: UUID
+    mission_id: UUID
+    mission_key: str = Field(min_length=1)
+    revision_id: UUID
+    family: ChainFamily
+    initial_goal: str | None = Field(default=None, min_length=1)
+    autostart: bool = True
+    run_request: RunRequest
+    verified_configuration: VerifiedRunConfiguration
+
+    @model_validator(mode="after")
+    def _goal_for_goal_directed(self) -> ChainMemberAdmission:
+        if (self.family == "GoalDirected") != (self.initial_goal is not None):
+            raise ValueError("a GoalDirected member carries its initial goal; StageGraph none")
+        return self
 
 
 # ---------------------------------------------------------------------------

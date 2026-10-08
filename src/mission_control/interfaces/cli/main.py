@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit
+from uuid import UUID, uuid4
 
 import httpx
 
@@ -42,6 +43,16 @@ class MissionClient:
 
     def commands(self, run_id: str) -> httpx.Response:
         return self.client.get(f"{self.prefix}/runs/{self._id(run_id)}/commands")
+
+    def manifest(self, verb: str, body: dict[str, Any]) -> httpx.Response:
+        """FT-E2/E3: ``POST /missions:compile`` and ``POST /missions:submit``."""
+
+        return self.client.post(f"{self.prefix}/missions:{verb}", json=body)
+
+    def chain(self, chain_id: str) -> httpx.Response:
+        """FT-D2: the ``mc.chain.v1`` projection with each member's run."""
+
+        return self.client.get(f"{self.prefix}/chains/{self._id(chain_id)}")
 
     def admit(self, body: dict[str, Any]) -> httpx.Response:
         return self.client.post(
@@ -603,6 +614,24 @@ def main(argv: list[str] | None = None) -> int:
     )
     compile_ = mission_commands.add_parser("compile", parents=[common])
     compile_.add_argument("file")
+    compile_.add_argument(
+        "--offline",
+        action="store_true",
+        help="structure-only compile without the service (no catalog resolution)",
+    )
+    submit = mission_commands.add_parser("submit", parents=[common])
+    submit.add_argument("file")
+    submit.add_argument("--request-id", dest="request_id_arg")
+    mission_start = mission_commands.add_parser("start", parents=[common])
+    mission_start.add_argument("run_id")
+    mission_start.add_argument(
+        "--request-file", help="family input JSON (when the deployment does not author it)"
+    )
+    # FT-D2: Mission Chains (read-only; members are cancelled individually in v1).
+    chain = groups.add_parser("chain", parents=[common])
+    chain_commands = chain.add_subparsers(dest="action", required=True)
+    chain_inspect = chain_commands.add_parser("inspect", parents=[common])
+    chain_inspect.add_argument("chain_id")
     subscribe = groups.add_parser("subscribe", parents=[common])
     subscribe.add_argument("action", nargs="?", choices=("create", "list", "close"))
     subscribe.add_argument("subscription_id", nargs="?")
@@ -657,7 +686,7 @@ def main(argv: list[str] | None = None) -> int:
     publish.add_argument("--version")
     publish.add_argument("--definition-file", dest="definition_file")
     args = parser.parse_args(argv)
-    if args.group == "mission":
+    if args.group == "mission" and (args.action == "schema" or getattr(args, "offline", False)):
         return mission_local(args)
     application = getattr(args, "application", os.environ.get("MISSION_CONTROL_APPLICATION_ID"))
     base_url = getattr(args, "url", os.environ.get("MISSION_CONTROL_URL", "http://127.0.0.1:8000"))
@@ -675,11 +704,13 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("API URL must use HTTPS (HTTP is allowed only for loopback)")
         if deadline_seconds is not None and not 0 < deadline_seconds <= 3600:
             raise ValueError("--wait must be greater than zero and at most 3600 seconds")
-        if deadline_seconds is not None and (
-            args.group != "run" or args.action not in {"inspect", "transcript", "frames"}
+        if deadline_seconds is not None and not (
+            (args.group == "run" and args.action in {"inspect", "transcript", "frames"})
+            or (args.group == "chain" and args.action == "inspect")
+            or (args.group == "mission" and args.action == "start")
         ):
             raise ValueError(
-                "--wait is supported on run inspect, transcript and frames; "
+                "--wait is supported on run inspect, transcript, frames and chain inspect; "
                 "command admission is not completion"
             )
         body = strict_object(args.request_file) if getattr(args, "request_file", None) else None
@@ -701,6 +732,15 @@ def main(argv: list[str] | None = None) -> int:
             return status
         if args.group == "subscribe":
             args.action = args.action or "create"
+        if args.group == "mission" and args.action == "compile":
+            body = {"manifest_yaml": Path(args.file).read_text(encoding="utf-8")}
+        if args.group == "mission" and args.action == "submit":
+            body = {
+                "manifest_yaml": Path(args.file).read_text(encoding="utf-8"),
+                "request_id": str(UUID(args.request_id_arg) if args.request_id_arg else uuid4()),
+            }
+        if args.group == "mission" and args.action == "start":
+            body = {"run_id": args.run_id, "family_input": body}
         if args.group == "subscribe" and args.action == "create":
             body = subscription_body(args)
         with httpx.Client(
@@ -719,6 +759,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.group == "run" and args.action == "search":
                 return run_search(client, args)
             deadline = time.monotonic() + (deadline_seconds or 0)
+            started = False
             while True:
                 if deadline_seconds is not None:
                     transport.timeout = httpx.Timeout(
@@ -740,6 +781,13 @@ def main(argv: list[str] | None = None) -> int:
                         getattr(args, "checkpoint_id", None),
                         full=getattr(args, "full", False),
                     )
+                elif args.group == "chain":
+                    response = client.chain(args.chain_id)
+                elif args.group == "mission" and args.action == "start" and started:
+                    response = client.inspection(args.run_id)
+                elif args.group == "mission" and body is not None:
+                    response = client.manifest(args.action, body)
+                    started = args.action == "start" and response.status_code == 202
                 elif args.action == "inspect":
                     response = client.inspection(args.run_id)
                 elif args.action == "admit" and body is not None:
@@ -761,6 +809,10 @@ def main(argv: list[str] | None = None) -> int:
                 if isinstance(result, dict) and result.get("lifecycle") == "completed":
                     print(json.dumps(result, allow_nan=False))
                     return 0 if result.get("execution_outcome") == "completed" else 6
+                chain_state = result.get("chain") if isinstance(result, dict) else None
+                if isinstance(chain_state, dict) and chain_state.get("lifecycle") == "completed":
+                    print(json.dumps(result, allow_nan=False))
+                    return 0 if chain_state.get("terminal_outcome") == "accepted" else 6
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     print(json.dumps({"error": "wait_timeout", "inspection": result}))

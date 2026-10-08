@@ -37,10 +37,10 @@ missions:
         repo: { url: https://github.com/Overton77/biotech-research-notes, ref: main }   # pre-created mc/<run> branch at start
         skills:
           - { search: "biotech literature review procedure", kind: skill_bundle, as: lit_review }
-          - { pin: "skill.mission-control-observe@0.2.0#sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+          - { pin: "skill.mission-control-observe@latest" }
       capabilities:
         - { search: "pubmed literature retrieval", kind: mcp_server, as: pubmed, require: [cursor_cloud] }
-        - { search: "web search extract crawl", kind: mcp_server, as: tavily, require: [cursor_cloud] }
+        - { search: "tavily web search extract", kind: mcp_server, as: tavily, require: [cursor_cloud] }
       agents:                                # subagent profiles projected to .cursor/agents/*.md in the repository
         - { search: "literature verifier subagent", kind: subagent_profile, as: literature_verifier,
             overlay: { readonly: true, is_background: false, model: inherit } }

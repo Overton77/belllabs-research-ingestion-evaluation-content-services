@@ -841,10 +841,10 @@
             ],
             "body_summary": "Author a Mission Manifest (mission.yml, manifest mission/v1) from an interview, compile it with missionctl mission compile, read the Validation Report, submit it, and start the run as a separate authorized call. Use when a human describes a research, ingestion, content or coding outcome that should become a mission, or asks to edit, compile, validate, submit or start a mission.yml.",
             "bundle_ref": {
-              "digest": "sha256:7c4fe33fba4742c28a33a57f4f427f2b4639af018a775472a163a02c0722354c",
+              "digest": "sha256:1518fc50c3d8638b54fbc145922289219862e7cd5d9971ecd6cf8821efac6d93",
               "media_type": "application/vnd.mc.capability-bundle+json",
-              "size_bytes": 12622,
-              "uri": "capability-bundles://biotech/skill_bundle/skill.mission-control-author/0.1.0/7c4fe33fba4742c28a33a57f4f427f2b4639af018a775472a163a02c0722354c"
+              "size_bytes": 13277,
+              "uri": "capability-bundles://biotech/skill_bundle/skill.mission-control-author/0.2.0/1518fc50c3d8638b54fbc145922289219862e7cd5d9971ecd6cf8821efac6d93"
             },
             "compatibility": {
               "executables": [],
@@ -859,13 +859,13 @@
             "description": "Author a Mission Manifest (mission.yml, manifest mission/v1) from an interview, compile it with missionctl mission compile, read the Validation Report, submit it, and start the run as a separate authorized call. Use when a human describes a research, ingestion, content or coding outcome that should become a mission, or asks to edit, compile, validate, submit or start a mission.yml.",
             "file_manifest": [
               {
-                "digest": "sha256:6a418dc30a26ae0c17c0c64fdddd5cec7cdf14573ccfabc7670b4c513115e1d2",
+                "digest": "sha256:2f2de93ace6b3d582f98c9509aa246ee236ef304e97a5508b3eb11aba27160d9",
                 "executable": false,
                 "path": "SKILL.md",
-                "size_bytes": 4398
+                "size_bytes": 5053
               },
               {
-                "digest": "sha256:89deec84e57f78acd5ad59da13604eeca400ca46cf7535196ada52182eb3644b",
+                "digest": "sha256:a8801a69ecf2d28452f00e7ad26c3fceb6006df495c90d072369ac632f446129",
                 "executable": false,
                 "path": "manifest.json",
                 "size_bytes": 487
@@ -919,7 +919,7 @@
             },
             "kind": "skill",
             "logical_id": "skill.mission-control-author",
-            "manifest_digest": "sha256:7c4fe33fba4742c28a33a57f4f427f2b4639af018a775472a163a02c0722354c",
+            "manifest_digest": "sha256:1518fc50c3d8638b54fbc145922289219862e7cd5d9971ecd6cf8821efac6d93",
             "maturity": "qualified",
             "required_capabilities": [],
             "review_status": "approved",
@@ -931,14 +931,14 @@
               "locator": "repo://skills/mission-control-author",
               "source": "local",
               "upstream_identity": "skill.mission-control-author",
-              "upstream_version": "0.1.0"
+              "upstream_version": "0.2.0"
             },
             "title": "mission-control-author"
           },
           "published_at": "2026-10-08T00:00:00Z",
           "published_by": "seed:mission-control-catalog",
           "ref": {
-            "digest": "sha256:8f3586779cc1ce5dbd579bfdc6f47b9c257f94877de5c1e81cfd1aa7b0f78d6a",
+            "digest": "sha256:6adffa51447535879239a105b525b27b45f769f957fbead68f76516d11c51252",
             "kind": "skill",
             "lifecycle_status": "published",
             "logical_id": "skill.mission-control-author",
@@ -948,7 +948,7 @@
           },
           "retired_at": null
         },
-        "manifest_digest": "sha256:d049878cac4a86bea001924809e68b5053f64eb71280456080f922794b086364",
+        "manifest_digest": "sha256:d13c7899f8d3ad448250b170a8cb76a028ddde83a2a641e5ee429088cee9c4c5",
         "manifest_ref": "mc-catalog://definition/skill/skill.mission-control-author/1",
         "required_compatibility": [
           ">=1.0.0 <2.0.0"
@@ -1189,10 +1189,10 @@
             ],
             "body_summary": "Compose several Mission Control missions into a Mission Chain (missions plus links in one manifest), decide between chaining, nesting a Goal Loop or a Stage Graph, and invoking a child mission, and move state across links as a Context Packet. Use when a human wants one workflow to feed another, wants research then ingestion, or asks how mission state transfers between linked workflows.",
             "bundle_ref": {
-              "digest": "sha256:8f00e920ae2113aef99a52049ccfa1c688bde98c22db61f6e964279986f40df6",
+              "digest": "sha256:b722bc8d81f0d9386e3fabbe8691e75d78a161f75336b059f96daddddf656c35",
               "media_type": "application/vnd.mc.capability-bundle+json",
-              "size_bytes": 7041,
-              "uri": "capability-bundles://biotech/skill_bundle/skill.mission-control-compose/0.1.0/8f00e920ae2113aef99a52049ccfa1c688bde98c22db61f6e964279986f40df6"
+              "size_bytes": 7163,
+              "uri": "capability-bundles://biotech/skill_bundle/skill.mission-control-compose/0.2.0/b722bc8d81f0d9386e3fabbe8691e75d78a161f75336b059f96daddddf656c35"
             },
             "compatibility": {
               "executables": [],
@@ -1207,13 +1207,13 @@
             "description": "Compose several Mission Control missions into a Mission Chain (missions plus links in one manifest), decide between chaining, nesting a Goal Loop or a Stage Graph, and invoking a child mission, and move state across links as a Context Packet. Use when a human wants one workflow to feed another, wants research then ingestion, or asks how mission state transfers between linked workflows.",
             "file_manifest": [
               {
-                "digest": "sha256:d48ca772a714971f454a5fec8bccdf15ad7f48dbe4af14033799ddaadbe6219c",
+                "digest": "sha256:84373df07b780ba821e45fd612c043fc227b53a8a9305b20db74b08aada26ff1",
                 "executable": false,
                 "path": "SKILL.md",
-                "size_bytes": 3828
+                "size_bytes": 3950
               },
               {
-                "digest": "sha256:c0ad5e08abb5d643a3aa0388880ad5451e9ec1e8881f7420e34b0f2aba07ac5a",
+                "digest": "sha256:e5295713988f6cd921b29d13bf2b50c1e607e5bf099b858c1feabde812135848",
                 "executable": false,
                 "path": "manifest.json",
                 "size_bytes": 369
@@ -1261,7 +1261,7 @@
             },
             "kind": "skill",
             "logical_id": "skill.mission-control-compose",
-            "manifest_digest": "sha256:8f00e920ae2113aef99a52049ccfa1c688bde98c22db61f6e964279986f40df6",
+            "manifest_digest": "sha256:b722bc8d81f0d9386e3fabbe8691e75d78a161f75336b059f96daddddf656c35",
             "maturity": "qualified",
             "required_capabilities": [],
             "review_status": "approved",
@@ -1273,14 +1273,14 @@
               "locator": "repo://skills/mission-control-compose",
               "source": "local",
               "upstream_identity": "skill.mission-control-compose",
-              "upstream_version": "0.1.0"
+              "upstream_version": "0.2.0"
             },
             "title": "mission-control-compose"
           },
           "published_at": "2026-10-08T00:00:00Z",
           "published_by": "seed:mission-control-catalog",
           "ref": {
-            "digest": "sha256:5947fc10c7f6107f1d06d67eae1e0785ea68519ccbadea2d145bbd028f2e7fd3",
+            "digest": "sha256:5f2bd8ec85e952cfd27b1a6512885273567d020f5a3e49b11f8b5d6c2fbe321c",
             "kind": "skill",
             "lifecycle_status": "published",
             "logical_id": "skill.mission-control-compose",
@@ -1290,7 +1290,7 @@
           },
           "retired_at": null
         },
-        "manifest_digest": "sha256:9b8adb9f07e933b366c6e5767526753215d848898e34d1abeba2298f3bd280c7",
+        "manifest_digest": "sha256:4d035a46a54fcec4ac7ee573b8edecce016112772cf868efd4dd9b08d335b648",
         "manifest_ref": "mc-catalog://definition/skill/skill.mission-control-compose/1",
         "required_compatibility": [
           ">=1.0.0 <2.0.0"
