@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BioMCP Pathway",
+  "type": "object",
+  "required": ["id", "name"],
+  "properties": {
+    "id": { "type": "string" },
+    "name": { "type": "string" },
+    "species": { "type": ["string", "null"] },
+    "summary": { "type": ["string", "null"] },
+    "genes": {
+      "type": ["array", "null"],
+      "items": {}
+    },
+    "events": {
+      "type": ["array", "null"],
+      "items": {}
+    },
+    "enrichment": {
+      "type": ["array", "null"],
+      "items": {}
+    },
+    "_meta": {
+      "type": ["object", "null"],
+      "properties": {
+        "evidence_urls": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": { "type": "string" },
+              "url": { "type": "string" }
+            },
+            "required": ["label", "url"],
+            "additionalProperties": true
+          }
+        },
+        "next_commands": {
+          "type": ["array", "null"],
+          "items": { "type": "string" }
+        },
+        "workflow": { "type": ["string", "null"] },
+        "workflow_rationale": { "type": ["string", "null"] },
+        "workflow_playbook": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

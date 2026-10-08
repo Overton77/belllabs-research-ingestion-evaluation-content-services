@@ -1,0 +1,2028 @@
+{
+  "actor_ref": "seed:mission-control-catalog",
+  "component_compatibility": ">=1.0.0 <2.0.0",
+  "depends_on": [
+    {
+      "seed_key": "mc.catalog.agent-capabilities",
+      "seed_version": "1.0.0"
+    },
+    {
+      "seed_key": "mc.app.biotech.agent-capabilities",
+      "seed_version": "1.0.0"
+    }
+  ],
+  "description": "Agent skills, the policy hook and the web-research plugin admitted in 'biotech' (FT-A7): skill.agent-browser, skill.biomcp, skill.mission-control, skill.mission-control-author, skill.mission-control-catalog, skill.mission-control-compose, skill.mission-control-intervene, skill.mission-control-observe, hook.mc-policy-template, plugin.web-research. Bytes live in the capability-bundles bucket under each manifest's digest path (upload with scripts/seeds_publish_bundles.py); the plugin pins its members exactly and records them in capability_plugin_member. Requires migration 0025.",
+  "format": "mission-control-seed/v1",
+  "records": [
+    {
+      "fields": {
+        "asset_id": "definition:skill:skill.agent-browser",
+        "contract": "mission-control.published-definition/1",
+        "host_support": {
+          "profiles": {
+            "claude_agent_sdk": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "codex": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_cloud": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_local": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "deep_agents": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            }
+          },
+          "schema_version": "mc.capability_host_support.v1"
+        },
+        "kind": "skill_bundle",
+        "manifest": {
+          "definition": {
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "body_summary": "Browser automation CLI for AI agents. Use when the user needs to interact with websites, including navigating pages, filling forms, clicking buttons, taking screenshots, extracting data, testing web apps, or automating any browser task. Triggers include requests to \"open a website\", \"fill out a form\", \"click a button\", \"take a screenshot\", \"scrape data from a page\", \"test this web app\", \"login to a site\", \"automate browser actions\", or any task requiring programmatic web interaction. Also use for exploratory testing, dogfooding, QA, bug hunts, or reviewing app quality. Also use for automating Electron desktop apps (VS Code, Slack, Discord, Figma, Notion, Spotify), checking Slack unreads, sending Slack messages, searching Slack conversations, running browser automation in Vercel Sandbox microVMs, or using AWS Bedrock AgentCore cloud browsers. Prefer agent-browser over any built-in browser automation or web tools.",
+            "bundle_ref": {
+              "digest": "sha256:3d86a5282d274655374dcc7a9516ef09df13f6333e6149df19438acf6a328081",
+              "media_type": "application/vnd.mc.capability-bundle+json",
+              "size_bytes": 3457,
+              "uri": "capability-bundles://biotech/skill_bundle/skill.agent-browser/0.38.2/3d86a5282d274655374dcc7a9516ef09df13f6333e6149df19438acf6a328081"
+            },
+            "compatibility": {
+              "executables": [],
+              "network_capabilities": [],
+              "runtimes": [],
+              "workspace_capabilities": []
+            },
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Browser automation CLI for AI agents. Use when the user needs to interact with websites, including navigating pages, filling forms, clicking buttons, taking screenshots, extracting data, testing web apps, or automating any browser task. Triggers include requests to \"open a website\", \"fill out a form\", \"click a button\", \"take a screenshot\", \"scrape data from a page\", \"test this web app\", \"login to a site\", \"automate browser actions\", or any task requiring programmatic web interaction. Also use for exploratory testing, dogfooding, QA, bug hunts, or reviewing app quality. Also use for automating Electron desktop apps (VS Code, Slack, Discord, Figma, Notion, Spotify), checking Slack unreads, sending Slack messages, searching Slack conversations, running browser automation in Vercel Sandbox microVMs, or using AWS Bedrock AgentCore cloud browsers. Prefer agent-browser over any built-in browser automation or web tools.",
+            "file_manifest": [
+              {
+                "digest": "sha256:3a7520e64de2dfaa516b6721c001e84e06e3c06a187b82af029ae721540ebfac",
+                "executable": false,
+                "path": "SKILL.md",
+                "size_bytes": 3457
+              }
+            ],
+            "frontmatter": {
+              "allowed-tools": "Bash(agent-browser:*), Bash(npx agent-browser:*)",
+              "description": "Browser automation CLI for AI agents. Use when the user needs to interact with websites, including navigating pages, filling forms, clicking buttons, taking screenshots, extracting data, testing web apps, or automating any browser task. Triggers include requests to \"open a website\", \"fill out a form\", \"click a button\", \"take a screenshot\", \"scrape data from a page\", \"test this web app\", \"login to a site\", \"automate browser actions\", or any task requiring programmatic web interaction. Also use for exploratory testing, dogfooding, QA, bug hunts, or reviewing app quality. Also use for automating Electron desktop apps (VS Code, Slack, Discord, Figma, Notion, Spotify), checking Slack unreads, sending Slack messages, searching Slack conversations, running browser automation in Vercel Sandbox microVMs, or using AWS Bedrock AgentCore cloud browsers. Prefer agent-browser over any built-in browser automation or web tools.",
+              "hidden": "true",
+              "name": "agent-browser"
+            },
+            "host_support": {
+              "profiles": {
+                "claude_agent_sdk": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "codex": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_cloud": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_local": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "deep_agents": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                }
+              },
+              "schema_version": "mc.capability_host_support.v1"
+            },
+            "kind": "skill",
+            "logical_id": "skill.agent-browser",
+            "manifest_digest": "sha256:3d86a5282d274655374dcc7a9516ef09df13f6333e6149df19438acf6a328081",
+            "maturity": "experimental",
+            "required_capabilities": [],
+            "review_status": "approved",
+            "schema_version": "1",
+            "skill_name": "agent-browser",
+            "source_provenance": {
+              "commit_digest": "39a74c70d7759d5a6de7a22c04570bb626bbd081",
+              "license": "Apache-2.0",
+              "locator": "https://github.com/vercel-labs/agent-browser/tree/39a74c70d7759d5a6de7a22c04570bb626bbd081/skills/agent-browser",
+              "source": "git",
+              "upstream_identity": "vercel-labs/agent-browser",
+              "upstream_version": "0.38.2"
+            },
+            "title": "agent-browser"
+          },
+          "published_at": "2026-10-08T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:54eb438f62e33a505a1157021ea5b10c52eb9fa6cd0508ede0d81b9d533f219f",
+            "kind": "skill",
+            "lifecycle_status": "published",
+            "logical_id": "skill.agent-browser",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:fe7565feec8af0fabf724be7ab81c8021ab1337461cac335476f87d7c5ad64dd",
+        "manifest_ref": "mc-catalog://definition/skill/skill.agent-browser/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-skill:skill:skill.agent-browser/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-skill:skill:skill.agent-browser/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_skills.py",
+          "tests/fixtures/skills/agent-browser",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-skill:skill:skill.agent-browser/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:skill:skill.biomcp",
+        "contract": "mission-control.published-definition/1",
+        "host_support": {
+          "profiles": {
+            "claude_agent_sdk": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "codex": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_cloud": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_local": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "deep_agents": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            }
+          },
+          "schema_version": "mc.capability_host_support.v1"
+        },
+        "kind": "skill_bundle",
+        "manifest": {
+          "definition": {
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "body_summary": "Search and retrieve biomedical data - genes, variants, clinical trials, diagnostic tests, articles, drugs, diseases, pathways, proteins, adverse events, pharmacogenomics, and phenotype-disease matching. Use for gene function, variant pathogenicity, trials, diagnostics, drug safety, pathway context, disease workups, and literature evidence.",
+            "bundle_ref": {
+              "digest": "sha256:d5cbccd3959ffd0a2e7a2723c2605ed009674cab5a923d05e408ffcbc68b06c7",
+              "media_type": "application/vnd.mc.capability-bundle+json",
+              "size_bytes": 106568,
+              "uri": "capability-bundles://biotech/skill_bundle/skill.biomcp/0.9.1/d5cbccd3959ffd0a2e7a2723c2605ed009674cab5a923d05e408ffcbc68b06c7"
+            },
+            "compatibility": {
+              "executables": [],
+              "network_capabilities": [],
+              "runtimes": [],
+              "workspace_capabilities": []
+            },
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Search and retrieve biomedical data - genes, variants, clinical trials, diagnostic tests, articles, drugs, diseases, pathways, proteins, adverse events, pharmacogenomics, and phenotype-disease matching. Use for gene function, variant pathogenicity, trials, diagnostics, drug safety, pathway context, disease workups, and literature evidence.",
+            "file_manifest": [
+              {
+                "digest": "sha256:ed18d3568d4b4fbd25ad6bd8e37cd2c83087881c083ea5a4952e9c3a38ac2178",
+                "executable": false,
+                "path": ".biomcp-skill.json",
+                "size_bytes": 5340
+              },
+              {
+                "digest": "sha256:161edb4b5dbbc5c58cfbfb09ccdb658ad3268afff2e5fbc72a1786604aec197d",
+                "executable": false,
+                "path": "AUTHORING.md",
+                "size_bytes": 2568
+              },
+              {
+                "digest": "sha256:6ae0a1a8c64acdb2fb0deabecb2197dfecf45507ccebad463dce2fd630ad44b9",
+                "executable": false,
+                "path": "SKILL.md",
+                "size_bytes": 16562
+              },
+              {
+                "digest": "sha256:9dcfef1ad0cd6e48383d7b451a9ecda4a065997abf4c26b096d29996ca2720f9",
+                "executable": false,
+                "path": "examples/get-gene-BRAF.json",
+                "size_bytes": 1677
+              },
+              {
+                "digest": "sha256:7248453a9a7d67964d9bdb411500905a02ae0de541bfca3d05c3bf2401f63870",
+                "executable": false,
+                "path": "examples/get-gene-BRAF.txt",
+                "size_bytes": 1082
+              },
+              {
+                "digest": "sha256:b6150c59792b962e5c236fe6759fa4d4dadef2409d1a1d7d6b2faa089c317419",
+                "executable": false,
+                "path": "examples/get-trial.json",
+                "size_bytes": 2852
+              },
+              {
+                "digest": "sha256:7953eef1bfb3d94011586d84eafd54b217d1acb003fae7ac1c33fcff6e5503c9",
+                "executable": false,
+                "path": "examples/get-trial.txt",
+                "size_bytes": 1379
+              },
+              {
+                "digest": "sha256:d943dd3da1d7902ba0927845b3f5c393709ad6df2af74f84b13c14a8af2e574e",
+                "executable": false,
+                "path": "examples/get-variant-rs113488022-all.json",
+                "size_bytes": 2431
+              },
+              {
+                "digest": "sha256:35d8e9ef42df22c09c3a575adb9851c37f776bf124d1355b1f386d82c94589ca",
+                "executable": false,
+                "path": "examples/get-variant-rs113488022-all.txt",
+                "size_bytes": 5509
+              },
+              {
+                "digest": "sha256:aa9eeefb4cb1571b67438aeb026fba0c9f514fd1c084e0f8a8268b7eabb86c2d",
+                "executable": false,
+                "path": "examples/search-article.json",
+                "size_bytes": 947
+              },
+              {
+                "digest": "sha256:9bfa8e9ca222f67d69eb39984cc0afa95b7a07eeb010c6c60a3a7024d4b2c749",
+                "executable": false,
+                "path": "examples/search-article.txt",
+                "size_bytes": 951
+              },
+              {
+                "digest": "sha256:48809331e2958e32b0d65b4dc41defd3d19c0943787d65ef030f0768d5a8bafa",
+                "executable": false,
+                "path": "examples/search-drug.json",
+                "size_bytes": 1511
+              },
+              {
+                "digest": "sha256:92d26c520414a2f42fd14544607d33a03d437265fb79cfbe3ff2411ba474a4a2",
+                "executable": false,
+                "path": "examples/search-drug.txt",
+                "size_bytes": 511
+              },
+              {
+                "digest": "sha256:6bb635313b0fea144d4bc71a0d27bb8bcf371552d76f8e50218e9315c3ead65b",
+                "executable": false,
+                "path": "jq-examples.md",
+                "size_bytes": 906
+              },
+              {
+                "digest": "sha256:9e5d0dfb0f3b0c1d7d98101cb4ae4f1d8f0e5503f34703a4d2e37a1aecab5e0b",
+                "executable": false,
+                "path": "schemas/article.json",
+                "size_bytes": 2298
+              },
+              {
+                "digest": "sha256:a79dc5ef88e60710821b4a4376f767767a57cdba841b3053cf91c24b69708e82",
+                "executable": false,
+                "path": "schemas/disease.json",
+                "size_bytes": 2046
+              },
+              {
+                "digest": "sha256:0935e2348e341cd148644e5f5f54dd79199f66637c5a0e4588002c569c403c4a",
+                "executable": false,
+                "path": "schemas/drug.json",
+                "size_bytes": 2553
+              },
+              {
+                "digest": "sha256:9e4c308713274b6da7053a1470b49a7b341d60d37ef226634f7e22773a8262c1",
+                "executable": false,
+                "path": "schemas/gene.json",
+                "size_bytes": 15725
+              },
+              {
+                "digest": "sha256:cce050905aa7968a6ed55df9efab0ff47a91dedf2c077e223060047f9fd90ac1",
+                "executable": false,
+                "path": "schemas/pathway.json",
+                "size_bytes": 1344
+              },
+              {
+                "digest": "sha256:4272385e3ab9f1dcfc1a25d701e698fd3b82dd7fc13725275c012e55cd9f1d24",
+                "executable": false,
+                "path": "schemas/trial.json",
+                "size_bytes": 8278
+              },
+              {
+                "digest": "sha256:3cbe78bb9c9a4860caa6c50eb90295d33711c99589226f40e4f4b56a74d2382d",
+                "executable": false,
+                "path": "schemas/variant.json",
+                "size_bytes": 4424
+              },
+              {
+                "digest": "sha256:47bb3db9bfc1e2b8d03a58de804d304e855842e5e7fc23015871091f95fcdd22",
+                "executable": false,
+                "path": "schemas/workflow-ladder.schema.json",
+                "size_bytes": 1098
+              },
+              {
+                "digest": "sha256:686fde065718a80bec5e5169dafc7bc8727cf1a71af9dc771d32906bbb7902ff",
+                "executable": false,
+                "path": "use-cases/01-treatment-lookup.md",
+                "size_bytes": 568
+              },
+              {
+                "digest": "sha256:f15b15fed1ea4f1818c1f83378300f92d2c211911d69fe82096c98224a3b1f27",
+                "executable": false,
+                "path": "use-cases/02-symptom-phenotype.md",
+                "size_bytes": 853
+              },
+              {
+                "digest": "sha256:62b1097d8fd9be726a61432d8607ffe450cbb1a41e4242ccd8fedded6de4fb64",
+                "executable": false,
+                "path": "use-cases/03-gene-disease-orientation.md",
+                "size_bytes": 1031
+              },
+              {
+                "digest": "sha256:08049c7c6af31a78351796e6d4f3254847c68e8d7fd35fc615bb20084b886a83",
+                "executable": false,
+                "path": "use-cases/04-article-follow-up.md",
+                "size_bytes": 707
+              },
+              {
+                "digest": "sha256:c7879fb8a8ccd34f9597976c303ebb336bac8cd4fbced4b9395e10a817c8bb91",
+                "executable": false,
+                "path": "use-cases/05-variant-pathogenicity.md",
+                "size_bytes": 772
+              },
+              {
+                "digest": "sha256:e2b10fe43c6dad2b80a83b4eaf358765f2a78018f65e39a193ac6714b5a7394a",
+                "executable": false,
+                "path": "use-cases/06-drug-regulatory.md",
+                "size_bytes": 1066
+              },
+              {
+                "digest": "sha256:8dd2123dfc7c7f6555c6e34d96ff7a8fa2e61fb267bc9a29c77844f7632179af",
+                "executable": false,
+                "path": "use-cases/07-gene-function-localization.md",
+                "size_bytes": 753
+              },
+              {
+                "digest": "sha256:1907a1582d399cf927e49716722c918c22eb6d23e9017912935cc094537b1f3f",
+                "executable": false,
+                "path": "use-cases/08-mechanism-pathway.md",
+                "size_bytes": 711
+              },
+              {
+                "digest": "sha256:5d027cb4069c8595f6e39f81281bff00384e811bb54f69582fdce17103b70acc",
+                "executable": false,
+                "path": "use-cases/09-trial-recruitment.md",
+                "size_bytes": 756
+              },
+              {
+                "digest": "sha256:e7fc3e28cb824ab76dfe232059c191e64784f95f0d3d25534dcc4bcea321cf03",
+                "executable": false,
+                "path": "use-cases/10-pharmacogene-cumulative.md",
+                "size_bytes": 754
+              },
+              {
+                "digest": "sha256:8e97a01c9b864e8bd989565dca7d6aa02cb12a6e4e6e9fcd1a34a2fe32cbf8dd",
+                "executable": false,
+                "path": "use-cases/11-disease-locus-mapping.md",
+                "size_bytes": 868
+              },
+              {
+                "digest": "sha256:e4286702be2b67d1c7c152542ffd07715258c55d48d502da8ad001df364c2e07",
+                "executable": false,
+                "path": "use-cases/12-cellular-process-regulation.md",
+                "size_bytes": 637
+              },
+              {
+                "digest": "sha256:c993d606826ba080420e2b3a84e9340e180bcc14c1f6eaaf953d25c566992153",
+                "executable": false,
+                "path": "use-cases/13-mutation-catalog.md",
+                "size_bytes": 1011
+              },
+              {
+                "digest": "sha256:df81b2f8bb852360df9e01b9e04f6e9b972219713c293d30d21da4384cb83ee3",
+                "executable": false,
+                "path": "use-cases/14-syndrome-disambiguation.md",
+                "size_bytes": 757
+              },
+              {
+                "digest": "sha256:b0a491f6c42ef1da3f4906d5462db1cf6ca0f39adfa86a37510853e2e359fdbd",
+                "executable": false,
+                "path": "use-cases/15-negative-evidence.md",
+                "size_bytes": 865
+              },
+              {
+                "digest": "sha256:e4b5369e293edbaf1de2bc66518b468177a543e4d39f7ce1d41dcafb1f3a16d2",
+                "executable": false,
+                "path": "use-cases/16-normalize-to-codes.md",
+                "size_bytes": 828
+              },
+              {
+                "digest": "sha256:06b27a4e20bf7c29ad82f6d71967f385ec716077bd100b17d8d5a36645c76236",
+                "executable": false,
+                "path": "use-cases/17-exact-variant-literature.md",
+                "size_bytes": 3104
+              },
+              {
+                "digest": "sha256:ba9f5aa10d4294df951f88e46a86ee59d97984d27add38b8e2ee8786304c981f",
+                "executable": false,
+                "path": "use-cases/_TEMPLATE.ladder.json",
+                "size_bytes": 749
+              },
+              {
+                "digest": "sha256:fb6cf72671a2c5c61b2d63b23b036b61b8948c42ed43c02339cf8de41f831297",
+                "executable": false,
+                "path": "use-cases/_TEMPLATE.md",
+                "size_bytes": 476
+              },
+              {
+                "digest": "sha256:d4bdca2b4c8e0358aaaa855c051d439050f233384bb747fe5c5719316754531b",
+                "executable": false,
+                "path": "use-cases/article-follow-up.ladder.json",
+                "size_bytes": 771
+              },
+              {
+                "digest": "sha256:498892a860ddf431a0aa2ccba3f06cb8bf0f371896e0f6fb39037cf51d352876",
+                "executable": false,
+                "path": "use-cases/mechanism-pathway.ladder.json",
+                "size_bytes": 985
+              },
+              {
+                "digest": "sha256:59df6dd537a866c84732b2cf8f5799aaaf83792342d07c3b0cd44bab6a19c812",
+                "executable": false,
+                "path": "use-cases/mutation-catalog.ladder.json",
+                "size_bytes": 905
+              },
+              {
+                "digest": "sha256:76bd7a87740543b375ea4994c0a1e28fb4ee360d65e79e93983ac70b9b08668c",
+                "executable": false,
+                "path": "use-cases/normalize-to-codes.ladder.json",
+                "size_bytes": 865
+              },
+              {
+                "digest": "sha256:175f640ddcc6aab0e0e739693cb5642d2925d9d6fe3731b38ac50a327c21ee52",
+                "executable": false,
+                "path": "use-cases/pharmacogene-cumulative.ladder.json",
+                "size_bytes": 993
+              },
+              {
+                "digest": "sha256:e6e3fb74506728c2feb3d3ebf55dd09f942f77d3b0fed14a17600c44c1784b92",
+                "executable": false,
+                "path": "use-cases/treatment-lookup.ladder.json",
+                "size_bytes": 836
+              },
+              {
+                "digest": "sha256:265547b7346aeddf4705ae6616875479929344518b2eca1a4f1a0837e14b3560",
+                "executable": false,
+                "path": "use-cases/trial-recruitment.ladder.json",
+                "size_bytes": 996
+              },
+              {
+                "digest": "sha256:ce0f2d5bc96b30792d9dc7435fac6781ed98ef48f687ef8d2552360e52636855",
+                "executable": false,
+                "path": "use-cases/variant-pathogenicity.ladder.json",
+                "size_bytes": 959
+              }
+            ],
+            "frontmatter": {
+              "description": "Search and retrieve biomedical data - genes, variants, clinical trials, diagnostic tests, articles, drugs, diseases, pathways, proteins, adverse events, pharmacogenomics, and phenotype-disease matching. Use for gene function, variant pathogenicity, trials, diagnostics, drug safety, pathway context, disease workups, and literature evidence.",
+              "name": "biomcp"
+            },
+            "host_support": {
+              "profiles": {
+                "claude_agent_sdk": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "codex": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_cloud": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_local": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "deep_agents": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                }
+              },
+              "schema_version": "mc.capability_host_support.v1"
+            },
+            "kind": "skill",
+            "logical_id": "skill.biomcp",
+            "manifest_digest": "sha256:d5cbccd3959ffd0a2e7a2723c2605ed009674cab5a923d05e408ffcbc68b06c7",
+            "maturity": "experimental",
+            "required_capabilities": [],
+            "review_status": "approved",
+            "schema_version": "1",
+            "skill_name": "biomcp",
+            "source_provenance": {
+              "commit_digest": null,
+              "license": "MIT",
+              "locator": "pypi:biomcp-cli==0.9.1 (biomcp skill install)",
+              "source": "local",
+              "upstream_identity": "genomoncology/biomcp",
+              "upstream_version": "0.9.1"
+            },
+            "title": "biomcp"
+          },
+          "published_at": "2026-10-08T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:bf0c38d379bb838c460c62e1550ecd8824c341cd667311e3e8371821521680c6",
+            "kind": "skill",
+            "lifecycle_status": "published",
+            "logical_id": "skill.biomcp",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:7e8dccfde6b0f6a25ff2e4d87239efb20d6b5b23c02d7fb8be1544bf21116405",
+        "manifest_ref": "mc-catalog://definition/skill/skill.biomcp/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-skill:skill:skill.biomcp/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-skill:skill:skill.biomcp/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_skills.py",
+          "tests/fixtures/skills/biomcp",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-skill:skill:skill.biomcp/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:skill:skill.mission-control",
+        "contract": "mission-control.published-definition/1",
+        "host_support": {
+          "profiles": {
+            "claude_agent_sdk": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "codex": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_cloud": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_local": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "deep_agents": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            }
+          },
+          "schema_version": "mc.capability_host_support.v1"
+        },
+        "kind": "skill_bundle",
+        "manifest": {
+          "definition": {
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "body_summary": "Router for Mission Control work through missionctl. Use when a task authors or compiles a Mission Manifest, searches or pins catalog capabilities (skills, MCP servers, hooks, subagents, plugins), inspects a run or chain or reads a transcript, queues or injects an instruction, cancels, forks or reconciles a run, subscribes to mission events, or chains missions. Routes to the mission-control-author, -catalog, -observe, -intervene and -compose bundles.",
+            "bundle_ref": {
+              "digest": "sha256:dd07bff01bf8b896f3cae1aebb5bbe47c611564bfa0b900be46737a5dfad7f54",
+              "media_type": "application/vnd.mc.capability-bundle+json",
+              "size_bytes": 12658,
+              "uri": "capability-bundles://biotech/skill_bundle/skill.mission-control/0.3.0/dd07bff01bf8b896f3cae1aebb5bbe47c611564bfa0b900be46737a5dfad7f54"
+            },
+            "compatibility": {
+              "executables": [],
+              "network_capabilities": [],
+              "runtimes": [],
+              "workspace_capabilities": []
+            },
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Router for Mission Control work through missionctl. Use when a task authors or compiles a Mission Manifest, searches or pins catalog capabilities (skills, MCP servers, hooks, subagents, plugins), inspects a run or chain or reads a transcript, queues or injects an instruction, cancels, forks or reconciles a run, subscribes to mission events, or chains missions. Routes to the mission-control-author, -catalog, -observe, -intervene and -compose bundles.",
+            "file_manifest": [
+              {
+                "digest": "sha256:cccfb371f1f9566500d391c9a726eaec103575e4698e7a5cf16686bf1fe2c795",
+                "executable": false,
+                "path": "SKILL.md",
+                "size_bytes": 3155
+              },
+              {
+                "digest": "sha256:b323af9443648e89c4f6d522e3c4322ca046b361c81bece509d9586908351c1d",
+                "executable": false,
+                "path": "manifest.json",
+                "size_bytes": 569
+              },
+              {
+                "digest": "sha256:0e6896e28e58434b604d2afb9408afc69d7e19107154e34bed305234fcb24021",
+                "executable": false,
+                "path": "references/operations.json",
+                "size_bytes": 1740
+              },
+              {
+                "digest": "sha256:83980c6a81f7f6586e48038ac9b177c9899e661840c2d3d03392d82a3133b5c1",
+                "executable": false,
+                "path": "references/protocol.md",
+                "size_bytes": 7194
+              }
+            ],
+            "frontmatter": {
+              "description": "Router for Mission Control work through missionctl. Use when a task authors or compiles a Mission Manifest, searches or pins catalog capabilities (skills, MCP servers, hooks, subagents, plugins), inspects a run or chain or reads a transcript, queues or injects an instruction, cancels, forks or reconciles a run, subscribes to mission events, or chains missions. Routes to the mission-control-author, -catalog, -observe, -intervene and -compose bundles.",
+              "name": "mission-control"
+            },
+            "host_support": {
+              "profiles": {
+                "claude_agent_sdk": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "codex": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_cloud": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_local": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "deep_agents": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                }
+              },
+              "schema_version": "mc.capability_host_support.v1"
+            },
+            "kind": "skill",
+            "logical_id": "skill.mission-control",
+            "manifest_digest": "sha256:dd07bff01bf8b896f3cae1aebb5bbe47c611564bfa0b900be46737a5dfad7f54",
+            "maturity": "qualified",
+            "required_capabilities": [],
+            "review_status": "approved",
+            "schema_version": "1",
+            "skill_name": "mission-control",
+            "source_provenance": {
+              "commit_digest": null,
+              "license": "proprietary",
+              "locator": "repo://skills/mission-control",
+              "source": "local",
+              "upstream_identity": "skill.mission-control",
+              "upstream_version": "0.3.0"
+            },
+            "title": "mission-control"
+          },
+          "published_at": "2026-10-08T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:7cc9c473c9b754bbf857d2f3490e91a6a54d44009630f260c2385bdbc108f710",
+            "kind": "skill",
+            "lifecycle_status": "published",
+            "logical_id": "skill.mission-control",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:f9129f0f6fa33d526f8b0d9be9edbbf27acfb90fa22e62d2dbd5362d45726d22",
+        "manifest_ref": "mc-catalog://definition/skill/skill.mission-control/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-skill:skill:skill.mission-control/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-skill:skill:skill.mission-control/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_skills.py",
+          "skills/mission-control",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-skill:skill:skill.mission-control/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:skill:skill.mission-control-author",
+        "contract": "mission-control.published-definition/1",
+        "host_support": {
+          "profiles": {
+            "claude_agent_sdk": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "codex": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_cloud": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_local": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "deep_agents": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            }
+          },
+          "schema_version": "mc.capability_host_support.v1"
+        },
+        "kind": "skill_bundle",
+        "manifest": {
+          "definition": {
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "body_summary": "Author a Mission Manifest (mission.yml, manifest mission/v1) from an interview, compile it with missionctl mission compile, read the Validation Report, submit it, and start the run as a separate authorized call. Use when a human describes a research, ingestion, content or coding outcome that should become a mission, or asks to edit, compile, validate, submit or start a mission.yml.",
+            "bundle_ref": {
+              "digest": "sha256:7c4fe33fba4742c28a33a57f4f427f2b4639af018a775472a163a02c0722354c",
+              "media_type": "application/vnd.mc.capability-bundle+json",
+              "size_bytes": 12622,
+              "uri": "capability-bundles://biotech/skill_bundle/skill.mission-control-author/0.1.0/7c4fe33fba4742c28a33a57f4f427f2b4639af018a775472a163a02c0722354c"
+            },
+            "compatibility": {
+              "executables": [],
+              "network_capabilities": [],
+              "runtimes": [],
+              "workspace_capabilities": []
+            },
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Author a Mission Manifest (mission.yml, manifest mission/v1) from an interview, compile it with missionctl mission compile, read the Validation Report, submit it, and start the run as a separate authorized call. Use when a human describes a research, ingestion, content or coding outcome that should become a mission, or asks to edit, compile, validate, submit or start a mission.yml.",
+            "file_manifest": [
+              {
+                "digest": "sha256:6a418dc30a26ae0c17c0c64fdddd5cec7cdf14573ccfabc7670b4c513115e1d2",
+                "executable": false,
+                "path": "SKILL.md",
+                "size_bytes": 4398
+              },
+              {
+                "digest": "sha256:89deec84e57f78acd5ad59da13604eeca400ca46cf7535196ada52182eb3644b",
+                "executable": false,
+                "path": "manifest.json",
+                "size_bytes": 487
+              },
+              {
+                "digest": "sha256:f72f76df52b7ec3fefdb50e81524376fea63ef252def877b38968f1d3489019a",
+                "executable": false,
+                "path": "references/manifest-cheatsheet.md",
+                "size_bytes": 5001
+              },
+              {
+                "digest": "sha256:25ec3a69e247bb033a84bcc90eec5d948a506cefa14d47c1555da71686008ba4",
+                "executable": false,
+                "path": "references/validation-report.md",
+                "size_bytes": 2736
+              }
+            ],
+            "frontmatter": {
+              "description": "Author a Mission Manifest (mission.yml, manifest mission/v1) from an interview, compile it with missionctl mission compile, read the Validation Report, submit it, and start the run as a separate authorized call. Use when a human describes a research, ingestion, content or coding outcome that should become a mission, or asks to edit, compile, validate, submit or start a mission.yml.",
+              "name": "mission-control-author"
+            },
+            "host_support": {
+              "profiles": {
+                "claude_agent_sdk": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "codex": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_cloud": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_local": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "deep_agents": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                }
+              },
+              "schema_version": "mc.capability_host_support.v1"
+            },
+            "kind": "skill",
+            "logical_id": "skill.mission-control-author",
+            "manifest_digest": "sha256:7c4fe33fba4742c28a33a57f4f427f2b4639af018a775472a163a02c0722354c",
+            "maturity": "qualified",
+            "required_capabilities": [],
+            "review_status": "approved",
+            "schema_version": "1",
+            "skill_name": "mission-control-author",
+            "source_provenance": {
+              "commit_digest": null,
+              "license": "proprietary",
+              "locator": "repo://skills/mission-control-author",
+              "source": "local",
+              "upstream_identity": "skill.mission-control-author",
+              "upstream_version": "0.1.0"
+            },
+            "title": "mission-control-author"
+          },
+          "published_at": "2026-10-08T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:8f3586779cc1ce5dbd579bfdc6f47b9c257f94877de5c1e81cfd1aa7b0f78d6a",
+            "kind": "skill",
+            "lifecycle_status": "published",
+            "logical_id": "skill.mission-control-author",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:d049878cac4a86bea001924809e68b5053f64eb71280456080f922794b086364",
+        "manifest_ref": "mc-catalog://definition/skill/skill.mission-control-author/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-skill:skill:skill.mission-control-author/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-skill:skill:skill.mission-control-author/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_skills.py",
+          "skills/mission-control-author",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-skill:skill:skill.mission-control-author/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:skill:skill.mission-control-catalog",
+        "contract": "mission-control.published-definition/1",
+        "host_support": {
+          "profiles": {
+            "claude_agent_sdk": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "codex": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_cloud": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_local": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "deep_agents": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            }
+          },
+          "schema_version": "mc.capability_host_support.v1"
+        },
+        "kind": "skill_bundle",
+        "manifest": {
+          "definition": {
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "body_summary": "Search, inspect, pin and publish Mission Control capabilities (skill bundles, MCP servers and tools, hook scripts, subagent profiles, plugins, model and sandbox profiles) with missionctl catalog, and compose plugins from exact pins. Use when a manifest needs a capability, when a human asks what tools or skills exist for a lane, when a new skill bundle must be published, or when an external MCP server or skill is discovered and must be quarantined.",
+            "bundle_ref": {
+              "digest": "sha256:014316c4343e0173399345f54162b10b798c2320e77aee744e962c231466aec2",
+              "media_type": "application/vnd.mc.capability-bundle+json",
+              "size_bytes": 8810,
+              "uri": "capability-bundles://biotech/skill_bundle/skill.mission-control-catalog/0.2.0/014316c4343e0173399345f54162b10b798c2320e77aee744e962c231466aec2"
+            },
+            "compatibility": {
+              "executables": [],
+              "network_capabilities": [],
+              "runtimes": [],
+              "workspace_capabilities": []
+            },
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Search, inspect, pin and publish Mission Control capabilities (skill bundles, MCP servers and tools, hook scripts, subagent profiles, plugins, model and sandbox profiles) with missionctl catalog, and compose plugins from exact pins. Use when a manifest needs a capability, when a human asks what tools or skills exist for a lane, when a new skill bundle must be published, or when an external MCP server or skill is discovered and must be quarantined.",
+            "file_manifest": [
+              {
+                "digest": "sha256:5ba76caef5d550d199c476af34bce1184751b7880c9f82732450547842541086",
+                "executable": false,
+                "path": "SKILL.md",
+                "size_bytes": 4673
+              },
+              {
+                "digest": "sha256:4f728cf75d1c752841e2029c28858785bb920383e69b20e4d0e4d123c8f6be83",
+                "executable": false,
+                "path": "manifest.json",
+                "size_bytes": 376
+              },
+              {
+                "digest": "sha256:74fcaaf6ade072d4b9738104a2559877473b8d390eb060210c3fae8bb80693d2",
+                "executable": false,
+                "path": "references/kinds-and-projections.md",
+                "size_bytes": 3761
+              }
+            ],
+            "frontmatter": {
+              "description": "Search, inspect, pin and publish Mission Control capabilities (skill bundles, MCP servers and tools, hook scripts, subagent profiles, plugins, model and sandbox profiles) with missionctl catalog, and compose plugins from exact pins. Use when a manifest needs a capability, when a human asks what tools or skills exist for a lane, when a new skill bundle must be published, or when an external MCP server or skill is discovered and must be quarantined.",
+              "name": "mission-control-catalog"
+            },
+            "host_support": {
+              "profiles": {
+                "claude_agent_sdk": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "codex": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_cloud": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_local": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "deep_agents": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                }
+              },
+              "schema_version": "mc.capability_host_support.v1"
+            },
+            "kind": "skill",
+            "logical_id": "skill.mission-control-catalog",
+            "manifest_digest": "sha256:014316c4343e0173399345f54162b10b798c2320e77aee744e962c231466aec2",
+            "maturity": "qualified",
+            "required_capabilities": [],
+            "review_status": "approved",
+            "schema_version": "1",
+            "skill_name": "mission-control-catalog",
+            "source_provenance": {
+              "commit_digest": null,
+              "license": "proprietary",
+              "locator": "repo://skills/mission-control-catalog",
+              "source": "local",
+              "upstream_identity": "skill.mission-control-catalog",
+              "upstream_version": "0.2.0"
+            },
+            "title": "mission-control-catalog"
+          },
+          "published_at": "2026-10-08T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:90adf43476c567ce21d999e734b13e9d0e469be789550e98b1ba2fb108cdf9b5",
+            "kind": "skill",
+            "lifecycle_status": "published",
+            "logical_id": "skill.mission-control-catalog",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:81efb1e315f1d9c13cd9a6da86156a86bdc0bf547b90eec65b82b91381811756",
+        "manifest_ref": "mc-catalog://definition/skill/skill.mission-control-catalog/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-skill:skill:skill.mission-control-catalog/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-skill:skill:skill.mission-control-catalog/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_skills.py",
+          "skills/mission-control-catalog",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-skill:skill:skill.mission-control-catalog/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:skill:skill.mission-control-compose",
+        "contract": "mission-control.published-definition/1",
+        "host_support": {
+          "profiles": {
+            "claude_agent_sdk": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "codex": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_cloud": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_local": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "deep_agents": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            }
+          },
+          "schema_version": "mc.capability_host_support.v1"
+        },
+        "kind": "skill_bundle",
+        "manifest": {
+          "definition": {
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "body_summary": "Compose several Mission Control missions into a Mission Chain (missions plus links in one manifest), decide between chaining, nesting a Goal Loop or a Stage Graph, and invoking a child mission, and move state across links as a Context Packet. Use when a human wants one workflow to feed another, wants research then ingestion, or asks how mission state transfers between linked workflows.",
+            "bundle_ref": {
+              "digest": "sha256:8f00e920ae2113aef99a52049ccfa1c688bde98c22db61f6e964279986f40df6",
+              "media_type": "application/vnd.mc.capability-bundle+json",
+              "size_bytes": 7041,
+              "uri": "capability-bundles://biotech/skill_bundle/skill.mission-control-compose/0.1.0/8f00e920ae2113aef99a52049ccfa1c688bde98c22db61f6e964279986f40df6"
+            },
+            "compatibility": {
+              "executables": [],
+              "network_capabilities": [],
+              "runtimes": [],
+              "workspace_capabilities": []
+            },
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Compose several Mission Control missions into a Mission Chain (missions plus links in one manifest), decide between chaining, nesting a Goal Loop or a Stage Graph, and invoking a child mission, and move state across links as a Context Packet. Use when a human wants one workflow to feed another, wants research then ingestion, or asks how mission state transfers between linked workflows.",
+            "file_manifest": [
+              {
+                "digest": "sha256:d48ca772a714971f454a5fec8bccdf15ad7f48dbe4af14033799ddaadbe6219c",
+                "executable": false,
+                "path": "SKILL.md",
+                "size_bytes": 3828
+              },
+              {
+                "digest": "sha256:c0ad5e08abb5d643a3aa0388880ad5451e9ec1e8881f7420e34b0f2aba07ac5a",
+                "executable": false,
+                "path": "manifest.json",
+                "size_bytes": 369
+              },
+              {
+                "digest": "sha256:d91b8fd8d44c6ac8f1dc1fe9fb6a1ff9477681cc62bde9ac60976178c3b943c0",
+                "executable": false,
+                "path": "references/chain-patterns.md",
+                "size_bytes": 2844
+              }
+            ],
+            "frontmatter": {
+              "description": "Compose several Mission Control missions into a Mission Chain (missions plus links in one manifest), decide between chaining, nesting a Goal Loop or a Stage Graph, and invoking a child mission, and move state across links as a Context Packet. Use when a human wants one workflow to feed another, wants research then ingestion, or asks how mission state transfers between linked workflows.",
+              "name": "mission-control-compose"
+            },
+            "host_support": {
+              "profiles": {
+                "claude_agent_sdk": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "codex": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_cloud": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_local": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "deep_agents": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                }
+              },
+              "schema_version": "mc.capability_host_support.v1"
+            },
+            "kind": "skill",
+            "logical_id": "skill.mission-control-compose",
+            "manifest_digest": "sha256:8f00e920ae2113aef99a52049ccfa1c688bde98c22db61f6e964279986f40df6",
+            "maturity": "qualified",
+            "required_capabilities": [],
+            "review_status": "approved",
+            "schema_version": "1",
+            "skill_name": "mission-control-compose",
+            "source_provenance": {
+              "commit_digest": null,
+              "license": "proprietary",
+              "locator": "repo://skills/mission-control-compose",
+              "source": "local",
+              "upstream_identity": "skill.mission-control-compose",
+              "upstream_version": "0.1.0"
+            },
+            "title": "mission-control-compose"
+          },
+          "published_at": "2026-10-08T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:5947fc10c7f6107f1d06d67eae1e0785ea68519ccbadea2d145bbd028f2e7fd3",
+            "kind": "skill",
+            "lifecycle_status": "published",
+            "logical_id": "skill.mission-control-compose",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:9b8adb9f07e933b366c6e5767526753215d848898e34d1abeba2298f3bd280c7",
+        "manifest_ref": "mc-catalog://definition/skill/skill.mission-control-compose/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-skill:skill:skill.mission-control-compose/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-skill:skill:skill.mission-control-compose/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_skills.py",
+          "skills/mission-control-compose",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-skill:skill:skill.mission-control-compose/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:skill:skill.mission-control-intervene",
+        "contract": "mission-control.published-definition/1",
+        "host_support": {
+          "profiles": {
+            "claude_agent_sdk": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "codex": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_cloud": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_local": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "deep_agents": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            }
+          },
+          "schema_version": "mc.capability_host_support.v1"
+        },
+        "kind": "skill_bundle",
+        "manifest": {
+          "definition": {
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "body_summary": "Change a running Mission Control run with missionctl commands - queue an instruction or context for the next turn or iteration, interrupt and inject, pause, resume, cancel (normal or immediate), snapshot, fork from a snapshot with an instruction, or reconcile an in-doubt unit. Use when a human wants to steer, stop, branch or repair a run that is already running.",
+            "bundle_ref": {
+              "digest": "sha256:30f7b3e842a167dbade8dd95fd4dd942d6854853cc0f7b412f155081b5f4d649",
+              "media_type": "application/vnd.mc.capability-bundle+json",
+              "size_bytes": 8721,
+              "uri": "capability-bundles://biotech/skill_bundle/skill.mission-control-intervene/0.1.0/30f7b3e842a167dbade8dd95fd4dd942d6854853cc0f7b412f155081b5f4d649"
+            },
+            "compatibility": {
+              "executables": [],
+              "network_capabilities": [],
+              "runtimes": [],
+              "workspace_capabilities": []
+            },
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Change a running Mission Control run with missionctl commands - queue an instruction or context for the next turn or iteration, interrupt and inject, pause, resume, cancel (normal or immediate), snapshot, fork from a snapshot with an instruction, or reconcile an in-doubt unit. Use when a human wants to steer, stop, branch or repair a run that is already running.",
+            "file_manifest": [
+              {
+                "digest": "sha256:380f93e97baf0e296852d4b11ef54f70d42ba9e670700f4f11d22652aa464eb9",
+                "executable": false,
+                "path": "SKILL.md",
+                "size_bytes": 4163
+              },
+              {
+                "digest": "sha256:503f2fbec8e2d64322366e72e8cf9890a0b4ab54d71738fd17f86694c6d45dfc",
+                "executable": false,
+                "path": "manifest.json",
+                "size_bytes": 374
+              },
+              {
+                "digest": "sha256:40a738db53cae5a947b3fcb015e67a04e207bd4bd0d916a48987ef560e82f5e3",
+                "executable": false,
+                "path": "references/command-templates.md",
+                "size_bytes": 4184
+              }
+            ],
+            "frontmatter": {
+              "description": "Change a running Mission Control run with missionctl commands - queue an instruction or context for the next turn or iteration, interrupt and inject, pause, resume, cancel (normal or immediate), snapshot, fork from a snapshot with an instruction, or reconcile an in-doubt unit. Use when a human wants to steer, stop, branch or repair a run that is already running.",
+              "name": "mission-control-intervene"
+            },
+            "host_support": {
+              "profiles": {
+                "claude_agent_sdk": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "codex": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_cloud": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_local": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "deep_agents": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                }
+              },
+              "schema_version": "mc.capability_host_support.v1"
+            },
+            "kind": "skill",
+            "logical_id": "skill.mission-control-intervene",
+            "manifest_digest": "sha256:30f7b3e842a167dbade8dd95fd4dd942d6854853cc0f7b412f155081b5f4d649",
+            "maturity": "qualified",
+            "required_capabilities": [],
+            "review_status": "approved",
+            "schema_version": "1",
+            "skill_name": "mission-control-intervene",
+            "source_provenance": {
+              "commit_digest": null,
+              "license": "proprietary",
+              "locator": "repo://skills/mission-control-intervene",
+              "source": "local",
+              "upstream_identity": "skill.mission-control-intervene",
+              "upstream_version": "0.1.0"
+            },
+            "title": "mission-control-intervene"
+          },
+          "published_at": "2026-10-08T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:300a72b104003885265139deba17fb099a7b2b60f6d7a28811949327c3abc5e1",
+            "kind": "skill",
+            "lifecycle_status": "published",
+            "logical_id": "skill.mission-control-intervene",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:6fb710aba14b6fcd2ef80df5d0d38a4fe52480a6df9fdac98bf3faf63b956047",
+        "manifest_ref": "mc-catalog://definition/skill/skill.mission-control-intervene/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-skill:skill:skill.mission-control-intervene/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-skill:skill:skill.mission-control-intervene/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_skills.py",
+          "skills/mission-control-intervene",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-skill:skill:skill.mission-control-intervene/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:skill:skill.mission-control-observe",
+        "contract": "mission-control.published-definition/1",
+        "host_support": {
+          "profiles": {
+            "claude_agent_sdk": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "codex": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_cloud": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_local": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "deep_agents": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            }
+          },
+          "schema_version": "mc.capability_host_support.v1"
+        },
+        "kind": "skill_bundle",
+        "manifest": {
+          "definition": {
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "body_summary": "Inspect Mission Control runs and chains, list and search runs, read a run's transcript, watch mission events and register subscriptions (webhook or stream) with missionctl. Use when a human asks what a run is doing, whether a control took effect, what an agent did, why a mission stopped, or wants callbacks when a human task opens or a run completes.",
+            "bundle_ref": {
+              "digest": "sha256:aef1e8c2ab9eba53c28181c2c50ae91584fbb456501620b9e54e28e7d86012ab",
+              "media_type": "application/vnd.mc.capability-bundle+json",
+              "size_bytes": 7156,
+              "uri": "capability-bundles://biotech/skill_bundle/skill.mission-control-observe/0.2.0/aef1e8c2ab9eba53c28181c2c50ae91584fbb456501620b9e54e28e7d86012ab"
+            },
+            "compatibility": {
+              "executables": [],
+              "network_capabilities": [],
+              "runtimes": [],
+              "workspace_capabilities": []
+            },
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Inspect Mission Control runs and chains, list and search runs, read a run's transcript, watch mission events and register subscriptions (webhook or stream) with missionctl. Use when a human asks what a run is doing, whether a control took effect, what an agent did, why a mission stopped, or wants callbacks when a human task opens or a run completes.",
+            "file_manifest": [
+              {
+                "digest": "sha256:7f22fb7de206b18a3e96961f2af859007682833135587363e43e7801c14df0d3",
+                "executable": false,
+                "path": "SKILL.md",
+                "size_bytes": 4971
+              },
+              {
+                "digest": "sha256:98ceca3ed939cefe4b1c447d36627110506c773d73cdd8c6c8dba55388493ae9",
+                "executable": false,
+                "path": "manifest.json",
+                "size_bytes": 372
+              },
+              {
+                "digest": "sha256:64d81e092c1792c5a5213dd6a9bb7b1585ad2a4a5fb14dc85aa3cc1fbc9bab84",
+                "executable": false,
+                "path": "references/transcript-format.md",
+                "size_bytes": 1813
+              }
+            ],
+            "frontmatter": {
+              "description": "Inspect Mission Control runs and chains, list and search runs, read a run's transcript, watch mission events and register subscriptions (webhook or stream) with missionctl. Use when a human asks what a run is doing, whether a control took effect, what an agent did, why a mission stopped, or wants callbacks when a human task opens or a run completes.",
+              "name": "mission-control-observe"
+            },
+            "host_support": {
+              "profiles": {
+                "claude_agent_sdk": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "codex": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_cloud": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_local": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "deep_agents": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                }
+              },
+              "schema_version": "mc.capability_host_support.v1"
+            },
+            "kind": "skill",
+            "logical_id": "skill.mission-control-observe",
+            "manifest_digest": "sha256:aef1e8c2ab9eba53c28181c2c50ae91584fbb456501620b9e54e28e7d86012ab",
+            "maturity": "qualified",
+            "required_capabilities": [],
+            "review_status": "approved",
+            "schema_version": "1",
+            "skill_name": "mission-control-observe",
+            "source_provenance": {
+              "commit_digest": null,
+              "license": "proprietary",
+              "locator": "repo://skills/mission-control-observe",
+              "source": "local",
+              "upstream_identity": "skill.mission-control-observe",
+              "upstream_version": "0.2.0"
+            },
+            "title": "mission-control-observe"
+          },
+          "published_at": "2026-10-08T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:7bad40eb43cbd0bc4397b8a0426bbf43bd9a4ac63bdd47e91c1ffd2dabeacc57",
+            "kind": "skill",
+            "lifecycle_status": "published",
+            "logical_id": "skill.mission-control-observe",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:73f74fab2432a501aa1ff18e661a0ba001dee48bab3d89ec8d9ab06657c644b7",
+        "manifest_ref": "mc-catalog://definition/skill/skill.mission-control-observe/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-skill:skill:skill.mission-control-observe/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-skill:skill:skill.mission-control-observe/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_skills.py",
+          "skills/mission-control-observe",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-skill:skill:skill.mission-control-observe/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:hook_script:hook.mc-policy-template",
+        "contract": "mission-control.published-definition/1",
+        "host_support": {
+          "profiles": {
+            "claude_agent_sdk": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "codex": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_cloud": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_local": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "deep_agents": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            }
+          },
+          "schema_version": "mc.capability_host_support.v1"
+        },
+        "kind": "hook_script",
+        "manifest": {
+          "definition": {
+            "bundle_ref": {
+              "digest": "sha256:79c856c6e04efdea95aa7b648435989223de1542246b7d3faf46dff42e5ae8a2",
+              "media_type": "application/vnd.mc.capability-bundle+json",
+              "size_bytes": 6513,
+              "uri": "capability-bundles://biotech/hook_script/hook.mc-policy-template/1.0.0/79c856c6e04efdea95aa7b648435989223de1542246b7d3faf46dff42e5ae8a2"
+            },
+            "callback": "none",
+            "description": "Fail-closed policy hook for every lane: denies rm -rf of the root (any flag order), force pushes, and file writes outside the declared write paths. Reads mc.hook_input.v1 on stdin and writes mc.hook_result.v1 on stdout.",
+            "entrypoint": "policy.py",
+            "events": [
+              "before_shell",
+              "before_tool"
+            ],
+            "fail_closed": true,
+            "file_manifest": [
+              {
+                "digest": "sha256:8d0b4b2a728358258b2edde3c6bd2613dddcc9b2259515975205ccf851df3a57",
+                "executable": false,
+                "path": "policy.py",
+                "size_bytes": 6513
+              }
+            ],
+            "host_support": {
+              "profiles": {
+                "claude_agent_sdk": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "codex": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_cloud": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_local": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "deep_agents": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                }
+              },
+              "schema_version": "mc.capability_host_support.v1"
+            },
+            "interpreter": "python",
+            "kind": "hook_script",
+            "logical_id": "hook.mc-policy-template",
+            "manifest_digest": "sha256:79c856c6e04efdea95aa7b648435989223de1542246b7d3faf46dff42e5ae8a2",
+            "matcher": null,
+            "required_events": [],
+            "schema_version": "1",
+            "secret_refs": [],
+            "side_effect_class": "read_only",
+            "source_provenance": {
+              "commit_digest": null,
+              "license": "proprietary",
+              "locator": "repo://scripts/hooks/policy_template",
+              "source": "local",
+              "upstream_identity": "hook.mc-policy-template",
+              "upstream_version": "1.0.0"
+            },
+            "timeout_seconds": 10,
+            "title": "Mission Control policy template hook"
+          },
+          "published_at": "2026-10-08T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:c92c26a553d7a80a3c41b8979aac14c05c1eefd75cb43bd8141f00ba3bfcb987",
+            "kind": "hook_script",
+            "lifecycle_status": "published",
+            "logical_id": "hook.mc-policy-template",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:a9db2a9ea7325f6b664dbca4c56fe2ac8dbf84c6fe4046be41064536ebae103f",
+        "manifest_ref": "mc-catalog://definition/hook_script/hook.mc-policy-template/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-skill:hook-script:hook.mc-policy-template/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-skill:hook-script:hook.mc-policy-template/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_skills.py",
+          "scripts/hooks/policy_template",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-skill:hook-script:hook.mc-policy-template/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:plugin:plugin.web-research",
+        "contract": "mission-control.published-definition/1",
+        "host_support": {
+          "profiles": {
+            "claude_agent_sdk": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "codex": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_cloud": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_local": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "deep_agents": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            }
+          },
+          "schema_version": "mc.capability_host_support.v1"
+        },
+        "kind": "plugin",
+        "manifest": {
+          "definition": {
+            "description": "Composition of exact pins: Tavily and Firecrawl MCP servers for search, extraction and crawling, the agent-browser skill stub, and the agent-browser MCP server (optional) for a real browser. No install command or marketplace reference.",
+            "host_support": {
+              "profiles": {
+                "claude_agent_sdk": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "codex": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_cloud": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_local": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "deep_agents": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                }
+              },
+              "schema_version": "mc.capability_host_support.v1"
+            },
+            "kind": "plugin",
+            "logical_id": "plugin.web-research",
+            "manifest": {
+              "members": [
+                {
+                  "optional": false,
+                  "overlay": {},
+                  "pin": {
+                    "capability_id": "mcp.tavily",
+                    "digest": "sha256:0ddb64e0269e50f242bd52ca3dbb0eaea8ce6bebf28d3a52b5692829f50785f2",
+                    "version": "0.2.22"
+                  },
+                  "role": "mcp_server"
+                },
+                {
+                  "optional": false,
+                  "overlay": {},
+                  "pin": {
+                    "capability_id": "mcp.firecrawl",
+                    "digest": "sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+                    "version": "3.28.2"
+                  },
+                  "role": "mcp_server"
+                },
+                {
+                  "optional": false,
+                  "overlay": {},
+                  "pin": {
+                    "capability_id": "skill.agent-browser",
+                    "digest": "sha256:54eb438f62e33a505a1157021ea5b10c52eb9fa6cd0508ede0d81b9d533f219f",
+                    "version": "0.38.2"
+                  },
+                  "role": "skill"
+                },
+                {
+                  "optional": true,
+                  "overlay": {},
+                  "pin": {
+                    "capability_id": "mcp.agent-browser",
+                    "digest": "sha256:0adefa4043827cb505858f7f76060f08140d0fc9a3aeeb580f6b0d2ecc6e3282",
+                    "version": "0.38.2"
+                  },
+                  "role": "mcp_server"
+                }
+              ],
+              "prompts": [],
+              "resources": [],
+              "schema_version": "mc.plugin_manifest.v1"
+            },
+            "schema_version": "1",
+            "secret_refs": [
+              "FIRECRAWL_API_KEY",
+              "TAVILY_API_KEY"
+            ],
+            "title": "Web research plugin (Tavily, Firecrawl, agent-browser)"
+          },
+          "published_at": "2026-10-08T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:a344bbc40ecdf5d0da9d14e1f10f3f4b7f3c3e4c94ef7de633dd4fc744e04929",
+            "kind": "plugin",
+            "lifecycle_status": "published",
+            "logical_id": "plugin.web-research",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:bfa259b8b74480a8b2c9421ba5664cef3ed4ce316f6876cc82772ca69b1a56e3",
+        "manifest_ref": "mc-catalog://definition/plugin/plugin.web-research/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "secret_refs": [
+          "FIRECRAWL_API_KEY",
+          "TAVILY_API_KEY"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-skill:plugin:plugin.web-research/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-skill:plugin:plugin.web-research/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_skills.py",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-skill:plugin:plugin.web-research/1:admit"
+    },
+    {
+      "fields": {
+        "member": "agent-capability:mcp-server:mcp.tavily/1",
+        "optional": false,
+        "plugin": "agent-skill:plugin:plugin.web-research/1",
+        "position": 0,
+        "role": "mcp_server"
+      },
+      "kind": "capability_plugin_member",
+      "logical_key": "agent-skill:plugin:plugin.web-research/1:member:0"
+    },
+    {
+      "fields": {
+        "member": "agent-capability:mcp-server:mcp.firecrawl/1",
+        "optional": false,
+        "plugin": "agent-skill:plugin:plugin.web-research/1",
+        "position": 1,
+        "role": "mcp_server"
+      },
+      "kind": "capability_plugin_member",
+      "logical_key": "agent-skill:plugin:plugin.web-research/1:member:1"
+    },
+    {
+      "fields": {
+        "member": "agent-skill:skill:skill.agent-browser/1",
+        "optional": false,
+        "plugin": "agent-skill:plugin:plugin.web-research/1",
+        "position": 2,
+        "role": "skill"
+      },
+      "kind": "capability_plugin_member",
+      "logical_key": "agent-skill:plugin:plugin.web-research/1:member:2"
+    },
+    {
+      "fields": {
+        "member": "agent-capability:mcp-server:mcp.agent-browser/1",
+        "optional": true,
+        "plugin": "agent-skill:plugin:plugin.web-research/1",
+        "position": 3,
+        "role": "mcp_server"
+      },
+      "kind": "capability_plugin_member",
+      "logical_key": "agent-skill:plugin:plugin.web-research/1:member:3"
+    }
+  ],
+  "seed_key": "mc.app.biotech.agent-skills",
+  "seed_version": "1.0.0"
+}

@@ -16,9 +16,15 @@ import asyncpg
 from mission_control.adapters.postgres.async_subagents.async_subagents import (
     PostgresAsyncSubagentAuthority,
 )
+from mission_control.adapters.postgres.context.continuation_repository import (
+    PostgresContinuationRepository,
+    PostgresRunIds,
+)
 from mission_control.adapters.postgres.control_plane.definition_repository import (
     PostgresDefinitionRepository,
 )
+from mission_control.adapters.postgres.frames.repository import PostgresFrameRepository
+from mission_control.adapters.postgres.frames.transcript_projection import PostgresRunMissionIds
 from mission_control.adapters.postgres.orchestration.stagegraph_repository import (
     PostgresStageGraphOperationTemplateRepository,
 )
@@ -39,6 +45,11 @@ from mission_control.adapters.postgres.runtime.stage3_kernel_repository import (
     PostgresForkRepository,
 )
 from mission_control.application.authoring.service import ControlPlaneService
+from mission_control.application.context.continuation import (
+    ContinuationCommands,
+    ContinuationTriggers,
+    FrameSessionLocator,
+)
 from mission_control.application.execution.boundary_interventions import (
     BoundaryCommandDeliveryService,
     BoundaryCommandTransport,
@@ -196,6 +207,8 @@ async def compose_application_services(
             fork_templates=StageGraphForkTemplateDerivation(
                 PostgresStageGraphOperationTemplateRepository(runtime_pool)
             ),
+            # FT-C4: the root starts with the ledger mission as `mc_mission_id`.
+            mission_ids=PostgresRunMissionIds(runtime_pool),
         )
         if submitter is not None
         else None
@@ -211,6 +224,14 @@ async def compose_application_services(
             interventions,
             request_scope=scope,
             stop_fences=PostgresStopFenceRepository(runtime_pool),
+            # FT-B4: request_continuation records a trigger for the live session.
+            continuations=ContinuationCommands(
+                ContinuationTriggers(PostgresContinuationRepository(runtime_pool)),
+                FrameSessionLocator(
+                    PostgresFrameRepository(runtime_pool), PostgresRunIds(runtime_pool)
+                ),
+                request_scope=scope,
+            ),
         ),
         runtime=MissionControlRuntimeService(
             snapshots, forks, request_scope=scope, reconciliation_service=recovery.reconciliation

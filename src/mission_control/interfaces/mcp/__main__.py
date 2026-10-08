@@ -16,11 +16,15 @@ from mission_control.adapters.postgres.control_plane.definition_repository impor
     PostgresDefinitionRepository,
 )
 from mission_control.adapters.postgres.frames.repository import PostgresFrameRepository
+from mission_control.adapters.postgres.frames.transcript_projection import (
+    PostgresTranscriptDocuments,
+)
 from mission_control.adapters.postgres.frames.transcript_reads import PostgresMissionEventReader
 from mission_control.application.coordinator.coordinator_facade import (
     CoordinatorLimits,
     ProductionCoordinatorFacade,
 )
+from mission_control.application.frames.search import TranscriptSearchService
 from mission_control.application.frames.transcript import TranscriptService
 from mission_control.bootstrap.coordinator_composition import (
     CoordinatorProductionDependencies,
@@ -150,14 +154,18 @@ def _transcripts(application_pool: PostgresPool, request_scope: str) -> ScopedTr
     except ValueError:
         return None
     pool = cast(asyncpg.Pool, application_pool)
+    service = TranscriptService(
+        PostgresMissionEventReader(pool),
+        PostgresFrameRepository(pool),
+        request_scope=request_scope,
+    )
+    # FT-C4: transcript search over the projection (run list needs Temporal Visibility,
+    # which this standalone server does not compose).
     return ScopedTranscripts(
-        {
-            request_scope: TranscriptService(
-                PostgresMissionEventReader(pool),
-                PostgresFrameRepository(pool),
-                request_scope=request_scope,
-            )
-        }
+        {request_scope: service},
+        searches={
+            request_scope: TranscriptSearchService(service, PostgresTranscriptDocuments(pool))
+        },
     )
 
 

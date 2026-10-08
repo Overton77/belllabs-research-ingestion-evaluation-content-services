@@ -1,0 +1,27 @@
+{
+  "workflow": "variant-pathogenicity",
+  "rationale": "Start with ClinVar, prediction, and population context, then widen to cancer evidence, trials, and literature.",
+  "playbook": "biomcp skill variant-pathogenicity",
+  "ladder": [
+    {
+      "step": 1,
+      "command": "biomcp get variant \"BRAF V600E\" clinvar predictions population",
+      "what_it_gives": "Clinical significance, computational predictions, and allele-frequency context."
+    },
+    {
+      "step": 2,
+      "command": "biomcp get variant \"BRAF V600E\" civic cgi",
+      "what_it_gives": "Curated cancer evidence and biomarker interpretation."
+    },
+    {
+      "step": 3,
+      "command": "biomcp variant trials \"BRAF V600E\" --limit 5",
+      "what_it_gives": "Variant-matched clinical trials."
+    },
+    {
+      "step": 4,
+      "command": "biomcp variant articles \"BRAF V600E\" --limit 5",
+      "what_it_gives": "Literature follow-up anchored on the variant."
+    }
+  ]
+}

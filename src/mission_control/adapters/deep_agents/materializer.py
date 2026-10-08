@@ -35,13 +35,13 @@ from mission_control.adapters.capabilities.capability_bundles import (
     file_manifest,
     safe_relative_path,
 )
+from mission_control.adapters.deep_agents.compaction import ObservedSummarizationMiddleware
 from mission_control.adapters.deep_agents.hooks import (
     HookContext,
     HookDispatcher,
     HookScriptMiddleware,
     HookScriptRunner,
     KernelHookPorts,
-    MissionSummarizationMiddleware,
     ResolvedHookScript,
     SubprocessHookScriptRunner,
 )
@@ -318,7 +318,7 @@ class ExactDeepAgentMaterializer:
                 HookScriptMiddleware(
                     dispatcher, mcp_tools=frozenset(tool.name for tool in mcp_tools)
                 ),
-                MissionSummarizationMiddleware.from_default(model, backend, dispatcher),
+                ObservedSummarizationMiddleware.observed(model, backend, dispatcher),
                 *catalog_middleware,
             )
             subagents = self._materialize_subagents(binding, secrets, skill_sources)

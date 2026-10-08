@@ -1,0 +1,47 @@
+# SEC Form Code Reference
+# Use: from edgar.reference import describe_form
+
+mappings:
+  corporate:
+    "annual report": "10-K"
+    "quarterly report": "10-Q"
+    "current events|material event": "8-K"
+
+  capital_raising:
+    "IPO|going public": "S-1"
+    "prospectus supplement|shelf takedown|follow-on offering": "424B5"
+    "ipo prospectus|ipo pricing": "424B4"
+    "resale prospectus|pipe resale": "424B3"
+    "structured note prospectus": "424B2"
+    "merger registration|business combination registration|acquisition stock registration|de-spac registration": "S-4"
+    "foreign merger registration|foreign business combination": "F-4"
+    "crowdfunding": "C"
+    "private placement": "D"
+    "regulation a|mini-ipo": "1-A"
+
+  ownership:
+    "insider trading|insider transaction": "4"
+    "initial ownership": "3"
+    "institutional holdings|13f": "13F-HR"
+    "activist investor|5% stake": "SC 13D"
+    "passive 5%": "SC 13G"
+    "tender offer recommendation|target board recommendation|14D-9": "SC 14D9"
+
+  proxy:
+    "proxy statement|executive comp": "DEF 14A"
+    "merger proxy": "DEFM14A"
+
+  foreign:
+    "foreign annual": "20-F"
+    "canadian annual|mjds": "40-F"
+    "foreign current": "6-K"
+
+gotchas:
+  - "Use hyphens: 10-K not 10K, 8-K not 8K"
+  - "13F-HR has holdings data; 13F-NT is just a notice (no data)"
+  - "/A suffix = amendment (10-K/A, 8-K/A)"
+  - "Form 4 = insider trades; SC 13D = 5%+ ownership disclosure"
+  - "SC 14D9 = target board's accept/reject/neutral recommendation on a tender offer; filing.obj() -> Schedule14D9. .recommendation is None in two cases, told apart by .item4_text: a string means Item 4 was read but its wording is hedged, indirect or unrecognised (read .recommendation_text); None means an SC 14D9/A that does not restate Item 4 (.is_amendment is True) - most amendments, so look at the original SC 14D9 for the board's position"
+  - "DEF 14A = final proxy; PRE 14A = preliminary draft"
+  - "424B5 = shelf takedown supplement; 424B4 = IPO final; 424B3 = resale; 424B2 = structured notes"
+  - "S-4/F-4 = securities registered in a merger/business combination; filing.obj() -> RegistrationS4 (fee table, cover page, offering_type)"

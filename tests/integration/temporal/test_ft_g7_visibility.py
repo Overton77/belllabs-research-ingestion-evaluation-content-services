@@ -118,7 +118,8 @@ async def test_runs_forks_and_operations_carry_the_fast_track_attributes() -> No
         assert await _count(client, f"mc_run_id = '{run_id}'", 5) == 5
         # Root and family carry the mission; operations carry lane and phase instead.
         assert await _count(client, "mc_mission_id = 'mission-ft-g7'", 4) == 4
-        assert await _count(client, f"mc_run_id = '{run_id}' AND mc_phase = 'completed'", 3) == 3
+        # Three operations plus the family, which upserts its phase since FT-C4.
+        assert await _count(client, f"mc_run_id = '{run_id}' AND mc_phase = 'completed'", 4) == 4
         assert await _count(client, f"mc_run_id = '{run_id}' AND mc_phase = 'executing'", 0) == 0
         assert await _count(client, f"ForkedFromRunId = '{run_id}'", 1) == 1
         listed = [item async for item in client.list_workflows(f"ForkedFromRunId = '{run_id}'")]
@@ -136,7 +137,7 @@ async def test_runs_forks_and_operations_carry_the_fast_track_attributes() -> No
         family = client.get_workflow_handle(f"family/{run_id}/1")
         family_attributes = (await family.describe()).typed_search_attributes
         assert family_attributes.get(_key("mc_mission_id")) == "mission-ft-g7"
-        assert family_attributes.get(_key("mc_phase")) is None
+        assert family_attributes.get(_key("mc_phase")) == "completed"  # FT-C4 family phase
 
         histories = [await root.fetch_history(), await family.fetch_history()]
         for _unit, bound in activities.operations[:3]:

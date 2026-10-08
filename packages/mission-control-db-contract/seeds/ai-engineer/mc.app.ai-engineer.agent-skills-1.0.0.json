@@ -1,0 +1,1866 @@
+{
+  "actor_ref": "seed:mission-control-catalog",
+  "component_compatibility": ">=1.0.0 <2.0.0",
+  "depends_on": [
+    {
+      "seed_key": "mc.catalog.agent-capabilities",
+      "seed_version": "1.0.0"
+    },
+    {
+      "seed_key": "mc.app.ai-engineer.agent-capabilities",
+      "seed_version": "1.0.0"
+    }
+  ],
+  "description": "Agent skills, the policy hook and the web-research plugin admitted in 'ai-engineer' (FT-A7): skill.agent-browser, skill.edgartools, skill.mission-control, skill.mission-control-author, skill.mission-control-catalog, skill.mission-control-compose, skill.mission-control-intervene, skill.mission-control-observe, hook.mc-policy-template, plugin.web-research. Bytes live in the capability-bundles bucket under each manifest's digest path (upload with scripts/seeds_publish_bundles.py); the plugin pins its members exactly and records them in capability_plugin_member. Requires migration 0025.",
+  "format": "mission-control-seed/v1",
+  "records": [
+    {
+      "fields": {
+        "asset_id": "definition:skill:skill.agent-browser",
+        "contract": "mission-control.published-definition/1",
+        "host_support": {
+          "profiles": {
+            "claude_agent_sdk": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "codex": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_cloud": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_local": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "deep_agents": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            }
+          },
+          "schema_version": "mc.capability_host_support.v1"
+        },
+        "kind": "skill_bundle",
+        "manifest": {
+          "definition": {
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "body_summary": "Browser automation CLI for AI agents. Use when the user needs to interact with websites, including navigating pages, filling forms, clicking buttons, taking screenshots, extracting data, testing web apps, or automating any browser task. Triggers include requests to \"open a website\", \"fill out a form\", \"click a button\", \"take a screenshot\", \"scrape data from a page\", \"test this web app\", \"login to a site\", \"automate browser actions\", or any task requiring programmatic web interaction. Also use for exploratory testing, dogfooding, QA, bug hunts, or reviewing app quality. Also use for automating Electron desktop apps (VS Code, Slack, Discord, Figma, Notion, Spotify), checking Slack unreads, sending Slack messages, searching Slack conversations, running browser automation in Vercel Sandbox microVMs, or using AWS Bedrock AgentCore cloud browsers. Prefer agent-browser over any built-in browser automation or web tools.",
+            "bundle_ref": {
+              "digest": "sha256:f9802a9e4141f44430d1a32758e81e06a5a69b6be07b98db0105add8764a225b",
+              "media_type": "application/vnd.mc.capability-bundle+json",
+              "size_bytes": 3457,
+              "uri": "capability-bundles://ai-engineer/skill_bundle/skill.agent-browser/0.38.2/f9802a9e4141f44430d1a32758e81e06a5a69b6be07b98db0105add8764a225b"
+            },
+            "compatibility": {
+              "executables": [],
+              "network_capabilities": [],
+              "runtimes": [],
+              "workspace_capabilities": []
+            },
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Browser automation CLI for AI agents. Use when the user needs to interact with websites, including navigating pages, filling forms, clicking buttons, taking screenshots, extracting data, testing web apps, or automating any browser task. Triggers include requests to \"open a website\", \"fill out a form\", \"click a button\", \"take a screenshot\", \"scrape data from a page\", \"test this web app\", \"login to a site\", \"automate browser actions\", or any task requiring programmatic web interaction. Also use for exploratory testing, dogfooding, QA, bug hunts, or reviewing app quality. Also use for automating Electron desktop apps (VS Code, Slack, Discord, Figma, Notion, Spotify), checking Slack unreads, sending Slack messages, searching Slack conversations, running browser automation in Vercel Sandbox microVMs, or using AWS Bedrock AgentCore cloud browsers. Prefer agent-browser over any built-in browser automation or web tools.",
+            "file_manifest": [
+              {
+                "digest": "sha256:3a7520e64de2dfaa516b6721c001e84e06e3c06a187b82af029ae721540ebfac",
+                "executable": false,
+                "path": "SKILL.md",
+                "size_bytes": 3457
+              }
+            ],
+            "frontmatter": {
+              "allowed-tools": "Bash(agent-browser:*), Bash(npx agent-browser:*)",
+              "description": "Browser automation CLI for AI agents. Use when the user needs to interact with websites, including navigating pages, filling forms, clicking buttons, taking screenshots, extracting data, testing web apps, or automating any browser task. Triggers include requests to \"open a website\", \"fill out a form\", \"click a button\", \"take a screenshot\", \"scrape data from a page\", \"test this web app\", \"login to a site\", \"automate browser actions\", or any task requiring programmatic web interaction. Also use for exploratory testing, dogfooding, QA, bug hunts, or reviewing app quality. Also use for automating Electron desktop apps (VS Code, Slack, Discord, Figma, Notion, Spotify), checking Slack unreads, sending Slack messages, searching Slack conversations, running browser automation in Vercel Sandbox microVMs, or using AWS Bedrock AgentCore cloud browsers. Prefer agent-browser over any built-in browser automation or web tools.",
+              "hidden": "true",
+              "name": "agent-browser"
+            },
+            "host_support": {
+              "profiles": {
+                "claude_agent_sdk": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "codex": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_cloud": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_local": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "deep_agents": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                }
+              },
+              "schema_version": "mc.capability_host_support.v1"
+            },
+            "kind": "skill",
+            "logical_id": "skill.agent-browser",
+            "manifest_digest": "sha256:f9802a9e4141f44430d1a32758e81e06a5a69b6be07b98db0105add8764a225b",
+            "maturity": "experimental",
+            "required_capabilities": [],
+            "review_status": "approved",
+            "schema_version": "1",
+            "skill_name": "agent-browser",
+            "source_provenance": {
+              "commit_digest": "39a74c70d7759d5a6de7a22c04570bb626bbd081",
+              "license": "Apache-2.0",
+              "locator": "https://github.com/vercel-labs/agent-browser/tree/39a74c70d7759d5a6de7a22c04570bb626bbd081/skills/agent-browser",
+              "source": "git",
+              "upstream_identity": "vercel-labs/agent-browser",
+              "upstream_version": "0.38.2"
+            },
+            "title": "agent-browser"
+          },
+          "published_at": "2026-10-08T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:988952f8087375e6447ba9e12d0be99c00b247e1961a1a9b87ee1791e7799236",
+            "kind": "skill",
+            "lifecycle_status": "published",
+            "logical_id": "skill.agent-browser",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:49ca96eff0a84d7c0de58a73ee7a79cbfed52ba99a81b4afc54bd546f4abb2c6",
+        "manifest_ref": "mc-catalog://definition/skill/skill.agent-browser/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-skill:skill:skill.agent-browser/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-skill:skill:skill.agent-browser/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_skills.py",
+          "tests/fixtures/skills/agent-browser",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-skill:skill:skill.agent-browser/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:skill:skill.edgartools",
+        "contract": "mission-control.published-definition/1",
+        "host_support": {
+          "profiles": {
+            "claude_agent_sdk": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "codex": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_cloud": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_local": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "deep_agents": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            }
+          },
+          "schema_version": "mc.capability_host_support.v1"
+        },
+        "kind": "skill_bundle",
+        "manifest": {
+          "definition": {
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "body_summary": "Query and analyze SEC filings using EdgarTools",
+            "bundle_ref": {
+              "digest": "sha256:446bb91d5ec38da0fee2925966205149edbd7c9b13b9c30294073a842510ce78",
+              "media_type": "application/vnd.mc.capability-bundle+json",
+              "size_bytes": 134514,
+              "uri": "capability-bundles://ai-engineer/skill_bundle/skill.edgartools/5.61.1/446bb91d5ec38da0fee2925966205149edbd7c9b13b9c30294073a842510ce78"
+            },
+            "compatibility": {
+              "executables": [],
+              "network_capabilities": [],
+              "runtimes": [],
+              "workspace_capabilities": []
+            },
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Query and analyze SEC filings using EdgarTools",
+            "file_manifest": [
+              {
+                "digest": "sha256:65ff350a67cbb8ff9ca0dc6038aa9b6856fe3855e9e4b008bfe81124617d4791",
+                "executable": false,
+                "path": "SKILL.md",
+                "size_bytes": 1339
+              },
+              {
+                "digest": "sha256:ee9decf62b4bb7561d3d2b37627dc4775aa3ff7e45a2545bd0f52ff94726fa19",
+                "executable": false,
+                "path": "api-reference/Company.md",
+                "size_bytes": 10635
+              },
+              {
+                "digest": "sha256:d454366f57eea9f7edd9162d7c9afd694e27fa2c9a9e093df1263ac15a5d271f",
+                "executable": false,
+                "path": "api-reference/EntityFiling.md",
+                "size_bytes": 8271
+              },
+              {
+                "digest": "sha256:ba92e13df8d919d28a82676aef2a55ed5c8adcb07412d5a2eab4e37ba9ca769b",
+                "executable": false,
+                "path": "api-reference/EntityFilings.md",
+                "size_bytes": 9957
+              },
+              {
+                "digest": "sha256:4a226096ef32f473f5236a8fcbad81b7ece13d80932d3acc75ba325a9d2a0c6a",
+                "executable": false,
+                "path": "api-reference/Statement.md",
+                "size_bytes": 12647
+              },
+              {
+                "digest": "sha256:a72964e54ddadb83d80032b08e647176b08fad1dcece98d28c5cfd9d8ccad21f",
+                "executable": false,
+                "path": "api-reference/XBRL.md",
+                "size_bytes": 15138
+              },
+              {
+                "digest": "sha256:8bd730d84cd333e1bf0b080b29cd284ee2a8689d0810f8adb0b6cfddf18f7ad1",
+                "executable": false,
+                "path": "collaboration.yaml",
+                "size_bytes": 2837
+              },
+              {
+                "digest": "sha256:90ddcf8c7dfd2274f82316bd4b90d20f20704d0e1a90c053fc9a26c6da5ddfcd",
+                "executable": false,
+                "path": "financials/sharp-edges.yaml",
+                "size_bytes": 3617
+              },
+              {
+                "digest": "sha256:296d783fda9ad0e2d0dc585b4bc80202d47be48c46382cfb6de6ba71d26cc98f",
+                "executable": false,
+                "path": "financials/skill.yaml",
+                "size_bytes": 5650
+              },
+              {
+                "digest": "sha256:4a8f2227f520786072cc5a0aecc4664e01401d794e3807aedbf5e1c5d7454c38",
+                "executable": false,
+                "path": "forms.yaml",
+                "size_bytes": 2179
+              },
+              {
+                "digest": "sha256:ffe7e6824de8c00c43a07eee1c182cbe947c66fa74e0a6bf8ad5c611411063eb",
+                "executable": false,
+                "path": "holdings/sharp-edges.yaml",
+                "size_bytes": 5786
+              },
+              {
+                "digest": "sha256:bb5dcd3f2f209e824ca0f0050f17ec2e0574286d968487448aebfb9a66810c46",
+                "executable": false,
+                "path": "holdings/skill.yaml",
+                "size_bytes": 2847
+              },
+              {
+                "digest": "sha256:002274c6eb4f28f80dd26c42b64697f7fb79f0cf452894ab7db13c9bb3c0851d",
+                "executable": false,
+                "path": "ownership/sharp-edges.yaml",
+                "size_bytes": 3044
+              },
+              {
+                "digest": "sha256:286df0fede5aad20c72483f7fcf3c4956e494a6cff4410626ddfe71dfec2ef90",
+                "executable": false,
+                "path": "ownership/skill.yaml",
+                "size_bytes": 3743
+              },
+              {
+                "digest": "sha256:886eb71124344f10529b3247bb02e9b98fef3ae43159fcc1b259c3989b19ba96",
+                "executable": false,
+                "path": "readme.md",
+                "size_bytes": 2224
+              },
+              {
+                "digest": "sha256:b4764ab68af9ee2a26207dc166bc2cac3ab2b562ec5b1476217045cf631d4d2f",
+                "executable": false,
+                "path": "reports/sharp-edges.yaml",
+                "size_bytes": 5568
+              },
+              {
+                "digest": "sha256:b9407fa80da890f9eb45539bcbca060e7d453b23a27a96786291215d5827dcb2",
+                "executable": false,
+                "path": "reports/skill.yaml",
+                "size_bytes": 11761
+              },
+              {
+                "digest": "sha256:6e20b22aafa09a7d46d24bf814e3322a1a7df999e17bb731a7b2bcaf412b0a98",
+                "executable": false,
+                "path": "sharp-edges.yaml",
+                "size_bytes": 7462
+              },
+              {
+                "digest": "sha256:ed4c0e983824d521122926573f501072c75de93b3f291f4fb452f7214105b96c",
+                "executable": false,
+                "path": "skill.yaml",
+                "size_bytes": 11010
+              },
+              {
+                "digest": "sha256:a3da765262784da152025923a9b93761d6f9e068f8f83354031c87237584aff2",
+                "executable": false,
+                "path": "validations.yaml",
+                "size_bytes": 2184
+              },
+              {
+                "digest": "sha256:32fdd98ac413f26b029c3d154e8baf9ad5a3e6167da0b3c60921979f84bf0807",
+                "executable": false,
+                "path": "xbrl/sharp-edges.yaml",
+                "size_bytes": 2136
+              },
+              {
+                "digest": "sha256:cd6bb2e5d39c0eed8af9f2ca4514edc67069f1005d71c109ec36e6a29793803b",
+                "executable": false,
+                "path": "xbrl/skill.yaml",
+                "size_bytes": 4479
+              }
+            ],
+            "frontmatter": {
+              "description": "Query and analyze SEC filings using EdgarTools",
+              "name": "EdgarTools"
+            },
+            "host_support": {
+              "profiles": {
+                "claude_agent_sdk": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "codex": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_cloud": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_local": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "deep_agents": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                }
+              },
+              "schema_version": "mc.capability_host_support.v1"
+            },
+            "kind": "skill",
+            "logical_id": "skill.edgartools",
+            "manifest_digest": "sha256:446bb91d5ec38da0fee2925966205149edbd7c9b13b9c30294073a842510ce78",
+            "maturity": "experimental",
+            "required_capabilities": [],
+            "review_status": "approved",
+            "schema_version": "1",
+            "skill_name": "edgartools",
+            "source_provenance": {
+              "commit_digest": "7338aa335f6442c52dfa0695422cf1cd27e946e0",
+              "license": "MIT",
+              "locator": "pypi:edgartools==5.61.1 (edgar.ai.install_skill)",
+              "source": "local",
+              "upstream_identity": "dgunning/edgartools",
+              "upstream_version": "5.61.1"
+            },
+            "title": "EdgarTools"
+          },
+          "published_at": "2026-10-08T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:a8d71d0e6bc23c33e09ef9460c84b21b6553ddb919165ef60857b0f62773bd8c",
+            "kind": "skill",
+            "lifecycle_status": "published",
+            "logical_id": "skill.edgartools",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:4377658a08a931a0b03db0bff6cdac719b7a27fce8c093c07bc76d94f2f8dd80",
+        "manifest_ref": "mc-catalog://definition/skill/skill.edgartools/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-skill:skill:skill.edgartools/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-skill:skill:skill.edgartools/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_skills.py",
+          "tests/fixtures/skills/edgartools",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-skill:skill:skill.edgartools/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:skill:skill.mission-control",
+        "contract": "mission-control.published-definition/1",
+        "host_support": {
+          "profiles": {
+            "claude_agent_sdk": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "codex": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_cloud": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_local": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "deep_agents": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            }
+          },
+          "schema_version": "mc.capability_host_support.v1"
+        },
+        "kind": "skill_bundle",
+        "manifest": {
+          "definition": {
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "body_summary": "Router for Mission Control work through missionctl. Use when a task authors or compiles a Mission Manifest, searches or pins catalog capabilities (skills, MCP servers, hooks, subagents, plugins), inspects a run or chain or reads a transcript, queues or injects an instruction, cancels, forks or reconciles a run, subscribes to mission events, or chains missions. Routes to the mission-control-author, -catalog, -observe, -intervene and -compose bundles.",
+            "bundle_ref": {
+              "digest": "sha256:a574862104a8d5a4e3784dd7ff37514f0514cc439aaf5bcea9b714653cd6da79",
+              "media_type": "application/vnd.mc.capability-bundle+json",
+              "size_bytes": 12658,
+              "uri": "capability-bundles://ai-engineer/skill_bundle/skill.mission-control/0.3.0/a574862104a8d5a4e3784dd7ff37514f0514cc439aaf5bcea9b714653cd6da79"
+            },
+            "compatibility": {
+              "executables": [],
+              "network_capabilities": [],
+              "runtimes": [],
+              "workspace_capabilities": []
+            },
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Router for Mission Control work through missionctl. Use when a task authors or compiles a Mission Manifest, searches or pins catalog capabilities (skills, MCP servers, hooks, subagents, plugins), inspects a run or chain or reads a transcript, queues or injects an instruction, cancels, forks or reconciles a run, subscribes to mission events, or chains missions. Routes to the mission-control-author, -catalog, -observe, -intervene and -compose bundles.",
+            "file_manifest": [
+              {
+                "digest": "sha256:cccfb371f1f9566500d391c9a726eaec103575e4698e7a5cf16686bf1fe2c795",
+                "executable": false,
+                "path": "SKILL.md",
+                "size_bytes": 3155
+              },
+              {
+                "digest": "sha256:b323af9443648e89c4f6d522e3c4322ca046b361c81bece509d9586908351c1d",
+                "executable": false,
+                "path": "manifest.json",
+                "size_bytes": 569
+              },
+              {
+                "digest": "sha256:0e6896e28e58434b604d2afb9408afc69d7e19107154e34bed305234fcb24021",
+                "executable": false,
+                "path": "references/operations.json",
+                "size_bytes": 1740
+              },
+              {
+                "digest": "sha256:83980c6a81f7f6586e48038ac9b177c9899e661840c2d3d03392d82a3133b5c1",
+                "executable": false,
+                "path": "references/protocol.md",
+                "size_bytes": 7194
+              }
+            ],
+            "frontmatter": {
+              "description": "Router for Mission Control work through missionctl. Use when a task authors or compiles a Mission Manifest, searches or pins catalog capabilities (skills, MCP servers, hooks, subagents, plugins), inspects a run or chain or reads a transcript, queues or injects an instruction, cancels, forks or reconciles a run, subscribes to mission events, or chains missions. Routes to the mission-control-author, -catalog, -observe, -intervene and -compose bundles.",
+              "name": "mission-control"
+            },
+            "host_support": {
+              "profiles": {
+                "claude_agent_sdk": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "codex": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_cloud": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_local": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "deep_agents": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                }
+              },
+              "schema_version": "mc.capability_host_support.v1"
+            },
+            "kind": "skill",
+            "logical_id": "skill.mission-control",
+            "manifest_digest": "sha256:a574862104a8d5a4e3784dd7ff37514f0514cc439aaf5bcea9b714653cd6da79",
+            "maturity": "qualified",
+            "required_capabilities": [],
+            "review_status": "approved",
+            "schema_version": "1",
+            "skill_name": "mission-control",
+            "source_provenance": {
+              "commit_digest": null,
+              "license": "proprietary",
+              "locator": "repo://skills/mission-control",
+              "source": "local",
+              "upstream_identity": "skill.mission-control",
+              "upstream_version": "0.3.0"
+            },
+            "title": "mission-control"
+          },
+          "published_at": "2026-10-08T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:1398308a4e109ff4daca1611162f88e53d8d884dac30ad04650a24d00b7b16ab",
+            "kind": "skill",
+            "lifecycle_status": "published",
+            "logical_id": "skill.mission-control",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:aefcc3fef6831bc48b22ae680a599e8d2a6aa48fcb6afadd7ffefb69cf62046d",
+        "manifest_ref": "mc-catalog://definition/skill/skill.mission-control/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-skill:skill:skill.mission-control/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-skill:skill:skill.mission-control/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_skills.py",
+          "skills/mission-control",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-skill:skill:skill.mission-control/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:skill:skill.mission-control-author",
+        "contract": "mission-control.published-definition/1",
+        "host_support": {
+          "profiles": {
+            "claude_agent_sdk": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "codex": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_cloud": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_local": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "deep_agents": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            }
+          },
+          "schema_version": "mc.capability_host_support.v1"
+        },
+        "kind": "skill_bundle",
+        "manifest": {
+          "definition": {
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "body_summary": "Author a Mission Manifest (mission.yml, manifest mission/v1) from an interview, compile it with missionctl mission compile, read the Validation Report, submit it, and start the run as a separate authorized call. Use when a human describes a research, ingestion, content or coding outcome that should become a mission, or asks to edit, compile, validate, submit or start a mission.yml.",
+            "bundle_ref": {
+              "digest": "sha256:4c8c12a6d9cd90bc5e214ee2c820ec6942dbca3cd542ebbe48ea1f4b3cf27121",
+              "media_type": "application/vnd.mc.capability-bundle+json",
+              "size_bytes": 12622,
+              "uri": "capability-bundles://ai-engineer/skill_bundle/skill.mission-control-author/0.1.0/4c8c12a6d9cd90bc5e214ee2c820ec6942dbca3cd542ebbe48ea1f4b3cf27121"
+            },
+            "compatibility": {
+              "executables": [],
+              "network_capabilities": [],
+              "runtimes": [],
+              "workspace_capabilities": []
+            },
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Author a Mission Manifest (mission.yml, manifest mission/v1) from an interview, compile it with missionctl mission compile, read the Validation Report, submit it, and start the run as a separate authorized call. Use when a human describes a research, ingestion, content or coding outcome that should become a mission, or asks to edit, compile, validate, submit or start a mission.yml.",
+            "file_manifest": [
+              {
+                "digest": "sha256:6a418dc30a26ae0c17c0c64fdddd5cec7cdf14573ccfabc7670b4c513115e1d2",
+                "executable": false,
+                "path": "SKILL.md",
+                "size_bytes": 4398
+              },
+              {
+                "digest": "sha256:89deec84e57f78acd5ad59da13604eeca400ca46cf7535196ada52182eb3644b",
+                "executable": false,
+                "path": "manifest.json",
+                "size_bytes": 487
+              },
+              {
+                "digest": "sha256:f72f76df52b7ec3fefdb50e81524376fea63ef252def877b38968f1d3489019a",
+                "executable": false,
+                "path": "references/manifest-cheatsheet.md",
+                "size_bytes": 5001
+              },
+              {
+                "digest": "sha256:25ec3a69e247bb033a84bcc90eec5d948a506cefa14d47c1555da71686008ba4",
+                "executable": false,
+                "path": "references/validation-report.md",
+                "size_bytes": 2736
+              }
+            ],
+            "frontmatter": {
+              "description": "Author a Mission Manifest (mission.yml, manifest mission/v1) from an interview, compile it with missionctl mission compile, read the Validation Report, submit it, and start the run as a separate authorized call. Use when a human describes a research, ingestion, content or coding outcome that should become a mission, or asks to edit, compile, validate, submit or start a mission.yml.",
+              "name": "mission-control-author"
+            },
+            "host_support": {
+              "profiles": {
+                "claude_agent_sdk": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "codex": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_cloud": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_local": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "deep_agents": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                }
+              },
+              "schema_version": "mc.capability_host_support.v1"
+            },
+            "kind": "skill",
+            "logical_id": "skill.mission-control-author",
+            "manifest_digest": "sha256:4c8c12a6d9cd90bc5e214ee2c820ec6942dbca3cd542ebbe48ea1f4b3cf27121",
+            "maturity": "qualified",
+            "required_capabilities": [],
+            "review_status": "approved",
+            "schema_version": "1",
+            "skill_name": "mission-control-author",
+            "source_provenance": {
+              "commit_digest": null,
+              "license": "proprietary",
+              "locator": "repo://skills/mission-control-author",
+              "source": "local",
+              "upstream_identity": "skill.mission-control-author",
+              "upstream_version": "0.1.0"
+            },
+            "title": "mission-control-author"
+          },
+          "published_at": "2026-10-08T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:91e225222c748ded3cdac4edc7165f9cce888bee602c3a956bd544d3de257546",
+            "kind": "skill",
+            "lifecycle_status": "published",
+            "logical_id": "skill.mission-control-author",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:912fb132b98c2cdfceca301e4ae8152d52cd8ab64da7f57327c90e2acae2783a",
+        "manifest_ref": "mc-catalog://definition/skill/skill.mission-control-author/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-skill:skill:skill.mission-control-author/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-skill:skill:skill.mission-control-author/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_skills.py",
+          "skills/mission-control-author",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-skill:skill:skill.mission-control-author/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:skill:skill.mission-control-catalog",
+        "contract": "mission-control.published-definition/1",
+        "host_support": {
+          "profiles": {
+            "claude_agent_sdk": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "codex": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_cloud": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_local": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "deep_agents": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            }
+          },
+          "schema_version": "mc.capability_host_support.v1"
+        },
+        "kind": "skill_bundle",
+        "manifest": {
+          "definition": {
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "body_summary": "Search, inspect, pin and publish Mission Control capabilities (skill bundles, MCP servers and tools, hook scripts, subagent profiles, plugins, model and sandbox profiles) with missionctl catalog, and compose plugins from exact pins. Use when a manifest needs a capability, when a human asks what tools or skills exist for a lane, when a new skill bundle must be published, or when an external MCP server or skill is discovered and must be quarantined.",
+            "bundle_ref": {
+              "digest": "sha256:6d9eb4c70e29d99d7106337ebe75b6d7fd37ac3fda5c07952ad73f85c048b32b",
+              "media_type": "application/vnd.mc.capability-bundle+json",
+              "size_bytes": 8810,
+              "uri": "capability-bundles://ai-engineer/skill_bundle/skill.mission-control-catalog/0.2.0/6d9eb4c70e29d99d7106337ebe75b6d7fd37ac3fda5c07952ad73f85c048b32b"
+            },
+            "compatibility": {
+              "executables": [],
+              "network_capabilities": [],
+              "runtimes": [],
+              "workspace_capabilities": []
+            },
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Search, inspect, pin and publish Mission Control capabilities (skill bundles, MCP servers and tools, hook scripts, subagent profiles, plugins, model and sandbox profiles) with missionctl catalog, and compose plugins from exact pins. Use when a manifest needs a capability, when a human asks what tools or skills exist for a lane, when a new skill bundle must be published, or when an external MCP server or skill is discovered and must be quarantined.",
+            "file_manifest": [
+              {
+                "digest": "sha256:5ba76caef5d550d199c476af34bce1184751b7880c9f82732450547842541086",
+                "executable": false,
+                "path": "SKILL.md",
+                "size_bytes": 4673
+              },
+              {
+                "digest": "sha256:4f728cf75d1c752841e2029c28858785bb920383e69b20e4d0e4d123c8f6be83",
+                "executable": false,
+                "path": "manifest.json",
+                "size_bytes": 376
+              },
+              {
+                "digest": "sha256:74fcaaf6ade072d4b9738104a2559877473b8d390eb060210c3fae8bb80693d2",
+                "executable": false,
+                "path": "references/kinds-and-projections.md",
+                "size_bytes": 3761
+              }
+            ],
+            "frontmatter": {
+              "description": "Search, inspect, pin and publish Mission Control capabilities (skill bundles, MCP servers and tools, hook scripts, subagent profiles, plugins, model and sandbox profiles) with missionctl catalog, and compose plugins from exact pins. Use when a manifest needs a capability, when a human asks what tools or skills exist for a lane, when a new skill bundle must be published, or when an external MCP server or skill is discovered and must be quarantined.",
+              "name": "mission-control-catalog"
+            },
+            "host_support": {
+              "profiles": {
+                "claude_agent_sdk": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "codex": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_cloud": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_local": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "deep_agents": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                }
+              },
+              "schema_version": "mc.capability_host_support.v1"
+            },
+            "kind": "skill",
+            "logical_id": "skill.mission-control-catalog",
+            "manifest_digest": "sha256:6d9eb4c70e29d99d7106337ebe75b6d7fd37ac3fda5c07952ad73f85c048b32b",
+            "maturity": "qualified",
+            "required_capabilities": [],
+            "review_status": "approved",
+            "schema_version": "1",
+            "skill_name": "mission-control-catalog",
+            "source_provenance": {
+              "commit_digest": null,
+              "license": "proprietary",
+              "locator": "repo://skills/mission-control-catalog",
+              "source": "local",
+              "upstream_identity": "skill.mission-control-catalog",
+              "upstream_version": "0.2.0"
+            },
+            "title": "mission-control-catalog"
+          },
+          "published_at": "2026-10-08T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:35d376a0fff00ffdbeab8fadbb8a3ecea85b5f1c5ed642c6072b94d04d0b122d",
+            "kind": "skill",
+            "lifecycle_status": "published",
+            "logical_id": "skill.mission-control-catalog",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:f83f08a83dc48a42346e7f09099e6d790c3199e46d509efc14f828d5ca9a0996",
+        "manifest_ref": "mc-catalog://definition/skill/skill.mission-control-catalog/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-skill:skill:skill.mission-control-catalog/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-skill:skill:skill.mission-control-catalog/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_skills.py",
+          "skills/mission-control-catalog",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-skill:skill:skill.mission-control-catalog/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:skill:skill.mission-control-compose",
+        "contract": "mission-control.published-definition/1",
+        "host_support": {
+          "profiles": {
+            "claude_agent_sdk": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "codex": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_cloud": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_local": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "deep_agents": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            }
+          },
+          "schema_version": "mc.capability_host_support.v1"
+        },
+        "kind": "skill_bundle",
+        "manifest": {
+          "definition": {
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "body_summary": "Compose several Mission Control missions into a Mission Chain (missions plus links in one manifest), decide between chaining, nesting a Goal Loop or a Stage Graph, and invoking a child mission, and move state across links as a Context Packet. Use when a human wants one workflow to feed another, wants research then ingestion, or asks how mission state transfers between linked workflows.",
+            "bundle_ref": {
+              "digest": "sha256:7632106e76a11455b53b4812757e8a00ca8ec8bc2de887cd1b213ebe860fa8b4",
+              "media_type": "application/vnd.mc.capability-bundle+json",
+              "size_bytes": 7041,
+              "uri": "capability-bundles://ai-engineer/skill_bundle/skill.mission-control-compose/0.1.0/7632106e76a11455b53b4812757e8a00ca8ec8bc2de887cd1b213ebe860fa8b4"
+            },
+            "compatibility": {
+              "executables": [],
+              "network_capabilities": [],
+              "runtimes": [],
+              "workspace_capabilities": []
+            },
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Compose several Mission Control missions into a Mission Chain (missions plus links in one manifest), decide between chaining, nesting a Goal Loop or a Stage Graph, and invoking a child mission, and move state across links as a Context Packet. Use when a human wants one workflow to feed another, wants research then ingestion, or asks how mission state transfers between linked workflows.",
+            "file_manifest": [
+              {
+                "digest": "sha256:d48ca772a714971f454a5fec8bccdf15ad7f48dbe4af14033799ddaadbe6219c",
+                "executable": false,
+                "path": "SKILL.md",
+                "size_bytes": 3828
+              },
+              {
+                "digest": "sha256:c0ad5e08abb5d643a3aa0388880ad5451e9ec1e8881f7420e34b0f2aba07ac5a",
+                "executable": false,
+                "path": "manifest.json",
+                "size_bytes": 369
+              },
+              {
+                "digest": "sha256:d91b8fd8d44c6ac8f1dc1fe9fb6a1ff9477681cc62bde9ac60976178c3b943c0",
+                "executable": false,
+                "path": "references/chain-patterns.md",
+                "size_bytes": 2844
+              }
+            ],
+            "frontmatter": {
+              "description": "Compose several Mission Control missions into a Mission Chain (missions plus links in one manifest), decide between chaining, nesting a Goal Loop or a Stage Graph, and invoking a child mission, and move state across links as a Context Packet. Use when a human wants one workflow to feed another, wants research then ingestion, or asks how mission state transfers between linked workflows.",
+              "name": "mission-control-compose"
+            },
+            "host_support": {
+              "profiles": {
+                "claude_agent_sdk": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "codex": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_cloud": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_local": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "deep_agents": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                }
+              },
+              "schema_version": "mc.capability_host_support.v1"
+            },
+            "kind": "skill",
+            "logical_id": "skill.mission-control-compose",
+            "manifest_digest": "sha256:7632106e76a11455b53b4812757e8a00ca8ec8bc2de887cd1b213ebe860fa8b4",
+            "maturity": "qualified",
+            "required_capabilities": [],
+            "review_status": "approved",
+            "schema_version": "1",
+            "skill_name": "mission-control-compose",
+            "source_provenance": {
+              "commit_digest": null,
+              "license": "proprietary",
+              "locator": "repo://skills/mission-control-compose",
+              "source": "local",
+              "upstream_identity": "skill.mission-control-compose",
+              "upstream_version": "0.1.0"
+            },
+            "title": "mission-control-compose"
+          },
+          "published_at": "2026-10-08T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:3611ec47d067e3e38900594821bfce17cd7a5920da55924d8dc82bd85e776411",
+            "kind": "skill",
+            "lifecycle_status": "published",
+            "logical_id": "skill.mission-control-compose",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:4c91b73630713e2a518cc771b29553a81c9c3c94c59cc7f15c0eebd0b5994640",
+        "manifest_ref": "mc-catalog://definition/skill/skill.mission-control-compose/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-skill:skill:skill.mission-control-compose/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-skill:skill:skill.mission-control-compose/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_skills.py",
+          "skills/mission-control-compose",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-skill:skill:skill.mission-control-compose/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:skill:skill.mission-control-intervene",
+        "contract": "mission-control.published-definition/1",
+        "host_support": {
+          "profiles": {
+            "claude_agent_sdk": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "codex": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_cloud": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_local": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "deep_agents": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            }
+          },
+          "schema_version": "mc.capability_host_support.v1"
+        },
+        "kind": "skill_bundle",
+        "manifest": {
+          "definition": {
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "body_summary": "Change a running Mission Control run with missionctl commands - queue an instruction or context for the next turn or iteration, interrupt and inject, pause, resume, cancel (normal or immediate), snapshot, fork from a snapshot with an instruction, or reconcile an in-doubt unit. Use when a human wants to steer, stop, branch or repair a run that is already running.",
+            "bundle_ref": {
+              "digest": "sha256:a14bf413437b142a91b25c9800481cdcc2f721591e690490dad4091d19d43709",
+              "media_type": "application/vnd.mc.capability-bundle+json",
+              "size_bytes": 8721,
+              "uri": "capability-bundles://ai-engineer/skill_bundle/skill.mission-control-intervene/0.1.0/a14bf413437b142a91b25c9800481cdcc2f721591e690490dad4091d19d43709"
+            },
+            "compatibility": {
+              "executables": [],
+              "network_capabilities": [],
+              "runtimes": [],
+              "workspace_capabilities": []
+            },
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Change a running Mission Control run with missionctl commands - queue an instruction or context for the next turn or iteration, interrupt and inject, pause, resume, cancel (normal or immediate), snapshot, fork from a snapshot with an instruction, or reconcile an in-doubt unit. Use when a human wants to steer, stop, branch or repair a run that is already running.",
+            "file_manifest": [
+              {
+                "digest": "sha256:380f93e97baf0e296852d4b11ef54f70d42ba9e670700f4f11d22652aa464eb9",
+                "executable": false,
+                "path": "SKILL.md",
+                "size_bytes": 4163
+              },
+              {
+                "digest": "sha256:503f2fbec8e2d64322366e72e8cf9890a0b4ab54d71738fd17f86694c6d45dfc",
+                "executable": false,
+                "path": "manifest.json",
+                "size_bytes": 374
+              },
+              {
+                "digest": "sha256:40a738db53cae5a947b3fcb015e67a04e207bd4bd0d916a48987ef560e82f5e3",
+                "executable": false,
+                "path": "references/command-templates.md",
+                "size_bytes": 4184
+              }
+            ],
+            "frontmatter": {
+              "description": "Change a running Mission Control run with missionctl commands - queue an instruction or context for the next turn or iteration, interrupt and inject, pause, resume, cancel (normal or immediate), snapshot, fork from a snapshot with an instruction, or reconcile an in-doubt unit. Use when a human wants to steer, stop, branch or repair a run that is already running.",
+              "name": "mission-control-intervene"
+            },
+            "host_support": {
+              "profiles": {
+                "claude_agent_sdk": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "codex": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_cloud": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_local": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "deep_agents": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                }
+              },
+              "schema_version": "mc.capability_host_support.v1"
+            },
+            "kind": "skill",
+            "logical_id": "skill.mission-control-intervene",
+            "manifest_digest": "sha256:a14bf413437b142a91b25c9800481cdcc2f721591e690490dad4091d19d43709",
+            "maturity": "qualified",
+            "required_capabilities": [],
+            "review_status": "approved",
+            "schema_version": "1",
+            "skill_name": "mission-control-intervene",
+            "source_provenance": {
+              "commit_digest": null,
+              "license": "proprietary",
+              "locator": "repo://skills/mission-control-intervene",
+              "source": "local",
+              "upstream_identity": "skill.mission-control-intervene",
+              "upstream_version": "0.1.0"
+            },
+            "title": "mission-control-intervene"
+          },
+          "published_at": "2026-10-08T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:2873358168e0194921791219d71de845ead9cd6e76dad162ec383ca3be025b8c",
+            "kind": "skill",
+            "lifecycle_status": "published",
+            "logical_id": "skill.mission-control-intervene",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:92579a19a3c4f6f7dd1ac2b73c7fada3e0964aab9e5a1d8215951474e0d4d33f",
+        "manifest_ref": "mc-catalog://definition/skill/skill.mission-control-intervene/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-skill:skill:skill.mission-control-intervene/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-skill:skill:skill.mission-control-intervene/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_skills.py",
+          "skills/mission-control-intervene",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-skill:skill:skill.mission-control-intervene/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:skill:skill.mission-control-observe",
+        "contract": "mission-control.published-definition/1",
+        "host_support": {
+          "profiles": {
+            "claude_agent_sdk": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "codex": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_cloud": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_local": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "deep_agents": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            }
+          },
+          "schema_version": "mc.capability_host_support.v1"
+        },
+        "kind": "skill_bundle",
+        "manifest": {
+          "definition": {
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "body_summary": "Inspect Mission Control runs and chains, list and search runs, read a run's transcript, watch mission events and register subscriptions (webhook or stream) with missionctl. Use when a human asks what a run is doing, whether a control took effect, what an agent did, why a mission stopped, or wants callbacks when a human task opens or a run completes.",
+            "bundle_ref": {
+              "digest": "sha256:acf68fba5ac0c2f193f73d92ecb4dc0ee2ae8439b913cfc25743267949d1ce3d",
+              "media_type": "application/vnd.mc.capability-bundle+json",
+              "size_bytes": 7156,
+              "uri": "capability-bundles://ai-engineer/skill_bundle/skill.mission-control-observe/0.2.0/acf68fba5ac0c2f193f73d92ecb4dc0ee2ae8439b913cfc25743267949d1ce3d"
+            },
+            "compatibility": {
+              "executables": [],
+              "network_capabilities": [],
+              "runtimes": [],
+              "workspace_capabilities": []
+            },
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Inspect Mission Control runs and chains, list and search runs, read a run's transcript, watch mission events and register subscriptions (webhook or stream) with missionctl. Use when a human asks what a run is doing, whether a control took effect, what an agent did, why a mission stopped, or wants callbacks when a human task opens or a run completes.",
+            "file_manifest": [
+              {
+                "digest": "sha256:7f22fb7de206b18a3e96961f2af859007682833135587363e43e7801c14df0d3",
+                "executable": false,
+                "path": "SKILL.md",
+                "size_bytes": 4971
+              },
+              {
+                "digest": "sha256:98ceca3ed939cefe4b1c447d36627110506c773d73cdd8c6c8dba55388493ae9",
+                "executable": false,
+                "path": "manifest.json",
+                "size_bytes": 372
+              },
+              {
+                "digest": "sha256:64d81e092c1792c5a5213dd6a9bb7b1585ad2a4a5fb14dc85aa3cc1fbc9bab84",
+                "executable": false,
+                "path": "references/transcript-format.md",
+                "size_bytes": 1813
+              }
+            ],
+            "frontmatter": {
+              "description": "Inspect Mission Control runs and chains, list and search runs, read a run's transcript, watch mission events and register subscriptions (webhook or stream) with missionctl. Use when a human asks what a run is doing, whether a control took effect, what an agent did, why a mission stopped, or wants callbacks when a human task opens or a run completes.",
+              "name": "mission-control-observe"
+            },
+            "host_support": {
+              "profiles": {
+                "claude_agent_sdk": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "codex": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_cloud": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_local": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "deep_agents": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                }
+              },
+              "schema_version": "mc.capability_host_support.v1"
+            },
+            "kind": "skill",
+            "logical_id": "skill.mission-control-observe",
+            "manifest_digest": "sha256:acf68fba5ac0c2f193f73d92ecb4dc0ee2ae8439b913cfc25743267949d1ce3d",
+            "maturity": "qualified",
+            "required_capabilities": [],
+            "review_status": "approved",
+            "schema_version": "1",
+            "skill_name": "mission-control-observe",
+            "source_provenance": {
+              "commit_digest": null,
+              "license": "proprietary",
+              "locator": "repo://skills/mission-control-observe",
+              "source": "local",
+              "upstream_identity": "skill.mission-control-observe",
+              "upstream_version": "0.2.0"
+            },
+            "title": "mission-control-observe"
+          },
+          "published_at": "2026-10-08T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:f3c2b75ea598b5810918d41fcf1c6a40fbe5ea434c2cb40b0c4596f34aff839d",
+            "kind": "skill",
+            "lifecycle_status": "published",
+            "logical_id": "skill.mission-control-observe",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:e7aa0d89b6cb3ad48b3fed2208c3f710970fa63e0462e59be4917d72e1567884",
+        "manifest_ref": "mc-catalog://definition/skill/skill.mission-control-observe/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-skill:skill:skill.mission-control-observe/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-skill:skill:skill.mission-control-observe/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_skills.py",
+          "skills/mission-control-observe",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-skill:skill:skill.mission-control-observe/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:hook_script:hook.mc-policy-template",
+        "contract": "mission-control.published-definition/1",
+        "host_support": {
+          "profiles": {
+            "claude_agent_sdk": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "codex": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_cloud": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_local": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "deep_agents": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            }
+          },
+          "schema_version": "mc.capability_host_support.v1"
+        },
+        "kind": "hook_script",
+        "manifest": {
+          "definition": {
+            "bundle_ref": {
+              "digest": "sha256:8ce6f768cbecef14378e3d437535125d449f471755c08b3652ab45f541c38130",
+              "media_type": "application/vnd.mc.capability-bundle+json",
+              "size_bytes": 6513,
+              "uri": "capability-bundles://ai-engineer/hook_script/hook.mc-policy-template/1.0.0/8ce6f768cbecef14378e3d437535125d449f471755c08b3652ab45f541c38130"
+            },
+            "callback": "none",
+            "description": "Fail-closed policy hook for every lane: denies rm -rf of the root (any flag order), force pushes, and file writes outside the declared write paths. Reads mc.hook_input.v1 on stdin and writes mc.hook_result.v1 on stdout.",
+            "entrypoint": "policy.py",
+            "events": [
+              "before_shell",
+              "before_tool"
+            ],
+            "fail_closed": true,
+            "file_manifest": [
+              {
+                "digest": "sha256:8d0b4b2a728358258b2edde3c6bd2613dddcc9b2259515975205ccf851df3a57",
+                "executable": false,
+                "path": "policy.py",
+                "size_bytes": 6513
+              }
+            ],
+            "host_support": {
+              "profiles": {
+                "claude_agent_sdk": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "codex": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_cloud": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_local": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "deep_agents": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                }
+              },
+              "schema_version": "mc.capability_host_support.v1"
+            },
+            "interpreter": "python",
+            "kind": "hook_script",
+            "logical_id": "hook.mc-policy-template",
+            "manifest_digest": "sha256:8ce6f768cbecef14378e3d437535125d449f471755c08b3652ab45f541c38130",
+            "matcher": null,
+            "required_events": [],
+            "schema_version": "1",
+            "secret_refs": [],
+            "side_effect_class": "read_only",
+            "source_provenance": {
+              "commit_digest": null,
+              "license": "proprietary",
+              "locator": "repo://scripts/hooks/policy_template",
+              "source": "local",
+              "upstream_identity": "hook.mc-policy-template",
+              "upstream_version": "1.0.0"
+            },
+            "timeout_seconds": 10,
+            "title": "Mission Control policy template hook"
+          },
+          "published_at": "2026-10-08T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:2cc169fc52ed36a74ad17a261a563eb886d030acea6fe7aba7e5959346214f9e",
+            "kind": "hook_script",
+            "lifecycle_status": "published",
+            "logical_id": "hook.mc-policy-template",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:19a79803ff0929b074031148fe320efcf1c8096fa4a1443cb2df8f9833c60e1a",
+        "manifest_ref": "mc-catalog://definition/hook_script/hook.mc-policy-template/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-skill:hook-script:hook.mc-policy-template/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-skill:hook-script:hook.mc-policy-template/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_skills.py",
+          "scripts/hooks/policy_template",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-skill:hook-script:hook.mc-policy-template/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:plugin:plugin.web-research",
+        "contract": "mission-control.published-definition/1",
+        "host_support": {
+          "profiles": {
+            "claude_agent_sdk": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "codex": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_cloud": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_local": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "deep_agents": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            }
+          },
+          "schema_version": "mc.capability_host_support.v1"
+        },
+        "kind": "plugin",
+        "manifest": {
+          "definition": {
+            "description": "Composition of exact pins: Tavily and Firecrawl MCP servers for search, extraction and crawling, the agent-browser skill stub, and the agent-browser MCP server (optional) for a real browser. No install command or marketplace reference.",
+            "host_support": {
+              "profiles": {
+                "claude_agent_sdk": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "codex": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_cloud": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_local": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "deep_agents": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                }
+              },
+              "schema_version": "mc.capability_host_support.v1"
+            },
+            "kind": "plugin",
+            "logical_id": "plugin.web-research",
+            "manifest": {
+              "members": [
+                {
+                  "optional": false,
+                  "overlay": {},
+                  "pin": {
+                    "capability_id": "mcp.tavily",
+                    "digest": "sha256:0ddb64e0269e50f242bd52ca3dbb0eaea8ce6bebf28d3a52b5692829f50785f2",
+                    "version": "0.2.22"
+                  },
+                  "role": "mcp_server"
+                },
+                {
+                  "optional": false,
+                  "overlay": {},
+                  "pin": {
+                    "capability_id": "mcp.firecrawl",
+                    "digest": "sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+                    "version": "3.28.2"
+                  },
+                  "role": "mcp_server"
+                },
+                {
+                  "optional": false,
+                  "overlay": {},
+                  "pin": {
+                    "capability_id": "skill.agent-browser",
+                    "digest": "sha256:988952f8087375e6447ba9e12d0be99c00b247e1961a1a9b87ee1791e7799236",
+                    "version": "0.38.2"
+                  },
+                  "role": "skill"
+                },
+                {
+                  "optional": true,
+                  "overlay": {},
+                  "pin": {
+                    "capability_id": "mcp.agent-browser",
+                    "digest": "sha256:0adefa4043827cb505858f7f76060f08140d0fc9a3aeeb580f6b0d2ecc6e3282",
+                    "version": "0.38.2"
+                  },
+                  "role": "mcp_server"
+                }
+              ],
+              "prompts": [],
+              "resources": [],
+              "schema_version": "mc.plugin_manifest.v1"
+            },
+            "schema_version": "1",
+            "secret_refs": [
+              "FIRECRAWL_API_KEY",
+              "TAVILY_API_KEY"
+            ],
+            "title": "Web research plugin (Tavily, Firecrawl, agent-browser)"
+          },
+          "published_at": "2026-10-08T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:a6b1d98d35647d072d77db23032c04e07a58134bc867d272f7a7bedfb0817cfd",
+            "kind": "plugin",
+            "lifecycle_status": "published",
+            "logical_id": "plugin.web-research",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:e932740d1545e8599c1cdcf05059584f690d6eb6d99ed9e9c71fba53a59e71c7",
+        "manifest_ref": "mc-catalog://definition/plugin/plugin.web-research/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "secret_refs": [
+          "FIRECRAWL_API_KEY",
+          "TAVILY_API_KEY"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-skill:plugin:plugin.web-research/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-skill:plugin:plugin.web-research/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_skills.py",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-skill:plugin:plugin.web-research/1:admit"
+    },
+    {
+      "fields": {
+        "member": "agent-capability:mcp-server:mcp.tavily/1",
+        "optional": false,
+        "plugin": "agent-skill:plugin:plugin.web-research/1",
+        "position": 0,
+        "role": "mcp_server"
+      },
+      "kind": "capability_plugin_member",
+      "logical_key": "agent-skill:plugin:plugin.web-research/1:member:0"
+    },
+    {
+      "fields": {
+        "member": "agent-capability:mcp-server:mcp.firecrawl/1",
+        "optional": false,
+        "plugin": "agent-skill:plugin:plugin.web-research/1",
+        "position": 1,
+        "role": "mcp_server"
+      },
+      "kind": "capability_plugin_member",
+      "logical_key": "agent-skill:plugin:plugin.web-research/1:member:1"
+    },
+    {
+      "fields": {
+        "member": "agent-skill:skill:skill.agent-browser/1",
+        "optional": false,
+        "plugin": "agent-skill:plugin:plugin.web-research/1",
+        "position": 2,
+        "role": "skill"
+      },
+      "kind": "capability_plugin_member",
+      "logical_key": "agent-skill:plugin:plugin.web-research/1:member:2"
+    },
+    {
+      "fields": {
+        "member": "agent-capability:mcp-server:mcp.agent-browser/1",
+        "optional": true,
+        "plugin": "agent-skill:plugin:plugin.web-research/1",
+        "position": 3,
+        "role": "mcp_server"
+      },
+      "kind": "capability_plugin_member",
+      "logical_key": "agent-skill:plugin:plugin.web-research/1:member:3"
+    }
+  ],
+  "seed_key": "mc.app.ai-engineer.agent-skills",
+  "seed_version": "1.0.0"
+}

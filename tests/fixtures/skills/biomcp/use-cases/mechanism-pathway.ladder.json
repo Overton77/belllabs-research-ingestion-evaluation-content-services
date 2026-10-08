@@ -1,0 +1,27 @@
+{
+  "workflow": "mechanism-pathway",
+  "rationale": "Orient from a mechanism-relevant drug to target and pathway context, then confirm the disease mechanism in review literature.",
+  "playbook": "biomcp skill mechanism-pathway",
+  "ladder": [
+    {
+      "step": 1,
+      "command": "biomcp search drug imatinib --limit 5",
+      "what_it_gives": "Candidate drug identity and available structured drug records."
+    },
+    {
+      "step": 2,
+      "command": "biomcp get drug imatinib targets regulatory",
+      "what_it_gives": "Drug target and regulatory context."
+    },
+    {
+      "step": 3,
+      "command": "biomcp get gene ABL1 pathways protein",
+      "what_it_gives": "Target protein and Reactome pathway context."
+    },
+    {
+      "step": 4,
+      "command": "biomcp search article --drug imatinib -g ABL1 -d \"chronic myeloid leukemia\" --type review --limit 5",
+      "what_it_gives": "Review literature tying the drug, gene, pathway, and disease together."
+    }
+  ]
+}

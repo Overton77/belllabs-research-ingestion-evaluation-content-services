@@ -32,7 +32,9 @@
       "mc.catalog.agent-capabilities",
       "mc.app.biotech.agent-capabilities",
       "mc.app.ai-engineer.agent-capabilities",
-      "mc.storage.capability-bundles"
+      "mc.storage.capability-bundles",
+      "mc.app.biotech.agent-skills",
+      "mc.app.ai-engineer.agent-skills"
     ]
   },
   "runtime_descriptor_path": "../runtime/descriptor.json"

@@ -428,13 +428,25 @@ class DeepAgentFrameRecorder:
             if not isinstance(value, Mapping):
                 continue
             if value.get("_summarization_event") is not None:
-                event = jsonable(value.get("_summarization_event"))
+                raw_event = value.get("_summarization_event")
+                event = jsonable(raw_event)
                 digest = _digest(event)
+                body: dict[str, Any] = {"node": node, "summary_digest": digest, "event": event}
+                if isinstance(raw_event, Mapping) and raw_event.get("summary_message") is not None:
+                    # The same summary digest and cutoff the compaction middleware (B4) emits,
+                    # so the reducer derives one compaction fact from either frame.
+                    summary = raw_event["summary_message"]
+                    text = _text(getattr(summary, "content", summary))
+                    body["summary_digest"] = (
+                        "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+                    )
+                    body["cutoff_index"] = raw_event.get("cutoff_index")
+                    body["file_path"] = raw_event.get("file_path")
                 observations.append(
                     self._observation(
                         "updates.summarization_event",
                         item_id=f"{node}:{digest}",
-                        body={"node": node, "summary_digest": digest, "event": event},
+                        body=body,
                         ns=ns,
                     )
                 )

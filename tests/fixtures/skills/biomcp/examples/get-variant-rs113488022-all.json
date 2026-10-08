@@ -1,0 +1,91 @@
+{
+  "gene": "BRAF",
+  "id": "chr7:g.140753336A>T",
+  "genome_build": "GRCh38",
+  "genome_build_provenance": "MyVariant.info requested GRCh38",
+  "hgvs_p": "p.V600E",
+  "hgvs_c": "c.620T>A",
+  "rsid": "rs113488022",
+  "cosmic_id": "COSM476",
+  "significance": "Pathogenic",
+  "clinvar_id": "13961",
+  "clinvar_review_status": "criteria provided, multiple submitters, no conflicts",
+  "clinvar_review_stars": 2,
+  "conditions": [
+    "Astrocytoma, low-grade, somatic",
+    "Carcinoma of colon (CRC)",
+    "Cardio-facio-cutaneous syndrome",
+    "Cardiovascular phenotype",
+    "Cerebral arteriovenous malformation (BAVM)",
+    "Cystic epithelial invagination containing papillae lined by columnar epithelium",
+    "Lymphangioma",
+    "Malignant neoplastic disease"
+  ],
+  "population": {
+    "status": "data",
+    "dataset": "gnomad_r4",
+    "release": "gnomAD v4",
+    "exome": {
+      "allele_frequency": 0.0000013692829212026208,
+      "ac": 2,
+      "an": 1460618,
+      "homozygote_count": 0,
+      "hemizygote_count": 0,
+      "filters": [],
+      "faf95": null,
+      "populations": []
+    },
+    "genome": null,
+    "faf_caveat": "gnomAD excludes bottlenecked genetic ancestry groups when selecting grpmax FAF."
+  },
+  "consequence": "missense_variant",
+  "cadd_score": 32.0,
+  "polyphen_pred": "Probably damaging",
+  "expanded_predictions": [
+    {
+      "tool": "REVEL",
+      "score": 0.931
+    },
+    {
+      "tool": "AlphaMissense",
+      "score": 0.9853,
+      "prediction": "Pathogenic"
+    },
+    {
+      "tool": "ClinPred",
+      "score": 0.993496775627136,
+      "prediction": "D"
+    },
+    {
+      "tool": "MetaRNN",
+      "score": 0.88336486,
+      "prediction": "D"
+    }
+  ],
+  "_meta": {
+    "evidence_urls": [
+      {
+        "label": "ClinVar",
+        "url": "https://www.ncbi.nlm.nih.gov/clinvar/variation/13961/"
+      },
+      {
+        "label": "dbSNP",
+        "url": "https://www.ncbi.nlm.nih.gov/snp/rs113488022"
+      },
+      {
+        "label": "COSMIC",
+        "url": "https://cancer.sanger.ac.uk/cosmic/mutation/overview?id=COSM476"
+      },
+      {
+        "label": "gnomAD",
+        "url": "https://gnomad.broadinstitute.org/variant/7-140753336-A-T?dataset=gnomad_r4"
+      }
+    ],
+    "next_commands": [
+      "biomcp get gene BRAF",
+      "biomcp search drug --target BRAF",
+      "biomcp variant trials chr7:g.140753336A>T",
+      "biomcp variant articles chr7:g.140753336A>T"
+    ]
+  }
+}

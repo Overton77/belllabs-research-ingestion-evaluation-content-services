@@ -1,0 +1,129 @@
+# BRAF p.V600E (rs113488022)
+
+rsID: rs113488022
+Genomic coordinate (GRCh38): chr7:g.140753336A>T
+Protein: p.V600E
+cDNA: c.620T>A
+Consequence: missense_variant
+COSMIC: COSM476
+Significance: Pathogenic
+## AlphaGenome Prediction
+Expression LFC: -0.059 (Minimal change)
+Splice Score: 0.008 (Low splice impact)
+Chromatin: 0.005 (Low chromatin impact)
+Top Affected Gene (Ensembl ID when available): ENSG00000103200
+Note: AlphaGenome reports this field as a gene-level identifier from its model output.
+## ClinVar
+Conditions (17 reports):
+- Astrocytoma, low-grade, somatic (1 report)
+- Carcinoma of colon (CRC) (1 report)
+- Cardio-facio-cutaneous syndrome (1 report)
+- Cardiovascular phenotype (1 report)
+- Cerebral arteriovenous malformation (BAVM) (1 report)
+- Cystic epithelial invagination containing papillae lined by columnar epithelium (1 report)
+- Lymphangioma (1 report)
+- Malignant neoplastic disease (1 report)
+- Melanoma (1 report)
+- Multiple myeloma (MM) (1 report)
+- Nephroblastoma (1 report)
+- Non-small cell lung carcinoma (NSCLC) (1 report)
+- Nongerminomatous germ cell tumor (1 report)
+- Papillary thyroid carcinoma (1 report)
+- RASopathy (1 report)
+- Vascular malformation (1 report)
+- not provided (1 report)
+- Review: 2 star(s) (criteria provided, multiple submitters, no conflicts)
+- Variant ID: 13961
+## Conservation
+phyloP (100-way vertebrate): 0.945
+phyloP (470-way mammalian): 0.896
+phastCons (100-way vertebrate): 0.716
+phastCons (470-way mammalian): 0.682
+## Expanded Predictions
+| Tool | Score | Prediction |
+|---|---|---|
+| REVEL | 0.931 | - |
+| AlphaMissense | 0.985 | Pathogenic |
+| ClinPred | 0.993 | D |
+| MetaRNN | 0.883 | D |
+## Population (direct gnomAD v4)
+Dataset: `gnomad_r4` (gnomAD v4)
+### Exomes
+| Dataset | Ancestry | Raw allele frequency | Allele count | Allele number | Homozygotes | Hemizygotes |
+|---|---|---:|---:|---:|---:|---:|
+| gnomAD v4 | Overall | 0.000001 | 2 | 1460618 | 0 | 0 |
+Exome quality filters: PASS (no filter flags reported)
+### Genomes
+No genome result in gnomAD v4.
+gnomAD excludes bottlenecked genetic ancestry groups when selecting grpmax FAF.
+## COSMIC
+- COSMIC ID: COSM476
+- Mutation frequency: 2.830
+- Tumor site: biliary_tract
+- Mutation nucleotide: T>A
+## CGI Drug Associations
+| Drug | Association | Tumor Type | Evidence |
+|---|---|---|---|
+| PLX4720 (BRAF inhibitor) | Responsive | Malignant astrocytoma | Pre-clinical |
+| BRAF inhibitor + MEK inhibitors | Responsive | Thyroid | Early trials |
+| Pan-RAF inhibitors | Responsive | Cutaneous melanoma | Early trials |
+| BRAF inhibitors | Responsive | Ovary | Case report |
+| EGFR TK inhibitors | Resistant | Lung adenocarcinoma | Case report |
+| Trametinib (MEK inhibitor) | Responsive | Cutaneous melanoma | FDA guidelines |
+| BRAF inhibitors | Responsive | Glioma | Pre-clinical |
+| Vemurafenib + Cobimetinib (BRAF inhibitor + MEK inhibitor) | Responsive | Cutaneous melanoma | FDA guidelines |
+| BRAF inhibitor + PI3K pathway inhibitors | Responsive | Cutaneous melanoma | Pre-clinical |
+| Cetuximab (EGFR mAb inhibitor) | Resistant | Colorectal adenocarcinoma | Late trials |
+## CIViC
+### Cached Evidence (MyVariant)
+| Evidence | Type | Level | Disease | Therapies |
+|---|---|---|---|---|
+| EID79 | DIAGNOSTIC | B | Thyroid Cancer | - |
+| EID95 | PREDICTIVE | B | Melanoma | Dabrafenib, Trametinib |
+| EID104 | PROGNOSTIC | B | Melanoma | - |
+| EID106 | PROGNOSTIC | B | Papillary Thyroid Carcinoma | - |
+| EID107 | PROGNOSTIC | B | Papillary Thyroid Carcinoma | - |
+| EID105 | PROGNOSTIC | B | Papillary Thyroid Carcinoma | - |
+| EID463 | PROGNOSTIC | B | Multiple Myeloma | - |
+| EID2123 | PREDICTIVE | D | Melanoma | Sorafenib |
+| EID2128 | PREDICTIVE | D | Melanoma | Dabrafenib |
+| EID86 | PREDICTIVE | D | Melanoma | Trametinib, Mirdametinib |
+| EID2124 | PREDICTIVE | D | Melanoma | Mirdametinib |
+| EID2125 | PREDICTIVE | D | Melanoma | Mirdametinib |
+| EID2127 | PREDICTIVE | D | Melanoma | Dabrafenib |
+| EID2133 | PREDICTIVE | D | Melanoma | Dabrafenib |
+| EID2129 | PREDICTIVE | D | Melanoma | Selumetinib |
+| EID1405 | PREDICTIVE | B | Colorectal Cancer | Vemurafenib |
+| EID2131 | PREDICTIVE | D | Melanoma | Trametinib |
+| EID2132 | PREDICTIVE | D | Melanoma | Dabrafenib |
+| EID103 | PROGNOSTIC | B | Colorectal Cancer | - |
+| EID1430 | PREDICTIVE | C | Gastrointestinal Neuroendocrine Tumor | Dabrafenib, Trametinib, Vemurafenib |
+### GraphQL Context
+- Evidence Items: 109
+- Assertions: 3
+| Assertion | AMP Level | Disease | Therapies |
+|---|---|---|---|
+| AID20 | TIER_I_LEVEL_A | Colorectal Cancer | - |
+| AID7 | TIER_I_LEVEL_A | Melanoma | Trametinib, Dabrafenib |
+| AID10 | TIER_I_LEVEL_A | Melanoma | Vemurafenib, Cobimetinib |
+## Predictions
+- CADD: 32.0
+- PolyPhen: Probably damaging
+## cBioPortal
+| Cancer Type | Samples | Frequency |
+|---|---|---|
+| Colon Adenocarcinoma | 97 | 0.171986 |
+| Cutaneous Melanoma | 81 | 0.143617 |
+| Lung Adenocarcinoma | 79 | 0.140071 |
+| Papillary Thyroid Cancer | 62 | 0.109929 |
+| Melanoma of Unknown Primary | 24 | 0.042553 |
+
+## GWAS
+No GWAS associations found for this variant.
+See also:
+  biomcp get gene BRAF
+  biomcp search drug --target BRAF
+  biomcp variant trials chr7:g.140753336A>T
+  biomcp variant articles chr7:g.140753336A>T
+
+[ClinVar](https://www.ncbi.nlm.nih.gov/clinvar/variation/13961/) | [dbSNP](https://www.ncbi.nlm.nih.gov/snp/rs113488022) | [COSMIC](https://cancer.sanger.ac.uk/cosmic/mutation/overview?id=COSM476) | [gnomAD](https://gnomad.broadinstitute.org/variant/7-140753336-A-T?dataset=gnomad_r4)

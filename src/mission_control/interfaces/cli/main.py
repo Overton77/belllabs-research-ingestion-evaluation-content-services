@@ -96,6 +96,36 @@ class MissionClient:
             headers={"Accept": "text/markdown" if markdown else "application/x-ndjson"},
         )
 
+    def checkpoints(
+        self, run_id: str, checkpoint_id: str | None = None, *, full: bool = False
+    ) -> httpx.Response:
+        """FT-B4: `run checkpoint RUN_ID --list|--get ID [--full]`."""
+
+        base = f"{self.prefix}/runs/{self._id(run_id)}/checkpoints"
+        if checkpoint_id is None:
+            return self.client.get(base)
+        return self.client.get(
+            f"{base}/{self._id(checkpoint_id)}", params={"full": "true"} if full else None
+        )
+
+    def run_list(self, query: str | None, limit: int | None = None) -> httpx.Response:
+        """FT-C4: `run list [--query FILTER]`."""
+
+        params: dict[str, Any] = {}
+        if query:
+            params["query"] = query
+        if limit is not None:
+            params["limit"] = limit
+        return self.client.get(f"{self.prefix}/runs", params=params)
+
+    def transcript_search(self, run_id: str, text: str, limit: int) -> httpx.Response:
+        """FT-C4: `run search RUN_ID --query TEXT`."""
+
+        return self.client.get(
+            f"{self.prefix}/runs/{self._id(run_id)}/transcript/search",
+            params={"q": text, "limit": limit},
+        )
+
     def frames_tail_url(self, run_id: str) -> str:
         return f"{self.prefix}/runs/{self._id(run_id)}/frames/tail"
 
@@ -343,6 +373,69 @@ def _write_utf8(text: str) -> None:
         sys.stdout.flush()
 
 
+def _json_object(response: httpx.Response) -> dict[str, Any]:
+    try:
+        value = response.json()
+    except ValueError:
+        return {"error": "non-JSON service response", "status": response.status_code}
+    return value if isinstance(value, dict) else {"result": value}
+
+
+def run_list(client: MissionClient, args: argparse.Namespace) -> int:
+    """`run list`: one line per run (or the JSON page with `--json`)."""
+
+    response = client.run_list(getattr(args, "query", None), getattr(args, "limit", None))
+    result = _json_object(response)
+    status = exit_status(response.status_code)
+    if status or getattr(args, "json", False):
+        print(json.dumps(result, allow_nan=False))
+        return status
+    rows: list[dict[str, Any]] = [row for row in result.get("rows", []) if isinstance(row, dict)]
+    for row in rows:
+        print(
+            "\t".join(
+                (
+                    str(row.get("run_id")),
+                    str(row.get("lifecycle")),
+                    str(row.get("terminal_outcome") or "-"),
+                    ",".join(row.get("lanes") or ()) or "-",
+                    ",".join(row.get("phases") or ()) or "-",
+                    str(row.get("mission_id") or "-"),
+                )
+            )
+        )
+    dropped = result.get("dropped_missing_from_ledger") or 0
+    if dropped:
+        print(json.dumps({"dropped_missing_from_ledger": dropped}), file=sys.stderr)
+    return 0
+
+
+def run_search(client: MissionClient, args: argparse.Namespace) -> int:
+    """`run search RUN_ID --query TEXT`: ranked entries with the cursor `--since` opens."""
+
+    response = client.transcript_search(args.run_id, args.query, args.limit)
+    result = _json_object(response)
+    status = exit_status(response.status_code)
+    if status or getattr(args, "json", False):
+        print(json.dumps(result, allow_nan=False, ensure_ascii=False))
+        return status
+    hits: list[dict[str, Any]] = [hit for hit in result.get("hits", []) if isinstance(hit, dict)]
+    lines = [
+        "\t".join(
+            (
+                f"{hit.get('rank', 0):.4f}",
+                str(hit.get("open_cursor") or "-"),
+                str(hit["entry"].get("cursor")),
+                str(hit["entry"].get("kind")),
+                str(hit["entry"].get("title")),
+            )
+        )
+        for hit in hits
+    ]
+    _write_utf8("".join(line + "\n" for line in lines))
+    return 0
+
+
 def run_transcript(client: MissionClient, args: argparse.Namespace, wait: float | None) -> int:
     """`run transcript`: print entries (JSONL or Markdown); `--follow` tails new entries."""
 
@@ -477,6 +570,21 @@ def main(argv: list[str] | None = None) -> int:
     frames.add_argument("--tail", action="store_true", required=True)
     frames.add_argument("--after")
     frames.add_argument("--until-end", action="store_true", help="exit 6 when the tail times out")
+    # SPEC-03 (C4): run list over Temporal Visibility and transcript search.
+    listing_runs = run_commands.add_parser("list", parents=[common])
+    listing_runs.add_argument("--query", help="e.g. \"lane='deep_agents' AND phase='executing'\"")
+    listing_runs.add_argument("--limit", type=int)
+    search = run_commands.add_parser("search", parents=[common])
+    search.add_argument("run_id")
+    search.add_argument("--query", required=True)
+    search.add_argument("--limit", type=int, default=20)
+    # SPEC-02 (B4): sealed continuation checkpoints of a run.
+    checkpoint = run_commands.add_parser("checkpoint", parents=[common])
+    checkpoint.add_argument("run_id")
+    checkpoint_mode = checkpoint.add_mutually_exclusive_group(required=True)
+    checkpoint_mode.add_argument("--list", action="store_true", dest="list_checkpoints")
+    checkpoint_mode.add_argument("--get", dest="checkpoint_id")
+    checkpoint.add_argument("--full", action="store_true", help="bodies above 4 KiB unredacted")
     command = groups.add_parser("command", parents=[common])
     commands = command.add_subparsers(dest="action", required=True)
     send = commands.add_parser("send", parents=[common])
@@ -606,6 +714,10 @@ def main(argv: list[str] | None = None) -> int:
                 return run_transcript(client, args, deadline_seconds)
             if args.group == "run" and args.action == "frames":
                 return run_frames_tail(client, args, deadline_seconds)
+            if args.group == "run" and args.action == "list":
+                return run_list(client, args)
+            if args.group == "run" and args.action == "search":
+                return run_search(client, args)
             deadline = time.monotonic() + (deadline_seconds or 0)
             while True:
                 if deadline_seconds is not None:
@@ -621,6 +733,12 @@ def main(argv: list[str] | None = None) -> int:
                 elif args.group == "subscribe":
                     response = client.subscriptions(
                         args.action, body, getattr(args, "subscription_id", None)
+                    )
+                elif args.group == "run" and args.action == "checkpoint":
+                    response = client.checkpoints(
+                        args.run_id,
+                        getattr(args, "checkpoint_id", None),
+                        full=getattr(args, "full", False),
                     )
                 elif args.action == "inspect":
                     response = client.inspection(args.run_id)

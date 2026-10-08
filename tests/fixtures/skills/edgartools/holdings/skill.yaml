@@ -1,0 +1,67 @@
+id: edgartools-holdings
+name: EdgarTools Holdings
+version: "1.1"
+
+# See also: sharp-edges.yaml for production gotchas
+
+identity: Institutional holdings analyst. Extract 13F portfolio data. Holdings sorted by value, infotable has raw manager breakdown.
+
+patterns:
+  - name: Get 13F Holdings
+    when: Analyze institutional investor portfolio
+    code: |
+      filings = get_filings(form="13F-HR", year=2024, quarter=3)
+      filing = filings.filter(company="BERKSHIRE HATHAWAY")[0]
+      thirteenf = filing.obj()
+
+  - name: Holdings Data
+    when: Get portfolio positions
+    code: |
+      holdings = thirteenf.holdings      # DataFrame sorted by value (aggregated)
+      holdings.head(10)                  # Top 10 positions
+
+      infotable = thirteenf.infotable    # Dollar values with OtherManager column
+
+      # DataFrame columns:
+      # Issuer, Class, Cusip, Ticker, Value (dollars), SharesPrnAmount, Type,
+      # SoleVoting, SharedVoting, NonVoting
+
+  - name: Analyze Portfolio
+    when: Portfolio analysis tasks
+    code: |
+      holdings = thirteenf.holdings
+
+      total_value = holdings['Value'].sum()          # Already in dollars (5.28.2+)
+      top5 = holdings.nlargest(5, 'Value')            # Top holdings by value
+      apple = holdings[holdings['Ticker'] == 'AAPL']  # Filter by ticker
+
+  - name: Inspect Ambiguous Value Units
+    when: Historical values appear 1000x too large or an Ambiguous13FValueUnitWarning is emitted
+    code: |
+      from edgar import ThirteenF
+      resolution = thirteenf.value_unit_resolution  # Unit, multiplier, source, ambiguity
+      raw = thirteenf.raw_infotable                 # Original reported values
+      # Only after independently verifying this specific filing reports dollars:
+      corrected = ThirteenF(filing, value_unit='dollars')
+    note: |
+      Metadata fallbacks are not independent verification. Avoid automatic corrections
+      based only on portfolio size or maximum share price. Overrides affect one filing
+      and both its holdings and summary; they bypass accession-only holdings caches.
+
+  - name: Fund Holdings (NPORT)
+    when: Mutual fund or ETF portfolio (not institutional 13F)
+    code: |
+      from edgar import Fund
+      fund = Fund("VFINX")
+      df = fund.get_portfolio()
+    note: |
+      13F = institutional holdings. NPORT = fund portfolios. Use Fund class for funds.
+      NPORT variants: NPORT-P (public quarterly), NPORT-EX (exhibit only).
+      For money market funds → use form='N-MFP3' (see funds skill).
+      For BDC portfolios → use edgar.bdc module (see funds skill, BDC patterns).
+
+avoid:
+  - pattern: "for f in get_filings(form='13F-HR'): f.obj().holdings"
+    when: Searching all 13Fs for a stock
+    fix: "Use financial data services for reverse lookups"
+    why: 8,000+ 13F filings per quarter; too slow for stock→holder searches

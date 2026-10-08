@@ -18,14 +18,19 @@ repos:
         args: [--maxkb=1500]
       - id: check-merge-conflict
       - id: check-toml
+      # Captured upstream skill bundles (tests/fixtures/skills) are verbatim bytes pinned by
+      # digest: never rewritten or re-validated as authored files.
       - id: check-yaml
+        exclude: ^tests/fixtures/skills/
       - id: check-json
-        exclude: ^(\.vscode/|\.cursor/)
+        exclude: ^(\.vscode/|\.cursor/|tests/fixtures/skills/)
       - id: detect-private-key
       - id: end-of-file-fixer
         types_or: [python, toml, yaml]
+        exclude: ^tests/fixtures/skills/
       - id: trailing-whitespace
         types_or: [python, toml, yaml]
+        exclude: ^tests/fixtures/skills/
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Keep in step with the ruff version in uv.lock.

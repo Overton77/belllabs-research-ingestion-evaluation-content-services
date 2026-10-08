@@ -197,6 +197,7 @@ class _ExecutionState:
     turn_usage: list[tuple[ProviderFrame, dict[str, Any]]] = field(default_factory=list)
     settled_tools: set[str] = field(default_factory=set)
     run_result_seen: bool = False
+    compactions: set[tuple[str, str | None, str, str]] = field(default_factory=set)
 
 
 def _evidence(frame: ProviderFrame) -> dict[str, Any]:
@@ -320,12 +321,19 @@ def derive(frames: Sequence[ProviderFrame], context: DeriveContext) -> tuple[Fra
                 )
             )
         elif frame.kind == FrameKind.AFTER_COMPACTION:
-            facts.append(
-                CompactionObservedFact(
-                    **evidence,
-                    summary_digest=_digest(body.get("summary_digest")) or frame.body_digest,
-                )
+            summary_digest = _digest(body.get("summary_digest")) or frame.body_digest
+            # One compaction may be observed twice (B4's middleware custom event and the
+            # `_summarization_event` state update): one fact per (session, cutoff, summary).
+            compaction = (
+                frame.native_session_ref,
+                frame.subordinate_ref,
+                str(body.get("cutoff_index")),
+                summary_digest,
             )
+            if compaction in state.compactions:
+                continue
+            state.compactions.add(compaction)
+            facts.append(CompactionObservedFact(**evidence, summary_digest=summary_digest))
         elif frame.kind == FrameKind.TURN_ENDED:
             bodies = state.turn_usage or [(frame, body)]
             report = usage_report(

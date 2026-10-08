@@ -43,6 +43,8 @@ KIND_ORDER = (
     "asset_version",
     "asset_decision",
     "capability_grant",
+    # FT-A7: plugin expansion rows, after the plugin and every member asset version.
+    "capability_plugin_member",
     # FT-A2: Supabase Storage provisioning (bucket first, then its policies).
     "storage_bucket",
     "storage_policy",
@@ -114,6 +116,15 @@ FIELD_SPECS: dict[str, dict[str, tuple[str, bool]]] = {
         "valid_until": (_TS, False),
         "revoked": (_BOOL, False),
     },
+    # FT-A7: one immutable capability_plugin_member row; the engine resolves both asset
+    # versions through their seed identities and pins the member's manifest digest.
+    "capability_plugin_member": {
+        "plugin": ("ref:asset_version", True),
+        "member": ("ref:asset_version", True),
+        "position": (_INT, True),
+        "role": (_STR, True),
+        "optional": (_BOOL, False),
+    },
     "storage_bucket": {
         "bucket_id": (_STR, True),
         "public": (_BOOL, True),
@@ -134,6 +145,14 @@ ENUMS = {
     ("asset_version", "status"): {"proposed", "admitted"},
     ("asset_decision", "decision"): {"admit", "revoke", "retire", "reject"},
     ("storage_policy", "command"): {"INSERT", "SELECT", "ALL"},
+    ("capability_plugin_member", "role"): {
+        "skill",
+        "mcp_server",
+        "hook",
+        "subagent",
+        "prompt",
+        "resource",
+    },
     ("storage_policy", "capability_role"): {"publisher", "reader", "*"},
 }
 
@@ -467,6 +486,11 @@ async def _apply_record(
             created = await storage.apply_policy(connection, resolved, target["application_id"])
         stats["created" if created else "reused"] += 1
         return
+    if kind == "capability_plugin_member":
+        await _resolve(connection, target, kind, logical, allocate=True, bundle=bundle)
+        created = await _apply_plugin_member(connection, target, actor, logical, fields)
+        stats["created" if created else "reused"] += 1
+        return
     record_id, _new = await _resolve(
         connection, target, kind, logical, allocate=True, bundle=bundle
     )
@@ -617,6 +641,82 @@ async def _apply_record(
     if revoke_wanted:
         await _revoke(connection, kind, record_id, fields)
         stats["revoked"] += 1
+
+
+async def _asset_identity(
+    connection: Any, target: dict[str, str], logical: str
+) -> tuple[str, str, str, str]:
+    record_id, _ = await _resolve(connection, target, "asset_version", logical, allocate=False)
+    row = await connection.fetchrow(
+        "SELECT asset_id, version, manifest_digest, kind FROM mission_control.asset_version "
+        "WHERE asset_version_id=$1::uuid AND installation_id=$2::uuid AND application_id=$3",
+        str(record_id),
+        target["installation_id"],
+        target["application_id"],
+    )
+    if row is None:
+        raise ContractError(f"Seed reference asset_version:{logical} has no row")
+    return row["asset_id"], row["version"], row["manifest_digest"], row["kind"]
+
+
+async def _apply_plugin_member(
+    connection: Any,
+    target: dict[str, str],
+    actor: str,
+    logical: str,
+    fields: dict[str, Any],
+) -> bool:
+    """Insert one plugin member row (immutable); a replay must match exactly."""
+    plugin_id, plugin_version, _digest, plugin_kind = await _asset_identity(
+        connection, target, fields["plugin"]
+    )
+    if plugin_kind != "plugin":
+        raise ContractError(f"Seed {logical} names a non-plugin asset as its plugin")
+    member_id, member_version, member_digest, _kind = await _asset_identity(
+        connection, target, fields["member"]
+    )
+    wanted = {
+        "member_asset_id": member_id,
+        "member_version": member_version,
+        "member_digest": member_digest,
+        "role": fields["role"],
+        "optional": bool(fields.get("optional", False)),
+    }
+    existing = await connection.fetchrow(
+        "SELECT member_asset_id, member_version, member_digest, role, optional "
+        "FROM mission_control.capability_plugin_member WHERE installation_id=$1::uuid "
+        "AND application_id=$2 AND plugin_asset_id=$3 AND plugin_version=$4 AND position=$5",
+        target["installation_id"],
+        target["application_id"],
+        plugin_id,
+        plugin_version,
+        fields["position"],
+    )
+    if existing is not None:
+        if dict(existing) != wanted:
+            raise ContractError(
+                f"Seed record capability_plugin_member:{logical} differs from its row",
+                code="SEED_CONFLICT",
+            )
+        return False
+    await connection.execute(
+        "INSERT INTO mission_control.capability_plugin_member (installation_id, application_id, "
+        "plugin_asset_id, plugin_version, position, member_asset_id, member_version, "
+        "member_digest, role, optional, created_at, created_by_actor_ref) VALUES "
+        "($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,clock_timestamp(),$11)",
+        target["installation_id"],
+        target["application_id"],
+        plugin_id,
+        plugin_version,
+        fields["position"],
+        member_id,
+        member_version,
+        member_digest,
+        fields["role"],
+        wanted["optional"],
+        actor,
+    )
+    return True
 
 
 def _extra_columns(kind: str, actor: str) -> tuple[list[str], list[str]]:

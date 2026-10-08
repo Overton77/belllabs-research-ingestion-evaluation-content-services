@@ -1,0 +1,41 @@
+{
+  "query": "gene=BRAF, disease=melanoma, sort=relevance",
+  "sort": "relevance",
+  "semantic_scholar_enabled": true,
+  "pagination": {
+    "offset": 0,
+    "limit": 2,
+    "returned": 2,
+    "total": null,
+    "has_more": true,
+    "next_page_token": null
+  },
+  "count": 2,
+  "results": [
+    {
+      "pmid": "41630477",
+      "title": "A data-driven cartography of NSCLC vaccine research",
+      "journal": "Hum Vaccin Immunother",
+      "date": "2026-12-01",
+      "citation_count": 12,
+      "source": "pubtator",
+      "is_retracted": false
+    },
+    {
+      "doi": "10.1000/example",
+      "semantic_scholar_id": "paper-example",
+      "title": "Origin dictates function",
+      "journal": "Oncol Rep",
+      "date": "2026",
+      "citation_count": 8,
+      "source": "semanticscholar",
+      "is_retracted": null
+    }
+  ],
+  "_meta": {
+    "next_commands": [
+      "biomcp get article 41630477",
+      "biomcp list article"
+    ]
+  }
+}

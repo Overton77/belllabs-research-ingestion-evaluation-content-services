@@ -15,6 +15,7 @@ with workflow.unsafe.imports_passed_through():
         child_search_attributes,
         ensure_workflow_search_attributes,
         operation_workflow_search_attributes,
+        upsert_family_phase,
     )
     from mission_control.adapters.temporal.workflows.operation import (
         MissionOperationWorkflow,
@@ -289,6 +290,8 @@ class StageGraphWorkflow:
                 execution_epoch=run_input.execution_epoch,
             ),
         )
+        # FT-C4: the family's phase is visible to `run list --query "phase='executing'"`.
+        upsert_family_phase(attribute_policy, run_input.run_id, "executing")
         projection = run_input.initial_projection or interpreter.initial_projection(
             ExecutionIdentity(
                 run_id=run_input.run_id,
@@ -967,6 +970,11 @@ class StageGraphWorkflow:
                         f"StageGraph terminalization rejected: {terminal.reason_code}",
                         non_retryable=True,
                     )
+                upsert_family_phase(
+                    attribute_policy,
+                    run_input.run_id,
+                    "cancelled" if completion.cancelled else "completed",
+                )
                 return StageGraphRunResult(
                     run_id=run_input.run_id,
                     workflow_cycles=projection.workflow_cycle_ordinal,

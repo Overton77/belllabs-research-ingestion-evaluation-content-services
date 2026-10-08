@@ -71,12 +71,17 @@ def test_each_app_installation_set_is_valid_and_dependency_closed(app: str) -> N
         ("mc.app.bindings", "1.0.1"),
     ]
     agent = [("mc.catalog.agent-capabilities", "1.0.0"), (APP_AGENT_KEYS[app], "1.0.0")]
+    # FT-A7: skills, the policy hook and the plugin are per application.
+    skills = [(f"mc.app.{app}.agent-skills", "1.0.0")]
     storage = [("mc.storage.capability-bundles", "1.0.0")]
-    assert sorted(keys) == sorted(base + agent + storage)
+    assert sorted(keys) == sorted(base + agent + skills + storage)
     assert [key for key in keys if key in base] == base
     position = {key: index for index, key in enumerate(keys)}
     assert (
-        position[("mc.catalog.approved-assets", "1.0.0")] < position[agent[0]] < position[agent[1]]
+        position[("mc.catalog.approved-assets", "1.0.0")]
+        < position[agent[0]]
+        < position[agent[1]]
+        < position[skills[0]]
     )
     bindings = [item for item in ordered if item["seed_key"] == "mc.app.bindings"]
     frozen, current = (item["records"][0]["fields"] for item in bindings)
@@ -89,7 +94,10 @@ def test_each_app_installation_set_is_valid_and_dependency_closed(app: str) -> N
     assert frozen["manifest"]["unresolved_operator_fields"]
     # Common catalog bytes are one shared copy; only the app binding differs.
     assert _bundles("common") == [
-        item for item in bundles if item["seed_key"] not in {"mc.app.bindings", APP_AGENT_KEYS[app]}
+        item
+        for item in bundles
+        if item["seed_key"]
+        not in {"mc.app.bindings", APP_AGENT_KEYS[app], f"mc.app.{app}.agent-skills"}
     ]
 
 
@@ -113,8 +121,14 @@ def test_bundles_seed_no_fabricated_authority_usage_or_secrets() -> None:
             assert len(policies) == 4
             assert {p["command"] for p in policies} == {"INSERT", "SELECT", "ALL"}
             continue
-        # No actor bindings, actor grants or capability grants without owner approval.
-        assert kinds <= {"tenant", "asset_version", "asset_decision"}, bundle["seed_key"]
+        # No actor bindings, actor grants or capability grants without owner approval
+        # (FT-A7 plugin expansion rows are catalog structure, not authority).
+        assert kinds <= {
+            "tenant",
+            "asset_version",
+            "asset_decision",
+            "capability_plugin_member",
+        }, bundle["seed_key"]
         if bundle["seed_key"] != "mc.qualification.parity":
             assert "tenant" not in kinds
         assets = {r["logical_key"] for r in bundle["records"] if r["kind"] == "asset_version"}

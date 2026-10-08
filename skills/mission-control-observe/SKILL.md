@@ -25,14 +25,20 @@ reports. Done when you can say lifecycle, phase and outcome in one sentence each
 ## 2. List and search runs
 
 ```text
-missionctl run list --query 'mc_lane = "cursor_local" AND mc_phase = "running"' --json
+missionctl run list --query "lane='cursor_local' AND phase='executing'" --json
+missionctl run list --query "mission_id='MISSION_ID' AND started_after>'2026-10-01T00:00:00Z'"
 missionctl run search RUN_ID --query "pytest failed" --json
 ```
 
-Availability: FT-C4. `run list` is a Temporal visibility query over the typed search attributes
-`mc_mission_id`, `mc_run_id`, `mc_lane`, `mc_application_id`, `mc_phase`,
-`mc_forked_from_run_id`; `run search` is a text search over a run's
-transcript index and returns transcript cursors you can pass to `--since`.
+Live (FT-C4): `run list` (HTTP `GET /v1/applications/{app}/runs?query=`, MCP `mission_run_list`)
+accepts only `lane`, `phase`, `mission_id`, `forked_from`, `status` (`key='value'`) and
+`started_after>'ISO instant'`, joined by `AND`; anything else exits 2 (`invalid_run_query`).
+Lanes are `deep_agents | cursor_local | cursor_cloud`; phases are `executing | cancelling |
+in_doubt | completed | cancelled | failed`. It queries Temporal visibility (scoped to your
+application and tenant) and enriches every row from the ledger: report the row's `lifecycle`
+and `terminal_outcome`, never the visibility status, as the run's state. `run search`
+(HTTP `GET .../runs/{id}/transcript/search?q=`, MCP `mission_run_search`) ranks the run's
+transcript entries; pass a hit's `open_cursor` to `run transcript --since` to read from it.
 
 ## 3. Transcript
 
@@ -41,7 +47,8 @@ missionctl run transcript RUN_ID --format md             # for a human
 missionctl run transcript RUN_ID --format jsonl --since CURSOR   # for an agent
 ```
 
-Availability: FT-C3. The transcript is a materialized, read-only join of mission events,
+Live (FT-C3); also HTTP `GET .../runs/{id}/transcript`, MCP `mission_run_transcript` and the
+resource `mc://applications/{app}/runs/{id}/transcript`. The transcript is a materialized, read-only join of mission events,
 provider frames and artifact references in order; see
 [transcript-format.md](references/transcript-format.md). It is evidence, never state: a tool
 call in the transcript proves the agent attempted it; the effect ledger proves it landed.

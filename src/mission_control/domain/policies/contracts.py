@@ -758,7 +758,7 @@ class ApplyBoundaryCommandAction(Contract):
 # Family boundary facts whose stale result is never persisted (F2): the boundary binds the
 # current version and retries at the new one, so a race can never strand a command.
 BOUNDARY_FACT_KINDS: frozenset[str] = frozenset(
-    {"apply_boundary_command", "observe_quiescence", "set_wait"}
+    {"apply_boundary_command", "observe_quiescence", "set_wait", "record_continuation"}
 )
 
 
@@ -803,6 +803,67 @@ class ApplyFrameFactsAction(Contract):
             ):
                 raise ValueError("frame facts belong to exactly one execution generation")
         return self
+
+
+class RecordContinuationAction(Contract):
+    """SPEC-02 (B4): a continuation fact of one logical execution, as a mission event.
+
+    ``checkpoint_sealed`` follows a sealed ``mc.continuation_checkpoint.v1``;
+    ``transferred`` follows the target session's hydration (source and target session
+    refs); ``continuation_failed`` records an explicit failed compaction or an exhausted
+    governor. The run phase never moves; the event cites the checkpoint by id and digest.
+    """
+
+    kind: Literal["record_continuation"] = "record_continuation"
+    event: Literal["checkpoint_sealed", "transferred", "continuation_failed"]
+    transfer_id: str = Field(min_length=1, max_length=128)
+    activation_id: str = Field(min_length=1, max_length=256)
+    logical_execution_id: str = Field(min_length=1, max_length=256)
+    lane_profile: str = Field(min_length=1, max_length=64)
+    trigger_kind: str = Field(min_length=1, max_length=64)
+    source_session_ref: str = Field(min_length=1, max_length=1024)
+    target_session_ref: str | None = Field(default=None, min_length=1, max_length=1024)
+    checkpoint_id: str | None = Field(default=None, min_length=1, max_length=256)
+    checkpoint_digest: str | None = Field(default=None, pattern=DIGEST_PATTERN)
+    context_packet_ref: str | None = Field(default=None, min_length=1, max_length=1024)
+    validator_result: Literal["valid", "invalid"] | None = None
+    failure_reason: str | None = Field(default=None, min_length=1, max_length=1024)
+    released_command_ids: tuple[str, ...] = Field(default=(), max_length=512)
+
+    @model_validator(mode="after")
+    def event_carries_its_evidence(self) -> RecordContinuationAction:
+        if self.event == "checkpoint_sealed" and (
+            self.checkpoint_id is None
+            or self.checkpoint_digest is None
+            or self.validator_result is None
+        ):
+            raise ValueError("checkpoint_sealed names the checkpoint, its digest and verdict")
+        if self.event == "transferred" and (
+            self.target_session_ref is None
+            or self.checkpoint_id is None
+            or self.validator_result != "valid"
+        ):
+            raise ValueError("transferred names the target session and a valid checkpoint")
+        if self.event == "continuation_failed" and self.failure_reason is None:
+            raise ValueError("continuation_failed names its failure reason")
+        return self
+
+
+class RequestContinuationAction(Contract):
+    """SPEC-02/SPEC-06 (B4): an operator or coordinator ``request_continuation`` command.
+
+    Accepting it records the trigger only; the family seals a checkpoint at its next safe
+    boundary (``turn_boundary_guaranteed`` on Deep Agents, ``wait_then_send`` on Cursor) and
+    transfers the logical execution to a fresh session. The run phase never moves.
+    """
+
+    kind: Literal["request_continuation"] = "request_continuation"
+    transfer_id: str = Field(min_length=1, max_length=128)
+    activation_id: str = Field(min_length=1, max_length=256)
+    logical_execution_id: str = Field(min_length=1, max_length=256)
+    lane_profile: str = Field(min_length=1, max_length=64)
+    source_session_ref: str = Field(min_length=1, max_length=1024)
+    delivery: Literal["turn_boundary_guaranteed", "wait_then_send"]
 
 
 class ObserveQuiescenceAction(Contract):
@@ -1039,7 +1100,9 @@ LifecycleAction = Annotated[
     | ReconcileUnitAction
     | ApplyBoundaryCommandAction
     | ObserveQuiescenceAction
-    | ApplyFrameFactsAction,
+    | ApplyFrameFactsAction
+    | RecordContinuationAction
+    | RequestContinuationAction,
     Field(discriminator="kind"),
 ]
 

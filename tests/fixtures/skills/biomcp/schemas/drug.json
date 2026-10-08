@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BioMCP Drug",
+  "type": "object",
+  "required": ["name"],
+  "examples": [
+    {
+      "name": "eflornithine",
+      "_meta": {
+        "next_commands": [
+          "biomcp get drug eflornithine approvals",
+          "biomcp get drug eflornithine label",
+          "biomcp get drug eflornithine regulatory --region us"
+        ]
+      }
+    }
+  ],
+  "properties": {
+    "name": { "type": "string" },
+    "drugbank_id": { "type": ["string", "null"] },
+    "chembl_id": { "type": ["string", "null"] },
+    "unii": { "type": ["string", "null"] },
+    "drug_type": { "type": ["string", "null"] },
+    "mechanism": { "type": ["string", "null"] },
+    "mechanisms": {
+      "type": ["array", "null"],
+      "items": { "type": "string" }
+    },
+    "approval_date": { "type": ["string", "null"] },
+    "approval_date_raw": { "type": ["string", "null"] },
+    "approval_date_display": { "type": ["string", "null"] },
+    "approval_summary": { "type": ["string", "null"] },
+    "brand_names": {
+      "type": ["array", "null"],
+      "items": { "type": "string" }
+    },
+    "route": { "type": ["string", "null"] },
+    "targets": {
+      "type": ["array", "null"],
+      "items": { "type": "string" }
+    },
+    "target": { "type": ["string", "null"] },
+    "indications": {
+      "type": ["array", "null"],
+      "items": { "type": "string" }
+    },
+    "pharm_classes": {
+      "type": ["array", "null"],
+      "items": { "type": "string" }
+    },
+    "top_adverse_events": {
+      "type": ["array", "null"],
+      "items": { "type": "string" }
+    },
+    "_meta": {
+      "type": ["object", "null"],
+      "properties": {
+        "evidence_urls": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": { "type": "string" },
+              "url": { "type": "string" }
+            },
+            "required": ["label", "url"],
+            "additionalProperties": true
+          }
+        },
+        "next_commands": {
+          "type": ["array", "null"],
+          "description": "At most ten executable follow-ups, ordered by recovery, unloaded sections, aggregate, and related pivots.",
+          "items": { "type": "string" }
+        },
+        "workflow": { "type": ["string", "null"] },
+        "workflow_rationale": { "type": ["string", "null"] },
+        "workflow_playbook": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

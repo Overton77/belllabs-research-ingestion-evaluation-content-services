@@ -311,3 +311,79 @@ GRANT SELECT, INSERT ON mission_control.context_selection
 TO mission_control_runtime, mission_control_family_writer;
 GRANT SELECT ON mission_control.context_selection TO mission_control_readonly;
 -- end section: B2 ----------------------------------------------------------------------------
+
+-- section: B4 (FT-B4, OVE-33) continuation_transfer -----------------------------------------
+-- One continuation of one logical execution, from its trigger (context health, provider
+-- compaction frame, turn count, workflow boundary or a request_continuation command) to the
+-- fresh session's hydration (SPEC-02 "Continuation checkpoint and compaction",
+-- workflow-types/08 sections 8, 9 and 13). The sealed mc.continuation_checkpoint.v1 manifests
+-- live in continuation_checkpoint (0003) with their checkpoint_validation verdicts; this row
+-- carries the mutable saga: status, held mailbox commands, compaction attempts and the
+-- cumulative governor ledger. Optimistic version; never deleted.
+CREATE TABLE mission_control.continuation_transfer (
+    installation_id uuid NOT NULL,
+    application_id text NOT NULL,
+    tenant_id uuid NOT NULL,
+    continuation_transfer_id uuid PRIMARY KEY,
+    transfer_key text NOT NULL CHECK (transfer_key <> ''),
+    run_key text NOT NULL CHECK (run_key <> ''),
+    activation_key text NOT NULL CHECK (activation_key <> ''),
+    logical_execution_id text NOT NULL CHECK (logical_execution_id <> ''),
+    lane_profile text NOT NULL
+        CHECK (lane_profile IN ('deep_agents', 'cursor_local', 'cursor_cloud',
+                                'claude_agent_sdk', 'codex')),
+    trigger_kind text NOT NULL CHECK (trigger_kind IN (
+        'context_health_soft', 'context_health_hard', 'provider_compaction', 'turn_count',
+        'workflow_boundary', 'request_continuation')),
+    trigger_ref text NOT NULL CHECK (trigger_ref <> ''),
+    delivery text NOT NULL CHECK (delivery IN ('turn_boundary_guaranteed', 'wait_then_send')),
+    status text NOT NULL CHECK (status IN (
+        'requested', 'parked', 'sealed', 'transferred', 'human_review', 'failed',
+        'governor_exhausted')),
+    source_session_ref text NOT NULL CHECK (source_session_ref <> ''),
+    target_session_ref text CHECK (target_session_ref <> ''),
+    checkpoint_key text CHECK (checkpoint_key <> ''),
+    released boolean NOT NULL DEFAULT false,
+    failure_reason text CHECK (failure_reason <> ''),
+    transfer jsonb NOT NULL CHECK (jsonb_typeof(transfer) = 'object'),
+    version bigint NOT NULL CHECK (version >= 1),
+    requested_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    created_at timestamptz NOT NULL,
+    created_by_actor_ref text NOT NULL CHECK (created_by_actor_ref <> ''),
+    CHECK (status <> 'transferred' OR (target_session_ref IS NOT NULL
+        AND checkpoint_key IS NOT NULL)),
+    CHECK ((transfer->>'transfer_id' = transfer_key
+        AND transfer->>'status' = status
+        AND (transfer->>'version')::bigint = version) IS TRUE),
+    UNIQUE (installation_id, application_id, tenant_id, continuation_transfer_id),
+    UNIQUE (installation_id, application_id, tenant_id, transfer_key),
+    FOREIGN KEY (installation_id, application_id, tenant_id)
+        REFERENCES mission_control.tenant (installation_id, application_id, tenant_id),
+    FOREIGN KEY (installation_id, application_id, tenant_id, run_key)
+        REFERENCES mission_control.mission_run (installation_id, application_id, tenant_id, run_key)
+);
+CREATE INDEX continuation_transfer_run_idx ON mission_control.continuation_transfer
+    (installation_id, application_id, tenant_id, run_key, logical_execution_id, requested_at);
+CREATE INDEX continuation_transfer_open_idx ON mission_control.continuation_transfer
+    (installation_id, application_id, tenant_id, run_key)
+    WHERE status IN ('requested', 'parked', 'sealed');
+
+ALTER TABLE mission_control.continuation_transfer ENABLE ROW LEVEL SECURITY;
+ALTER TABLE mission_control.continuation_transfer FORCE ROW LEVEL SECURITY;
+CREATE POLICY continuation_transfer_scope ON mission_control.continuation_transfer
+    USING (installation_id = mission_control.ctx_installation_id()
+        AND application_id = mission_control.ctx_application_id()
+        AND tenant_id = mission_control.ctx_tenant_id())
+    WITH CHECK (installation_id = mission_control.ctx_installation_id()
+        AND application_id = mission_control.ctx_application_id()
+        AND tenant_id = mission_control.ctx_tenant_id());
+REVOKE ALL ON mission_control.continuation_transfer FROM PUBLIC;
+-- The worker (runtime) runs triggers, seals and transfers; the API records
+-- request_continuation triggers through the same runtime role; readers read.
+GRANT SELECT, INSERT ON mission_control.continuation_transfer TO mission_control_runtime;
+GRANT UPDATE (status, target_session_ref, checkpoint_key, released, failure_reason, transfer,
+    version, updated_at)
+ON mission_control.continuation_transfer TO mission_control_runtime;
+GRANT SELECT ON mission_control.continuation_transfer TO mission_control_readonly;
+-- end section: B4 ----------------------------------------------------------------------------

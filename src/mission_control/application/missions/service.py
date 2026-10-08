@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from typing import Protocol
 
 from mission_control.application.execution.boundary_interventions import BoundaryInterventionService
 from mission_control.application.execution.service import RunControlService
@@ -16,6 +17,7 @@ from mission_control.application.execution.stop_fence import StopFenceRepository
 from mission_control.contracts.canonical import canonical_digest
 from mission_control.contracts.contracts import (
     CancelPayload,
+    ContinuationRequestPayload,
     MissionCommandReceipt,
     MissionCommandRequest,
     MissionControlRejected,
@@ -28,8 +30,10 @@ from mission_control.domain.policies.contracts import (
     ActorContext,
     BoundaryCommandStatus,
     CancelAction,
+    CommandStatus,
     LifecycleCommand,
     PauseAction,
+    RequestContinuationAction,
     ResumeAction,
     RunPhase,
     SatisfyWaitAction,
@@ -42,6 +46,21 @@ from mission_control.domain.policies.stop_fence import (
 )
 
 
+class ContinuationCommandPort(Protocol):
+    """FT-B4: resolves and records ``request_continuation`` triggers."""
+
+    async def plan(
+        self, run_id: str, command_id: str, activation_id: str | None
+    ) -> RequestContinuationAction:
+        """The accepted command's action (lane, source session, delivery); raises
+        ``MissionControlRejected`` when no continuable session exists."""
+        ...
+
+    async def record(self, run_id: str, action: RequestContinuationAction, command_id: str) -> None:
+        """Record the trigger the family seals at its next safe boundary (idempotent)."""
+        ...
+
+
 class MissionControlService:
     def __init__(
         self,
@@ -50,6 +69,7 @@ class MissionControlService:
         *,
         request_scope: str,
         stop_fences: StopFenceRepository | None = None,
+        continuations: ContinuationCommandPort | None = None,
     ) -> None:
         if not request_scope:
             raise ValueError("an authenticated application/tenant request scope is required")
@@ -58,6 +78,8 @@ class MissionControlService:
         self._scope = request_scope
         # FT-F3: an immediate cancel is admitted only where its Stop Fence can be persisted.
         self._stop_fences = stop_fences
+        # FT-B4: request_continuation is admitted only where continuation is composed.
+        self._continuations = continuations
 
     @property
     def request_scope(self) -> str:
@@ -70,7 +92,24 @@ class MissionControlService:
         request = MissionCommandRequest.model_validate(request.model_dump(mode="python"))
         if request.target.id != run_id:
             raise MissionControlRejected("target_mismatch", "command target differs from route run")
-        action = self._action(request)
+        action: (
+            PauseAction
+            | ResumeAction
+            | CancelAction
+            | SatisfyWaitAction
+            | RequestContinuationAction
+        )
+        if isinstance(request.payload, ContinuationRequestPayload):
+            if self._continuations is None:
+                raise MissionControlRejected(
+                    "unsupported_control",
+                    "request_continuation requires continuation in this composition",
+                )
+            action = await self._continuations.plan(
+                run_id, str(request.request_id), request.payload.activation_id
+            )
+        else:
+            action = self._action(request)
         if isinstance(action, CancelAction) and action.urgency == "immediate":
             if self._stop_fences is None:
                 raise MissionControlRejected(
@@ -116,6 +155,12 @@ class MissionControlService:
                 correlation_id=command_id,
             )
         )
+        if (
+            isinstance(action, RequestContinuationAction)
+            and result.status == CommandStatus.ACCEPTED
+            and self._continuations is not None
+        ):
+            await self._continuations.record(run_id, action, command_id)
         delivery = await self._run_control.get_boundary_command(
             self._scope, run_id, issuer, command_id
         )
