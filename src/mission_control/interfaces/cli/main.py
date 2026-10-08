@@ -70,11 +70,78 @@ class MissionClient:
             raise ValueError("unknown catalog action")
         return self.client.post(f"{self.prefix}/catalog/{action}", json=body)
 
+    def subscriptions(
+        self, action: str, body: dict[str, Any] | None, target: str | None
+    ) -> httpx.Response:
+        if action == "create":
+            return self.client.post(f"{self.prefix}/subscriptions", json=body)
+        if action == "list":
+            return self.client.get(f"{self.prefix}/subscriptions")
+        if action == "close" and target:
+            return self.client.delete(f"{self.prefix}/subscriptions/{self._id(target)}")
+        raise ValueError("subscribe close needs a subscription id")
+
+    def events_path(self, mission_id: str) -> str:
+        return f"{self.prefix}/missions/{self._id(mission_id)}/events"
+
     @staticmethod
     def _id(value: str) -> str:
         if not value or value in {".", ".."}:
             raise ValueError("run id must be a nonempty identifier")
         return quote(value, safe="")
+
+
+def subscription_body(args: argparse.Namespace) -> dict[str, Any]:
+    run_id, mission_id = getattr(args, "run", None), getattr(args, "mission", None)
+    if (run_id is None) == (mission_id is None):
+        raise ValueError("subscribe needs exactly one of --run or --mission")
+    if not getattr(args, "webhook", None) or not getattr(args, "secret_ref", None):
+        raise ValueError("subscribe needs --webhook URL and --secret-ref provider:KEY")
+    events = [item for item in getattr(args, "events", "").split(",") if item]
+    if not events:
+        raise ValueError("subscribe needs --events a,b")
+    body: dict[str, Any] = {
+        "target": "run" if run_id else "mission",
+        "target_id": run_id or mission_id,
+        "events": events,
+        "channel": {"kind": "webhook", "url": args.webhook, "secret_ref": args.secret_ref},
+    }
+    if getattr(args, "node_keys", None):
+        body["node_keys"] = [item for item in args.node_keys.split(",") if item]
+    if getattr(args, "after_seq", None) is not None:
+        body["after_seq"] = args.after_seq
+    return body
+
+
+def watch_events(transport: httpx.Client, client: MissionClient, args: argparse.Namespace) -> int:
+    """Print each mission event as one JSON line; exit 6 on resync_required."""
+
+    params: dict[str, Any] = {}
+    if getattr(args, "after_seq", None) is not None:
+        params["after_seq"] = args.after_seq
+    if getattr(args, "types", None):
+        params["types"] = args.types
+    limit = getattr(args, "max_events", None)
+    seen = 0
+    with transport.stream(
+        "GET", client.events_path(args.mission_id), params=params, timeout=None
+    ) as response:
+        if response.status_code >= 300:
+            response.read()
+            print(json.dumps({"error": "events_unavailable", "status": response.status_code}))
+            return exit_status(response.status_code)
+        event = ""
+        for line in response.iter_lines():
+            if line.startswith("event: "):
+                event = line[len("event: ") :]
+            elif line.startswith("data: ") and event in {"mission_event", "resync_required"}:
+                print(line[len("data: ") :], flush=True)
+                if event == "resync_required":
+                    return 6
+                seen += 1
+                if limit is not None and seen >= limit:
+                    return 0
+    return 0
 
 
 def exit_status(status: int) -> int:
@@ -169,6 +236,23 @@ def main(argv: list[str] | None = None) -> int:
     )
     compile_ = mission_commands.add_parser("compile", parents=[common])
     compile_.add_argument("file")
+    subscribe = groups.add_parser("subscribe", parents=[common])
+    subscribe.add_argument("action", nargs="?", choices=("create", "list", "close"))
+    subscribe.add_argument("subscription_id", nargs="?")
+    subscribe.add_argument("--run")
+    subscribe.add_argument("--mission")
+    subscribe.add_argument("--webhook")
+    subscribe.add_argument("--secret-ref")
+    subscribe.add_argument("--events", default="")
+    subscribe.add_argument("--node-keys")
+    subscribe.add_argument("--after-seq", type=int)
+    events = groups.add_parser("events", parents=[common])
+    events_commands = events.add_subparsers(dest="action", required=True)
+    watch = events_commands.add_parser("watch", parents=[common])
+    watch.add_argument("mission_id")
+    watch.add_argument("--after-seq", type=int)
+    watch.add_argument("--types")
+    watch.add_argument("--max-events", type=int)
     catalog = groups.add_parser("catalog", parents=[common])
     catalog_commands = catalog.add_subparsers(dest="action", required=True)
     catalog_commands.add_parser("list", parents=[common])
@@ -198,7 +282,11 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError(
                 "--wait is supported on run inspect; command admission is not completion"
             )
+        if args.group == "subscribe":
+            args.action = args.action or "create"
         body = strict_object(args.request_file) if hasattr(args, "request_file") else None
+        if args.group == "subscribe" and args.action == "create":
+            body = subscription_body(args)
         with httpx.Client(
             base_url=base_url,
             headers={"Authorization": f"Bearer {token}"},
@@ -212,7 +300,13 @@ def main(argv: list[str] | None = None) -> int:
                     transport.timeout = httpx.Timeout(
                         max(0.001, min(30, deadline - time.monotonic()))
                     )
-                if args.group == "catalog":
+                if args.group == "events":
+                    return watch_events(transport, client, args)
+                if args.group == "subscribe":
+                    response = client.subscriptions(
+                        args.action, body, getattr(args, "subscription_id", None)
+                    )
+                elif args.group == "catalog":
                     response = client.catalog(args.action, body)
                 elif args.action == "inspect":
                     response = client.inspection(args.run_id)

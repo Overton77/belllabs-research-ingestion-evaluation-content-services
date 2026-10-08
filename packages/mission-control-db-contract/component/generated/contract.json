@@ -218,6 +218,39 @@
         "column:mission_chain.version": [
           "mission_control_runtime:UPDATE"
         ],
+        "column:mission_subscription.closed_at": [
+          "mission_control_runtime:UPDATE"
+        ],
+        "column:mission_subscription.closed_by_actor_ref": [
+          "mission_control_runtime:UPDATE"
+        ],
+        "column:mission_subscription.cursor_seq": [
+          "mission_control_runtime:UPDATE"
+        ],
+        "column:mission_subscription.dead_lettered_at": [
+          "mission_control_runtime:UPDATE"
+        ],
+        "column:mission_subscription.failure_count": [
+          "mission_control_runtime:UPDATE"
+        ],
+        "column:mission_subscription.lease_expires_at": [
+          "mission_control_runtime:UPDATE"
+        ],
+        "column:mission_subscription.lease_owner": [
+          "mission_control_runtime:UPDATE"
+        ],
+        "column:mission_subscription.next_attempt_at": [
+          "mission_control_runtime:UPDATE"
+        ],
+        "column:mission_subscription.state": [
+          "mission_control_runtime:UPDATE"
+        ],
+        "column:mission_subscription.updated_at": [
+          "mission_control_runtime:UPDATE"
+        ],
+        "column:mission_subscription.version": [
+          "mission_control_runtime:UPDATE"
+        ],
         "column:operation_claim.heartbeat_at": [
           "mission_control_runtime:UPDATE"
         ],
@@ -1277,6 +1310,19 @@
           "mission_control_runtime:SELECT",
           "mission_control_runtime:UPDATE"
         ],
+        "relation:mission_subscription": [
+          "$OWNER:DELETE",
+          "$OWNER:INSERT",
+          "$OWNER:MAINTAIN",
+          "$OWNER:REFERENCES",
+          "$OWNER:SELECT",
+          "$OWNER:TRIGGER",
+          "$OWNER:TRUNCATE",
+          "$OWNER:UPDATE",
+          "mission_control_readonly:SELECT",
+          "mission_control_runtime:INSERT",
+          "mission_control_runtime:SELECT"
+        ],
         "relation:native_observation": [
           "$OWNER:DELETE",
           "$OWNER:INSERT",
@@ -1744,6 +1790,19 @@
           "mission_control_runtime:INSERT",
           "mission_control_runtime:SELECT"
         ],
+        "relation:subscription_delivery": [
+          "$OWNER:DELETE",
+          "$OWNER:INSERT",
+          "$OWNER:MAINTAIN",
+          "$OWNER:REFERENCES",
+          "$OWNER:SELECT",
+          "$OWNER:TRIGGER",
+          "$OWNER:TRUNCATE",
+          "$OWNER:UPDATE",
+          "mission_control_readonly:SELECT",
+          "mission_control_runtime:INSERT",
+          "mission_control_runtime:SELECT"
+        ],
         "relation:success_criterion": [
           "$OWNER:DELETE",
           "$OWNER:INSERT",
@@ -2122,6 +2181,10 @@
           "$OWNER:USAGE",
           "PUBLIC:USAGE"
         ],
+        "type:_mission_subscription": [
+          "$OWNER:USAGE",
+          "PUBLIC:USAGE"
+        ],
         "type:_native_observation": [
           "$OWNER:USAGE",
           "PUBLIC:USAGE"
@@ -2263,6 +2326,10 @@
           "PUBLIC:USAGE"
         ],
         "type:_subordinate_message": [
+          "$OWNER:USAGE",
+          "PUBLIC:USAGE"
+        ],
+        "type:_subscription_delivery": [
           "$OWNER:USAGE",
           "PUBLIC:USAGE"
         ],
@@ -2578,6 +2645,10 @@
           "$OWNER:USAGE",
           "PUBLIC:USAGE"
         ],
+        "type:mission_subscription": [
+          "$OWNER:USAGE",
+          "PUBLIC:USAGE"
+        ],
         "type:native_observation": [
           "$OWNER:USAGE",
           "PUBLIC:USAGE"
@@ -2719,6 +2790,10 @@
           "PUBLIC:USAGE"
         ],
         "type:subordinate_message": [
+          "$OWNER:USAGE",
+          "PUBLIC:USAGE"
+        ],
+        "type:subscription_delivery": [
           "$OWNER:USAGE",
           "PUBLIC:USAGE"
         ],
@@ -18358,6 +18433,332 @@
           "row_level_security": true,
           "triggers": []
         },
+        "mission_subscription": {
+          "columns": [
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "installation_id",
+              "not_null": true,
+              "type": "uuid"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "application_id",
+              "not_null": true,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "tenant_id",
+              "not_null": true,
+              "type": "uuid"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "subscription_id",
+              "not_null": true,
+              "type": "uuid"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "target_kind",
+              "not_null": true,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "mission_id",
+              "not_null": true,
+              "type": "uuid"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "run_id",
+              "not_null": false,
+              "type": "uuid"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "event_types",
+              "not_null": true,
+              "type": "text[]"
+            },
+            {
+              "default": "'{}'::text[]",
+              "generated": null,
+              "identity": null,
+              "name": "node_keys",
+              "not_null": true,
+              "type": "text[]"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "channel_kind",
+              "not_null": true,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "channel",
+              "not_null": true,
+              "type": "jsonb"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "cursor_seq",
+              "not_null": true,
+              "type": "bigint"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "state",
+              "not_null": true,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "failure_count",
+              "not_null": true,
+              "type": "integer"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "next_attempt_at",
+              "not_null": true,
+              "type": "timestamp with time zone"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "lease_owner",
+              "not_null": false,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "lease_expires_at",
+              "not_null": false,
+              "type": "timestamp with time zone"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "dead_lettered_at",
+              "not_null": false,
+              "type": "timestamp with time zone"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "closed_at",
+              "not_null": false,
+              "type": "timestamp with time zone"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "closed_by_actor_ref",
+              "not_null": false,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "version",
+              "not_null": true,
+              "type": "bigint"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "created_at",
+              "not_null": true,
+              "type": "timestamp with time zone"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "updated_at",
+              "not_null": true,
+              "type": "timestamp with time zone"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "created_by_actor_ref",
+              "not_null": true,
+              "type": "text"
+            }
+          ],
+          "constraints": [
+            {
+              "definition": "CHECK (channel_kind = ANY (ARRAY['webhook'::text, 'stream_ticket'::text, 'mcp_session'::text]))",
+              "name": "mission_subscription_channel_kind_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (jsonb_typeof(channel) = 'object'::text AND (channel ->> 'kind'::text) = channel_kind AND NOT channel ?| ARRAY['secret'::text, 'secret_value'::text, 'password'::text, 'token'::text])",
+              "name": "mission_subscription_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK ((target_kind = 'run'::text) = (run_id IS NOT NULL))",
+              "name": "mission_subscription_check1",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK ((state = 'dead_lettered'::text) = (dead_lettered_at IS NOT NULL))",
+              "name": "mission_subscription_check2",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK ((state = 'closed'::text) = (closed_at IS NOT NULL))",
+              "name": "mission_subscription_check3",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK ((lease_owner IS NULL) = (lease_expires_at IS NULL))",
+              "name": "mission_subscription_check4",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (closed_by_actor_ref <> ''::text)",
+              "name": "mission_subscription_closed_by_actor_ref_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (created_by_actor_ref <> ''::text)",
+              "name": "mission_subscription_created_by_actor_ref_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (cursor_seq >= 0)",
+              "name": "mission_subscription_cursor_seq_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (cardinality(event_types) >= 1)",
+              "name": "mission_subscription_event_types_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (failure_count >= 0)",
+              "name": "mission_subscription_failure_count_check",
+              "type": "c"
+            },
+            {
+              "definition": "FOREIGN KEY (installation_id, application_id, tenant_id, mission_id) REFERENCES mission_control.mission(installation_id, application_id, tenant_id, mission_id)",
+              "name": "mission_subscription_installation_id_application_id_tenan_fkey1",
+              "type": "f"
+            },
+            {
+              "definition": "FOREIGN KEY (installation_id, application_id, tenant_id, run_id) REFERENCES mission_control.mission_run(installation_id, application_id, tenant_id, run_id)",
+              "name": "mission_subscription_installation_id_application_id_tenan_fkey2",
+              "type": "f"
+            },
+            {
+              "definition": "UNIQUE (installation_id, application_id, tenant_id, subscription_id)",
+              "name": "mission_subscription_installation_id_application_id_tenant__key",
+              "type": "u"
+            },
+            {
+              "definition": "FOREIGN KEY (installation_id, application_id, tenant_id) REFERENCES mission_control.tenant(installation_id, application_id, tenant_id)",
+              "name": "mission_subscription_installation_id_application_id_tenant_fkey",
+              "type": "f"
+            },
+            {
+              "definition": "CHECK (lease_owner <> ''::text)",
+              "name": "mission_subscription_lease_owner_check",
+              "type": "c"
+            },
+            {
+              "definition": "PRIMARY KEY (subscription_id)",
+              "name": "mission_subscription_pkey",
+              "type": "p"
+            },
+            {
+              "definition": "CHECK (state = ANY (ARRAY['active'::text, 'paused'::text, 'dead_lettered'::text, 'closed'::text]))",
+              "name": "mission_subscription_state_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (target_kind = ANY (ARRAY['mission'::text, 'run'::text]))",
+              "name": "mission_subscription_target_kind_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (version >= 1)",
+              "name": "mission_subscription_version_check",
+              "type": "c"
+            }
+          ],
+          "force_row_level_security": true,
+          "indexes": [
+            "CREATE INDEX mission_subscription_due_idx ON mission_control.mission_subscription USING btree (installation_id, application_id, tenant_id, next_attempt_at) WHERE (state = 'active'::text)",
+            "CREATE INDEX mission_subscription_mission_id_fk_idx ON mission_control.mission_subscription USING btree (installation_id, application_id, tenant_id, mission_id)",
+            "CREATE INDEX mission_subscription_run_id_fk_idx ON mission_control.mission_subscription USING btree (installation_id, application_id, tenant_id, run_id)",
+            "CREATE UNIQUE INDEX mission_subscription_installation_id_application_id_tenant__key ON mission_control.mission_subscription USING btree (installation_id, application_id, tenant_id, subscription_id)",
+            "CREATE UNIQUE INDEX mission_subscription_pkey ON mission_control.mission_subscription USING btree (subscription_id)"
+          ],
+          "kind": "r",
+          "policies": [
+            {
+              "command": "*",
+              "name": "mission_subscription_scope",
+              "permissive": true,
+              "roles": [
+                "PUBLIC"
+              ],
+              "using": "((installation_id = mission_control.ctx_installation_id()) AND (application_id = mission_control.ctx_application_id()) AND (tenant_id = mission_control.ctx_tenant_id()))",
+              "with_check": "((installation_id = mission_control.ctx_installation_id()) AND (application_id = mission_control.ctx_application_id()) AND (tenant_id = mission_control.ctx_tenant_id()))"
+            }
+          ],
+          "row_level_security": true,
+          "triggers": [
+            {
+              "definition": "CREATE TRIGGER mission_subscription_no_delete BEFORE DELETE ON mission_control.mission_subscription FOR EACH ROW EXECUTE FUNCTION mission_control.reject_mutation()",
+              "name": "mission_subscription_no_delete"
+            }
+          ]
+        },
         "native_observation": {
           "columns": [
             {
@@ -26779,6 +27180,224 @@
             {
               "definition": "CREATE TRIGGER subordinate_message_immutable BEFORE DELETE OR UPDATE ON mission_control.subordinate_message FOR EACH ROW EXECUTE FUNCTION mission_control.reject_mutation()",
               "name": "subordinate_message_immutable"
+            }
+          ]
+        },
+        "subscription_delivery": {
+          "columns": [
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "installation_id",
+              "not_null": true,
+              "type": "uuid"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "application_id",
+              "not_null": true,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "tenant_id",
+              "not_null": true,
+              "type": "uuid"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "delivery_id",
+              "not_null": true,
+              "type": "uuid"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "subscription_id",
+              "not_null": true,
+              "type": "uuid"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "event_id",
+              "not_null": true,
+              "type": "uuid"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "seq",
+              "not_null": true,
+              "type": "bigint"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "attempt",
+              "not_null": true,
+              "type": "integer"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "status",
+              "not_null": true,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "response_code",
+              "not_null": false,
+              "type": "integer"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "latency_ms",
+              "not_null": false,
+              "type": "integer"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "error_class",
+              "not_null": false,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "recorded_at",
+              "not_null": true,
+              "type": "timestamp with time zone"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "created_at",
+              "not_null": true,
+              "type": "timestamp with time zone"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "created_by_actor_ref",
+              "not_null": true,
+              "type": "text"
+            }
+          ],
+          "constraints": [
+            {
+              "definition": "CHECK (attempt >= 1)",
+              "name": "subscription_delivery_attempt_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (created_by_actor_ref <> ''::text)",
+              "name": "subscription_delivery_created_by_actor_ref_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (error_class <> ''::text)",
+              "name": "subscription_delivery_error_class_check",
+              "type": "c"
+            },
+            {
+              "definition": "FOREIGN KEY (installation_id, application_id, tenant_id, subscription_id) REFERENCES mission_control.mission_subscription(installation_id, application_id, tenant_id, subscription_id)",
+              "name": "subscription_delivery_installation_id_application_id_tena_fkey1",
+              "type": "f"
+            },
+            {
+              "definition": "FOREIGN KEY (installation_id, application_id, tenant_id, event_id) REFERENCES mission_control.mission_event(installation_id, application_id, tenant_id, event_id)",
+              "name": "subscription_delivery_installation_id_application_id_tena_fkey2",
+              "type": "f"
+            },
+            {
+              "definition": "FOREIGN KEY (installation_id, application_id, tenant_id) REFERENCES mission_control.tenant(installation_id, application_id, tenant_id)",
+              "name": "subscription_delivery_installation_id_application_id_tenan_fkey",
+              "type": "f"
+            },
+            {
+              "definition": "UNIQUE (installation_id, application_id, tenant_id, subscription_id, event_id, attempt)",
+              "name": "subscription_delivery_installation_id_application_id_tenan_key1",
+              "type": "u"
+            },
+            {
+              "definition": "UNIQUE (installation_id, application_id, tenant_id, delivery_id)",
+              "name": "subscription_delivery_installation_id_application_id_tenant_key",
+              "type": "u"
+            },
+            {
+              "definition": "CHECK (latency_ms >= 0)",
+              "name": "subscription_delivery_latency_ms_check",
+              "type": "c"
+            },
+            {
+              "definition": "PRIMARY KEY (delivery_id)",
+              "name": "subscription_delivery_pkey",
+              "type": "p"
+            },
+            {
+              "definition": "CHECK (response_code >= 100 AND response_code <= 599)",
+              "name": "subscription_delivery_response_code_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (seq >= 1)",
+              "name": "subscription_delivery_seq_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (status = ANY (ARRAY['delivered'::text, 'failed'::text, 'dead_lettered'::text]))",
+              "name": "subscription_delivery_status_check",
+              "type": "c"
+            }
+          ],
+          "force_row_level_security": true,
+          "indexes": [
+            "CREATE INDEX subscription_delivery_event_id_fk_idx ON mission_control.subscription_delivery USING btree (installation_id, application_id, tenant_id, event_id)",
+            "CREATE UNIQUE INDEX subscription_delivery_installation_id_application_id_tenan_key1 ON mission_control.subscription_delivery USING btree (installation_id, application_id, tenant_id, subscription_id, event_id, attempt)",
+            "CREATE UNIQUE INDEX subscription_delivery_installation_id_application_id_tenant_key ON mission_control.subscription_delivery USING btree (installation_id, application_id, tenant_id, delivery_id)",
+            "CREATE UNIQUE INDEX subscription_delivery_pkey ON mission_control.subscription_delivery USING btree (delivery_id)"
+          ],
+          "kind": "r",
+          "policies": [
+            {
+              "command": "*",
+              "name": "subscription_delivery_scope",
+              "permissive": true,
+              "roles": [
+                "PUBLIC"
+              ],
+              "using": "((installation_id = mission_control.ctx_installation_id()) AND (application_id = mission_control.ctx_application_id()) AND (tenant_id = mission_control.ctx_tenant_id()))",
+              "with_check": "((installation_id = mission_control.ctx_installation_id()) AND (application_id = mission_control.ctx_application_id()) AND (tenant_id = mission_control.ctx_tenant_id()))"
+            }
+          ],
+          "row_level_security": true,
+          "triggers": [
+            {
+              "definition": "CREATE TRIGGER subscription_delivery_immutable BEFORE DELETE OR UPDATE ON mission_control.subscription_delivery FOR EACH ROW EXECUTE FUNCTION mission_control.reject_mutation()",
+              "name": "subscription_delivery_immutable"
             }
           ]
         },

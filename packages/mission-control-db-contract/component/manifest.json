@@ -3,7 +3,7 @@
   "component": "mission_control",
   "component_version": "1.0.0",
   "contract_path": "generated/contract.json",
-  "contract_schema_digest": "sha256:a6a8305fceed38affabf285534430397a4996f69bb0b1d9e9e3aa11495f316f9",
+  "contract_schema_digest": "sha256:ba7ac824a04d8039e8ab6e4eedacc02f7d8eac25500da62580d4d17c5556430a",
   "installer_protocol": "mission-control-sql/v2",
   "min_postgres_version": 170000,
   "ordered_migrations": [
@@ -101,6 +101,11 @@
       "key": "0028_mission_chains",
       "path": "migrations/0028_mission_chains.sql",
       "sha256": "f6155bbf7215dea327fdbecfc3fc923bc085f51292a1e2a2d2176159f1ff9107"
+    },
+    {
+      "key": "0029_command_mailbox_stop_fence_subscriptions",
+      "path": "migrations/0029_command_mailbox_stop_fence_subscriptions.sql",
+      "sha256": "e6c6195776adbb2699a3b038b612eab1729d6fed91da3c9faedb31efa3cd1f01"
     }
   ],
   "owned_schemas": [
@@ -128,10 +133,10 @@
     "mission_control_outbox_worker",
     "mission_control_readonly"
   ],
-  "schema_fingerprint": "sha256:1523a3b6efd2b99c946ae9448b9871629a61b01c69e28bb7f108fcf177c86e3e",
+  "schema_fingerprint": "sha256:6a0f9d8446169fec8c866084ba4c8bbcde002f51f300737d74dcb09bb0e65bd0",
   "schema_fingerprint_algorithm": "mc-pg-catalog-v2",
   "schema_fingerprints": {
-    "mission_control": "sha256:bf2335ef451c889380dcb172170f0fca36820418ef096516a79ec2003a1a9128",
+    "mission_control": "sha256:5b14f40a6706fe1defbd6338cfc7c4d7a8a150f9ff32ae823216ba329eefae86",
     "mission_control_search": "sha256:1df2cc3c968448828537bd0dc171b97fde614b00c85c6f8b6c9552ab2c796c89"
   },
   "seed_compatibility": {
@@ -147,8 +152,8 @@
     ]
   },
   "source_identity": "mission-control-db-contract",
-  "source_inputs_digest": "sha256:56fa4e7cc541a384082db0a95be7a1ac7852fb2a03aedba369c5475f0d9cbdd7",
-  "source_revision": "git:7e5aadf198844fbfbe6849ce3cea5118036f79a1+inputs:sha256:56fa4e7cc541a384082db0a95be7a1ac7852fb2a03aedba369c5475f0d9cbdd7",
+  "source_inputs_digest": "sha256:5e85c5a7b45ace6962c5e2912a8065194f55b1fc905f8f0b1f7f8325ed6c019d",
+  "source_revision": "git:2b221dc1bdab6b59b02df9862ab408be1fa8eb4a+inputs:sha256:5e85c5a7b45ace6962c5e2912a8065194f55b1fc905f8f0b1f7f8325ed6c019d",
   "supported_reader_versions": [
     "mission-control-runtime/1"
   ],

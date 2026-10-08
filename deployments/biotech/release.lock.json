@@ -3,9 +3,9 @@
   "component": "mission_control",
   "component_version": "1.0.0",
   "files": {
-    "generated/contract.json": "a6a8305fceed38affabf285534430397a4996f69bb0b1d9e9e3aa11495f316f9",
-    "generated/contract.md": "8b7b17e4998314f510bef2509180f4fe0ad0e41dae5c747e402439e149e8a81a",
-    "manifest.json": "0e633800a8604aefb3207fc6175f6671c51548bf37d739271e296e1be1f8aaae",
+    "generated/contract.json": "ba7ac824a04d8039e8ab6e4eedacc02f7d8eac25500da62580d4d17c5556430a",
+    "generated/contract.md": "3764ccdf0c1796d10fc6ba857fa474ae3965788560a4295a9493e4091c5dfdc5",
+    "manifest.json": "03462a92bf5b5ed6573766098d8d5316db29d37f1f7ec1f9c2d02e0b2854e585",
     "migrations/0001_foundation.sql": "17fdeed4fd09b2a6ca82fa9dbc5fcb99a5255b25c86c4ac4055a0f4003c5c571",
     "migrations/0002_authoring.sql": "0bda2c01feb68a4a3030be57ebedd6ef102cca85ce8baf26dec1ee1ed3207a37",
     "migrations/0003_execution.sql": "fd0f839bd389f66c9dbb139934d7333699718fcfaa143e5757b23fefff947f27",
@@ -25,6 +25,7 @@
     "migrations/0023_capability_discovery_custody.sql": "d2022c5b9b858734fe6e5b2fd72a04dc7a42d264092c3427d91b5a6f317fac23",
     "migrations/0024_workspace_artifact_custody.sql": "c6ca8f833dc46c0e055866e491858a565d9721c998e94bb6b3b6f09946581ed9",
     "migrations/0028_mission_chains.sql": "f6155bbf7215dea327fdbecfc3fc923bc085f51292a1e2a2d2176159f1ff9107",
+    "migrations/0029_command_mailbox_stop_fence_subscriptions.sql": "e6c6195776adbb2699a3b038b612eab1729d6fed91da3c9faedb31efa3cd1f01",
     "release-spec.json": "d0487057b6fd48b62fbb4fad84071cb6cdfcb794951117dd8735ab74137104ad"
   },
   "format_version": 2,
@@ -32,6 +33,6 @@
   "release_root": "../../packages/mission-control-db-contract/component",
   "release_uri": "mission-control:../../packages/mission-control-db-contract/component",
   "source_identity": "mission-control-db-contract",
-  "source_revision": "git:7e5aadf198844fbfbe6849ce3cea5118036f79a1+inputs:sha256:56fa4e7cc541a384082db0a95be7a1ac7852fb2a03aedba369c5475f0d9cbdd7",
+  "source_revision": "git:2b221dc1bdab6b59b02df9862ab408be1fa8eb4a+inputs:sha256:5e85c5a7b45ace6962c5e2912a8065194f55b1fc905f8f0b1f7f8325ed6c019d",
   "status": "pinned"
 }

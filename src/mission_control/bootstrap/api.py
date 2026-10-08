@@ -6,6 +6,7 @@ schemas. The transitional local mode is explicit and does not attest production 
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import os
 import re
@@ -26,6 +27,7 @@ from mission_control.adapters.auth.jwt import (
     MissionAuthenticationRejected,
     MissionTokenVerifier,
 )
+from mission_control.adapters.postgres.subscriptions.store import PostgresSubscriptionStore
 from mission_control.adapters.storage.control_plane_payloads import UnavailablePayloadStore
 from mission_control.adapters.temporal.boundary_commands import TemporalBoundaryCommandTransport
 from mission_control.adapters.temporal.search_attributes import verify_belllabs_search_attributes
@@ -48,6 +50,11 @@ from mission_control.bootstrap.composition import (
     MissionApplicationServices,
     compose_application_services,
 )
+from mission_control.bootstrap.subscriptions import (
+    compose_subscription_service,
+    relay_enabled,
+    run_subscription_relays,
+)
 from mission_control.contracts.json import parse_json_object
 from mission_control.domain.authoring.extensions import ExtensionRegistry
 from mission_control.interfaces.http.catalog import router as catalog_router
@@ -57,6 +64,7 @@ from mission_control.interfaces.http.mission_control import (
     get_mission_principal,
     router,
 )
+from mission_control.interfaces.http.subscriptions import router as subscriptions_router
 
 
 class TemporalDeployment(BaseModel):
@@ -169,6 +177,11 @@ async def application_pool(secret_ref: str) -> asyncpg.Pool:
         raise RuntimeError("configured PostgreSQL connection is unavailable") from None
 
 
+async def _stop_relay(stop: asyncio.Event, task: asyncio.Task[None]) -> None:
+    stop.set()
+    await task
+
+
 def create_application(
     deployment: MissionDeployment,
     *,
@@ -192,6 +205,7 @@ def create_application(
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         async with AsyncExitStack() as stack:
+            subscription_stores: list[PostgresSubscriptionStore] = []
             try:
                 for item in deployment.applications:
                     config = item.authentication
@@ -276,6 +290,17 @@ def create_application(
                                 "catalog composition differs from authenticated scope"
                             )
                         application.state.mission_control_catalog_services[key] = catalog
+                        subscriptions = compose_subscription_service(pool, request_scope(identity))
+                        application.state.mission_control_subscription_services[key] = subscriptions
+                        subscription_stores.append(
+                            PostgresSubscriptionStore(pool, request_scope(identity))
+                        )
+                if subscription_stores and relay_enabled():
+                    relay_stop = asyncio.Event()
+                    relay_task = asyncio.create_task(
+                        run_subscription_relays(subscription_stores, relay_stop)
+                    )
+                    stack.push_async_callback(_stop_relay, relay_stop, relay_task)
                 application.state.mission_control_ready = True
                 yield
             finally:
@@ -290,11 +315,13 @@ def create_application(
     application.state.mission_control_runtime_services = {}
     application.state.mission_control_admission_services = {}
     application.state.mission_control_catalog_services = {}
+    application.state.mission_control_subscription_services = {}
     application.state.mission_control_compositions = {}
     application.state.mission_control_ready = False
     install_authentication(application, verifier)
     application.include_router(router)
     application.include_router(catalog_router)
+    application.include_router(subscriptions_router)
 
     @application.get("/health/live")
     def live() -> dict[str, bool]:
