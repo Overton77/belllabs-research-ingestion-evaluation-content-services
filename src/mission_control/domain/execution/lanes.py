@@ -453,6 +453,20 @@ class CursorCloudOptions(LaneContract):
     env_vars_ref: str | None = Field(default=None, min_length=1)
     metadata: dict[str, str] = Field(default_factory=dict)
     environment: Literal["cloud", "pool", "machine"] = "cloud"
+    # FT-G5: create idempotently with a client-supplied `agentId` (`409 agent_id_conflict`
+    # means already created). The API refuses `envVars` with `agentId`, so a binding that
+    # needs env vars sets this false and creates with an `Idempotency-Key` (dedupe window
+    # UNVERIFIED). Omitted from dumps and digests at its default.
+    client_agent_id: bool = Field(default=True, exclude_if=lambda value: value is True)
+
+    @model_validator(mode="after")
+    def env_vars_need_server_minted_ids(self) -> CursorCloudOptions:
+        if self.env_vars_ref is not None and self.client_agent_id:
+            raise ValueError(
+                "env_vars cannot be combined with a client-supplied agent id; "
+                "set client_agent_id false (Idempotency-Key create)"
+            )
+        return self
 
 
 class CursorBudgets(LaneContract):

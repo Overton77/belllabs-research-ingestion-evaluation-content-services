@@ -88,7 +88,13 @@ class OperationHeartbeatPolicy:
         `lane.turn` segment loop (SPEC-07 section 4.2)."""
 
         if operation.execution_runtime == "cursor":
-            return LaneSegmentBounds(heartbeat_timeout_s=min(self.timeout_for(operation), 600))
+            binding = operation.cursor_binding
+            assert binding is not None
+            # `wait_then_send` is bounded by the binding's wall clock (SPEC-07 Further Notes).
+            return LaneSegmentBounds(
+                heartbeat_timeout_s=min(self.timeout_for(operation), 600),
+                busy_wait_s=min(binding.budgets.wall_clock_s, 86_400),
+            )
         if self.deep_agent_segment_loop and operation.execution_runtime == "deep_agent":
             return LaneSegmentBounds()
         return None

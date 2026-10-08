@@ -2,10 +2,12 @@
 
 `cursor_local` (FT-G3) is `local.CursorLocalHarness`: the pinned `cursor-sdk` bridge on the
 worker behind the `bridge.CursorBridgeLauncher` port, git worktree leases, Host Projections
-with fail-closed Kernel Hooks calling the worker back, frames keyed by bridge offset. The
-`cursor_cloud` profile (FT-G5) is registered as an unqualified stub until its harness lands.
-Both stay `qualified=False` until FT-G6 records a qualification. Importing this package
-imports no SDK; the SDK loads lazily inside the bridge adapter.
+with fail-closed Kernel Hooks calling the worker back, frames keyed by bridge offset.
+`cursor_cloud` (FT-G5) is `cloud.CursorCloudHarness`: Cloud Agents API v1 over `httpx`, branch
+`mc/<run>` published through the SCM, SSE resume with `Last-Event-ID`, artifacts and usage.
+The stubs below stand in for a profile a process does not compose. Both profiles stay
+`qualified=False` until FT-G6 records a qualification. Importing this package imports no SDK;
+the SDK loads lazily inside the bridge adapter.
 """
 
 from __future__ import annotations

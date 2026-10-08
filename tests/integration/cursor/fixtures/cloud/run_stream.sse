@@ -1,0 +1,46 @@
+: synthetic: hand-authored from research/cursor-platform.md section 4.4 (SSE events, ids, leading id-less status, heartbeat); replace with a scrubbed recording in FT-G6
+event: status
+data: {"runId": "run-7f1e2d3c-4b5a-4c6d-8e7f-9a0b1c2d3e4f", "status": "CREATING"}
+
+id: 1
+event: status
+data: {"runId": "run-7f1e2d3c-4b5a-4c6d-8e7f-9a0b1c2d3e4f", "status": "RUNNING"}
+
+event: heartbeat
+data: {}
+
+id: 2
+event: assistant
+data: {"text": "Reading the mission context."}
+
+id: 3
+event: tool_call
+data: {"callId": "call-c1", "name": "read", "status": "running", "args": {"path": ".mission/context.md"}}
+
+id: 4
+event: tool_call
+data: {"callId": "call-c1", "name": "read", "status": "completed", "result": {"lines": 20}}
+
+event: heartbeat
+data: {}
+
+id: 5
+event: tool_call
+data: {"callId": "call-c2", "name": "edit", "status": "running", "args": {"path": "src/feature.py"}}
+
+id: 6
+event: tool_call
+data: {"callId": "call-c2", "name": "edit", "status": "completed", "result": {"ok": true}}
+
+id: 7
+event: interaction_update
+data: {"type": "turn-ended", "usage": {"inputTokens": 2400, "outputTokens": 380, "totalTokens": 2780}}
+
+id: 8
+event: result
+data: {"runId": "run-7f1e2d3c-4b5a-4c6d-8e7f-9a0b1c2d3e4f", "status": "FINISHED", "text": "Implemented the feature on mc/run-operation.", "durationMs": 95100, "git": {"branches": [{"repoUrl": "github.com/acme/target", "branch": "mc/run-operation", "prUrl": null}]}}
+
+id: 9
+event: done
+data: {}
+

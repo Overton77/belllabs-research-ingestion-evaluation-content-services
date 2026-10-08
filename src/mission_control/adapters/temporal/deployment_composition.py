@@ -46,6 +46,8 @@ from mission_control.adapters.capabilities.capability_bundles import (
 from mission_control.adapters.capabilities.capability_pins import CapabilityPins
 from mission_control.adapters.cursor import cursor_lane_stubs
 from mission_control.adapters.cursor.bridge import SdkBridgeLauncher
+from mission_control.adapters.cursor.cloud import CursorCloudHarness
+from mission_control.adapters.cursor.cloud_api import CloudAgentsClient
 from mission_control.adapters.cursor.hooks_callback import CursorHookMapper
 from mission_control.adapters.cursor.local import CursorLocalHarness, CursorLocalSettings
 from mission_control.adapters.cursor.projection import (
@@ -53,6 +55,7 @@ from mission_control.adapters.cursor.projection import (
     RenderedProjectionSource,
     hook_context_index,
 )
+from mission_control.adapters.cursor.scm import GitBranchPublisher
 from mission_control.adapters.cursor.workspace import GitWorktreeLeaser
 from mission_control.adapters.deep_agents import (
     DeepAgentRuntimeAdapter,
@@ -451,18 +454,50 @@ def compose_lane_registry(
     deep_agents: DeepAgentsHarness,
     *,
     cursor_local: AgentHarness | None = None,
+    cursor_cloud: AgentHarness | None = None,
 ) -> LaneRegistry:
     """`deep_agents` always; the Cursor profiles when a Cursor credential is bound: the real
-    `cursor_local` harness (FT-G3) when composed, otherwise unqualified stubs. Unqualified lanes
-    are admitted only under the application's local-proof policy
-    (`MISSION_CONTROL_ALLOW_UNQUALIFIED_LANES`)."""
+    `cursor_local` (FT-G3) and `cursor_cloud` (FT-G5) harnesses when composed, otherwise
+    unqualified stubs. Unqualified lanes are admitted only under the application's local-proof
+    policy (`MISSION_CONTROL_ALLOW_UNQUALIFIED_LANES`)."""
 
     harnesses: list[AgentHarness] = [deep_agents]
     if settings.cursor_api_key is not None:
         local_stub, cloud_stub = cursor_lane_stubs()
         harnesses.append(cursor_local if cursor_local is not None else local_stub)
-        harnesses.append(cloud_stub)
+        harnesses.append(cursor_cloud if cursor_cloud is not None else cloud_stub)
     return LaneRegistry(harnesses, allow_unqualified=settings.allow_unqualified_lanes)
+
+
+def compose_cursor_cloud(
+    settings: Settings, pool: asyncpg.Pool, payloads: ArtifactPayloadPort
+) -> tuple[CursorCloudHarness, CloudAgentsClient] | None:
+    """The `cursor_cloud` lane (FT-G5) over the Cloud Agents API v1 when a Cursor credential
+    is bound. Branches are published through the worker's git configuration; the cloud
+    projection carries catalog command hooks only (the VM cannot reach the worker)."""
+
+    if settings.cursor_api_key is None:
+        return None
+    files = PayloadContextFiles(payloads)
+    root = settings.cursor_lease_root or (
+        (settings.deep_agent_sandbox_workspace_root or DEFAULT_WORKSPACE_ROOT) / "cursor-leases"
+    )
+    client = CloudAgentsClient(settings.cursor_api_key)
+    harness = CursorCloudHarness(
+        client=client,
+        publisher=GitBranchPublisher(root / "cloud-mirrors"),
+        projections=RenderedProjectionSource(
+            CatalogRows(
+                PostgresDefinitionRepository(
+                    pool, catalog_scope=settings.mission_control_catalog_scope or ""
+                )
+            ),
+            kernel_hooks=(),
+        ),
+        artifacts=files,
+        inputs=files,
+    )
+    return harness, client
 
 
 def compose_cursor_local(
@@ -785,11 +820,16 @@ class ProductionWorkerActivityCompositionFactory:
         secrets = EnvironmentSecretResolver()
         # FT-G3: the real `cursor_local` lane and its hook callbacks when Cursor is bound.
         cursor = compose_cursor_local(settings, postgres_pool, payloads)
+        # FT-G5: the real `cursor_cloud` lane over the Cloud Agents API v1.
+        cloud = compose_cursor_cloud(settings, postgres_pool, payloads)
+        if cloud is not None:
+            resources.push_async_callback(cloud[1].aclose)
         # FT-G1: the lane registry is built once per worker (SPEC-07 section 3).
         lanes = compose_lane_registry(
             settings,
             DeepAgentsHarness(adapter, secrets),
             cursor_local=cursor[0] if cursor is not None else None,
+            cursor_cloud=cloud[0] if cloud is not None else None,
         )
         service = OperationExecutionService(
             lanes=lanes,

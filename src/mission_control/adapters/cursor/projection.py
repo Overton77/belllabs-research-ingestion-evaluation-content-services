@@ -247,17 +247,16 @@ def write_secret(root: Path, path: str, value: str) -> None:
         handle.write(value)
 
 
-async def materialize_packet(
-    root: Path,
+async def packet_files(
     operation: OperationExecutionRequest,
     reader: DurableInputReader | None,
     *,
     mount_root: str = "",
-) -> dict[str, str]:
-    """Write the packet's verified read-only files (`.mission/`, `inputs/`), the operating
-    contract and an empty `outputs/`; return path -> digest of what was written."""
+) -> list[tuple[str, bytes]]:
+    """The packet's verified read-only files (`.mission/`, `inputs/`) and the operating
+    contract, as workspace-relative paths and bytes (digests checked against the slots)."""
 
-    written: dict[str, str] = {}
+    files: list[tuple[str, bytes]] = []
     for slot in operation.workspace.slot_bindings:
         if not is_context_input_slot(slot):
             continue
@@ -274,12 +273,25 @@ async def materialize_packet(
         logical = slot.logical_path
         if mount_root and logical.startswith(mount_root.rstrip("/") + "/"):
             logical = logical[len(mount_root.rstrip("/")) :]
-        relative = safe_relative(logical)
-        await asyncio.to_thread(_write, root, relative, content, 0o444)
-        written[relative.as_posix()] = slot.content_digest
-    contract = operating_contract(operation).encode("utf-8")
-    await asyncio.to_thread(_write, root, safe_relative(OPERATING_CONTRACT_PATH), contract, 0o444)
-    written[OPERATING_CONTRACT_PATH] = bytes_digest(contract)
+        files.append((safe_relative(logical).as_posix(), content))
+    files.append((OPERATING_CONTRACT_PATH, operating_contract(operation).encode("utf-8")))
+    return files
+
+
+async def materialize_packet(
+    root: Path,
+    operation: OperationExecutionRequest,
+    reader: DurableInputReader | None,
+    *,
+    mount_root: str = "",
+) -> dict[str, str]:
+    """Write the packet's verified read-only files (`.mission/`, `inputs/`), the operating
+    contract and an empty `outputs/`; return path -> digest of what was written."""
+
+    written: dict[str, str] = {}
+    for path, content in await packet_files(operation, reader, mount_root=mount_root):
+        await asyncio.to_thread(_write, root, safe_relative(path), content, 0o444)
+        written[path] = bytes_digest(content)
     await asyncio.to_thread((root / OUTPUTS_DIR).mkdir, parents=True, exist_ok=True)
     return written
 
@@ -313,6 +325,7 @@ __all__ = [
     "hook_context_index",
     "materialize_packet",
     "operating_contract",
+    "packet_files",
     "projection_digests",
     "read_packet_index",
     "safe_relative",
