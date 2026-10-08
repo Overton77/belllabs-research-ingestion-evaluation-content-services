@@ -32,7 +32,10 @@ ROOT = Path(__file__).resolve().parents[2]
 COMPONENT_ROOT = ROOT / "packages" / "mission-control-db-contract" / "component"
 MIGRATIONS_ROOT = COMPONENT_ROOT / "migrations"
 ADMIN_DSN_ENV = "MISSION_CONTROL_TEST_ADMIN_DSN"
-COMPONENT_VERSION = "1.0.0"
+# The fixture installs the release being built, so it carries that release's version.
+COMPONENT_VERSION = json.loads((COMPONENT_ROOT / "release-spec.json").read_bytes())[
+    "component_version"
+]
 WRITER_VERSION = "mission-control-runtime/1"
 
 _NAMESPACE = UUID("6d9c2f6e-6a43-4c7e-9a52-6f3b1b7f2a10")
