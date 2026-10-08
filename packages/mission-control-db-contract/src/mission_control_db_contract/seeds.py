@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+from . import storage
 from .canonical import digest_value, read_json_object
 from .deployment import observe_state, verify_state
 from .errors import ContractError, sqlstate
@@ -42,12 +43,17 @@ KIND_ORDER = (
     "asset_version",
     "asset_decision",
     "capability_grant",
+    # FT-A2: Supabase Storage provisioning (bucket first, then its policies).
+    "storage_bucket",
+    "storage_policy",
 )
+STORAGE_KINDS = frozenset({"storage_bucket", "storage_policy"})
 _STR = "str"
 _BOOL = "bool"
 _TS = "timestamp"
 _STRLIST = "strlist"
 _OBJ = "object"
+_INT = "int"
 # kind -> {field: (type, required)}; reference fields name the referenced kind.
 FIELD_SPECS: dict[str, dict[str, tuple[str, bool]]] = {
     "tenant": {
@@ -83,6 +89,9 @@ FIELD_SPECS: dict[str, dict[str, tuple[str, bool]]] = {
         "manifest": (_OBJ, True),
         "required_compatibility": (_STRLIST, True),
         "status": (_STR, True),
+        # Migration 0025 agent-composition columns; omitted by older bundles.
+        "host_support": (_OBJ, False),
+        "secret_refs": (_STRLIST, False),
     },
     "asset_decision": {
         "asset_version": ("ref:asset_version", True),
@@ -105,6 +114,18 @@ FIELD_SPECS: dict[str, dict[str, tuple[str, bool]]] = {
         "valid_until": (_TS, False),
         "revoked": (_BOOL, False),
     },
+    "storage_bucket": {
+        "bucket_id": (_STR, True),
+        "public": (_BOOL, True),
+        "file_size_limit": (_INT, True),
+    },
+    "storage_policy": {
+        "bucket_id": (_STR, True),
+        "policy": (_STR, True),
+        "command": (_STR, True),
+        "capability_role": (_STR, True),
+        "restrictive": (_BOOL, False),
+    },
 }
 ENUMS = {
     ("tenant", "state"): {"active", "suspended", "retired"},
@@ -112,6 +133,8 @@ ENUMS = {
     ("actor_binding", "state"): {"active", "revoked"},
     ("asset_version", "status"): {"proposed", "admitted"},
     ("asset_decision", "decision"): {"admit", "revoke", "retire", "reject"},
+    ("storage_policy", "command"): {"INSERT", "SELECT", "ALL"},
+    ("storage_policy", "capability_role"): {"publisher", "reader", "*"},
 }
 
 
@@ -237,6 +260,8 @@ def validate_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
                     if not isinstance(value, list) or any(not isinstance(v, str) for v in value):
                         raise ValueError
                 elif kind_of == _OBJ and not isinstance(value, dict):
+                    raise ValueError
+                elif kind_of == _INT and (isinstance(value, bool) or not isinstance(value, int)):
                     raise ValueError
             except ValueError:
                 raise ContractError(f"Invalid {name} on {kind}:{logical}") from None
@@ -428,6 +453,20 @@ async def _apply_record(
     kind, logical, fields = record["kind"], record["logical_key"], record["fields"]
     actor = bundle["actor_ref"]
     await _set_context(connection, target, None)
+    if kind in STORAGE_KINDS:
+        await _resolve(connection, target, kind, logical, allocate=True, bundle=bundle)
+        resolved = {
+            key: storage.resolve_application(value, target["application_id"])
+            if isinstance(value, str)
+            else value
+            for key, value in fields.items()
+        }
+        if kind == "storage_bucket":
+            created = await storage.apply_bucket(connection, resolved)
+        else:
+            created = await storage.apply_policy(connection, resolved, target["application_id"])
+        stats["created" if created else "reused"] += 1
+        return
     record_id, _new = await _resolve(
         connection, target, kind, logical, allocate=True, bundle=bundle
     )
@@ -482,6 +521,9 @@ async def _apply_record(
             "required_compatibility": fields["required_compatibility"],
             "status": fields["status"],
         }
+        for optional in ("host_support", "secret_refs"):
+            if optional in fields:
+                wanted[optional] = fields[optional]
     elif kind == "asset_decision":
         table, id_column = "asset_decision", "asset_decision_id"
         asset, _ = await _resolve(
@@ -738,6 +780,12 @@ async def apply_bundle(
         for dependency in bundle["depends_on"]:
             if (dependency["seed_key"], dependency["seed_version"]) not in applied:
                 raise ContractError("Seed dependency has not been applied")
+        if any(r["kind"] in STORAGE_KINDS for r in bundle["records"]) and not (
+            await storage.storage_available(connection)
+        ):
+            # No Storage schema (e.g. a local disposable cluster): nothing is written and no
+            # receipt is recorded, so the bundle applies later where Storage exists.
+            return {"outcome": "blocked", "reason": "storage schema is absent on this target"}
         stats = {"created": 0, "reused": 0, "revoked": 0}
         records = sorted(
             bundle["records"], key=lambda r: KIND_ORDER.index(r["kind"])

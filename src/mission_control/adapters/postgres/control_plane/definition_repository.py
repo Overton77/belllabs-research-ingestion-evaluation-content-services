@@ -25,6 +25,7 @@ from mission_control.adapters.postgres.control_plane.catalog_assets import (
     CATALOG_SERVICE_ACTOR,
     PUBLICATION_POLICY_REF,
     PUBLISHED_DEFINITION_CONTRACT,
+    capability_core_columns,
     definition_asset_id,
     definition_manifest_ref,
     insert_projection_job,
@@ -317,9 +318,10 @@ class PostgresDefinitionRepository:
                 """INSERT INTO mission_control.asset_version
                    (installation_id, application_id, asset_version_id, asset_id, version, kind,
                     contract, manifest_ref, manifest_digest, manifest, required_compatibility,
-                    status, version_no, updated_at, created_at, created_by_actor_ref)
+                    status, version_no, updated_at, created_at, created_by_actor_ref,
+                    host_support, secret_refs)
                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,'{}'::text[],'admitted',1,$11,
-                           clock_timestamp(),$12)""",
+                           clock_timestamp(),$12,$13::jsonb,$14::text[])""",
                 *self._scope,
                 asset_version_id,
                 definition_asset_id(definition.kind, logical_id),
@@ -331,12 +333,115 @@ class PostgresDefinitionRepository:
                 json.dumps(manifest, allow_nan=False),
                 published_at,
                 actor_id,
+                *capability_core_columns(definition),
             )
             await self._decision(
                 connection, asset_version_id, "admit", "published", actor_id, published_at
             )
             await self._event(connection, ref, "upsert", published_at, actor_ref=actor_id)
             return published
+
+    async def propose(
+        self, definition: Definition, actor_id: str, proposed_at: datetime
+    ) -> PublishedDefinition:
+        """FT-A2: register the next revision as a ``proposed`` row (no admit decision).
+
+        Proposed rows are invisible to readers until an operator admits them; the revision
+        number is reserved so a later publication continues after it.
+        """
+        kind, logical_id = definition.kind.value, definition.logical_id
+        async with self._transaction(write=True) as connection:
+            revision = await self._published_revision(connection, kind, logical_id) + 1
+            ref = ExactDefinitionRef(
+                kind=definition.kind,
+                logical_id=logical_id,
+                revision=revision,
+                digest=sha256_digest(definition),
+            )
+            published = PublishedDefinition(
+                ref=ref, definition=definition, published_at=proposed_at, published_by=actor_id
+            )
+            manifest = canonical_data(stable_json_dump(published))["payload"]
+            await connection.execute(
+                """INSERT INTO mission_control.asset_version
+                   (installation_id, application_id, asset_version_id, asset_id, version, kind,
+                    contract, manifest_ref, manifest_digest, manifest, required_compatibility,
+                    status, version_no, updated_at, created_at, created_by_actor_ref,
+                    host_support, secret_refs)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,'{}'::text[],'proposed',1,$11,
+                           clock_timestamp(),$12,$13::jsonb,$14::text[])""",
+                *self._scope,
+                uuid7(),
+                definition_asset_id(definition.kind, logical_id),
+                str(revision),
+                ASSET_KIND[definition.kind],
+                PUBLISHED_DEFINITION_CONTRACT,
+                definition_manifest_ref(definition.kind, logical_id, revision),
+                sha256_digest(manifest),
+                json.dumps(manifest, allow_nan=False),
+                proposed_at,
+                actor_id,
+                *capability_core_columns(definition),
+            )
+            return published
+
+    async def find_by_definition_digest(
+        self, kind: str, logical_id: str, digest: str
+    ) -> PublishedDefinition | None:
+        """Any row (proposed or later) whose definition digest matches, newest first."""
+        async with self._transaction() as connection:
+            row = await connection.fetchrow(
+                """SELECT manifest FROM mission_control.asset_version
+                   WHERE installation_id=$1 AND application_id=$2 AND asset_id=$3
+                     AND contract=$4 AND manifest->'ref'->>'digest' = $5
+                   ORDER BY version::bigint DESC LIMIT 1""",
+                *self._scope,
+                definition_asset_id(kind, logical_id),
+                PUBLISHED_DEFINITION_CONTRACT,
+                digest,
+            )
+        if row is None:
+            return None
+        return PublishedDefinition.model_validate(json_value(row["manifest"]))
+
+    async def find_by_pin(self, logical_id: str, digest: str) -> PublishedDefinition | None:
+        """FT-A8: the newest non-proposed revision with this logical id and definition digest."""
+        async with self._transaction() as connection:
+            row = await connection.fetchrow(
+                """SELECT manifest FROM mission_control.asset_version
+                   WHERE installation_id=$1 AND application_id=$2 AND contract=$3
+                     AND manifest->'ref'->>'logical_id' = $4
+                     AND manifest->'ref'->>'digest' = $5
+                     AND status <> 'proposed'
+                   ORDER BY version::bigint DESC LIMIT 1""",
+                *self._scope,
+                PUBLISHED_DEFINITION_CONTRACT,
+                logical_id,
+                digest,
+            )
+            if row is None:
+                return None
+            publication = PublishedDefinition.model_validate(json_value(row["manifest"]))
+            return await self._get(connection, publication.ref)
+
+    async def find_by_reference(
+        self, kind: str, logical_id: str, reference: str
+    ) -> PublishedDefinition | None:
+        """Newest row of this identity whose definition mentions ``reference`` (a bundle prefix)."""
+        async with self._transaction() as connection:
+            row = await connection.fetchrow(
+                """SELECT manifest FROM mission_control.asset_version
+                   WHERE installation_id=$1 AND application_id=$2 AND asset_id=$3
+                     AND contract=$4 AND position($5 in manifest::text) > 0
+                   ORDER BY version::bigint DESC LIMIT 1""",
+                *self._scope,
+                definition_asset_id(kind, logical_id),
+                PUBLISHED_DEFINITION_CONTRACT,
+                reference,
+            )
+        if row is None:
+            return None
+        return PublishedDefinition.model_validate(json_value(row["manifest"]))
 
     async def _decision(
         self,
@@ -613,6 +718,10 @@ class PostgresDefinitionRepository:
 
     async def list_published_definition_refs(self) -> tuple[ExactDefinitionRef, ...]:
         """List only this installation's verified immutable publication identities."""
+        return tuple(item.ref for item in await self.list_published_definitions())
+
+    async def list_published_definitions(self) -> tuple[PublishedDefinition, ...]:
+        """Verified published definitions (not proposed), ordered by kind, id and revision."""
         async with self._transaction() as connection:
             rows = await connection.fetch(
                 """SELECT manifest FROM mission_control.asset_version
@@ -622,11 +731,13 @@ class PostgresDefinitionRepository:
                 *self._scope,
                 PUBLISHED_DEFINITION_CONTRACT,
             )
-            refs = []
+            published = []
             for row in rows:
                 publication = PublishedDefinition.model_validate(json_value(row["manifest"]))
-                verified = await self._get(connection, publication.ref)
-                refs.append(verified.ref)
+                published.append(await self._get(connection, publication.ref))
             return tuple(
-                sorted(refs, key=lambda ref: (ref.kind.value, ref.logical_id, ref.revision))
+                sorted(
+                    published,
+                    key=lambda item: (item.ref.kind.value, item.ref.logical_id, item.ref.revision),
+                )
             )

@@ -1,0 +1,17 @@
+{
+  "callback": "none",
+  "entrypoint": "policy.py",
+  "events": [
+    "before_shell",
+    "before_tool",
+    "session_start",
+    "before_model"
+  ],
+  "fail_closed": true,
+  "hook_id": "hook.mc-policy-template",
+  "interpreter": "python",
+  "lane_profile": "claude_agent_sdk",
+  "pin": "hook.mc-policy-template@1.0.0#sha256:0648298b48be031996277ae472115a46e7964d2ac3882e61b84351f3c3f8a547",
+  "schema_version": "mc.hook_descriptor.v1",
+  "timeout_seconds": 10
+}

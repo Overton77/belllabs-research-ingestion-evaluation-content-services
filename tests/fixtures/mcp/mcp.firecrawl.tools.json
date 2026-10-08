@@ -1,0 +1,267 @@
+{
+  "capture_method": "transcribed",
+  "captured_on": "2026-10-07",
+  "environment": {
+    "FIRECRAWL_NO_ENDPOINT_FEEDBACK": "1",
+    "FIRECRAWL_NO_SEARCH_FEEDBACK": "1"
+  },
+  "note": "Transcribed from the primary-source research note; no live tools/list was run (fast-track wave A, no live provider calls). Re-capture with scripts/capture_mcp_tool_snapshot.py and update the digest before qualifying.",
+  "package_pin": "npm:firecrawl-mcp@3.28.2",
+  "schema_version": "mc.mcp_tools_fixture.v1",
+  "server": "mcp.firecrawl",
+  "source": "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md \u00a72 Firecrawl MCP (registered names in dist/index.js 3.28.2)",
+  "tools": [
+    {
+      "description": "Scrape one URL to markdown, html, links, screenshot or schema JSON.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "firecrawl_scrape",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Discover URLs on a site without fetching content.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "firecrawl_map",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Web search with optional scrape options; research, pdf, developer and gov categories.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "firecrawl_search",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Multi-page crawl with limits and include or exclude paths.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "firecrawl_crawl",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Poll a crawl job.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "firecrawl_check_crawl_status",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Parse PDF, DOCX, XLSX or HTML documents.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "firecrawl_parse",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Deprecated structured extraction (use scrape JSON); excluded by tool_allowlist.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "firecrawl_extract",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Autonomous multi-source research returning structured JSON.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "firecrawl_agent",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Status of an asynchronous agent job.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "firecrawl_agent_status",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Browser actions (click, type, navigate) on a URL or scrape id, one prompt per call.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "firecrawl_interact",
+      "read_only_hint": false,
+      "side_effect_class": "consequential"
+    },
+    {
+      "description": "Stop an interact browser session.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "firecrawl_interact_stop",
+      "read_only_hint": false,
+      "side_effect_class": "bounded_write"
+    },
+    {
+      "description": "Search the paper index (PubMed, bioRxiv, medRxiv, arXiv).",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "firecrawl_research_search_papers",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Read a paper from the research index.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "firecrawl_research_read_paper",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Inspect a paper's metadata and sections.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "firecrawl_research_inspect_paper",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Find papers related to a paper.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "firecrawl_research_related_papers",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Search GitHub repositories for research.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "firecrawl_research_search_github",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Create a scheduled change monitor.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "firecrawl_monitor_create",
+      "read_only_hint": false,
+      "side_effect_class": "bounded_write"
+    },
+    {
+      "description": "List change monitors.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "firecrawl_monitor_list",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Get one change monitor.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "firecrawl_monitor_get",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Update a change monitor.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "firecrawl_monitor_update",
+      "read_only_hint": false,
+      "side_effect_class": "bounded_write"
+    },
+    {
+      "description": "Delete a change monitor.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "firecrawl_monitor_delete",
+      "read_only_hint": false,
+      "side_effect_class": "bounded_write"
+    },
+    {
+      "description": "Run a change monitor now.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "firecrawl_monitor_run",
+      "read_only_hint": false,
+      "side_effect_class": "bounded_write"
+    },
+    {
+      "description": "Get one monitor check result.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "firecrawl_monitor_check",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "List monitor check results.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "firecrawl_monitor_checks",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Developer index: repositories, issues, merged pull requests, READMEs, docs.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "firecrawl_developer_search",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "US federal, state and local law and regulatory index.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "firecrawl_gov_search",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Browse the Alexandria capability catalogue and contracts.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "firecrawl_find_tools",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Current and historical credit usage.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "firecrawl_credit_usage",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    }
+  ]
+}

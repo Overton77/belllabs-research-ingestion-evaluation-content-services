@@ -7,6 +7,9 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from mission_control.domain.authoring.contracts import CatalogPayloadRef, ExactDefinitionRef
+from mission_control.domain.capabilities.hooks import HookEvent, HookInterpreter
+from mission_control.domain.capabilities.host_support import LaneProfile
+from mission_control.domain.capabilities.subagents import SubagentProfile
 
 
 class HarnessContract(BaseModel):
@@ -19,6 +22,19 @@ class AgentHost(StrEnum):
     CLAUDE_CODE = "claude_code"
     AGENT_FRAMEWORK = "agent_framework"
 
+    @property
+    def lane_profile(self) -> LaneProfile:
+        """The lane profile whose native files this Agent Host reads (SPEC-01)."""
+        return HOST_LANE_PROFILE[self]
+
+
+HOST_LANE_PROFILE: dict[AgentHost, LaneProfile] = {
+    AgentHost.CURSOR: LaneProfile.CURSOR_LOCAL,
+    AgentHost.CODEX: LaneProfile.CODEX,
+    AgentHost.CLAUDE_CODE: LaneProfile.CLAUDE_AGENT_SDK,
+    AgentHost.AGENT_FRAMEWORK: LaneProfile.DEEP_AGENTS,
+}
+
 
 class ComponentKind(StrEnum):
     PLUGIN = "plugin"
@@ -28,6 +44,8 @@ class ComponentKind(StrEnum):
     SANDBOX_SNAPSHOT = "sandbox_snapshot"
     WORKSPACE_SETUP = "workspace_setup"
     DIFF_CODEC = "diff_codec"
+    HOOK_SCRIPT = "hook_script"
+    SUBAGENT_PROFILE = "subagent_profile"
 
 
 class TrustStage(StrEnum):
@@ -278,6 +296,32 @@ class AgentComponentBinding(HarnessContract):
     metadata_ref: CatalogPayloadRef
 
 
+class HookScriptBinding(HarnessContract):
+    hook_id: str = Field(min_length=1)
+    events: tuple[HookEvent, ...] = Field(min_length=1)
+    interpreter: HookInterpreter
+    entrypoint: str = Field(min_length=1)
+    timeout_seconds: int = Field(default=30, ge=1, le=600)
+    fail_closed: bool = False
+    matcher: str | None = None
+
+
+class PluginBinding(HarnessContract):
+    """A plugin release expands into exact member releases in position order."""
+
+    members: tuple[ComponentCoordinate, ...] = Field(min_length=1)
+    optional_digests: frozenset[str] = Field(default_factory=frozenset)
+
+    @model_validator(mode="after")
+    def members_are_unique(self) -> PluginBinding:
+        digests = [member.digest for member in self.members]
+        if len(digests) != len(set(digests)):
+            raise ValueError("plugin member releases must be unique")
+        if not self.optional_digests <= set(digests):
+            raise ValueError("optional plugin members must be members")
+        return self
+
+
 class AgenticComponentRelease(HarnessContract):
     coordinate: ComponentCoordinate
     kind: ComponentKind
@@ -295,6 +339,9 @@ class AgenticComponentRelease(HarnessContract):
     workspace: WorkspaceSetup | None = None
     diff_qualification: DiffCodecQualification | None = None
     agent_component: AgentComponentBinding | None = None
+    hook_script: HookScriptBinding | None = None
+    subagent_profile: SubagentProfile | None = None
+    plugin: PluginBinding | None = None
 
     @model_validator(mode="after")
     def exactly_one_kind_binding(self) -> AgenticComponentRelease:
@@ -305,6 +352,9 @@ class AgenticComponentRelease(HarnessContract):
             ComponentKind.WORKSPACE_SETUP: self.workspace,
             ComponentKind.DIFF_CODEC: self.diff_qualification,
             ComponentKind.AGENT_COMPONENT: self.agent_component,
+            ComponentKind.HOOK_SCRIPT: self.hook_script,
+            ComponentKind.SUBAGENT_PROFILE: self.subagent_profile,
+            ComponentKind.PLUGIN: self.plugin,
         }
         populated = [kind for kind, value in bindings.items() if value is not None]
         if self.kind in bindings and bindings[self.kind] is None:

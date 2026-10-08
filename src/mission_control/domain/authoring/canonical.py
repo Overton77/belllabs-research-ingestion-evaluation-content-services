@@ -21,12 +21,25 @@ def _excluded_if(field: Any, value: Any) -> bool:
     return predicate is not None and bool(predicate(value))
 
 
+def _digest_neutral_default(field: Any, item: Any) -> bool:
+    """True when an additive field marked ``digest_omit_default`` still holds its default.
+
+    Such fields are left out of the canonical form, so definitions published before the
+    field existed keep their digest (ADR-0020: published bytes never change identity).
+    """
+    extra = field.json_schema_extra
+    if not (isinstance(extra, dict) and extra.get("digest_omit_default")):
+        return False
+    return bool(item == field.get_default(call_default_factory=True))
+
+
 def _normalize(value: Any) -> Any:
     if isinstance(value, BaseModel):
         return {
             field_name: _normalize(getattr(value, field_name))
             for field_name, field in type(value).model_fields.items()
             if not _excluded_if(field, getattr(value, field_name))
+            and not _digest_neutral_default(field, getattr(value, field_name))
         }
     if isinstance(value, datetime):
         if value.tzinfo is None or value.utcoffset() is None:
@@ -131,7 +144,7 @@ def _stabilize_sets(
                 getattr(value, name), in_set=in_set, declared=_declared_model(field.annotation)
             )
             for name, field in owner.model_fields.items()
-            if not field.exclude
+            if not field.exclude and not _digest_neutral_default(field, getattr(value, name))
         }
         content.update(
             {

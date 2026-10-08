@@ -17,6 +17,7 @@ from mission_control.application.coordinator.coordinator_facade import (
     EffectiveCoordinatorSurface,
 )
 from mission_control.domain.authoring.contracts import DefinitionKind
+from mission_control.domain.capabilities.host_support import LaneProfile
 from mission_control.domain.coordinator.errors import CoordinatorDomainError, CoordinatorErrorCode
 from mission_control.interfaces.mcp.coordinator_prompts import (
     COORDINATOR_PROMPT_NAMES,
@@ -33,6 +34,7 @@ _CORRELATION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 PRODUCTION_COORDINATOR_TOOL_NAMES = (
     "coordinator_bootstrap",
     "search_capabilities",
+    "pin_capability",
     "get_capability",
     "discover_mcp_servers",
     "discover_agent_skills",
@@ -83,6 +85,12 @@ class CoordinatorFacade(Protocol):
         self,
         principal: CoordinatorPrincipalLike,
         exact_ref: dict[str, object],
+    ) -> object: ...
+
+    async def pin(
+        self,
+        principal: CoordinatorPrincipalLike,
+        request: dict[str, object],
     ) -> object: ...
 
     async def discover_mcp_servers(
@@ -243,6 +251,7 @@ def create_coordinator_server(
             tools=(
                 "coordinator_bootstrap",
                 "search_capabilities",
+                "pin_capability",
                 "get_capability",
                 "discover_mcp_servers",
                 "discover_agent_skills",
@@ -301,6 +310,8 @@ def create_coordinator_server(
         operation_class: str | None = None,
         runtime: str | None = None,
         limit: int = 10,
+        host_profiles: list[str] | None = None,
+        side_effect_classes: list[str] | None = None,
     ) -> dict[str, object]:
         async def invoke(principal: CoordinatorPrincipal) -> object:
             normalized_kinds = [DefinitionKind(kind).value for kind in kinds]
@@ -311,6 +322,10 @@ def create_coordinator_server(
                 "required_capabilities": required_capabilities or [],
                 "limit": limit,
             }
+            if host_profiles:
+                request["host_profiles"] = [LaneProfile(item).value for item in host_profiles]
+            if side_effect_classes:
+                request["side_effect_classes"] = list(side_effect_classes)
             if workflow_type_ref is not None:
                 request["workflow_type_ref"] = workflow_type_ref
             if operation_class is not None:
@@ -322,14 +337,44 @@ def create_coordinator_server(
         return await _principal_call(context, principals, invoke)
 
     @server.tool(annotations={"readOnlyHint": True})
-    async def get_capability(
-        exact_ref: dict[str, object],
+    async def pin_capability(
+        query: str,
         context: Context,
+        kinds: list[str] | None = None,
+        host_profiles: list[str] | None = None,
+        side_effect_classes: list[str] | None = None,
+        margin: float | None = None,
     ) -> dict[str, object]:
+        """Exactly one Capability Pin for a query, or AMBIGUOUS_CAPABILITY with candidates."""
+
+        async def invoke(principal: CoordinatorPrincipal) -> object:
+            request: dict[str, object] = {
+                "query": query,
+                "tenant_scope": principal.tenant_scope,
+                "kinds": [DefinitionKind(kind).value for kind in kinds or ()],
+                "host_profiles": [LaneProfile(item).value for item in host_profiles or ()],
+                "side_effect_classes": list(side_effect_classes or ()),
+            }
+            if margin is not None:
+                request["margin"] = margin
+            return await facade.pin(principal, request)
+
+        return await _principal_call(context, principals, invoke)
+
+    @server.tool(annotations={"readOnlyHint": True})
+    async def get_capability(
+        context: Context,
+        exact_ref: dict[str, object] | None = None,
+        pin: str | None = None,
+    ) -> dict[str, object]:
+        """One catalog capability by exact ref or by Capability Pin (host support, members)."""
+        if (exact_ref is None) == (pin is None):
+            return _invalid("get_capability needs exactly one of exact_ref or pin")
+        target: dict[str, object] = {"pin": pin} if pin is not None else dict(exact_ref or {})
         return await _principal_call(
             context,
             principals,
-            lambda principal: facade.get_capability(principal, exact_ref),
+            lambda principal: facade.get_capability(principal, target),
         )
 
     @server.tool(

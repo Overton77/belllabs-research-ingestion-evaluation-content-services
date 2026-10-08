@@ -1,0 +1,57 @@
+{
+  "capture_method": "transcribed",
+  "captured_on": "2026-10-07",
+  "environment": {},
+  "note": "Transcribed from the primary-source research note; no live tools/list was run (fast-track wave A, no live provider calls). Re-capture with scripts/capture_mcp_tool_snapshot.py and update the digest before qualifying.",
+  "package_pin": "npm:tavily-mcp@0.2.22",
+  "schema_version": "mc.mcp_tools_fixture.v1",
+  "server": "mcp.tavily",
+  "source": "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md \u00a71 Tavily MCP (published build/index.js 0.2.22)",
+  "tools": [
+    {
+      "description": "Web search with depth, topic, time range, domain filters and optional raw content.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "tavily_search",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Extract markdown or text content from a list of URLs, optionally reranked by a query.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "tavily_extract",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Crawl from a root URL with depth, breadth, limit and natural-language instructions.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "tavily_crawl",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Return a site's URL structure from a base URL.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "tavily_map",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Multi-source research task (input, model mini/pro/auto); 20 requests per minute.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "tavily_research",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    }
+  ]
+}

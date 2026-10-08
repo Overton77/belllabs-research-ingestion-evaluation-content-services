@@ -1,0 +1,1343 @@
+{
+  "actor_ref": "seed:mission-control-catalog",
+  "component_compatibility": ">=1.0.0 <2.0.0",
+  "depends_on": [
+    {
+      "seed_key": "mc.catalog.agent-capabilities",
+      "seed_version": "1.0.0"
+    }
+  ],
+  "description": "Agent-capability MCP servers admitted only in 'ai-engineer' (FT-A6): mcp.edgartools. Secret reference NAMES only; requires migration 0025.",
+  "format": "mission-control-seed/v1",
+  "records": [
+    {
+      "fields": {
+        "asset_id": "definition:mcp_server:mcp.edgartools",
+        "contract": "mission-control.published-definition/1",
+        "host_support": {
+          "profiles": {
+            "claude_agent_sdk": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "codex": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_cloud": {
+              "evidence_ref": null,
+              "overlay": {
+                "transport": "streamable_http",
+                "url_ref": "MCP_SELF_HOSTED_URL"
+              },
+              "status": "unqualified"
+            },
+            "cursor_local": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "deep_agents": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            }
+          },
+          "schema_version": "mc.capability_host_support.v1"
+        },
+        "kind": "mcp_server",
+        "manifest": {
+          "definition": {
+            "allowed_tools": [
+              "edgar_company",
+              "edgar_compare",
+              "edgar_filing",
+              "edgar_fund",
+              "edgar_monitor",
+              "edgar_notes",
+              "edgar_ownership",
+              "edgar_proxy",
+              "edgar_read",
+              "edgar_screen",
+              "edgar_search",
+              "edgar_text_search",
+              "edgar_trends"
+            ],
+            "approval_policy": {},
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "credential_refs": [],
+            "description": "edgartools MCP server (uvx --from edgartools[ai]==5.61.1 edgartools-mcp): SEC EDGAR company profiles, filings, full-text search, XBRL financial trends, insider and institutional ownership, funds and proxy compensation (sec filings). SEC requires a declared identity (EDGAR_IDENTITY) and allows 10 requests/s. Cloud lanes need the streamable-http transport self-hosted.",
+            "endpoint": null,
+            "env_refs": {
+              "EDGAR_IDENTITY": "EDGAR_IDENTITY"
+            },
+            "host_support": {
+              "profiles": {
+                "claude_agent_sdk": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "codex": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_cloud": {
+                  "evidence_ref": null,
+                  "overlay": {
+                    "transport": "streamable_http",
+                    "url_ref": "MCP_SELF_HOSTED_URL"
+                  },
+                  "status": "unqualified"
+                },
+                "cursor_local": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "deep_agents": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                }
+              },
+              "schema_version": "mc.capability_host_support.v1"
+            },
+            "kind": "mcp_server",
+            "launch_template": [
+              "uvx",
+              "--from",
+              "edgartools[ai]==5.61.1",
+              "edgartools-mcp"
+            ],
+            "logical_id": "mcp.edgartools",
+            "maturity": "experimental",
+            "network_requirements": [],
+            "package_pin": "pypi:edgartools[ai]==5.61.1",
+            "review_status": "approved",
+            "schema_digest": "sha256:0942de2dd22477d9e0d2dc9e5634ac2536fcbdcc09e23f377f1e0748f048d3ec",
+            "schema_snapshot_ref": {
+              "digest": "sha256:f1e517e9691964bef22071df1ba9a495e51978ebfd7fa4e7e496c5936bbd5de1",
+              "media_type": "application/json",
+              "size_bytes": 3609,
+              "uri": "repo://tests/fixtures/mcp/mcp.edgartools.tools.json"
+            },
+            "schema_version": "1",
+            "secret_refs": [
+              "EDGAR_IDENTITY"
+            ],
+            "source_provenance": {
+              "commit_digest": null,
+              "license": "MIT",
+              "locator": "https://github.com/dgunning/edgartools",
+              "source": "git",
+              "upstream_identity": "edgartools",
+              "upstream_version": "5.61.1"
+            },
+            "title": "edgartools SEC EDGAR filings, financials and ownership",
+            "tools": [
+              {
+                "description": "Company profile, financials, filings and ownership in one call.",
+                "name": "edgar_company",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Filing metadata search.",
+                "name": "edgar_search",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Screen companies by industry, exchange or state from local data.",
+                "name": "edgar_screen",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "EDGAR full-text search.",
+                "name": "edgar_text_search",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Live filing feed.",
+                "name": "edgar_monitor",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Parse a filing into typed data.",
+                "name": "edgar_filing",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Extract filing sections.",
+                "name": "edgar_read",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Notes and disclosures drill-down.",
+                "name": "edgar_notes",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "XBRL time series and growth.",
+                "name": "edgar_trends",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Side-by-side or industry comparison.",
+                "name": "edgar_compare",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Insider (Form 4) and institutional (13F) ownership.",
+                "name": "edgar_ownership",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Mutual funds, ETFs, BDCs and money market funds.",
+                "name": "edgar_fund",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "DEF 14A executive compensation.",
+                "name": "edgar_proxy",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              }
+            ],
+            "tools_list_digest": "sha256:0942de2dd22477d9e0d2dc9e5634ac2536fcbdcc09e23f377f1e0748f048d3ec",
+            "transport": "stdio"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:fa757ab0c00da175bd51c261389e0ed8b7e776c83a907b7a489950dab2c8cbde",
+            "kind": "mcp_server",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.edgartools",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:407d9ba8b45bdc32f724f4f044ca4a56e9db55bf4c8e6ce5d93f818f50a41344",
+        "manifest_ref": "mc-catalog://definition/mcp_server/mcp.edgartools/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "secret_refs": [
+          "EDGAR_IDENTITY"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-server:mcp.edgartools/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-server:mcp.edgartools/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.edgartools.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-server:mcp.edgartools/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.edgartools.tool.edgar-company",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Company profile, financials, filings and ownership in one call.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.edgartools.tool.edgar-company",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:24453aeb0c7344b521426ba4f0cf92bf038eea7364271e4fca35f1839237b23c",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:fa757ab0c00da175bd51c261389e0ed8b7e776c83a907b7a489950dab2c8cbde",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.edgartools",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "edgar_company",
+            "tool_name": "edgar_company"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:26fa7d39725cbf54890b1ad2f1023c81cd18a2baf18fbe2dfa082bfc61940da9",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.edgartools.tool.edgar-company",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:71ad66ee3471fd36cebb624ba9f1ae020382bdddc50e188fa4905e33046e3db6",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.edgartools.tool.edgar-company/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-company/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-company/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.edgartools.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-company/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.edgartools.tool.edgar-search",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Filing metadata search.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.edgartools.tool.edgar-search",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:672aae2c21b545a269c283444d2c7a751c07997c8b1a2add37925269b289a36c",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:fa757ab0c00da175bd51c261389e0ed8b7e776c83a907b7a489950dab2c8cbde",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.edgartools",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "edgar_search",
+            "tool_name": "edgar_search"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:23e70338f7623fbe6b50049ab0eb4bb7f829ecb9695ed6bf4c118471fd9c7dce",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.edgartools.tool.edgar-search",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:10d9d6e89166c359f8a8ffb287e2e778ab4b6de87bef3fc2d1aaa8d34b6689d6",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.edgartools.tool.edgar-search/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-search/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-search/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.edgartools.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-search/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.edgartools.tool.edgar-screen",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Screen companies by industry, exchange or state from local data.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.edgartools.tool.edgar-screen",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:d13892f2d1390003ea24a082dadd454cc7620612df881ecf6aa95894ad472b4c",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:fa757ab0c00da175bd51c261389e0ed8b7e776c83a907b7a489950dab2c8cbde",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.edgartools",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "edgar_screen",
+            "tool_name": "edgar_screen"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:2011ea20b8ab14b316664121899208bd29d59e79a961a88e4955640a60db5b66",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.edgartools.tool.edgar-screen",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:e8aabbf010d78d75e1282ab4e5e4f537c471202618a16bd54cf7bb47acb55a0a",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.edgartools.tool.edgar-screen/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-screen/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-screen/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.edgartools.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-screen/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.edgartools.tool.edgar-text-search",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "EDGAR full-text search.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.edgartools.tool.edgar-text-search",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:3419e307538a89cafda5f46ed51bf39074d17dab63f4b675d3da313d86ef142a",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:fa757ab0c00da175bd51c261389e0ed8b7e776c83a907b7a489950dab2c8cbde",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.edgartools",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "edgar_text_search",
+            "tool_name": "edgar_text_search"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:cc3cef6e205f98a019aa7dc5d199cd26fa35af2527efd18837d4bbe6b259ea9f",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.edgartools.tool.edgar-text-search",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:75785a4f5d6be3a7015edc22ed961a53a9c0bba97bd2032ceee6a82101221486",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.edgartools.tool.edgar-text-search/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-text-search/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-text-search/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.edgartools.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-text-search/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.edgartools.tool.edgar-monitor",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Live filing feed.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.edgartools.tool.edgar-monitor",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:0e858eb9fe25d5ac6178c5ac7845220f2b1774e096d4e1bb68703e1021f99c30",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:fa757ab0c00da175bd51c261389e0ed8b7e776c83a907b7a489950dab2c8cbde",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.edgartools",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "edgar_monitor",
+            "tool_name": "edgar_monitor"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:11cf9bff49671e3f4f6aa1103f5516e5ea5ac2e607f1071de40b221dcc02ec19",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.edgartools.tool.edgar-monitor",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:1924ef00bad4e26915f3c38f489c727c8e0b44ee71225838f330384e75afd7a5",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.edgartools.tool.edgar-monitor/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-monitor/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-monitor/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.edgartools.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-monitor/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.edgartools.tool.edgar-filing",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Parse a filing into typed data.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.edgartools.tool.edgar-filing",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:1cd9775469fdb9e89ab645278bb635fe0f72ec4d860416526e94fd24bb2d195c",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:fa757ab0c00da175bd51c261389e0ed8b7e776c83a907b7a489950dab2c8cbde",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.edgartools",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "edgar_filing",
+            "tool_name": "edgar_filing"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:86b78b0e844291d8d4c85eb222ebf5cced39f0bdcf5b32334f298d0181087830",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.edgartools.tool.edgar-filing",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:e7a24a8606f251f8e45812864909390ec37373fbe405126c85f562dc6b6c4362",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.edgartools.tool.edgar-filing/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-filing/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-filing/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.edgartools.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-filing/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.edgartools.tool.edgar-read",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Extract filing sections.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.edgartools.tool.edgar-read",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:e88bba199bb9387d1dbef5dc214f4df6dda4c0d731f56fc49069a2ea74e30435",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:fa757ab0c00da175bd51c261389e0ed8b7e776c83a907b7a489950dab2c8cbde",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.edgartools",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "edgar_read",
+            "tool_name": "edgar_read"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:3529e79ad876086d6a3c50c84dc25a1c008712ff14e2f8d23e3ced79dda3b1d0",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.edgartools.tool.edgar-read",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:7a8e9854bcf103182b62a56c1f19e33714920f208006653e3f1a0978a2afae66",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.edgartools.tool.edgar-read/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-read/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-read/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.edgartools.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-read/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.edgartools.tool.edgar-notes",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Notes and disclosures drill-down.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.edgartools.tool.edgar-notes",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:90e3935ff2ce6aad94c4e6f882d7aa7beb595f31819f7e7fbb9069144d99bdd6",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:fa757ab0c00da175bd51c261389e0ed8b7e776c83a907b7a489950dab2c8cbde",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.edgartools",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "edgar_notes",
+            "tool_name": "edgar_notes"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:dac54414b85047528777d246143a0dbcb346cc382fc6abff87fcc0e719d37a85",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.edgartools.tool.edgar-notes",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:87190241c27869e2512b6c20de9c9bd398817269edf8dc64e5ba2ac3aa7b9004",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.edgartools.tool.edgar-notes/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-notes/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-notes/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.edgartools.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-notes/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.edgartools.tool.edgar-trends",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "XBRL time series and growth.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.edgartools.tool.edgar-trends",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:5655723a1725865822051f070bf6ba66513dd5e76cd4e38e7cd47a61b8dc0ddc",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:fa757ab0c00da175bd51c261389e0ed8b7e776c83a907b7a489950dab2c8cbde",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.edgartools",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "edgar_trends",
+            "tool_name": "edgar_trends"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:1bcbbb3c71fc9bf836f4baf928c06181ad72c477ca01c6ffe1206317793c0c84",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.edgartools.tool.edgar-trends",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:7397a2e8db862c82b4a5a9cca3efa38301141a58f9884ea6d850cfde282fc0ea",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.edgartools.tool.edgar-trends/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-trends/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-trends/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.edgartools.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-trends/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.edgartools.tool.edgar-compare",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Side-by-side or industry comparison.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.edgartools.tool.edgar-compare",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:d376dc6f180c8282ffb49fdfc4c799ef7456bde8d40b43ab5cda5db8d1edc900",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:fa757ab0c00da175bd51c261389e0ed8b7e776c83a907b7a489950dab2c8cbde",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.edgartools",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "edgar_compare",
+            "tool_name": "edgar_compare"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:0faca6a0fbaff46d649993771e22aa0f43d0b2ed79e817480a13b2b946da5452",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.edgartools.tool.edgar-compare",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:6105ced47eae9da77a7dc3118271ef57af2add110ab527f64940d6354324f93e",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.edgartools.tool.edgar-compare/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-compare/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-compare/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.edgartools.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-compare/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.edgartools.tool.edgar-ownership",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Insider (Form 4) and institutional (13F) ownership.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.edgartools.tool.edgar-ownership",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:881a35dd32140b228251e0e0452bf4966645cfffdc11f131ba629d0082e458ae",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:fa757ab0c00da175bd51c261389e0ed8b7e776c83a907b7a489950dab2c8cbde",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.edgartools",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "edgar_ownership",
+            "tool_name": "edgar_ownership"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:b2983bf35786d29023297639e8be14a801a05f7eaddab7a1d91080dcbc1dfe31",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.edgartools.tool.edgar-ownership",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:9f382a112a9b41d6421745cb75a0c13e69de449658583a6f3ece478e65537883",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.edgartools.tool.edgar-ownership/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-ownership/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-ownership/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.edgartools.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-ownership/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.edgartools.tool.edgar-fund",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Mutual funds, ETFs, BDCs and money market funds.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.edgartools.tool.edgar-fund",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:502eff37c8a30d2245d7814935a439235cd1fe935c2bed161f7afa0702c96181",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:fa757ab0c00da175bd51c261389e0ed8b7e776c83a907b7a489950dab2c8cbde",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.edgartools",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "edgar_fund",
+            "tool_name": "edgar_fund"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:703e15496ff79ecce55670f73f0f750472b07491fa298bb0ec606b544d9df9c9",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.edgartools.tool.edgar-fund",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:df44a43c33692a2e7d44e864f556e0b429644c3425aa161aecdfcb765659431d",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.edgartools.tool.edgar-fund/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-fund/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-fund/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.edgartools.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-fund/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.edgartools.tool.edgar-proxy",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "DEF 14A executive compensation.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.edgartools.tool.edgar-proxy",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:81a0340030f27a60f4707208367693efa1a8ee9649616b78743db604b79389e5",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:fa757ab0c00da175bd51c261389e0ed8b7e776c83a907b7a489950dab2c8cbde",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.edgartools",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "edgar_proxy",
+            "tool_name": "edgar_proxy"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:fd766a673e98863b9474586d3e19b096dd8c252232b4ea57e1d596c9a7a81b05",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.edgartools.tool.edgar-proxy",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:b36d881cba606d176dbf294153ab3e4cada270339d2f3ab3072cd7aef53d10e9",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.edgartools.tool.edgar-proxy/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-proxy/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-proxy/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.edgartools.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.edgartools.tool.edgar-proxy/1:admit"
+    }
+  ],
+  "seed_key": "mc.app.ai-engineer.agent-capabilities",
+  "seed_version": "1.0.0"
+}

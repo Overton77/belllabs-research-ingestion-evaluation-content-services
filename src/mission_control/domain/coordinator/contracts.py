@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from mission_control.domain.authoring.contracts import (
+    DIGEST_NEUTRAL_DEFAULT,
     AuthorityCeiling,
     BudgetCeiling,
     DefinitionKind,
@@ -14,6 +15,10 @@ from mission_control.domain.authoring.contracts import (
     StageGraphBlueprint,
     WorkflowTypeDefinition,
     WorkflowWorkspaceContract,
+)
+from mission_control.domain.capabilities.host_support import (
+    CapabilityHostSupport,
+    LaneProfile,
 )
 
 DIGEST_PATTERN = r"^sha256:[0-9a-f]{64}$"
@@ -69,6 +74,15 @@ class CapabilitySearchRequest(Contract):
     status_filter: frozenset[CatalogAssetStatus] = frozenset({CatalogAssetStatus.PUBLISHED})
     include_external_candidates: bool = False
     limit: int = Field(default=10, ge=1, le=100)
+    # SPEC-01 (FT-A3): filters applied before ranking. A host profile matches only rows whose
+    # host_support marks it ``supported``.
+    host_profiles: frozenset[LaneProfile] = Field(
+        default_factory=frozenset, json_schema_extra=DIGEST_NEUTRAL_DEFAULT
+    )
+    side_effect_classes: frozenset[str] = Field(
+        default_factory=frozenset, json_schema_extra=DIGEST_NEUTRAL_DEFAULT
+    )
+    include_plugin_members: bool = Field(default=False, json_schema_extra=DIGEST_NEUTRAL_DEFAULT)
 
     @field_validator("query", "tenant_scope", "operation_class", "runtime")
     @classmethod
@@ -99,6 +113,15 @@ class CapabilitySearchRequest(Contract):
         return self
 
 
+class RankProvenance(Contract):
+    """Where a hit ranked in each list before reciprocal rank fusion (ADR-0025)."""
+
+    lexical_rank: int | None = Field(default=None, ge=1)
+    trigram_rank: int | None = Field(default=None, ge=1)
+    vector_rank: int | None = Field(default=None, ge=1)
+    fused_score: float = Field(ge=0)
+
+
 class CapabilitySearchHit(Contract):
     exact_ref: ExactDefinitionRef | None = None
     candidate_id: str | None = Field(default=None, min_length=1)
@@ -115,6 +138,17 @@ class CapabilitySearchHit(Contract):
     indexed_at: AwareDatetime | None = None
     projection_generation: str | None = Field(default=None, min_length=1)
     parent_ref: ExactDefinitionRef | None = None
+    # SPEC-01 (FT-A3) additions; digest-neutral at their defaults.
+    pin: str | None = Field(default=None, json_schema_extra=DIGEST_NEUTRAL_DEFAULT)
+    host_support: CapabilityHostSupport | None = Field(
+        default=None, json_schema_extra=DIGEST_NEUTRAL_DEFAULT
+    )
+    supported_profiles: tuple[LaneProfile, ...] = Field(
+        default=(), json_schema_extra=DIGEST_NEUTRAL_DEFAULT
+    )
+    rank_provenance: RankProvenance | None = Field(
+        default=None, json_schema_extra=DIGEST_NEUTRAL_DEFAULT
+    )
 
     @model_validator(mode="after")
     def validate_identity_and_projection_evidence(self) -> CapabilitySearchHit:

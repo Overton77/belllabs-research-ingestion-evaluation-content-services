@@ -6,7 +6,8 @@
   "postgres_major": 17,
   "min_postgres_version": 170000,
   "required_extensions": [
-    {"name": "vector", "schema": "extensions", "required_by": ["mission_control_search"]}
+    {"name": "vector", "schema": "extensions", "required_by": ["mission_control_search"]},
+    {"name": "pg_trgm", "schema": "extensions", "required_by": ["mission_control_search"]}
   ],
   "supported_reader_versions": ["mission-control-runtime/1"],
   "supported_writer_versions": ["mission-control-runtime/1"],
@@ -27,7 +28,11 @@
       "mc.catalog.runtime-profiles",
       "mc.catalog.approved-assets",
       "mc.app.bindings",
-      "mc.qualification.parity"
+      "mc.qualification.parity",
+      "mc.catalog.agent-capabilities",
+      "mc.app.biotech.agent-capabilities",
+      "mc.app.ai-engineer.agent-capabilities",
+      "mc.storage.capability-bundles"
     ]
   },
   "runtime_descriptor_path": "../runtime/descriptor.json"

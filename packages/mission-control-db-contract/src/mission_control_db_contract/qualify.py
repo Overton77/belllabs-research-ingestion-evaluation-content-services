@@ -17,7 +17,18 @@ from .deployment import inspect_target, plan_release, verify_release
 from .errors import ContractError
 from .integrity import Release
 from .snapshot import compare, snapshot_target
-from .target import public_identity
+from .storage import verify_capability_bundles
+from .target import close_quietly, connect, public_identity
+
+
+async def verify_storage(target: dict[str, str]) -> dict[str, Any]:
+    """Read-only check of the capability-bundles bucket seed (absent without Storage)."""
+    connection = await connect(target, readonly=True)
+    try:
+        async with connection.transaction(isolation="repeatable_read", readonly=True):
+            return await verify_capability_bundles(connection, target["application_id"])
+    finally:
+        await close_quietly(connection)
 
 
 async def qualify(
@@ -88,6 +99,12 @@ async def qualify(
             "migration-receipts.json",
             "roles.json",
         ]
+        # FT-A2: capability-bundles bucket and policies, when the target has Storage.
+        bundles = await verify_storage(target)
+        write_json(out_dir / "storage-capability-bundles.json", bundles)
+        written.append("storage-capability-bundles.json")
+        if bundles["status"] == "drift":
+            holds.append("capability-bundles storage policies drifted from their seed")
         decision = {"phase": "after", "verification": verified.get("status")}
         before_path = out_dir / "protected-before.json"
         if before_path.exists():

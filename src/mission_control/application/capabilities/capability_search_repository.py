@@ -57,7 +57,12 @@ class CapabilitySearchDocument(SearchRepositoryContract):
     description: str = Field(min_length=1)
     search_text: str = Field(min_length=1)
     search_text_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
-    embedding: tuple[float, ...] = Field(min_length=1)
+    # FT-A3 (ADR-0025): a row may be projected lexically first and embedded later, so the
+    # embedding is optional; ``embedding_model``/``embedding_dims`` record what embedded it.
+    # ``embedding_model_id``/``embedding_dimensions`` remain the generation contract.
+    embedding: tuple[float, ...] | None = None
+    embedding_model: str | None = Field(default=None, min_length=1)
+    embedding_dims: int | None = Field(default=None, ge=1)
     embedding_model_id: str = Field(min_length=1)
     embedding_dimensions: int = Field(ge=1)
     search_document_format_version: int = Field(ge=1)
@@ -68,6 +73,11 @@ class CapabilitySearchDocument(SearchRepositoryContract):
     workflow_type_refs: frozenset[ExactDefinitionRef] = frozenset()
     capability_requirements: frozenset[str] = frozenset()
     compatible_runtimes: frozenset[str] = frozenset()
+    # Pre-ranking filters and the trigram name surface (SPEC-01 hybrid search).
+    host_profiles: frozenset[str] = frozenset()
+    side_effect_class: str | None = None
+    aliases: frozenset[str] = frozenset()
+    tool_names: frozenset[str] = frozenset()
     compatibility_summary: str = "Compatible with the indexed catalog contract."
     schema_digest_verified: bool = True
     mongodb_collection: str = "control_plane_published_definitions"
@@ -76,10 +86,25 @@ class CapabilitySearchDocument(SearchRepositoryContract):
     indexed_at: datetime
     projection_generation: str = Field(min_length=1)
 
+    @model_validator(mode="before")
+    @classmethod
+    def embedding_provenance_defaults(cls, value: object) -> object:
+        # Rows written before FT-A3 carry an embedding but no per-row provenance.
+        if isinstance(value, dict) and value.get("embedding"):
+            value = dict(value)
+            value.setdefault("embedding_model", value.get("embedding_model_id"))
+            value.setdefault("embedding_dims", len(value["embedding"]))
+        return value
+
     @model_validator(mode="after")
     def validate_projection_shape(self) -> CapabilitySearchDocument:
-        if len(self.embedding) != self.embedding_dimensions:
-            raise ValueError("search document embedding dimensions do not match")
+        if self.embedding is not None:
+            if not self.embedding or len(self.embedding) != self.embedding_dims:
+                raise ValueError("search document embedding dimensions do not match")
+            if self.embedding_model is None:
+                raise ValueError("an embedded search document records its embedding model")
+        elif self.embedding_model is not None or self.embedding_dims is not None:
+            raise ValueError("embedding provenance requires an embedding")
         if self.asset_kind == DefinitionKind.MCP_TOOL:
             if self.parent_ref is None or self.parent_ref.kind != DefinitionKind.MCP_SERVER:
                 raise ValueError("MCP Tool search rows require an exact MCP Server parent")
@@ -88,6 +113,18 @@ class CapabilitySearchDocument(SearchRepositoryContract):
         if any(ref.kind != DefinitionKind.WORKFLOW_TYPE for ref in self.workflow_type_refs):
             raise ValueError("workflow filters must contain Workflow Type references")
         return self
+
+    @property
+    def name_surface(self) -> str:
+        """Identifier, title, aliases and tool names: the trigram (near-exact name) surface."""
+        parts = [self.logical_id, self.title, *sorted(self.aliases), *sorted(self.tool_names)]
+        return " ".join(part.casefold() for part in parts if part)
+
+    @property
+    def embedded_with(self) -> tuple[str, int] | None:
+        if self.embedding is None or self.embedding_model is None or self.embedding_dims is None:
+            return None
+        return self.embedding_model, self.embedding_dims
 
     @property
     def exact_ref(self) -> ExactDefinitionRef:
@@ -141,6 +178,16 @@ class CatalogSearchRepository(Protocol):
         *,
         limit: int,
     ) -> tuple[RankedCapabilityDocument, ...]: ...
+
+    async def trigram_search(
+        self,
+        request: CapabilitySearchRequest,
+        *,
+        limit: int,
+    ) -> tuple[RankedCapabilityDocument, ...]: ...
+
+
+TRIGRAM_THRESHOLD = 0.3
 
 
 class InMemoryCatalogSearchRepository:
@@ -304,10 +351,33 @@ class InMemoryCatalogSearchRepository:
     ) -> tuple[RankedCapabilityDocument, ...]:
         scored: list[RankedCapabilityDocument] = []
         for document in self._filtered(request):
-            if len(document.embedding) != len(query_embedding):
+            if document.embedding is None or len(document.embedding) != len(query_embedding):
                 continue
             score = _cosine_similarity(query_embedding, document.embedding)
             scored.append(RankedCapabilityDocument(document=document, branch_score=score))
+        return tuple(
+            sorted(
+                scored,
+                key=lambda item: (
+                    -item.branch_score,
+                    item.document.logical_id,
+                    item.document.revision,
+                ),
+            )[:limit]
+        )
+
+    async def trigram_search(
+        self,
+        request: CapabilitySearchRequest,
+        *,
+        limit: int,
+    ) -> tuple[RankedCapabilityDocument, ...]:
+        query = " ".join(request.query.casefold().split())
+        scored = [
+            RankedCapabilityDocument(document=document, branch_score=score)
+            for document in self._filtered(request)
+            if (score := word_similarity(query, document.name_surface)) >= TRIGRAM_THRESHOLD
+        ]
         return tuple(
             sorted(
                 scored,
@@ -343,6 +413,11 @@ class InMemoryCatalogSearchRepository:
                 request.workflow_type_ref is None
                 or request.workflow_type_ref in document.workflow_type_refs
             )
+            and {profile.value for profile in request.host_profiles} <= document.host_profiles
+            and (
+                not request.side_effect_classes
+                or document.side_effect_class in request.side_effect_classes
+            )
         )
 
     def _is_active(self, document: CapabilitySearchDocument) -> bool:
@@ -358,12 +433,38 @@ def _lexical_score(
     query_terms: tuple[str, ...],
     document: CapabilitySearchDocument,
 ) -> float:
+    return lexical_score(
+        query_terms,
+        identifier=document.logical_id,
+        title=document.title,
+        text=document.search_text,
+        description=document.description,
+    )
+
+
+def query_terms(query: str) -> tuple[str, ...]:
+    return _terms(query)
+
+
+def lexical_score(
+    query_terms: tuple[str, ...],
+    *,
+    identifier: str,
+    title: str,
+    text: str,
+    description: str,
+) -> float:
+    """The lexical ranking shared by the in-memory projection and component search.
+
+    Field weights mirror the PostgreSQL ``fts`` vector: identifier and title (A), search
+    text (B), description (C); an exact or contained identifier match is boosted.
+    """
     if not query_terms:
         return 0
-    logical = document.logical_id.casefold()
-    title = document.title.casefold()
-    description = document.description.casefold()
-    search_text = document.search_text.casefold()
+    logical = identifier.casefold()
+    title = title.casefold()
+    description = description.casefold()
+    search_text = text.casefold()
     score = 0.0
     for term in query_terms:
         score += logical.count(term) * 5.0
@@ -384,3 +485,35 @@ def _cosine_similarity(left: tuple[float, ...], right: tuple[float, ...]) -> flo
     if left_norm == 0 or right_norm == 0:
         return 0.0
     return sum(a * b for a, b in zip(left, right, strict=True)) / (left_norm * right_norm)
+
+
+def _trigrams(text: str) -> set[str]:
+    """pg_trgm-style trigrams: each alphanumeric word padded with two leading blanks."""
+    grams: set[str] = set()
+    for word in re.findall(r"[a-z0-9]+", text.casefold()):
+        padded = f"  {word} "
+        grams.update(padded[index : index + 3] for index in range(len(padded) - 2))
+    return grams
+
+
+def word_similarity(query: str, text: str) -> float:
+    """Approximates pg_trgm ``word_similarity(query, text)``.
+
+    The greatest trigram similarity between the query and any run of consecutive words of
+    ``text``, normalized by the query's trigram count, as PostgreSQL computes it for the
+    best-matching extent. Used by the in-memory adapter; PostgreSQL uses pg_trgm itself.
+    """
+    query_grams = _trigrams(query)
+    if not query_grams:
+        return 0.0
+    words = re.findall(r"[a-z0-9]+", text.casefold())
+    best = 0.0
+    width = max(1, len(re.findall(r"[a-z0-9]+", query.casefold())))
+    for start in range(len(words)):
+        for size in range(1, width + 2):
+            extent = words[start : start + size]
+            if not extent:
+                continue
+            shared = len(query_grams & _trigrams(" ".join(extent)))
+            best = max(best, shared / len(query_grams))
+    return best

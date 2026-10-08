@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "firecrawl": {
+      "headers": {
+        "Authorization": "Bearer ${env:FIRECRAWL_API_KEY}"
+      },
+      "type": "http",
+      "url": "https://mcp.firecrawl.dev/v2/mcp"
+    },
+    "tavily": {
+      "headers": {
+        "Authorization": "Bearer ${env:TAVILY_API_KEY}"
+      },
+      "type": "http",
+      "url": "https://mcp.tavily.com/mcp/"
+    }
+  }
+}

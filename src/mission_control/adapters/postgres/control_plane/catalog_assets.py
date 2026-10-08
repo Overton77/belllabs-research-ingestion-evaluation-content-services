@@ -19,6 +19,7 @@ import asyncpg
 from mission_control.contracts.identities import uuid7
 from mission_control.domain.authoring.canonical import sha256_digest
 from mission_control.domain.authoring.contracts import DefinitionKind
+from mission_control.domain.capabilities.host_support import CapabilityHostSupport
 
 PUBLISHED_DEFINITION_CONTRACT = "mission-control.published-definition/1"
 SKILL_BUNDLE_CONTRACT = "mission-control.skill-bundle.v1"
@@ -38,16 +39,52 @@ ASSET_KIND: dict[DefinitionKind, str] = {
     DefinitionKind.AGENT_PROFILE: "profile",
     DefinitionKind.CAPABILITY_SELECTION: "policy",
     DefinitionKind.PROMPT: "schema",
-    DefinitionKind.SKILL: "skill",
+    # Agent-composition kinds (ADR-0023, migration 0025): one SQL literal each.
+    DefinitionKind.SKILL: "skill_bundle",
     DefinitionKind.MCP_SERVER: "mcp_server",
-    DefinitionKind.MCP_TOOL: "tool",
-    DefinitionKind.PLUGIN_PACKAGE: "plugin",
+    DefinitionKind.MCP_TOOL: "mcp_tool",
+    DefinitionKind.HOOK_SCRIPT: "hook_script",
+    DefinitionKind.SUBAGENT_PROFILE: "subagent_profile",
+    DefinitionKind.PLUGIN: "plugin",
     DefinitionKind.MODEL: "model_route",
-    DefinitionKind.MIDDLEWARE: "hook",
+    # "hook" now means Hook Script only (SPEC-01 vocabulary reconciliation).
+    DefinitionKind.MIDDLEWARE: "middleware",
     DefinitionKind.SANDBOX_PROFILE: "profile",
     DefinitionKind.TOOL: "tool",
     DefinitionKind.DEEP_AGENT_PLACEMENT: "profile",
 }
+
+# Literals written before migration 0025. Rows keep them (asset_version is immutable); readers
+# that filter by kind accept both, and a later migration retires them once no row carries one.
+LEGACY_ASSET_KIND: dict[DefinitionKind, str] = {
+    DefinitionKind.SKILL: "skill",
+    DefinitionKind.MCP_TOOL: "tool",
+    DefinitionKind.MIDDLEWARE: "hook",
+}
+
+# The agent-composition literals whose rows carry host_support and secret_refs.
+AGENT_COMPOSITION_ASSET_KINDS = frozenset(
+    {"skill_bundle", "mcp_server", "mcp_tool", "hook_script", "subagent_profile", "plugin"}
+)
+
+
+def asset_kinds_for(kind: DefinitionKind | str) -> frozenset[str]:
+    """Every SQL literal a row of this Definition kind may carry (current plus legacy)."""
+    definition_kind = DefinitionKind(kind)
+    legacy = LEGACY_ASSET_KIND.get(definition_kind)
+    current = ASSET_KIND[definition_kind]
+    return frozenset({current} if legacy is None else {current, legacy})
+
+
+def capability_core_columns(definition: object) -> tuple[str, list[str]]:
+    """``(host_support jsonb, secret_refs text[])`` column values for an asset row."""
+    host_support = getattr(definition, "host_support", None)
+    document = (
+        host_support.model_dump(mode="json")
+        if isinstance(host_support, CapabilityHostSupport)
+        else CapabilityHostSupport().model_dump(mode="json")
+    )
+    return json.dumps(document, sort_keys=True), list(getattr(definition, "secret_refs", ()))
 
 
 def definition_asset_id(kind: DefinitionKind | str, logical_id: str) -> str:

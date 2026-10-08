@@ -3,6 +3,7 @@
 CREATE SCHEMA extensions;
 CREATE EXTENSION vector SCHEMA extensions;
 CREATE EXTENSION pgcrypto SCHEMA extensions;
+CREATE EXTENSION pg_trgm SCHEMA extensions;
 CREATE SCHEMA corpus;
 CREATE TABLE corpus.document (
     document_id bigint PRIMARY KEY,

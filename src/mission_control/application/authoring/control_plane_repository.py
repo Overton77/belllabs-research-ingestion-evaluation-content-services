@@ -153,6 +153,18 @@ class InMemoryDefinitionRepository:
         self._projection_events[str(event["event_id"])] = event
         return published.model_copy(deep=True)
 
+    async def list_published_definitions(self) -> tuple[PublishedDefinition, ...]:
+        """Every published revision (retirement applied), ordered like the PostgreSQL adapter."""
+        return tuple(
+            [
+                await self.get(published.ref)
+                for _, published in sorted(self._published.items(), key=lambda item: item[0])
+            ]
+        )
+
+    async def list_published_definition_refs(self) -> tuple[ExactDefinitionRef, ...]:
+        return tuple(item.ref for item in await self.list_published_definitions())
+
     async def get(self, ref: ExactDefinitionRef) -> PublishedDefinition:
         key = (ref.kind.value, ref.logical_id, ref.revision)
         try:

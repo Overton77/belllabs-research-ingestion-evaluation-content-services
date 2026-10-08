@@ -264,6 +264,7 @@ async def test_concrete_facade_through_in_memory_fastmcp() -> None:
         assert bootstrap.data["data"]["root_tools"] == [
             "coordinator_bootstrap",
             "search_capabilities",
+            "pin_capability",
             "get_capability",
             "validate_workflow_design",
         ]

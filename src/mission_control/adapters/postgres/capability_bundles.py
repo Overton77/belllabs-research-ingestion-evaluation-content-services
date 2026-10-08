@@ -16,6 +16,7 @@ import asyncio
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from types import MappingProxyType
 
 import asyncpg
@@ -32,10 +33,21 @@ from mission_control.adapters.postgres.control_plane.catalog_assets import (
     SKILL_BUNDLE_CONTRACT,
     skill_bundle_asset_id,
 )
+from mission_control.adapters.postgres.control_plane.definition_repository import (
+    PostgresDefinitionRepository,
+)
 from mission_control.adapters.postgres.scope import apply_catalog_scope, parse_catalog_scope
 from mission_control.contracts.identities import uuid7
-from mission_control.domain.authoring.canonical import stable_json_dump
-from mission_control.domain.authoring.contracts import DefinitionKind
+from mission_control.domain.authoring.canonical import sha256_digest, stable_json_dump
+from mission_control.domain.authoring.contracts import Definition, DefinitionKind
+from mission_control.domain.capabilities.bundles import CapabilityBundleManifest
+from mission_control.domain.capabilities.catalog_entry import capability_pin
+
+_BUNDLE_KIND = {
+    "skill_bundle": DefinitionKind.SKILL.value,
+    "hook_script": DefinitionKind.HOOK_SCRIPT.value,
+    "subagent_profile": DefinitionKind.SUBAGENT_PROFILE.value,
+}
 
 BundleContents = tuple[BundleManifest, tuple[tuple[str, bytes], ...]]
 BUNDLE_ADMISSION_POLICY = "mission-control.skill-bundle-admission/1"
@@ -245,3 +257,33 @@ class PostgresCapabilityBundleAdmissions:
             manifest, files = await self.resolve(pin, reader=reader)
             bundles[manifest.digest] = (manifest, files)
         return AdmittedBundleReader(MappingProxyType(bundles))
+
+
+class PostgresBundleRegistry:
+    """FT-A2 registration step: one ``proposed`` published-definition row per bundle.
+
+    Idempotent: a bundle whose definition (and so whose manifest digest) is already
+    registered returns the existing pin; promotion to ``admitted`` is an operator decision.
+    """
+
+    def __init__(self, pool: asyncpg.Pool, *, catalog_scope: str) -> None:
+        self._definitions = PostgresDefinitionRepository(pool, catalog_scope=catalog_scope)
+
+    async def find(self, manifest: CapabilityBundleManifest) -> str | None:
+        found = await self._definitions.find_by_reference(
+            _BUNDLE_KIND[manifest.kind], manifest.capability_id, manifest.object_prefix
+        )
+        return None if found is None else capability_pin(found).render()
+
+    async def register_proposed(
+        self, manifest: CapabilityBundleManifest, definition: Definition, actor_ref: str
+    ) -> str:
+        if definition.logical_id != manifest.capability_id:
+            raise BundleError("bundle definition identity differs from its manifest")
+        existing = await self._definitions.find_by_definition_digest(
+            definition.kind.value, definition.logical_id, sha256_digest(definition)
+        )
+        if existing is not None:
+            return capability_pin(existing).render()
+        published = await self._definitions.propose(definition, actor_ref, datetime.now(UTC))
+        return capability_pin(published).render()

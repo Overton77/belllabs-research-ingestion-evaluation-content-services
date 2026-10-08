@@ -1,0 +1,120 @@
+{
+  "capture_method": "transcribed",
+  "captured_on": "2026-10-07",
+  "environment": {},
+  "note": "Transcribed from the primary-source research note; no live tools/list was run (fast-track wave A, no live provider calls). Re-capture with scripts/capture_mcp_tool_snapshot.py and update the digest before qualifying.",
+  "package_pin": "npm:agent-browser@0.38.2",
+  "schema_version": "mc.mcp_tools_fixture.v1",
+  "server": "mcp.agent-browser",
+  "source": "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md \u00a73 Vercel agent-browser MCP mode, core tool profile",
+  "tools": [
+    {
+      "description": "List the available tool profiles.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "agent_browser_tools_profiles",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Open a URL in the browser session.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "agent_browser_open",
+      "read_only_hint": false,
+      "side_effect_class": "consequential"
+    },
+    {
+      "description": "Accessibility-tree snapshot with element refs.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "agent_browser_snapshot",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Click an element by selector or ref.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "agent_browser_click",
+      "read_only_hint": false,
+      "side_effect_class": "consequential"
+    },
+    {
+      "description": "Fill an input by selector or ref.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "agent_browser_fill",
+      "read_only_hint": false,
+      "side_effect_class": "consequential"
+    },
+    {
+      "description": "Type text into an element.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "agent_browser_type",
+      "read_only_hint": false,
+      "side_effect_class": "consequential"
+    },
+    {
+      "description": "Press a key.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "agent_browser_press",
+      "read_only_hint": false,
+      "side_effect_class": "consequential"
+    },
+    {
+      "description": "Wait until a selector appears.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "agent_browser_wait_for_selector",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Capture a screenshot.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "agent_browser_screenshot",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Return the current URL.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "agent_browser_get_url",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Evaluate JavaScript in the page.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "agent_browser_eval",
+      "read_only_hint": false,
+      "side_effect_class": "consequential"
+    },
+    {
+      "description": "Close the browser session.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "agent_browser_close",
+      "read_only_hint": false,
+      "side_effect_class": "bounded_write"
+    }
+  ]
+}

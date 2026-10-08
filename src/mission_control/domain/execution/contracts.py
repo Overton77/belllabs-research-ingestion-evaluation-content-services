@@ -550,6 +550,28 @@ class DeepAgentMiddlewareComponent(Contract):
         return self
 
 
+class DeepAgentHookScriptComponent(Contract):
+    """A catalog Hook Script pinned into a Deep Agents attempt (ADR-0026, SPEC-01)."""
+
+    ref: ExactDefinitionRef
+    hook_id: str = Field(min_length=1)
+    order: int = Field(ge=0)
+    events: tuple[str, ...] = Field(min_length=1)
+    matcher: str | None = None
+    timeout_seconds: int = Field(default=30, ge=1, le=600)
+    fail_closed: bool = False
+    interpreter: Literal["sh", "bash", "python", "node"]
+    entrypoint: str = Field(min_length=1)
+    manifest_digest: str = Field(pattern=DIGEST_PATTERN)
+    callback: Literal["none", "service"] = "none"
+
+    @model_validator(mode="after")
+    def exact_hook_ref(self) -> DeepAgentHookScriptComponent:
+        if self.ref.kind.value != "hook_script":
+            raise ValueError("Deep Agent hook component requires an exact hook_script ref")
+        return self
+
+
 class DeepAgentToolComponent(Contract):
     ref: ExactDefinitionRef
     tool_name: str = Field(min_length=1)
@@ -1087,6 +1109,9 @@ class DeepAgentExecutionBinding(Contract):
     store_ref: ExactDefinitionRef
     checkpointer_ref: ExactDefinitionRef
     middleware: tuple[DeepAgentMiddlewareComponent, ...] = ()
+    # FT-A5: catalog hook scripts; kernel hooks are composed by the materializer, never here.
+    # Excluded from the digest while empty so earlier bindings keep their content address.
+    hook_scripts: tuple[DeepAgentHookScriptComponent, ...] = ()
     tools: tuple[DeepAgentToolComponent, ...] = ()
     mcp_servers: tuple[DeepAgentMCPServerComponent, ...] = ()
     skills: tuple[DeepAgentSkillComponent, ...] = ()
@@ -1162,6 +1187,9 @@ class DeepAgentExecutionBinding(Contract):
         ]
         if len(attachment_keys) != len(set(attachment_keys)):
             raise ValueError("Deep Agent attachment collision")
+        hook_ids = [item.hook_id for item in self.hook_scripts]
+        if len(hook_ids) != len(set(hook_ids)) or any(i.startswith("mc.") for i in hook_ids):
+            raise ValueError("Deep Agent hook scripts need unique, non-kernel hook ids")
         if (
             not (info.context or {}).get("allow_placeholder_digest")
             and self.content_digest() != self.binding_digest
@@ -1173,6 +1201,8 @@ class DeepAgentExecutionBinding(Contract):
         excluded = {"binding_digest"}
         if self.runtime_unit is None:
             excluded |= {"runtime_unit", "cognitive_session_namespace"}
+        if not self.hook_scripts:
+            excluded.add("hook_scripts")
         return sha256_digest(self.model_dump(mode="python", exclude=excluded))
 
     @classmethod

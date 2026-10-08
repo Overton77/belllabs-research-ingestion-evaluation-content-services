@@ -12,12 +12,15 @@ from mission_control.domain.authoring.contracts import (
     Definition,
     EvaluationProfileDefinition,
     ExactDefinitionRef,
+    HookScriptDefinition,
     MCPServerDefinition,
     MCPToolDefinition,
+    PluginDefinition,
     PromptDefinition,
     RuntimeProfileDefinition,
     SkillDefinition,
     StageGraphBlueprint,
+    SubagentProfileDefinition,
     WorkflowConfigurationDefinition,
     WorkflowImplementationBindingDefinition,
     WorkflowTypeDefinition,
@@ -141,6 +144,15 @@ def search_document_source(
             f"network hosts: {_items(item.host for item in definition.network_requirements)}"
         )
         compatibility_parts.add(f"review status: {definition.review_status}")
+        if definition.tools:
+            # SPEC-01 core: exposed tool names and descriptions are the lexical surface.
+            exposed = definition.exposed_tools()
+            tool_names.update(tool.name for tool in exposed)
+            intended_uses.update(tool.description for tool in exposed if tool.description)
+        if definition.package_pin:
+            compatibility_parts.add(f"package: {definition.package_pin}")
+        if definition.host_support.profiles:
+            compatibility_parts.add(_host_line(definition))
     elif isinstance(definition, MCPToolDefinition):
         intended_uses.add(definition.description)
         input_summary = _json(definition.input_schema)
@@ -151,6 +163,30 @@ def search_document_source(
         )
         authority_summary = f"side effect class: {definition.side_effect_class}"
         parent_ref = definition.server_ref
+    elif isinstance(definition, HookScriptDefinition):
+        intended_uses.add(
+            "Run a hook script on " + ", ".join(event.value for event in definition.events)
+        )
+        authority_summary = (
+            f"side effect class: {definition.side_effect_class}; "
+            f"fail closed: {str(definition.fail_closed).lower()}"
+        )
+        compatibility_parts.add(_host_line(definition))
+    elif isinstance(definition, SubagentProfileDefinition):
+        profile = definition.profile
+        intended_uses.add(profile.description)
+        authority_summary = (
+            f"readonly: {str(profile.readonly).lower()}; "
+            f"background: {str(profile.background).lower()}"
+        )
+        compatibility_parts.add(_host_line(definition))
+    elif isinstance(definition, PluginDefinition):
+        intended_uses.add("Compose exact capability pins into one installable unit")
+        input_summary = "members: " + _items(
+            f"{member.role.value} {member.pin.capability_id}"
+            for member in definition.manifest.members
+        )
+        compatibility_parts.add(_host_line(definition))
     elif isinstance(definition, AgentProfileDefinition):
         intended_uses.add("Configure an exact governed agent profile")
         input_summary = (
@@ -213,6 +249,11 @@ def render_search_document(source: SearchDocumentSource) -> RenderedSearchDocume
     return RenderedSearchDocument(
         search_text="\n".join(f"{label}: {_text(value)}" for label, value in lines)
     )
+
+
+def _host_line(definition: Any) -> str:
+    supported = definition.host_support.supported_profiles()
+    return "lane profiles: " + (", ".join(profile.value for profile in supported) or "none")
 
 
 def _authority(authority: Any) -> str:

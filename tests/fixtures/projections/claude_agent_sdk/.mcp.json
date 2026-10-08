@@ -1,0 +1,31 @@
+{
+  "mcpServers": {
+    "agent-browser": {
+      "args": [
+        "mcp",
+        "--tools",
+        "core"
+      ],
+      "command": "agent-browser",
+      "type": "stdio"
+    },
+    "firecrawl": {
+      "headers": {
+        "Authorization": "Bearer ${FIRECRAWL_API_KEY}"
+      },
+      "type": "http",
+      "url": "https://mcp.firecrawl.dev/v2/mcp"
+    },
+    "tavily": {
+      "args": [
+        "-y",
+        "tavily-mcp@0.2.22"
+      ],
+      "command": "npx",
+      "env": {
+        "TAVILY_API_KEY": "${TAVILY_API_KEY}"
+      },
+      "type": "stdio"
+    }
+  }
+}

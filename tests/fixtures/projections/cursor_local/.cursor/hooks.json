@@ -1,0 +1,209 @@
+{
+  "hooks": {
+    "afterAgentResponse": [
+      {
+        "command": "python .mission/hooks/kernel.py after_model mc.frame_capture",
+        "failClosed": true,
+        "timeout": 30,
+        "type": "command"
+      },
+      {
+        "command": "python .mission/hooks/kernel.py after_model mc.usage",
+        "failClosed": true,
+        "timeout": 30,
+        "type": "command"
+      }
+    ],
+    "afterFileEdit": [
+      {
+        "command": "python .mission/hooks/kernel.py after_file_edit mc.frame_capture",
+        "failClosed": true,
+        "timeout": 30,
+        "type": "command"
+      }
+    ],
+    "afterShellExecution": [
+      {
+        "command": "python .mission/hooks/kernel.py after_shell mc.frame_capture",
+        "failClosed": true,
+        "timeout": 30,
+        "type": "command"
+      }
+    ],
+    "beforeMCPExecution": [
+      {
+        "command": "python .mission/hooks/kernel.py before_mcp mc.stop_fence",
+        "failClosed": true,
+        "timeout": 30,
+        "type": "command"
+      },
+      {
+        "command": "python .mission/hooks/kernel.py before_mcp mc.operation_intent",
+        "failClosed": true,
+        "timeout": 30,
+        "type": "command"
+      },
+      {
+        "command": "python .mission/hooks/kernel.py before_mcp mc.frame_capture",
+        "failClosed": true,
+        "timeout": 30,
+        "type": "command"
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": "python .mission/hooks/kernel.py before_shell mc.stop_fence",
+        "failClosed": true,
+        "timeout": 30,
+        "type": "command"
+      },
+      {
+        "command": "python .mission/hooks/kernel.py before_shell mc.operation_intent",
+        "failClosed": true,
+        "timeout": 30,
+        "type": "command"
+      },
+      {
+        "command": "python .mission/hooks/kernel.py before_shell mc.frame_capture",
+        "failClosed": true,
+        "timeout": 30,
+        "type": "command"
+      },
+      {
+        "command": "python .mission/hooks/run.py hook.mc-policy-template before_shell",
+        "failClosed": true,
+        "timeout": 10,
+        "type": "command"
+      }
+    ],
+    "beforeSubmitPrompt": [
+      {
+        "command": "python .mission/hooks/kernel.py before_prompt mc.frame_capture",
+        "failClosed": true,
+        "timeout": 30,
+        "type": "command"
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "python .mission/hooks/kernel.py after_tool mc.frame_capture",
+        "failClosed": true,
+        "timeout": 30,
+        "type": "command"
+      },
+      {
+        "command": "python .mission/hooks/kernel.py after_tool mc.usage",
+        "failClosed": true,
+        "timeout": 30,
+        "type": "command"
+      }
+    ],
+    "postToolUseFailure": [
+      {
+        "command": "python .mission/hooks/kernel.py after_tool_failure mc.frame_capture",
+        "failClosed": true,
+        "timeout": 30,
+        "type": "command"
+      }
+    ],
+    "preCompact": [
+      {
+        "command": "python .mission/hooks/kernel.py before_compaction mc.frame_capture",
+        "failClosed": true,
+        "timeout": 30,
+        "type": "command"
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": "python .mission/hooks/kernel.py before_tool mc.stop_fence",
+        "failClosed": true,
+        "timeout": 30,
+        "type": "command"
+      },
+      {
+        "command": "python .mission/hooks/kernel.py before_tool mc.operation_intent",
+        "failClosed": true,
+        "timeout": 30,
+        "type": "command"
+      },
+      {
+        "command": "python .mission/hooks/kernel.py before_tool mc.frame_capture",
+        "failClosed": true,
+        "timeout": 30,
+        "type": "command"
+      },
+      {
+        "command": "python .mission/hooks/run.py hook.mc-policy-template before_tool",
+        "failClosed": true,
+        "timeout": 10,
+        "type": "command"
+      }
+    ],
+    "sessionEnd": [
+      {
+        "command": "python .mission/hooks/kernel.py session_end mc.frame_capture",
+        "failClosed": true,
+        "timeout": 30,
+        "type": "command"
+      }
+    ],
+    "sessionStart": [
+      {
+        "command": "python .mission/hooks/kernel.py session_start mc.frame_capture",
+        "failClosed": true,
+        "timeout": 30,
+        "type": "command"
+      },
+      {
+        "command": "python .mission/hooks/run.py hook.mc-policy-template session_start",
+        "failClosed": true,
+        "timeout": 10,
+        "type": "command"
+      }
+    ],
+    "stop": [
+      {
+        "command": "python .mission/hooks/kernel.py stop mc.frame_capture",
+        "failClosed": true,
+        "timeout": 30,
+        "type": "command"
+      },
+      {
+        "command": "python .mission/hooks/kernel.py stop mc.usage",
+        "failClosed": true,
+        "timeout": 30,
+        "type": "command"
+      }
+    ],
+    "subagentStart": [
+      {
+        "command": "python .mission/hooks/kernel.py subagent_start mc.stop_fence",
+        "failClosed": true,
+        "timeout": 30,
+        "type": "command"
+      },
+      {
+        "command": "python .mission/hooks/kernel.py subagent_start mc.operation_intent",
+        "failClosed": true,
+        "timeout": 30,
+        "type": "command"
+      },
+      {
+        "command": "python .mission/hooks/kernel.py subagent_start mc.frame_capture",
+        "failClosed": true,
+        "timeout": 30,
+        "type": "command"
+      }
+    ],
+    "subagentStop": [
+      {
+        "command": "python .mission/hooks/kernel.py subagent_stop mc.frame_capture",
+        "failClosed": true,
+        "timeout": 30,
+        "type": "command"
+      }
+    ]
+  },
+  "version": 1
+}

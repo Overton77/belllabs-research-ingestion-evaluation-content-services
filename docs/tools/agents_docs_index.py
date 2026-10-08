@@ -137,7 +137,8 @@ def subsystem_line() -> str | None:
     found = []
     for path in sorted(REPO_ROOT.rglob("AGENTS.md")):
         if path in skip or any(
-            part.startswith(".") or part in {"node_modules", "app"}
+            # tests/fixtures holds projected AGENTS.md goldens (test data, not guidance).
+            part.startswith(".") or part in {"node_modules", "app", "fixtures"}
             for part in path.relative_to(REPO_ROOT).parts
         ):
             continue

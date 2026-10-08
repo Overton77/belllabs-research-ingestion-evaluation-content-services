@@ -21,7 +21,14 @@ EXPECTED = {
     ("mc.catalog.workflow-parity", "1.0.0"),
     ("mc.catalog.runtime-profiles", "1.0.0"),
     ("mc.catalog.approved-assets", "1.0.0"),
+    ("mc.catalog.agent-capabilities", "1.0.0"),
+    ("mc.storage.capability-bundles", "1.0.0"),
     ("mc.qualification.parity", "1.0.0"),
+}
+STORAGE_KINDS = {"storage_bucket", "storage_policy"}
+APP_AGENT_KEYS = {
+    "biotech": "mc.app.biotech.agent-capabilities",
+    "ai-engineer": "mc.app.ai-engineer.agent-capabilities",
 }
 SECRET_LIKE = re.compile(
     r"(postgres(ql)?://|password|passwd|secret_value|api[_-]?key|bearer |-----BEGIN)", re.IGNORECASE
@@ -56,14 +63,23 @@ def test_each_app_installation_set_is_valid_and_dependency_closed(app: str) -> N
     bundles = _bundles("common", app)
     ordered = order_bundles(bundles, already_applied=set())
     keys = [(item["seed_key"], item["seed_version"]) for item in ordered]
-    assert keys == [
+    base = [
         ("mc.catalog.workflow-parity", "1.0.0"),
         ("mc.catalog.runtime-profiles", "1.0.0"),
         ("mc.catalog.approved-assets", "1.0.0"),
         ("mc.app.bindings", "1.0.0"),
         ("mc.app.bindings", "1.0.1"),
     ]
-    frozen, current = (item["records"][0]["fields"] for item in ordered[-2:])
+    agent = [("mc.catalog.agent-capabilities", "1.0.0"), (APP_AGENT_KEYS[app], "1.0.0")]
+    storage = [("mc.storage.capability-bundles", "1.0.0")]
+    assert sorted(keys) == sorted(base + agent + storage)
+    assert [key for key in keys if key in base] == base
+    position = {key: index for index, key in enumerate(keys)}
+    assert (
+        position[("mc.catalog.approved-assets", "1.0.0")] < position[agent[0]] < position[agent[1]]
+    )
+    bindings = [item for item in ordered if item["seed_key"] == "mc.app.bindings"]
+    frozen, current = (item["records"][0]["fields"] for item in bindings)
     assert (frozen["version"], current["version"]) == ("1", "2")
     binding = current["manifest"]
     assert binding["application_id"] == app
@@ -72,7 +88,9 @@ def test_each_app_installation_set_is_valid_and_dependency_closed(app: str) -> N
     assert binding["unresolved_operator_fields"] == []
     assert frozen["manifest"]["unresolved_operator_fields"]
     # Common catalog bytes are one shared copy; only the app binding differs.
-    assert _bundles("common") == [item for item in bundles if item["seed_key"] != "mc.app.bindings"]
+    assert _bundles("common") == [
+        item for item in bundles if item["seed_key"] not in {"mc.app.bindings", APP_AGENT_KEYS[app]}
+    ]
 
 
 def test_qualification_bundle_is_opt_in_and_closes_over_common() -> None:
@@ -89,6 +107,12 @@ def test_qualification_bundle_is_opt_in_and_closes_over_common() -> None:
 def test_bundles_seed_no_fabricated_authority_usage_or_secrets() -> None:
     for bundle in _bundles("common", "biotech", "ai-engineer", "qualification"):
         kinds = {record["kind"] for record in bundle["records"]}
+        if bundle["seed_key"] == "mc.storage.capability-bundles":
+            assert kinds == STORAGE_KINDS
+            policies = [r["fields"] for r in bundle["records"] if r["kind"] == "storage_policy"]
+            assert len(policies) == 4
+            assert {p["command"] for p in policies} == {"INSERT", "SELECT", "ALL"}
+            continue
         # No actor bindings, actor grants or capability grants without owner approval.
         assert kinds <= {"tenant", "asset_version", "asset_decision"}, bundle["seed_key"]
         if bundle["seed_key"] != "mc.qualification.parity":
@@ -98,9 +122,24 @@ def test_bundles_seed_no_fabricated_authority_usage_or_secrets() -> None:
         assert {d["fields"]["asset_version"] for d in decisions} == assets
         assert all(d["fields"]["decision"] == "admit" for d in decisions)
         text = json.dumps(bundle)
+        # Secret reference NAMES (e.g. TAVILY_API_KEY) are allowed; values never are.
+        for name in _secret_ref_names(bundle):
+            text = text.replace(name, "SECRET_REF_NAME")
         assert not SECRET_LIKE.search(text), bundle["seed_key"]
         for forbidden in ("embedding", "mission_run", "usage", "receipt"):
             assert f'"{forbidden}"' not in text
+
+
+def _secret_ref_names(bundle: dict) -> set[str]:
+    names: set[str] = set()
+    for record in bundle["records"]:
+        fields = record["fields"]
+        names.update(fields.get("secret_refs", ()))
+        definition = fields.get("manifest", {}).get("definition", {})
+        names.update(definition.get("secret_refs", ()))
+        names.update(definition.get("env_refs", {}))
+        names.update(definition.get("env_refs", {}).values())
+    return {name for name in names if re.fullmatch(r"[A-Z][A-Z0-9_]*", name)}
 
 
 def test_published_definition_assets_are_exact_and_repository_readable() -> None:
@@ -125,12 +164,15 @@ def test_published_definition_assets_are_exact_and_repository_readable() -> None
             )
             assert fields["version"] == str(published.ref.revision) == "1"
             seen.add(published.ref.logical_id)
-    assert seen == {
+    assert {
         "skill.mission-control-coordinator",
         "prompt.coordinator.propose-workflow",
         "fixture.generic-stage-graph",
         "fixture.generic-goal-directed",
-    }
+        "mcp.tavily",
+        "mcp.firecrawl",
+        "mcp.agent-browser",
+    } <= seen
 
 
 def test_changed_bytes_change_the_seed_digest() -> None:

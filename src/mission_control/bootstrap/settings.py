@@ -98,6 +98,9 @@ class Settings(BaseSettings):
     coordinator_launch_enabled: bool = False
     capability_embedding_model: Literal["text-embedding-3-small"] = "text-embedding-3-small"
     capability_embedding_dimensions: Literal[1536] = 1536
+    # FT-A3: the Model Profile naming the catalog search embedding route. Unset means the
+    # public catalog search runs lexical-only (never unavailable for a missing route).
+    capability_embedding_profile: Literal["embedding.openai.text-embedding-3-small"] | None = None
     capability_projection_lease_seconds: int = Field(
         default=120,
         ge=15,
@@ -238,6 +241,10 @@ class Settings(BaseSettings):
     )
     capability_bundle_backend: Literal["local", "supabase"] = "local"
     capability_bundle_namespace: str | None = None
+    # FT-A2: custody credentials (never the service key). The publisher holds INSERT+SELECT
+    # on the application prefix of `capability-bundles`; the reader holds SELECT only.
+    capability_bundle_publisher_token: SecretStr | None = None
+    capability_bundle_reader_token: SecretStr | None = None
     capability_bundle_local_root: Path | None = None
     deep_agent_sandbox_workspace_root: Path | None = None
 

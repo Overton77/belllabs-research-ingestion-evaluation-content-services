@@ -1,0 +1,75 @@
+{
+  "capture_method": "transcribed",
+  "captured_on": "2026-10-07",
+  "environment": {},
+  "note": "Transcribed from the primary-source research note; no live tools/list was run (fast-track wave A, no live provider calls). Re-capture with scripts/capture_mcp_tool_snapshot.py and update the digest before qualifying.",
+  "package_pin": "pypi:biomcp-cli==0.9.1",
+  "schema_version": "mc.mcp_tools_fixture.v1",
+  "server": "mcp.biomcp",
+  "source": "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md \u00a74b GenomOncology BioMCP 0.9.1 (all tools readOnlyHint true)",
+  "tools": [
+    {
+      "description": "Search biomedical entities across literature, trials, variants and genes.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "search",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Get one biomedical entity record.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "get",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Normalize a variant through the ClinGen allele registry.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "variant_normalize_car",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "ClinGen evidence repository for a variant.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "variant_erepo",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "ClinGen specification for a gene.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "gene_cspec",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Articles mentioning a variant.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "variant_articles",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Read-only BioMCP CLI escape hatch (allowlisted commands).",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "biomcp",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    }
+  ]
+}

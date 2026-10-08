@@ -3,6 +3,7 @@
 CREATE SCHEMA extensions;
 CREATE EXTENSION vector SCHEMA extensions;
 CREATE EXTENSION pgcrypto SCHEMA extensions;
+CREATE EXTENSION pg_trgm SCHEMA extensions;
 CREATE SCHEMA capability_search;
 CREATE TABLE capability_search.search_document (
     document_key text PRIMARY KEY,
