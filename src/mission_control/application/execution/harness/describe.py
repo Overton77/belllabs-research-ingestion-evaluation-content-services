@@ -144,13 +144,16 @@ CURSOR_CLOUD_DESCRIBE: Final = LaneDescribe(
     identity=LaneIdentityMap(
         session_ref="agent_id", turn_ref="run_id", effect_ref="call_id", cursor="sse_event_id"
     ),
-    # Cloud runs fire no sessionStart, sessionEnd or MCP hooks.
+    # Cloud runs fire no sessionStart, sessionEnd or MCP hooks. The cloud VM cannot reach the
+    # worker's loopback callback, so no fail-closed Kernel Hook runs there (catalog command
+    # hooks only; the Stop Fence reaches a cloud run through `POST .../cancel`): FT-G6 states
+    # it honestly.
     hooks=LaneHooks(
         mechanism="command_hooks",
         events_supported=tuple(
             event for event in _CURSOR_LOCAL_HOOKS if event not in {"session_start", "session_end"}
         ),
-        fail_closed=True,
+        fail_closed=False,
     ),
     instruction_channel=("AGENTS.md", ".cursor/rules/mc-mission.mdc"),
     subagents=LaneSubagents(

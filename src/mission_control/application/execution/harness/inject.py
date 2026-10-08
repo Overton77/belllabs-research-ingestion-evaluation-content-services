@@ -42,6 +42,7 @@ from mission_control.domain.execution.contracts import (
 from mission_control.domain.execution.lanes import (
     CancelTurnRequest,
     LaneDescribe,
+    LaneFrame,
     ObserveRequest,
     SendTurnRequest,
     TurnHandle,
@@ -315,21 +316,34 @@ async def cancel_and_replace_turn(
     unsettled: UnsettledEffects,
     settings: InjectionSettings | None = None,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    after: str | None = None,
+    on_frame: Callable[[LaneFrame], Awaitable[None]] | None = None,
+    cancel_first: bool = True,
 ) -> ReplacedTurn:
     """`cancel_and_replace` over the harness protocol: cancel the running turn (idempotent),
     observe it to its terminal frame, settle uncertain effects (raise `InjectionParked` when
     they do not settle within the grace), then send the replacement turn whose
-    `instruction_ref` names the injected mailbox item."""
+    `instruction_ref` names the injected mailbox item.
+
+    FT-G4: `after` resumes the drain from the last persisted cursor and `on_frame` persists
+    every drained frame (a tool call that completes during the cancel settles its effect);
+    `cancel_first=False` replaces a turn already found terminal (a retried replacement).
+    """
 
     settings = settings or InjectionSettings()
-    await lane.cancel_turn(cancel)
+    if cancel_first:
+        await lane.cancel_turn(cancel)
     observe = ObserveRequest(
         **cancel.model_dump(exclude={"turn", "reason", "urgency"}),
         turn=cancel.turn,
+        after=after,
     )
-    async for frame in lane.observe(observe):
-        if frame.terminal:
-            break
+    if cancel_first:
+        async for frame in lane.observe(observe):
+            if on_frame is not None:
+                await on_frame(frame)
+            if frame.terminal:
+                break
     settled_before = await unsettled()
     waited = 0.0
     pending = settled_before

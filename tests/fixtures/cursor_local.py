@@ -6,6 +6,13 @@ local/`: `event` records are `ObserveRun` envelopes with their durable offsets, 
 are Cursor hook invocations it fires through the kernel hook path while the run progresses
 (as Cursor does), `workspace_write` records are files the agent writes, `run_state` and
 `usage` answer `GetRun` and `GetUsage`. No Cursor agent is created and nothing is paid for.
+
+FT-G4: a fixture may hold several runs (records carry `"run"`; absent means the meta run):
+the first send returns the meta `run_id`, later sends the meta `later_runs` in order (a
+replacement or continuation turn), and every `Agent.create` after the first returns a new
+agent id (a fork or a continuation). Events marked `after_cancel` are delivered only once the
+held run was cancelled (a tool call that completes during the cancel), unless the launcher
+drops them (a tool call that never closes).
 """
 
 from __future__ import annotations
@@ -102,11 +109,11 @@ class ReplayBridge:
         self.launcher.created.append(spec)
         if spec.sandbox_enabled and not self.launcher.sandbox:
             raise SandboxUnsupported("the Cursor sandbox is unavailable on this host")
-        return str(self.launcher.meta["agent_id"])
+        return self.launcher.next_agent()
 
     async def resume_agent(self, agent_id: str, spec: LocalAgentSpec) -> str:
         self.launcher.resumed.append((agent_id, spec))
-        if self.launcher.lost or agent_id != self.launcher.meta["agent_id"]:
+        if self.launcher.lost or agent_id not in self.launcher.known_agents():
             raise RunNotFound("unknown agent")
         return agent_id
 
@@ -114,14 +121,22 @@ class ReplayBridge:
         if self.launcher.busy_sends > 0:
             self.launcher.busy_sends -= 1
             raise AgentBusy("busy")
+        prior = self.launcher.sent_runs.get(idempotency_key)
+        if prior is not None:
+            return prior  # the bridge deduplicates a send by its idempotency key
         self.launcher.sends.append((idempotency_key, text))
-        return str(self.launcher.meta["run_id"])
+        self.launcher.sent_to.append(agent_id)
+        run_id = self.launcher.next_run()
+        self.launcher.sent_runs[idempotency_key] = run_id
+        return run_id
 
     async def observe(self, run_id: str, *, after_offset: str | None) -> AsyncIterator[BridgeEvent]:
         self.launcher.observed_after.append(after_offset)
         after = int(after_offset) if after_offset else 0
         pending_hooks: list[dict[str, Any]] = []
-        for record in self.launcher.records:
+        held_run = run_id == self.launcher.first_run
+        draining = False
+        for record in self.launcher.run_records(run_id):
             if record["kind"] == "hook":
                 pending_hooks.append(record)
                 continue
@@ -129,6 +144,8 @@ class ReplayBridge:
                 continue
             offset = int(record["offset"])
             envelope = record["envelope"]
+            if record.get("after_cancel") and not draining:
+                continue
             if offset <= after:
                 pending_hooks.clear()
                 continue
@@ -139,21 +156,34 @@ class ReplayBridge:
                 self.launcher.fail_at = None
                 raise ConnectionError("bridge stream dropped")
             if "result" in envelope:
-                await asyncio.to_thread(self.launcher.write_files, self.workspace)
-            if self.launcher.hold_at is not None and offset >= self.launcher.hold_at:
+                await asyncio.to_thread(self.launcher.write_files, self.workspace, run_id)
+            if (
+                held_run
+                and not draining
+                and self.launcher.hold_at is not None
+                and offset >= self.launcher.hold_at
+            ):
                 self.launcher.held.set()
                 await self.launcher.release.wait()
-                if self.launcher.cancelled:
-                    return
+                if run_id in self.launcher.cancelled_runs:
+                    if self.launcher.drop_after_cancel:
+                        return
+                    draining = True
+                    after = offset - 1
+                    continue
+            if draining and not record.get("after_cancel"):
+                continue
             yield BridgeEvent(offset=str(offset), envelope=envelope)
+        if draining:
+            return
         for hook in pending_hooks:
             await self.launcher.fire(hook, self.workspace)
 
     async def run_state(self, run_id: str) -> RunState:
         if self.launcher.lost:
             raise RunNotFound("unknown run")
-        state = next(r for r in self.launcher.records if r["kind"] == "run_state")
-        status = "cancelled" if self.launcher.cancelled else state["status"]
+        state = next(r for r in self.launcher.run_records(run_id) if r["kind"] == "run_state")
+        status = "cancelled" if run_id in self.launcher.cancelled_runs else state["status"]
         return RunState(
             run_id=run_id,
             agent_id=str(self.launcher.meta["agent_id"]),
@@ -166,9 +196,19 @@ class ReplayBridge:
 
     async def cancel(self, run_id: str, *, agent_id: str) -> None:
         self.launcher.cancel_calls += 1
-        if self.launcher.cancelled:
+        state = next(
+            (r for r in self.launcher.run_records(run_id) if r["kind"] == "run_state"), None
+        )
+        finished = (
+            state is not None
+            and run_id not in self.launcher.cancelled_runs
+            and self.launcher.finished_runs.get(run_id, False)
+        )
+        if run_id in self.launcher.cancelled_runs or finished:
             raise RunNotCancellable("already terminal")
-        self.launcher.cancelled = True
+        self.launcher.cancelled_runs.add(run_id)
+        if run_id == self.launcher.first_run:
+            self.launcher.cancelled = True
         self.launcher.release.set()
 
     async def usage(self, agent_id: str) -> UsageState:
@@ -211,10 +251,48 @@ class ReplayBridgeLauncher:
     held: asyncio.Event = field(default_factory=asyncio.Event)
     release: asyncio.Event = field(default_factory=asyncio.Event)
     fired: set[int] = field(default_factory=set)
+    # FT-G4: several agents and runs per fixture.
+    drop_after_cancel: bool = False
+    agents: list[str] = field(default_factory=list)
+    runs: list[str] = field(default_factory=list)
+    sent_to: list[str] = field(default_factory=list)
+    sent_runs: dict[str, str] = field(default_factory=dict)
+    cancelled_runs: set[str] = field(default_factory=set)
+    finished_runs: dict[str, bool] = field(default_factory=dict)
+    agent_base: str | None = None
 
     @property
     def meta(self) -> dict[str, Any]:
         return next(r for r in self.records if r["kind"] == "meta")
+
+    @property
+    def first_run(self) -> str:
+        return str(self.meta["run_id"])
+
+    def next_agent(self) -> str:
+        base = self.agent_base or str(self.meta["agent_id"])
+        agent = base if not self.agents else f"{base}-{len(self.agents) + 1}"
+        self.agents.append(agent)
+        return agent
+
+    def known_agents(self) -> set[str]:
+        return {self.agent_base or str(self.meta["agent_id"]), *self.agents}
+
+    def next_run(self) -> str:
+        later = [str(item) for item in self.meta.get("later_runs", ())]
+        order = [self.first_run, *later]
+        index = len(self.runs)
+        run = order[index] if index < len(order) else f"{self.first_run}-{index + 1}"
+        self.runs.append(run)
+        return run
+
+    def run_records(self, run_id: str) -> list[dict[str, Any]]:
+        return [
+            record
+            for record in self.records
+            if record["kind"] in {"event", "hook", "run_state", "workspace_write"}
+            and str(record.get("run", self.first_run)) == run_id
+        ]
 
     @property
     def versions(self) -> Mapping[str, str]:
@@ -235,8 +313,11 @@ class ReplayBridgeLauncher:
         result = await self.hook_invoker({**record, "payload": payload}, workspace)
         self.hook_results.append((record["native_event"], record.get("expect", "allow"), result))
 
-    def write_files(self, workspace: Path) -> None:
-        for record in self.records:
+    def write_files(self, workspace: Path, run_id: str | None = None) -> None:
+        if run_id is not None:
+            self.finished_runs[run_id] = True
+        records = self.records if run_id is None else self.run_records(run_id)
+        for record in records:
             if record["kind"] == "workspace_write":
                 target = workspace / record["path"]
                 target.parent.mkdir(parents=True, exist_ok=True)
@@ -287,6 +368,12 @@ class MemoryArtifacts:
         ref = f"payload://{len(self.staged)}/{name}"
         self.staged[ref] = (name, content, media_type)
         return ref
+
+    async def retrieve(self, durable_ref: str) -> bytes:
+        try:
+            return self.staged[durable_ref][1]
+        except KeyError as error:
+            raise LookupError(durable_ref) from error
 
 
 def projection_rows() -> tuple[ResolvedCapability, ...]:
@@ -339,6 +426,11 @@ def local_stack(
     launcher_changes: Mapping[str, Any] | None = None,
     frames: InMemoryFrameStore | None = None,
     drift: bool = False,
+    operation_changes: Mapping[str, Any] | None = None,
+    artifacts: MemoryArtifacts | None = None,
+    inputs: Any = None,
+    settings_changes: Mapping[str, Any] | None = None,
+    lease_dir: str = "leases",
 ) -> LocalStack:
     records = load_fixture(fixture)
     rows = projection_rows()
@@ -361,6 +453,10 @@ def local_stack(
             **changes,
         )
     operation = cursor_operation(binding=binding)
+    if operation_changes:
+        operation = OperationExecutionRequest.model_validate(
+            {**operation.model_dump(mode="python"), **dict(operation_changes)}
+        )
     frames = frames or InMemoryFrameStore()
     tokens = InMemoryHookTokenStore()
     intents = InMemoryHookIntentLedger()
@@ -382,16 +478,19 @@ def local_stack(
         records, hook_invoker=service_hook_invoker(hooks), **dict(launcher_changes or {})
     )
     leases = InMemoryWorkspaceLeaseStore()
-    artifacts = MemoryArtifacts()
-    lease_root = tmp_path / "leases"
+    artifacts = artifacts or MemoryArtifacts()
+    lease_root = tmp_path / lease_dir
     harness = CursorLocalHarness(
         launcher=launcher,
         leaser=GitWorktreeLeaser(leases, lease_root=lease_root),
         projections=RenderedProjectionSource(static_rows(rows)),
         hooks=hooks,
         artifacts=artifacts,
-        settings=CursorLocalSettings(lease_root=lease_root),
+        inputs=inputs,
+        settings=CursorLocalSettings(lease_root=lease_root, **dict(settings_changes or {})),
     )
+    # FT-G4: the stop hook's `missing_output_policy` follow-up knows the declared outputs.
+    hooks.set_stop_policy(harness)
     return LocalStack(
         harness,
         launcher,

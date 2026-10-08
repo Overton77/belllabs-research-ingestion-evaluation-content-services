@@ -1,0 +1,32 @@
+: synthetic: hand-authored from research/cursor-platform.md section 4.4; replace with a scrubbed recording in the owner's live qualification drill (a later run of the same agent: a cancel_and_replace replacement or a continuation agent's first run; its event ids restart at 1, as SSE ids are per run)
+event: status
+data: {"status": "CREATING"}
+
+id: 1
+event: status
+data: {"status": "RUNNING"}
+
+id: 2
+event: assistant
+data: {"text": "Applying the operator's instruction."}
+
+id: 3
+event: tool_call
+data: {"callId": "call-r1", "name": "edit", "status": "running", "args": {"path": "src/feature.py"}}
+
+id: 4
+event: tool_call
+data: {"callId": "call-r1", "name": "edit", "status": "completed", "result": {"ok": true}}
+
+id: 5
+event: interaction_update
+data: {"type": "turn-ended", "usage": {"inputTokens": 1500, "outputTokens": 210, "totalTokens": 1710}}
+
+id: 6
+event: result
+data: {"status": "FINISHED", "text": "Done on release/2.3.", "durationMs": 50200}
+
+id: 7
+event: done
+data: {}
+

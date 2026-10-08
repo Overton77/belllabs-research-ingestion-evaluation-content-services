@@ -1,0 +1,24 @@
+: synthetic: hand-authored from research/cursor-platform.md section 4.4; replace with a scrubbed recording in the owner's live qualification drill (a run cancelled by the provider or a person, not by Mission Control)
+event: status
+data: {"runId": "run-7f1e2d3c-4b5a-4c6d-8e7f-9a0b1c2d3e4f", "status": "CREATING"}
+
+id: 1
+event: status
+data: {"runId": "run-7f1e2d3c-4b5a-4c6d-8e7f-9a0b1c2d3e4f", "status": "RUNNING"}
+
+id: 2
+event: assistant
+data: {"text": "Starting."}
+
+id: 3
+event: interaction_update
+data: {"type": "turn-ended", "usage": {"inputTokens": 300, "outputTokens": 20, "totalTokens": 320}}
+
+id: 4
+event: result
+data: {"runId": "run-7f1e2d3c-4b5a-4c6d-8e7f-9a0b1c2d3e4f", "status": "CANCELLED", "text": "", "durationMs": 9000}
+
+id: 5
+event: done
+data: {}
+

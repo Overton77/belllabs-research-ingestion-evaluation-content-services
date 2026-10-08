@@ -78,6 +78,15 @@ def offset_of(provider_key: str) -> str | None:
     return offset
 
 
+def run_of(provider_key: str) -> str | None:
+    """The run a persisted local frame belongs to (None for a key of another shape)."""
+
+    if not provider_key.startswith(_BRIDGE_PREFIX):
+        return None
+    run, separator, _rest = provider_key.removeprefix(_BRIDGE_PREFIX).rpartition(":")
+    return run if separator and run else None
+
+
 @dataclass(frozen=True)
 class MappedEvent:
     raw_kind: str
@@ -271,5 +280,6 @@ __all__ = [
     "map_envelope",
     "native_status",
     "offset_of",
+    "run_of",
     "scrub",
 ]

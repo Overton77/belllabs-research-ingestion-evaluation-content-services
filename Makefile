@@ -59,7 +59,7 @@ endif
 	fmt fmt-check lint lint-fix typecheck typecheck-fast typecheck-watch typecheck-daemon \
 	deps-check audit links precommit arch skills-manifest skills-check seeds-validate check ci \
 	test test-unit test-unit-fast test-arch test-integration test-acceptance test-qualification \
-	test-db-contract test-failed coverage \
+	test-db-contract test-failed coverage lane-qualify \
 	clean up dev down stop status
 
 # ========================================================================================
@@ -289,6 +289,10 @@ skills-manifest: ## Rewrite skills/*/manifest.json digests from the files on dis
 
 skills-check: ## Fail if any skills/*/manifest.json digest drifted from disk
 	$(RUN) python scripts/skills_manifest.py --check
+
+PROFILE ?= cursor_local
+lane-qualify: ## Cursor lane qualification: offline fixture, describe-honesty and replay suites; LIVE=1 adds the paid drill (CURSOR_API_KEY, MC_PAID_BUDGET_USD) for PROFILE=cursor_local|cursor_cloud
+	$(UV) run --no-sync --group biotech python scripts/lane_qualify.py --profile $(PROFILE) $(if $(LIVE),--live,)
 
 seeds-validate: ## Fail if a seed Capability Pin does not parse or a tools/list digest drifted
 	$(RUN) python scripts/seeds_validate.py

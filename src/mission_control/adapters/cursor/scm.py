@@ -143,5 +143,69 @@ class GitBranchPublisher:
         diff = _git_bytes("diff", "--binary", base, head, "--", ".", *excludes, cwd=mirror)
         return diff, head
 
+    # --- FT-G4/G6 controls: snapshot head, continuation files ---------------------------------
+
+    async def head(self, *, repository: str, branch: str) -> str:
+        """The branch's current head on the remote (the agent pushes its work there)."""
+
+        return await asyncio.to_thread(self._head, repository, branch)
+
+    def _head(self, repository: str, branch: str) -> str:
+        mirror = self._mirror(repository)
+        return _git("rev-parse", f"refs/heads/{branch}", cwd=mirror).strip()
+
+    async def read_tree(
+        self, *, repository: str, ref: str, roots: Sequence[str]
+    ) -> list[tuple[str, bytes]]:
+        """Files under `roots` at `ref` (path relative to the repository root, bytes)."""
+
+        return await asyncio.to_thread(self._read_tree, repository, ref, tuple(roots))
+
+    def _read_tree(
+        self, repository: str, ref: str, roots: tuple[str, ...]
+    ) -> list[tuple[str, bytes]]:
+        mirror = self._mirror(repository)
+        listed = _git("ls-tree", "-r", "--name-only", ref, "--", *roots, cwd=mirror)
+        return [
+            (path, _git_bytes("show", f"{ref}:{path}", cwd=mirror))
+            for path in sorted(line for line in listed.splitlines() if line)
+        ]
+
+    async def commit_files(
+        self,
+        *,
+        repository: str,
+        branch: str,
+        files: Sequence[tuple[str, bytes]],
+        message: str,
+    ) -> str:
+        """Commit `files` on top of the branch head and push it (fast-forward); the new head."""
+
+        return await asyncio.to_thread(self._commit_files, repository, branch, files, message)
+
+    def _commit_files(
+        self, repository: str, branch: str, files: Sequence[tuple[str, bytes]], message: str
+    ) -> str:
+        mirror = self._mirror(repository)
+        base = _git("rev-parse", f"refs/heads/{branch}", cwd=mirror).strip()
+        with tempfile.TemporaryDirectory(prefix="mc-branch-") as scratch:
+            work = Path(scratch) / "work"
+            _git("worktree", "add", "--quiet", "--detach", str(work), base, cwd=mirror)
+            try:
+                for path, content in files:
+                    relative = PurePosixPath(path.replace("\\", "/").lstrip("/"))
+                    if ".." in relative.parts or not relative.parts:
+                        raise GitWorkspaceError(f"unsafe branch path: {path}")
+                    target = work.joinpath(*relative.parts)
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(content)
+                _git("add", "--all", cwd=work)
+                _git(*_IDENTITY, "commit", "--quiet", "--allow-empty", "-m", message, cwd=work)
+                head = _git("rev-parse", "HEAD", cwd=work).strip()
+                _git("push", "--quiet", "origin", f"{head}:refs/heads/{branch}", cwd=mirror)
+            finally:
+                _git("worktree", "remove", "--force", str(work), cwd=mirror)
+        return head
+
 
 __all__ = ["GitBranchPublisher", "PublishedBranch"]

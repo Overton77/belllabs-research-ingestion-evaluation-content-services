@@ -23,8 +23,8 @@ has real values.
 | --- | --- | --- |
 | Add guidance without stopping | `command queue` (`kind: queue_instruction`), `boundary: next_turn \| next_iteration` | `turn_boundary_guaranteed` (Deep Agents) or `wait_then_send` (Cursor); consumed once into the next Context Packet. Available (FT-F1) |
 | Add a document or artifact to context | `command queue --add-context` (`kind: add_context`) with a short note or an artifact ref | same. Available (FT-F1) |
-| Stop the current turn and redirect | `command inject` (`kind: interrupt_and_inject`) | `cooperative_inject` where native (no first-wave lane), otherwise `cancel_and_replace`: the turn is cancelled, uncertain effects settle, and a replacement turn continues the same session with your item; an effect that never settles parks the unit `in_doubt` (reconcile, then the item rides the next turn). A lane reporting `unsupported` rejects it. Available (FT-F2) for Deep Agents; Cursor lanes use the same protocol path with FT-G4 |
-| Stop releasing new work | `command send` with `kind: pause` | quiescence at the next safe boundary; the run parks |
+| Stop the current turn and redirect | `command inject` (`kind: interrupt_and_inject`) | `cooperative_inject` where native (no first-wave lane), otherwise `cancel_and_replace`: the turn is cancelled, uncertain effects settle, and a replacement turn continues the same session with your item; an effect that never settles parks the unit `in_doubt` (reconcile, then the item rides the next turn). A lane reporting `unsupported` rejects it. Available (FT-F2) for Deep Agents and (FT-G4) for `cursor_local`, where the replacement turn is a new run of the same agent |
+| Stop releasing new work | `command send` with `kind: pause` | quiescence at the next safe boundary; the run parks. A Cursor lane cannot pause mid-run: a pause while its turn runs is refused (`unsupported_control`), at the run boundary no new segment starts until `resume` (FT-G4) |
 | Continue | `command send` with `kind: resume` (optionally with an instruction) | never new authority or budget |
 | Stop | `command cancel --urgency normal` | settlement after children, effects and usage reconcile |
 | Stop now | `command cancel --urgency immediate` | a Stop Fence is persisted first, then provider cancel; no new effects, no promise that dispatched tools halt. Availability: FT-F3 |
@@ -75,7 +75,9 @@ children, and never launches by itself: start the fork with `run start`. `run in
 runs shows the lineage (`lineage.forked_from`, `lineage.forks`); `run list --query
 "ForkedFromRunId = 'RUN_ID'"` finds the branch once it started. A retry with the same
 `--request-id` returns the same forked run. Available (FT-F4); `--request-file` still works and
-the flags fill what it omits.
+the flags fill what it omits. On `cursor_local` the fork's first turn runs a new agent in a fresh
+workspace restored from the snapshot (agent patch, untracked files, `inputs/`, `outputs/`,
+`.mission/`; FT-G4).
 
 ## 5. Repair
 

@@ -95,7 +95,9 @@ async def test_a_cloud_turn_runs_on_the_pre_created_branch_and_settles(tmp_path:
     frames = _frames(lanes, stack)
     keys = [frame.provider_key for frame in frames]
     assert len(keys) == len(set(keys))
-    assert {f"sse:{index}" for index in range(1, 9)} <= set(keys)
+    # FT-G6: SSE ids are per run, so frames are keyed `sse:<run>:<id>`.
+    run_id = stack.api.run_id
+    assert {f"sse:{run_id}:{index}" for index in range(1, 9)} <= set(keys)
     assert all(frame.raw_kind != "heartbeat" for frame in frames)
     assert (
         sum(frame.raw_kind == "status" and "CREATING" in frame.body_excerpt for frame in frames)
@@ -188,7 +190,7 @@ async def test_a_reconnect_with_last_event_id_stores_nothing_twice(tmp_path: Pat
     lanes = _lanes(stack)
     heid = _identity(stack).harness_execution_id
     first = await lanes.service.turn(_turn(stack), RecordingSignals(lanes.frames, heid))
-    assert not first.done and first.cursor == "4"
+    assert not first.done and first.cursor == f"{stack.api.run_id}@4"
     second = await lanes.service.turn(
         _turn(stack, phase="resume", cursor=first.cursor, segment_no=2),
         RecordingSignals(lanes.frames, heid),
@@ -360,7 +362,8 @@ def test_describe_is_the_declared_unqualified_cloud_matrix(tmp_path: Path) -> No
     assert "session_start" not in describe.hooks.events_supported
     assert "session_end" not in describe.hooks.events_supported
     assert isinstance(stack.harness, SessionLane)
-    assert stack.harness.resume_cursor("sse:7") == "7"
+    assert stack.harness.resume_cursor("sse:7") == "7"  # a key recorded before FT-G6
+    assert stack.harness.resume_cursor("sse:run-1:7") == "run-1@7"
     assert stack.harness.resume_cursor("run:run-1:final") is None
     assert STREAM_START.startswith("^")
 

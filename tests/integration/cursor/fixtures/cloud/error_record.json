@@ -1,0 +1,49 @@
+{
+  "synthetic": true,
+  "source": "hand-authored from research/cursor-platform.md section 4.4; replace with a scrubbed recording in the owner's live qualification drill (GET .../runs/{runId} of the ERROR run)",
+  "agent": {
+    "id": "bc-from-create",
+    "name": "mc-run",
+    "status": "IDLE",
+    "url": "https://cursor.com/agents/bc-from-create",
+    "latestRunId": "run-7f1e2d3c-4b5a-4c6d-8e7f-9a0b1c2d3e4f"
+  },
+  "run": {
+    "id": "run-7f1e2d3c-4b5a-4c6d-8e7f-9a0b1c2d3e4f",
+    "status": "ERROR",
+    "durationMs": 95100,
+    "result": "",
+    "error": {
+      "code": "provider_error",
+      "message": "model request failed"
+    }
+  },
+  "usage": {
+    "totalUsage": {
+      "inputTokens": 2400,
+      "outputTokens": 380,
+      "cacheWriteTokens": 0,
+      "cacheReadTokens": 0,
+      "totalTokens": 2780
+    },
+    "runs": [
+      {
+        "id": "run-7f1e2d3c-4b5a-4c6d-8e7f-9a0b1c2d3e4f",
+        "usage": {
+          "inputTokens": 2400,
+          "outputTokens": 380,
+          "totalTokens": 2780
+        }
+      }
+    ]
+  },
+  "artifacts": {
+    "artifacts/report.md": "# Cloud report\n\nDone.\n",
+    "artifacts/chart.csv": "x,y\n1,2\n"
+  },
+  "retention_seconds": 3600,
+  "agent_branch_commit": {
+    "path": "src/feature.py",
+    "content": "def feature() -> int:\n    return 7\n"
+  }
+}

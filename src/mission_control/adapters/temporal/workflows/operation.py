@@ -25,6 +25,10 @@ with workflow.unsafe.imports_passed_through():
     )
     from mission_control.domain.execution.lane_turns import (
         LANE_COMMAND_SEMANTICS,
+        LANE_PAUSE_SEMANTICS,
+        LANE_RESUME_SEMANTICS,
+        UNSUPPORTED_CONTROL,
+        ControlDecision,
         LaneCancelRequest,
         LaneCommandReceipt,
         LaneStatusRequest,
@@ -33,6 +37,7 @@ with workflow.unsafe.imports_passed_through():
         LaneTurnResult,
         NativeRefs,
         default_lane_profile,
+        pause_decision_for,
     )
     from mission_control.domain.execution.lanes import LaneResumePoint, LaneSegmentBounds
     from mission_control.domain.programs.search_attributes import (
@@ -51,6 +56,10 @@ NUDGE_SNAPSHOT_PATCH = "rrm-008-nudge-snapshot-before-activity"
 # family passed `segments`) runs as a loop of `lane.turn` segments with the lane cancel path.
 # Requests without the new fields never reach the marker, so every earlier history replays.
 SEGMENT_LOOP_PATCH = "ft-g2-segment-loop"
+# FT-G4 (SPEC-07 section 7): a lane without a mid-run pause applies an accepted pause at the
+# run boundary only; the marker is written only when a pause actually holds the next segment,
+# so every history recorded without a pause replays unchanged.
+LANE_PAUSE_PATCH = "ft-g4-lane-boundary-pause"
 TERMINAL_DISPOSITIONS = frozenset({"completed", "cancelled", "failed", "in_doubt"})
 # `lane.turn` retries infrastructure failures (a lost worker, a heartbeat timeout) only:
 # rejections are non-retryable application errors raised by the activity.
@@ -201,6 +210,10 @@ class OperationWorkflow:
         self._cancel_urgency = "normal"
         self._cancel_command_id: str | None = None
         self._terminal = False
+        # FT-G4: the lane profile, whether a provider turn is in flight, and a boundary pause.
+        self._lane_profile = default_lane_profile(request.operation)
+        self._turn_in_flight = False
+        self._paused = False
 
     @workflow.signal
     def request_cancel(self) -> None:
@@ -257,6 +270,77 @@ class OperationWorkflow:
             raise ValueError("cancel urgency is normal or immediate")
         if self._terminal:
             raise ValueError("the unit is terminal; a cancel has nothing to stop")
+
+    @workflow.update(name="pause_command")
+    async def pause_command(self, command_id: str, reason: str = "command") -> dict[str, Any]:
+        """FT-G4 (SPEC-07 section 7): a lane that cannot pause mid-run (Cursor) refuses a pause
+        while its turn runs (the validator's typed `unsupported_control` rejection) and holds
+        an accepted pause at the run boundary: no new segment starts until `resume_command`."""
+
+        del reason
+        decision = self._pause_decision()
+        self._seen_cmds.add(command_id)
+        self._paused = True
+        receipt = LaneCommandReceipt(
+            command_id=command_id,
+            kind="pause",
+            delivery_semantics=decision.delivery_semantics,
+            detail=decision.detail,
+        ).model_dump(mode="json")
+        self._command_receipts.append(receipt)
+        return receipt
+
+    @pause_command.validator
+    def _validate_pause_command(self, command_id: str, reason: str = "command") -> None:
+        del reason
+        self._validate_command_id(command_id)
+        decision = self._pause_decision()
+        if not decision.accepted:
+            raise ApplicationError(
+                decision.detail,
+                {"reason_code": decision.reason_code, "delivery_semantics": "unsupported"},
+                type=UNSUPPORTED_CONTROL,
+                non_retryable=True,
+            )
+
+    @workflow.update(name="resume_command")
+    async def resume_command(self, command_id: str) -> dict[str, Any]:
+        """Release a boundary pause: the next segment may start."""
+
+        self._seen_cmds.add(command_id)
+        self._paused = False
+        receipt = LaneCommandReceipt(
+            command_id=command_id,
+            kind="resume",
+            delivery_semantics=LANE_RESUME_SEMANTICS[self._lane_profile],
+        ).model_dump(mode="json")
+        self._command_receipts.append(receipt)
+        return receipt
+
+    @resume_command.validator
+    def _validate_resume_command(self, command_id: str) -> None:
+        self._validate_command_id(command_id)
+        if not self._paused:
+            raise ValueError("the unit is not paused")
+
+    def _pause_decision(self) -> ControlDecision:
+        return pause_decision_for(
+            self._lane_profile,
+            LANE_PAUSE_SEMANTICS[self._lane_profile],
+            turn_in_flight=self._turn_in_flight,
+        )
+
+    def _validate_command_id(self, command_id: str) -> None:
+        if not command_id or len(command_id) > 512:
+            raise ValueError("a command names its command id")
+        if command_id in self._seen_cmds:
+            raise ValueError(f"command {command_id} was already applied to this unit")
+        if self._terminal:
+            raise ValueError("the unit is terminal")
+
+    @workflow.query
+    def paused(self) -> bool:
+        return self._paused
 
     @workflow.query
     def seen_commands(self) -> list[str]:
@@ -409,6 +493,7 @@ class OperationWorkflow:
             if not _parks(outcome):
                 return outcome
             self._visibility(request, "in_doubt")
+            self._turn_in_flight = False
             cancelling = self._cancel_requested
             seen = self._reconciliation_nudges
 
@@ -434,6 +519,11 @@ class OperationWorkflow:
         if loop.segment_no > bounds.max_segments:
             # A turn that never closes within its segment budget is not guessed at.
             return await self._lane_in_doubt(request, loop)
+        if self._paused and loop.phase == "start" and workflow.patched(LANE_PAUSE_PATCH):
+            # FT-G4: the run boundary; nothing is sent while the unit is paused.
+            await workflow.wait_condition(lambda: not self._paused or self._cancel_requested)
+            if self._cancel_requested:
+                return None
         turn = LaneTurnRequest(
             operation=request.operation,
             lane_profile=loop.lane_profile,
@@ -455,6 +545,7 @@ class OperationWorkflow:
             retry_policy=LANE_TURN_RETRY,
             cancellation_type=workflow.ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
         )
+        self._turn_in_flight = True
         try:
             await workflow.wait_condition(partial(self._turn_ended_or_cancelled, handle))
         except asyncio.CancelledError:
@@ -472,6 +563,8 @@ class OperationWorkflow:
         result = LaneTurnResult.model_validate(handle.result())
         if result.native.session_ref is not None:
             loop.native = result.native
+        # Between segments a sent turn is still running at the provider.
+        self._turn_in_flight = not (result.done or result.busy)
         if result.done:
             assert result.operation_result is not None
             return dict(result.operation_result)
@@ -737,6 +830,7 @@ class OperationWorkflow:
 
 __all__: tuple[str, ...] = (
     "CANCELLATION_SAGA_PATCH",
+    "LANE_PAUSE_PATCH",
     "SEGMENT_LOOP_PATCH",
     "OperationWorkflow",
     "settle_superseded_generation",

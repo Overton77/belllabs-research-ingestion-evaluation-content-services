@@ -1085,7 +1085,7 @@
     "skill.biotech-literature-review@1.0.0#sha256:a5f52a8d5b4dab28700851bbdcc04c03e330fe0f0d860bea38498b41345aae48",
     "skill.biomcp@0.9.1#sha256:bf0c38d379bb838c460c62e1550ecd8824c341cd667311e3e8371821521680c6",
     "skill.mission-control-compose@0.2.0#sha256:5f2bd8ec85e952cfd27b1a6512885273567d020f5a3e49b11f8b5d6c2fbe321c",
-    "skill.mission-control-intervene@0.4.0#sha256:ec468632c9bcbb56062c5bbadc71a5a75108253290640edf8eda332cfb3a84bf"
+    "skill.mission-control-intervene@0.5.0#sha256:b98854a1dccbb85511c00ba17a75e215154bdafc67482b78e03b44507da16eb1"
    ],
    "lanes": [
     "deep_agents"

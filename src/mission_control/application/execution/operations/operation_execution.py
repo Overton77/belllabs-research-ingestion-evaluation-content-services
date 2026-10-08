@@ -957,7 +957,12 @@ class OperationExecutionService:
         claim = await self._lane_claim(binding)
         if cancelled_by_command:
             await self._fence_milestone(binding, "provider_acknowledged")
-        settlement = _lane_settlement(binding, facts, native_turn_ref=native_turn_ref)
+        settlement = _lane_settlement(
+            binding,
+            facts,
+            native_turn_ref=native_turn_ref,
+            cancelled_by_command=cancelled_by_command,
+        )
         try:
             _validate_bound_usage(binding, settlement.usage)
         except OperationBudgetViolation as violation:
@@ -1983,6 +1988,7 @@ def _lane_settlement(
     facts: ClosingFacts,
     *,
     native_turn_ref: str | None,
+    cancelled_by_command: bool = True,
 ) -> OperationSettlement:
     status = _LANE_STATUS[facts.native_status]
     amounts = {
@@ -1996,10 +2002,19 @@ def _lane_settlement(
         if dimension in binding.budget_limits and facts.usage.disposition != "unknown"
     }
     failure_code: str | None = None
-    if facts.native_status == "expired":
+    if facts.native_status == "finished" and facts.missing_outputs:
+        # FT-G4: a native `finished` without the declared outputs is not acceptance
+        # (`not_accepted(outputs_missing)`, after the one follow-up turn the lane allowed).
+        status = "failed"
+        failure_code = "outputs_missing"
+    elif facts.native_status == "expired":
         failure_code = "timeout"
     elif facts.native_status == "error":
         failure_code = "capacity" if facts.error_code == "capacity" else "provider_error"
+    elif facts.native_status == "cancelled" and not cancelled_by_command:
+        # SPEC-07 section 8: a provider cancel no command caused is an infrastructure failure.
+        status = "failed"
+        failure_code = "infrastructure"
     elif facts.native_status == "cancelled":
         failure_code = "cancelled"
     refs = tuple(
@@ -2024,7 +2039,11 @@ def _lane_settlement(
         failure_message=(
             None
             if failure_code is None
-            else f"lane reported {facts.native_status} at governed operation boundary"
+            else (
+                "declared outputs were not registered: " + ", ".join(facts.missing_outputs)[:900]
+                if failure_code == "outputs_missing"
+                else f"lane reported {facts.native_status} at governed operation boundary"
+            )
         ),
         settled_at=datetime.now(UTC),
     )

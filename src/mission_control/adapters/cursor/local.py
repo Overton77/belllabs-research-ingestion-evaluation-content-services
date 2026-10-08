@@ -21,19 +21,30 @@ One Session Turn of a bound operation, driven by `lane.turn` (FT-G2):
 `reattach` re-launches the bridge over the same lease and `state_root` and resumes the agent
 (emulated: a turn the bridge store no longer knows raises `NativeTurnLost`). Qualification
 stays false until FT-G6 records a real run (`describe().qualified=False`).
+
+FT-G4 controls (SPEC-07 section 7): cursors are turn-qualified (`<run_id>@<offset>`, so a
+replacement or continuation turn never resumes from another run's offset); a later turn's text
+is staged by its instruction ref (`stage_turn`: the injected item of a `cancel_and_replace`
+replacement, a continuation's hydration prompt); `snapshot` freezes `mc.cursor_snapshot.v1`
+(patch, untracked files, packet files with digests, native refs); `prepare` restores the
+packet's `workspace` item (a fork) into the fresh lease before anything else is placed; the
+`stop` hook asks once for missing declared outputs (`missing_output_policy` follow-up) and a
+finished session that still lacks them closes with `missing_outputs`; a continuation hydrates
+a fresh agent in the same lease (`CursorSessionHydrator`, `adapters/cursor/controls.py`).
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 from uuid import UUID
 
+from mission_control.adapters.cursor import snapshot as snapshots
 from mission_control.adapters.cursor.bridge import (
     AgentBusy,
     CursorBridgeLauncher,
@@ -49,11 +60,13 @@ from mission_control.adapters.cursor.frames import (
     final_lane_frame,
     local_lane_frame,
     offset_of,
+    run_of,
 )
 from mission_control.adapters.cursor.hooks_callback import kernel_hook_script
 from mission_control.adapters.cursor.projection import (
     HOOK_CONTEXT_PATH,
     KERNEL_HOOK_PATH,
+    OUTPUTS_DIR,
     STATE_ROOT,
     TOKEN_PATH,
     UNSUPPORTED_BEHAVIOR,
@@ -61,6 +74,7 @@ from mission_control.adapters.cursor.projection import (
     LaneProjectionError,
     ProjectionSource,
     materialize_packet,
+    packet_files,
     projection_digests,
     turn_text,
     verify_projection,
@@ -68,6 +82,7 @@ from mission_control.adapters.cursor.projection import (
     write_secret,
 )
 from mission_control.adapters.cursor.workspace import GitWorktreeLeaser
+from mission_control.application.execution.harness.controls import SessionHandover
 from mission_control.application.execution.harness.describe import CURSOR_LOCAL_DESCRIBE
 from mission_control.application.execution.harness.hook_callbacks import (
     HookCallbackService,
@@ -81,6 +96,7 @@ from mission_control.application.execution.harness.leases import WorkspaceLease
 from mission_control.application.execution.harness.protocol import NativeTurnLost
 from mission_control.domain.agentic_components.projection import HostProjection, ProjectedFile
 from mission_control.domain.authoring.canonical import sha256_digest
+from mission_control.domain.context.render import INPUTS_MANIFEST_PATH
 from mission_control.domain.execution.contracts import OperationExecutionRequest
 from mission_control.domain.execution.lane_turns import ClosingFacts
 from mission_control.domain.execution.lanes import (
@@ -127,6 +143,9 @@ class CursorLocalSettings:
     mount_root: str = ""
     # A worker-local checkout used when the binding names no repository (Mission 3 binds one).
     default_repository: str | None = None
+    # FT-G4 `missing_output_policy`: one follow-up asking for the declared outputs (SPEC-07
+    # user story 26); False closes a session without them `not_accepted` at once.
+    missing_output_follow_up: bool = True
 
 
 @dataclass
@@ -141,10 +160,58 @@ class _Session:
     agent_id: str | None = None
     run_id: str | None = None
     token_context: HookTokenContext | None = None
+    # FT-G4: staged texts of later turns (by instruction ref) and a hydrated continuation.
+    turn_texts: dict[str, str] = field(default_factory=dict)
+    handover: SessionHandover | None = None
+    restored_snapshot: str | None = None
 
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+FOLLOW_UP_TEXT = (
+    "Before you stop: the mission declares outputs that are not written yet: {missing}. "
+    "Write each declared output under outputs/ as described in .mission/context.md, "
+    "then stop. Do not start other work."
+)
+TURNS_DIR = ".mission/turns"
+
+
+def declared_outputs(
+    operation: OperationExecutionRequest, *, mount_root: str = ""
+) -> tuple[str, ...]:
+    """The operation's declared outputs: its writable paths under `outputs/` (relative)."""
+
+    declared: list[str] = []
+    prefix = mount_root.rstrip("/")
+    for path in operation.workspace.exclusive_write_paths:
+        logical = path
+        if prefix and logical.startswith(prefix + "/"):
+            logical = logical[len(prefix) :]
+        relative = logical.lstrip("/")
+        if relative.startswith(OUTPUTS_DIR + "/"):
+            declared.append(relative)
+    return tuple(dict.fromkeys(declared))
+
+
+def missing_outputs(root: Path, declared: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(path for path in declared if not (root / path).is_file())
+
+
+def composite_cursor(run_id: str, offset: str) -> str:
+    return f"{run_id}@{offset}"
+
+
+def split_cursor(cursor: str | None, run_id: str) -> str | None:
+    """The bridge offset a cursor names for `run_id`; another run's cursor resumes nothing."""
+
+    if cursor is None:
+        return None
+    run, separator, offset = cursor.rpartition("@")
+    if not separator:
+        return cursor
+    return offset if run == run_id and offset else None
 
 
 def _callback_url(base: str, request_scope: str) -> str:
@@ -157,6 +224,21 @@ def _scope_block(request_scope: str) -> dict[str, str]:
     if len(parts) == 4 and parts[0] == "mc":
         return {"installation_id": parts[1], "application_id": parts[2], "tenant_id": parts[3]}
     return {"installation_id": request_scope, "application_id": "local"}
+
+
+class _StageOnly:
+    """A sink without reads: snapshots are stored but cannot be restored from it."""
+
+    def __init__(self, sink: LaneArtifactSink) -> None:
+        self._sink = sink
+
+    async def stage(self, *, request_scope: str, name: str, content: bytes, media_type: str) -> str:
+        return await self._sink.stage(
+            request_scope=request_scope, name=name, content=content, media_type=media_type
+        )
+
+    async def retrieve(self, durable_ref: str) -> bytes:
+        raise LookupError(durable_ref)
 
 
 class CursorLocalHarness:
@@ -175,6 +257,7 @@ class CursorLocalHarness:
         inputs: DurableInputReader | None = None,
         describe: LaneDescribe = CURSOR_LOCAL_DESCRIBE,
         clock: Callable[[], datetime] = _utc_now,
+        snapshot_store: snapshots.SnapshotArtifacts | None = None,
     ) -> None:
         if describe.lane_profile != PROFILE:
             raise ValueError("the Cursor local harness describes the cursor_local profile")
@@ -188,6 +271,11 @@ class CursorLocalHarness:
         self._describe = describe
         self._clock = clock
         self._sessions: dict[str, _Session] = {}
+        # FT-G4: where snapshot bytes are staged and read back (fork, continuation).
+        store = snapshot_store
+        if store is None and hasattr(artifacts, "retrieve"):
+            store = artifacts  # type: ignore[assignment]
+        self._snapshots: snapshots.SnapshotArtifacts | None = store
 
     def describe(self) -> LaneDescribe:
         return self._describe
@@ -240,6 +328,9 @@ class CursorLocalHarness:
         )
         session.lease = lease
         root = Path(lease.path)
+        # A fork's (or continuation's) packet carries one `workspace` item: restore it into
+        # the fresh lease first; the new packet and projection are placed over it.
+        await self._restore_workspace_item(session, root)
         packet = await materialize_packet(
             root, session.operation, self._inputs, mount_root=self._settings.mount_root
         )
@@ -265,6 +356,46 @@ class CursorLocalHarness:
             projection_digests=session.digests,
             materialization_ref=sha256_digest(sorted(written)),
         )
+
+    async def _restore_workspace_item(self, session: _Session, root: Path) -> None:
+        files = dict(
+            await packet_files(
+                session.operation, self._inputs, mount_root=self._settings.mount_root
+            )
+        )
+        raw = files.get(INPUTS_MANIFEST_PATH)
+        if raw is None:
+            return
+        try:
+            workspace = json.loads(raw.decode("utf-8")).get("workspace")
+        except (ValueError, AttributeError):
+            return
+        if not isinstance(workspace, dict) or not workspace.get("snapshot_ref"):
+            return
+        ref = str(workspace["snapshot_ref"])
+        if session.restored_snapshot == ref:
+            return
+        if self._snapshots is None:
+            raise LaneProjectionError(
+                snapshots.CHECKPOINT_INVALID, "no snapshot store is composed to restore " + ref
+            )
+        manifest = await snapshots.load(ref, self._snapshots)
+        restored = await snapshots.restore(
+            manifest,
+            root,
+            self._snapshots,
+            restore_paths=tuple(workspace.get("restore_paths") or ("/",)),
+        )
+        expected = {
+            path: digest
+            for path, digest in manifest.workspace_manifest().items()
+            if path in restored or not path.startswith("/.mission/")
+        }
+        if any(restored.get(path) != digest for path, digest in expected.items()):
+            raise LaneProjectionError(
+                snapshots.CHECKPOINT_INVALID, "restored files differ from the snapshot digests"
+            )
+        session.restored_snapshot = ref
 
     def _spec(self, session: _Session, root: Path) -> LocalAgentSpec:
         binding = session.binding
@@ -421,10 +552,11 @@ class CursorLocalHarness:
         agent_id = request.session.native_session_ref or session.agent_id
         if agent_id is None:
             raise ValueError("send_turn requires a started session")
+        text = session.turn_texts.get(request.instruction_ref) or turn_text(session.operation)
         try:
             run_id = await bridge.send(
                 agent_id,
-                turn_text(session.operation),
+                text,
                 idempotency_key=request.idempotency_key,
             )
         except AgentBusy:
@@ -432,21 +564,42 @@ class CursorLocalHarness:
         session.run_id = run_id
         return TurnHandle(session=request.session, turn_no=request.turn_no, native_turn_ref=run_id)
 
+    def stage_turn(self, harness_execution_id: str, instruction_ref: str, text: str) -> None:
+        """The text a later turn sends (FT-G4): kept for the send and written under
+        `.mission/turns/` so the agent and the transcript see what was injected."""
+
+        session = self._sessions.get(harness_execution_id)
+        if session is None:
+            raise NativeTurnLost(f"harness execution {harness_execution_id} is not staged")
+        session.turn_texts[instruction_ref] = text
+        if session.lease is not None:
+            name = sha256_digest(instruction_ref).removeprefix("sha256:")[:16]
+            write_files(
+                Path(session.lease.path),
+                (
+                    ProjectedFile(
+                        path=f"{TURNS_DIR}/{name}.md", content=text.encode("utf-8"), mode=0o444
+                    ),
+                ),
+            )
+
     async def observe(self, request: ObserveRequest) -> AsyncIterator[LaneFrame]:
         session = self._session(request)
         run_id = request.turn.native_turn_ref or session.run_id
         if run_id is None:
             raise NativeTurnLost("no native turn to observe")
         bridge = await self._bridge(session, request)
-        cursor = request.after
+        after = split_cursor(request.after, run_id)
+        cursor = request.after if after is not None else None
         try:
-            async for event in bridge.observe(run_id, after_offset=request.after):
+            async for event in bridge.observe(run_id, after_offset=after):
                 frame = local_lane_frame(
                     event,
                     run_id=run_id,
                     harness_execution_id=request.harness_execution_id,
                     generation=request.generation,
                 )
+                frame = frame.model_copy(update={"cursor": composite_cursor(run_id, frame.cursor)})
                 cursor = frame.cursor
                 yield frame
                 if frame.terminal:
@@ -464,10 +617,109 @@ class CursorLocalHarness:
 
     def closing_facts(self, turn: TurnHandle, frame: LaneFrame) -> ClosingFacts:
         body = frame.body if isinstance(frame.body, dict) else {}
-        return closing_facts(body)
+        facts = closing_facts(body)
+        if facts.native_status != "finished":
+            return facts
+        session = self._sessions.get(turn.session.harness_execution_id)
+        if session is None or session.lease is None:
+            return facts
+        # A native `finished` is never acceptance: declared outputs must be on disk.
+        declared = declared_outputs(session.operation, mount_root=self._settings.mount_root)
+        missing = missing_outputs(Path(session.lease.path), declared)
+        return facts.model_copy(update={"missing_outputs": missing}) if missing else facts
 
     def resume_cursor(self, provider_key: str) -> str | None:
-        return offset_of(provider_key)
+        offset = offset_of(provider_key)
+        run = run_of(provider_key)
+        if offset is None or run is None:
+            return None
+        return composite_cursor(run, offset)
+
+    # --- FT-G4: missing_output_policy follow-up (Cursor `stop` hook) ---------------------------
+
+    async def stop_followup(
+        self, context: HookTokenContext, payload: Mapping[str, Any]
+    ) -> str | None:
+        """The follow-up a stopping agent gets when declared outputs are missing."""
+
+        del payload
+        if not self._settings.missing_output_follow_up:
+            return None
+        session = self._sessions.get(str(context.harness_execution_id))
+        if session is None or context.workspace_root is None:
+            return None
+        declared = declared_outputs(session.operation, mount_root=self._settings.mount_root)
+        missing = await asyncio.to_thread(missing_outputs, Path(context.workspace_root), declared)
+        if not missing:
+            return None
+        return FOLLOW_UP_TEXT.format(missing=", ".join(missing))
+
+    # --- FT-G4: continuation handover (a fresh agent in the same lease) -------------------------
+
+    async def pending_handover(self, harness_execution_id: str) -> SessionHandover | None:
+        session = self._sessions.get(harness_execution_id)
+        return None if session is None else session.handover
+
+    async def complete_handover(self, harness_execution_id: str, transfer_id: str) -> None:
+        session = self._sessions.get(harness_execution_id)
+        if session is not None and session.handover is not None:
+            if session.handover.transfer_id == transfer_id:
+                session.agent_id = session.handover.session.native_session_ref
+                session.handover = None
+
+    def live_session(self, agent_id: str) -> str | None:
+        """The staged harness execution whose live agent is `agent_id` (a continuation's
+        source), when its lease is on this worker."""
+
+        for harness_execution_id, session in self._sessions.items():
+            if session.agent_id == agent_id and session.lease is not None:
+                return harness_execution_id
+        return None
+
+    def lease_path(self, harness_execution_id: str) -> str:
+        lease = self._sessions[harness_execution_id].lease
+        if lease is None:
+            raise NativeTurnLost("the session holds no workspace lease")
+        return lease.path
+
+    async def open_bridge(self, harness_execution_id: str) -> CursorLocalBridge:
+        session = self._sessions[harness_execution_id]
+        if session.bridge is None:
+            root = Path(self.lease_path(harness_execution_id))
+            session.bridge = await self._launcher.launch(
+                workspace=root, state_root=root / STATE_ROOT
+            )
+        return session.bridge
+
+    def agent_spec(self, harness_execution_id: str) -> LocalAgentSpec:
+        """The pinned agent options (tools are re-supplied on every create and resume)."""
+
+        return self._spec(
+            self._sessions[harness_execution_id], Path(self.lease_path(harness_execution_id))
+        )
+
+    def session_handle(self, harness_execution_id: str, agent_id: str) -> SessionHandle:
+        session = self._sessions[harness_execution_id]
+        root = Path(self.lease_path(harness_execution_id))
+        return SessionHandle(
+            lane_profile=PROFILE,
+            harness_execution_id=harness_execution_id,
+            generation=session.identity.attempt_no,
+            native_session_ref=agent_id,
+            native_details={
+                "cursor_sdk_version": self._launcher.versions.get("cursor_sdk", ""),
+                "bridge_state_root": str(root / STATE_ROOT),
+            },
+        )
+
+    def offer_handover(self, harness_execution_id: str, handover: SessionHandover) -> None:
+        """A hydrated continuation: the next turn of this execution goes to its agent."""
+
+        self._sessions[harness_execution_id].handover = handover
+
+    @property
+    def snapshot_store(self) -> snapshots.SnapshotArtifacts | None:
+        return self._snapshots
 
     async def cancel_turn(self, request: CancelTurnRequest) -> CancelReceipt:
         session = self._session(request)
@@ -545,33 +797,38 @@ class CursorLocalHarness:
         projected = session.projection.paths() if session.projection is not None else ()
         return tuple(projected)
 
-    async def _store_patch(self, session: _Session, request: HarnessRequest) -> str:
+    async def _freeze(
+        self, session: _Session, request: HarnessRequest, reason: str
+    ) -> snapshots.FrozenSnapshot:
+        """`mc.cursor_snapshot.v1` of the lease: patch, untracked files, packet files, refs."""
+
         assert session.lease is not None
-        patch = await self._leaser.capture_patch(session.lease, exclude=self._excluded(session))
-        manifest = json.dumps(
-            {"base_commit": session.lease.base_commit, "untracked": list(patch.untracked)},
-            sort_keys=True,
-        ).encode("utf-8")
-        name = f"cursor-local/{request.harness_execution_id}/{request.generation}"
-        await self._artifacts.stage(
+        lease = session.lease
+        patch = await self._leaser.capture_patch(lease, exclude=self._excluded(session))
+        store = self._snapshots or _StageOnly(self._artifacts)
+        return await snapshots.freeze(
+            root=Path(lease.path),
+            patch=patch,
+            artifacts=store,
             request_scope=session.identity.request_scope,
-            name=f"{name}/patch-manifest.json",
-            content=manifest,
-            media_type="application/json",
-        )
-        return await self._artifacts.stage(
-            request_scope=session.identity.request_scope,
-            name=f"{name}/patch.diff",
-            content=patch.diff,
-            media_type="text/x-diff",
+            name=f"cursor-local/{request.harness_execution_id}/{request.generation}",
+            harness_execution_id=request.harness_execution_id,
+            generation=request.generation,
+            reason=reason,
+            base_commit=lease.base_commit,
+            base_ref=lease.base_ref,
+            repository=lease.repository,
+            native={"agent_id": session.agent_id or "", "run_id": session.run_id or ""},
         )
 
     async def snapshot(self, request: SnapshotRequest) -> SnapshotManifest:
+        """Emulated: a frozen `mc.cursor_snapshot.v1` named by `cursor-snapshot:<ref>`."""
+
         session = self._session(request)
         if session.lease is None:
             raise ValueError("no leased workspace to snapshot")
-        ref = await self._store_patch(session, request)
-        refs = (ref, *(f"{path}={digest}" for path, digest in sorted(session.digests.items())))
+        frozen = await self._freeze(session, request, request.reason)
+        refs = snapshots.manifest_refs(frozen)
         return SnapshotManifest(
             lane_profile=PROFILE,
             harness_execution_id=request.harness_execution_id,
@@ -594,8 +851,9 @@ class CursorLocalHarness:
         if session.lease is None or session.lease.released:
             self._sessions.pop(request.harness_execution_id, None)
             return CleanupReceipt(released=False)
-        patch_ref = await self._store_patch(session, request)
-        outputs: list[str] = []
+        frozen = await self._freeze(session, request, f"end_session:{request.reason}")
+        patch_ref = frozen.manifest.patch.ref
+        outputs: list[str] = [frozen.snapshot_ref]
         for path, content in await self._leaser.outputs(session.lease):
             outputs.append(
                 await self._artifacts.stage(
@@ -625,8 +883,13 @@ class CursorLocalHarness:
 
 
 __all__ = [
+    "FOLLOW_UP_TEXT",
     "PROFILE",
     "CursorLocalHarness",
     "CursorLocalSettings",
     "LaneArtifactSink",
+    "composite_cursor",
+    "declared_outputs",
+    "missing_outputs",
+    "split_cursor",
 ]

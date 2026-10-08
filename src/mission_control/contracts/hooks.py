@@ -83,6 +83,14 @@ class HookResult(_Strict):
     updated_input: dict[str, Any] | None = None
     additional_context: str | None = Field(default=None, max_length=ADDITIONAL_CONTEXT_LIMIT)
     message: str | None = None
+    # FT-G4: the `stop` event's follow-up turn (Cursor `followup_message`), used only by the
+    # kernel's `missing_output_policy` follow-up. Left out of dumps while absent.
+    followup_message: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=ADDITIONAL_CONTEXT_LIMIT,
+        exclude_if=lambda value: value is None,
+    )
 
     @model_validator(mode="after")
     def reason_required_to_refuse(self) -> HookResult:
@@ -109,6 +117,7 @@ def merge_results(results: Iterable[HookResult]) -> HookResult:
     contexts: list[str] = []
     messages: list[str] = []
     updated: dict[str, Any] | None = None
+    followup: str | None = None
     for result in results:
         if _RANK[result.decision] > _RANK[decision]:
             decision = result.decision
@@ -120,6 +129,8 @@ def merge_results(results: Iterable[HookResult]) -> HookResult:
             messages.append(result.message)
         if result.updated_input is not None:
             updated = result.updated_input
+        if followup is None and result.followup_message:
+            followup = result.followup_message
     refusing = reasons if decision is not HookDecision.ALLOW else []
     context = "\n\n".join(contexts)[:ADDITIONAL_CONTEXT_LIMIT] or None
     return HookResult(
@@ -128,6 +139,7 @@ def merge_results(results: Iterable[HookResult]) -> HookResult:
         updated_input=updated,
         additional_context=context,
         message="\n".join(messages) or None,
+        followup_message=followup if decision is HookDecision.ALLOW else None,
     )
 
 
