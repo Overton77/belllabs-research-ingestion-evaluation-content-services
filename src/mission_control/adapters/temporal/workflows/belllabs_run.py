@@ -7,6 +7,7 @@ from temporalio import workflow
 
 with workflow.unsafe.imports_passed_through():
     from mission_control.adapters.temporal.search_attributes import (
+        child_mission_visibility,
         child_search_attributes,
         ensure_workflow_search_attributes,
     )
@@ -153,6 +154,8 @@ class BellLabsRunWorkflow:
         policy = run_input.search_attribute_policy
         ensure_workflow_search_attributes(policy, self._attributes(run_input, "root"))
         family_attributes = child_search_attributes(policy, self._attributes(run_input, "family"))
+        # FT-G7: the family also carries `mc_run_id` and the root's `mc_mission_id`.
+        family_attributes = child_mission_visibility(policy, family_attributes, run_input.run_id)
         family_input = (
             {**run_input.family_input, "search_attribute_policy": policy}
             if family_attributes is not None

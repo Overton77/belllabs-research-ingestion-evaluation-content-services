@@ -6,7 +6,7 @@ from typing import Any
 from temporalio import activity
 from temporalio.client import Client
 from temporalio.exceptions import ApplicationError
-from temporalio.worker import Worker
+from temporalio.worker import Worker, WorkerDeploymentConfig
 
 from mission_control.adapters.temporal.artifact_workflow import GenericArtifactWorkflow
 from mission_control.adapters.temporal.operation_activities import OperationExecutionActivities
@@ -92,6 +92,7 @@ def create_generic_artifact_worker(
     operations: OperationExecutionActivities,
     artifacts: ArtifactPromotionActivities,
     graceful_shutdown_timeout: timedelta = timedelta(),
+    deployment_config: WorkerDeploymentConfig | None = None,
 ) -> Worker:
     return Worker(
         client,
@@ -100,4 +101,5 @@ def create_generic_artifact_worker(
         workflow_runner=coordinator_workflow_runner(),
         activities=generic_artifact_activities(operations, artifacts),
         graceful_shutdown_timeout=graceful_shutdown_timeout,
+        deployment_config=deployment_config,
     )

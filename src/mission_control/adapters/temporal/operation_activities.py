@@ -10,7 +10,7 @@ from typing import Any
 from temporalio import activity
 from temporalio.client import Client
 from temporalio.exceptions import ApplicationError
-from temporalio.worker import Worker
+from temporalio.worker import Worker, WorkerDeploymentConfig
 
 from mission_control.adapters.temporal.registration.activities import agent_cognitive_activities
 from mission_control.application.execution.operations.operation_execution import (
@@ -184,6 +184,7 @@ def create_agent_cognitive_worker(
     task_queue: str,
     activities: OperationExecutionActivities,
     graceful_shutdown_timeout: timedelta = timedelta(),
+    deployment_config: WorkerDeploymentConfig | None = None,
 ) -> Worker:
     """`operation.execute` and `operation.cancel` (RRM-008) on the cognitive queue.
 
@@ -198,6 +199,7 @@ def create_agent_cognitive_worker(
         task_queue=task_queue,
         activities=agent_cognitive_activities(activities),
         graceful_shutdown_timeout=graceful_shutdown_timeout,
+        deployment_config=deployment_config,
     )
 
 

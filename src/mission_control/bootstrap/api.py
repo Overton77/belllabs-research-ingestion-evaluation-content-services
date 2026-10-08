@@ -19,7 +19,6 @@ from urllib.parse import parse_qsl, urlsplit
 import asyncpg
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from temporalio.client import Client
 
 from mission_control.adapters.auth.jwt import (
     ApplicationAuthentication,
@@ -28,6 +27,7 @@ from mission_control.adapters.auth.jwt import (
 )
 from mission_control.adapters.storage.control_plane_payloads import UnavailablePayloadStore
 from mission_control.adapters.temporal.boundary_commands import TemporalBoundaryCommandTransport
+from mission_control.adapters.temporal.client import connect_temporal, resolve_temporal_connection
 from mission_control.adapters.temporal.search_attributes import verify_belllabs_search_attributes
 from mission_control.adapters.temporal.submission import TemporalWorkflowSubmitter
 from mission_control.adapters.temporal.unit_reconciliation import TemporalUnitReconciliationNudge
@@ -48,6 +48,7 @@ from mission_control.bootstrap.composition import (
     MissionApplicationServices,
     compose_application_services,
 )
+from mission_control.bootstrap.settings import get_settings
 from mission_control.contracts.json import parse_json_object
 from mission_control.domain.authoring.extensions import ExtensionRegistry
 from mission_control.interfaces.http.catalog import router as catalog_router
@@ -210,10 +211,13 @@ def create_application(
                     transport = submitter = nudge = None
                     if item.temporal is not None:
                         temporal = item.temporal
-                        client = await Client.connect(
-                            temporal.address, namespace=temporal.namespace
+                        # FT-G7: local server by default; Temporal Cloud only when
+                        # TEMPORAL_TARGET=cloud (api key + TLS).
+                        connection = resolve_temporal_connection(
+                            get_settings(), address=temporal.address, namespace=temporal.namespace
                         )
-                        await verify_belllabs_search_attributes(client, temporal.namespace)
+                        client = await connect_temporal(connection)
+                        await verify_belllabs_search_attributes(client, connection.namespace)
                         transport = TemporalBoundaryCommandTransport(client)
                         nudge = TemporalUnitReconciliationNudge(client)
                         submitter = TemporalWorkflowSubmitter.for_production(

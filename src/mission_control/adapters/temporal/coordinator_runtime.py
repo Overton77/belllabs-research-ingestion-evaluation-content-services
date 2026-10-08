@@ -7,7 +7,7 @@ from temporalio.api.enums.v1 import TaskQueueType
 from temporalio.api.taskqueue.v1 import TaskQueue
 from temporalio.api.workflowservice.v1 import DescribeTaskQueueRequest
 from temporalio.client import Client
-from temporalio.worker import Worker
+from temporalio.worker import Worker, WorkerDeploymentConfig
 
 from mission_control.adapters.temporal.activities.goal_directed import (
     GoalDirectedActivities,
@@ -188,6 +188,7 @@ def create_coordinator_workers(
     *,
     task_queues: CoordinatorTaskQueues,
     activities: CoordinatorWorkerActivities,
+    deployment_config: WorkerDeploymentConfig | None = None,
 ) -> CoordinatorWorkerSet:
     """Register both accepted coordinator workflow families with real activities."""
 
@@ -198,11 +199,13 @@ def create_coordinator_workers(
             client,
             task_queue=task_queues.stagegraph,
             activities=activities.stagegraph,
+            deployment_config=deployment_config,
         ),
         goal_directed=create_goal_directed_worker(
             client,
             task_queue=task_queues.goal_directed,
             activities=activities.goal_directed,
+            deployment_config=deployment_config,
         ),
         task_queues=task_queues,
     )

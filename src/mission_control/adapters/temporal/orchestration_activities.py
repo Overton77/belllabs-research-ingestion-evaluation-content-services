@@ -5,7 +5,7 @@ from dataclasses import replace
 from temporalio import activity
 from temporalio.client import Client
 from temporalio.exceptions import ApplicationError
-from temporalio.worker import Worker
+from temporalio.worker import Worker, WorkerDeploymentConfig
 
 from mission_control.adapters.temporal.boundary_activities import apply_boundary_fact
 from mission_control.adapters.temporal.registration.activities import coordinator_activities
@@ -158,6 +158,7 @@ def create_stagegraph_worker(
     *,
     task_queue: str,
     activities: StageGraphActivities,
+    deployment_config: WorkerDeploymentConfig | None = None,
 ) -> Worker:
     """Compose the F3 worker after F4 supplies concrete operation/evaluator ports."""
 
@@ -167,4 +168,5 @@ def create_stagegraph_worker(
         workflows=coordinator_workflows("StageGraph"),
         workflow_runner=coordinator_workflow_runner(),
         activities=coordinator_activities("StageGraph", activities),
+        deployment_config=deployment_config,
     )

@@ -86,6 +86,45 @@ and prints the per-terminal commands. `make up` chains infra, preflight and the 
 `make infra-down` removes containers but keeps volumes; there is deliberately no target
 that deletes volumes.
 
+### Temporal SDK 1.34 (FT-G7, 2026-10-07)
+
+`temporalio[opentelemetry]>=1.34,<2` (locked 1.34.0; was 1.30.0). What changed for this repo:
+
+- **Breaking (1.31):** payload size warnings moved from the data converter to
+  `Client.connect(payload_limits=PayloadLimitsConfig(payloads_warn_size=..., memo_warn_size=...))`.
+  Every client is created by `adapters/temporal/client.py` (`connect_temporal`), which sets
+  512 KiB / 2 KiB; nothing configures limits on a `DataConverter`.
+- **Target selection:** the local `make temporal-up` server is the default even when
+  `TEMPORAL_CLOUD_API_KEY` is in `.env`. `TEMPORAL_TARGET=cloud` connects with `api_key=`
+  and `tls=True` to `TEMPORAL_ADDRESS` / `TEMPORAL_NAMESPACE` (a deployment naming another
+  frontend is refused). `make preflight` prints the target per application, never the key.
+- **Worker Deployment versioning:** `make worker` polls as
+  `WorkerDeploymentVersion(TEMPORAL_DEPLOYMENT_NAME="mission-control", build_id=<package version or TEMPORAL_BUILD_ID>)`
+  with default behavior `AUTO_UPGRADE`, and promotes its version to current on start
+  (`TEMPORAL_PROMOTE_ON_START=false` leaves promotion to the CLI;
+  `TEMPORAL_WORKER_VERSIONING=false` runs unversioned workers). A roll is: start the new
+  worker, it becomes current, stop the old one; running executions move on their next task,
+  which is why every command-structure change stays behind `workflow.patched` and the replay
+  suite (`tests/integration/temporal/test_replay_histories.py`, histories captured on 1.30)
+  must pass. `tests/integration/temporal/test_worker_versioning.py` proves the drain against
+  the local server.
+- **Search Attributes:** `make temporal-up` now runs `make temporal-search-attributes`, which
+  registers (idempotently) and lists the BellLabs core plus `mc_mission_id`, `mc_lane`,
+  `mc_phase` (Keyword) and `mc_run_id`, `ForkedFromRunId` (KeywordList). The postgres12
+  visibility store has 10 Keyword / 3 KeywordList / 3 Int columns per namespace; the core
+  uses 7 Keyword + 2 Int, so these two identifiers are KeywordLists (equality filters work
+  unchanged) and no Keyword column is left free.
+- **Not adopted:** `workflow.uuid7()` (no workflow hand-rolls a UUIDv7; the helper in
+  `contracts/identities.py` runs outside workflows), Workflow Streams,
+  `signal_with_start_workflow`, `OpenTelemetryPlugin`, Workflow Pause and the Deep Agents
+  Temporal plugin (the 1.33 `deepagents.retire-result-cache` patch is irrelevant here).
+  Whether a self-hosted server's Update limits match Temporal Cloud's is UNVERIFIED.
+- **Rollback:** pin `temporalio[opentelemetry]==1.30.0` in `pyproject.toml`, `uv lock`, and
+  restore `Client.connect(address, namespace=...)` without `payload_limits` in
+  `adapters/temporal/client.py` (1.30 has no such argument); set
+  `TEMPORAL_WORKER_VERSIONING=false` before rolling back so workers stop polling as a
+  deployment version. Registered Search Attributes can stay.
+
 ### Database component targets
 
 `make db-inspect`, `db-plan`, `db-verify`, `db-runtime-plan`, `db-seed-plan` and
@@ -100,8 +139,9 @@ owner authorization as described in the operator guide.
 | --- | --- |
 | `make_help.py` | renders `make help` from `##` comments |
 | `wait_for_services.py` | waits for compose health; fails fast on a one-shot job error |
+| `temporal_search_attributes.py` | registers and lists the Search Attributes on the local Temporal namespace |
 | `env_check.py` | compares variable names in `.env` with `.env.example` (never values) |
 | `clean_caches.py` | removes tool caches and coverage output, never `.venv` or volumes |
 
-All are stdlib-only so they run identically from PowerShell, Git Bash, WSL and the Cursor
+All but `temporal_search_attributes.py` (which uses the project environment) are stdlib-only so they run identically from PowerShell, Git Bash, WSL and the Cursor
 cloud image.

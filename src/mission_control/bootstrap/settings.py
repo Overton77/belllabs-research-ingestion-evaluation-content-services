@@ -253,6 +253,16 @@ class Settings(BaseSettings):
 
     temporal_address: str = "localhost:7233"
     temporal_namespace: str = "default"
+    # FT-G7: the local `make temporal-up` server stays the default even when the Cloud key
+    # is present; `TEMPORAL_TARGET=cloud` selects Temporal Cloud (api key + TLS).
+    temporal_target: Literal["local", "cloud"] = "local"
+    temporal_cloud_api_key: SecretStr | None = None
+    # FT-G7 Worker Deployment versioning: the deployment name and the build id of this
+    # release (defaults to the package version); `false` keeps unversioned workers.
+    temporal_worker_versioning: bool = True
+    temporal_deployment_name: str = "mission-control"
+    temporal_build_id: str | None = None
+    temporal_promote_on_start: bool = True
     temporal_task_queue: str = "biotech-research-ingestion"
     sandbox_image: str = "python:3.12-slim"
 

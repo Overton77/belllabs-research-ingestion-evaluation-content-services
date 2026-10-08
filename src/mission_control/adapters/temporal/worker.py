@@ -7,7 +7,7 @@ from typing import Protocol
 
 import asyncpg
 from temporalio.client import Client
-from temporalio.worker import Worker
+from temporalio.worker import Worker, WorkerDeploymentConfig
 
 from mission_control.adapters.temporal.artifact_activities import (
     ArtifactPromotionActivities,
@@ -99,7 +99,11 @@ def operation_heartbeat_policy(settings: Settings) -> OperationHeartbeatPolicy:
 
 
 def create_production_workers(
-    client: Client, settings: Settings, composition: WorkerActivityComposition
+    client: Client,
+    settings: Settings,
+    composition: WorkerActivityComposition,
+    *,
+    deployment_config: WorkerDeploymentConfig | None = None,
 ) -> ProductionWorkerSet:
     """Both family workers, the cognitive worker and the generic artifact worker, on the
     canonical queues derived from `TEMPORAL_TASK_QUEUE`.
@@ -107,6 +111,9 @@ def create_production_workers(
     The workers that serve `operation.execute` also serve `operation.cancel` (RRM-008) and
     drain with `WORKER_GRACEFUL_SHUTDOWN_SECONDS`, which must be shorter than every operation
     heartbeat timeout the families declare: the composition refuses otherwise.
+
+    FT-G7: `deployment_config` (from `worker_deployment_config`) puts every worker of the
+    set into one Worker Deployment Version; `None` keeps unversioned workers.
     """
 
     operation_heartbeat_policy(settings).verify_graceful_shutdown(
@@ -118,12 +125,14 @@ def create_production_workers(
             client,
             task_queues=coordinator_task_queues(settings.temporal_task_queue),
             activities=composition.coordinator,
+            deployment_config=deployment_config,
         ),
         operation=create_agent_cognitive_worker(
             client,
             task_queue=BellLabsTaskQueues.from_base(settings.temporal_task_queue).agent_cognitive,
             activities=composition.operation,
             graceful_shutdown_timeout=drain,
+            deployment_config=deployment_config,
         ),
         artifacts=(
             create_generic_artifact_worker(
@@ -132,6 +141,7 @@ def create_production_workers(
                 operations=composition.operation,
                 artifacts=composition.artifacts,
                 graceful_shutdown_timeout=drain,
+                deployment_config=deployment_config,
             )
             if composition.artifacts is not None
             else None
@@ -140,14 +150,20 @@ def create_production_workers(
 
 
 async def production_workers_or_close(
-    client: Client, settings: Settings, composition: WorkerActivityComposition
+    client: Client,
+    settings: Settings,
+    composition: WorkerActivityComposition,
+    *,
+    deployment_config: WorkerDeploymentConfig | None = None,
 ) -> ProductionWorkerSet:
     """`create_production_workers`, closing the composition's resources (the persistent saver
     and store) when the worker set refuses to start, for example on a drain that is not
     shorter than a heartbeat timeout (RRM-009 review)."""
 
     try:
-        return create_production_workers(client, settings, composition)
+        return create_production_workers(
+            client, settings, composition, deployment_config=deployment_config
+        )
     except BaseException:
         if composition.resources is not None:
             await composition.resources.aclose()
