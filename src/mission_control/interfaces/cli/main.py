@@ -14,6 +14,9 @@ from urllib.parse import quote, urlsplit
 import httpx
 
 from mission_control.contracts.json import parse_json_object
+from mission_control.domain.capabilities.bundles import build_bundle_manifest, skipped
+
+_BUNDLE_PREFIXES = {"skill_bundle": "skill", "hook_script": "hook", "subagent_profile": "subagent"}
 
 
 def strict_object(path: str) -> dict[str, Any]:
@@ -70,11 +73,97 @@ class MissionClient:
             raise ValueError("unknown catalog action")
         return self.client.post(f"{self.prefix}/catalog/{action}", json=body)
 
+    def publish(self, phase: str, body: dict[str, Any]) -> httpx.Response:
+        if phase not in {"prepare", "complete"}:
+            raise ValueError("unknown publish phase")
+        return self.client.post(f"{self.prefix}/catalog/publish:{phase}", json=body)
+
     @staticmethod
     def _id(value: str) -> str:
         if not value or value in {".", ".."}:
             raise ValueError("run id must be a nonempty identifier")
         return quote(value, safe="")
+
+
+def read_bundle_directory(directory: Path) -> list[tuple[str, bytes]]:
+    """Regular files under ``directory`` (no links), skipping ``.git`` and ``node_modules``."""
+    root = directory.resolve()
+    if not root.is_dir():
+        raise ValueError(f"bundle directory not found: {directory}")
+    files: list[tuple[str, bytes]] = []
+    for path in sorted(root.rglob("*")):
+        relative = path.relative_to(root).as_posix()
+        if skipped(relative):
+            continue
+        if path.is_symlink():
+            raise ValueError(f"bundle directories cannot contain links: {relative}")
+        if path.is_file():
+            files.append((relative, path.read_bytes()))
+    if not files:
+        raise ValueError("bundle directory is empty")
+    return files
+
+
+def publish_bundle(
+    client: MissionClient,
+    storage: httpx.Client,
+    application: str,
+    args: argparse.Namespace,
+) -> tuple[dict[str, Any], int]:
+    """`catalog publish`: hash, signed-URL upload of missing objects, register proposed."""
+    directory = Path(args.dir)
+    files = read_bundle_directory(directory)
+    kind = str(args.kind)
+    capability_id = getattr(args, "capability_id", None) or (
+        f"{_BUNDLE_PREFIXES[kind]}.{directory.resolve().name}"
+    )
+    manifest = build_bundle_manifest(
+        files,
+        application_id=application,
+        kind=kind,  # type: ignore[arg-type]
+        capability_id=capability_id,
+        version=getattr(args, "version", None) or "1",
+        executable=frozenset(path for path, content in files if content.startswith(b"#!")),
+    )
+    definition = (
+        strict_object(args.definition_file) if getattr(args, "definition_file", None) else {}
+    )
+    body = {"manifest": manifest.model_dump(mode="json"), "definition": definition}
+    prepared = client.publish("prepare", body)
+    if exit_status(prepared.status_code):
+        return _json(prepared), exit_status(prepared.status_code)
+    plan = prepared.json()
+    contents = dict(files)
+    prefix = str(plan["object_prefix"]) + "/"
+    for upload in plan.get("uploads", []):
+        relative = str(upload["path"]).removeprefix(prefix)
+        url = urlsplit(str(upload["url"]))
+        if (
+            url.username
+            or url.password
+            or not (
+                url.scheme == "https"
+                or (url.scheme == "http" and url.hostname in {"localhost", "127.0.0.1", "::1"})
+            )
+        ):
+            raise ValueError("signed upload URLs must be HTTPS (HTTP only for loopback)")
+        response = storage.put(
+            str(upload["url"]),
+            files={"file": (relative.rsplit("/", 1)[-1], contents[relative])},
+            headers={"x-upsert": "false", "cache-control": "max-age=3600"},
+        )
+        if response.status_code not in {200, 201, 409}:
+            return {"error": "bundle_upload_failed", "path": relative}, 5
+    completed = client.publish("complete", body)
+    return _json(completed), exit_status(completed.status_code)
+
+
+def _json(response: httpx.Response) -> dict[str, Any]:
+    try:
+        payload = response.json()
+    except ValueError:
+        return {"error": "non-JSON service response", "status": response.status_code}
+    return payload if isinstance(payload, dict) else {"result": payload}
 
 
 def exit_status(status: int) -> int:
@@ -121,6 +210,14 @@ def main(argv: list[str] | None = None) -> int:
     for action in ("resolve", "search", "discover", "inspect", "components"):
         operation = catalog_commands.add_parser(action, parents=[common])
         operation.add_argument("--request-file", required=True)
+    publish = catalog_commands.add_parser("publish", parents=[common])
+    publish.add_argument("--dir", required=True)
+    publish.add_argument(
+        "--kind", required=True, choices=("skill_bundle", "hook_script", "subagent_profile")
+    )
+    publish.add_argument("--capability-id", dest="capability_id")
+    publish.add_argument("--version")
+    publish.add_argument("--definition-file", dest="definition_file")
     args = parser.parse_args(argv)
     application = getattr(args, "application", os.environ.get("MISSION_CONTROL_APPLICATION_ID"))
     base_url = getattr(args, "url", os.environ.get("MISSION_CONTROL_URL", "http://127.0.0.1:8000"))
@@ -143,6 +240,22 @@ def main(argv: list[str] | None = None) -> int:
                 "--wait is supported on run inspect; command admission is not completion"
             )
         body = strict_object(args.request_file) if hasattr(args, "request_file") else None
+        if args.group == "catalog" and args.action == "publish":
+            with (
+                httpx.Client(
+                    base_url=base_url,
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=30,
+                    follow_redirects=False,
+                ) as transport,
+                # Storage uploads carry only the signed URL token, never the API bearer.
+                httpx.Client(timeout=120, follow_redirects=False) as storage,
+            ):
+                result, status = publish_bundle(
+                    MissionClient(transport, application), storage, application, args
+                )
+            print(json.dumps(result, allow_nan=False))
+            return status
         with httpx.Client(
             base_url=base_url,
             headers={"Authorization": f"Bearer {token}"},

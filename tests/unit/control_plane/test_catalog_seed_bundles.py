@@ -22,8 +22,10 @@ EXPECTED = {
     ("mc.catalog.runtime-profiles", "1.0.0"),
     ("mc.catalog.approved-assets", "1.0.0"),
     ("mc.catalog.agent-capabilities", "1.0.0"),
+    ("mc.storage.capability-bundles", "1.0.0"),
     ("mc.qualification.parity", "1.0.0"),
 }
+STORAGE_KINDS = {"storage_bucket", "storage_policy"}
 APP_AGENT_KEYS = {
     "biotech": "mc.app.biotech.agent-capabilities",
     "ai-engineer": "mc.app.ai-engineer.agent-capabilities",
@@ -69,7 +71,8 @@ def test_each_app_installation_set_is_valid_and_dependency_closed(app: str) -> N
         ("mc.app.bindings", "1.0.1"),
     ]
     agent = [("mc.catalog.agent-capabilities", "1.0.0"), (APP_AGENT_KEYS[app], "1.0.0")]
-    assert sorted(keys) == sorted(base + agent)
+    storage = [("mc.storage.capability-bundles", "1.0.0")]
+    assert sorted(keys) == sorted(base + agent + storage)
     assert [key for key in keys if key in base] == base
     position = {key: index for index, key in enumerate(keys)}
     assert (
@@ -104,6 +107,12 @@ def test_qualification_bundle_is_opt_in_and_closes_over_common() -> None:
 def test_bundles_seed_no_fabricated_authority_usage_or_secrets() -> None:
     for bundle in _bundles("common", "biotech", "ai-engineer", "qualification"):
         kinds = {record["kind"] for record in bundle["records"]}
+        if bundle["seed_key"] == "mc.storage.capability-bundles":
+            assert kinds == STORAGE_KINDS
+            policies = [r["fields"] for r in bundle["records"] if r["kind"] == "storage_policy"]
+            assert len(policies) == 4
+            assert {p["command"] for p in policies} == {"INSERT", "SELECT", "ALL"}
+            continue
         # No actor bindings, actor grants or capability grants without owner approval.
         assert kinds <= {"tenant", "asset_version", "asset_decision"}, bundle["seed_key"]
         if bundle["seed_key"] != "mc.qualification.parity":

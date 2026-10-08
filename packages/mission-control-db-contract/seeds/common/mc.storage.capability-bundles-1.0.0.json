@@ -1,0 +1,61 @@
+{
+  "actor_ref": "seed:mission-control-catalog",
+  "component_compatibility": ">=1.0.0 <2.0.0",
+  "depends_on": [],
+  "description": "Private capability-bundles bucket (50 MiB per object, any MIME type) and its storage.objects policies, each scoped to the application's top-level prefix: publisher INSERT, publisher SELECT (verify before treating an existing path as published), reader SELECT (signed download URLs), and a restrictive prefix guard. No UPDATE or DELETE policy exists, so a digest path is never overwritten. Targets without the Storage schema report this bundle blocked.",
+  "format": "mission-control-seed/v1",
+  "records": [
+    {
+      "fields": {
+        "bucket_id": "capability-bundles",
+        "file_size_limit": 52428800,
+        "public": false
+      },
+      "kind": "storage_bucket",
+      "logical_key": "storage:capability-bundles"
+    },
+    {
+      "fields": {
+        "bucket_id": "capability-bundles",
+        "capability_role": "publisher",
+        "command": "INSERT",
+        "policy": "mc_capability_bundles_publisher_insert"
+      },
+      "kind": "storage_policy",
+      "logical_key": "storage:capability-bundles:publisher-insert"
+    },
+    {
+      "fields": {
+        "bucket_id": "capability-bundles",
+        "capability_role": "publisher",
+        "command": "SELECT",
+        "policy": "mc_capability_bundles_publisher_select"
+      },
+      "kind": "storage_policy",
+      "logical_key": "storage:capability-bundles:publisher-select"
+    },
+    {
+      "fields": {
+        "bucket_id": "capability-bundles",
+        "capability_role": "reader",
+        "command": "SELECT",
+        "policy": "mc_capability_bundles_reader_select"
+      },
+      "kind": "storage_policy",
+      "logical_key": "storage:capability-bundles:reader-select"
+    },
+    {
+      "fields": {
+        "bucket_id": "capability-bundles",
+        "capability_role": "*",
+        "command": "ALL",
+        "policy": "mc_capability_bundles_application_prefix_guard",
+        "restrictive": true
+      },
+      "kind": "storage_policy",
+      "logical_key": "storage:capability-bundles:application-prefix-guard"
+    }
+  ],
+  "seed_key": "mc.storage.capability-bundles",
+  "seed_version": "1.0.0"
+}

@@ -34,6 +34,15 @@ pytestmark = pytest.mark.common_db
 SEEDS = Path(__file__).resolve().parents[3] / "packages" / "mission-control-db-contract" / "seeds"
 
 
+def _catalog_only(bundles: list[dict]) -> list[dict]:
+    """Storage provisioning needs a Storage schema; it has its own test (FT-A2)."""
+    return [
+        bundle
+        for bundle in bundles
+        if not any(record["kind"].startswith("storage_") for record in bundle["records"])
+    ]
+
+
 async def _apply(database: CommonDatabase, bundle: dict) -> dict[str, int]:
     target = {
         "installation_id": str(database.installation_id),
@@ -54,8 +63,10 @@ async def _apply(database: CommonDatabase, bundle: dict) -> dict[str, int]:
 async def test_seeded_catalog_is_readable_replayable_and_conflicts_on_change(
     catalog_db: CommonDatabase, runtime_pool: asyncpg.Pool
 ) -> None:
-    bundles = order_bundles(
-        load_bundles([SEEDS / "common", SEEDS / "biotech", SEEDS / "qualification"]), set()
+    bundles = _catalog_only(
+        order_bundles(
+            load_bundles([SEEDS / "common", SEEDS / "biotech", SEEDS / "qualification"]), set()
+        )
     )
     first = [await _apply(catalog_db, bundle) for bundle in bundles]
     assert all(stats["reused"] == 0 and stats["created"] > 0 for stats in first)
@@ -137,7 +148,9 @@ async def test_ai_engineer_seeds_admit_edgartools_only_there() -> None:
 
     database = await create_common_database(application_id="ai-engineer")
     try:
-        bundles = order_bundles(load_bundles([SEEDS / "common", SEEDS / "ai-engineer"]), set())
+        bundles = _catalog_only(
+            order_bundles(load_bundles([SEEDS / "common", SEEDS / "ai-engineer"]), set())
+        )
         first = [await _apply(database, bundle) for bundle in bundles]
         assert all(stats["created"] > 0 for stats in first)
         replay = [await _apply(database, bundle) for bundle in bundles]

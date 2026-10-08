@@ -20,6 +20,10 @@ from typing import Literal, Protocol
 from pydantic import BaseModel, ConfigDict, Field
 
 from mission_control.domain.authoring.canonical import sha256_digest, stable_json_dump
+from mission_control.domain.capabilities.bundles import (
+    CapabilityBundleManifest,
+    verify_bundle_files,
+)
 
 DIGEST = r"^sha256:[0-9a-f]{64}$"
 MAX_FILES = 1024
@@ -236,3 +240,31 @@ class DirectoryBundleStore:
         if version_path.read_text() != digest:
             raise BundleError("bundle version is not published with this manifest")
         return manifest, result
+
+
+def materialize_read_only(
+    manifest: CapabilityBundleManifest,
+    files: tuple[tuple[str, bytes], ...],
+    target: Path,
+) -> tuple[Path, ...]:
+    """FT-A2 materialization: verified bytes written under ``target`` and made read-only.
+
+    The bytes are verified against the manifest first (``CAPABILITY_DRIFT`` on mismatch);
+    the target must be a fresh directory without links, and every path is re-checked with
+    the bundle path rules, so a manifest can never write outside ``target``.
+    """
+    verified = verify_bundle_files(manifest, files)
+    if target.exists() and any(target.iterdir()):
+        raise BundleError("materialization target must be empty")
+    target.mkdir(parents=True, exist_ok=True)
+    reject_links(target)
+    written: list[Path] = []
+    for relative, content in verified:
+        destination = target / safe_relative_path(relative)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        reject_links(destination.parent)
+        destination.write_bytes(content)
+        mode = 0o555 if manifest.entry(relative).executable else 0o444
+        destination.chmod(mode)
+        written.append(destination)
+    return tuple(written)

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from mission_control.application.agentic_components.repository import AgenticComponentRepository
+from mission_control.application.capabilities.bundle_custody import BundleCustodyService
 from mission_control.application.capabilities.capability_search import CapabilitySearchService
 from mission_control.application.capabilities.external_candidate_inspection import (
     ExternalCandidateInspectionService,
@@ -31,3 +32,5 @@ class CatalogService:
     discovery: ExternalCapabilityDiscoveryService | None = None
     inspection: ExternalCandidateInspectionService | None = None
     components: AgenticComponentRepository | None = None
+    # FT-A2: bundle custody (publish:prepare / publish:complete); None until configured.
+    custody: BundleCustodyService | None = None

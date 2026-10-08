@@ -341,6 +341,88 @@ class PostgresDefinitionRepository:
             await self._event(connection, ref, "upsert", published_at, actor_ref=actor_id)
             return published
 
+    async def propose(
+        self, definition: Definition, actor_id: str, proposed_at: datetime
+    ) -> PublishedDefinition:
+        """FT-A2: register the next revision as a ``proposed`` row (no admit decision).
+
+        Proposed rows are invisible to readers until an operator admits them; the revision
+        number is reserved so a later publication continues after it.
+        """
+        kind, logical_id = definition.kind.value, definition.logical_id
+        async with self._transaction(write=True) as connection:
+            revision = await self._published_revision(connection, kind, logical_id) + 1
+            ref = ExactDefinitionRef(
+                kind=definition.kind,
+                logical_id=logical_id,
+                revision=revision,
+                digest=sha256_digest(definition),
+            )
+            published = PublishedDefinition(
+                ref=ref, definition=definition, published_at=proposed_at, published_by=actor_id
+            )
+            manifest = canonical_data(stable_json_dump(published))["payload"]
+            await connection.execute(
+                """INSERT INTO mission_control.asset_version
+                   (installation_id, application_id, asset_version_id, asset_id, version, kind,
+                    contract, manifest_ref, manifest_digest, manifest, required_compatibility,
+                    status, version_no, updated_at, created_at, created_by_actor_ref,
+                    host_support, secret_refs)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,'{}'::text[],'proposed',1,$11,
+                           clock_timestamp(),$12,$13::jsonb,$14::text[])""",
+                *self._scope,
+                uuid7(),
+                definition_asset_id(definition.kind, logical_id),
+                str(revision),
+                ASSET_KIND[definition.kind],
+                PUBLISHED_DEFINITION_CONTRACT,
+                definition_manifest_ref(definition.kind, logical_id, revision),
+                sha256_digest(manifest),
+                json.dumps(manifest, allow_nan=False),
+                proposed_at,
+                actor_id,
+                *capability_core_columns(definition),
+            )
+            return published
+
+    async def find_by_definition_digest(
+        self, kind: str, logical_id: str, digest: str
+    ) -> PublishedDefinition | None:
+        """Any row (proposed or later) whose definition digest matches, newest first."""
+        async with self._transaction() as connection:
+            row = await connection.fetchrow(
+                """SELECT manifest FROM mission_control.asset_version
+                   WHERE installation_id=$1 AND application_id=$2 AND asset_id=$3
+                     AND contract=$4 AND manifest->'ref'->>'digest' = $5
+                   ORDER BY version::bigint DESC LIMIT 1""",
+                *self._scope,
+                definition_asset_id(kind, logical_id),
+                PUBLISHED_DEFINITION_CONTRACT,
+                digest,
+            )
+        if row is None:
+            return None
+        return PublishedDefinition.model_validate(json_value(row["manifest"]))
+
+    async def find_by_reference(
+        self, kind: str, logical_id: str, reference: str
+    ) -> PublishedDefinition | None:
+        """Newest row of this identity whose definition mentions ``reference`` (a bundle prefix)."""
+        async with self._transaction() as connection:
+            row = await connection.fetchrow(
+                """SELECT manifest FROM mission_control.asset_version
+                   WHERE installation_id=$1 AND application_id=$2 AND asset_id=$3
+                     AND contract=$4 AND position($5 in manifest::text) > 0
+                   ORDER BY version::bigint DESC LIMIT 1""",
+                *self._scope,
+                definition_asset_id(kind, logical_id),
+                PUBLISHED_DEFINITION_CONTRACT,
+                reference,
+            )
+        if row is None:
+            return None
+        return PublishedDefinition.model_validate(json_value(row["manifest"]))
+
     async def _decision(
         self,
         connection: asyncpg.Connection,

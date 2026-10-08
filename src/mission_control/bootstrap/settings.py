@@ -241,6 +241,10 @@ class Settings(BaseSettings):
     )
     capability_bundle_backend: Literal["local", "supabase"] = "local"
     capability_bundle_namespace: str | None = None
+    # FT-A2: custody credentials (never the service key). The publisher holds INSERT+SELECT
+    # on the application prefix of `capability-bundles`; the reader holds SELECT only.
+    capability_bundle_publisher_token: SecretStr | None = None
+    capability_bundle_reader_token: SecretStr | None = None
     capability_bundle_local_root: Path | None = None
     deep_agent_sandbox_workspace_root: Path | None = None
 

@@ -62,6 +62,11 @@ async def _seed(database: CommonDatabase) -> None:
     bundles = order_bundles(
         load_bundles([SEEDS / "common", SEEDS / "biotech", SEEDS / "qualification"]), set()
     )
+    bundles = [
+        bundle
+        for bundle in bundles
+        if not any(record["kind"].startswith("storage_") for record in bundle["records"])
+    ]
     connection = await asyncpg.connect(database.owner_dsn)
     try:
         for bundle in bundles:

@@ -461,6 +461,61 @@ def agent_capabilities() -> dict[str, dict[str, Any]]:
     return dict(module.bundles(published, SEED_FORMAT, COMPATIBILITY, SEED_ACTOR))
 
 
+def storage_capability_bundles() -> dict[str, Any]:
+    """FT-A2 / ADR-0024: the private capability-bundles bucket and its four policies.
+
+    ``${application_id}`` resolves to the target application at apply time, so one common
+    bundle scopes every policy to that application's top-level prefix.
+    """
+
+    def policy(key: str, command: str, role: str, *, restrictive: bool = False) -> dict:
+        fields: dict[str, Any] = {
+            "bucket_id": "capability-bundles",
+            "policy": f"mc_capability_bundles_{key.replace('-', '_')}",
+            "command": command,
+            "capability_role": role,
+        }
+        if restrictive:
+            fields["restrictive"] = True
+        return {
+            "kind": "storage_policy",
+            "logical_key": f"storage:capability-bundles:{key}",
+            "fields": fields,
+        }
+
+    return {
+        "format": SEED_FORMAT,
+        "seed_key": "mc.storage.capability-bundles",
+        "seed_version": "1.0.0",
+        "component_compatibility": COMPATIBILITY,
+        "depends_on": [],
+        "actor_ref": SEED_ACTOR,
+        "description": (
+            "Private capability-bundles bucket (50 MiB per object, any MIME type) and its "
+            "storage.objects policies, each scoped to the application's top-level prefix: "
+            "publisher INSERT, publisher SELECT (verify before treating an existing path as "
+            "published), reader SELECT (signed download URLs), and a restrictive prefix guard. "
+            "No UPDATE or DELETE policy exists, so a digest path is never overwritten. "
+            "Targets without the Storage schema report this bundle blocked."
+        ),
+        "records": [
+            {
+                "kind": "storage_bucket",
+                "logical_key": "storage:capability-bundles",
+                "fields": {
+                    "bucket_id": "capability-bundles",
+                    "public": False,
+                    "file_size_limit": 52_428_800,
+                },
+            },
+            policy("publisher-insert", "INSERT", "publisher"),
+            policy("publisher-select", "SELECT", "publisher"),
+            policy("reader-select", "SELECT", "reader"),
+            policy("application-prefix-guard", "ALL", "*", restrictive=True),
+        ],
+    }
+
+
 def build_bundles() -> dict[str, dict[str, Any]]:
     bundles = {
         "common/mc.catalog.workflow-parity-1.0.0.json": workflow_parity(),
@@ -473,6 +528,7 @@ def build_bundles() -> dict[str, dict[str, Any]]:
     for app in APPS:
         bundles[f"{app}/mc.app.bindings-{CURRENT_BINDING[0]}.json"] = app_bindings(app)
     bundles.update(agent_capabilities())
+    bundles["common/mc.storage.capability-bundles-1.0.0.json"] = storage_capability_bundles()
     return bundles
 
 

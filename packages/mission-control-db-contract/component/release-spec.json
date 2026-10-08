@@ -31,7 +31,8 @@
       "mc.qualification.parity",
       "mc.catalog.agent-capabilities",
       "mc.app.biotech.agent-capabilities",
-      "mc.app.ai-engineer.agent-capabilities"
+      "mc.app.ai-engineer.agent-capabilities",
+      "mc.storage.capability-bundles"
     ]
   },
   "runtime_descriptor_path": "../runtime/descriptor.json"
