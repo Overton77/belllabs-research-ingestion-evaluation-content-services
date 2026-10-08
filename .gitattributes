@@ -1,0 +1,5 @@
+# Checksummed artifacts: digests are computed over LF bytes, so Windows checkouts must not convert them.
+packages/mission-control-db-contract/component/** text eol=lf
+packages/mission-control-db-contract/runtime/** text eol=lf
+packages/mission-control-db-contract/seeds/** text eol=lf
+deployments/*/release.lock.json text eol=lf
