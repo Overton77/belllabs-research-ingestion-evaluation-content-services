@@ -400,8 +400,16 @@ class ResumeAction(Contract):
     runnable_work_remains: bool = True
 
 
+def _normal_urgency(value: object) -> bool:
+    return value == "normal"
+
+
 class CancelAction(Contract):
     kind: Literal["cancel"] = "cancel"
+    # FT-F3: `immediate` is admitted only after its Stop Fence is persisted. `normal` is
+    # left out of dumps and digests, so every cancel recorded before FT-F3 keeps its
+    # payload digest.
+    urgency: Literal["normal", "immediate"] = Field(default="normal", exclude_if=_normal_urgency)
 
 
 class ReserveBudgetAction(Contract):

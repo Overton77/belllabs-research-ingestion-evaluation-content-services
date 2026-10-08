@@ -3,12 +3,13 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
 from contextvars import ContextVar
 from copy import deepcopy
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import Literal, Protocol
 
 from mission_control.application.authoring.service import ControlPlaneService
 from mission_control.application.execution.harness.deep_agents_harness import DeepAgentsHarness
@@ -24,6 +25,7 @@ from mission_control.application.execution.operations.operation_progress import 
     report_phase,
 )
 from mission_control.application.execution.service import RunControlService
+from mission_control.application.execution.stop_fence import StopFenceRepository
 from mission_control.domain.authoring.canonical import contract_fingerprint, sha256_digest
 from mission_control.domain.authoring.contracts import DefinitionKind, SecretRef
 from mission_control.domain.authoring.identity import stable_id
@@ -77,6 +79,8 @@ from mission_control.domain.programs.runtime_units import (
     goal_unit_operation_id,
     goal_unit_workspace_root,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 # The lease deadline of the attempt holding the claim lease, so that a cancellation raised
 # by the deadline is told apart from a Temporal cancel delivered through the heartbeat.
@@ -622,6 +626,7 @@ class OperationExecutionService:
         fork_reuse: ForkReusePort | None = None,
         children: AsyncChildCancellationPort | None = None,
         lanes: LaneRegistry | None = None,
+        stop_fences: StopFenceRepository | None = None,
     ) -> None:
         self._authority = authority
         self._bindings = bindings
@@ -629,6 +634,8 @@ class OperationExecutionService:
         # FT-G1: dispatch by lane. Without an explicit registry the given runtime is the
         # `deep_agents` lane, exactly as before.
         self._lanes = lanes if lanes is not None else LaneRegistry([DeepAgentsHarness(runtime)])
+        # FT-F3: the immediate cancel's Delivery Report milestones (no-op without a fence).
+        self._stop_fences = stop_fences
         self._sandbox = sandbox
         self._assets = assets
         self._mcp = mcp
@@ -1087,6 +1094,8 @@ class OperationExecutionService:
 
         report_phase("settling")
         started_at = datetime.now(UTC)
+        # FT-F3: the lane stopped cognition for this unit (the provider acknowledged).
+        await self._fence_milestone(binding, "provider_acknowledged")
         children = await self._cancel_children(binding, started_at)
         if self._journal is not None and claim is not None:
             # Step 5 (REQ-CP-RUN-007 narrowed): a consequential effect the unit claimed and
@@ -1128,7 +1137,7 @@ class OperationExecutionService:
             ),
             result_checkpoint=capture.result_key if capture is not None else None,
         )
-        return await self._settle(
+        result = await self._settle(
             binding,
             claim,
             settlement,
@@ -1138,6 +1147,27 @@ class OperationExecutionService:
             plan=plan if capture is not None else None,
             capture=capture,
         )
+        await self._fence_milestone(binding, "settled")
+        return result
+
+    async def _fence_milestone(
+        self,
+        binding: OperationExecutionBinding,
+        milestone: Literal["provider_acknowledged", "settled"],
+    ) -> None:
+        if self._stop_fences is None:
+            return
+        try:
+            await self._stop_fences.record_milestone(
+                binding.request_scope,
+                binding.run_id,
+                None,
+                milestone,
+                unit_key=binding.binding_id,
+            )
+        except Exception:
+            # Report evidence only: the settlement above is the authority.
+            _LOGGER.warning("stop fence milestone %s was not recorded", milestone, exc_info=True)
 
     async def _settle_superseded(
         self,

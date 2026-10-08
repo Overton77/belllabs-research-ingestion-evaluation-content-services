@@ -135,10 +135,34 @@ class OperationWorkflow:
         self._active_async_child_ids: tuple[str, ...] = ()
         self._reconciliation_nudges = 0
         self._nudges_seen = 0
+        self._stop_fence_command_id: str | None = None
 
     @workflow.signal
     def request_cancel(self) -> None:
         self._cancel_requested = True
+
+    @workflow.signal
+    def request_immediate_cancel(self, command_id: str) -> None:
+        """FT-F3 immediate branch: the run's Stop Fence for `command_id` is already persisted
+        (Kernel Hooks deny new effects from that moment); the in-flight attempt is cancelled
+        at once and `operation.cancel` settles the unit. No command differs from a normal
+        cancel, so histories with or without this signal replay identically."""
+
+        if not command_id:
+            raise ApplicationError(
+                "immediate cancel names its fencing command",
+                type="invalid_immediate_cancel",
+                non_retryable=True,
+            )
+        if self._stop_fence_command_id is None:
+            self._stop_fence_command_id = command_id
+        self._cancel_requested = True
+
+    @workflow.query
+    def stop_fence_command(self) -> str | None:
+        """The immediate cancel that fenced this unit, if any (diagnostic)."""
+
+        return self._stop_fence_command_id
 
     @workflow.signal
     def unit_reconciliation_recorded(self, decision_ref: str) -> None:

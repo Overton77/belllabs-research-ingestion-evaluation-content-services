@@ -103,6 +103,7 @@ from mission_control.adapters.postgres.orchestration.stagegraph_repository impor
 from mission_control.adapters.postgres.run_control.run_control_repository import (
     PostgresRunControlRepository,
 )
+from mission_control.adapters.postgres.run_control.stop_fence import PostgresStopFenceRepository
 from mission_control.adapters.postgres.runtime.run_forks import PostgresForkMaterializationStore
 from mission_control.adapters.postgres.workspace_candidate_contents import (
     PostgresWorkspaceCandidateContents,
@@ -688,6 +689,8 @@ class ProductionWorkerActivityCompositionFactory:
         lanes = compose_lane_registry(settings, DeepAgentsHarness(adapter, secrets))
         service = OperationExecutionService(
             lanes=lanes,
+            # FT-F3: immediate-cancel Delivery Report milestones on the run's Stop Fence.
+            stop_fences=PostgresStopFenceRepository(postgres_pool),
             authority=RunControlOperationAuthority(run_control, control_plane),
             bindings=bindings,
             runtime=adapter,

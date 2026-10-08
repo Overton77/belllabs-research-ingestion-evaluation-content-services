@@ -60,6 +60,7 @@ from mission_control.interfaces.http.mission_control import (
     get_mission_principal,
     router,
 )
+from mission_control.interfaces.http.stop_fence import router as stop_fence_router
 
 
 class TemporalDeployment(BaseModel):
@@ -308,6 +309,7 @@ def create_application(
     application.include_router(router)
     application.include_router(catalog_router)
     application.include_router(lanes_router)
+    application.include_router(stop_fence_router)
 
     @application.get("/health/live")
     def live() -> dict[str, bool]:
