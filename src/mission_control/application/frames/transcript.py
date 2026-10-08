@@ -305,6 +305,15 @@ class TranscriptService:
         body = await self._artifacts.read(self.request_scope, actor, ref)
         return entry.model_copy(update={"body_excerpt": redact_text(body, self._secrets)[0]})
 
+    async def projection_entries(self, run_key: str) -> tuple[TranscriptEntry, ...]:
+        """Every entry of the run, redacted, in transcript order (the C4 search projection
+        source). No actor: the projection job indexes; searches authorize on read."""
+
+        _run_uuid, events, frames = await self._sources(run_key)
+        return tuple(
+            item.entry for item in merge(run_key, events, frames, secret_values=self._secrets)
+        )
+
     async def tail_frames(
         self,
         run_key: str,

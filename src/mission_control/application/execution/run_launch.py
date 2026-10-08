@@ -91,6 +91,7 @@ class RunWorkflowSubmitter(Protocol):
         workflow_id: str,
         blueprint_family: BlueprintFamily,
         parent_run_id: str | None = None,
+        mission_id: str | None = None,
     ) -> WorkflowSubmission: ...
 
 
@@ -107,6 +108,12 @@ class ForkTemplateDerivationPort(Protocol):
     ) -> tuple[str, ...]: ...
 
 
+class MissionIdResolver(Protocol):
+    """FT-C4: the ledger mission of a run, set as `mc_mission_id` on the root at start."""
+
+    async def __call__(self, request_scope: str, run_id: str) -> str | None: ...
+
+
 class RunLaunchService:
     def __init__(
         self,
@@ -116,7 +123,9 @@ class RunLaunchService:
         forks: ForkRepository | None = None,
         materializations: ForkMaterializationStore | None = None,
         fork_templates: ForkTemplateDerivationPort | None = None,
+        mission_ids: MissionIdResolver | None = None,
     ) -> None:
+        self._mission_ids = mission_ids
         self._run_control = run_control
         self._submitter = submitter
         self._forks = forks
@@ -151,13 +160,27 @@ class RunLaunchService:
             fork_request_id = fork_request.request_id
             parent_run_id = receipt.source_run_id
             await self._apply_fork(request, fork_request, workflow_input)
+        mission_id = (
+            await self._mission_ids(request.request_scope, run.run_id)
+            if self._mission_ids is not None
+            else None
+        )
         try:
-            submission = await self._submitter.submit(
-                workflow_input,
-                workflow_id=f"belllabs-run/{run.run_id}",
-                blueprint_family=family,
-                parent_run_id=parent_run_id,
-            )
+            if mission_id is not None:
+                submission = await self._submitter.submit(
+                    workflow_input,
+                    workflow_id=f"belllabs-run/{run.run_id}",
+                    blueprint_family=family,
+                    parent_run_id=parent_run_id,
+                    mission_id=mission_id,
+                )
+            else:
+                submission = await self._submitter.submit(
+                    workflow_input,
+                    workflow_id=f"belllabs-run/{run.run_id}",
+                    blueprint_family=family,
+                    parent_run_id=parent_run_id,
+                )
         except LaunchIdempotencyConflict as error:
             raise RunLaunchRejected(error.code, str(error)) from error
         return RunLaunchReceipt(

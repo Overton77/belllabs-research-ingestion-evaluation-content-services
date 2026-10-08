@@ -166,3 +166,47 @@ async def test_fork_derived_run_waits_for_materialization_and_binds_the_fork_ref
     receipt = await plain.launch(_launch(run_id, _input(run_id)), actor())
     assert receipt.parent_run_id is None
     assert fork_semantic_input_binding_ref("fork-1") == "semantic-input:fork:fork-1"
+
+
+class MissionAwareSubmitter(RecordingSubmitter):
+    def __init__(self) -> None:
+        super().__init__()
+        self.mission_ids: list[str | None] = []
+
+    async def submit(
+        self,
+        workflow_input: object,
+        *,
+        workflow_id: str,
+        blueprint_family: BlueprintFamily,
+        parent_run_id: str | None = None,
+        mission_id: str | None = None,
+    ) -> WorkflowSubmission:
+        self.mission_ids.append(mission_id)
+        return await super().submit(
+            workflow_input,
+            workflow_id=workflow_id,
+            blueprint_family=blueprint_family,
+            parent_run_id=parent_run_id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_launch_passes_the_ledger_mission_to_the_root_search_attributes() -> None:
+    """FT-C4: the root starts with `mc_mission_id` from the ledger when it is resolvable."""
+
+    run_control, _ = service()
+    admitted = await run_control.admit(request(request_id="launch-mission"))
+    run_id = admitted.run_id
+    assert run_id is not None
+    submitter = MissionAwareSubmitter()
+
+    async def mission_ids(request_scope: str, run: str) -> str | None:
+        assert (request_scope, run) == (SCOPE, run_id)
+        return "mission-ft-c4"
+
+    launcher = RunLaunchService(
+        run_control=run_control, submitter=submitter, mission_ids=mission_ids
+    )
+    await launcher.launch(_launch(run_id, _input(run_id)), actor())
+    assert submitter.mission_ids == ["mission-ft-c4"]

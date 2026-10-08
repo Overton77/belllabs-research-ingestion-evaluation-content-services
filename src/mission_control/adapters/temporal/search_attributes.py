@@ -54,6 +54,35 @@ _INDEXED_TYPES = {
 MC_VISIBILITY_PATCH = "ft-g7-mc-visibility"
 
 
+# FT-C4: family executions upsert `mc_phase` (and `mc_run_id`) at their phase changes
+# (start `executing`; close `completed`, `cancelled` or `failed`). Histories recorded
+# before this marker replay unchanged.
+FAMILY_PHASE_PATCH = "ft-c4-family-phase"
+_OUTCOME_PHASES: dict[str, MissionPhase] = {
+    "completed": "completed",
+    "complete": "completed",
+    "partially_completed": "completed",
+    "succeeded": "completed",
+    "cancelled": "cancelled",
+    "canceled": "cancelled",
+    "failed": "failed",
+}
+
+
+def upsert_family_phase(policy: str, run_id: str, phase: MissionPhase) -> None:
+    """Inside a family workflow: record its phase in Visibility (`run list --query`)."""
+
+    upsert_mission_visibility(
+        policy, MissionVisibilityValues(run_id, phase=phase), patch=FAMILY_PHASE_PATCH
+    )
+
+
+def phase_for_outcome(outcome: str | None) -> MissionPhase:
+    """`mc_phase` of a family at its terminal outcome (unknown outcomes are `failed`)."""
+
+    return _OUTCOME_PHASES.get(str(outcome or "").lower(), "failed")
+
+
 class SearchAttributeRegistrationError(RuntimeError):
     """The namespace has a conflicting attribute, no free slot, or misses a declared one."""
 
@@ -143,14 +172,16 @@ def child_mission_visibility(
     )
 
 
-def upsert_mission_visibility(policy: str, values: MissionVisibilityValues) -> None:
+def upsert_mission_visibility(
+    policy: str, values: MissionVisibilityValues, *, patch: str = MC_VISIBILITY_PATCH
+) -> None:
     """Inside a workflow, at a boundary: upsert the changed fast-track attributes.
 
-    No command under `disabled`, and none when replaying a history recorded before
-    `MC_VISIBILITY_PATCH` (the marker is only written for new executions).
+    No command under `disabled`, and none when replaying a history recorded before the
+    `patch` marker (the marker is only written for new executions).
     """
 
-    if policy != SEARCH_ATTRIBUTES_REQUIRED or not workflow.patched(MC_VISIBILITY_PATCH):
+    if policy != SEARCH_ATTRIBUTES_REQUIRED or not workflow.patched(patch):
         return
     current = workflow.info().typed_search_attributes
     updates = [

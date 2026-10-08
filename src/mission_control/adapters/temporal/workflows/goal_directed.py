@@ -14,6 +14,8 @@ with workflow.unsafe.imports_passed_through():
         child_search_attributes,
         ensure_workflow_search_attributes,
         operation_workflow_search_attributes,
+        phase_for_outcome,
+        upsert_family_phase,
     )
     from mission_control.adapters.temporal.workflows.operation import (
         MissionOperationWorkflow,
@@ -287,6 +289,8 @@ class GoalDirectedWorkflow:
                 execution_epoch=run_input.execution_epoch,
             ),
         )
+        # FT-C4: the family's phase is visible to `run list --query "phase='executing'"`.
+        upsert_family_phase(run_input.search_attribute_policy, run_input.run_id, "executing")
         try:
             state = interpreter.initial_state(run_input)
         except GoalDirectedExecutionError as error:
@@ -701,6 +705,11 @@ class GoalDirectedWorkflow:
                     "run-control reducer did not authorize GoalDirected terminalization",
                     non_retryable=True,
                 )
+            upsert_family_phase(
+                run_input.search_attribute_policy,
+                run_input.run_id,
+                phase_for_outcome(terminal.terminal_outcome),
+            )
             return result
         except _CancellationEntered as entered:
             # RRM-016 review fix 2 meets RRM-008: an authority result reported the run
@@ -1257,6 +1266,7 @@ class GoalDirectedWorkflow:
                         non_retryable=True,
                     )
         await self._terminalize_cancelled(run_input, run_version, activity_timeout, digests)
+        upsert_family_phase(run_input.search_attribute_policy, run_input.run_id, "cancelled")
         return self._cancelled_result(state)
 
     async def _terminalize_cancelled(

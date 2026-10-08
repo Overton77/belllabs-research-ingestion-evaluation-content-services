@@ -2,6 +2,8 @@
 
 - tool `mission_run_transcript(run_id, since?, format?, limit?, kinds?, canonical_only?)`
 - resource `mc://applications/{application_id}/runs/{run_id}/transcript{?since}` (JSONL)
+- tool `mission_run_search(run_id, query, limit?)` (FT-C4) when a search service is composed
+- tool `mission_run_list(query?, limit?)` (FT-C4) when Temporal Visibility is composed
 
 Both return exactly the entries the HTTP surface returns for the same principal and are
 annotated read-only. The principal's request scope selects the tenant's transcript
@@ -15,6 +17,7 @@ from typing import Any, Literal, Protocol
 
 from fastmcp import Context, FastMCP
 
+from mission_control.application.frames.search import RunListService, TranscriptSearchService
 from mission_control.application.frames.transcript import TranscriptService
 from mission_control.contracts.identities import parse_request_scope
 from mission_control.domain.coordinator.errors import CoordinatorDomainError, CoordinatorErrorCode
@@ -24,6 +27,8 @@ from mission_control.domain.policies.contracts import ActorContext
 
 TRANSCRIPT_RESOURCE = "mc://applications/{application_id}/runs/{run_id}/transcript{?since}"
 TRANSCRIPT_TOOL = "mission_run_transcript"
+SEARCH_TOOL = "mission_run_search"
+LIST_TOOL = "mission_run_list"
 READ_GRANTS = frozenset({"workflow_run.read", "mission.read", "workflow.result.read"})
 
 
@@ -45,8 +50,47 @@ class TranscriptPrincipalResolver(Protocol):
 class ScopedTranscripts:
     """Selects the transcript service of the principal's verified tenant scope."""
 
-    def __init__(self, services: Mapping[str, TranscriptService]) -> None:
+    def __init__(
+        self,
+        services: Mapping[str, TranscriptService],
+        *,
+        searches: Mapping[str, TranscriptSearchService] | None = None,
+        run_lists: Mapping[str, RunListService] | None = None,
+    ) -> None:
         self._services = dict(services)
+        self._searches = dict(searches or {})
+        self._run_lists = dict(run_lists or {})
+
+    @property
+    def searchable(self) -> bool:
+        return bool(self._searches)
+
+    @property
+    def listable(self) -> bool:
+        return bool(self._run_lists)
+
+    def _scoped(self, registry: Mapping[str, Any], principal: TranscriptPrincipal) -> Any:
+        self._service(principal, None)  # canonical scope and application checks
+        service = registry.get(principal.request_scope)
+        if service is None:
+            raise CoordinatorDomainError(
+                code=CoordinatorErrorCode.FORBIDDEN, message="service unavailable for scope"
+            )
+        return service
+
+    async def search(
+        self, principal: TranscriptPrincipal, *, run_id: str, query: str, limit: int = 20
+    ) -> dict[str, object]:
+        service: TranscriptSearchService = self._scoped(self._searches, principal)
+        page = await service.search(run_id, query, actor=self._actor(principal), limit=limit)
+        return page.model_dump(mode="json", exclude_none=True)
+
+    async def run_list(
+        self, principal: TranscriptPrincipal, *, query: str | None = None, limit: int = 100
+    ) -> dict[str, object]:
+        service: RunListService = self._scoped(self._run_lists, principal)
+        page = await service.list(query, actor=self._actor(principal), limit=limit)
+        return page.model_dump(mode="json")
 
     def _service(
         self, principal: TranscriptPrincipal, application_id: str | None
@@ -155,6 +199,28 @@ def register_transcript_tools(
             )
 
         return await call(context, principals, invoke)
+
+    if transcripts.searchable:
+
+        @server.tool(name=SEARCH_TOOL, annotations={"readOnlyHint": True})
+        async def mission_run_search(
+            run_id: str, query: str, context: Context, limit: int = 20
+        ) -> dict[str, object]:
+            async def invoke(principal: Any) -> object:
+                return await transcripts.search(principal, run_id=run_id, query=query, limit=limit)
+
+            return await call(context, principals, invoke)
+
+    if transcripts.listable:
+
+        @server.tool(name=LIST_TOOL, annotations={"readOnlyHint": True})
+        async def mission_run_list(
+            context: Context, query: str | None = None, limit: int = 100
+        ) -> dict[str, object]:
+            async def invoke(principal: Any) -> object:
+                return await transcripts.run_list(principal, query=query, limit=limit)
+
+            return await call(context, principals, invoke)
 
     @server.resource(TRANSCRIPT_RESOURCE, mime_type="application/x-ndjson")
     async def run_transcript_resource(

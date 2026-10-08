@@ -16,9 +16,9 @@ command returns an error rather than a partial result. Rows without the marker e
 | Admit run | `run admit --request-file FILE` | `POST /run-requests` | |
 | Launch admitted run | `run start ID --request-file FILE` | `POST /runs/ID/launch` | |
 | Inspect | `run inspect ID [--wait S]` | `GET /runs/ID/inspection` | enriched in FT-F6 |
-| List and query runs | `run list --query 'mc_lane="cursor_local" AND mc_phase="running"'` | `GET /runs?query=` | FT-C4 |
-| Transcript | `run transcript ID --format jsonl\|md [--since CURSOR]` | `GET /runs/ID/transcript` | FT-C3 |
-| Search a run | `run search ID --query TEXT` | `GET /runs/ID/transcript/search?q=` | FT-C4 |
+| List and query runs | `run list --query "lane='cursor_local' AND phase='executing'" [--json]` (keys `lane`, `phase`, `mission_id`, `forked_from`, `status`, `started_after`) | `GET /runs?query=` | |
+| Transcript | `run transcript ID --format jsonl\|md [--since CURSOR]` | `GET /runs/ID/transcript` | |
+| Search a run | `run search ID --query TEXT [--limit N]` | `GET /runs/ID/transcript/search?q=` | |
 | Send control | `command send ID --request-file FILE` | `POST /runs/ID/commands` | kinds added in FT-F1, FT-F2, FT-F3 |
 | Queue instruction or context | `command queue ID --file FILE` | same endpoint, `kind: queue_instruction \| add_context` | FT-F1 |
 | Interrupt and inject | `command inject ID --file FILE` | same endpoint, `kind: interrupt_and_inject` | FT-F2 |

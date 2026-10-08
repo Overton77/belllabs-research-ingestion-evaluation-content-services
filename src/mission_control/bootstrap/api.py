@@ -31,6 +31,9 @@ from mission_control.adapters.postgres.context.continuation_repository import (
     PostgresContinuationRepository,
 )
 from mission_control.adapters.postgres.frames.repository import PostgresFrameRepository
+from mission_control.adapters.postgres.frames.transcript_projection import (
+    PostgresTranscriptDocuments,
+)
 from mission_control.adapters.postgres.frames.transcript_reads import PostgresMissionEventReader
 from mission_control.adapters.postgres.subscriptions.store import PostgresSubscriptionStore
 from mission_control.adapters.storage.control_plane_payloads import UnavailablePayloadStore
@@ -39,6 +42,7 @@ from mission_control.adapters.temporal.client import connect_temporal, resolve_t
 from mission_control.adapters.temporal.search_attributes import verify_belllabs_search_attributes
 from mission_control.adapters.temporal.submission import TemporalWorkflowSubmitter
 from mission_control.adapters.temporal.unit_reconciliation import TemporalUnitReconciliationNudge
+from mission_control.adapters.temporal.visibility import TemporalRunVisibility
 from mission_control.application.capabilities.catalog import CatalogService
 from mission_control.application.context.continuation import CheckpointReadService
 from mission_control.application.execution.harness.registry import describe_only_registry
@@ -46,6 +50,7 @@ from mission_control.application.execution.service import (
     AdmissionPolicyRegistry,
     FamilyAdmissionRegistry,
 )
+from mission_control.application.frames.search import RunListService, TranscriptSearchService
 from mission_control.application.frames.transcript import TranscriptService
 from mission_control.application.installations.registry import (
     ApplicationRegistry,
@@ -240,6 +245,7 @@ def create_application(
                         UnavailablePayloadStore(),
                     )
                     transport = submitter = nudge = None
+                    run_visibility: TemporalRunVisibility | None = None
                     if item.temporal is not None:
                         temporal = item.temporal
                         # FT-G7: local server by default; Temporal Cloud only when
@@ -250,6 +256,8 @@ def create_application(
                         client = await connect_temporal(connection)
                         await verify_belllabs_search_attributes(client, connection.namespace)
                         transport = TemporalBoundaryCommandTransport(client)
+                        # FT-C4: run list over the typed Search Attributes.
+                        run_visibility = TemporalRunVisibility(client)
                         nudge = TemporalUnitReconciliationNudge(client)
                         submitter = TemporalWorkflowSubmitter.for_production(
                             client,
@@ -323,12 +331,20 @@ def create_application(
                             )
                         application.state.mission_control_catalog_services[key] = catalog
                         # SPEC-03 (C3): the run transcript, read under the tenant scope.
-                        application.state.mission_control_transcript_services[key] = (
-                            TranscriptService(
-                                PostgresMissionEventReader(pool),
-                                PostgresFrameRepository(pool),
-                                request_scope=request_scope(identity),
-                            )
+                        transcripts = TranscriptService(
+                            PostgresMissionEventReader(pool),
+                            PostgresFrameRepository(pool),
+                            request_scope=request_scope(identity),
+                        )
+                        application.state.mission_control_transcript_services[key] = transcripts
+                        # SPEC-03 (C4): run list (Temporal Visibility + ledger) and search.
+                        application.state.mission_control_run_list_services[key] = RunListService(
+                            run_visibility,
+                            services.run_control,
+                            request_scope=request_scope(identity),
+                        )
+                        application.state.mission_control_transcript_search_services[key] = (
+                            TranscriptSearchService(transcripts, PostgresTranscriptDocuments(pool))
                         )
                         # SPEC-02 (B4): sealed continuation checkpoints, read under scope.
                         application.state.mission_control_checkpoint_services[key] = (
@@ -365,6 +381,8 @@ def create_application(
     application.state.mission_control_catalog_services = {}
     application.state.mission_control_transcript_services = {}
     application.state.mission_control_checkpoint_services = {}
+    application.state.mission_control_run_list_services = {}
+    application.state.mission_control_transcript_search_services = {}
     application.state.mission_control_subscription_services = {}
     application.state.mission_control_compositions = {}
     application.state.mission_control_ready = False

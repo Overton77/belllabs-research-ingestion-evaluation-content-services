@@ -7,6 +7,15 @@
 - `GET .../runs/{run_id}/frames/tail` is a non-canonical Server-Sent Events tail over the
   Native Event Store for dashboards and `--follow`; every event says `canonical: false`.
 
+FT-C4 adds run list and search:
+
+- `GET /v1/applications/{app}/runs?query=&limit=` lists runs through Temporal Visibility
+  (bounded grammar, bound to the installation prefix and scope hash) enriched from the
+  ledger; a filter outside the grammar is `422 invalid_run_query`.
+- `GET .../runs/{run_id}/transcript/search?q=&limit=` ranks the run's projected transcript
+  entries (`websearch_to_tsquery` + `ts_rank_cd`) and returns entries with the cursor that
+  `run transcript --since` opens.
+
 Authentication and the application/tenant scope are verified exactly as the Mission
 Control router does; `workflow_run.read` is required. A malformed cursor is
 `409 CURSOR_EXPIRED`.
@@ -23,6 +32,12 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
 
+from mission_control.application.frames.search import (
+    RunListService,
+    RunListUnavailable,
+    TranscriptSearchInvalid,
+    TranscriptSearchService,
+)
 from mission_control.application.frames.transcript import (
     FullBodyUnavailable,
     TranscriptDenied,
@@ -30,6 +45,7 @@ from mission_control.application.frames.transcript import (
     TranscriptService,
 )
 from mission_control.domain.frames.render import to_jsonl, to_markdown
+from mission_control.domain.frames.run_query import RunQueryInvalid
 from mission_control.domain.frames.transcript import CursorExpired, TranscriptPage, TranscriptQuery
 from mission_control.interfaces.http.mission_control import (
     MissionPrincipal,
@@ -61,6 +77,59 @@ def get_transcript_service(
 
 Principal = Annotated[MissionPrincipal, Depends(get_mission_principal)]
 Service = Annotated[TranscriptService, Depends(get_transcript_service)]
+
+
+def _scoped_service(
+    application_id: str,
+    request: Request,
+    principal: MissionPrincipal,
+    *,
+    registry_name: str,
+    kind: type[Any],
+    unavailable: str,
+) -> Any:
+    authorize_application(application_id, request, principal)
+    registry = getattr(request.app.state, registry_name, {})
+    service = registry.get((principal.installation_id, application_id, principal.tenant_id))
+    if not isinstance(service, kind):
+        raise HTTPException(status_code=503, detail={"code": unavailable})
+    if service.request_scope != principal_request_scope(principal):
+        raise HTTPException(status_code=503, detail={"code": "service_scope_mismatch"})
+    return service
+
+
+def get_run_list_service(
+    application_id: str,
+    request: Request,
+    principal: Annotated[MissionPrincipal, Depends(get_mission_principal)],
+) -> RunListService:
+    return _scoped_service(
+        application_id,
+        request,
+        principal,
+        registry_name="mission_control_run_list_services",
+        kind=RunListService,
+        unavailable="run_list_unavailable",
+    )
+
+
+def get_transcript_search_service(
+    application_id: str,
+    request: Request,
+    principal: Annotated[MissionPrincipal, Depends(get_mission_principal)],
+) -> TranscriptSearchService:
+    return _scoped_service(
+        application_id,
+        request,
+        principal,
+        registry_name="mission_control_transcript_search_services",
+        kind=TranscriptSearchService,
+        unavailable="transcript_search_unavailable",
+    )
+
+
+RunList = Annotated[RunListService, Depends(get_run_list_service)]
+Search = Annotated[TranscriptSearchService, Depends(get_transcript_search_service)]
 
 
 def _error(exc: Exception) -> HTTPException:
@@ -205,3 +274,49 @@ async def frames_tail(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
     )
+
+
+@router.get("/runs")
+async def list_runs(
+    principal: Principal,
+    service: RunList,
+    query: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+) -> dict[str, Any]:
+    """FT-C4: runs matching the bounded filter, enriched from the ledger."""
+
+    try:
+        page = await service.list(query, actor=principal.actor, limit=limit)
+    except RunQueryInvalid as exc:
+        raise HTTPException(
+            status_code=422, detail={"code": RunQueryInvalid.code, "message": str(exc)}
+        ) from None
+    except TranscriptDenied:
+        raise HTTPException(status_code=403, detail={"code": "unauthorized"}) from None
+    except RunListUnavailable:
+        raise HTTPException(status_code=503, detail={"code": "run_list_unavailable"}) from None
+    return {"application_id": principal.application_id, **page.model_dump(mode="json")}
+
+
+@router.get("/runs/{run_id}/transcript/search")
+async def search_transcript(
+    run_id: str,
+    principal: Principal,
+    service: Search,
+    q: Annotated[str, Query(min_length=1, max_length=512)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> dict[str, Any]:
+    """FT-C4: ranked transcript entries with the cursor `run transcript --since` opens."""
+
+    try:
+        page = await service.search(run_id, q, actor=principal.actor, limit=limit)
+    except TranscriptSearchInvalid as exc:
+        raise HTTPException(
+            status_code=422, detail={"code": TranscriptSearchInvalid.code, "message": str(exc)}
+        ) from None
+    except (TranscriptDenied, TranscriptRunNotFound) as exc:
+        raise _error(exc) from None
+    return {
+        "application_id": principal.application_id,
+        **page.model_dump(mode="json", exclude_none=True),
+    }

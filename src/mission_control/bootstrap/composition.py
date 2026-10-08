@@ -24,6 +24,7 @@ from mission_control.adapters.postgres.control_plane.definition_repository impor
     PostgresDefinitionRepository,
 )
 from mission_control.adapters.postgres.frames.repository import PostgresFrameRepository
+from mission_control.adapters.postgres.frames.transcript_projection import PostgresRunMissionIds
 from mission_control.adapters.postgres.orchestration.stagegraph_repository import (
     PostgresStageGraphOperationTemplateRepository,
 )
@@ -206,6 +207,8 @@ async def compose_application_services(
             fork_templates=StageGraphForkTemplateDerivation(
                 PostgresStageGraphOperationTemplateRepository(runtime_pool)
             ),
+            # FT-C4: the root starts with the ledger mission as `mc_mission_id`.
+            mission_ids=PostgresRunMissionIds(runtime_pool),
         )
         if submitter is not None
         else None
