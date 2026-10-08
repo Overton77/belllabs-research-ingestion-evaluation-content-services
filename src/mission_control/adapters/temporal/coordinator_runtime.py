@@ -91,6 +91,8 @@ class GoalDirectedCoordinatorDependencies:
     actor: ActorContext
     # RRM-009: the deployment's heartbeat timeout per operation class (RRM-008 cancel latency).
     operation_heartbeats: OperationHeartbeatPolicy = DEFAULT_OPERATION_HEARTBEATS
+    # FT-B3: when composed, every iteration and role starts from a sealed Context Packet.
+    context_packs: ContextPackService | None = None
 
 
 @dataclass(frozen=True)
@@ -150,6 +152,7 @@ def create_routed_coordinator_activities(
                 goal_directed.run_control, orchestration_lifecycle_actor()
             ),
             heartbeats=goal_directed.operation_heartbeats,
+            context_packs=goal_directed.context_packs,
         ),
     )
 

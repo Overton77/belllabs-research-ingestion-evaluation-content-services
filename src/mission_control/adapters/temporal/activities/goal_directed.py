@@ -9,6 +9,10 @@ from mission_control.adapters.temporal.boundary_activities import apply_boundary
 from mission_control.adapters.temporal.registration.activities import coordinator_activities
 from mission_control.adapters.temporal.registration.workflows import coordinator_workflows
 from mission_control.adapters.temporal.workflow_sandbox import coordinator_workflow_runner
+from mission_control.application.context.pack_service import (
+    ContextPackRejected,
+    ContextPackService,
+)
 from mission_control.application.coordinator.coordinator_results import (
     TerminalWorkflowCompletionPort,
 )
@@ -111,6 +115,10 @@ class GoalDirectedActivities:
                 type=GOAL_ADMISSION_STALE,
                 non_retryable=True,
             ) from error
+        except ContextPackRejected as error:
+            # FT-B3: a packet that cannot be sealed rejects the admission before any provider
+            # work (for example a mandatory Loop State over budget); never truncated.
+            raise ApplicationError(str(error), type=error.code, non_retryable=True) from error
 
     @activity.defn(name="goaldirected.reconcile_operation")
     async def prepare_handoff(
@@ -167,6 +175,7 @@ def compose_goal_directed_activities(
     completion: TerminalWorkflowCompletionPort | None = None,
     boundary: BoundaryCommandApplicationService | None = None,
     heartbeats: OperationHeartbeatPolicy = DEFAULT_OPERATION_HEARTBEATS,
+    context_packs: ContextPackService | None = None,
 ) -> GoalDirectedActivities:
     """Wire production GoalDirected activities on the OperationWorkflow path."""
 
@@ -178,6 +187,7 @@ def compose_goal_directed_activities(
             documents=documents,
             actor=actor,
             heartbeats=heartbeats,
+            context_packs=context_packs,
         ),
         # RRM-016: the family consumes each operation's journaled run-control settlement.
         results=GoalDirectedOperationResultService(

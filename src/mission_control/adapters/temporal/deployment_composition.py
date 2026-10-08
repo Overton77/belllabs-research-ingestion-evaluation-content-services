@@ -751,6 +751,7 @@ class ProductionWorkerActivityCompositionFactory:
                     authority_refs=frozenset({f"authority:{GOAL_DIRECTED_WORKER_ACTOR}"}),
                 ),
                 operation_heartbeats=heartbeats,
+                context_packs=context_packs,
             ),
             stagegraph=StageGraphCoordinatorDependencies(
                 run_control=run_control,

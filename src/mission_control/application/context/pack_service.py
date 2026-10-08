@@ -18,9 +18,10 @@ and ``pack_for_chain_link`` (FT-D2) build on :meth:`ContextPackService.seal`.
 
 from __future__ import annotations
 
+import json
 import uuid
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Protocol
 
 from mission_control.domain.authoring.contracts import StageGraphBlueprint, StageNode
@@ -61,13 +62,21 @@ from mission_control.domain.execution.contracts import (
     WorkspaceOwnerKind,
     WorkspaceSlotBinding,
 )
+from mission_control.domain.graph_runtime.contracts import GoalHandoffReference
+from mission_control.domain.graph_runtime.identities import GoalHandoffCheckpointKey
 from mission_control.domain.programs.contracts import (
+    GoalHandoff,
     StageGraphAdmissionActivityRequest,
     StageInputBinding,
 )
+from mission_control.domain.programs.goal_directed_runtime import GoalOperationPreparationRequest
+from mission_control.domain.programs.runtime_units import goal_operation_id
 
 _PACKET_NAMESPACE = uuid.UUID("5b0f8a6e-2f7d-4c1a-9a3e-27c0c0de7a01")
 DEFAULT_MAX_TEXT_BYTES = 65_536
+DEFAULT_HANDOFF_PATH = "/goal/HANDOFF.md"
+DEFAULT_CHECKPOINT_PATH = "/goal/checkpoint.json"
+CONTEXT_PACKET_SEGMENT_PREFIX = "context-packet:"
 
 
 # --------------------------------------------------------------------------------------
@@ -304,6 +313,242 @@ class ContextPackService:
             materialize_files=compiled,
         )
 
+    # -- Goal Loop iteration handoff (FT-B3) ----------------------------------------------
+
+    async def pack_for_iteration(
+        self,
+        request: GoalOperationPreparationRequest,
+        template: OperationExecutionRequest,
+        *,
+        role_root: str,
+        handoff_path: str = DEFAULT_HANDOFF_PATH,
+        checkpoint_path: str = DEFAULT_CHECKPOINT_PATH,
+        extra_candidates: Sequence[PackCandidate] = (),
+    ) -> SealedPacket:
+        """Build the ``iteration_start`` packet of one GoalDirected executor or verifier.
+
+        Executor: goals and criteria, the bounded Loop State (inline, mandatory), the prior
+        iteration's sealed handoff as the journal head (reference, mandatory), its Progress
+        Review (model-authored, untrusted, inline), unresolved blockers (inline, mandatory),
+        the handoff's artifacts (``auto``) and the handoff snapshot files at the policy paths
+        under the role root (``materialize``). Verifier: an independent packet with only the
+        executor's registered outputs (``verifier_input_refs``), never its handoff or prompt.
+        ``extra_candidates`` is the hook for queued ``add_context`` items (FT-F1) and human
+        answers.
+        """
+
+        role = request.operation_role
+        operation_id = goal_operation_id(request.goal_iteration, role)
+        scope_key = request.request_scope
+        semantic = (
+            f"{request.run_id}:goal:{request.goal_iteration}:{role}:"
+            f"{request.operation_attempt}:{request.execution_generation}"
+        )
+        candidates: list[PackCandidate] = list(
+            _goal_contract_candidates(request, template, role_root=role_root)
+        )
+        bindings: list[ContextBinding] = []
+        producer_refs: list[str] = []
+        if role == "verifier":
+            # Independence (REQ-BP-GD-004): only registered executor outputs cross; they are
+            # under verification, so they enter as provisional and never mandatory.
+            if request.verifier_input_refs:
+                bindings.append(ContextBinding(binding_name="executor_outputs"))
+            for ref in request.verifier_input_refs:
+                candidates.append(
+                    await self._captured_output(
+                        ref,
+                        binding_name="executor_outputs",
+                        request_scope=scope_key,
+                        provenance=ItemProvenance(
+                            producer_activation_id=goal_operation_id(
+                                request.goal_iteration, "executor"
+                            ),
+                            iteration_id=str(request.goal_iteration),
+                            provisional=True,
+                        ),
+                        label=f"executor output of iteration {request.goal_iteration}",
+                    )
+                )
+        elif request.handoff is not None:
+            handoff = request.handoff
+            producer_refs.append(handoff.handoff_id)
+            candidates.extend(
+                await self._handoff_candidates(
+                    request,
+                    handoff,
+                    role_root=role_root,
+                    handoff_path=handoff_path,
+                    checkpoint_path=checkpoint_path,
+                )
+            )
+            if handoff.artifact_refs:
+                bindings.append(ContextBinding(binding_name="prior_artifacts"))
+            for ref in handoff.artifact_refs:
+                candidates.append(
+                    await self._captured_output(
+                        ref,
+                        binding_name="prior_artifacts",
+                        request_scope=scope_key,
+                        provenance=ItemProvenance(
+                            producer_activation_id=goal_operation_id(
+                                handoff.source_iteration.goal_iteration, "executor"
+                            ),
+                            accepted_decision_ref=handoff.handoff_id,
+                            iteration_id=str(handoff.source_iteration.goal_iteration),
+                        ),
+                        label=f"artifact of iteration {handoff.source_iteration.goal_iteration}",
+                    )
+                )
+        candidates.extend(extra_candidates)
+        sandbox = template.deep_agent_binding.sandbox if template.deep_agent_binding else None
+        owner = WorkspaceOwner(
+            kind=(
+                WorkspaceOwnerKind.ITERATION if role == "executor" else WorkspaceOwnerKind.EVALUATOR
+            ),
+            owner_id=operation_id,
+        )
+        return await self.seal(
+            PackRequest(
+                packet_id=_stable_uuid("packet", scope_key, semantic),
+                sealed_at=request.decided_at,
+                context_selection_ref=(
+                    "context_selection:" + _stable_uuid("selection", scope_key, semantic)
+                ),
+                scope=_packet_scope(scope_key),
+                target=PacketTarget(
+                    mission_id=request.run_id,
+                    run_id=request.run_id,
+                    revision_id=request.goal_revision_id,
+                    node_key=f"goal/{role}",
+                    activation_id=operation_id,
+                    attempt_no=request.operation_attempt,
+                    generation=request.execution_generation,
+                    purpose=ContextPurpose.ITERATION_START,
+                ),
+                producer_refs=tuple(producer_refs),
+                profile=self._profiles.profile_for(template),
+                bindings=tuple(bindings),
+                candidates=tuple(candidates),
+                policy=self._policy,
+                lane=LaneFileSupport(
+                    writable_workspace=True,
+                    text_only_files=sandbox is not None and sandbox.backend == "state",
+                    mount_root=role_root,
+                ),
+            ),
+            request_scope=scope_key,
+            owner=owner,
+        )
+
+    async def _handoff_candidates(
+        self,
+        request: GoalOperationPreparationRequest,
+        handoff: GoalHandoff,
+        *,
+        role_root: str,
+        handoff_path: str,
+        checkpoint_path: str,
+    ) -> list[PackCandidate]:
+        run_id = request.run_id
+        source = handoff.source_iteration.goal_iteration
+        loop_state = _canonical_text(
+            {
+                "goal_revision_id": request.goal_revision_id,
+                "goal_iteration": request.goal_iteration,
+                "prior_iteration": source,
+                "remaining_iterations": handoff.remaining_iterations,
+                "remaining_budget": handoff.remaining_budget,
+                "consumed_budget": handoff.consumed_budget,
+                "accepted_fact_refs": list(handoff.accepted_fact_refs),
+                "evidence_refs": list(handoff.evidence_refs),
+                "artifact_refs": list(handoff.artifact_refs),
+                "effect_frontier_refs": list(handoff.effect_frontier_refs),
+                "pending_liability_refs": list(handoff.pending_liability_refs),
+                "workspace_refs": list(handoff.workspace_refs),
+                "compaction_status": handoff.compaction_status,
+            }
+        )
+        candidates = [
+            _text_candidate(
+                ContextSourceKind.LOOP_STATE,
+                f"state://{run_id}/goal/{request.goal_iteration}/loop_state",
+                loop_state,
+                trust=ContextTrust.ADMITTED_INPUT,
+                media_type="application/json",
+            ),
+            PackCandidate(
+                source_kind=ContextSourceKind.JOURNAL_DIGEST,
+                source_ref=f"journal://{run_id}/goal/{source}/handoff/{handoff.handoff_digest}",
+                content_digest=handoff.handoff_digest,
+                bytes=0,
+                media_type="application/json",
+                trust=ContextTrust.AUTHORITATIVE,
+                mandatory=True,
+                expand=ExpandMode.REFERENCE,
+                summary=(
+                    f"sealed handoff of iteration {source} ({handoff.handoff_id}); "
+                    "read it for the full journal head"
+                ),
+            ),
+            _text_candidate(
+                ContextSourceKind.PROGRESS_REVIEW,
+                f"state://{run_id}/goal/{source}/progress_review",
+                _progress_review(handoff),
+                trust=ContextTrust.UNTRUSTED_CONTENT,
+                mandatory=False,
+            ),
+        ]
+        blockers = [f"blocker: {item}" for item in handoff.blockers] + [
+            f"unresolved obligation: {item}" for item in handoff.unresolved_obligations
+        ]
+        if blockers:
+            candidates.append(
+                _text_candidate(
+                    ContextSourceKind.BLOCKER,
+                    f"state://{run_id}/goal/{source}/blockers",
+                    "\n".join(blockers),
+                    trust=ContextTrust.UNTRUSTED_CONTENT,
+                )
+            )
+        snapshots = (
+            (
+                ContextSourceKind.PROGRESS_REVIEW,
+                handoff_path,
+                render_goal_handoff_markdown(handoff),
+                "text/markdown",
+            ),
+            (
+                ContextSourceKind.CONTINUATION_CHECKPOINT,
+                checkpoint_path,
+                render_goal_checkpoint_json(handoff),
+                "application/json",
+            ),
+        )
+        for kind, path, text, media_type in snapshots:
+            content = text.encode("utf-8")
+            durable_ref = await self._staging.stage(
+                request_scope=request.request_scope,
+                name=f"{handoff.handoff_digest}{path}",
+                content=content,
+                media_type=media_type,
+            )
+            candidates.append(
+                PackCandidate(
+                    source_kind=kind,
+                    source_ref=f"journal://{run_id}/goal/{source}/handoff{path}",
+                    content_digest=bytes_digest(content),
+                    bytes=len(content),
+                    media_type=media_type,
+                    trust=ContextTrust.UNTRUSTED_CONTENT,
+                    expand=ExpandMode.MATERIALIZE,
+                    path=f"{role_root}{path}",
+                    durable_ref=durable_ref,
+                    summary=f"iteration {source} handoff snapshot ({path})",
+                )
+            )
+        return candidates
+
     async def _captured_output(
         self,
         ref: str,
@@ -499,3 +744,140 @@ def _packet_scope(request_scope: str) -> PacketScope:
 
 def _stable_uuid(kind: str, *parts: str) -> str:
     return str(uuid.uuid5(_PACKET_NAMESPACE, "\x1f".join((kind, *parts))))
+
+
+def _canonical_text(value: object) -> str:
+    return json.dumps(value, sort_keys=True, indent=2, ensure_ascii=False)
+
+
+def _goal_contract_candidates(
+    request: GoalOperationPreparationRequest,
+    template: OperationExecutionRequest,
+    *,
+    role_root: str,
+) -> list[PackCandidate]:
+    role = request.operation_role
+    revision = request.goal_revision
+    identity = {
+        "goal_revision_id": request.goal_revision_id,
+        "goal_iteration": request.goal_iteration,
+        "operation_role": role,
+        "operation_attempt": request.operation_attempt,
+    }
+    duty = (
+        "Advance the goal and finish with your typed executor observation and handoff."
+        if role == "executor"
+        else "Independently verify the executor's registered outputs against the goal; you "
+        "see its outputs, never its reasoning."
+    )
+    contract = f"GoalDirected {role} operation. Identity: {identity!r}. {duty}"
+    goals_lines = [f"Objective: {revision.objective}"]
+    for title, values in (
+        ("Tactics", revision.tactics),
+        ("Subgoals", revision.subgoals),
+        ("Coverage emphasis", revision.coverage_emphasis),
+        ("Tactical changes", revision.tactical_changes),
+        ("Unmet obligations", revision.unmet_obligations),
+    ):
+        if values:
+            goals_lines.append(f"{title}: " + "; ".join(values))
+    writable = ", ".join(template.workspace.exclusive_write_paths)
+    workspace_map = (
+        f"Writable (under {role_root}): {writable}. Read-only inputs: {role_root}/inputs/ "
+        f"(see {role_root}/.mission/inputs.json). This index: {role_root}/.mission/context.md."
+    )
+    base = f"state://{request.run_id}/goal/{request.goal_iteration}/{role}"
+    return [
+        _text_candidate(
+            ContextSourceKind.OPERATING_CONTRACT, f"{base}/operating_contract", contract
+        ),
+        _text_candidate(
+            ContextSourceKind.GOALS_AND_CRITERIA,
+            f"state://{request.run_id}/goal/revision/{request.goal_revision_id}",
+            "\n".join(goals_lines),
+            trust=ContextTrust.ADMITTED_INPUT,
+        ),
+        _text_candidate(ContextSourceKind.WORKSPACE_MAP, f"{base}/workspace_map", workspace_map),
+    ]
+
+
+def _progress_review(handoff: GoalHandoff) -> str:
+    lines = [f"Continuation instructions: {handoff.continuation_instructions}"]
+    if handoff.attempted_tactics:
+        lines.append("Attempted tactics: " + "; ".join(handoff.attempted_tactics))
+    if handoff.rejected_tactics:
+        lines.append(
+            "Rejected tactics: "
+            + "; ".join(f"{tactic} ({reason})" for tactic, reason in handoff.rejected_tactics)
+        )
+    return "\n".join(lines)
+
+
+def render_goal_handoff_markdown(handoff: GoalHandoff) -> str:
+    """``HANDOFF.md``: the bound handoff as a readable snapshot (model content is data)."""
+
+    def bullets(values: Sequence[str]) -> str:
+        return "".join(f"- {value}\n" for value in values) or "- none\n"
+
+    return (
+        f"# Handoff from iteration {handoff.source_iteration.goal_iteration}\n\n"
+        f"handoff: `{handoff.handoff_id}` (`{handoff.handoff_digest}`)\n\n"
+        f"## Continuation instructions\n\n{handoff.continuation_instructions}\n\n"
+        f"## Accepted facts\n\n{bullets(handoff.accepted_fact_refs)}\n"
+        f"## Evidence\n\n{bullets(handoff.evidence_refs)}\n"
+        f"## Artifacts\n\n{bullets(handoff.artifact_refs)}\n"
+        f"## Attempted tactics\n\n{bullets(handoff.attempted_tactics)}\n"
+        f"## Blockers\n\n{bullets(handoff.blockers)}\n"
+        f"## Unresolved obligations\n\n{bullets(handoff.unresolved_obligations)}"
+    )
+
+
+def render_goal_checkpoint_json(handoff: GoalHandoff) -> str:
+    """``checkpoint.json``: the bound handoff document, canonical JSON."""
+
+    return json.dumps(asdict(handoff), sort_keys=True, indent=2, ensure_ascii=False) + "\n"
+
+
+def context_packet_ref(segments: Sequence[PromptSegment]) -> str | None:
+    """The packet a bound operation consumed, from its ``admitted_input`` packet segment."""
+
+    return next(
+        (
+            segment.source_ref
+            for segment in segments
+            if segment.source_ref.startswith(CONTEXT_PACKET_SEGMENT_PREFIX)
+        ),
+        None,
+    )
+
+
+def goal_handoff_reference(
+    handoff: GoalHandoff, *, request_scope: str
+) -> GoalHandoffReference | None:
+    """The runtime writer of ``GoalHandoffReference``: the packet the handoff's iteration read.
+
+    ``_bind_handoff`` records the packet ref first in ``context_selection_refs``; the
+    reference names that packet by digest under the iteration's handoff checkpoint key.
+    """
+
+    ref = next(
+        (
+            item
+            for item in handoff.context_selection_refs
+            if item.startswith(CONTEXT_PACKET_SEGMENT_PREFIX)
+        ),
+        None,
+    )
+    if ref is None:
+        return None
+    digest = ref.removeprefix(CONTEXT_PACKET_SEGMENT_PREFIX)
+    return GoalHandoffReference(
+        checkpoint=GoalHandoffCheckpointKey(
+            request_scope=request_scope,
+            belllabs_run_id=handoff.run_id,
+            goal_handoff_checkpoint_id=f"context-packet:{digest.removeprefix('sha256:')}",
+            goal_iteration=handoff.source_iteration.goal_iteration,
+        ),
+        artifact_ref=f"context-packet://{digest}",
+        content_digest=digest,
+    )
