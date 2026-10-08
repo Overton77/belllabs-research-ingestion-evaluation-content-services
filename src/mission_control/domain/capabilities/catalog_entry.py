@@ -14,6 +14,7 @@ from mission_control.domain.capabilities.host_support import (
     CapabilityHostSupport,
     LaneProfile,
 )
+from mission_control.domain.capabilities.pins import CapabilityPin
 
 AGENT_CAPABILITY_KIND: dict[DefinitionKind, AgentCapabilityKind] = {
     DefinitionKind.SKILL: AgentCapabilityKind.SKILL_BUNDLE,
@@ -31,6 +32,7 @@ class CatalogEntrySummary(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     ref: ExactDefinitionRef
+    pin: str
     kind: DefinitionKind
     capability_kind: AgentCapabilityKind | None
     host_support: CapabilityHostSupport
@@ -46,9 +48,26 @@ def summarize(published: PublishedDefinition) -> CatalogEntrySummary:
     secret_refs = getattr(definition, "secret_refs", ())
     return CatalogEntrySummary(
         ref=published.ref,
+        pin=capability_pin(published).render(),
         kind=published.ref.kind,
         capability_kind=AGENT_CAPABILITY_KIND.get(published.ref.kind),
         host_support=host_support,
         supported_profiles=host_support.supported_profiles(),
         secret_refs=tuple(secret_refs),
+    )
+
+
+def capability_pin(published: PublishedDefinition) -> CapabilityPin:
+    """``<logical_id>@<version>#<definition digest>`` for a published catalog row.
+
+    The version is the upstream release the row pins (``source_provenance.upstream_version``)
+    when it has one, else the catalog revision; the digest is the exact definition digest, so
+    the pin resolves to exactly one row.
+    """
+    provenance = getattr(published.definition, "source_provenance", None)
+    version = getattr(provenance, "upstream_version", None) or str(published.ref.revision)
+    return CapabilityPin(
+        capability_id=published.ref.logical_id,
+        version=version,
+        digest=published.ref.digest,
     )

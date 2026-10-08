@@ -1,0 +1,1973 @@
+{
+  "actor_ref": "seed:mission-control-catalog",
+  "component_compatibility": ">=1.0.0 <2.0.0",
+  "depends_on": [
+    {
+      "seed_key": "mc.catalog.agent-capabilities",
+      "seed_version": "1.0.0"
+    }
+  ],
+  "description": "Agent-capability MCP servers admitted only in 'biotech' (FT-A6): mcp.pubmed, mcp.biomcp. Secret reference NAMES only; requires migration 0025.",
+  "format": "mission-control-seed/v1",
+  "records": [
+    {
+      "fields": {
+        "asset_id": "definition:mcp_server:mcp.pubmed",
+        "contract": "mission-control.published-definition/1",
+        "host_support": {
+          "profiles": {
+            "claude_agent_sdk": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "codex": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_cloud": {
+              "evidence_ref": null,
+              "overlay": {
+                "transport": "streamable_http",
+                "url_ref": "MCP_SELF_HOSTED_URL"
+              },
+              "status": "unqualified"
+            },
+            "cursor_local": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "deep_agents": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            }
+          },
+          "schema_version": "mc.capability_host_support.v1"
+        },
+        "kind": "mcp_server",
+        "manifest": {
+          "definition": {
+            "allowed_tools": [
+              "pubmed_convert_ids",
+              "pubmed_europepmc_fetch",
+              "pubmed_europepmc_search",
+              "pubmed_fetch_articles",
+              "pubmed_fetch_fulltext",
+              "pubmed_find_related",
+              "pubmed_format_citations",
+              "pubmed_lookup_citation",
+              "pubmed_lookup_mesh",
+              "pubmed_search_articles",
+              "pubmed_spell_check"
+            ],
+            "approval_policy": {},
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "credential_refs": [],
+            "description": "cyanheads PubMed MCP server: PubMed and Europe PMC literature retrieval, article metadata and full text, citation formatting, related articles, spell check, MeSH lookup and identifier conversion (biomedical literature). Requires Node >= 24 or Bun >= 1.4. NCBI allows 3 requests/s without NCBI_API_KEY, 10 with it. Cloud lanes need a self-hosted Streamable HTTP endpoint; the author's public endpoint is never referenced.",
+            "endpoint": null,
+            "env": {
+              "MCP_TRANSPORT_TYPE": "stdio"
+            },
+            "env_refs": {
+              "NCBI_ADMIN_EMAIL": "NCBI_ADMIN_EMAIL",
+              "NCBI_API_KEY": "NCBI_API_KEY",
+              "UNPAYWALL_EMAIL": "UNPAYWALL_EMAIL"
+            },
+            "host_support": {
+              "profiles": {
+                "claude_agent_sdk": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "codex": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_cloud": {
+                  "evidence_ref": null,
+                  "overlay": {
+                    "transport": "streamable_http",
+                    "url_ref": "MCP_SELF_HOSTED_URL"
+                  },
+                  "status": "unqualified"
+                },
+                "cursor_local": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "deep_agents": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                }
+              },
+              "schema_version": "mc.capability_host_support.v1"
+            },
+            "kind": "mcp_server",
+            "launch_template": [
+              "npx",
+              "-y",
+              "@cyanheads/pubmed-mcp-server@2.10.20"
+            ],
+            "logical_id": "mcp.pubmed",
+            "maturity": "experimental",
+            "network_requirements": [],
+            "package_pin": "npm:@cyanheads/pubmed-mcp-server@2.10.20",
+            "review_status": "approved",
+            "schema_digest": "sha256:7647d27c158f7421c1b09c2b76dda95cb5820368e3ca8c9b1c0896a480292598",
+            "schema_snapshot_ref": {
+              "digest": "sha256:9930c728962b99b325d6fb1413e1fdd4f149f675b6a5b59bc387b0629d1fa336",
+              "media_type": "application/json",
+              "size_bytes": 3420,
+              "uri": "repo://tests/fixtures/mcp/mcp.pubmed.tools.json"
+            },
+            "schema_version": "1",
+            "secret_refs": [
+              "NCBI_API_KEY",
+              "NCBI_ADMIN_EMAIL",
+              "UNPAYWALL_EMAIL"
+            ],
+            "source_provenance": {
+              "commit_digest": null,
+              "license": "Apache-2.0",
+              "locator": "https://github.com/cyanheads/pubmed-mcp-server",
+              "source": "git",
+              "upstream_identity": "@cyanheads/pubmed-mcp-server",
+              "upstream_version": "2.10.20"
+            },
+            "title": "PubMed literature search, fetch, full text, citations and MeSH",
+            "tools": [
+              {
+                "description": "PubMed query syntax with filters and date ranges; optional summaries.",
+                "name": "pubmed_search_articles",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Article metadata by PMID (up to 200 per call).",
+                "name": "pubmed_fetch_articles",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Full text by PMID, PMCID or DOI with PMC, Europe PMC and Unpaywall fallback.",
+                "name": "pubmed_fetch_fulltext",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Europe PMC search including preprints and patents.",
+                "name": "pubmed_europepmc_search",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Full Europe PMC records (up to 25 per call).",
+                "name": "pubmed_europepmc_fetch",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Format citations as APA, MLA, BibTeX, RIS or Vancouver.",
+                "name": "pubmed_format_citations",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Similar, cited-by and reference articles.",
+                "name": "pubmed_find_related",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "NCBI ESpell query correction.",
+                "name": "pubmed_spell_check",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "MeSH descriptors, tree numbers and scope notes.",
+                "name": "pubmed_lookup_mesh",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Partial citations to PMIDs via ECitMatch.",
+                "name": "pubmed_lookup_citation",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "DOI, PMID and PMCID conversion.",
+                "name": "pubmed_convert_ids",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              }
+            ],
+            "tools_list_digest": "sha256:7647d27c158f7421c1b09c2b76dda95cb5820368e3ca8c9b1c0896a480292598",
+            "transport": "stdio"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:39bb8510e8fc14ad611fb2c5a66f58e68fb634c5b6426b00ddc2c1351ab81599",
+            "kind": "mcp_server",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.pubmed",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:94bee037e1bdc7226d8db8912df004fa69fa0463f3b435b945a1c16e6eea17c8",
+        "manifest_ref": "mc-catalog://definition/mcp_server/mcp.pubmed/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "secret_refs": [
+          "NCBI_API_KEY",
+          "NCBI_ADMIN_EMAIL",
+          "UNPAYWALL_EMAIL"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-server:mcp.pubmed/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-server:mcp.pubmed/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.pubmed.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-server:mcp.pubmed/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.pubmed.tool.pubmed-search-articles",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "PubMed query syntax with filters and date ranges; optional summaries.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.pubmed.tool.pubmed-search-articles",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:c1392feca0458fed297dac655c610b36f7edacafd90717ce79d5c9f2814a9ff8",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:39bb8510e8fc14ad611fb2c5a66f58e68fb634c5b6426b00ddc2c1351ab81599",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.pubmed",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "pubmed_search_articles",
+            "tool_name": "pubmed_search_articles"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:00350ecf0e45439d591eca4b4c5038a13d0358e5255ccc8fe54f9794b672f64e",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.pubmed.tool.pubmed-search-articles",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:9c5a46490c262318cf07c8328fadc494c0897ea2e04277d75e6c1fbecc5015f0",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.pubmed.tool.pubmed-search-articles/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.pubmed.tool.pubmed-search-articles/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.pubmed.tool.pubmed-search-articles/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.pubmed.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.pubmed.tool.pubmed-search-articles/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.pubmed.tool.pubmed-fetch-articles",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Article metadata by PMID (up to 200 per call).",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.pubmed.tool.pubmed-fetch-articles",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:c02291f00119286a81916102e57c4342cb1a290b83c64499d9e064ff72ca0ae3",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:39bb8510e8fc14ad611fb2c5a66f58e68fb634c5b6426b00ddc2c1351ab81599",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.pubmed",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "pubmed_fetch_articles",
+            "tool_name": "pubmed_fetch_articles"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:9568cd34db251ac33e6611d27d834d079087be97e9a82faa52ba384382bfbf64",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.pubmed.tool.pubmed-fetch-articles",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:7863900014008edada95130cac278c375971fba82a93341ba055cc6dc8634ce6",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.pubmed.tool.pubmed-fetch-articles/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.pubmed.tool.pubmed-fetch-articles/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.pubmed.tool.pubmed-fetch-articles/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.pubmed.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.pubmed.tool.pubmed-fetch-articles/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.pubmed.tool.pubmed-fetch-fulltext",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Full text by PMID, PMCID or DOI with PMC, Europe PMC and Unpaywall fallback.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.pubmed.tool.pubmed-fetch-fulltext",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:48fd9d67c37130eb784eff209699711fb01afc7a47781f580b19f72350a63e7b",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:39bb8510e8fc14ad611fb2c5a66f58e68fb634c5b6426b00ddc2c1351ab81599",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.pubmed",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "pubmed_fetch_fulltext",
+            "tool_name": "pubmed_fetch_fulltext"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:13af74f5b80b5c92e2f9a35a6f42f2e44b499815201faf84b843638594f22ef4",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.pubmed.tool.pubmed-fetch-fulltext",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:583333d288de35e718d0ab1530dfe468e5d2a34531bb066e011d041ab0c70cd2",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.pubmed.tool.pubmed-fetch-fulltext/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.pubmed.tool.pubmed-fetch-fulltext/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.pubmed.tool.pubmed-fetch-fulltext/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.pubmed.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.pubmed.tool.pubmed-fetch-fulltext/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.pubmed.tool.pubmed-europepmc-search",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Europe PMC search including preprints and patents.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.pubmed.tool.pubmed-europepmc-search",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:4e56d24ee8053f79e27b9c2820de6321ce73750e52e63f384a7ec0c2dee651ff",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:39bb8510e8fc14ad611fb2c5a66f58e68fb634c5b6426b00ddc2c1351ab81599",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.pubmed",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "pubmed_europepmc_search",
+            "tool_name": "pubmed_europepmc_search"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:7d65bd80f44b90006a02ee65b2552ea3ebd8fdef2802f902a3c862b769afa617",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.pubmed.tool.pubmed-europepmc-search",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:40764ced82df4ec47c34ebbd6e096925147e4c0ceac17f4560ac9b01c2d95d63",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.pubmed.tool.pubmed-europepmc-search/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.pubmed.tool.pubmed-europepmc-search/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.pubmed.tool.pubmed-europepmc-search/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.pubmed.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.pubmed.tool.pubmed-europepmc-search/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.pubmed.tool.pubmed-europepmc-fetch",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Full Europe PMC records (up to 25 per call).",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.pubmed.tool.pubmed-europepmc-fetch",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:cb881e9f14d18e9108aecbd112915b9b491795238568e65095e9ffae8788d54e",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:39bb8510e8fc14ad611fb2c5a66f58e68fb634c5b6426b00ddc2c1351ab81599",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.pubmed",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "pubmed_europepmc_fetch",
+            "tool_name": "pubmed_europepmc_fetch"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:2b2cbeede12dfceb46bf1d8ad84a3e347f287fcb18a14fa72181e5ec89120ced",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.pubmed.tool.pubmed-europepmc-fetch",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:63fd316cee03e67c939e116d964ab2a7e84a8fda2130d6ab58ae683f08ae53fa",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.pubmed.tool.pubmed-europepmc-fetch/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.pubmed.tool.pubmed-europepmc-fetch/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.pubmed.tool.pubmed-europepmc-fetch/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.pubmed.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.pubmed.tool.pubmed-europepmc-fetch/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.pubmed.tool.pubmed-format-citations",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Format citations as APA, MLA, BibTeX, RIS or Vancouver.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.pubmed.tool.pubmed-format-citations",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:cbd6d074ca3101e74074e8ebb988e7803dae459745d80d3753bc570e7bf1847d",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:39bb8510e8fc14ad611fb2c5a66f58e68fb634c5b6426b00ddc2c1351ab81599",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.pubmed",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "pubmed_format_citations",
+            "tool_name": "pubmed_format_citations"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:effb79c2eb9e44a0b2e15977a819e63e2f73db709fb069e896d47b7fdf0b059c",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.pubmed.tool.pubmed-format-citations",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:993175196afd12b624774217dc3d6a3354512db63b41476ffbab0bfcff5c1c56",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.pubmed.tool.pubmed-format-citations/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.pubmed.tool.pubmed-format-citations/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.pubmed.tool.pubmed-format-citations/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.pubmed.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.pubmed.tool.pubmed-format-citations/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.pubmed.tool.pubmed-find-related",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Similar, cited-by and reference articles.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.pubmed.tool.pubmed-find-related",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:ff348d0e81db8d0b633252be72ac1332b1a5e45a3f290915245719a79bce649b",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:39bb8510e8fc14ad611fb2c5a66f58e68fb634c5b6426b00ddc2c1351ab81599",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.pubmed",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "pubmed_find_related",
+            "tool_name": "pubmed_find_related"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:f24cfc863a2f574e21c9e1042589e897168b5c4e2ceb98e83e7a12d32735fc5c",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.pubmed.tool.pubmed-find-related",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:61d63d23e79f1598f18432efa087e5b14c043cb2ccc5154f0be017b7676b6fa3",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.pubmed.tool.pubmed-find-related/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.pubmed.tool.pubmed-find-related/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.pubmed.tool.pubmed-find-related/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.pubmed.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.pubmed.tool.pubmed-find-related/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.pubmed.tool.pubmed-spell-check",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "NCBI ESpell query correction.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.pubmed.tool.pubmed-spell-check",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:7f1b01a1c14e2731c53c99b810b9f69bc05700eca42592039d8c2b38dbcb42d8",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:39bb8510e8fc14ad611fb2c5a66f58e68fb634c5b6426b00ddc2c1351ab81599",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.pubmed",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "pubmed_spell_check",
+            "tool_name": "pubmed_spell_check"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:6ec4f1c162feac1372aae152dd50baf0fe02bc8f20774ef50b765e6a2634f3d1",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.pubmed.tool.pubmed-spell-check",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:62e65a02a17bd15e71a86cf79f2582b6085a3f26fe059fc223d545b9450e7f51",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.pubmed.tool.pubmed-spell-check/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.pubmed.tool.pubmed-spell-check/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.pubmed.tool.pubmed-spell-check/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.pubmed.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.pubmed.tool.pubmed-spell-check/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.pubmed.tool.pubmed-lookup-mesh",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "MeSH descriptors, tree numbers and scope notes.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.pubmed.tool.pubmed-lookup-mesh",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:10c4ff4995ec3055251b8d0e3b7ceaa667734cc728d1eb7570db62888a1a1d00",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:39bb8510e8fc14ad611fb2c5a66f58e68fb634c5b6426b00ddc2c1351ab81599",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.pubmed",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "pubmed_lookup_mesh",
+            "tool_name": "pubmed_lookup_mesh"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:1b50c2078702a827599c1a9d53dd8b96fb1a9e8333a217a9c59193a6d13a8b81",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.pubmed.tool.pubmed-lookup-mesh",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:54e89305a0a22f3c0c3188296a42515ccf39cca62a735ea0a2410171067759ae",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.pubmed.tool.pubmed-lookup-mesh/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.pubmed.tool.pubmed-lookup-mesh/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.pubmed.tool.pubmed-lookup-mesh/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.pubmed.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.pubmed.tool.pubmed-lookup-mesh/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.pubmed.tool.pubmed-lookup-citation",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Partial citations to PMIDs via ECitMatch.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.pubmed.tool.pubmed-lookup-citation",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:38e6ef087580cf3f258c5cf375c2f46be44f09726d9b7fb42cff898fd174b974",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:39bb8510e8fc14ad611fb2c5a66f58e68fb634c5b6426b00ddc2c1351ab81599",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.pubmed",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "pubmed_lookup_citation",
+            "tool_name": "pubmed_lookup_citation"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:e7762a30bdb220fbf4297f2f4038ed27047ed0926cdb2d5c4981d2ac94e973e3",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.pubmed.tool.pubmed-lookup-citation",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:4d2e79de8df6e5d0a1fa7eecfb29752f978871f281e96dcbff21d85d922a2556",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.pubmed.tool.pubmed-lookup-citation/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.pubmed.tool.pubmed-lookup-citation/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.pubmed.tool.pubmed-lookup-citation/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.pubmed.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.pubmed.tool.pubmed-lookup-citation/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.pubmed.tool.pubmed-convert-ids",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "DOI, PMID and PMCID conversion.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.pubmed.tool.pubmed-convert-ids",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:34310b3e6fd20746f1465288747dcc6412bd1ec41153b0a88ebbee778e7ffa86",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:39bb8510e8fc14ad611fb2c5a66f58e68fb634c5b6426b00ddc2c1351ab81599",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.pubmed",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "pubmed_convert_ids",
+            "tool_name": "pubmed_convert_ids"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:1ab0fe83706962ba17c0aec6cd83d479aa93d343d8e2d3c4e7ac3b11a97a335d",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.pubmed.tool.pubmed-convert-ids",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:ff8f57cba49cae2aa6396f2cbc18f7547d9e4e3e32db4529e52950791b903436",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.pubmed.tool.pubmed-convert-ids/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.pubmed.tool.pubmed-convert-ids/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.pubmed.tool.pubmed-convert-ids/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.pubmed.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.pubmed.tool.pubmed-convert-ids/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_server:mcp.biomcp",
+        "contract": "mission-control.published-definition/1",
+        "host_support": {
+          "profiles": {
+            "claude_agent_sdk": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "codex": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_cloud": {
+              "evidence_ref": null,
+              "overlay": {
+                "transport": "streamable_http",
+                "url_ref": "MCP_SELF_HOSTED_URL"
+              },
+              "status": "unqualified"
+            },
+            "cursor_local": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "deep_agents": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            }
+          },
+          "schema_version": "mc.capability_host_support.v1"
+        },
+        "kind": "mcp_server",
+        "manifest": {
+          "definition": {
+            "allowed_tools": [
+              "biomcp",
+              "gene_cspec",
+              "get",
+              "search",
+              "variant_articles",
+              "variant_erepo",
+              "variant_normalize_car"
+            ],
+            "approval_policy": {},
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "credential_refs": [],
+            "description": "GenomOncology BioMCP (biomcp serve): seven read-only tools pivoting across literature (PubMed, PubTator3, Europe PMC), clinical trials, variants (ClinVar, ClinGen) and genes. Optional secret refs: NCBI_API_KEY, S2_API_KEY, OPENFDA_API_KEY, NCI_API_KEY, ONCOKB_TOKEN, ALPHAGENOME_API_KEY, DISGENET_API_KEY. Cloud lanes need biomcp serve-http self-hosted.",
+            "endpoint": null,
+            "host_support": {
+              "profiles": {
+                "claude_agent_sdk": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "codex": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_cloud": {
+                  "evidence_ref": null,
+                  "overlay": {
+                    "transport": "streamable_http",
+                    "url_ref": "MCP_SELF_HOSTED_URL"
+                  },
+                  "status": "unqualified"
+                },
+                "cursor_local": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "deep_agents": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                }
+              },
+              "schema_version": "mc.capability_host_support.v1"
+            },
+            "kind": "mcp_server",
+            "launch_template": [
+              "biomcp",
+              "serve"
+            ],
+            "logical_id": "mcp.biomcp",
+            "maturity": "experimental",
+            "network_requirements": [],
+            "package_pin": "pypi:biomcp-cli==0.9.1",
+            "review_status": "approved",
+            "schema_digest": "sha256:14a3275e7bf42582d3b233ad7431ba31fe16f8d954b046de0a07b1b8bb14dbb0",
+            "schema_snapshot_ref": {
+              "digest": "sha256:763e0bf10aa42751f27da2fc36cfb7d358f67308c215ff8dd641d2539e8e3312",
+              "media_type": "application/json",
+              "size_bytes": 2286,
+              "uri": "repo://tests/fixtures/mcp/mcp.biomcp.tools.json"
+            },
+            "schema_version": "1",
+            "secret_refs": [
+              "NCBI_API_KEY",
+              "S2_API_KEY",
+              "OPENFDA_API_KEY",
+              "NCI_API_KEY",
+              "ONCOKB_TOKEN",
+              "ALPHAGENOME_API_KEY",
+              "DISGENET_API_KEY"
+            ],
+            "source_provenance": {
+              "commit_digest": null,
+              "license": "MIT",
+              "locator": "https://github.com/genomoncology/biomcp",
+              "source": "git",
+              "upstream_identity": "biomcp-cli",
+              "upstream_version": "0.9.1"
+            },
+            "title": "BioMCP biomedical search across literature, trials, variants and genes",
+            "tools": [
+              {
+                "description": "Search biomedical entities across literature, trials, variants and genes.",
+                "name": "search",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Get one biomedical entity record.",
+                "name": "get",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Normalize a variant through the ClinGen allele registry.",
+                "name": "variant_normalize_car",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "ClinGen evidence repository for a variant.",
+                "name": "variant_erepo",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "ClinGen specification for a gene.",
+                "name": "gene_cspec",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Articles mentioning a variant.",
+                "name": "variant_articles",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Read-only BioMCP CLI escape hatch (allowlisted commands).",
+                "name": "biomcp",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              }
+            ],
+            "tools_list_digest": "sha256:14a3275e7bf42582d3b233ad7431ba31fe16f8d954b046de0a07b1b8bb14dbb0",
+            "transport": "stdio"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:4f7617b49d40ab0b58ac6d34918b99850cbac9782b3ed73a92a7b7f178d433f2",
+            "kind": "mcp_server",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.biomcp",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:6c575cd7be9df30d6a11aa4ff7b6565b0e4999d99d830d231cc27357171b8db5",
+        "manifest_ref": "mc-catalog://definition/mcp_server/mcp.biomcp/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "secret_refs": [
+          "NCBI_API_KEY",
+          "S2_API_KEY",
+          "OPENFDA_API_KEY",
+          "NCI_API_KEY",
+          "ONCOKB_TOKEN",
+          "ALPHAGENOME_API_KEY",
+          "DISGENET_API_KEY"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-server:mcp.biomcp/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-server:mcp.biomcp/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.biomcp.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-server:mcp.biomcp/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.biomcp.tool.search",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Search biomedical entities across literature, trials, variants and genes.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.biomcp.tool.search",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:8182a82d7c4bd2ce40ab9c5860d129c8e9abb643413bdf55feac8740ce817e25",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:4f7617b49d40ab0b58ac6d34918b99850cbac9782b3ed73a92a7b7f178d433f2",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.biomcp",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "search",
+            "tool_name": "search"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:2951a206484be50406b9b33c70fcc9d1e0cb7c9a67d7b6f72932cc65ea10f425",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.biomcp.tool.search",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:2bd7eaa8d78bd29d76c324d7cc79b128dac51fd4e97abbd6e933e6a5b702872e",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.biomcp.tool.search/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.biomcp.tool.search/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.biomcp.tool.search/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.biomcp.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.biomcp.tool.search/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.biomcp.tool.get",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Get one biomedical entity record.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.biomcp.tool.get",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:3002d585eb4ce6c615b378e60196266b77f99cb1ac3d7388994391a3a626e905",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:4f7617b49d40ab0b58ac6d34918b99850cbac9782b3ed73a92a7b7f178d433f2",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.biomcp",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "get",
+            "tool_name": "get"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:c340500e4c5917bb7ee98672974ae963787102ea953406d83e2f8baa9432cebc",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.biomcp.tool.get",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:3748b099a66ab2f6ebc81aebe407c25db94625b86d2313a9c7bbe1b53f0a8353",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.biomcp.tool.get/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.biomcp.tool.get/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.biomcp.tool.get/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.biomcp.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.biomcp.tool.get/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.biomcp.tool.variant-normalize-car",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Normalize a variant through the ClinGen allele registry.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.biomcp.tool.variant-normalize-car",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:a313195ae40413d885557fdc5aa209fab817782f6b4676ea2551269ef3c86d0b",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:4f7617b49d40ab0b58ac6d34918b99850cbac9782b3ed73a92a7b7f178d433f2",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.biomcp",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "variant_normalize_car",
+            "tool_name": "variant_normalize_car"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:261e9bd383fb9d2ecc58f816e55afaf7ced14ff12204daea16dc42a378b68f1d",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.biomcp.tool.variant-normalize-car",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:b22ce84fd2e79faccd558b77f237b5fdad2b6289670911abe3d6d581126ac274",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.biomcp.tool.variant-normalize-car/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.biomcp.tool.variant-normalize-car/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.biomcp.tool.variant-normalize-car/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.biomcp.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.biomcp.tool.variant-normalize-car/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.biomcp.tool.variant-erepo",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "ClinGen evidence repository for a variant.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.biomcp.tool.variant-erepo",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:cfb33738f0a6773b4ba88dd509cf3410ed40fb93bb4e78d14cf293f450c49d63",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:4f7617b49d40ab0b58ac6d34918b99850cbac9782b3ed73a92a7b7f178d433f2",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.biomcp",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "variant_erepo",
+            "tool_name": "variant_erepo"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:2d612d6beaa60b381df9991b7dd785eda09fce1e12c0dfce9fe88312526a2217",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.biomcp.tool.variant-erepo",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:1c89b70e13736571bb7edc438a25fb0baeec71380955f1d2454e0fb36c4565e0",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.biomcp.tool.variant-erepo/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.biomcp.tool.variant-erepo/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.biomcp.tool.variant-erepo/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.biomcp.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.biomcp.tool.variant-erepo/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.biomcp.tool.gene-cspec",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "ClinGen specification for a gene.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.biomcp.tool.gene-cspec",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:3214fdb5620b222f837075e0fe619931a9ada4d1f72303bdd849dcbd6be2241a",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:4f7617b49d40ab0b58ac6d34918b99850cbac9782b3ed73a92a7b7f178d433f2",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.biomcp",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "gene_cspec",
+            "tool_name": "gene_cspec"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:388a198b774781cd81097aad3f285fcc125fe749b3dd7e6f9f3d0538bca9ee40",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.biomcp.tool.gene-cspec",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:230709eb3746ca9d72293b85b8903d8e7abcaaa864cdfbb390177f0b86a024c6",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.biomcp.tool.gene-cspec/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.biomcp.tool.gene-cspec/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.biomcp.tool.gene-cspec/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.biomcp.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.biomcp.tool.gene-cspec/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.biomcp.tool.variant-articles",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Articles mentioning a variant.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.biomcp.tool.variant-articles",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:ef5f5eb73b819dc993fca39368e5120427ebff705dbb6b6ba2ac2ab3640d336e",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:4f7617b49d40ab0b58ac6d34918b99850cbac9782b3ed73a92a7b7f178d433f2",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.biomcp",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "variant_articles",
+            "tool_name": "variant_articles"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:cbdbb09c0bad7f53e4bb6c7f93244f1e5e22a7c543b8b0d45abacaea48dbd5cd",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.biomcp.tool.variant-articles",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:e055493a7580f0a5819e046decca78d87f91d4bb8fd81597b59cac7cb0aaad92",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.biomcp.tool.variant-articles/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.biomcp.tool.variant-articles/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.biomcp.tool.variant-articles/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.biomcp.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.biomcp.tool.variant-articles/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.biomcp.tool.biomcp",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Read-only BioMCP CLI escape hatch (allowlisted commands).",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.biomcp.tool.biomcp",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:3ca585e9e315e4a10e231ff6d375ffaf57128244c9333d53805d250fee6577bc",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:4f7617b49d40ab0b58ac6d34918b99850cbac9782b3ed73a92a7b7f178d433f2",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.biomcp",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "biomcp",
+            "tool_name": "biomcp"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:8daef0fa52db234210631d3a65f0e8716aa4dd139d1892c620b2c7af49d17b36",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.biomcp.tool.biomcp",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:d40b01f01f2973d0e30894f08ac20d28ed11259d2e57f0a264d875667e17232c",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.biomcp.tool.biomcp/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.biomcp.tool.biomcp/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.biomcp.tool.biomcp/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.biomcp.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.biomcp.tool.biomcp/1:admit"
+    }
+  ],
+  "seed_key": "mc.app.biotech.agent-capabilities",
+  "seed_version": "1.0.0"
+}

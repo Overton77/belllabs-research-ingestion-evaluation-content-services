@@ -1,0 +1,129 @@
+{
+  "capture_method": "transcribed",
+  "captured_on": "2026-10-07",
+  "environment": {},
+  "note": "Transcribed from the primary-source research note; no live tools/list was run (fast-track wave A, no live provider calls). Re-capture with scripts/capture_mcp_tool_snapshot.py and update the digest before qualifying.",
+  "package_pin": "pypi:edgartools[ai]==5.61.1",
+  "schema_version": "mc.mcp_tools_fixture.v1",
+  "server": "mcp.edgartools",
+  "source": "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md \u00a75 edgartools 5.61.1 MCP server (13 tools)",
+  "tools": [
+    {
+      "description": "Company profile, financials, filings and ownership in one call.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "edgar_company",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Filing metadata search.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "edgar_search",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Screen companies by industry, exchange or state from local data.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "edgar_screen",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "EDGAR full-text search.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "edgar_text_search",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Live filing feed.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "edgar_monitor",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Parse a filing into typed data.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "edgar_filing",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Extract filing sections.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "edgar_read",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Notes and disclosures drill-down.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "edgar_notes",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "XBRL time series and growth.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "edgar_trends",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Side-by-side or industry comparison.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "edgar_compare",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Insider (Form 4) and institutional (13F) ownership.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "edgar_ownership",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Mutual funds, ETFs, BDCs and money market funds.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "edgar_fund",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "DEF 14A executive compensation.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "edgar_proxy",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    }
+  ]
+}

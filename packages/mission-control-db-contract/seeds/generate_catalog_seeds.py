@@ -77,26 +77,35 @@ def _asset(
     manifest_ref: str,
     manifest: dict[str, Any],
     manifest_digest: str | None = None,
+    host_support: dict[str, Any] | None = None,
+    secret_refs: list[str] | None = None,
 ) -> dict[str, Any]:
-    return {
-        "kind": "asset_version",
-        "logical_key": logical_key,
-        "fields": {
-            "asset_id": asset_id,
-            "version": version,
-            "kind": kind,
-            "contract": contract,
-            "manifest_ref": manifest_ref,
-            "manifest_digest": manifest_digest or _canonical_digest(manifest),
-            "manifest": manifest,
-            "required_compatibility": [COMPATIBILITY],
-            "status": "admitted",
-        },
+    fields: dict[str, Any] = {
+        "asset_id": asset_id,
+        "version": version,
+        "kind": kind,
+        "contract": contract,
+        "manifest_ref": manifest_ref,
+        "manifest_digest": manifest_digest or _canonical_digest(manifest),
+        "manifest": manifest,
+        "required_compatibility": [COMPATIBILITY],
+        "status": "admitted",
     }
+    # Agent-composition rows (migration 0025) carry their host-support matrix and secret
+    # reference names; older rows omit both so their bundles stay byte-identical.
+    if host_support is not None:
+        fields["host_support"] = host_support
+    if secret_refs:
+        fields["secret_refs"] = secret_refs
+    return {"kind": "asset_version", "logical_key": logical_key, "fields": fields}
 
 
 def _published_definition_records(
-    definition: Any, key_prefix: str, evidence: list[str]
+    definition: Any,
+    key_prefix: str,
+    evidence: list[str],
+    *,
+    published_at: datetime = SEED_TIME,
 ) -> list[dict[str, Any]]:
     """Asset rows readable by PostgresDefinitionRepository (revision 1, exact digest)."""
     from mission_control.adapters.postgres.control_plane.catalog_assets import (
@@ -119,10 +128,17 @@ def _published_definition_records(
         digest=sha256_digest(definition),
     )
     published = PublishedDefinition(
-        ref=ref, definition=definition, published_at=SEED_TIME, published_by=SEED_ACTOR
+        ref=ref, definition=definition, published_at=published_at, published_by=SEED_ACTOR
     )
     manifest = canonical_data(stable_json_dump(published))["payload"]
-    asset_key = f"{key_prefix}:{definition.kind.value}:{definition.logical_id}/1"
+    # Seed logical keys admit no underscore, so mcp_server/mcp_tool are spelled with hyphens.
+    asset_key = f"{key_prefix}:{definition.kind.value.replace('_', '-')}:{definition.logical_id}/1"
+    host_support = getattr(definition, "host_support", None)
+    support = (
+        host_support.model_dump(mode="json")
+        if host_support is not None and host_support.profiles
+        else None
+    )
     return [
         _asset(
             asset_key,
@@ -133,6 +149,8 @@ def _published_definition_records(
             manifest_ref=definition_manifest_ref(definition.kind, definition.logical_id, 1),
             manifest=manifest,
             manifest_digest=sha256_digest(manifest),
+            host_support=support,
+            secret_refs=list(getattr(definition, "secret_refs", ())),
         ),
         _admit(asset_key + ":admit", asset_key, evidence),
     ]
@@ -425,6 +443,24 @@ def qualification_parity() -> dict[str, Any]:
     }
 
 
+def agent_capabilities() -> dict[str, dict[str, Any]]:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "mc_seed_agent_capabilities", SEEDS_ROOT / "agent_capabilities.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    def published(definition: Any, key_prefix: str, evidence: list[str]) -> list[dict[str, Any]]:
+        return _published_definition_records(
+            definition, key_prefix, evidence, published_at=module.AGENT_SEED_TIME
+        )
+
+    return dict(module.bundles(published, SEED_FORMAT, COMPATIBILITY, SEED_ACTOR))
+
+
 def build_bundles() -> dict[str, dict[str, Any]]:
     bundles = {
         "common/mc.catalog.workflow-parity-1.0.0.json": workflow_parity(),
@@ -436,6 +472,7 @@ def build_bundles() -> dict[str, dict[str, Any]]:
         bundles[relative] = frozen_bundle(relative)
     for app in APPS:
         bundles[f"{app}/mc.app.bindings-{CURRENT_BINDING[0]}.json"] = app_bindings(app)
+    bundles.update(agent_capabilities())
     return bundles
 
 

@@ -1,0 +1,4476 @@
+{
+  "actor_ref": "seed:mission-control-catalog",
+  "component_compatibility": ">=1.0.0 <2.0.0",
+  "depends_on": [
+    {
+      "seed_key": "mc.catalog.approved-assets",
+      "seed_version": "1.0.0"
+    }
+  ],
+  "description": "Agent-capability MCP servers admitted in every application (FT-A6): Tavily, Firecrawl and agent-browser, each a published MCP Server definition with exact package pins, secret reference NAMES only, host_support and one MCP Tool row per tool. Requires migration 0025 (agent-composition kinds). Tool lists are transcribed fixtures (capture_method=transcribed) until re-captured live.",
+  "format": "mission-control-seed/v1",
+  "records": [
+    {
+      "fields": {
+        "asset_id": "definition:mcp_server:mcp.tavily",
+        "contract": "mission-control.published-definition/1",
+        "host_support": {
+          "profiles": {
+            "claude_agent_sdk": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "codex": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_cloud": {
+              "evidence_ref": null,
+              "overlay": {
+                "header_refs": {
+                  "Authorization": "TAVILY_API_KEY"
+                },
+                "transport": "streamable_http",
+                "url": "https://mcp.tavily.com/mcp/"
+              },
+              "status": "supported"
+            },
+            "cursor_local": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "deep_agents": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            }
+          },
+          "schema_version": "mc.capability_host_support.v1"
+        },
+        "kind": "mcp_server",
+        "manifest": {
+          "definition": {
+            "allowed_tools": [
+              "tavily_crawl",
+              "tavily_extract",
+              "tavily_map",
+              "tavily_research",
+              "tavily_search"
+            ],
+            "approval_policy": {},
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "credential_refs": [],
+            "description": "Tavily MCP: web search, page extraction, crawl, site map and multi-source research. Keyless mode supports search and extract only. Cloud lanes use the remote endpoint with an Authorization header carrying the key reference (never the key-in-URL form).",
+            "endpoint": null,
+            "env_refs": {
+              "TAVILY_API_KEY": "TAVILY_API_KEY"
+            },
+            "host_support": {
+              "profiles": {
+                "claude_agent_sdk": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "codex": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_cloud": {
+                  "evidence_ref": null,
+                  "overlay": {
+                    "header_refs": {
+                      "Authorization": "TAVILY_API_KEY"
+                    },
+                    "transport": "streamable_http",
+                    "url": "https://mcp.tavily.com/mcp/"
+                  },
+                  "status": "supported"
+                },
+                "cursor_local": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "deep_agents": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                }
+              },
+              "schema_version": "mc.capability_host_support.v1"
+            },
+            "kind": "mcp_server",
+            "launch_template": [
+              "npx",
+              "-y",
+              "tavily-mcp@0.2.22"
+            ],
+            "logical_id": "mcp.tavily",
+            "maturity": "experimental",
+            "network_requirements": [],
+            "package_pin": "npm:tavily-mcp@0.2.22",
+            "review_status": "approved",
+            "schema_digest": "sha256:175b19af6eb450b93e32f289422758cf13af55d1ca8d5687b5a82d17df0883d0",
+            "schema_snapshot_ref": {
+              "digest": "sha256:760765bd2c59275ec3c48f16919ea846e61596533c3c3f846119871d65a40b09",
+              "media_type": "application/json",
+              "size_bytes": 1947,
+              "uri": "repo://tests/fixtures/mcp/mcp.tavily.tools.json"
+            },
+            "schema_version": "1",
+            "secret_refs": [
+              "TAVILY_API_KEY"
+            ],
+            "source_provenance": {
+              "commit_digest": null,
+              "license": "MIT",
+              "locator": "https://github.com/tavily-ai/tavily-mcp",
+              "source": "git",
+              "upstream_identity": "tavily-mcp",
+              "upstream_version": "0.2.22"
+            },
+            "title": "Tavily web search, extract, crawl, map and research",
+            "tools": [
+              {
+                "description": "Web search with depth, topic, time range, domain filters and optional raw content.",
+                "name": "tavily_search",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Extract markdown or text content from a list of URLs, optionally reranked by a query.",
+                "name": "tavily_extract",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Crawl from a root URL with depth, breadth, limit and natural-language instructions.",
+                "name": "tavily_crawl",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Return a site's URL structure from a base URL.",
+                "name": "tavily_map",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Multi-source research task (input, model mini/pro/auto); 20 requests per minute.",
+                "name": "tavily_research",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              }
+            ],
+            "tools_list_digest": "sha256:175b19af6eb450b93e32f289422758cf13af55d1ca8d5687b5a82d17df0883d0",
+            "transport": "stdio"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:0ddb64e0269e50f242bd52ca3dbb0eaea8ce6bebf28d3a52b5692829f50785f2",
+            "kind": "mcp_server",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.tavily",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:447c86eb5be3279d372c885683516db265d2a7ff0e22066ad81a9165d75b8956",
+        "manifest_ref": "mc-catalog://definition/mcp_server/mcp.tavily/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "secret_refs": [
+          "TAVILY_API_KEY"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-server:mcp.tavily/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-server:mcp.tavily/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.tavily.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-server:mcp.tavily/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.tavily.tool.tavily-search",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Web search with depth, topic, time range, domain filters and optional raw content.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.tavily.tool.tavily-search",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:25029880d86d2f2e9e8064ecaacbffb6bfe6b5c0d7998c0225376f545e2ee56f",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:0ddb64e0269e50f242bd52ca3dbb0eaea8ce6bebf28d3a52b5692829f50785f2",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.tavily",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "tavily_search",
+            "tool_name": "tavily_search"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:b52d6d7d6a49ce8ab33e2e3317cb7c85a99791d4ae81113d0fc377893e37e8ea",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.tavily.tool.tavily-search",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:f3849de1c8b8143adeeea9ca95a313f0c9ce9e0eb71e47cc9c2057c6c8621ad3",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.tavily.tool.tavily-search/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.tavily.tool.tavily-search/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.tavily.tool.tavily-search/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.tavily.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.tavily.tool.tavily-search/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.tavily.tool.tavily-extract",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Extract markdown or text content from a list of URLs, optionally reranked by a query.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.tavily.tool.tavily-extract",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:641edb7ec2a8e11693af64a95be5a7afd0a41baa6d1b1b25100be954b5ab53f3",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:0ddb64e0269e50f242bd52ca3dbb0eaea8ce6bebf28d3a52b5692829f50785f2",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.tavily",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "tavily_extract",
+            "tool_name": "tavily_extract"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:ad314c0804efb41063913945e96c112765048f0f7e7d43385351bdf443b7e458",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.tavily.tool.tavily-extract",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:5a881f36e839a82cc37e1682cace6abf70fb79f2cb2818faaa4846c58c78a415",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.tavily.tool.tavily-extract/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.tavily.tool.tavily-extract/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.tavily.tool.tavily-extract/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.tavily.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.tavily.tool.tavily-extract/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.tavily.tool.tavily-crawl",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Crawl from a root URL with depth, breadth, limit and natural-language instructions.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.tavily.tool.tavily-crawl",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:92344c8f20c531b70bfc0e13eaf0430cc4dc95f0bcb0016b6f0b37fbe9a5857f",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:0ddb64e0269e50f242bd52ca3dbb0eaea8ce6bebf28d3a52b5692829f50785f2",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.tavily",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "tavily_crawl",
+            "tool_name": "tavily_crawl"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:592a36afdf38bde9eb0464e0b41e89ce5bc8fd5b2bd04e6c2e4ba47258f9e461",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.tavily.tool.tavily-crawl",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:c70d0c4e476fe9b26b33cbf3322c6459f120bc7f3a68a5b46524ad93731e2c2a",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.tavily.tool.tavily-crawl/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.tavily.tool.tavily-crawl/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.tavily.tool.tavily-crawl/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.tavily.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.tavily.tool.tavily-crawl/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.tavily.tool.tavily-map",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Return a site's URL structure from a base URL.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.tavily.tool.tavily-map",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:e32a0758fc499d848b7b2a375aa484394b8f4d11501bd02a65662d636e8094b0",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:0ddb64e0269e50f242bd52ca3dbb0eaea8ce6bebf28d3a52b5692829f50785f2",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.tavily",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "tavily_map",
+            "tool_name": "tavily_map"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:b7047f9e52e3e863fe88abb2f26cef5c0964c622b1af9c398e28bdd3761d1079",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.tavily.tool.tavily-map",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:63a1e2b9dc3f246d4f964c5214aad0467d415e00f1508146218f8e45b7a3507d",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.tavily.tool.tavily-map/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.tavily.tool.tavily-map/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.tavily.tool.tavily-map/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.tavily.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.tavily.tool.tavily-map/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.tavily.tool.tavily-research",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Multi-source research task (input, model mini/pro/auto); 20 requests per minute.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.tavily.tool.tavily-research",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:06d12b20d0cc5a75cc87f3a09f99d56d6d7b3bbb2968def7d2221ddef2b6b15f",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:0ddb64e0269e50f242bd52ca3dbb0eaea8ce6bebf28d3a52b5692829f50785f2",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.tavily",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "tavily_research",
+            "tool_name": "tavily_research"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:5a4479fafff7d7f72d69334c1d07438d97d497fcb86683afc0bee25815e39cfc",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.tavily.tool.tavily-research",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:874bfd26672c33176936500ada61adc99f5c7c60923faa75b9871d556ca29f42",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.tavily.tool.tavily-research/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.tavily.tool.tavily-research/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.tavily.tool.tavily-research/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.tavily.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.tavily.tool.tavily-research/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_server:mcp.firecrawl",
+        "contract": "mission-control.published-definition/1",
+        "host_support": {
+          "profiles": {
+            "claude_agent_sdk": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "codex": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_cloud": {
+              "evidence_ref": null,
+              "overlay": {
+                "header_refs": {
+                  "Authorization": "FIRECRAWL_API_KEY"
+                },
+                "transport": "streamable_http",
+                "url": "https://mcp.firecrawl.dev/v2/mcp"
+              },
+              "status": "supported"
+            },
+            "cursor_local": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "deep_agents": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            }
+          },
+          "schema_version": "mc.capability_host_support.v1"
+        },
+        "kind": "mcp_server",
+        "manifest": {
+          "definition": {
+            "allowed_tools": [
+              "firecrawl_agent",
+              "firecrawl_agent_status",
+              "firecrawl_check_crawl_status",
+              "firecrawl_crawl",
+              "firecrawl_credit_usage",
+              "firecrawl_developer_search",
+              "firecrawl_find_tools",
+              "firecrawl_gov_search",
+              "firecrawl_interact",
+              "firecrawl_interact_stop",
+              "firecrawl_map",
+              "firecrawl_monitor_check",
+              "firecrawl_monitor_checks",
+              "firecrawl_monitor_create",
+              "firecrawl_monitor_delete",
+              "firecrawl_monitor_get",
+              "firecrawl_monitor_list",
+              "firecrawl_monitor_run",
+              "firecrawl_monitor_update",
+              "firecrawl_parse",
+              "firecrawl_research_inspect_paper",
+              "firecrawl_research_read_paper",
+              "firecrawl_research_related_papers",
+              "firecrawl_research_search_github",
+              "firecrawl_research_search_papers",
+              "firecrawl_scrape",
+              "firecrawl_search"
+            ],
+            "approval_policy": {},
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "credential_refs": [],
+            "description": "Firecrawl MCP: scrape pages to markdown or JSON, web and developer and government search, crawl and map sites, parse documents, research paper index (PubMed, bioRxiv, medRxiv, arXiv), agent research and change monitors. firecrawl_extract is deprecated and excluded by the tool allowlist; feedback tools are disabled by environment.",
+            "endpoint": null,
+            "env": {
+              "FIRECRAWL_NO_ENDPOINT_FEEDBACK": "1",
+              "FIRECRAWL_NO_SEARCH_FEEDBACK": "1"
+            },
+            "env_refs": {
+              "FIRECRAWL_API_KEY": "FIRECRAWL_API_KEY"
+            },
+            "host_support": {
+              "profiles": {
+                "claude_agent_sdk": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "codex": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_cloud": {
+                  "evidence_ref": null,
+                  "overlay": {
+                    "header_refs": {
+                      "Authorization": "FIRECRAWL_API_KEY"
+                    },
+                    "transport": "streamable_http",
+                    "url": "https://mcp.firecrawl.dev/v2/mcp"
+                  },
+                  "status": "supported"
+                },
+                "cursor_local": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "deep_agents": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                }
+              },
+              "schema_version": "mc.capability_host_support.v1"
+            },
+            "kind": "mcp_server",
+            "launch_template": [
+              "npx",
+              "-y",
+              "firecrawl-mcp@3.28.2"
+            ],
+            "logical_id": "mcp.firecrawl",
+            "maturity": "experimental",
+            "network_requirements": [],
+            "package_pin": "npm:firecrawl-mcp@3.28.2",
+            "review_status": "approved",
+            "schema_digest": "sha256:8b3078dadce28702ed418b7bdb795f72ad2be1e6f534e6593b298075b63c3c0c",
+            "schema_snapshot_ref": {
+              "digest": "sha256:8677f96be288a3028f7f326f1cf2190b6388d3198d2e62898e214d06848b1a80",
+              "media_type": "application/json",
+              "size_bytes": 7716,
+              "uri": "repo://tests/fixtures/mcp/mcp.firecrawl.tools.json"
+            },
+            "schema_version": "1",
+            "secret_refs": [
+              "FIRECRAWL_API_KEY"
+            ],
+            "source_provenance": {
+              "commit_digest": null,
+              "license": "MIT",
+              "locator": "https://github.com/firecrawl/firecrawl-mcp-server",
+              "source": "git",
+              "upstream_identity": "firecrawl-mcp",
+              "upstream_version": "3.28.2"
+            },
+            "title": "Firecrawl scrape, search, crawl, parse, research papers and monitors",
+            "tool_allowlist": [
+              "firecrawl_agent",
+              "firecrawl_agent_status",
+              "firecrawl_check_crawl_status",
+              "firecrawl_crawl",
+              "firecrawl_credit_usage",
+              "firecrawl_developer_search",
+              "firecrawl_find_tools",
+              "firecrawl_gov_search",
+              "firecrawl_interact",
+              "firecrawl_interact_stop",
+              "firecrawl_map",
+              "firecrawl_monitor_check",
+              "firecrawl_monitor_checks",
+              "firecrawl_monitor_create",
+              "firecrawl_monitor_delete",
+              "firecrawl_monitor_get",
+              "firecrawl_monitor_list",
+              "firecrawl_monitor_run",
+              "firecrawl_monitor_update",
+              "firecrawl_parse",
+              "firecrawl_research_inspect_paper",
+              "firecrawl_research_read_paper",
+              "firecrawl_research_related_papers",
+              "firecrawl_research_search_github",
+              "firecrawl_research_search_papers",
+              "firecrawl_scrape",
+              "firecrawl_search"
+            ],
+            "tools": [
+              {
+                "description": "Scrape one URL to markdown, html, links, screenshot or schema JSON.",
+                "name": "firecrawl_scrape",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Discover URLs on a site without fetching content.",
+                "name": "firecrawl_map",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Web search with optional scrape options; research, pdf, developer and gov categories.",
+                "name": "firecrawl_search",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Multi-page crawl with limits and include or exclude paths.",
+                "name": "firecrawl_crawl",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Poll a crawl job.",
+                "name": "firecrawl_check_crawl_status",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Parse PDF, DOCX, XLSX or HTML documents.",
+                "name": "firecrawl_parse",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Deprecated structured extraction (use scrape JSON); excluded by tool_allowlist.",
+                "name": "firecrawl_extract",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Autonomous multi-source research returning structured JSON.",
+                "name": "firecrawl_agent",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Status of an asynchronous agent job.",
+                "name": "firecrawl_agent_status",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Browser actions (click, type, navigate) on a URL or scrape id, one prompt per call.",
+                "name": "firecrawl_interact",
+                "read_only_hint": false,
+                "side_effect_class": "consequential"
+              },
+              {
+                "description": "Stop an interact browser session.",
+                "name": "firecrawl_interact_stop",
+                "read_only_hint": false,
+                "side_effect_class": "bounded_write"
+              },
+              {
+                "description": "Search the paper index (PubMed, bioRxiv, medRxiv, arXiv).",
+                "name": "firecrawl_research_search_papers",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Read a paper from the research index.",
+                "name": "firecrawl_research_read_paper",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Inspect a paper's metadata and sections.",
+                "name": "firecrawl_research_inspect_paper",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Find papers related to a paper.",
+                "name": "firecrawl_research_related_papers",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Search GitHub repositories for research.",
+                "name": "firecrawl_research_search_github",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Create a scheduled change monitor.",
+                "name": "firecrawl_monitor_create",
+                "read_only_hint": false,
+                "side_effect_class": "bounded_write"
+              },
+              {
+                "description": "List change monitors.",
+                "name": "firecrawl_monitor_list",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Get one change monitor.",
+                "name": "firecrawl_monitor_get",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Update a change monitor.",
+                "name": "firecrawl_monitor_update",
+                "read_only_hint": false,
+                "side_effect_class": "bounded_write"
+              },
+              {
+                "description": "Delete a change monitor.",
+                "name": "firecrawl_monitor_delete",
+                "read_only_hint": false,
+                "side_effect_class": "bounded_write"
+              },
+              {
+                "description": "Run a change monitor now.",
+                "name": "firecrawl_monitor_run",
+                "read_only_hint": false,
+                "side_effect_class": "bounded_write"
+              },
+              {
+                "description": "Get one monitor check result.",
+                "name": "firecrawl_monitor_check",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "List monitor check results.",
+                "name": "firecrawl_monitor_checks",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Developer index: repositories, issues, merged pull requests, READMEs, docs.",
+                "name": "firecrawl_developer_search",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "US federal, state and local law and regulatory index.",
+                "name": "firecrawl_gov_search",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Browse the Alexandria capability catalogue and contracts.",
+                "name": "firecrawl_find_tools",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Current and historical credit usage.",
+                "name": "firecrawl_credit_usage",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              }
+            ],
+            "tools_list_digest": "sha256:8b3078dadce28702ed418b7bdb795f72ad2be1e6f534e6593b298075b63c3c0c",
+            "transport": "stdio"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+            "kind": "mcp_server",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.firecrawl",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:cd3bd88bc35a70636ec1939cd4dfe040e15f7e161fcbcb4396af119d1841cc9a",
+        "manifest_ref": "mc-catalog://definition/mcp_server/mcp.firecrawl/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "secret_refs": [
+          "FIRECRAWL_API_KEY"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-server:mcp.firecrawl/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-server:mcp.firecrawl/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.firecrawl.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-server:mcp.firecrawl/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.firecrawl.tool.firecrawl-scrape",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Scrape one URL to markdown, html, links, screenshot or schema JSON.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-scrape",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:f1c14cb09c8f71eeba013f82927173e7a972f1525a61be7dc062f63f6a3c6679",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.firecrawl",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "firecrawl_scrape",
+            "tool_name": "firecrawl_scrape"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:4c6a4b4acb3181ae3f5cd0736958cf6a645ad8a6f26e4a38f6181e67a7cc6337",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-scrape",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:77d5e95a054edc86031c47c6183ac9398a951f659e6445bf81ef96b7709985d4",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.firecrawl.tool.firecrawl-scrape/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-scrape/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-scrape/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.firecrawl.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-scrape/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.firecrawl.tool.firecrawl-map",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Discover URLs on a site without fetching content.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-map",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:260878f12921fe1bc5d50c8d73be5b5e81f5502b9e5ab2ddcd36809b52ab85dc",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.firecrawl",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "firecrawl_map",
+            "tool_name": "firecrawl_map"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:e5e3198bc9bc3ac3d9167d0eba232253edb890b0f2fb08ff4ad6313f9de6b10e",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-map",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:89dd578c103daf7fea3937676f595d62e46492e732f981bd4514ddbd2f5d97db",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.firecrawl.tool.firecrawl-map/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-map/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-map/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.firecrawl.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-map/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.firecrawl.tool.firecrawl-search",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Web search with optional scrape options; research, pdf, developer and gov categories.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-search",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:f5cc742aa35feb4f5aef25a10b0663ee90b51bee4abf6ffd8aec1474a1733633",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.firecrawl",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "firecrawl_search",
+            "tool_name": "firecrawl_search"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:d97ee5e3190b2d39827e6ea7fefac129bdccc4ae96b06990b074d5c0120731cb",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-search",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:70634d5db966848c311bdb86d7d736d935deabe61de88b34b930c283a59076b3",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.firecrawl.tool.firecrawl-search/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-search/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-search/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.firecrawl.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-search/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.firecrawl.tool.firecrawl-crawl",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Multi-page crawl with limits and include or exclude paths.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-crawl",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:699e4c54cc1e9e7c5ccb75cd30fa1224430126bb1a8a5fe844b9ee4cdc80811e",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.firecrawl",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "firecrawl_crawl",
+            "tool_name": "firecrawl_crawl"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:cc86b0524a3e4233bd9d3d147783a69550bd04ff9a18a04eeb36068e435e060f",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-crawl",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:28fdb4b1a438929cee92587321f3d76027bea98e98a6ee68d6985d2c53391136",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.firecrawl.tool.firecrawl-crawl/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-crawl/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-crawl/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.firecrawl.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-crawl/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.firecrawl.tool.firecrawl-check-crawl-status",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Poll a crawl job.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-check-crawl-status",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:931c89813c31259cfd0c0f0131ad020c8dd90031bb8299abe7e834a6789f6c3b",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.firecrawl",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "firecrawl_check_crawl_status",
+            "tool_name": "firecrawl_check_crawl_status"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:b26fb0176c375419cf598fdf4fae9f2139e7693f2a20d7648a69cb6811926cf0",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-check-crawl-status",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:51c930eb2f39fa9c819337e2ddcac506a9e26e462aef9a9504db1614bb70186e",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.firecrawl.tool.firecrawl-check-crawl-status/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-check-crawl-status/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-check-crawl-status/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.firecrawl.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-check-crawl-status/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.firecrawl.tool.firecrawl-parse",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Parse PDF, DOCX, XLSX or HTML documents.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-parse",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:fc155343c0c1db903d735cddb22e99eb0e044f41ff411938c7020df1204b7d50",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.firecrawl",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "firecrawl_parse",
+            "tool_name": "firecrawl_parse"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:81751187fddbc551b597e9ec19f6a94a0f6a3db5d86fe71922ee114cdcfc3337",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-parse",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:15c7fcc986eb5a3dea947a202ef111ff7d9ae3a025ea8d6bc3d380e8999ea383",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.firecrawl.tool.firecrawl-parse/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-parse/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-parse/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.firecrawl.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-parse/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.firecrawl.tool.firecrawl-agent",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Autonomous multi-source research returning structured JSON.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-agent",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:955e67be606c6e0831b9920e12aece0ec2135a6b9db0f07b5f9ba067789fb0ed",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.firecrawl",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "firecrawl_agent",
+            "tool_name": "firecrawl_agent"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:df98947a2d2fd7589097384164478a9aca479bacfb668f944d68a17548941e6c",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-agent",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:5df3ae54da9e0cf9ac61805ae5212b8e05e164849c1023adcb2b61777edbfe6f",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.firecrawl.tool.firecrawl-agent/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-agent/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-agent/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.firecrawl.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-agent/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.firecrawl.tool.firecrawl-agent-status",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Status of an asynchronous agent job.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-agent-status",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:aa4571485a3e0d9ba421022247eed86369d75497a0a06c19c40c3a86fefc72f2",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.firecrawl",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "firecrawl_agent_status",
+            "tool_name": "firecrawl_agent_status"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:905f74623b593d5027d7b6601e8de710016f65d7b3717bf307fcb0aa41c422f1",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-agent-status",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:5f1cde49ba298cd668c7f7170de4bad08bce3b864b44ea8333b4a09a14279beb",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.firecrawl.tool.firecrawl-agent-status/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-agent-status/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-agent-status/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.firecrawl.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-agent-status/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.firecrawl.tool.firecrawl-interact",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": false,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Browser actions (click, type, navigate) on a URL or scrape id, one prompt per call.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-interact",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:50d2e90d289db5178fa466b6f2e23d2294f2452bf82a1bb6fce16b359a1420c8",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.firecrawl",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "consequential",
+            "title": "firecrawl_interact",
+            "tool_name": "firecrawl_interact"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:4b7495996efbe08637069b8b8a38d18b92c60c48ec6b4858a1c24a3f55a371d0",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-interact",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:29e9929077423d17a1a71a963ad58a341c8204a5f19405d40a089f08236670d1",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.firecrawl.tool.firecrawl-interact/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-interact/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-interact/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.firecrawl.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-interact/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.firecrawl.tool.firecrawl-interact-stop",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": false,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Stop an interact browser session.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-interact-stop",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:76f98c02d1b3f34733a3d3d27d353036a3ab5230c6318d5af464789216adbdfa",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.firecrawl",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "bounded_write",
+            "title": "firecrawl_interact_stop",
+            "tool_name": "firecrawl_interact_stop"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:1850bfd5f6547c3cc26e8b47ce3b46b7778cc9343ccbda3fa91ea1e3395958a8",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-interact-stop",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:644c880b770a923bff6d9bffeaa9b5a7ae54849a43914b7229da914a87fd2036",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.firecrawl.tool.firecrawl-interact-stop/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-interact-stop/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-interact-stop/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.firecrawl.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-interact-stop/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.firecrawl.tool.firecrawl-research-search-papers",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Search the paper index (PubMed, bioRxiv, medRxiv, arXiv).",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-research-search-papers",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:ae4f4b097edf8015ac336ce97402507b8edee2c91c547ac87a57322feded8fb3",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.firecrawl",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "firecrawl_research_search_papers",
+            "tool_name": "firecrawl_research_search_papers"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:ac713f1f5da8246b93fc837eb31b70def3a12ba6f2d58bfb622675d35fc98aa2",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-research-search-papers",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:54d9b385940111d54d39d0a1cd832a880e0b7eae7079d5add601cc1602029328",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.firecrawl.tool.firecrawl-research-search-papers/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-research-search-papers/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-research-search-papers/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.firecrawl.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-research-search-papers/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.firecrawl.tool.firecrawl-research-read-paper",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Read a paper from the research index.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-research-read-paper",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:96a8c7630dcb2ebb9093465a8245e299f4c3cc2a609afbfaa7620b0b9e520d75",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.firecrawl",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "firecrawl_research_read_paper",
+            "tool_name": "firecrawl_research_read_paper"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:f647bc6da2a76bde78df01759cd772e1a8a715efe0ce51172a962611679141e8",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-research-read-paper",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:50389c474dc4c62b91b14c475d7e7162fefcf26397a645c98d2efb2421fed74c",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.firecrawl.tool.firecrawl-research-read-paper/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-research-read-paper/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-research-read-paper/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.firecrawl.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-research-read-paper/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.firecrawl.tool.firecrawl-research-inspect-paper",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Inspect a paper's metadata and sections.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-research-inspect-paper",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:6a093808e3b82930850d69b0178786607b3d156eb22c5bc5d2849f7e34e0a139",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.firecrawl",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "firecrawl_research_inspect_paper",
+            "tool_name": "firecrawl_research_inspect_paper"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:cafdb3d28ed3bebcdd8f85f24756c81dbd9d03c5ae1fb653c47872d16f99e4dc",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-research-inspect-paper",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:f9f47e742bb0dadc7fa28064372931b0c7339cb35702d4f7ef7f34d8b1f4fb62",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.firecrawl.tool.firecrawl-research-inspect-paper/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-research-inspect-paper/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-research-inspect-paper/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.firecrawl.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-research-inspect-paper/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.firecrawl.tool.firecrawl-research-related-papers",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Find papers related to a paper.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-research-related-papers",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:b9f35639a833822521eb787cd758d202b28145eefd8b60d3cbaac24e4e9d163a",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.firecrawl",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "firecrawl_research_related_papers",
+            "tool_name": "firecrawl_research_related_papers"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:31391198a8c005e92f326183ec81c89bf18b96c2b28065973b800f3957a09127",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-research-related-papers",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:d8c31f54f6c88936f742ba2868726ac7a35ecf6b1a92ec779e7e4204e7c09537",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.firecrawl.tool.firecrawl-research-related-papers/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-research-related-papers/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-research-related-papers/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.firecrawl.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-research-related-papers/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.firecrawl.tool.firecrawl-research-search-github",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Search GitHub repositories for research.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-research-search-github",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:c203d0945a56d30a13d0e22c59a7d3bbc0a950cbdf493c07a939214b5704c2f4",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.firecrawl",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "firecrawl_research_search_github",
+            "tool_name": "firecrawl_research_search_github"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:189dcb214882d0ad8fcad05b2ea989a1efceadc67e836207b828d7afbe030601",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-research-search-github",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:955cbe3daf7b71599919269eab6d648b74737d2f83ca1239d33199f9605df129",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.firecrawl.tool.firecrawl-research-search-github/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-research-search-github/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-research-search-github/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.firecrawl.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-research-search-github/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.firecrawl.tool.firecrawl-monitor-create",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": false,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Create a scheduled change monitor.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-monitor-create",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:f39a2a4c7b125019f951d4a95e465032f50f03f2b301e819720947fee9e819d0",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.firecrawl",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "bounded_write",
+            "title": "firecrawl_monitor_create",
+            "tool_name": "firecrawl_monitor_create"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:9d8e5707061629eb0f517310ae7bf08514223edd14023c1d4450f66896e07ad6",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-monitor-create",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:40a0a0ecba8005b719b30d8c48739606c65988904404f652119b50086af7a3c4",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.firecrawl.tool.firecrawl-monitor-create/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-monitor-create/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-monitor-create/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.firecrawl.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-monitor-create/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.firecrawl.tool.firecrawl-monitor-list",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "List change monitors.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-monitor-list",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:011257b88cde69778af606c14cc50d59a186ea6195cb50d853da4a06b4905ecd",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.firecrawl",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "firecrawl_monitor_list",
+            "tool_name": "firecrawl_monitor_list"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:906eefe68cd0af5743e1b8bdd605e2fdf6e5ae9cce1e582f25b6e9370f4f4fe3",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-monitor-list",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:507058d887ec3b0ea5088ec7df7ecdfaa3375be95a4d92a410bd61668b1dab82",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.firecrawl.tool.firecrawl-monitor-list/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-monitor-list/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-monitor-list/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.firecrawl.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-monitor-list/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.firecrawl.tool.firecrawl-monitor-get",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Get one change monitor.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-monitor-get",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:e855c7ecc5baa5ec9d2f72e12c6e2f07cfee654988217e07d44bbd46c9e5aab3",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.firecrawl",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "firecrawl_monitor_get",
+            "tool_name": "firecrawl_monitor_get"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:5f17bfdac8365a5da95637fab68cc4fb6b7fbf1ae2d9afad391a767940daae1a",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-monitor-get",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:2efbb7103e669185aa120f58ece5140eb74ef180642ecc48dbf19af13dcb38dd",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.firecrawl.tool.firecrawl-monitor-get/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-monitor-get/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-monitor-get/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.firecrawl.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-monitor-get/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.firecrawl.tool.firecrawl-monitor-update",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": false,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Update a change monitor.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-monitor-update",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:e403a418ed54a8d2527418dae39773d8ed2417b3eeed454c9bb878301f5ca744",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.firecrawl",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "bounded_write",
+            "title": "firecrawl_monitor_update",
+            "tool_name": "firecrawl_monitor_update"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:336ddf52ac7c28d956a111921466ef356b87ec922a8b6d50b8cc3cde5a015b8e",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-monitor-update",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:504e3a6d1a64983d98ba3a9575488211276f5292b850f2027735e829a458064f",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.firecrawl.tool.firecrawl-monitor-update/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-monitor-update/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-monitor-update/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.firecrawl.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-monitor-update/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.firecrawl.tool.firecrawl-monitor-delete",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": false,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Delete a change monitor.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-monitor-delete",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:a0e28c986ffbce9b7ef0e4dd0fd3b42a7bad171282bfd5aae03cc524e5f18da1",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.firecrawl",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "bounded_write",
+            "title": "firecrawl_monitor_delete",
+            "tool_name": "firecrawl_monitor_delete"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:f77704c13e5aea6ba7580c2aad4007e0f7e5d1e65dc485c40ddfcb2b91b163af",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-monitor-delete",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:4832fb5dd176963302061fe19e3924a2658164298b8431e1781a418c45883e43",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.firecrawl.tool.firecrawl-monitor-delete/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-monitor-delete/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-monitor-delete/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.firecrawl.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-monitor-delete/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.firecrawl.tool.firecrawl-monitor-run",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": false,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Run a change monitor now.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-monitor-run",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:1fe4db65ec7e6f6c78d1b769fa321fec959a4c358df45aeae998142b2217595d",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.firecrawl",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "bounded_write",
+            "title": "firecrawl_monitor_run",
+            "tool_name": "firecrawl_monitor_run"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:0f0c3d96ed0a2c9b038a4d9263f5e0f2d6208ab4b74f6426d9f8b8fe70979447",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-monitor-run",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:993d59ceca7b62961d2da4499e19736a5c91af4b2f3bbdbc9ea6ae1f00e38ccb",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.firecrawl.tool.firecrawl-monitor-run/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-monitor-run/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-monitor-run/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.firecrawl.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-monitor-run/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.firecrawl.tool.firecrawl-monitor-check",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Get one monitor check result.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-monitor-check",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:ed8b094d89cd9cde4738763b233db93dab1e2d96b54845c6749744db7bc742e9",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.firecrawl",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "firecrawl_monitor_check",
+            "tool_name": "firecrawl_monitor_check"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:74c16171c75b27e40e8b24f5ef92b9d13707145f7ec00661a208ef70d1d706bd",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-monitor-check",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:4c7e1ec77219d9dee43f4d831987a5d5d1e57876d047ac339bff10f28b0eae03",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.firecrawl.tool.firecrawl-monitor-check/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-monitor-check/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-monitor-check/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.firecrawl.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-monitor-check/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.firecrawl.tool.firecrawl-monitor-checks",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "List monitor check results.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-monitor-checks",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:de12c70f9c65527e7bd4255e191f4b298806c01b300dd9e03272e567755784a3",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.firecrawl",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "firecrawl_monitor_checks",
+            "tool_name": "firecrawl_monitor_checks"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:e7796b1d0e3342e627229e5ad43beba0ad81882c0db42f690c4b771914bdbd08",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-monitor-checks",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:6e93eca3672a7880da963c68eabaf50ff91911169e34f8b81c3d497adb704696",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.firecrawl.tool.firecrawl-monitor-checks/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-monitor-checks/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-monitor-checks/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.firecrawl.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-monitor-checks/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.firecrawl.tool.firecrawl-developer-search",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Developer index: repositories, issues, merged pull requests, READMEs, docs.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-developer-search",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:89f79a09763f40784d9885226a5d306321d14c1a84e12e82842ddf120674ae44",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.firecrawl",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "firecrawl_developer_search",
+            "tool_name": "firecrawl_developer_search"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:4ab38f721f9d8549d452666203a942200bd6ac778d1b1c661e8198803867d06c",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-developer-search",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:7ee14ea9bbc9f35662c168fbdde5c239a322d7c166d9e7ec18f0c865d8a09dd9",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.firecrawl.tool.firecrawl-developer-search/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-developer-search/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-developer-search/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.firecrawl.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-developer-search/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.firecrawl.tool.firecrawl-gov-search",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "US federal, state and local law and regulatory index.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-gov-search",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:33a16ae87238562888ec0fc8c02594b9899ae0b1b838e296136ab9550becf3d7",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.firecrawl",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "firecrawl_gov_search",
+            "tool_name": "firecrawl_gov_search"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:135ab2f40c98d73e6efae241625fceef70526263142ef4b98d78a68588b6f14e",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-gov-search",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:bb74f211bbef8ba74d8f35183d8d676208727c535db109a60f113207ede043e2",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.firecrawl.tool.firecrawl-gov-search/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-gov-search/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-gov-search/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.firecrawl.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-gov-search/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.firecrawl.tool.firecrawl-find-tools",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Browse the Alexandria capability catalogue and contracts.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-find-tools",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:a4c9f8324eafa40c97053052f1ac715a8c74ca8ac8b8478005de594f97de2c38",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.firecrawl",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "firecrawl_find_tools",
+            "tool_name": "firecrawl_find_tools"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:c14b2708d201d3b99d47af48a631534182605b0355e3d2452c62b740b0f4949f",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-find-tools",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:2ae493b2949f5bf30a88f2630667c82668def11e65e233a85a288c2a9089244a",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.firecrawl.tool.firecrawl-find-tools/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-find-tools/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-find-tools/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.firecrawl.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-find-tools/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.firecrawl.tool.firecrawl-credit-usage",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Current and historical credit usage.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-credit-usage",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:84dacea7d753c0b991430c2d0206352a0d2a1cf3836d7b1d32a34892c1e392c0",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.firecrawl",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "firecrawl_credit_usage",
+            "tool_name": "firecrawl_credit_usage"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:db561227bcfe037f01e0897f06f83a15a4e6176087e5224eb4eeda842817dbc6",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.firecrawl.tool.firecrawl-credit-usage",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:47304ce1b847e6fa573c9b2f07ea29f4972feb0cc871c7a577683951c01a1466",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.firecrawl.tool.firecrawl-credit-usage/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-credit-usage/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-credit-usage/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.firecrawl.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.firecrawl.tool.firecrawl-credit-usage/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_server:mcp.agent-browser",
+        "contract": "mission-control.published-definition/1",
+        "host_support": {
+          "profiles": {
+            "claude_agent_sdk": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "codex": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "cursor_cloud": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "unqualified"
+            },
+            "cursor_local": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            },
+            "deep_agents": {
+              "evidence_ref": null,
+              "overlay": {},
+              "status": "supported"
+            }
+          },
+          "schema_version": "mc.capability_host_support.v1"
+        },
+        "kind": "mcp_server",
+        "manifest": {
+          "definition": {
+            "allowed_tools": [
+              "agent_browser_click",
+              "agent_browser_close",
+              "agent_browser_eval",
+              "agent_browser_fill",
+              "agent_browser_get_url",
+              "agent_browser_open",
+              "agent_browser_press",
+              "agent_browser_screenshot",
+              "agent_browser_snapshot",
+              "agent_browser_tools_profiles",
+              "agent_browser_type",
+              "agent_browser_wait_for_selector"
+            ],
+            "approval_policy": {},
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "credential_refs": [],
+            "description": "Vercel agent-browser MCP server (agent-browser mcp --tools core): open pages, accessibility snapshots with element refs, click, fill, type, press, wait, screenshot and evaluate. No secrets. Environment Profile requirement: run `agent-browser install` (Chrome for Testing) before first use. cursor_cloud is unqualified.",
+            "endpoint": null,
+            "host_support": {
+              "profiles": {
+                "claude_agent_sdk": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "codex": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "cursor_cloud": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "unqualified"
+                },
+                "cursor_local": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                },
+                "deep_agents": {
+                  "evidence_ref": null,
+                  "overlay": {},
+                  "status": "supported"
+                }
+              },
+              "schema_version": "mc.capability_host_support.v1"
+            },
+            "kind": "mcp_server",
+            "launch_template": [
+              "agent-browser",
+              "mcp",
+              "--tools",
+              "core"
+            ],
+            "logical_id": "mcp.agent-browser",
+            "maturity": "experimental",
+            "network_requirements": [],
+            "package_pin": "npm:agent-browser@0.38.2",
+            "review_status": "approved",
+            "schema_digest": "sha256:40adbd0af83fc37ae8e5e075ef364189e35c34cbfe9e3ec0c62b8f9b38a94a09",
+            "schema_snapshot_ref": {
+              "digest": "sha256:e37bc71102a861d3c184f1b607312bbec375f7e544d34ee7f2b36c8a7996e9d5",
+              "media_type": "application/json",
+              "size_bytes": 3444,
+              "uri": "repo://tests/fixtures/mcp/mcp.agent-browser.tools.json"
+            },
+            "schema_version": "1",
+            "source_provenance": {
+              "commit_digest": null,
+              "license": "Apache-2.0",
+              "locator": "https://github.com/vercel-labs/agent-browser",
+              "source": "git",
+              "upstream_identity": "agent-browser",
+              "upstream_version": "0.38.2"
+            },
+            "title": "agent-browser real browser automation (core tool profile)",
+            "tools": [
+              {
+                "description": "List the available tool profiles.",
+                "name": "agent_browser_tools_profiles",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Open a URL in the browser session.",
+                "name": "agent_browser_open",
+                "read_only_hint": false,
+                "side_effect_class": "consequential"
+              },
+              {
+                "description": "Accessibility-tree snapshot with element refs.",
+                "name": "agent_browser_snapshot",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Click an element by selector or ref.",
+                "name": "agent_browser_click",
+                "read_only_hint": false,
+                "side_effect_class": "consequential"
+              },
+              {
+                "description": "Fill an input by selector or ref.",
+                "name": "agent_browser_fill",
+                "read_only_hint": false,
+                "side_effect_class": "consequential"
+              },
+              {
+                "description": "Type text into an element.",
+                "name": "agent_browser_type",
+                "read_only_hint": false,
+                "side_effect_class": "consequential"
+              },
+              {
+                "description": "Press a key.",
+                "name": "agent_browser_press",
+                "read_only_hint": false,
+                "side_effect_class": "consequential"
+              },
+              {
+                "description": "Wait until a selector appears.",
+                "name": "agent_browser_wait_for_selector",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Capture a screenshot.",
+                "name": "agent_browser_screenshot",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Return the current URL.",
+                "name": "agent_browser_get_url",
+                "read_only_hint": true,
+                "side_effect_class": "read_only"
+              },
+              {
+                "description": "Evaluate JavaScript in the page.",
+                "name": "agent_browser_eval",
+                "read_only_hint": false,
+                "side_effect_class": "consequential"
+              },
+              {
+                "description": "Close the browser session.",
+                "name": "agent_browser_close",
+                "read_only_hint": false,
+                "side_effect_class": "bounded_write"
+              }
+            ],
+            "tools_list_digest": "sha256:40adbd0af83fc37ae8e5e075ef364189e35c34cbfe9e3ec0c62b8f9b38a94a09",
+            "transport": "stdio"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:0adefa4043827cb505858f7f76060f08140d0fc9a3aeeb580f6b0d2ecc6e3282",
+            "kind": "mcp_server",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.agent-browser",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:38b3b1aab8627f680be49ce5a045bef9ba54b537deddffe6535282a4d2ebbc28",
+        "manifest_ref": "mc-catalog://definition/mcp_server/mcp.agent-browser/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-server:mcp.agent-browser/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-server:mcp.agent-browser/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.agent-browser.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-server:mcp.agent-browser/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.agent-browser.tool.agent-browser-tools-profiles",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "List the available tool profiles.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.agent-browser.tool.agent-browser-tools-profiles",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:5bcdd23d2572c4609489df41a3d7e598cfdbe6af8d810723b326eb74b901e155",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:0adefa4043827cb505858f7f76060f08140d0fc9a3aeeb580f6b0d2ecc6e3282",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.agent-browser",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "agent_browser_tools_profiles",
+            "tool_name": "agent_browser_tools_profiles"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:09af23d8a86c7f981b248a1163662e0d8659cb9882a1e45a7e4ec3f4eeddf6a8",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.agent-browser.tool.agent-browser-tools-profiles",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:f78fc3b9b0e00f994efc5e440425bb90415f2bb2e47565696cfe8347601ad8c5",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.agent-browser.tool.agent-browser-tools-profiles/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-tools-profiles/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-tools-profiles/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.agent-browser.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-tools-profiles/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.agent-browser.tool.agent-browser-open",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": false,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Open a URL in the browser session.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.agent-browser.tool.agent-browser-open",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:aaa0392f97667606ff0e2cee44f9facf45a21969728b43bcddcafaefc938e2b6",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:0adefa4043827cb505858f7f76060f08140d0fc9a3aeeb580f6b0d2ecc6e3282",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.agent-browser",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "consequential",
+            "title": "agent_browser_open",
+            "tool_name": "agent_browser_open"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:de9ca4381ef9a22b2eb8219a70334ee5b9c5cbec06ae6d4e1430e9b25ba51fde",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.agent-browser.tool.agent-browser-open",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:208531edb59be00831d5bf1d39f377f01c453fa5685554dcb23e3746c41cf6b9",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.agent-browser.tool.agent-browser-open/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-open/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-open/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.agent-browser.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-open/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.agent-browser.tool.agent-browser-snapshot",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Accessibility-tree snapshot with element refs.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.agent-browser.tool.agent-browser-snapshot",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:154d5efbee073d61f3d2698656ad8364f9fae33721e4a716ca3dda0a78974105",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:0adefa4043827cb505858f7f76060f08140d0fc9a3aeeb580f6b0d2ecc6e3282",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.agent-browser",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "agent_browser_snapshot",
+            "tool_name": "agent_browser_snapshot"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:54b863e924c045a3e282bb58d6a0e4741332f81d89d80236a9645f037a012405",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.agent-browser.tool.agent-browser-snapshot",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:88f8e3b235ae4a4e5abc685c5e1aa3bed55d27ae9db4bd60b07b0c000b2c3bda",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.agent-browser.tool.agent-browser-snapshot/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-snapshot/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-snapshot/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.agent-browser.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-snapshot/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.agent-browser.tool.agent-browser-click",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": false,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Click an element by selector or ref.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.agent-browser.tool.agent-browser-click",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:b1207d70e5ce73b542124ebe45f90550035e30d632110772115c946f9ac38a1c",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:0adefa4043827cb505858f7f76060f08140d0fc9a3aeeb580f6b0d2ecc6e3282",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.agent-browser",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "consequential",
+            "title": "agent_browser_click",
+            "tool_name": "agent_browser_click"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:ef51df5bb90c464f0b7f71dbfa8615dc5d88f0cafc434ab8cfd0b977295fdb68",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.agent-browser.tool.agent-browser-click",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:5b1492f8b7c252f98885540749b7e1a2920b8357325c98f04d5dbbf1363cd23c",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.agent-browser.tool.agent-browser-click/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-click/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-click/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.agent-browser.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-click/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.agent-browser.tool.agent-browser-fill",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": false,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Fill an input by selector or ref.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.agent-browser.tool.agent-browser-fill",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:92f898b632440abb141bf5388d2880fe6c99b5541cc7c2c2149a6b1846d9a61d",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:0adefa4043827cb505858f7f76060f08140d0fc9a3aeeb580f6b0d2ecc6e3282",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.agent-browser",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "consequential",
+            "title": "agent_browser_fill",
+            "tool_name": "agent_browser_fill"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:caac8e78019b37248cfdd235dbaecca0d87ba405c1fafe8ba13167c050b01b2c",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.agent-browser.tool.agent-browser-fill",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:fb992aadc4fbd8889ee38f829ad643cbbc954ba4da4f9bcc1130fcd3312d7aa8",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.agent-browser.tool.agent-browser-fill/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-fill/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-fill/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.agent-browser.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-fill/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.agent-browser.tool.agent-browser-type",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": false,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Type text into an element.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.agent-browser.tool.agent-browser-type",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:8efbd1c67b72a48c827098fc48df4ec6ad1cbd84206d18f9be051a92aef74a90",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:0adefa4043827cb505858f7f76060f08140d0fc9a3aeeb580f6b0d2ecc6e3282",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.agent-browser",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "consequential",
+            "title": "agent_browser_type",
+            "tool_name": "agent_browser_type"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:670f822eaa0feb17f01b498012bd079fa749514020166c8420292afb40ee250c",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.agent-browser.tool.agent-browser-type",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:22ec3c27af7167369f0913637107e30d8e2b669bf38384527f51fdd6b4eacba3",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.agent-browser.tool.agent-browser-type/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-type/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-type/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.agent-browser.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-type/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.agent-browser.tool.agent-browser-press",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": false,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Press a key.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.agent-browser.tool.agent-browser-press",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:b20674c8d0025712faf6b8876d92c6ad8faf5576a4d41c16e8f0aa8c6bb74193",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:0adefa4043827cb505858f7f76060f08140d0fc9a3aeeb580f6b0d2ecc6e3282",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.agent-browser",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "consequential",
+            "title": "agent_browser_press",
+            "tool_name": "agent_browser_press"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:e01697c8e49ba78aca89df5f072931b1b178bb243ba5001edcfad7241b6609c4",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.agent-browser.tool.agent-browser-press",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:a3112c88d718f70c7cdcbe6b815dc6869d35d2cea217597561cabb4c04f10fd4",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.agent-browser.tool.agent-browser-press/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-press/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-press/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.agent-browser.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-press/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.agent-browser.tool.agent-browser-wait-for-selector",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Wait until a selector appears.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.agent-browser.tool.agent-browser-wait-for-selector",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:9a2be1eeacfc229d311e99b31b8116e2243298371b7a5c729af3691dc45ff85f",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:0adefa4043827cb505858f7f76060f08140d0fc9a3aeeb580f6b0d2ecc6e3282",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.agent-browser",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "agent_browser_wait_for_selector",
+            "tool_name": "agent_browser_wait_for_selector"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:d5d1e1399c5b597cac26ae56190ff559b1b1fe97855bd66c80ed2f617c64e11e",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.agent-browser.tool.agent-browser-wait-for-selector",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:933f831ef2b89fca3fc61dd673c42c54aceaced951053010d7054bf78077c6c6",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.agent-browser.tool.agent-browser-wait-for-selector/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-wait-for-selector/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-wait-for-selector/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.agent-browser.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-wait-for-selector/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.agent-browser.tool.agent-browser-screenshot",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Capture a screenshot.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.agent-browser.tool.agent-browser-screenshot",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:7be212f6f668cfd45d6b8ccecaaf99441282252f3d43d972693599a7ead6d901",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:0adefa4043827cb505858f7f76060f08140d0fc9a3aeeb580f6b0d2ecc6e3282",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.agent-browser",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "agent_browser_screenshot",
+            "tool_name": "agent_browser_screenshot"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:ab15c0edada44cdda69f8aed74568814e46776f1e38bb95f65635dfc6ec2c136",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.agent-browser.tool.agent-browser-screenshot",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:9b19fc6dca823ecc7acf179af8c4e194a54176a4bffb9639e35983167e765a41",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.agent-browser.tool.agent-browser-screenshot/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-screenshot/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-screenshot/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.agent-browser.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-screenshot/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.agent-browser.tool.agent-browser-get-url",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": true,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Return the current URL.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.agent-browser.tool.agent-browser-get-url",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:fdb296e4c484cf016d08026d32662ed5a4721b9079bbd8f2d6d56222f61c0f23",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:0adefa4043827cb505858f7f76060f08140d0fc9a3aeeb580f6b0d2ecc6e3282",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.agent-browser",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "read_only",
+            "title": "agent_browser_get_url",
+            "tool_name": "agent_browser_get_url"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:07549aae0d6e4d856e7f2ea3bd0794ebdab0485736263fe710551654aa7ed7e3",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.agent-browser.tool.agent-browser-get-url",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:79f9b844d88ee1961a194b8911acdf08182e7fa0d291f409caba24f11b30f90a",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.agent-browser.tool.agent-browser-get-url/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-get-url/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-get-url/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.agent-browser.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-get-url/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.agent-browser.tool.agent-browser-eval",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": false,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Evaluate JavaScript in the page.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.agent-browser.tool.agent-browser-eval",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:a56c55f44fe9d4c8b2a07e99371811f3622c6064688d7a747229243028bd2de7",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:0adefa4043827cb505858f7f76060f08140d0fc9a3aeeb580f6b0d2ecc6e3282",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.agent-browser",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "consequential",
+            "title": "agent_browser_eval",
+            "tool_name": "agent_browser_eval"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:d79949517dc700662ec2e3af6db5056f82095a94675a66ea7b03e1cad7bafbd4",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.agent-browser.tool.agent-browser-eval",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:479515d8d7f04b07b8503266a97a103e67f58b54df736fa8486369d1ddc9572a",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.agent-browser.tool.agent-browser-eval/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-eval/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-eval/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.agent-browser.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-eval/1:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "definition:mcp_tool:mcp.agent-browser.tool.agent-browser-close",
+        "contract": "mission-control.published-definition/1",
+        "kind": "mcp_tool",
+        "manifest": {
+          "definition": {
+            "annotations": {
+              "readOnlyHint": false,
+              "schema_source": "transcribed"
+            },
+            "attachment_targets": [
+              "agent.main"
+            ],
+            "compatible_compiler_versions": [
+              "control-plane-definitions/1"
+            ],
+            "conflicts_with": [],
+            "description": "Close the browser session.",
+            "input_schema": {
+              "type": "object"
+            },
+            "kind": "mcp_tool",
+            "logical_id": "mcp.agent-browser.tool.agent-browser-close",
+            "maturity": "experimental",
+            "output_schema": null,
+            "schema_digest": "sha256:edde2ba6d3a09c360a7dacaeac0ab75ec06a4a53873fe85433dc9329050686c8",
+            "schema_version": "1",
+            "server_ref": {
+              "digest": "sha256:0adefa4043827cb505858f7f76060f08140d0fc9a3aeeb580f6b0d2ecc6e3282",
+              "kind": "mcp_server",
+              "lifecycle_status": "published",
+              "logical_id": "mcp.agent-browser",
+              "payload_ref": null,
+              "revision": 1,
+              "schema_version": "1"
+            },
+            "side_effect_class": "bounded_write",
+            "title": "agent_browser_close",
+            "tool_name": "agent_browser_close"
+          },
+          "published_at": "2026-10-07T00:00:00Z",
+          "published_by": "seed:mission-control-catalog",
+          "ref": {
+            "digest": "sha256:f8100a8c055aea424966eb55ae68baee843202943a1ca634a5ca762b11fd6d89",
+            "kind": "mcp_tool",
+            "lifecycle_status": "published",
+            "logical_id": "mcp.agent-browser.tool.agent-browser-close",
+            "payload_ref": null,
+            "revision": 1,
+            "schema_version": "1"
+          },
+          "retired_at": null
+        },
+        "manifest_digest": "sha256:9f36fd469755f90794d22c91e019b81cf346c64a2acb3dd2c3bd4d041746bfb6",
+        "manifest_ref": "mc-catalog://definition/mcp_tool/mcp.agent-browser.tool.agent-browser-close/1",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "1"
+      },
+      "kind": "asset_version",
+      "logical_key": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-close/1"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-close/1",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "packages/mission-control-db-contract/seeds/agent_capabilities.py",
+          "tests/fixtures/mcp/mcp.agent-browser.tools.json",
+          "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "agent-capability:mcp-tool:mcp.agent-browser.tool.agent-browser-close/1:admit"
+    }
+  ],
+  "seed_key": "mc.catalog.agent-capabilities",
+  "seed_version": "1.0.0"
+}

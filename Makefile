@@ -57,7 +57,7 @@ endif
 	preflight server worker agent-server mcp-server health openapi socketio-smoke missionctl \
 	mission-db db-inspect db-plan db-verify db-runtime-plan db-seed-plan db-snapshot db-apply \
 	fmt fmt-check lint lint-fix typecheck typecheck-fast typecheck-watch typecheck-daemon \
-	deps-check audit links precommit arch skills-manifest skills-check check ci \
+	deps-check audit links precommit arch skills-manifest skills-check seeds-validate check ci \
 	test test-unit test-unit-fast test-arch test-integration test-acceptance test-qualification \
 	test-db-contract test-failed coverage \
 	clean up dev down stop status
@@ -285,6 +285,9 @@ skills-manifest: ## Rewrite skills/*/manifest.json digests from the files on dis
 
 skills-check: ## Fail if any skills/*/manifest.json digest drifted from disk
 	$(RUN) python scripts/skills_manifest.py --check
+
+seeds-validate: ## Fail if a seed Capability Pin does not parse or a tools/list digest drifted
+	$(RUN) python scripts/seeds_validate.py
 
 check: lint fmt-check typecheck-fast deps-check test-arch test-unit skills-check ## Fast local gate (seconds to a minute)
 

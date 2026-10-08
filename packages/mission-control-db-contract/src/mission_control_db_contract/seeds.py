@@ -83,6 +83,9 @@ FIELD_SPECS: dict[str, dict[str, tuple[str, bool]]] = {
         "manifest": (_OBJ, True),
         "required_compatibility": (_STRLIST, True),
         "status": (_STR, True),
+        # Migration 0025 agent-composition columns; omitted by older bundles.
+        "host_support": (_OBJ, False),
+        "secret_refs": (_STRLIST, False),
     },
     "asset_decision": {
         "asset_version": ("ref:asset_version", True),
@@ -482,6 +485,9 @@ async def _apply_record(
             "required_compatibility": fields["required_compatibility"],
             "status": fields["status"],
         }
+        for optional in ("host_support", "secret_refs"):
+            if optional in fields:
+                wanted[optional] = fields[optional]
     elif kind == "asset_decision":
         table, id_column = "asset_decision", "asset_decision_id"
         asset, _ = await _resolve(

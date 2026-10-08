@@ -1,0 +1,113 @@
+{
+  "capture_method": "transcribed",
+  "captured_on": "2026-10-07",
+  "environment": {
+    "MCP_TRANSPORT_TYPE": "stdio"
+  },
+  "note": "Transcribed from the primary-source research note; no live tools/list was run (fast-track wave A, no live provider calls). Re-capture with scripts/capture_mcp_tool_snapshot.py and update the digest before qualifying.",
+  "package_pin": "npm:@cyanheads/pubmed-mcp-server@2.10.20",
+  "schema_version": "mc.mcp_tools_fixture.v1",
+  "server": "mcp.pubmed",
+  "source": "docs/specs/fast-track-2026-10/research/seed-capabilities-and-formats.md \u00a74a cyanheads @cyanheads/pubmed-mcp-server 2.10.20",
+  "tools": [
+    {
+      "description": "PubMed query syntax with filters and date ranges; optional summaries.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "pubmed_search_articles",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Article metadata by PMID (up to 200 per call).",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "pubmed_fetch_articles",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Full text by PMID, PMCID or DOI with PMC, Europe PMC and Unpaywall fallback.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "pubmed_fetch_fulltext",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Europe PMC search including preprints and patents.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "pubmed_europepmc_search",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Full Europe PMC records (up to 25 per call).",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "pubmed_europepmc_fetch",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Format citations as APA, MLA, BibTeX, RIS or Vancouver.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "pubmed_format_citations",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Similar, cited-by and reference articles.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "pubmed_find_related",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "NCBI ESpell query correction.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "pubmed_spell_check",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "MeSH descriptors, tree numbers and scope notes.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "pubmed_lookup_mesh",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "Partial citations to PMIDs via ECitMatch.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "pubmed_lookup_citation",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    },
+    {
+      "description": "DOI, PMID and PMCID conversion.",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "pubmed_convert_ids",
+      "read_only_hint": true,
+      "side_effect_class": "read_only"
+    }
+  ]
+}

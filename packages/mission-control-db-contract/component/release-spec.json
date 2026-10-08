@@ -27,7 +27,10 @@
       "mc.catalog.runtime-profiles",
       "mc.catalog.approved-assets",
       "mc.app.bindings",
-      "mc.qualification.parity"
+      "mc.qualification.parity",
+      "mc.catalog.agent-capabilities",
+      "mc.app.biotech.agent-capabilities",
+      "mc.app.ai-engineer.agent-capabilities"
     ]
   },
   "runtime_descriptor_path": "../runtime/descriptor.json"
