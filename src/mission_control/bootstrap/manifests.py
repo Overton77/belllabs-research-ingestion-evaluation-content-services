@@ -52,7 +52,11 @@ def compose_manifest_service(
     definitions = PostgresDefinitionRepository(pool, catalog_scope=catalog.catalog_scope)
     programs = ManifestProgramCompiler(definitions, extensions, payload_store)
     compiler = ManifestCompileService(
-        definitions=catalog.definitions, search=catalog.search, programs=programs
+        definitions=catalog.definitions,
+        search=catalog.search,
+        programs=programs,
+        # The production projection is partitioned by the installation catalog scope.
+        catalog_scope=catalog.catalog_scope,
     )
     lifecycle = None
     if run_control is not None:

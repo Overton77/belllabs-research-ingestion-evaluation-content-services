@@ -649,3 +649,34 @@ async def _run(function: Callable[[list[str]], int], argv: list[str]) -> int:
     import asyncio
 
     return await asyncio.to_thread(function, argv)
+
+
+@pytest.mark.asyncio
+async def test_compile_searches_the_installation_catalog_partition() -> None:
+    """Production projects capability documents under the installation catalog scope (the
+    public catalog search reads only there); a compile searching the tenant request scope
+    found nothing and blocked every `search` entry of the owner manifests."""
+
+    request = scope()
+    parts = request.request_scope.split("/")
+    catalog = f"mc/{parts[1]}/{parts[2]}/catalog"
+    definitions, search = await fast_track_catalog(tenant_scope=catalog)
+    recording = RecordingSearch(search)
+    owner_manifest = (MISSIONS / "01-research-ingestion-deep-agents.yml").read_text(
+        encoding="utf-8"
+    )
+
+    def compiler(catalog_scope: str | None) -> ManifestCompileService:
+        return ManifestCompileService(
+            definitions=definitions,
+            search=recording,  # type: ignore[arg-type]
+            catalog_scope=catalog_scope,
+        )
+
+    blocked = await compiler(None).compile(owner_manifest, request)
+    assert "search_no_admitted_hits" in {issue.reason for issue in blocked.report.blockers}
+    recording.requests.clear()
+    resolved = await compiler(catalog).compile(owner_manifest, request)
+    assert "search_no_admitted_hits" not in {issue.reason for issue in resolved.report.blockers}
+    assert recording.requests
+    assert {item.tenant_scope for item in recording.requests} == {catalog}

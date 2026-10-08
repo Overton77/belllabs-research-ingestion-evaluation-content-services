@@ -375,8 +375,12 @@ def fixture_definitions() -> list[Any]:
     return [DEFINITION_ADAPTER.validate_python(item) for item in document["definitions"]]
 
 
-async def fast_track_catalog() -> tuple[InMemoryDefinitionRepository, CapabilitySearchService]:
-    """The seeded catalog plus the fixture rows, projected lexically (no embeddings)."""
+async def fast_track_catalog(
+    tenant_scope: str = "global",
+) -> tuple[InMemoryDefinitionRepository, CapabilitySearchService]:
+    """The seeded catalog plus the fixture rows, projected lexically (no embeddings) into
+    ``tenant_scope`` (``global`` is visible to every tenant in memory; the PostgreSQL
+    projection is partitioned by the installation catalog scope instead)."""
 
     definitions = InMemoryDefinitionRepository()
     refs = []
@@ -399,7 +403,9 @@ async def fast_track_catalog() -> tuple[InMemoryDefinitionRepository, Capability
         projection_generation="fast-track-fixture-1",
         clock=lambda: NOW,
     )
-    await projector.project_many(tuple(CatalogProjectionInput(ref=ref) for ref in refs))
+    await projector.project_many(
+        tuple(CatalogProjectionInput(ref=ref) for ref in refs), tenant_scope=tenant_scope
+    )
     return definitions, CapabilitySearchService(search=search, definitions=definitions)
 
 

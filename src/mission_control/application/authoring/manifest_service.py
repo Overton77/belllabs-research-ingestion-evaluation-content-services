@@ -443,12 +443,17 @@ class ManifestCompileService:
         programs: ManifestProgramCompiler | None = None,
         ambiguity_margin: float = AMBIGUITY_MARGIN,
         depth_cap: int = PLATFORM_DEPTH_CAP,
+        catalog_scope: str | None = None,
     ) -> None:
         self._definitions = definitions
         self._search = search
         self._programs = programs
         self._margin = ambiguity_margin
         self._depth_cap = depth_cap
+        # The installation catalog's search partition (`mc/<installation>/<app>/catalog`):
+        # publication projects there and the public catalog search reads there, so compile
+        # resolves there too. Absent (in-memory catalogs), the request scope is searched.
+        self._catalog_scope = catalog_scope
 
     async def compile(self, manifest_yaml: str, scope: ManifestScope) -> ManifestCompilation:
         at = scope.at or datetime.now(UTC)
@@ -859,7 +864,7 @@ class ManifestCompileService:
             CapabilitySearchRequest(
                 query=capability.search.query,
                 kinds=frozenset({kind}) if kind is not None else frozenset(),
-                tenant_scope=scope.request_scope,
+                tenant_scope=self._catalog_scope or scope.request_scope,
                 host_profiles=(
                     frozenset(LaneProfile(lane) for lane in lanes) if filtered else frozenset()
                 ),
