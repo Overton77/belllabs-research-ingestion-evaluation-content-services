@@ -1,0 +1,131 @@
+# yaml-language-server: $schema=../../../../src/mission_control/contracts/schemas/mc.mission_manifest.v1.json
+# Mission 1 — Research and ingestion on the Deep Agents lane (Biotech).
+# Stage Graph: collect (Goal Loop) -> synthesize -> review (Human Gate) -> ingest.
+# Acceptance fixture for tickets I1 and E1..E3 (SPEC-05, SPEC-02, SPEC-01).
+manifest: mission/v1
+
+mission:
+  key: nad-muscle-research-ingestion
+  title: NAD+ precursors and skeletal muscle — evidence map and knowledge-graph ingestion
+  application: biotech                     # resolved against the authenticated scope; the file cannot change it
+  domain_pack: biotech.research            # app-owned templates, rubrics and prompts
+  description: >
+    Sweep the human evidence on NMN and NR effects on skeletal muscle function and mass,
+    build a claim table with provenance, have the owner review it, then ingest accepted
+    claims into the Biotech knowledge graph through the admitted ingestion capability.
+
+  goals:
+    - key: evidence_map
+      description: Map the human evidence for NMN and NR effects on skeletal muscle function
+      importance: primary
+      objectives:
+        - key: find_trials
+          description: Identify randomized and observational human studies on NMN or NR and muscle outcomes
+        - key: extract_claims
+          description: Extract outcome-level claims with effect direction, population and citation
+          parent: find_trials
+      criteria:
+        - key: coverage
+          description: Every included study appears in the claim table with at least one claim
+          evidence: [source_manifest, claim_table]
+          acceptance:
+            assessment:
+              capability: { search: "evidence coverage assessment claim table", kind: assessment, as: coverage_check }
+              threshold: 0.8
+        - key: reviewed
+          description: The owner accepted the claim table
+          evidence: [claim_table]
+          acceptance: { human: review_accept }
+    - key: ingested
+      description: Accepted claims are written to the knowledge graph with provenance
+      importance: primary
+      criteria:
+        - key: ingestion_receipt
+          description: The ingestion capability returned an applied receipt for every accepted claim
+          evidence: [ingestion_receipt]
+          acceptance: { schema: ingestion_receipt@1 }
+
+  environment:                             # mission-level defaults; every node inherits and may narrow
+    lane: deep_agents
+    model: { profile: frontier.default }
+    sandbox: { profile: research.standard, egress: [pubmed, biorxiv, tavily, firecrawl] }
+    workspace:
+      context:
+        - { search: "biotech schema context muscle aging", kind: context_bundle, as: schema_context }
+      skills:
+        - { pin: "skill.mission-control-observe@0.2.0#sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+        - { search: "biotech literature review procedure", kind: skill_bundle, as: lit_review }
+    capabilities:                          # search now, pin at compile (ADR-0020, ADR-0023, ADR-0025)
+      - { search: "pubmed literature retrieval", kind: mcp_server, as: pubmed,
+          tools: [search_articles, get_article_metadata, find_related_articles] }
+      - { search: "web search extract crawl", kind: mcp_server, as: tavily }
+      - { search: "scrape web page to markdown", kind: mcp_server, as: firecrawl, tools: [firecrawl_scrape, firecrawl_search] }
+      - { search: "knowledge graph ingestion claims", kind: mcp_tool, as: kg_ingest }   # Biotech domain capability; app-owned
+    hooks:
+      - { search: "citation presence check", kind: hook_script, as: citation_check, events: [after_tool, stop], fail_closed: false }
+    budget: { usd: 40, tokens: 3000000, wall_clock: 6h, tool_calls: 600 }
+    governors: { depth: 2, fan_out: 6, iterations: 8, patience: 2, transfers: 3 }
+    side_effects: [read_only, workspace_write, external_write_reversible]   # ingestion writes are reversible intents with receipts
+
+  program:
+    key: root
+    behavior: stage_graph
+    objectives: [evidence_map, ingested]
+    nodes:
+      - key: collect                       # adaptive search: a Goal Loop nested in the Stage Graph
+        behavior: goal_loop
+        objective: find_trials
+        action_space: [pubmed, tavily, firecrawl]
+        environment:
+          budget: { usd: 12 }              # narrows the mission budget
+          governors: { iterations: 6, patience: 2 }
+        verifier: { independent: true }
+        outputs:
+          - { name: sources, schema: source_manifest@1, required: true }
+
+      - key: synthesize
+        behavior: agent_executor
+        objectives: [extract_claims]
+        depends_on: [collect]
+        inputs:
+          - { name: sources, from: collect.sources, expand: materialize }      # file at /inputs/sources/
+          - { name: schema_context, from: root.schema_context, expand: reference }
+        instruction: .mission/instructions/synthesize.md
+        environment:
+          model: { profile: frontier.long_context }
+        missing_output_policy: { follow_up_turn: { max_turns: 1 } }
+        outputs:
+          - { name: claim_table, schema: claim_table@1, required: true }
+          - { name: source_manifest, schema: source_manifest@1, required: true }
+
+      - key: review                        # Human Gate: the owner accepts or rejects the claim table
+        behavior: human_gate
+        depends_on: [synthesize]
+        task:
+          kind: REVIEW
+          prompt: Accept the NAD+ precursor claim table for ingestion?
+          reviewers: [owner]
+          packet: [synthesize.claim_table, synthesize.source_manifest]
+          on_timeout: keep_waiting
+
+      - key: ingest
+        behavior: agent_executor
+        objectives: [ingested]
+        depends_on: [review]
+        inputs:
+          - { name: claim_table, from: synthesize.claim_table, expand: materialize }
+          - { name: review, from: review.resolution, expand: inline }
+        instruction: .mission/instructions/ingest.md
+        environment:
+          capabilities:                    # list replaces the inherited list: only the ingestion tool here
+            - { search: "knowledge graph ingestion claims", kind: mcp_tool, as: kg_ingest }
+          side_effects: [read_only, workspace_write, external_write_reversible]
+          budget: { usd: 6 }
+        outputs:
+          - { name: ingestion_receipt, schema: ingestion_receipt@1, required: true }
+
+  controls:
+    commands_allowed: [pause, resume, cancel, queue_instruction, add_context, request_continuation]
+    subscriptions:
+      - { events: [human_task.opened, run.completed, activation.completed], channel: stream }
+    notifications: { on: [human_task, completion], channel: inbox }

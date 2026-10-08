@@ -1,0 +1,83 @@
+# yaml-language-server: $schema=../../../../src/mission_control/contracts/schemas/mc.mission_manifest.v1.json
+# Mission 3 — Codebase feature on the Cursor Local lane (ai-engineer).
+# One Goal Loop with a readonly verifier subagent, the agent-browser plugin, a pre-shell policy hook,
+# and deterministic executors test_run and git_snapshot in the action space.
+# Acceptance fixture for tickets G4 and I3; exercises queue_instruction, interrupt_and_inject, cancel and fork.
+manifest: mission/v1
+
+mission:
+  key: mission-control-transcript-cli
+  title: Add `missionctl run transcript` with JSONL and Markdown output
+  application: ai-engineer
+  description: >
+    Implement the transcript materialization command described in SPEC-03 in the mission-control
+    repository on a feature branch, with unit tests, and deliver the branch reference and a test report.
+
+  goals:
+    - key: feature_delivered
+      description: The feature is implemented on a branch with passing tests and a readable diff
+      importance: primary
+      objectives:
+        - key: implement
+          description: Implement the CLI command, HTTP route and renderer
+        - key: verify
+          description: Tests pass and an independent verifier confirms the acceptance criteria
+          parent: implement
+      criteria:
+        - key: tests_pass
+          description: The declared test command exits 0 and the report names the new tests
+          evidence: [test_report]
+          acceptance: { schema: test_report@1 }
+        - key: branch_pushed
+          description: A branch exists with the commits and a snapshot record
+          evidence: [branch_ref]
+          acceptance: { schema: git_ref@1 }
+        - key: verified
+          description: The independent verifier accepted the diff against the issue text
+          evidence: [verification]
+          acceptance:
+            assessment:
+              capability: { search: "code change verification against issue", kind: assessment, as: verify_change }
+              threshold: 0.9
+
+  environment:
+    lane: cursor_local                        # agent loop in the bridge process on the worker; workspace leased from the repo path
+    model: { profile: cursor.default }
+    workspace:
+      repo: { path: C:\Users\Pinda\Proyectos\Biotech\mission-control, ref: main }   # git worktree at ref; branch mc/<run>
+      context:
+        - { artifact: "artifact://ai-engineer/issues/FT-C3.md", expand: inline }    # the issue text as admitted input
+      skills:
+        - { pin: "skill.mission-control-observe@0.2.0#sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+    plugins:
+      - { search: "agent-browser browser automation", kind: plugin, as: agent_browser }   # expands to skill + mcp + binary pin
+    agents:
+      - { search: "code verifier subagent readonly", kind: subagent_profile, as: verifier,
+          overlay: { readonly: true, is_background: false, model: inherit } }      # projected to .cursor/agents/verifier.md
+    hooks:
+      - { search: "shell command policy deny destructive", kind: hook_script, as: shell_policy,
+          events: [before_shell], fail_closed: true }                               # kernel hooks still run first
+    capabilities:
+      - { search: "run declared test command capture report", kind: deterministic_executor, as: test_run }
+      - { search: "record branch commit snapshot", kind: deterministic_executor, as: git_snapshot }
+    budget: { usd: 20, tokens: 2000000, wall_clock: 3h, tool_calls: 500 }
+    governors: { depth: 1, fan_out: 2, iterations: 12, patience: 3, transfers: 4 }
+    side_effects: [read_only, workspace_write, external_write_reversible]        # branch push only; no merge
+
+  program:
+    key: root
+    behavior: goal_loop
+    objective: feature_delivered
+    action_space: [verifier, agent_browser, test_run, git_snapshot]
+    verifier: { independent: true, environment: { lane: deep_agents, model: { profile: frontier.default } } }
+    inputs:
+      - { name: issue, from: root.issue, expand: inline }
+    outputs:
+      - { name: branch_ref, schema: git_ref@1, required: true }
+      - { name: test_report, schema: test_report@1, required: true }
+      - { name: verification, schema: verification_report@1, required: true }
+
+  controls:
+    commands_allowed: [queue_instruction, interrupt_and_inject, cancel, fork, pause, resume, add_context]
+    subscriptions:
+      - { events: [activation.completed, command.completed, run.completed], channel: stream }

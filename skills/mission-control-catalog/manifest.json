@@ -1,0 +1,10 @@
+{
+  "schema_version": "mc.skill_bundle.v1",
+  "name": "mission-control-catalog",
+  "version": "0.1.0",
+  "service_contract_range": ">=0.1.0,<0.2.0",
+  "files": {
+    "references/kinds-and-projections.md": "sha256:74fcaaf6ade072d4b9738104a2559877473b8d390eb060210c3fae8bb80693d2",
+    "SKILL.md": "sha256:bea6a8ff5cead0d779a96601254e642df9f10d60735e48169a01154ae2c8c501"
+  }
+}

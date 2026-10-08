@@ -44,7 +44,15 @@ A durable statement of goals, success criteria and a recursive program, with exa
 
 **Mission Definition**:
 The typed document a mission is authored as: goals, objectives, criteria, inputs, program, policies, budget and completion contract.
-_Avoid_: mission spec, mission YAML (the file format is not the definition)
+_Avoid_: mission spec, mission contract
+
+**Mission Manifest**:
+The YAML authoring surface (`mission.yml`) a human or coordinator writes: goals, criteria, a mission-level environment with per-node overlays, and the program. It compiles into a Mission Definition; it is never the committed revision.
+_Avoid_: mission YAML, mission contract, mission config
+
+**Environment**:
+The bundle a manifest gives a node to run in: lane, model profile, sandbox profile, workspace context and skills, capabilities, budget and governors. Nodes inherit the mission-level environment and may overlay it.
+_Avoid_: config, settings, runtime
 
 **Goal**:
 An outcome the mission exists to reach, weighted by importance.
@@ -113,6 +121,13 @@ The admitted way one mission invokes another.
 
 **Spawn Grant**:
 The bounded authority to create child missions or subordinates.
+
+**Mission Chain**:
+An ordered set of missions authored together and linked by `supplies` and `depends_on` relationships, each with its own run, budget and acceptance.
+_Avoid_: linked workflows, multi-workflow, pipeline of missions
+
+**Chain Link**:
+One `supplies` or `depends_on` relationship inside a mission chain, with its typed output binding and the acceptance condition that releases the consumer.
 
 ### Workflow systems
 
@@ -245,6 +260,13 @@ New work with changed instructions, inputs or capabilities. It is never disguise
 **Workspace**:
 The owned filesystem an attempt works in, with read-only mission context, skill bundles, inputs and declared writable paths.
 
+**Workspace Lease**:
+The fenced, time-bounded ownership of a workspace by one attempt generation; a stale lease cannot write or publish results.
+
+**Task Token**:
+A short-lived credential bound to one attempt, generation and permitted action that a hook or sandbox CLI uses to call the service.
+_Avoid_: API key, session token
+
 **Sandbox Profile**:
 The pinned image, limits, lifetime, egress and cleanup rules for a workspace.
 
@@ -255,6 +277,20 @@ An immutable, digest-registered output. A file becomes an artifact only after re
 Bounded sync or async work delegated by an activation, with a dependency class of required_blocking, degradable_blocking, nonblocking or advisory.
 _Avoid_: subagent (the runtime's word), child (that is a child mission)
 
+**Context Packet**:
+The sealed, budgeted bundle an attempt receives to start or continue work: inline facts, references with retrieval instructions and files materialized into the workspace.
+_Avoid_: prompt, context dump, handoff blob
+
+**Expansion Tier**:
+How one item of a context packet reaches the agent: inline (bytes in the prompt), reference (identity, summary and how to fetch), materialize (a file in the workspace) or workspace (a restored snapshot).
+
+**Context Packer**:
+The deterministic function that builds a context packet from accepted outputs, state, checkpoints and selected context under a model profile's budget.
+
+**Lane Profile**:
+One placement of a lane with its own qualified control matrix and workspace contract, for example Cursor Local or Cursor Cloud.
+_Avoid_: runtime mode, deployment target
+
 ### Control and recovery
 
 **Command**:
@@ -263,6 +299,10 @@ _Avoid_: signal, message
 
 **Delivery Report**:
 What a lane actually did with a command, reported separately from what was requested.
+
+**Command Mailbox**:
+The durable, per-run and per-generation holding area for queued instructions and added context, consumed once at the next safe boundary.
+_Avoid_: queue (ambiguous with Temporal task queues), inbox
 
 **Stop Fence**:
 The persisted marker that rejects new effect claims after an urgent stop.
@@ -277,7 +317,8 @@ The deterministic function that owns lifecycle transitions and settlement. Nothi
 The transactional relay from the application database to Temporal.
 
 **Checkpoint**:
-A sealed, digest-verified manifest of a run's state that continuation resumes from.
+A sealed, digest-verified manifest of a run's state that continuation resumes from. Its full name is Continuation Checkpoint.
+_Avoid_: LangGraph checkpoint (that is runtime persistence), snapshot
 
 **Checkpoint Lineage**:
 The ordered ancestry of checkpoints a run has sealed.
@@ -302,6 +343,27 @@ A monotonically increasing number that fences stale results from an earlier laun
 
 **In Doubt**:
 A unit whose provider state cannot be confirmed; it is reconciled, never duplicated.
+
+**Provider Frame**:
+One raw event a lane observed from its provider or from a hook, persisted verbatim before any derivation.
+_Avoid_: trace event, log line
+
+**Closing Frame**:
+A provider frame that states a settled fact (a tool call completed, a turn ended, a result arrived); the reducer reads only closing frames.
+
+**Usage Disposition**:
+Whether a usage dimension is settled, estimated or unknown. Unknown is never counted as zero.
+
+**Native Event Store**:
+The bounded-retention store of provider frames keyed by harness execution. Mission events point into it; it never enters the mission stream.
+
+**Transcript**:
+The materialized, read-only view that joins a run's mission events, provider frames and artifact references in order. It is evidence for humans and agents, never state.
+_Avoid_: trace (LangSmith's word), chat log, history
+
+**Subscription**:
+A durable registration to receive selected mission events by webhook, stream or agent notification, delivered at least once from the outbox.
+_Avoid_: callback hook, listener, watcher
 
 ### Catalog and capabilities
 
@@ -337,6 +399,39 @@ An immutable record of a provider, model, endpoint, settings and limits.
 
 **Workflow Template**:
 A reusable, versioned program fragment.
+
+**MCP Server**:
+A capability that declares a Model Context Protocol server: transport, launch or endpoint identity, secret references and the tools it exposes.
+_Avoid_: tool server, integration
+
+**Plugin**:
+A pinned composition of other capabilities (skill bundles, MCP servers, hook scripts, subagent profiles, prompts and resources) admitted and bound as one unit.
+_Avoid_: extension, marketplace plugin, package
+
+**Hook Script**:
+A capability that runs at a declared hook event before or after an agent action and returns a typed decision or added context.
+_Avoid_: middleware (the Deep Agents word), callback, interceptor
+
+**Hook Event**:
+One of the provider-neutral points in an agent session's lifecycle at which a hook script may run.
+
+**Kernel Hook**:
+A hook Mission Control attaches to every session for fences, intents, usage and frame capture, running in process or as a command hook that calls the worker back with a task token. It is not a catalog item and no manifest can remove it.
+
+**Subagent Profile**:
+A capability describing a delegable agent (purpose, instructions, tools, model, mode) that a lane projects into its native subagent format.
+_Avoid_: subagent file, agent definition, persona
+
+**Host Projection**:
+Rendering a capability into one lane profile's native configuration files and formats.
+_Avoid_: install, export, sync
+
+**Overlay**:
+The few lane-profile-specific fields a capability row carries beside its provider-neutral core, applied only when projected to that profile.
+_Avoid_: override, variant
+
+**Hybrid Search**:
+Capability search that fuses a lexical ranking and a vector ranking after grant and compatibility filtering.
 
 ### Authoring and coordination
 
@@ -398,6 +493,9 @@ The required execution host for bounded asynchronous subordinate graphs. It sche
 
 **Deep Agents**:
 The first execution lane: bounded operation cognition on LangGraph.
+
+**Cursor**:
+The second lane family, with two lane profiles: Cursor Local (the agent loop in a bridge process on a worker) and Cursor Cloud (a Cursor-hosted machine driven through its API).
 
 **Temporal**:
 The only mission scheduler.

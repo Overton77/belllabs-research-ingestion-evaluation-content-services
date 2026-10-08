@@ -3,8 +3,9 @@ type: Decision Record
 title: Coding lanes qualify as worker-hosted local processes first; cloud placement is a second profile per lane
 description: "The first profile of each coding lane runs on a Mission Control worker as a managed process with a leased workspace, because that can be qualified today without new accounts and keeps secrets server-side. Cloud…"
 tags: [mission-control, adr, decision]
-status: proposed
+status: accepted
 source: interview 2026-10-07 (Q8)
+supplement: accepted for Cursor by ADR-0030 (2026-10-07)
 ---
 
 # Coding lanes qualify as worker-hosted local processes first; cloud placement is a second profile per lane

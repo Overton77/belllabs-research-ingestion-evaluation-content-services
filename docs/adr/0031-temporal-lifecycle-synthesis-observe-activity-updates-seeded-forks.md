@@ -1,0 +1,20 @@
+---
+type: Decision Record
+title: "Provider lifecycles are synthesized into Temporal through bounded observe-activity segments with heartbeat cursors, commands as Updates, cancellation through activity cancellation plus an idempotent cancel activity, forks as new runs seeded from snapshots, and chains through the outbox"
+description: "A lane's turn is driven by a lane.turn activity that starts or reattaches, streams frames, persists them, heartbeats the provider cursor and returns closing facts, split into bounded segments so history stays small; a status-poll activity reconciles; Temporal activity cancellation is how a cancel reaches the provider, followed by an idempotent provider-cancel activity and a poll to final state; Temporal reset is never used for forks; continue-as-new segments long Goal Loops with the handled command ids carried forward; search attributes expose mission, run, lane and phase."
+tags: [mission-control, adr, decision, temporal, lifecycle]
+status: accepted
+source: fast-track interview 2026-10-07 (lifecycle synthesis); ADR-0004; ADR-0008; docs/specs/fast-track-2026-10/research/temporal-lifecycle.md (temporalio 1.34.0; limits; cancel reaches activities only on heartbeat; update dedupe is per run); docs/research/2026-10-07-coding-lane-surfaces.md
+---
+
+# Provider lifecycles are synthesized into Temporal through bounded observe-activity segments with heartbeat cursors, commands as Updates, cancellation through activity cancellation plus an idempotent cancel activity, forks as new runs seeded from snapshots, and chains through the outbox
+
+Each Session Turn of a lane is driven by one or more `lane.turn` activity segments; each segment prepares or reattaches, sends the turn, consumes the provider stream, persists each frame before heartbeating the provider cursor (bridge offset, SSE id, LangGraph checkpoint id) in heartbeat details, and returns only closing facts. Because heartbeats are throttled and a cancel reaches an activity only at a heartbeat, the activity re-reads its own persisted frames on resume and dedupes by provider key rather than trusting the cursor alone, and it distinguishes a real cancel from worker shutdown so only a real cancel cancels the provider run. Long turns are split into bounded segments (by duration or frame count) that each return a cursor, with a short `lane.status` poll activity as reconciler, so a run never streams through workflow history. Commands reach the family and operation workflows as Temporal Updates with validators (ADR-0008); because Update deduplication by id holds only within one run, the family carries its handled command ids across continue-as-new. A cancel or interrupt becomes activity cancellation, then an idempotent `lane.cancel` activity, then polling until the provider reports a final state. Forks create a new run from a sealed snapshot through the existing fork saga; Temporal reset is excluded because it terminates the run and re-applies signals that paid for effects. Goal Loops continue-as-new at iteration boundaries when `is_continue_as_new_suggested()` is true (the server warns at 10,240 events or 10 MB), after handlers drain. Mission chains advance through the application outbox with run-derived workflow ids and `USE_EXISTING`, not child workflows. Typed search attributes (`mc_mission_id`, `mc_run_id`, `mc_lane`, `mc_phase`) make `missionctl run list` a visibility query rather than a ledger scan.
+
+We rejected short polling activities as the primary path because Cursor and SDK streams are push-based and offsets make a long activity recoverable, and rejected one workflow per provider event because history would exceed Temporal's limits within a single long run.
+
+## Consequences
+
+- Activity heartbeat timeout is the lane's liveness bound; exceeding it classifies the unit `in_doubt`, never duplicates a turn.
+- Replay never touches a provider; every I/O lives in the activity.
+- `temporalio` moves from the locked 1.30.0 to 1.34.0 deliberately (payload-limit option moved to `Client.connect`); `workflow.patched` guards family workflow changes.

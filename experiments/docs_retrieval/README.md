@@ -51,3 +51,7 @@ Running costs API money. Keep runs small (the default task set is 14 tasks × 4 
 
 - Add runners for Codex (`codex exec`) and Cursor (`agent -p`) as `--runner` options; the sandbox and scoring do not change.
 - Add tasks whenever a session shows an agent asserting something the docs contradict; that is the signal this experiment exists to catch.
+
+## Runs so far
+
+- `results/20261007-sonnet/`: first run (Sonnet, judge on). Re-judged result: index and both 100% pass, baseline and skill 93%; the index configuration used the fewest turns. See `notes.md` there for the reading and the scoring fixes it caused. Re-score a finished run with `python experiments/docs_retrieval/run.py --rejudge <run-id> --model <judge-model>`.

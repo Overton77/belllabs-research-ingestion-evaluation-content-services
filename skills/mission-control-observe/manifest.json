@@ -1,0 +1,10 @@
+{
+  "schema_version": "mc.skill_bundle.v1",
+  "name": "mission-control-observe",
+  "version": "0.1.0",
+  "service_contract_range": ">=0.1.0,<0.2.0",
+  "files": {
+    "references/transcript-format.md": "sha256:64d81e092c1792c5a5213dd6a9bb7b1585ad2a4a5fb14dc85aa3cc1fbc9bab84",
+    "SKILL.md": "sha256:d71897afcd3e1c4c1b178a30d45eb8390f9521cd5481a845712350489ae295c2"
+  }
+}

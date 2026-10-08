@@ -1,12 +1,12 @@
 {
   "schema_version": "mc.skill_bundle.v1",
   "name": "mission-control",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "service_contract_range": ">=0.1.0,<0.2.0",
   "files": {
     "references/operations.json": "sha256:8f8fe121ad9166d6c1838c1a81d52173dd81b47f21e592df427916a8fc7a1dfb",
-    "references/protocol.md": "sha256:acda9268b0bdcf1cc069149a97eaa879d5097138ca3b1c35741a9746ceef568d",
-    "SKILL.md": "sha256:dd297771a7801d0b7960f76338faaabbf995bcd200b215bead8dfa2fc9f399eb"
+    "references/protocol.md": "sha256:3ef89f7689095a7902f1f37fd11a91e04d65ae2609a969d93bc1cba4dd5b8531",
+    "SKILL.md": "sha256:cccfb371f1f9566500d391c9a726eaec103575e4698e7a5cf16686bf1fe2c795"
   },
   "operation_catalog_digest": "sha256:8f8fe121ad9166d6c1838c1a81d52173dd81b47f21e592df427916a8fc7a1dfb"
 }

@@ -102,9 +102,17 @@ def build_sandbox(run_dir: Path, config: str) -> Path:
     return repo
 
 
-def claude_command(prompt: str, model: str | None, max_turns: int) -> list[str]:
+def claude_binary() -> str:
+    found = shutil.which("claude")
+    if not found:
+        raise SystemExit("claude CLI not found on PATH")
+    return found
+
+
+def claude_command(model: str | None, max_turns: int) -> list[str]:
+    # The prompt is passed on stdin to avoid shell quoting of multi-line text.
     cmd = [
-        "claude", "-p", prompt,
+        claude_binary(), "-p",
         "--output-format", "stream-json", "--verbose",
         "--max-turns", str(max_turns),
         "--no-session-persistence",
@@ -116,10 +124,10 @@ def claude_command(prompt: str, model: str | None, max_turns: int) -> list[str]:
     return cmd
 
 
-def run_claude(cmd: list[str], cwd: Path, timeout: int) -> tuple[list[dict], str]:
+def run_claude(cmd: list[str], prompt: str, cwd: Path, timeout: int) -> tuple[list[dict], str]:
     env = dict(os.environ)
     env.setdefault("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
-    proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout, env=env, shell=(os.name == "nt"))
+    proc = subprocess.run(cmd, cwd=cwd, input=prompt, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout, env=env)
     events: list[dict] = []
     for line in proc.stdout.splitlines():
         line = line.strip()
@@ -187,16 +195,22 @@ def score(task: dict, run: dict) -> dict:
 
 def judge(task: dict, answer: str, model: str | None, cwd: Path) -> dict:
     prompt = (
-        "You are grading an answer about a software project. Question:\n" + task["prompt"] +
-        "\n\nExpected facts (all must be present and not contradicted): " + "; ".join(task["expected_terms"]) +
+        "You are grading an answer about a software project whose documentation deliberately distinguishes "
+        "what the specification requires from what the code implements today. Question:\n" + task["prompt"] +
+        "\n\nExpected facts (each must be present and not contradicted): " + "; ".join(task["expected_terms"]) +
+        "\n\nGrading rules: mark correct=true when every expected fact is stated and nothing in the answer contradicts it. "
+        "An answer that reports the specified behaviour AND separately reports a narrower or different implemented "
+        "behaviour is correct, not hedging, as long as it labels which is which. Mark correct=false only when an "
+        "expected fact is missing, is asserted to be wrong, or the answer invents a fact that the docs do not support. "
+        "Unverified-source caveats are not errors."
         "\n\nAnswer:\n" + answer +
         "\n\nReply with JSON only: {\"correct\": true|false, \"reason\": \"<one sentence>\"}"
     )
-    cmd = ["claude", "-p", prompt, "--output-format", "json", "--max-turns", "1", "--no-session-persistence",
-           "--strict-mcp-config", "--mcp-config", ".mcp-empty.json", "--allowedTools", "none"]
+    cmd = [claude_binary(), "-p", "--output-format", "json", "--max-turns", "1", "--no-session-persistence",
+           "--strict-mcp-config", "--mcp-config", ".mcp-empty.json", "--disallowedTools", "Read", "Grep", "Glob", "Bash", "Edit", "Write"]
     if model:
         cmd += ["--model", model]
-    proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300, shell=(os.name == "nt"))
+    proc = subprocess.run(cmd, cwd=cwd, input=prompt, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
     try:
         payload = json.loads(proc.stdout)
         text = payload.get("result", "")
@@ -229,6 +243,39 @@ def summarize(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def rejudge(run_id: str, model: str | None) -> int:
+    """Re-score a finished run with the current judge rubric and current tasks.jsonl, without re-running agents."""
+    out_dir = RESULTS / run_id
+    source = out_dir / "results.jsonl"
+    if not source.exists():
+        raise SystemExit(f"no results at {source}")
+    tasks = {t["id"]: t for t in load_tasks(None)}
+    rows = [json.loads(line) for line in source.read_text(encoding="utf-8").splitlines() if line.strip()]
+    cwd = SCRATCH / run_id
+    cwd.mkdir(parents=True, exist_ok=True)
+    (cwd / ".mcp-empty.json").write_text('{"mcpServers": {}}\n', encoding="utf-8")
+    rescored: list[dict] = []
+    for row in rows:
+        task = tasks.get(row["task"])
+        if not task:
+            rescored.append(row)
+            continue
+        synthetic = {"reads": row.get("reads", []), "searches": row.get("searches", []), "result": row.get("answer", "")}
+        row.update(score(task, synthetic))
+        if row.get("answer"):
+            verdict = judge(task, row["answer"], model, cwd)
+            row["judge_correct"] = verdict.get("correct")
+            row["judge_reason"] = verdict.get("reason")
+            row["judge_cost_usd"] = verdict.get("judge_cost_usd")
+        rescored.append(row)
+        print(f"[{row['config']}] {row['task']:<24} judge={row['judge_correct']} retrieved={row['retrieved']}")
+    (out_dir / "results-rejudged.jsonl").write_text("\n".join(json.dumps(r) for r in rescored) + "\n", encoding="utf-8")
+    summary = f"# Docs retrieval run {run_id} (re-judged)\n\nJudge model: {model or 'default'}; scored with the current rubric and tasks.jsonl\n\n" + summarize(rescored) + "\n"
+    (out_dir / "summary-rejudged.md").write_text(summary, encoding="utf-8")
+    print("\n" + summarize(rescored))
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", action="append", default=None, help="config name or 'all' (repeatable)")
@@ -239,7 +286,11 @@ def main() -> int:
     parser.add_argument("--timeout", type=int, default=600, help="seconds per task")
     parser.add_argument("--judge", action="store_true", help="add an LLM judge verdict per answer")
     parser.add_argument("--dry-run", action="store_true", help="build sandboxes only")
+    parser.add_argument("--rejudge", metavar="RUN_ID", help="re-run only the judge over a finished run's saved answers")
     args = parser.parse_args()
+
+    if args.rejudge:
+        return rejudge(args.rejudge, args.model)
 
     configs = list(CONFIGS) if not args.config or "all" in args.config else args.config
     for c in configs:
@@ -261,9 +312,9 @@ def main() -> int:
             continue
         for task in tasks:
             started = time.time()
-            cmd = claude_command(task["prompt"] + TASK_SUFFIX, args.model, args.max_turns)
+            cmd = claude_command(args.model, args.max_turns)
             try:
-                events, stderr = run_claude(cmd, repo, args.timeout)
+                events, stderr = run_claude(cmd, task["prompt"] + TASK_SUFFIX, repo, args.timeout)
             except subprocess.TimeoutExpired:
                 events, stderr = [], "timeout"
             run = extract(events)

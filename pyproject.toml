@@ -203,6 +203,7 @@ known-first-party = ["mission_control", "mission_control_db_contract", "biotech_
 # Operator-facing entrypoints print by design.
 "scripts/**" = ["T201"]
 "docs/tools/**" = ["T201"]
+"docs/specs/**" = ["T201", "E501"]
 "packages/*/scripts/**" = ["T201"]
 "packages/*/seeds/**" = ["T201"]
 "packages/*/runtime/**" = ["T201"]

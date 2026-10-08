@@ -1,0 +1,11 @@
+{
+  "schema_version": "mc.skill_bundle.v1",
+  "name": "mission-control-author",
+  "version": "0.1.0",
+  "service_contract_range": ">=0.1.0,<0.2.0",
+  "files": {
+    "references/manifest-cheatsheet.md": "sha256:f72f76df52b7ec3fefdb50e81524376fea63ef252def877b38968f1d3489019a",
+    "references/validation-report.md": "sha256:25ec3a69e247bb033a84bcc90eec5d948a506cefa14d47c1555da71686008ba4",
+    "SKILL.md": "sha256:151b936e646aa51db6b01d675021bf2d1ef14b7276f9185a043bbcba296608ca"
+  }
+}

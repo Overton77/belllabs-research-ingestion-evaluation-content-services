@@ -30,6 +30,13 @@ GROUPS: list[tuple[Path, str, bool]] = [
     (REPO_ROOT / "docs" / "adr", "docs/adr", False),
     (REPO_ROOT / "docs" / "knowledge", "docs/knowledge", True),
     (REPO_ROOT / "docs" / "agents", "docs/agents", True),
+    (REPO_ROOT / "docs" / "research", "docs/research", True),
+    (REPO_ROOT / "docs" / "specs" / "fast-track-2026-10", "docs/specs/fast-track-2026-10", True),
+    (
+        REPO_ROOT / "docs" / "specs" / "fast-track-2026-10" / "research",
+        "docs/specs/fast-track-2026-10/research",
+        True,
+    ),
     (REPO_ROOT / "docs", "docs", True),
     (
         REPO_ROOT.parent / "mission-control-general" / "general-mission-control",
@@ -125,8 +132,28 @@ def issues_line() -> str | None:
     return f"|{prefix}:{{{ranges} ({note})}}"
 
 
+def subsystem_line() -> str | None:
+    skip = {REPO_ROOT / "AGENTS.md", REPO_ROOT / "docs" / "AGENTS.md"}
+    found = []
+    for path in sorted(REPO_ROOT.rglob("AGENTS.md")):
+        if path in skip or any(
+            part.startswith(".") or part in {"node_modules", "app"}
+            for part in path.relative_to(REPO_ROOT).parts
+        ):
+            continue
+        found.append(str(path.parent.relative_to(REPO_ROOT)).replace("\\", "/"))
+    return (
+        f"|subsystem AGENTS.md (read the closest one before editing there):{{{','.join(found)}}}"
+        if found
+        else None
+    )
+
+
 def build_block() -> str:
     lines = list(HEADER)
+    sub = subsystem_line()
+    if sub:
+        lines.append(sub)
     for directory, label, with_titles in GROUPS:
         line = group_line(directory, label, with_titles)
         if line:

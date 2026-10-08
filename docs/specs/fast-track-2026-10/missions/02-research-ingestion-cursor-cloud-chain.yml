@@ -1,0 +1,128 @@
+# yaml-language-server: $schema=../../../../src/mission_control/contracts/schemas/mc.mission_manifest.v1.json
+# Mission 2 — Research and ingestion as a Mission Chain (SPEC-04).
+# research (Goal Loop on cursor_cloud, repository workspace) supplies ingestion (Goal Loop on deep_agents).
+# Acceptance fixture for tickets D3 and I2.
+manifest: mission/v1
+
+missions:
+  - key: research
+    title: NAD+ precursors and skeletal muscle — evidence map (Cursor Cloud)
+    application: biotech
+    domain_pack: biotech.research
+    description: >
+      A Cursor Cloud agent works in the research repository, collects human studies on NMN and NR
+      and skeletal muscle, and commits a source manifest and a claim table with citations.
+
+    goals:
+      - key: evidence_map
+        description: Map the human evidence for NMN and NR effects on skeletal muscle function
+        importance: primary
+        criteria:
+          - key: coverage
+            description: Every included study appears in the claim table
+            evidence: [evidence_map]
+            acceptance:
+              assessment:
+                capability: { search: "evidence coverage assessment claim table", kind: assessment, as: coverage_check }
+                threshold: 0.8
+          - key: cited
+            description: Every claim carries a resolvable citation
+            evidence: [evidence_map]
+            acceptance: { schema: claim_table@1 }
+
+    environment:
+      lane: cursor_cloud                     # Cursor-hosted machine; instructions arrive as AGENTS.md and a rule file
+      model: { profile: cursor.default }
+      workspace:
+        repo: { url: https://github.com/Overton77/biotech-research-notes, ref: main }   # pre-created mc/<run> branch at start
+        skills:
+          - { search: "biotech literature review procedure", kind: skill_bundle, as: lit_review }
+          - { pin: "skill.mission-control-observe@0.2.0#sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+      capabilities:
+        - { search: "pubmed literature retrieval", kind: mcp_server, as: pubmed, require: [cursor_cloud] }
+        - { search: "web search extract crawl", kind: mcp_server, as: tavily, require: [cursor_cloud] }
+      agents:                                # subagent profiles projected to .cursor/agents/*.md in the repository
+        - { search: "literature verifier subagent", kind: subagent_profile, as: literature_verifier,
+            overlay: { readonly: true, is_background: false, model: inherit } }
+      hooks:                                 # hook scripts projected to .cursor/hooks.json (command hooks)
+        - { search: "citation presence check", kind: hook_script, as: citation_check, events: [after_file_edit, stop], fail_closed: false }
+      budget: { usd: 30, tokens: 2500000, wall_clock: 5h, tool_calls: 400 }
+      governors: { depth: 1, fan_out: 2, iterations: 8, patience: 2, transfers: 3 }
+      side_effects: [read_only, workspace_write, external_write_reversible]   # branch push is reversible
+
+    program:
+      key: root
+      behavior: goal_loop
+      objective: evidence_map
+      action_space: [pubmed, tavily, literature_verifier]
+      verifier: { independent: true, environment: { lane: deep_agents, model: { profile: frontier.default } } }
+      outputs:
+        - { name: evidence_map, schema: claim_table@1, required: true }     # projected output the chain supplies
+        - { name: branch_ref, schema: git_ref@1, required: true }
+
+    controls:
+      commands_allowed: [pause, resume, cancel, queue_instruction, add_context, fork]
+      subscriptions:
+        - { events: [run.completed, chain_link.released, chain_link.blocked], channel: stream }
+
+  - key: ingestion
+    title: Ingest the accepted evidence map into the Biotech knowledge graph
+    application: biotech
+    domain_pack: biotech.ingestion
+    description: >
+      A Deep Agents loop reads the supplied claim table, validates each claim against the schema
+      context, and applies ingestion intents through the admitted knowledge-graph capability.
+
+    goals:
+      - key: ingested
+        description: Accepted claims are written to the knowledge graph with provenance
+        importance: primary
+        criteria:
+          - key: ingestion_receipt
+            description: Every claim has an applied receipt
+            evidence: [ingestion_receipt]
+            acceptance: { schema: ingestion_receipt@1 }
+          - key: reviewed
+            description: The owner approved the ingestion summary
+            evidence: [ingestion_summary]
+            acceptance: { human: approved }
+
+    environment:
+      lane: deep_agents
+      model: { profile: frontier.default }
+      sandbox: { profile: ingestion.standard, egress: [] }
+      workspace:
+        context:
+          - { search: "biotech schema context muscle aging", kind: context_bundle, as: schema_context }
+      capabilities:
+        - { search: "knowledge graph ingestion claims", kind: mcp_tool, as: kg_ingest }
+        - { search: "claim schema validation", kind: deterministic_executor, as: validate_claims }
+      budget: { usd: 15, tokens: 1500000, wall_clock: 3h, tool_calls: 300 }
+      governors: { depth: 1, fan_out: 1, iterations: 6, patience: 2, transfers: 2 }
+      side_effects: [read_only, workspace_write, external_write_reversible]
+
+    program:
+      key: root
+      behavior: goal_loop
+      objective: ingested
+      action_space: [validate_claims, kg_ingest]
+      inputs:
+        # chain-supplied inputs: the supplier's accepted outputs arrive in the first Context Packet
+        - { name: evidence_map, from: research.evidence_map, expand: materialize }
+        - { name: schema_context, from: root.schema_context, expand: reference }
+      verifier: { independent: true }
+      outputs:
+        - { name: ingestion_receipt, schema: ingestion_receipt@1, required: true }
+        - { name: ingestion_summary, schema: ingestion_summary@1, required: true }
+
+    controls:
+      commands_allowed: [pause, resume, cancel, queue_instruction, add_context]
+      subscriptions:
+        - { events: [human_task.opened, run.completed, chain.completed], channel: stream }
+
+links:
+  # research supplies ingestion once the evidence_map goal is accepted (default condition made explicit here)
+  - { from: research, to: ingestion, kind: supplies, outputs: [evidence_map],
+      on: { goal_accepted: { goal_key: evidence_map } }, on_upstream_cancel: cancel_downstream }
+  # and ingestion also waits for research execution to finish (branch pushed) before it starts
+  - { from: research, to: ingestion, kind: depends_on, on: execution_complete }

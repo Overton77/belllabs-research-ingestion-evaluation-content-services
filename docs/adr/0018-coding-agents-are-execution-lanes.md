@@ -3,8 +3,9 @@ type: Decision Record
 title: "Claude Code, Codex and Cursor are execution lanes behind the one harness protocol"
 description: "The canonical pack models only Cursor SDK Cloud as a coding lane and treats Claude Code and Codex as coordinator hosts. The owner's intent is that all three are controllable by Mission Control as lanes implementing the…"
 tags: [mission-control, adr, decision]
-status: proposed
+status: accepted
 source: interview 2026-10-07 (Q7); restores intent from the historical MISSION_CONTROL_PRESPEC.md section 10.3 and MISSION_CONTROL_SPEC.md sections 10.5 and 17
+supplement: accepted for the Cursor lanes by ADR-0030 (2026-10-07); Claude Agent SDK and Codex lanes remain proposed
 ---
 
 # Claude Code, Codex and Cursor are execution lanes behind the one harness protocol
