@@ -123,8 +123,11 @@ def test_registry_resolves_profiles_and_refuses_unknown_and_duplicates() -> None
 def test_unqualified_lanes_are_refused_at_admission_unless_policy_allows() -> None:
     registry = _worker_registry()
     assert registry.admit("deep_agents") is registry.for_profile("deep_agents")
-    with pytest.raises(LaneNotQualified, match="cursor_local"):
+    with pytest.raises(LaneNotQualified, match="cursor_local") as refused:
         registry.admit("cursor_local")
+    # The refusal names the local-proof flag and the qualification command.
+    assert "MISSION_CONTROL_ALLOW_UNQUALIFIED_LANES=true" in str(refused.value)
+    assert "make lane-qualify PROFILE=cursor_local LIVE=1" in str(refused.value)
     local_proof = _worker_registry(allow_unqualified=True)
     assert isinstance(local_proof.admit("cursor_cloud"), CursorLaneStub)
 
