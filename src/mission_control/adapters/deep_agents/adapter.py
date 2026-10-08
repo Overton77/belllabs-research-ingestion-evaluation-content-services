@@ -249,6 +249,19 @@ class DeepAgentRuntimeAdapter:
             # closed as `in_doubt` with typed candidates.
             classified = await _classify(checkpointer, agent, plan)
             source_key = classified.source_key
+            # FT-F2: a replacement turn continues the interrupted (or just finished) lineage
+            # with the injected item as one more user message, never re-running the prompt.
+            follow_up = invocation.follow_up
+            captured_as = classified
+            if follow_up is not None:
+                follow_message = {"role": "user", "content": follow_up.content}
+                if classified.kind == CheckpointClassification.NOT_SUBMITTED:
+                    state["messages"] = [
+                        {"role": "user", "content": user_prompt},
+                        follow_message,
+                    ]
+                else:
+                    captured_as = _follow_up_capture(classified, plan)
             recorder = await self._frame_recorder(invocation, binding, plan, resolved_secrets)
             thread_config: RunnableConfig = {
                 "configurable": {
@@ -275,7 +288,29 @@ class DeepAgentRuntimeAdapter:
                     prior_messages = cast(
                         list[BaseMessage], prior_snapshot.values.get("messages", [])
                     )
-                if classified.kind == CheckpointClassification.TERMINAL_UNOBSERVED:
+                if (
+                    follow_up is not None
+                    and classified.kind != CheckpointClassification.NOT_SUBMITTED
+                ):
+                    follow_config: RunnableConfig = {
+                        "configurable": {
+                            **thread_config["configurable"],
+                            "checkpoint_id": classified.leaf_id,
+                        },
+                        "metadata": plan.invocation_metadata(),
+                        "callbacks": [disclosure_observer, model_calls],
+                    }
+                    result = await _invoke(
+                        agent,
+                        {"messages": [follow_message]},
+                        context=materialized.context,
+                        config=follow_config,
+                        recorder=recorder,
+                    )
+                    snapshot = await agent.aget_state(
+                        await _own_result_config(checkpointer, plan, captured_as)
+                    )
+                elif classified.kind == CheckpointClassification.TERMINAL_UNOBSERVED:
                     # Terminal reconstruction: the result is the stamped leaf's state.
                     assert classified.leaf_snapshot is not None
                     snapshot = classified.leaf_snapshot
@@ -324,7 +359,7 @@ class DeepAgentRuntimeAdapter:
                     source_key,
                     snapshot_config=snapshot.config,
                     pending=bool(snapshot.next or snapshot.interrupts),
-                    classification=classified.kind,
+                    classification=captured_as.kind,
                     summary={
                         "state_keys": sorted(actual_state),
                         "message_count": len(messages),
@@ -946,6 +981,30 @@ async def _classify(
         ),
         source_key,
         leaf_id=leaf_id,
+        leaf_snapshot=snapshot,
+    )
+
+
+def _follow_up_capture(classified: _Classified, plan: CheckpointInvocationPlan) -> _Classified:
+    """How a replacement turn's result is verified (FT-F2).
+
+    A leaf this attempt wrote itself (it interrupted its own turn) is part of the attempt's own
+    lineage, which then runs unbroken from the expected source: verify it like a submission.
+    A leaf an earlier attempt wrote is resumed like an interrupted unit: pinned to that leaf.
+    """
+
+    snapshot = classified.leaf_snapshot
+    own = (
+        snapshot is not None
+        and plan.attempt_ref is not None
+        and (snapshot.metadata or {}).get(STAMP_ATTEMPT_REF) == plan.attempt_ref
+    )
+    if own:
+        return _Classified(CheckpointClassification.NOT_SUBMITTED, classified.source_key)
+    return _Classified(
+        CheckpointClassification.INTERRUPTED,
+        classified.source_key,
+        leaf_id=classified.leaf_id,
         leaf_snapshot=snapshot,
     )
 

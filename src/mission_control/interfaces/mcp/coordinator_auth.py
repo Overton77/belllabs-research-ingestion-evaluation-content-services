@@ -66,6 +66,8 @@ class VerifiedAccessTokenPrincipalResolver:
             roles=roles,
             permissions=permissions,
             request_scope=request_scope,
+            sponsorship_refs=_claim_set(claims, "sponsorship_refs"),
+            approval_refs=_claim_set(claims, "approval_refs"),
         )
 
 

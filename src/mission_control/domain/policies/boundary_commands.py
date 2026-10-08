@@ -19,23 +19,37 @@ from mission_control.domain.policies.contracts import (
     CANCEL_SEQUENCE_SPACE,
     EXECUTION_SEQUENCE_SPACE,
     FAMILY_BOUNDARY_COMMAND_KINDS,
+    MAILBOX_COMMAND_KINDS,
+    AddContextAction,
     BoundaryCommandReceipt,
     BoundaryCommandRecord,
     BoundaryRejectionReason,
     BoundaryTarget,
     CancelAction,
+    InterruptAndInjectAction,
     LifecycleCommand,
     PauseAction,
+    QueueInstructionAction,
     ReceiptState,
     ReconcileUnitAction,
     ResumeAction,
     RunProjection,
     SatisfyWaitAction,
+    mailbox_sequence_space,
     self_issued_sequence_space,
 )
 
 RUN_CONTROL_RECORDER = "run_control"
-BoundaryAction = PauseAction | ResumeAction | SatisfyWaitAction | CancelAction | ReconcileUnitAction
+BoundaryAction = (
+    PauseAction
+    | ResumeAction
+    | SatisfyWaitAction
+    | CancelAction
+    | ReconcileUnitAction
+    | QueueInstructionAction
+    | AddContextAction
+    | InterruptAndInjectAction
+)
 
 # Reducer rejection codes mapped onto the closed rejection-reason set. Anything else that
 # the reducer rejects at acceptance is `not_applicable` (the command cannot apply to the
@@ -59,6 +73,12 @@ def is_boundary_command(action: object) -> bool:
 
 def is_family_boundary_command(action: object) -> bool:
     return getattr(action, "kind", None) in FAMILY_BOUNDARY_COMMAND_KINDS
+
+
+def is_mailbox_command(action: object) -> bool:
+    """FT-F1: `queue_instruction` / `add_context`, delivered from the Run's mailbox."""
+
+    return getattr(action, "kind", None) in MAILBOX_COMMAND_KINDS
 
 
 def rejection_reason_for(reason_code: str) -> BoundaryRejectionReason:
@@ -88,6 +108,18 @@ def boundary_target_for(
             sequence_space=f"unit:{action.unit_key}:gen:{action.execution_generation}",
         )
     target = projection.execution_target
+    if isinstance(action, QueueInstructionAction | AddContextAction | InterruptAndInjectAction):
+        # FT-F1: the family boundary of the targeted Generation takes the entry; before the
+        # family's start fact binds a target, the entry waits for the first boundary.
+        return BoundaryTarget(
+            kind="family",
+            target_ref=target.family_workflow_id if target is not None else "",
+            root_workflow_id=target.root_workflow_id if target is not None else None,
+            family_workflow_id=target.family_workflow_id if target is not None else None,
+            execution_epoch=target.execution_epoch if target is not None else 1,
+            execution_generation=action.generation,
+            sequence_space=mailbox_sequence_space(action.generation),
+        )
     if target is None:
         return BoundaryTarget(kind="run_control")
     if isinstance(action, CancelAction):
@@ -185,6 +217,8 @@ def run_control_boundary_receipts(
     - A family-targeted command: `accepted` only; delivery and application follow.
     - A cancel with a target: `accepted`; `applied` when the terminal outcome is recorded.
     - `reconcile_unit`: `accepted`; the hint delivery and the operation boundary follow.
+    - `queue_instruction` / `add_context` (FT-F1): `accepted` then `queued`; the mailbox
+      entry is written in the same commit and the family boundary delivers it.
     """
 
     when = command.occurred_at
@@ -195,6 +229,18 @@ def run_control_boundary_receipts(
         recorded_by=RUN_CONTROL_RECORDER,
         recorded_at=when,
     )
+    if is_mailbox_command(command.action):
+        return (
+            accepted,
+            receipt(
+                command,
+                ordinal=2,
+                state=ReceiptState.QUEUED,
+                recorded_by=RUN_CONTROL_RECORDER,
+                detail=f"queued in {target.sequence_space} for the next family boundary",
+                recorded_at=when,
+            ),
+        )
     if target.kind != "run_control":
         return (accepted,)
     delivered = receipt(

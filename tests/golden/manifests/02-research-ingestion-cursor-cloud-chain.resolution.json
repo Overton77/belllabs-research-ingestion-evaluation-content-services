@@ -34,7 +34,7 @@
      "pointer": "/missions/0/environment/workspace/skills/1",
      "resolved": {
       "capability_id": "skill.mission-control-observe",
-      "digest": "sha256:7bad40eb43cbd0bc4397b8a0426bbf43bd9a4ac63bdd47e91c1ffd2dabeacc57",
+      "digest": "sha256:904fac5d64f6cbb8cd6674eed445808270c2f3545a5d20eed79b46ff3d68921a",
       "version": "0.2.0"
      },
      "role": "skill",
@@ -314,12 +314,12 @@
  ],
  "lowering": [
   {
-   "blueprint_digest": "sha256:e0528bcce68a33d239c809d5622df767e0bf5066f872641fcb1a4321d62deb3a",
-   "definition_digest": "sha256:3a5662f8b9dfa10c0ac51c0969834a3c8de97291c6be13aa5a13f9cbf7dbbed3",
+   "blueprint_digest": "sha256:b8820c579dee84342a077284b47b620ecc936a432a0b4b6f3df60f77ff9c4cdc",
+   "definition_digest": "sha256:b659ef8f4beed0f83aaf85c498d443fc93e15c3b9e6e14570137f0d660af8ff4",
    "family": "GoalDirected",
    "lowering_version": "mc.manifest-lowering/1",
    "mission_key": "research",
-   "runtime_profile_digest": "sha256:d03fc884b5b4e9def1a4c631a256b390a25162f3e1ffc4d375df6a0b32b98ae8"
+   "runtime_profile_digest": "sha256:43bfbaefa0983122e60ca656a06094e55a327ecd1e0d9ab4056f2924b2663bb1"
   },
   {
    "blueprint_digest": "sha256:52857a51fcbb3e60c4359103edf4784bfcb5ec0702c16ef06da7c2f2954c4a63",
@@ -749,9 +749,9 @@
    },
    "result": {
     "capability_id": "skill.mission-control-observe",
-    "digest": "sha256:7bad40eb43cbd0bc4397b8a0426bbf43bd9a4ac63bdd47e91c1ffd2dabeacc57",
+    "digest": "sha256:904fac5d64f6cbb8cd6674eed445808270c2f3545a5d20eed79b46ff3d68921a",
     "exact_ref": {
-     "digest": "sha256:7bad40eb43cbd0bc4397b8a0426bbf43bd9a4ac63bdd47e91c1ffd2dabeacc57",
+     "digest": "sha256:904fac5d64f6cbb8cd6674eed445808270c2f3545a5d20eed79b46ff3d68921a",
      "kind": "skill",
      "lifecycle_status": "published",
      "logical_id": "skill.mission-control-observe",
@@ -760,7 +760,7 @@
      "schema_version": "1"
     },
     "kind": "skill",
-    "pin": "skill.mission-control-observe@0.2.0#sha256:7bad40eb43cbd0bc4397b8a0426bbf43bd9a4ac63bdd47e91c1ffd2dabeacc57",
+    "pin": "skill.mission-control-observe@0.2.0#sha256:904fac5d64f6cbb8cd6674eed445808270c2f3545a5d20eed79b46ff3d68921a",
     "supported_profiles": [
      "deep_agents",
      "cursor_local",
@@ -987,7 +987,7 @@
     "skill.biotech-literature-review@1.0.0#sha256:a5f52a8d5b4dab28700851bbdcc04c03e330fe0f0d860bea38498b41345aae48",
     "skill.biomcp@0.9.1#sha256:bf0c38d379bb838c460c62e1550ecd8824c341cd667311e3e8371821521680c6",
     "skill.mission-control-compose@0.2.0#sha256:5f2bd8ec85e952cfd27b1a6512885273567d020f5a3e49b11f8b5d6c2fbe321c",
-    "skill.mission-control-intervene@0.1.0#sha256:300a72b104003885265139deba17fb099a7b2b60f6d7a28811949327c3abc5e1"
+    "skill.mission-control-intervene@0.4.0#sha256:ec468632c9bcbb56062c5bbadc71a5a75108253290640edf8eda332cfb3a84bf"
    ],
    "lanes": [
     "deep_agents"

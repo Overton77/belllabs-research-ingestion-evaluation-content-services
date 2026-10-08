@@ -4,7 +4,7 @@
   "version": "0.2.0",
   "service_contract_range": ">=0.1.0,<0.2.0",
   "files": {
-    "SKILL.md": "sha256:7f22fb7de206b18a3e96961f2af859007682833135587363e43e7801c14df0d3",
+    "SKILL.md": "sha256:57beec5e2269f859ef4d2fe9095850f78feb8e7e3a8f1c50fd5e7e7705a5e6ce",
     "references/transcript-format.md": "sha256:64d81e092c1792c5a5213dd6a9bb7b1585ad2a4a5fb14dc85aa3cc1fbc9bab84"
   }
 }

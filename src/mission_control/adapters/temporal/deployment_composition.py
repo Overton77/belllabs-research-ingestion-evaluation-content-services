@@ -129,6 +129,7 @@ from mission_control.adapters.postgres.orchestration.orchestration_binding_repos
 from mission_control.adapters.postgres.orchestration.stagegraph_repository import (
     PostgresStageGraphOperationTemplateRepository,
 )
+from mission_control.adapters.postgres.run_control.mailbox import PostgresCommandMailbox
 from mission_control.adapters.postgres.run_control.run_control_repository import (
     PostgresRunControlRepository,
 )
@@ -184,9 +185,11 @@ from mission_control.application.coordinator.coordinator_results import (
 )
 from mission_control.application.execution.harness.deep_agents_harness import DeepAgentsHarness
 from mission_control.application.execution.harness.hook_callbacks import HookCallbackService
+from mission_control.application.execution.harness.inject import InterruptAndInjectService
 from mission_control.application.execution.harness.lane_turns import LaneTurnService
 from mission_control.application.execution.harness.protocol import AgentHarness
 from mission_control.application.execution.harness.registry import LaneRegistry
+from mission_control.application.execution.mailbox import MailboxDeliveryService
 from mission_control.application.execution.operations.checkpoint_lineage import DEFAULT_CLAIM_LEASE
 from mission_control.application.execution.operations.journaled_operation_execution import (
     JournaledOperationExecutionCoordinator,
@@ -209,7 +212,7 @@ from mission_control.application.programs.service import (
     RunControlLifecycleGateway,
     orchestration_lifecycle_actor,
 )
-from mission_control.application.recovery.run_forks import ForkReuseResolver
+from mission_control.application.recovery.run_forks import ForkReuseOracle, ForkReuseResolver
 from mission_control.application.subordinates.parent_completion import (
     AdmissionRule,
     AsyncChildCompletion,
@@ -834,10 +837,24 @@ class ProductionWorkerActivityCompositionFactory:
             cursor_local=cursor[0] if cursor is not None else None,
             cursor_cloud=cloud[0] if cloud is not None else None,
         )
+        # FT-F1: the command mailbox; Delivery Reports name what the registered lane declares.
+        mailbox = MailboxDeliveryService(
+            PostgresCommandMailbox(postgres_pool),
+            run_control,
+            describe=lambda profile: (
+                lanes.describe(profile) if profile in lanes.profiles() else None
+            ),
+            # FT-F4: a unit a fork reuses runs no turn and takes no queued content.
+            reuse=ForkReuseOracle(PostgresForkMaterializationStore(postgres_pool)),
+        )
         service = OperationExecutionService(
             lanes=lanes,
             # FT-F3: immediate-cancel Delivery Report milestones on the run's Stop Fence.
             stop_fences=PostgresStopFenceRepository(postgres_pool),
+            # FT-F1: delivered mailbox entries are consumed when their turn starts.
+            mailbox=mailbox,
+            # FT-F2: interrupt_and_inject by the lane's declared semantics.
+            injections=InterruptAndInjectService(mailbox, packs=context_packs),
             authority=RunControlOperationAuthority(run_control, control_plane),
             bindings=bindings,
             runtime=adapter,
@@ -917,6 +934,7 @@ class ProductionWorkerActivityCompositionFactory:
                 ),
                 operation_heartbeats=heartbeats,
                 context_packs=context_packs,
+                mailbox=mailbox,
             ),
             stagegraph=StageGraphCoordinatorDependencies(
                 run_control=run_control,
@@ -925,6 +943,7 @@ class ProductionWorkerActivityCompositionFactory:
                 templates=PostgresStageGraphOperationTemplateRepository(postgres_pool),
                 operation_heartbeats=heartbeats,
                 context_packs=context_packs,
+                mailbox=mailbox,
             ),
             completion=completion,
         )

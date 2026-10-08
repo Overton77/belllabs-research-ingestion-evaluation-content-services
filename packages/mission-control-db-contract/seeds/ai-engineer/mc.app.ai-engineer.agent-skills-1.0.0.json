@@ -502,10 +502,10 @@
             ],
             "body_summary": "Router for Mission Control work through missionctl. Use when a task authors or compiles a Mission Manifest, searches or pins catalog capabilities (skills, MCP servers, hooks, subagents, plugins), inspects a run or chain or reads a transcript, queues or injects an instruction, cancels, forks or reconciles a run, subscribes to mission events, or chains missions. Routes to the mission-control-author, -catalog, -observe, -intervene and -compose bundles.",
             "bundle_ref": {
-              "digest": "sha256:a574862104a8d5a4e3784dd7ff37514f0514cc439aaf5bcea9b714653cd6da79",
+              "digest": "sha256:2cecef16bc9ffc8575b1e826bf988e8031dadb70cb483c81cda12f4b5e8b0c87",
               "media_type": "application/vnd.mc.capability-bundle+json",
-              "size_bytes": 12658,
-              "uri": "capability-bundles://ai-engineer/skill_bundle/skill.mission-control/0.3.0/a574862104a8d5a4e3784dd7ff37514f0514cc439aaf5bcea9b714653cd6da79"
+              "size_bytes": 12741,
+              "uri": "capability-bundles://ai-engineer/skill_bundle/skill.mission-control/0.3.0/2cecef16bc9ffc8575b1e826bf988e8031dadb70cb483c81cda12f4b5e8b0c87"
             },
             "compatibility": {
               "executables": [],
@@ -526,7 +526,7 @@
                 "size_bytes": 3155
               },
               {
-                "digest": "sha256:b323af9443648e89c4f6d522e3c4322ca046b361c81bece509d9586908351c1d",
+                "digest": "sha256:a1de4d044267d0e069b9fecafc8e598ae3be1721ff6a33c121829a16b3dfd93f",
                 "executable": false,
                 "path": "manifest.json",
                 "size_bytes": 569
@@ -538,10 +538,10 @@
                 "size_bytes": 1740
               },
               {
-                "digest": "sha256:83980c6a81f7f6586e48038ac9b177c9899e661840c2d3d03392d82a3133b5c1",
+                "digest": "sha256:18cd8bd692d16d06311c5700112c4af1bc83a3ecd6111cf909e44b0f3187e29e",
                 "executable": false,
                 "path": "references/protocol.md",
-                "size_bytes": 7194
+                "size_bytes": 7277
               }
             ],
             "frontmatter": {
@@ -580,7 +580,7 @@
             },
             "kind": "skill",
             "logical_id": "skill.mission-control",
-            "manifest_digest": "sha256:a574862104a8d5a4e3784dd7ff37514f0514cc439aaf5bcea9b714653cd6da79",
+            "manifest_digest": "sha256:2cecef16bc9ffc8575b1e826bf988e8031dadb70cb483c81cda12f4b5e8b0c87",
             "maturity": "qualified",
             "required_capabilities": [],
             "review_status": "approved",
@@ -599,7 +599,7 @@
           "published_at": "2026-10-08T00:00:00Z",
           "published_by": "seed:mission-control-catalog",
           "ref": {
-            "digest": "sha256:1398308a4e109ff4daca1611162f88e53d8d884dac30ad04650a24d00b7b16ab",
+            "digest": "sha256:fbe0a86c68a9435d00a34a54f8e482eeedc23d12041650b8acaf4f3571bc3f78",
             "kind": "skill",
             "lifecycle_status": "published",
             "logical_id": "skill.mission-control",
@@ -609,7 +609,7 @@
           },
           "retired_at": null
         },
-        "manifest_digest": "sha256:aefcc3fef6831bc48b22ae680a599e8d2a6aa48fcb6afadd7ffefb69cf62046d",
+        "manifest_digest": "sha256:e5a316d21d121b6e0958604a319b3bd57a16f284937dac76bbe4d0f642426bb7",
         "manifest_ref": "mc-catalog://definition/skill/skill.mission-control/1",
         "required_compatibility": [
           ">=1.0.0 <2.0.0"
@@ -1198,10 +1198,10 @@
             ],
             "body_summary": "Change a running Mission Control run with missionctl commands - queue an instruction or context for the next turn or iteration, interrupt and inject, pause, resume, cancel (normal or immediate), snapshot, fork from a snapshot with an instruction, or reconcile an in-doubt unit. Use when a human wants to steer, stop, branch or repair a run that is already running.",
             "bundle_ref": {
-              "digest": "sha256:a14bf413437b142a91b25c9800481cdcc2f721591e690490dad4091d19d43709",
+              "digest": "sha256:3acee7305f6c892d0febce5bc580e919d6ce843be85408a13163d7250daa9d95",
               "media_type": "application/vnd.mc.capability-bundle+json",
-              "size_bytes": 8721,
-              "uri": "capability-bundles://ai-engineer/skill_bundle/skill.mission-control-intervene/0.1.0/a14bf413437b142a91b25c9800481cdcc2f721591e690490dad4091d19d43709"
+              "size_bytes": 12358,
+              "uri": "capability-bundles://ai-engineer/skill_bundle/skill.mission-control-intervene/0.4.0/3acee7305f6c892d0febce5bc580e919d6ce843be85408a13163d7250daa9d95"
             },
             "compatibility": {
               "executables": [],
@@ -1216,22 +1216,22 @@
             "description": "Change a running Mission Control run with missionctl commands - queue an instruction or context for the next turn or iteration, interrupt and inject, pause, resume, cancel (normal or immediate), snapshot, fork from a snapshot with an instruction, or reconcile an in-doubt unit. Use when a human wants to steer, stop, branch or repair a run that is already running.",
             "file_manifest": [
               {
-                "digest": "sha256:380f93e97baf0e296852d4b11ef54f70d42ba9e670700f4f11d22652aa464eb9",
+                "digest": "sha256:c027ce45879a87b3ff40474df59f0580d1ee3e235ac09cee28ebb5aa44acc63d",
                 "executable": false,
                 "path": "SKILL.md",
-                "size_bytes": 4163
+                "size_bytes": 6269
               },
               {
-                "digest": "sha256:503f2fbec8e2d64322366e72e8cf9890a0b4ab54d71738fd17f86694c6d45dfc",
+                "digest": "sha256:e1a66331dfb460d97b3520b20795a78ab76853cbf584dcf8f5908166a0dd4b95",
                 "executable": false,
                 "path": "manifest.json",
                 "size_bytes": 374
               },
               {
-                "digest": "sha256:40a738db53cae5a947b3fcb015e67a04e207bd4bd0d916a48987ef560e82f5e3",
+                "digest": "sha256:925b397d070b0941d5a4e74af577bbafc4ea9826b4a9d251f37c9cea831a3ca0",
                 "executable": false,
                 "path": "references/command-templates.md",
-                "size_bytes": 4184
+                "size_bytes": 5715
               }
             ],
             "frontmatter": {
@@ -1270,7 +1270,7 @@
             },
             "kind": "skill",
             "logical_id": "skill.mission-control-intervene",
-            "manifest_digest": "sha256:a14bf413437b142a91b25c9800481cdcc2f721591e690490dad4091d19d43709",
+            "manifest_digest": "sha256:3acee7305f6c892d0febce5bc580e919d6ce843be85408a13163d7250daa9d95",
             "maturity": "qualified",
             "required_capabilities": [],
             "review_status": "approved",
@@ -1282,14 +1282,14 @@
               "locator": "repo://skills/mission-control-intervene",
               "source": "local",
               "upstream_identity": "skill.mission-control-intervene",
-              "upstream_version": "0.1.0"
+              "upstream_version": "0.4.0"
             },
             "title": "mission-control-intervene"
           },
           "published_at": "2026-10-08T00:00:00Z",
           "published_by": "seed:mission-control-catalog",
           "ref": {
-            "digest": "sha256:2873358168e0194921791219d71de845ead9cd6e76dad162ec383ca3be025b8c",
+            "digest": "sha256:89cae43d3e7bd38e40015847ab9243512975203b06719d6b25c4f12b522781d8",
             "kind": "skill",
             "lifecycle_status": "published",
             "logical_id": "skill.mission-control-intervene",
@@ -1299,7 +1299,7 @@
           },
           "retired_at": null
         },
-        "manifest_digest": "sha256:92579a19a3c4f6f7dd1ac2b73c7fada3e0964aab9e5a1d8215951474e0d4d33f",
+        "manifest_digest": "sha256:a0b1db50909143ea2818b7074e1f0fe17d0c81ea054574dfafed6474fd53c2e1",
         "manifest_ref": "mc-catalog://definition/skill/skill.mission-control-intervene/1",
         "required_compatibility": [
           ">=1.0.0 <2.0.0"
@@ -1369,10 +1369,10 @@
             ],
             "body_summary": "Inspect Mission Control runs and chains, list and search runs, read a run's transcript, watch mission events and register subscriptions (webhook or stream) with missionctl. Use when a human asks what a run is doing, whether a control took effect, what an agent did, why a mission stopped, or wants callbacks when a human task opens or a run completes.",
             "bundle_ref": {
-              "digest": "sha256:acf68fba5ac0c2f193f73d92ecb4dc0ee2ae8439b913cfc25743267949d1ce3d",
+              "digest": "sha256:d174c71d2d0e7a93ed25cfdb6a7b28b7232c920599451573b84052fa5810f4d5",
               "media_type": "application/vnd.mc.capability-bundle+json",
-              "size_bytes": 7156,
-              "uri": "capability-bundles://ai-engineer/skill_bundle/skill.mission-control-observe/0.2.0/acf68fba5ac0c2f193f73d92ecb4dc0ee2ae8439b913cfc25743267949d1ce3d"
+              "size_bytes": 7770,
+              "uri": "capability-bundles://ai-engineer/skill_bundle/skill.mission-control-observe/0.2.0/d174c71d2d0e7a93ed25cfdb6a7b28b7232c920599451573b84052fa5810f4d5"
             },
             "compatibility": {
               "executables": [],
@@ -1387,13 +1387,13 @@
             "description": "Inspect Mission Control runs and chains, list and search runs, read a run's transcript, watch mission events and register subscriptions (webhook or stream) with missionctl. Use when a human asks what a run is doing, whether a control took effect, what an agent did, why a mission stopped, or wants callbacks when a human task opens or a run completes.",
             "file_manifest": [
               {
-                "digest": "sha256:7f22fb7de206b18a3e96961f2af859007682833135587363e43e7801c14df0d3",
+                "digest": "sha256:57beec5e2269f859ef4d2fe9095850f78feb8e7e3a8f1c50fd5e7e7705a5e6ce",
                 "executable": false,
                 "path": "SKILL.md",
-                "size_bytes": 4971
+                "size_bytes": 5585
               },
               {
-                "digest": "sha256:98ceca3ed939cefe4b1c447d36627110506c773d73cdd8c6c8dba55388493ae9",
+                "digest": "sha256:6b24aea1954a49d37322d39d6d6b16cf2ab9b7ef41ed168eab025430e7e3bef7",
                 "executable": false,
                 "path": "manifest.json",
                 "size_bytes": 372
@@ -1441,7 +1441,7 @@
             },
             "kind": "skill",
             "logical_id": "skill.mission-control-observe",
-            "manifest_digest": "sha256:acf68fba5ac0c2f193f73d92ecb4dc0ee2ae8439b913cfc25743267949d1ce3d",
+            "manifest_digest": "sha256:d174c71d2d0e7a93ed25cfdb6a7b28b7232c920599451573b84052fa5810f4d5",
             "maturity": "qualified",
             "required_capabilities": [],
             "review_status": "approved",
@@ -1460,7 +1460,7 @@
           "published_at": "2026-10-08T00:00:00Z",
           "published_by": "seed:mission-control-catalog",
           "ref": {
-            "digest": "sha256:f3c2b75ea598b5810918d41fcf1c6a40fbe5ea434c2cb40b0c4596f34aff839d",
+            "digest": "sha256:72138bcf2eb5b23b1c7e6a0237b1ed21ea30ce96e12c9976ff6b66db64f0231e",
             "kind": "skill",
             "lifecycle_status": "published",
             "logical_id": "skill.mission-control-observe",
@@ -1470,7 +1470,7 @@
           },
           "retired_at": null
         },
-        "manifest_digest": "sha256:e7aa0d89b6cb3ad48b3fed2208c3f710970fa63e0462e59be4917d72e1567884",
+        "manifest_digest": "sha256:06b2000a9beb8ea4cb0bb128867ca3f0000f9e8771c5bdf06470799f78d06728",
         "manifest_ref": "mc-catalog://definition/skill/skill.mission-control-observe/1",
         "required_compatibility": [
           ">=1.0.0 <2.0.0"

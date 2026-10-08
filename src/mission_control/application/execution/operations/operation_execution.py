@@ -13,11 +13,17 @@ from typing import Literal, Protocol
 
 from mission_control.application.authoring.service import ControlPlaneService
 from mission_control.application.execution.harness.deep_agents_harness import DeepAgentsHarness
+from mission_control.application.execution.harness.inject import (
+    InjectionParked,
+    InterruptAndInjectService,
+    TurnRecord,
+)
 from mission_control.application.execution.harness.protocol import OperationLane
 from mission_control.application.execution.harness.registry import (
     LaneRegistry,
     lane_profile_for,
 )
+from mission_control.application.execution.mailbox import MailboxDeliveryService
 from mission_control.application.execution.operations.checkpoint_lineage import (
     CheckpointLineageService,
     UnitAttempt,
@@ -635,6 +641,8 @@ class OperationExecutionService:
         children: AsyncChildCancellationPort | None = None,
         lanes: LaneRegistry | None = None,
         stop_fences: StopFenceRepository | None = None,
+        mailbox: MailboxDeliveryService | None = None,
+        injections: InterruptAndInjectService | None = None,
     ) -> None:
         self._authority = authority
         self._bindings = bindings
@@ -644,6 +652,12 @@ class OperationExecutionService:
         self._lanes = lanes if lanes is not None else LaneRegistry([DeepAgentsHarness(runtime)])
         # FT-F3: the immediate cancel's Delivery Report milestones (no-op without a fence).
         self._stop_fences = stop_fences
+        # FT-F1: the lane boundary consumes delivered mailbox entries when the turn that
+        # carries them starts, and completes their Commands when it settles.
+        self._mailbox = mailbox
+        # FT-F2: interrupt_and_inject by the lane's semantics while a lineage-qualified turn
+        # runs (cancel_and_replace with uncertain-effect settlement, or cooperative_inject).
+        self._injections = injections
         self._sandbox = sandbox
         self._assets = assets
         self._mcp = mcp
@@ -1419,6 +1433,7 @@ class OperationExecutionService:
         started_at = datetime.now(UTC)
         observed_usage = RuntimeUsage()
         capture: CheckpointCapture | None = None
+        turns = TurnRecord()
         report_phase("dispatching")
         try:
             self._validate_policy_support(request)
@@ -1426,10 +1441,24 @@ class OperationExecutionService:
             await self._mcp.verify_servers(binding)
             resolved_secrets = await self._secrets.resolve(binding.secret_refs)
             invocation = await self._invocation(request, binding, plan)
+            await self._mailbox_turn_started(request, binding)
             runtime_invoked = True
             report_phase("cognition")
             try:
-                runtime_result = await self._lane(binding).execute(invocation, resolved_secrets)
+                runtime_result = await self._execute_turns(
+                    request, binding, claim, admitted, invocation, resolved_secrets, turns
+                )
+            except InjectionParked as parked:
+                # FT-F2: the interrupted turn's uncertain effects did not settle; no
+                # replacement runs and the unit parks with a typed incident.
+                assert admitted is not None
+                return await self._in_doubt(
+                    binding,
+                    claim,
+                    admitted,
+                    reason="unsettled_effect_claims",
+                    unsettled_effect_ids=parked.pending_effect_ids,
+                )
             except asyncio.CancelledError:
                 # REQ-CP-EXEC-008 step 3: a requested Temporal cancel reached this Activity
                 # through its heartbeat and interrupted the in-flight step. The holder
@@ -1533,7 +1562,7 @@ class OperationExecutionService:
                 result_checkpoint=capture.result_key if capture is not None else None,
             )
         report_phase("settling")
-        return await self._settle(
+        settled = await self._settle(
             binding,
             claim,
             settlement,
@@ -1543,6 +1572,115 @@ class OperationExecutionService:
             plan=plan if capture is not None else None,
             capture=capture,
         )
+        await self._mailbox_turn_settled(
+            request,
+            binding,
+            settlement,
+            runtime_invoked=runtime_invoked,
+            injected=tuple(turns.delivery_keys),
+        )
+        return settled
+
+    async def _execute_turns(
+        self,
+        request: OperationExecutionRequest,
+        binding: OperationExecutionBinding,
+        claim: OperationEffectClaim | None,
+        admitted: UnitAttempt | None,
+        invocation: RuntimeInvocation,
+        resolved_secrets: Mapping[str, str],
+        turns: TurnRecord,
+    ) -> RuntimeResult:
+        """The attempt's turn; with injections composed on a lineage-qualified unit, an
+        admitted `interrupt_and_inject` interrupts and replaces it (FT-F2)."""
+
+        lane = self._lane(binding)
+        if (
+            self._injections is None
+            or admitted is None
+            or request.runtime_unit is None
+            or self._mailbox is None
+        ):
+            return await lane.execute(invocation, resolved_secrets)
+
+        async def unsettled() -> tuple[str, ...]:
+            if self._journal is None or claim is None:
+                return ()
+            return await self._journal.unsettled_effect_ids(binding, claim)
+
+        return await self._injections.run_turn(
+            request=request,
+            lane=lane,
+            invocation=invocation,
+            secrets=resolved_secrets,
+            unsettled=unsettled,
+            record=turns,
+        )
+
+    async def _mailbox_turn_started(
+        self, request: OperationExecutionRequest, binding: OperationExecutionBinding
+    ) -> None:
+        """FT-F1: the turn carrying delivered mailbox entries starts; they are consumed once
+        (a retried attempt of the same bound operation finds them already consumed)."""
+
+        if self._mailbox is None:
+            return
+        deep = request.deep_agent_binding
+        await self._mailbox.turn_started(
+            request.request_scope,
+            request.identity.run_id,
+            delivery_key=request.idempotency_key,
+            lane_profile=self._lane(binding).describe().lane_profile,
+            session_ref=(
+                deep.cognitive_session_namespace if deep is not None else request.session_id
+            ),
+        )
+
+    async def _mailbox_turn_settled(
+        self,
+        request: OperationExecutionRequest,
+        binding: OperationExecutionBinding,
+        settlement: OperationSettlement,
+        *,
+        runtime_invoked: bool,
+        injected: tuple[str, ...] = (),
+    ) -> None:
+        if self._mailbox is None:
+            return
+        try:
+            for key in injected:
+                # FT-F2: the replacement turn settled; the injected Commands complete.
+                await self._mailbox.turn_settled(
+                    request.request_scope,
+                    request.identity.run_id,
+                    delivery_key=key,
+                    lane_profile=self._lane(binding).describe().lane_profile,
+                    succeeded=settlement.status == "completed",
+                    turn_ref=settlement.provider_run_id,
+                )
+            if not runtime_invoked:
+                # SPEC-06: a turn that failed before it started returns its entries.
+                await self._mailbox.turn_not_started(
+                    request.request_scope,
+                    request.identity.run_id,
+                    delivery_key=request.idempotency_key,
+                )
+                return
+            await self._mailbox.turn_settled(
+                request.request_scope,
+                request.identity.run_id,
+                delivery_key=request.idempotency_key,
+                lane_profile=self._lane(binding).describe().lane_profile,
+                succeeded=settlement.status == "completed",
+                turn_ref=settlement.provider_run_id,
+            )
+        except Exception:
+            # Receipts are evidence of an already settled unit; the settlement stands and the
+            # terminal receipts close the Commands if this record is never written.
+            _LOGGER.exception(
+                "mailbox settlement receipts were not recorded",
+                extra={"run_id": request.identity.run_id, "key": request.idempotency_key},
+            )
 
     async def _post_failure_ambiguity(
         self,

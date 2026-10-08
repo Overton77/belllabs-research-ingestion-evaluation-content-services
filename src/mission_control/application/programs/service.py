@@ -8,6 +8,7 @@ from pydantic import TypeAdapter
 
 from mission_control.application.authoring.service import ControlPlaneService
 from mission_control.application.context.pack_service import ContextPackService
+from mission_control.application.execution.mailbox import MailboxDeliveryService
 from mission_control.application.execution.operations.operation_execution import (
     bind_operation_execution_request,
 )
@@ -30,6 +31,7 @@ from mission_control.domain.authoring.contracts import (
     GoalDirectedBlueprint,
     StageGraphBlueprint,
 )
+from mission_control.domain.context.packet import PackCandidate
 from mission_control.domain.execution.checkpoint_lineage import cognitive_session_namespace
 from mission_control.domain.execution.contracts import (
     OperationAttemptIdentity,
@@ -967,6 +969,7 @@ class StageGraphOperationPreparationService:
         operation_bindings: SemanticOperationBindingRepository,
         heartbeats: OperationHeartbeatPolicy = DEFAULT_OPERATION_HEARTBEATS,
         context_packs: ContextPackService | None = None,
+        mailbox: MailboxDeliveryService | None = None,
     ) -> None:
         self._templates = templates
         self._operation_bindings = operation_bindings
@@ -976,6 +979,9 @@ class StageGraphOperationPreparationService:
         # FT-B2 (ADR-0027): when composed, every admitted stage starts from a sealed Context
         # Packet; without it the template's prompt and workspace are used unchanged.
         self._context_packs = context_packs
+        # FT-F1: the StageGraph admission boundary delivers queued instructions and context
+        # into the admitted operation's packet (requires the packer).
+        self._mailbox = mailbox
 
     async def materialize(
         self,
@@ -1014,7 +1020,27 @@ class StageGraphOperationPreparationService:
             # FT-B2: the packet replaces the ad hoc objective segment (the objective is its
             # `goals_and_criteria` item); materialized inputs and the `.mission/` files join
             # the compiled slots as read-only, digest-verified durable inputs.
-            sealed = await self._context_packs.pack_for_stage(request, template)
+            queued: tuple[PackCandidate, ...] = ()
+            if self._mailbox is not None:
+                stage = proposal.identity
+                entries = await self._mailbox.deliver(
+                    request.request_scope,
+                    request.run_id,
+                    delivery_key=(
+                        f"stagegraph:{stage.semantic_key}:generation:{stage.execution_generation}"
+                    ),
+                    family="StageGraph",
+                    node_key=stage.stage_id,
+                    iteration_start=True,
+                    lane_profile=template.lane_profile or "deep_agents",
+                    unit_key=stage_runtime_unit(request.request_scope, stage).unit_key,
+                )
+                queued = await self._context_packs.queued_candidates(
+                    entries, request_scope=request.request_scope
+                )
+            sealed = await self._context_packs.pack_for_stage(
+                request, template, extra_candidates=queued
+            )
             prompt_segments = (*template.prompt_segments, sealed.prompt_segment)
             if sealed.slot_bindings:
                 workspace = WorkspaceContract.model_validate(

@@ -26,6 +26,7 @@ from mission_control.application.coordinator.coordinator_results import (
 from mission_control.application.execution.boundary_interventions import (
     BoundaryCommandApplicationService,
 )
+from mission_control.application.execution.mailbox import MailboxDeliveryService
 from mission_control.application.execution.operations.semantic_operation_bindings import (
     SemanticOperationBindingRepository,
 )
@@ -93,6 +94,8 @@ class GoalDirectedCoordinatorDependencies:
     operation_heartbeats: OperationHeartbeatPolicy = DEFAULT_OPERATION_HEARTBEATS
     # FT-B3: when composed, every iteration and role starts from a sealed Context Packet.
     context_packs: ContextPackService | None = None
+    # FT-F1: queued instructions and context enter the executor packet at iteration start.
+    mailbox: MailboxDeliveryService | None = None
 
 
 @dataclass(frozen=True)
@@ -106,6 +109,8 @@ class StageGraphCoordinatorDependencies:
     operation_heartbeats: OperationHeartbeatPolicy = DEFAULT_OPERATION_HEARTBEATS
     # FT-B2: when composed, every admitted stage starts from a sealed Context Packet.
     context_packs: ContextPackService | None = None
+    # FT-F1: queued instructions and context enter the next admitted stage's packet.
+    mailbox: MailboxDeliveryService | None = None
 
 
 def create_routed_coordinator_activities(
@@ -135,6 +140,7 @@ def create_routed_coordinator_activities(
                 operation_bindings=stagegraph.operation_bindings,
                 heartbeats=stagegraph.operation_heartbeats,
                 context_packs=stagegraph.context_packs,
+                mailbox=stagegraph.mailbox,
             ),
             boundary=BoundaryCommandApplicationService(
                 stagegraph.run_control, orchestration_lifecycle_actor()
@@ -153,6 +159,7 @@ def create_routed_coordinator_activities(
             ),
             heartbeats=goal_directed.operation_heartbeats,
             context_packs=goal_directed.context_packs,
+            mailbox=goal_directed.mailbox,
         ),
     )
 

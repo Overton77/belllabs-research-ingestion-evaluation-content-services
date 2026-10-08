@@ -13,6 +13,7 @@ from mission_control.domain.policies.contracts import (
     AcceptedObligationEvidence,
     AcceptedOutputEvidence,
     AcceptFinalizationPlanAction,
+    AddContextAction,
     ApplyAuthorityBatchAction,
     ApplyBoundaryCommandAction,
     ApplyFrameFactsAction,
@@ -42,6 +43,7 @@ from mission_control.domain.policies.contracts import (
     EffectSettlement,
     ExecutionTarget,
     FrameFactCursor,
+    InterruptAndInjectAction,
     LifecycleCommand,
     LifecycleTransitionRecord,
     ObserveEffectAction,
@@ -50,6 +52,7 @@ from mission_control.domain.policies.contracts import (
     PauseAction,
     PauseDecision,
     ProposeContinuationAction,
+    QueueInstructionAction,
     ReconcileUnitAction,
     RecordAsyncChildFactAction,
     RecordContinuationAction,
@@ -135,6 +138,10 @@ ACTION_PERMISSIONS: dict[str, str] = {
     # SPEC-02 (B4): continuation checkpoints sealed and sessions transferred.
     "record_continuation": "workflow_run.record_continuation",
     "request_continuation": "workflow_run.request_continuation",
+    # SPEC-06 (FT-F1): mailbox-bound interventions (`mission.command` scope).
+    "queue_instruction": "workflow_run.control",
+    "add_context": "workflow_run.control",
+    "interrupt_and_inject": "workflow_run.control",
 }
 LIFECYCLE_ACTION_KINDS = frozenset((*ACTION_PERMISSIONS, "apply_authority_batch"))
 AUTHORITY_BATCH_ACTION_TYPES = (
@@ -314,6 +321,20 @@ def reduce_lifecycle(
         phase = _progress_phase(action.runnable_work_remains, waits, pauses)
     elif isinstance(action, CancelAction):
         phase = RunPhase.CANCELLING
+    elif isinstance(action, QueueInstructionAction | AddContextAction | InterruptAndInjectAction):
+        # FT-F1 (SPEC-06): admission validates a mailbox command against the exact version
+        # it binds; it never moves the phase. Run control records it as a pending command
+        # whose mailbox entry the family boundary delivers.
+        if phase == RunPhase.CANCELLING:
+            raise ReductionRejected(
+                "run_is_cancelling", "a cancelling run takes no queued instruction or context"
+            )
+        generation = execution_target.execution_generation if execution_target is not None else 1
+        if action.generation != generation:
+            raise ReductionRejected(
+                "stale_generation",
+                f"the command targets generation {action.generation}; current is {generation}",
+            )
     elif isinstance(action, ReserveBudgetAction):
         next_budget, entry = _reserve(next_budget, action, command)
         ledger.append(entry)

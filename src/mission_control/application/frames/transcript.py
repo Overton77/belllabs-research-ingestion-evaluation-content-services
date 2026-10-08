@@ -339,6 +339,19 @@ class TranscriptService:
         _run_uuid, _events, frames = await self._sources(run_key)
         return summarize_sessions(frames)
 
+    async def inspection_summary(self, run_key: str, *, actor: ActorContext) -> RunFrameSummary:
+        """FT-F6: sessions and the transcript cursor from persisted frames and events only."""
+
+        self._authorize(actor)
+        _run_uuid, events, frames = await self._sources(run_key)
+        placed = merge(run_key, events, frames, secret_values=self._secrets)
+        return RunFrameSummary(
+            sessions=summarize_sessions(frames),
+            frame_count=len(frames),
+            last_arrival_ordinal=max((frame.arrival_ordinal for frame in frames), default=None),
+            transcript_cursor=placed[-1].entry.cursor if placed else None,
+        )
+
 
 def _matches(entry: TranscriptEntry, query: TranscriptQuery) -> bool:
     if query.canonical_only and not entry.canonical:
@@ -545,6 +558,16 @@ def _frame_entry(
     )
 
 
+@dataclass(frozen=True)
+class RunFrameSummary:
+    """What inspection reads from the Native Event Store (never a provider call)."""
+
+    sessions: tuple[SessionSummary, ...]
+    frame_count: int
+    last_arrival_ordinal: int | None
+    transcript_cursor: str | None
+
+
 def summarize_sessions(frames: Sequence[ProviderFrame]) -> tuple[SessionSummary, ...]:
     """Per harness execution: lane, generation, sessions, turns, tool calls, usage."""
 
@@ -599,6 +622,7 @@ __all__ = [
     "CursorExpired",
     "MissionEventReader",
     "MissionEventRecord",
+    "RunFrameSummary",
     "SessionSummary",
     "TranscriptDenied",
     "TranscriptRunNotFound",

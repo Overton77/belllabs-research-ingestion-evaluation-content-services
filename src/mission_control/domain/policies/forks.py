@@ -76,6 +76,8 @@ ForkRejectionCode = Literal[
     "unauthorized",
     "snapshot_digest_conflict",
     "fork_lineage_missing",
+    # FT-F4: a fork without a Snapshot of a Run that has no safe boundary to take one at.
+    "CHECKPOINT_INVALID",
 ]
 
 #: REQ-CP-EXEC-012: identity, scope, authority and capability grants, budget ceilings,

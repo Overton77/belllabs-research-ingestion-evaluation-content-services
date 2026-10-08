@@ -6,7 +6,7 @@
   "files": {
     "SKILL.md": "sha256:cccfb371f1f9566500d391c9a726eaec103575e4698e7a5cf16686bf1fe2c795",
     "references/operations.json": "sha256:0e6896e28e58434b604d2afb9408afc69d7e19107154e34bed305234fcb24021",
-    "references/protocol.md": "sha256:83980c6a81f7f6586e48038ac9b177c9899e661840c2d3d03392d82a3133b5c1"
+    "references/protocol.md": "sha256:18cd8bd692d16d06311c5700112c4af1bc83a3ecd6111cf909e44b0f3187e29e"
   },
   "operation_catalog_digest": "sha256:0e6896e28e58434b604d2afb9408afc69d7e19107154e34bed305234fcb24021"
 }

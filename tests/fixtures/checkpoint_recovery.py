@@ -488,6 +488,8 @@ class RecoveryHarness:
     # The in-memory suites use the literal scope; a common-database proof passes its
     # canonical `mc/{installation}/{application}/{tenant}` scope.
     request_scope: str = "tenant-1"
+    # FT-F2: the command mailbox the service's interrupt_and_inject reads (when composed).
+    mailbox: Any = None
 
     async def request(self, unit: RuntimeUnitIdentity) -> OperationExecutionRequest:
         """Reserve a budget slice, then bind one Deep Agent unit at the current version."""
@@ -519,6 +521,7 @@ class RecoveryHarness:
         return OperationExecutionRequest.model_validate(
             {
                 **operation_request().model_dump(mode="python"),
+                "request_scope": self.request_scope,
                 "workspace": workspace,
                 "identity": OperationAttemptIdentity(
                     run_id=self.run_id,
@@ -593,6 +596,7 @@ async def recovery_harness(
     saver: CrashingSaver | None = None,
     children: Any = None,
     request_scope: str = "tenant-1",
+    injection_settings: Any = None,
 ) -> RecoveryHarness:
     """`run_control` (RRM-016) lets a family's admissions be registered on the harness; its
     repository is then not exposed (`RecoveryHarness.repository` stays `None`)."""
@@ -631,6 +635,17 @@ async def recovery_harness(
     )
     clock = MutableClock()
     lineage = InMemoryCheckpointLineageRepository()
+    mailbox: Any = None
+    injections: Any = None
+    if injection_settings is not None:
+        from mission_control.application.execution.harness.inject import (
+            InterruptAndInjectService,
+        )
+        from mission_control.application.execution.mailbox import MailboxDeliveryService
+
+        assert repository is not None, "injections need the harness's own run control"
+        mailbox = MailboxDeliveryService(repository.mailbox, run_control)
+        injections = InterruptAndInjectService(mailbox, settings=injection_settings)
     assets = ConformanceAssetVerifier(
         mcp_schema_digests={"fixture-mcp": MCP_DIGEST},
         asset_manifest_digests={"skill:fixture.skill:1": SKILL_DIGEST},
@@ -651,6 +666,9 @@ async def recovery_harness(
         lineage=CheckpointLineageService(lineage, clock=clock),
         fork_reuse=fork_reuse,
         children=children,
+        # FT-F1 / FT-F2: the command mailbox and interrupt_and_inject at the lane boundary.
+        mailbox=mailbox,
+        injections=injections,
     )
     return RecoveryHarness(
         run_control=run_control,
@@ -674,6 +692,7 @@ async def recovery_harness(
         binding=binding,
         real_authority=real_authority,
         repository=repository,
+        mailbox=mailbox,
         results=results,
         bindings=bindings,
         request_scope=request_scope,

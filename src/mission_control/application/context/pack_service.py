@@ -72,6 +72,7 @@ from mission_control.domain.execution.contracts import (
 )
 from mission_control.domain.graph_runtime.contracts import GoalHandoffReference
 from mission_control.domain.graph_runtime.identities import GoalHandoffCheckpointKey
+from mission_control.domain.policies.mailbox import MailboxEntry
 from mission_control.domain.programs.contracts import (
     GoalHandoff,
     StageGraphAdmissionActivityRequest,
@@ -324,7 +325,8 @@ class ContextPackService:
             activation_id=identity.operation_id,
             attempt_no=identity.semantic_attempt,
             generation=identity.execution_generation,
-            purpose=ContextPurpose.STAGE_START,
+            # FT-F4: the derived Run's first packet carries the fork's workspace restore.
+            purpose=_purpose(extra_candidates, ContextPurpose.STAGE_START),
         )
         candidates: list[PackCandidate] = [
             *self._stage_contract_candidates(request, template, mount_root=mount_root),
@@ -486,7 +488,7 @@ class ContextPackService:
                     activation_id=operation_id,
                     attempt_no=request.operation_attempt,
                     generation=request.execution_generation,
-                    purpose=ContextPurpose.ITERATION_START,
+                    purpose=_purpose(extra_candidates, ContextPurpose.ITERATION_START),
                 ),
                 producer_refs=tuple(producer_refs),
                 profile=self._profiles.profile_for(template),
@@ -763,6 +765,168 @@ class ContextPackService:
             return None
         return await self._chain_supplies.supply_for(run_id, request_scope=request_scope)
 
+    # -- queued instructions and context (FT-F1) -------------------------------------------
+
+    async def queued_candidates(
+        self, entries: Sequence[MailboxEntry], *, request_scope: str
+    ) -> tuple[PackCandidate, ...]:
+        """Mailbox entries a boundary delivers, as mandatory ``queued_instruction`` items.
+
+        Operator content is admitted input: data with provenance, never authority
+        (ADR-0027). A ``queue_instruction`` is inline; an ``add_context`` follows its
+        ``expand`` hint (``materialize`` degrades to a reference where the lane cannot write
+        files, so it is not mandatory). An artifact reference that cannot be captured, or
+        whose bytes differ from the commanded digest, stays a non-mandatory reference.
+        """
+
+        candidates: list[PackCandidate] = []
+        for entry in entries:
+            if entry.expand == "workspace":
+                # FT-F4: a fork's Snapshot, restored by the lane before the first turn.
+                candidates.append(
+                    PackCandidate(
+                        source_kind=ContextSourceKind.CONTINUATION_CHECKPOINT,
+                        source_ref=entry.content_ref,
+                        content_digest=entry.content_digest,
+                        bytes=entry.content_bytes,
+                        media_type=entry.media_type,
+                        trust=ContextTrust.AUTHORITATIVE,
+                        mandatory=True,
+                        summary=f"fork workspace restored from {entry.content_ref}",
+                        workspace=WorkspaceRestore(
+                            snapshot_ref=entry.content_ref, restore_paths=FORK_RESTORE_PATHS
+                        ),
+                        provenance=ItemProvenance(
+                            producer_generation=entry.generation,
+                            accepted_decision_ref=entry.command_id,
+                        ),
+                    )
+                )
+                continue
+            label = (
+                f"{'instruction' if entry.kind == 'queue_instruction' else 'added context'} "
+                f"queued by command {entry.command_id} ({entry.boundary}, "
+                f"#{entry.admission_sequence})"
+            )
+            hint = ExpandMode(entry.expand) if entry.expand is not None else ExpandMode.INLINE
+            provenance = ItemProvenance(
+                producer_generation=entry.generation, accepted_decision_ref=entry.command_id
+            )
+            source_ref = f"mailbox://{entry.command_id}"
+            if entry.content_inline is not None:
+                durable_ref = await self._staging.stage(
+                    request_scope=request_scope,
+                    name=f"mailbox/{entry.content_digest}",
+                    content=entry.content_inline.encode("utf-8"),
+                    media_type=entry.media_type,
+                )
+                candidates.append(
+                    PackCandidate(
+                        source_kind=ContextSourceKind.QUEUED_INSTRUCTION,
+                        source_ref=source_ref,
+                        content_digest=entry.content_digest,
+                        bytes=entry.content_bytes,
+                        media_type=entry.media_type,
+                        trust=ContextTrust.ADMITTED_INPUT,
+                        mandatory=hint != ExpandMode.MATERIALIZE,
+                        expand=hint,
+                        text=entry.content_inline,
+                        summary=label,
+                        file_name=f"queued-{entry.admission_sequence}.md",
+                        durable_ref=durable_ref,
+                        provenance=provenance,
+                    )
+                )
+                continue
+            captured = await self._artifacts.capture(
+                entry.content_ref, request_scope=request_scope, max_text_bytes=self._max_text_bytes
+            )
+            if captured is None or captured.content_digest != entry.content_digest:
+                candidates.append(
+                    PackCandidate(
+                        source_kind=ContextSourceKind.QUEUED_INSTRUCTION,
+                        source_ref=entry.content_ref,
+                        content_digest=entry.content_digest,
+                        bytes=0,
+                        media_type="application/x-mission-control-ref",
+                        trust=ContextTrust.ADMITTED_INPUT,
+                        expand=ExpandMode.REFERENCE,
+                        summary=f"unresolved {label}",
+                        provenance=provenance,
+                    )
+                )
+                continue
+            candidates.append(
+                PackCandidate(
+                    source_kind=ContextSourceKind.QUEUED_INSTRUCTION,
+                    source_ref=entry.content_ref,
+                    content_digest=captured.content_digest,
+                    bytes=captured.size_bytes,
+                    media_type=captured.media_type,
+                    trust=ContextTrust.ADMITTED_INPUT,
+                    mandatory=hint != ExpandMode.MATERIALIZE,
+                    expand=hint if captured.text is not None else ExpandMode.AUTO,
+                    text=captured.text,
+                    summary=captured.summary or label,
+                    file_name=captured.file_name,
+                    durable_ref=captured.durable_ref,
+                    provenance=provenance,
+                )
+            )
+        return tuple(candidates)
+
+    async def pack_follow_up(
+        self,
+        request: OperationExecutionRequest,
+        candidates: Sequence[PackCandidate],
+        *,
+        delivery_key: str,
+        sealed_at: datetime,
+    ) -> SealedPacket:
+        """FT-F2: the `follow_up_turn` packet a replacement turn carries: the injected items
+        (no files; the replacement continues the same session and workspace)."""
+
+        unit = request.runtime_unit
+        node_key = (
+            str(getattr(unit.location, "stage_id", None) or unit.semantic_operation_id)
+            if unit is not None and unit.family == "stage_graph"
+            else f"goal/{getattr(unit.location, 'operation_role', 'executor')}"
+            if unit is not None
+            else request.identity.operation_id
+        )
+        deep = request.deep_agent_binding
+        semantic = f"{request.identity.semantic_key}:follow-up:{delivery_key}"
+        return await self.seal(
+            PackRequest(
+                packet_id=_stable_uuid("packet", request.request_scope, semantic),
+                sealed_at=sealed_at,
+                context_selection_ref=(
+                    "context_selection:"
+                    + _stable_uuid("selection", request.request_scope, semantic)
+                ),
+                scope=_packet_scope(request.request_scope),
+                target=PacketTarget(
+                    mission_id=request.identity.run_id,
+                    run_id=request.identity.run_id,
+                    revision_id=request.effective_configuration_digest,
+                    node_key=node_key,
+                    activation_id=request.identity.operation_id,
+                    attempt_no=request.identity.operation_attempt,
+                    generation=deep.execution_generation if deep is not None else 1,
+                    purpose=ContextPurpose.FOLLOW_UP_TURN,
+                ),
+                profile=self._profiles.profile_for(request),
+                candidates=tuple(candidates),
+                policy=self._policy,
+                lane=LaneFileSupport(writable_workspace=False),
+            ),
+            request_scope=request.request_scope,
+            owner=WorkspaceOwner(
+                kind=WorkspaceOwnerKind.STAGE, owner_id=request.identity.operation_id
+            ),
+            materialize_files=False,
+        )
+
     # -- shared sealing -------------------------------------------------------------------
 
     async def seal(
@@ -871,6 +1035,20 @@ class ContextPackService:
                 )
             )
         return candidates
+
+
+# The whole lane workspace is restored from the Snapshot (lanes map `/` to their root).
+FORK_RESTORE_PATHS: tuple[str, ...] = ("/",)
+
+
+def _purpose(candidates: Sequence[PackCandidate], default: ContextPurpose) -> ContextPurpose:
+    """`fork` when a workspace restore rides the packet (exactly one is allowed)."""
+
+    return (
+        ContextPurpose.FORK
+        if any(candidate.workspace is not None for candidate in candidates)
+        else default
+    )
 
 
 def _text_candidate(

@@ -4,7 +4,7 @@ Replace every `REPLACE_*` value from `missionctl run inspect RUN_ID --json`. Gen
 UUID per new action; keep the same UUID when retrying a lost write. Exact payload schemas come
 from OpenAPI; these are the shapes.
 
-## queue_instruction (FT-F1)
+## queue_instruction (FT-F1, available)
 
 ```json
 {
@@ -14,15 +14,26 @@ from OpenAPI; these are the shapes.
   "expected_generation": 1,
   "target": {"kind": "run", "id": "REPLACE_RUN_ID"},
   "kind": "queue_instruction",
-  "payload": {"content_ref": "artifact://…/note.md", "content_digest": "sha256:…", "boundary": "next_turn"},
+  "payload": {"boundary": "next_turn", "content": {"text": "Prefer primary literature."}},
   "reason": "Owner asked to prefer primary literature"
 }
 ```
 
-`boundary` is `next_turn` or `next_iteration`. The instruction becomes an `inline` item of the
-next Context Packet and is consumed once.
+`boundary` is `next_turn` or `next_iteration`; optional `node_key` (a stage id, or
+`goal/executor` / `goal/verifier`) and `deadline`. `content` is either `{"text": ...}` (at most
+8 KiB of UTF-8; an optional `content_digest` is verified) or
+`{"artifact_ref": "artifact://…/note.md", "content_digest": "sha256:…", "media_type": ...}`.
+The instruction becomes an admitted-input item of the next Context Packet and is consumed once.
+The pre-FT-F1 flat form `{"content_ref", "content_digest", "boundary"}` is still accepted.
 
-## add_context (FT-F1)
+`missionctl command queue RUN_ID --file queue.json` builds this body for you from a file such as:
+
+```json
+{"boundary": "next_iteration", "text": "Also update the README with the new flag",
+ "reason": "Owner asked for docs"}
+```
+
+## add_context (FT-F1, available)
 
 ```json
 {
@@ -32,11 +43,14 @@ next Context Packet and is consumed once.
   "expected_generation": 1,
   "target": {"kind": "run", "id": "REPLACE_RUN_ID"},
   "kind": "add_context",
-  "payload": {"artifact_ref": "artifact://…/review-notes.md", "content_digest": "sha256:…",
-              "expand": "materialize", "boundary": "next_iteration"},
+  "payload": {"boundary": "next_iteration", "expand": "materialize",
+              "content": {"artifact_ref": "artifact://…/review-notes.md", "content_digest": "sha256:…"}},
   "reason": "Reviewer notes from the first pass"
 }
 ```
+
+`expand` is `inline`, `reference`, `materialize` or `auto` (default). A `materialize` item
+degrades to a reference on a lane that cannot write files.
 
 ## interrupt_and_inject (FT-F2)
 
@@ -48,13 +62,19 @@ next Context Packet and is consumed once.
   "expected_generation": 1,
   "target": {"kind": "run", "id": "REPLACE_RUN_ID"},
   "kind": "interrupt_and_inject",
-  "payload": {"content_ref": "artifact://…/redirect.md", "content_digest": "sha256:…",
-              "accept_emulated": true},
+  "payload": {"content": {"text": "Wrong branch: continue on release/2.3."},
+              "settle_uncertain_effects": true},
   "reason": "Wrong repository branch; redirect to release/2.3"
 }
 ```
 
-`accept_emulated: false` rejects the command when the lane can only `cancel_and_replace`.
+`content` is `{"text": ...}` (8 KiB cap) or `{"artifact_ref": ..., "content_digest": ...}`;
+optional `node_key` targets one stage or `goal/executor`. `missionctl command inject RUN_ID
+--file redirect.json` builds the body (a plain-text file is the text). The receipts read
+`accepted, queued, delivered, observed, applied`; the Delivery Report names the semantics the
+lane used, the cancelled and replacement turn refs and the settled effect ids. A
+`command.in_doubt` event with `pending_effect_ids` means no replacement ran (FT-F2,
+available).
 
 ## pause / resume
 
@@ -97,15 +117,21 @@ receipt reports `fence_persisted_at` and, later, `settled_at`.
  "reason": "Branch point before the synthesis rewrite"}
 ```
 
-## fork (`mc.runtime_fork.v1`; FT-F4 adds the CLI flags)
+## fork (`mc.runtime_fork.v1`; FT-F4, available)
 
 ```json
 {"schema_version": "mc.runtime_fork.v1", "request_id": "REPLACE_UUID",
- "snapshot_id": "REPLACE_SNAPSHOT_ID", "snapshot_digest": "sha256:…",
- "changes": [{"kind": "queue_instruction", "content_ref": "artifact://…/note.md", "content_digest": "sha256:…"}],
- "invalidation_frontier": [], "sponsorship_ref": "REPLACE_SPONSORSHIP", "approval_refs": [],
+ "from_snapshot_id": "REPLACE_SNAPSHOT_ID_OR_OMIT",
+ "instruction": {"text": "Retry with the integration tests enabled."},
+ "changes": [], "invalidation_frontier": [], "baseline_reservations": {},
+ "sponsorship_ref": "REPLACE_SPONSORSHIP", "approval_refs": [],
  "reason": "Try the alternative extraction schema"}
 ```
+
+`from_snapshot_id` (alias of `snapshot_id`) and `snapshot_digest` are optional: omitted, the
+latest safe Snapshot is used. `instruction` is `{"text": ...}` (8 KiB cap) or
+`{"artifact_ref": ..., "content_digest": ...}`. The receipt's `seed` names the forked run and
+the command ids of its seeded instruction and workspace restore.
 
 ## reconcile (`mc.unit_reconciliation.v1`)
 

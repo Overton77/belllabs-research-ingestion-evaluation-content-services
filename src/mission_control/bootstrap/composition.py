@@ -26,12 +26,17 @@ from mission_control.adapters.postgres.control_plane.definition_repository impor
 )
 from mission_control.adapters.postgres.frames.repository import PostgresFrameRepository
 from mission_control.adapters.postgres.frames.transcript_projection import PostgresRunMissionIds
+from mission_control.adapters.postgres.frames.transcript_reads import PostgresMissionEventReader
 from mission_control.adapters.postgres.orchestration.stagegraph_repository import (
     PostgresStageGraphOperationTemplateRepository,
 )
 from mission_control.adapters.postgres.run_control.inspection_repository import (
     PostgresInspectionReadRepository,
 )
+from mission_control.adapters.postgres.run_control.inspection_sections import (
+    PostgresInspectionSections,
+)
+from mission_control.adapters.postgres.run_control.mailbox import PostgresCommandMailbox
 from mission_control.adapters.postgres.run_control.run_control_repository import (
     PostgresRunControlRepository,
 )
@@ -56,6 +61,7 @@ from mission_control.application.execution.boundary_interventions import (
     BoundaryCommandTransport,
     BoundaryInterventionService,
 )
+from mission_control.application.execution.mailbox import MailboxDeliveryService
 from mission_control.application.execution.operations.unit_reconciliation import (
     AcceptedCheckpointVerifier,
     UnitReconciliationNudge,
@@ -67,6 +73,7 @@ from mission_control.application.execution.service import (
     FamilyAdmissionRegistry,
     RunControlService,
 )
+from mission_control.application.frames.transcript import TranscriptService
 from mission_control.application.installations.registry import (
     ApplicationBinding,
     ApplicationRegistry,
@@ -76,10 +83,12 @@ from mission_control.application.installations.registry import (
     request_scope,
 )
 from mission_control.application.missions.admission import MissionAdmissionService
+from mission_control.application.missions.inspection import InspectionSources
 from mission_control.application.missions.runtime import MissionControlRuntimeService
 from mission_control.application.missions.service import MissionControlService
 from mission_control.application.ports.payloads import ContentAddressedPayloadStore
 from mission_control.application.programs.fork_templates import StageGraphForkTemplateDerivation
+from mission_control.application.recovery.fork_seed import ForkSeedService
 from mission_control.application.recovery.run_forks import (
     ForkPatchPolicyRegistry,
     LedgerPendingCommands,
@@ -235,9 +244,26 @@ async def compose_application_services(
                 ),
                 request_scope=scope,
             ),
+            # FT-F1: queue_instruction / add_context admit into the Run's command mailbox.
+            mailbox=MailboxDeliveryService(PostgresCommandMailbox(runtime_pool), run_control),
+            forks=materializations,
+            # FT-F6: inspection sections from frames, the ledger, chains and subscriptions.
+            inspection=InspectionSources(
+                transcripts=TranscriptService(
+                    PostgresMissionEventReader(runtime_pool),
+                    PostgresFrameRepository(runtime_pool),
+                    request_scope=scope,
+                ),
+                sections=PostgresInspectionSections(runtime_pool),
+            ),
         ),
         runtime=MissionControlRuntimeService(
-            snapshots, forks, request_scope=scope, reconciliation_service=recovery.reconciliation
+            snapshots,
+            forks,
+            request_scope=scope,
+            reconciliation_service=recovery.reconciliation,
+            # FT-F4: the forked Run's mailbox gets the Snapshot restore and the instruction.
+            seeds=ForkSeedService(run_control),
         ),
         admission=MissionAdmissionService(run_control, request_scope=scope, launch_service=launch),
         launch=launch,

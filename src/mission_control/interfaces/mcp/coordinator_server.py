@@ -33,6 +33,10 @@ from mission_control.interfaces.mcp.mission_tools import (
     register_chain_tools,
     register_manifest_tools,
 )
+from mission_control.interfaces.mcp.run_control_tools import (
+    ScopedRunControl,
+    register_run_control_tools,
+)
 from mission_control.interfaces.mcp.subscriptions import (
     McpSubscriptionBridge,
     register_subscription_tools,
@@ -67,6 +71,9 @@ class CoordinatorPrincipal:
     roles: frozenset[str]
     permissions: frozenset[str]
     request_scope: str = ""
+    # FT-F4: the sponsorships and approvals the verified identity holds (forks admit runs).
+    sponsorship_refs: frozenset[str] = frozenset()
+    approval_refs: frozenset[str] = frozenset()
 
 
 class PrincipalResolver(Protocol):
@@ -261,6 +268,7 @@ def create_coordinator_server(
     subscriptions: McpSubscriptionBridge | None = None,
     chains: ScopedChains | None = None,
     manifests: ScopedManifests | None = None,
+    run_control: ScopedRunControl | None = None,
 ) -> FastMCP:
     surface = getattr(
         facade,
@@ -530,6 +538,9 @@ def create_coordinator_server(
     if manifests is not None:
         # SPEC-05 (FT-E2/E3): Mission Manifest compile, submit and start.
         register_manifest_tools(server, manifests, principals, call=_principal_call)
+    if run_control is not None:
+        # SPEC-06: run commands, forks and inspection over the same application services.
+        register_run_control_tools(server, run_control, principals, call=_principal_call)
     unavailable_tools = set(PRODUCTION_COORDINATOR_TOOL_NAMES) - set(surface.tools)
     if unavailable_tools:
         server.disable(names=unavailable_tools, components={"tool"})

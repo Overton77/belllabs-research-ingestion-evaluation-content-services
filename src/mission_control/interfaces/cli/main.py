@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit
@@ -298,6 +299,150 @@ def subscription_body(args: argparse.Namespace) -> dict[str, Any]:
     return body
 
 
+MAILBOX_FILE_FIELDS = frozenset(
+    {
+        "kind",
+        "boundary",
+        "text",
+        "content",
+        "content_ref",
+        "content_digest",
+        "media_type",
+        "size_bytes",
+        "expand",
+        "node_key",
+        "deadline",
+        "reason",
+        "request_id",
+    }
+)
+
+
+def mailbox_payload(path: str, args: argparse.Namespace) -> tuple[str, dict[str, Any], str, str]:
+    """`command queue --file`: a JSON object (`text` or `content`, `boundary`, `node_key`,
+    `expand`, `deadline`, `reason`, `request_id`) or any other file read as instruction text.
+
+    Returns (kind, payload, reason, request_id). Flags override nothing the file states.
+    """
+
+    raw = Path(path).read_text(encoding="utf-8")
+    spec: dict[str, Any] | None = None
+    if raw.lstrip().startswith("{"):
+        spec = parse_json_object(raw)
+        unknown = set(spec) - MAILBOX_FILE_FIELDS
+        if unknown:
+            raise ValueError(f"unknown queue file fields: {sorted(unknown)}")
+    spec = spec or {"text": raw}
+    inject = getattr(args, "action", None) == "inject"
+    default_kind = (
+        "interrupt_and_inject"
+        if inject
+        else ("add_context" if getattr(args, "add_context", False) else "queue_instruction")
+    )
+    kind = str(spec.get("kind") or default_kind)
+    allowed = {"interrupt_and_inject"} if inject else {"queue_instruction", "add_context"}
+    if kind not in allowed:
+        raise ValueError(f"this command sends {' or '.join(sorted(allowed))}")
+    if "content" in spec:
+        content = spec["content"]
+    elif "text" in spec:
+        content = {"text": spec["text"]}
+        if "media_type" in spec:
+            content["media_type"] = spec["media_type"]
+    elif "content_ref" in spec:
+        content = {
+            "artifact_ref": spec["content_ref"],
+            "content_digest": spec.get("content_digest"),
+            "media_type": spec.get("media_type", "text/markdown"),
+            "size_bytes": spec.get("size_bytes", 0),
+        }
+    else:
+        raise ValueError("a queue file needs text, content or content_ref")
+    payload: dict[str, Any] = {"content": content}
+    if not inject:
+        # An injected item rides the replacement turn; it has no boundary or deadline.
+        payload["boundary"] = spec.get("boundary") or args.boundary
+        if spec.get("deadline"):
+            payload["deadline"] = spec["deadline"]
+    node_key = spec.get("node_key") or args.node_key
+    if node_key:
+        payload["node_key"] = node_key
+    if kind == "add_context":
+        payload["expand"] = spec.get("expand") or args.expand
+    reason = str(spec.get("reason") or args.reason)
+    request_id = str(spec.get("request_id") or args.request_id or uuid.uuid4())
+    return kind, payload, reason, request_id
+
+
+def instruction_content(path: str) -> dict[str, Any]:
+    """An instruction file: JSON `content` / `text` / `content_ref`, or plain text."""
+
+    raw = Path(path).read_text(encoding="utf-8")
+    if not raw.lstrip().startswith("{"):
+        return {"text": raw}
+    spec = parse_json_object(raw)
+    if "content" in spec:
+        content = spec["content"]
+        if not isinstance(content, dict):
+            raise ValueError("instruction content must be an object")
+        return content
+    if "text" in spec:
+        return {
+            "text": spec["text"],
+            **({"media_type": spec["media_type"]} if "media_type" in spec else {}),
+        }
+    if "content_ref" in spec:
+        return {
+            "artifact_ref": spec["content_ref"],
+            "content_digest": spec.get("content_digest"),
+            "media_type": spec.get("media_type", "text/markdown"),
+            "size_bytes": spec.get("size_bytes", 0),
+        }
+    raise ValueError("an instruction file needs text, content or content_ref")
+
+
+def fork_body(args: argparse.Namespace, body: dict[str, Any] | None) -> dict[str, Any]:
+    """`run fork`: the request file (if any) plus the FT-F4 flags; flags fill what it omits."""
+
+    fork = dict(body or {})
+    fork.setdefault("schema_version", "mc.runtime_fork.v1")
+    fork.setdefault("request_id", args.fork_request_id or str(uuid.uuid4()))
+    if args.from_snapshot:
+        fork["snapshot_id"] = args.from_snapshot
+    if args.instruction_file:
+        fork["instruction"] = instruction_content(args.instruction_file)
+    if args.sponsorship_ref:
+        fork["sponsorship_ref"] = args.sponsorship_ref
+    if args.approval_refs:
+        fork["approval_refs"] = list(args.approval_refs)
+    if args.reason:
+        fork["reason"] = args.reason
+    fork.setdefault("reason", "forked by missionctl")
+    if "sponsorship_ref" not in fork:
+        raise ValueError("run fork needs --sponsorship-ref (or a request file naming it)")
+    return fork
+
+
+def queue_command_body(client: MissionClient, args: argparse.Namespace) -> dict[str, Any]:
+    """Bind the queued command to the Run's current version and Generation (read first)."""
+
+    kind, payload, reason, request_id = mailbox_payload(args.file, args)
+    inspection = client.inspection(args.run_id)
+    if inspection.status_code >= 300:
+        raise ValueError(f"run inspection failed with HTTP {inspection.status_code}")
+    current = _json(inspection)
+    return {
+        "schema_version": "mc.command.v1",
+        "request_id": request_id,
+        "expected_version": current["version"],
+        "expected_generation": current["execution_generation"],
+        "target": {"kind": "run", "id": args.run_id},
+        "kind": kind,
+        "payload": payload,
+        "reason": reason,
+    }
+
+
 def watch_events(transport: httpx.Client, client: MissionClient, args: argparse.Namespace) -> int:
     """Print each mission event as one JSON line; exit 6 on resync_required."""
 
@@ -329,6 +474,17 @@ def watch_events(transport: httpx.Client, client: MissionClient, args: argparse.
     return 0
 
 
+WAIT_POLL_SECONDS = 0.5
+
+
+def inspection_wait_state(result: object) -> tuple[object, ...]:
+    """What `run inspect --wait` watches: lifecycle, phase and the terminal outcome."""
+
+    if not isinstance(result, dict):
+        return (None, None, None)
+    return (result.get("lifecycle"), result.get("phase"), result.get("execution_outcome"))
+
+
 def exit_status(status: int) -> int:
     if 200 <= status < 300:
         return 0
@@ -336,7 +492,7 @@ def exit_status(status: int) -> int:
         return 3
     if status == 409:
         return 4
-    if status in {400, 404, 422}:
+    if status in {400, 404, 413, 422}:
         return 2
     return 5
 
@@ -559,10 +715,20 @@ def main(argv: list[str] | None = None) -> int:
     inspect.add_argument("run_id")
     admission = run_commands.add_parser("admit", parents=[common])
     admission.add_argument("--request-file", required=True)
-    for action in ("snapshot", "fork", "reconcile", "start"):
+    for action in ("snapshot", "reconcile", "start"):
         operation = run_commands.add_parser(action, parents=[common])
         operation.add_argument("run_id")
         operation.add_argument("--request-file", required=True)
+    # FT-F4: fork from a Snapshot (default: the latest safe one) with a queued instruction.
+    fork = run_commands.add_parser("fork", parents=[common])
+    fork.add_argument("run_id")
+    fork.add_argument("--request-file")
+    fork.add_argument("--from-snapshot", dest="from_snapshot")
+    fork.add_argument("--instruction-file", dest="instruction_file")
+    fork.add_argument("--sponsorship-ref", dest="sponsorship_ref")
+    fork.add_argument("--approval-ref", dest="approval_refs", action="append")
+    fork.add_argument("--reason")
+    fork.add_argument("--request-id", dest="fork_request_id")
     # SPEC-03 (C3): the run transcript and the non-canonical frame tail.
     transcript = run_commands.add_parser("transcript", parents=[common])
     transcript.add_argument("run_id")
@@ -603,6 +769,25 @@ def main(argv: list[str] | None = None) -> int:
     send.add_argument("--request-file", required=True)
     listing = commands.add_parser("list", parents=[common])
     listing.add_argument("run_id")
+    # FT-F1: queue an instruction (or, with --add-context, context) for the next boundary.
+    queue = commands.add_parser("queue", parents=[common])
+    queue.add_argument("run_id")
+    queue.add_argument("--file", required=True)
+    queue.add_argument("--add-context", action="store_true")
+    queue.add_argument("--boundary", choices=("next_turn", "next_iteration"), default="next_turn")
+    queue.add_argument("--node-key")
+    queue.add_argument(
+        "--expand", choices=("inline", "reference", "materialize", "auto"), default="auto"
+    )
+    queue.add_argument("--reason", default="queued by missionctl")
+    queue.add_argument("--request-id")
+    # FT-F2: interrupt the running turn and continue with the injected content.
+    inject = commands.add_parser("inject", parents=[common])
+    inject.add_argument("run_id")
+    inject.add_argument("--file", required=True)
+    inject.add_argument("--node-key")
+    inject.add_argument("--reason", default="injected by missionctl")
+    inject.add_argument("--request-id")
     mission = groups.add_parser("mission", parents=[common])
     mission_commands = mission.add_subparsers(dest="action", required=True)
     schema = mission_commands.add_parser("schema", parents=[common])
@@ -714,6 +899,8 @@ def main(argv: list[str] | None = None) -> int:
                 "command admission is not completion"
             )
         body = strict_object(args.request_file) if getattr(args, "request_file", None) else None
+        if args.group == "run" and args.action == "fork":
+            body = fork_body(args, body)
         if args.group == "catalog" and args.action == "publish":
             with (
                 httpx.Client(
@@ -750,6 +937,8 @@ def main(argv: list[str] | None = None) -> int:
             follow_redirects=False,
         ) as transport:
             client = MissionClient(transport, application)
+            if args.group == "command" and args.action in {"queue", "inject"}:
+                body = queue_command_body(client, args)
             if args.group == "run" and args.action == "transcript":
                 return run_transcript(client, args, deadline_seconds)
             if args.group == "run" and args.action == "frames":
@@ -760,6 +949,9 @@ def main(argv: list[str] | None = None) -> int:
                 return run_search(client, args)
             deadline = time.monotonic() + (deadline_seconds or 0)
             started = False
+            # FT-F6: `run inspect --wait` returns early on a lifecycle, phase or terminal
+            # change from the first observation (polled well under a second apart).
+            initial: tuple[object, ...] | None = None
             while True:
                 if deadline_seconds is not None:
                     transport.timeout = httpx.Timeout(
@@ -813,11 +1005,17 @@ def main(argv: list[str] | None = None) -> int:
                 if isinstance(chain_state, dict) and chain_state.get("lifecycle") == "completed":
                     print(json.dumps(result, allow_nan=False))
                     return 0 if chain_state.get("terminal_outcome") == "accepted" else 6
+                observed = inspection_wait_state(result)
+                if initial is None:
+                    initial = observed
+                elif observed != initial:
+                    print(json.dumps(result, allow_nan=False))
+                    return 0
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     print(json.dumps({"error": "wait_timeout", "inspection": result}))
                     return 6
-                time.sleep(min(1, remaining))
+                time.sleep(min(WAIT_POLL_SECONDS, remaining))
     except (ValueError, OSError) as exc:
         print(json.dumps({"error": str(exc)}), file=sys.stderr)
         return 2

@@ -3,14 +3,16 @@ from __future__ import annotations
 import asyncio
 import inspect
 import re
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Protocol, TypeVar
 
+from mission_control.application.execution.mailbox import InMemoryCommandMailbox, queued_event
 from mission_control.domain.authoring.canonical import sha256_digest
 from mission_control.domain.execution.journal import OperationJournalSettlement
+from mission_control.domain.policies.boundary_commands import is_mailbox_command
 from mission_control.domain.policies.budget import roll_up_child_budget
 from mission_control.domain.policies.contracts import (
     CANCEL_SEQUENCE_SPACE,
@@ -50,6 +52,7 @@ from mission_control.domain.policies.family_admission import (
     FamilyAdmissionReceipt,
     FamilyVersionConflict,
 )
+from mission_control.domain.policies.mailbox import entry_for
 
 M = TypeVar("M", bound=AtomicFamilyMutation)
 FailureHook = Callable[[str], Awaitable[None] | None]
@@ -133,6 +136,9 @@ class CommandMutation:
     # of its target's sequence space under the run lock.
     boundary_commands: tuple[BoundaryCommandRecord, ...] = ()
     boundary_receipts: tuple[BoundaryCommandReceipt, ...] = ()
+    # FT-F1: the inline body of each accepted mailbox command, by command id. The repository
+    # writes the command's mailbox entry (sequenced in `mailbox:<generation>`) in this commit.
+    mailbox_inline: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -400,6 +406,8 @@ class InMemoryRunControlRepository:
         self._family_results: dict[tuple[str, str, str, str], FamilyAdmissionReceipt] = {}
         # Keyed by (run_id, idempotency_issuer, command_id): the exact command identity.
         self._boundary_commands: dict[tuple[str, str, str], BoundaryCommandStatus] = {}
+        # FT-F1: the Runs' command mailbox, written in the admitting commit.
+        self.mailbox = InMemoryCommandMailbox(sink=self._insert_events)
 
     async def get_admission_decision(
         self, request_scope: str, idempotency_issuer: str, request_id: str
@@ -613,10 +621,20 @@ class InMemoryRunControlRepository:
                     ),
                     default=0,
                 )
+            sequenced = record.model_copy(update={"target_sequence": sequence})
             self._boundary_commands[key] = BoundaryCommandStatus(
-                command=record.model_copy(update={"target_sequence": sequence}),
+                command=sequenced,
                 receipts=receipts,
             )
+            if is_mailbox_command(record.action) and _was_accepted(receipts):
+                entry = self.mailbox.insert_unlocked(
+                    entry_for(
+                        sequenced,
+                        content_inline=mutation.mailbox_inline.get(record.command_id),
+                        accepted_at=record.recorded_at,
+                    )
+                )
+                self._insert_events((queued_event(entry),))
         for receipt in mutation.boundary_receipts:
             key = (run_id, receipt.idempotency_issuer, receipt.command_id)
             if any(

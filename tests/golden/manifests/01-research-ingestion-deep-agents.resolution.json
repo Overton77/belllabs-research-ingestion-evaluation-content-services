@@ -34,7 +34,7 @@
      "pointer": "/mission/environment/workspace/skills/0",
      "resolved": {
       "capability_id": "skill.mission-control-observe",
-      "digest": "sha256:7bad40eb43cbd0bc4397b8a0426bbf43bd9a4ac63bdd47e91c1ffd2dabeacc57",
+      "digest": "sha256:904fac5d64f6cbb8cd6674eed445808270c2f3545a5d20eed79b46ff3d68921a",
       "version": "0.2.0"
      },
      "role": "skill",
@@ -340,12 +340,12 @@
  ],
  "lowering": [
   {
-   "blueprint_digest": "sha256:5bb79091a6c6557622cdff82793e4f0bf000ad831b80fdbcd001d538e4794bd4",
-   "definition_digest": "sha256:fe02453f629f928b188b0a0955d41c20414b159498ba9b121e6ea0e5533ebc5f",
+   "blueprint_digest": "sha256:757c34c9ccc761f2432523d1deb98c17cbf351993887dfd6f1e577c6e7ca94ed",
+   "definition_digest": "sha256:07bbb4b30910e0536d16e6dde3066cf1fa65ebbc21d838cbbb71c83e31014a9e",
    "family": "StageGraph",
    "lowering_version": "mc.manifest-lowering/1",
    "mission_key": "nad-muscle-research-ingestion",
-   "runtime_profile_digest": "sha256:5b6d9882557270ecffe7279db1b601db5ecfb8d2bfc85672db1aa0611103369a"
+   "runtime_profile_digest": "sha256:39c3596350758e322e27238d5f514fc0e523d8026faf831a488bfe27798bcce8"
   }
  ],
  "manifest_digest": "sha256:fc93183ad85b5d3db8e68886969c929b14ed86d6b69bcacd2bf012f49158d592",
@@ -1085,7 +1085,7 @@
     "skill.biotech-literature-review@1.0.0#sha256:a5f52a8d5b4dab28700851bbdcc04c03e330fe0f0d860bea38498b41345aae48",
     "skill.biomcp@0.9.1#sha256:bf0c38d379bb838c460c62e1550ecd8824c341cd667311e3e8371821521680c6",
     "skill.mission-control-compose@0.2.0#sha256:5f2bd8ec85e952cfd27b1a6512885273567d020f5a3e49b11f8b5d6c2fbe321c",
-    "skill.mission-control-intervene@0.1.0#sha256:300a72b104003885265139deba17fb099a7b2b60f6d7a28811949327c3abc5e1"
+    "skill.mission-control-intervene@0.4.0#sha256:ec468632c9bcbb56062c5bbadc71a5a75108253290640edf8eda332cfb3a84bf"
    ],
    "lanes": [
     "deep_agents"
@@ -1136,9 +1136,9 @@
    },
    "result": {
     "capability_id": "skill.mission-control-observe",
-    "digest": "sha256:7bad40eb43cbd0bc4397b8a0426bbf43bd9a4ac63bdd47e91c1ffd2dabeacc57",
+    "digest": "sha256:904fac5d64f6cbb8cd6674eed445808270c2f3545a5d20eed79b46ff3d68921a",
     "exact_ref": {
-     "digest": "sha256:7bad40eb43cbd0bc4397b8a0426bbf43bd9a4ac63bdd47e91c1ffd2dabeacc57",
+     "digest": "sha256:904fac5d64f6cbb8cd6674eed445808270c2f3545a5d20eed79b46ff3d68921a",
      "kind": "skill",
      "lifecycle_status": "published",
      "logical_id": "skill.mission-control-observe",
@@ -1147,7 +1147,7 @@
      "schema_version": "1"
     },
     "kind": "skill",
-    "pin": "skill.mission-control-observe@0.2.0#sha256:7bad40eb43cbd0bc4397b8a0426bbf43bd9a4ac63bdd47e91c1ffd2dabeacc57",
+    "pin": "skill.mission-control-observe@0.2.0#sha256:904fac5d64f6cbb8cd6674eed445808270c2f3545a5d20eed79b46ff3d68921a",
     "supported_profiles": [
      "deep_agents",
      "cursor_local",

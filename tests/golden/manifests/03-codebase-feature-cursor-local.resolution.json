@@ -17,7 +17,7 @@
      "pointer": "/mission/environment/workspace/skills/0",
      "resolved": {
       "capability_id": "skill.mission-control-observe",
-      "digest": "sha256:7bad40eb43cbd0bc4397b8a0426bbf43bd9a4ac63bdd47e91c1ffd2dabeacc57",
+      "digest": "sha256:904fac5d64f6cbb8cd6674eed445808270c2f3545a5d20eed79b46ff3d68921a",
       "version": "0.2.0"
      },
      "role": "skill",
@@ -228,12 +228,12 @@
  ],
  "lowering": [
   {
-   "blueprint_digest": "sha256:9a22c3531ab734d1a5399c8eb23defcf625d492477f3c01f88e4bc4e739b774c",
-   "definition_digest": "sha256:89ef87608b2bb44ecbb301211326eec0ae0db35e60b127c28de9593e1e808c06",
+   "blueprint_digest": "sha256:62d756acb3a18988ec72ea2317a96115512bc7fa4b2654c822d239009ae015fa",
+   "definition_digest": "sha256:829b6b2d308938dc1cbb5d0347720c1857d9d5173c04427096476e14035d6162",
    "family": "GoalDirected",
    "lowering_version": "mc.manifest-lowering/1",
    "mission_key": "mission-control-transcript-cli",
-   "runtime_profile_digest": "sha256:6d9b1c892ba90bfd1e11f69a9e21aac3fc6e8ac545653dc9d7cef73bb3d27eed"
+   "runtime_profile_digest": "sha256:2f9fd7f3d1bfdcc00a2f955c319f007f8306da496459c8719c6cc48862165db2"
   }
  ],
  "manifest_digest": "sha256:70ef0ac39e1eeacbcf330cb3f89bf938f23426c4badc44c7d83a92c7009cb9fc",
@@ -549,9 +549,9 @@
    },
    "result": {
     "capability_id": "skill.mission-control-observe",
-    "digest": "sha256:7bad40eb43cbd0bc4397b8a0426bbf43bd9a4ac63bdd47e91c1ffd2dabeacc57",
+    "digest": "sha256:904fac5d64f6cbb8cd6674eed445808270c2f3545a5d20eed79b46ff3d68921a",
     "exact_ref": {
-     "digest": "sha256:7bad40eb43cbd0bc4397b8a0426bbf43bd9a4ac63bdd47e91c1ffd2dabeacc57",
+     "digest": "sha256:904fac5d64f6cbb8cd6674eed445808270c2f3545a5d20eed79b46ff3d68921a",
      "kind": "skill",
      "lifecycle_status": "published",
      "logical_id": "skill.mission-control-observe",
@@ -560,7 +560,7 @@
      "schema_version": "1"
     },
     "kind": "skill",
-    "pin": "skill.mission-control-observe@0.2.0#sha256:7bad40eb43cbd0bc4397b8a0426bbf43bd9a4ac63bdd47e91c1ffd2dabeacc57",
+    "pin": "skill.mission-control-observe@0.2.0#sha256:904fac5d64f6cbb8cd6674eed445808270c2f3545a5d20eed79b46ff3d68921a",
     "supported_profiles": [
      "deep_agents",
      "cursor_local",
