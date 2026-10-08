@@ -25,6 +25,9 @@ from uuid import UUID, uuid5
 
 import asyncpg
 
+from mission_control.adapters.postgres.control_plane.mission_revisions import (
+    admit_run_for_revision,
+)
 from mission_control.adapters.postgres.run_control import canonical as mc
 from mission_control.application.chains.packet import SuppliedArtifact, chain_pack_request
 from mission_control.application.chains.reducer import (
@@ -621,50 +624,14 @@ async def _admit_consumer(
     )
     if mutation.budget.parent_account_id is not None:
         raise ChainReleaseError("chain members carry their own budget; no parent account")
-    prior = await mc.receipt_row(
+    run_uuid = await admit_run_for_revision(
         connection,
         args,
-        actor_ref=decision.idempotency_issuer,
-        action=mc.ADMIT_ACTION,
-        request_key=decision.request_id,
-    )
-    if prior is not None:
-        raise IdempotencyConflict("the chain member's run request was already admitted")
-    actor = mutation.transition.actor.actor_id
-    await mc.insert_receipt(
-        connection,
-        args,
-        actor_ref=decision.idempotency_issuer,
-        action=mc.ADMIT_ACTION,
-        request_key=decision.request_id,
-        payload_digest=decision.request_fingerprint,
-        state="completed",
-        resource_ref=decision.run_id,
-        result=decision.model_dump(mode="json"),
-        recorded_at=decision.recorded_at,
-    )
-    run_uuid = await mc.insert_run_for_mission(
-        connection,
-        args,
-        mutation.projection,
-        actor_ref,
+        mutation,
         mission_id=admission.to_mission_id,
         revision_id=frozen.revision_id,
+        created_by=actor_ref,
     )
-    await mc.insert_budget(connection, args, mutation.budget, run_uuid, at, actor)
-    await mc.insert_effect_ledger(connection, args, mutation.effects, at, actor)
-    commit_id = await mc.append_events(
-        connection,
-        args,
-        run_key=mutation.projection.run_id,
-        commit_key=mutation.transition.transition_id,
-        expected_versions={f"run:{mutation.projection.run_id}": 0},
-        events=mutation.events,
-        actor_ref=actor,
-        run_hooks=False,
-    )
-    await mc.insert_transition(connection, args, mutation.transition, commit_id)
-    await mc.insert_budget_entries(connection, args, mutation.ledger_entries, actor)
     consumer = member_run(admission.to_mission_id, run_uuid, mutation.projection)
     links = [link for link in chain.links if link.link_id in set(admission.link_ids)]
     suppliers = {link.from_mission_id for link in links if link.from_mission_id is not None}
@@ -708,7 +675,7 @@ async def _admit_consumer(
                 link_ids=admission.link_ids,
                 actor_ref=actor_ref,
             ),
-            commit_id,
+            None,
             at,
         )
     return consumer, packed

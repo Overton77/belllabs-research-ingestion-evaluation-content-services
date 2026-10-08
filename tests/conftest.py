@@ -57,6 +57,8 @@ _PSYCOPG_SELECTOR_MODULES = {
     ("mission_control", "test_postgres_runtime_parity.py"),
     ("mission_control", "test_postgres_children_and_artifacts.py"),
     ("mission_control", "test_authenticated_scoped_runtime.py"),
+    ("mission_control", "test_manifest_lifecycle.py"),
+    ("mission_control", "test_chain_two_goal_loops.py"),
     ("postgres", "test_mission_worker_startup.py"),
 }
 

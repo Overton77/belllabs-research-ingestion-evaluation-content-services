@@ -321,16 +321,6 @@ def create_application(
                                 "catalog composition differs from authenticated scope"
                             )
                         application.state.mission_control_catalog_services[key] = catalog
-                        # FT-E2: Mission Manifest compile through the tenant catalog.
-                        application.state.mission_control_manifest_services[key] = (
-                            compose_manifest_service(
-                                pool,
-                                request_scope=request_scope(identity),
-                                catalog=catalog,
-                                extensions=options.extensions,
-                                payload_store=options.payload_store,
-                            )
-                        )
                         # SPEC-03 (C3): the run transcript, read under the tenant scope.
                         application.state.mission_control_transcript_services[key] = (
                             TranscriptService(
@@ -341,6 +331,20 @@ def create_application(
                         )
                         subscriptions = compose_subscription_service(pool, request_scope(identity))
                         application.state.mission_control_subscription_services[key] = subscriptions
+                        # FT-E2/E3: Mission Manifest compile, submit and start for the tenant.
+                        application.state.mission_control_manifest_services[key] = (
+                            compose_manifest_service(
+                                pool,
+                                request_scope=request_scope(identity),
+                                catalog=catalog,
+                                extensions=options.extensions,
+                                payload_store=options.payload_store,
+                                run_control=services.run_control,
+                                admission_policies=options.admission_policies,
+                                launches=services.launch,
+                                subscriptions=subscriptions,
+                            )
+                        )
                         # FT-D2: the Mission Chain projection, read under the tenant scope.
                         application.state.mission_control_chain_services[key] = (
                             ChainInspectionService(

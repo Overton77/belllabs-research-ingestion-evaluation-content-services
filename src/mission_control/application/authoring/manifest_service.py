@@ -356,6 +356,7 @@ class ManifestProgramCompiler:
         actor_id: str,
         at: datetime,
         persist: bool,
+        compilation_suffix: str | None = None,
     ) -> tuple[EffectiveRunConfiguration, ExactDefinitionRef]:
         repository: Any = (
             self._repository if persist else OverlayDefinitionRepository(self._repository)
@@ -405,7 +406,10 @@ class ManifestProgramCompiler:
                     runtime_bindings=frozenset({MANIFEST_RUNTIME_BINDING}),
                 ),
                 context=CompilationContext(
-                    compilation_id=f"{lowered.base_id}.compile",
+                    # A persisted compile is unique per submit (the catalog keeps one ERC per
+                    # compilation identity); a dry run reuses the lowering identity.
+                    compilation_id=f"{lowered.base_id}.compile"
+                    + (f".{compilation_suffix}" if compilation_suffix else ""),
                     compiled_at=at,
                     actor_id=actor_id,
                     authority_subject_id=actor_id,
@@ -1338,13 +1342,37 @@ def require_any(permissions: frozenset[str], grants: frozenset[str], what: str) 
         raise ManifestPermissionDenied(f"{what} requires one of {sorted(grants)}")
 
 
-class MissionManifestService:
-    """Compile (and, with FT-E3, submit and start) Mission Manifests under one tenant scope."""
+class ManifestLifecyclePort(Protocol):
+    """Submit and start (FT-E3), composed beside compile when the installation allows them."""
 
-    def __init__(self, *, compiler: ManifestCompileService, request_scope: str) -> None:
+    @property
+    def request_scope(self) -> str: ...
+
+    async def submit(self, request: Any) -> tuple[Any, bool]: ...
+
+    async def start(
+        self, run_id: str, actor: Any, *, family_input: dict[str, Any] | None = None
+    ) -> Any: ...
+
+    async def head_run(self, mission_id: Any) -> str | None: ...
+
+
+class MissionManifestService:
+    """Compile, submit and start Mission Manifests under one tenant scope."""
+
+    def __init__(
+        self,
+        *,
+        compiler: ManifestCompileService,
+        request_scope: str,
+        lifecycle: ManifestLifecyclePort | None = None,
+    ) -> None:
         parse_request_scope(request_scope)
+        if lifecycle is not None and lifecycle.request_scope != request_scope:
+            raise ValueError("submit and start must run under the compile scope")
         self._compiler = compiler
         self._scope = request_scope
+        self.lifecycle = lifecycle
 
     @property
     def request_scope(self) -> str:

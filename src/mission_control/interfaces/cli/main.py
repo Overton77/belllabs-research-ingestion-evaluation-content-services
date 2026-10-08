@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit
+from uuid import UUID, uuid4
 
 import httpx
 
@@ -510,6 +511,14 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="structure-only compile without the service (no catalog resolution)",
     )
+    submit = mission_commands.add_parser("submit", parents=[common])
+    submit.add_argument("file")
+    submit.add_argument("--request-id", dest="request_id_arg")
+    mission_start = mission_commands.add_parser("start", parents=[common])
+    mission_start.add_argument("run_id")
+    mission_start.add_argument(
+        "--request-file", help="family input JSON (when the deployment does not author it)"
+    )
     # FT-D2: Mission Chains (read-only; members are cancelled individually in v1).
     chain = groups.add_parser("chain", parents=[common])
     chain_commands = chain.add_subparsers(dest="action", required=True)
@@ -590,6 +599,7 @@ def main(argv: list[str] | None = None) -> int:
         if deadline_seconds is not None and not (
             (args.group == "run" and args.action in {"inspect", "transcript", "frames"})
             or (args.group == "chain" and args.action == "inspect")
+            or (args.group == "mission" and args.action == "start")
         ):
             raise ValueError(
                 "--wait is supported on run inspect, transcript, frames and chain inspect; "
@@ -616,6 +626,13 @@ def main(argv: list[str] | None = None) -> int:
             args.action = args.action or "create"
         if args.group == "mission" and args.action == "compile":
             body = {"manifest_yaml": Path(args.file).read_text(encoding="utf-8")}
+        if args.group == "mission" and args.action == "submit":
+            body = {
+                "manifest_yaml": Path(args.file).read_text(encoding="utf-8"),
+                "request_id": str(UUID(args.request_id_arg) if args.request_id_arg else uuid4()),
+            }
+        if args.group == "mission" and args.action == "start":
+            body = {"run_id": args.run_id, "family_input": body}
         if args.group == "subscribe" and args.action == "create":
             body = subscription_body(args)
         with httpx.Client(
@@ -630,6 +647,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.group == "run" and args.action == "frames":
                 return run_frames_tail(client, args, deadline_seconds)
             deadline = time.monotonic() + (deadline_seconds or 0)
+            started = False
             while True:
                 if deadline_seconds is not None:
                     transport.timeout = httpx.Timeout(
@@ -647,8 +665,11 @@ def main(argv: list[str] | None = None) -> int:
                     )
                 elif args.group == "chain":
                     response = client.chain(args.chain_id)
+                elif args.group == "mission" and args.action == "start" and started:
+                    response = client.inspection(args.run_id)
                 elif args.group == "mission" and body is not None:
                     response = client.manifest(args.action, body)
+                    started = args.action == "start" and response.status_code == 202
                 elif args.action == "inspect":
                     response = client.inspection(args.run_id)
                 elif args.action == "admit" and body is not None:

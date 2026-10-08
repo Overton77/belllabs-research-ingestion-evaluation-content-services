@@ -16,8 +16,14 @@ from uuid import UUID
 
 import asyncpg
 
+from mission_control.adapters.postgres.run_control import canonical as mc
 from mission_control.adapters.postgres.run_control.canonical import SCOPE, dump
+from mission_control.application.execution.run_control_repository import AdmissionMutation
 from mission_control.contracts.identities import uuid7
+from mission_control.domain.authoring.canonical import sha256_digest, stable_json_dump
+from mission_control.domain.authoring.manifest import Behavior
+from mission_control.domain.authoring.mission_definition import DefinitionNode, MissionDefinition
+from mission_control.domain.policies.errors import IdempotencyConflict
 
 
 @dataclass(frozen=True, slots=True)
@@ -209,3 +215,225 @@ async def insert_revision(
         lifecycle,
     )
     return RevisionRows(mission_id, revision_id, revision_no, snapshot_id, program_id)
+
+
+async def admit_run_for_revision(
+    connection: asyncpg.Connection,
+    args: tuple[Any, ...],
+    mutation: AdmissionMutation,
+    *,
+    mission_id: UUID,
+    revision_id: UUID,
+    created_by: str,
+) -> UUID:
+    """Commit an accepted admission for the run of an existing mission revision.
+
+    The writes ``RunControlRepository.commit_admission`` makes (idempotency receipt, run,
+    budget account, effect ledger, admission events and transition, ledger entries), with the
+    run attached to the given revision instead of a fresh run-request mission.
+    """
+
+    decision = mutation.decision
+    if (
+        mutation.projection is None
+        or mutation.budget is None
+        or mutation.effects is None
+        or mutation.transition is None
+    ):
+        raise ValueError("only an accepted admission mutation can be committed")
+    if mutation.budget.parent_account_id is not None:
+        raise ValueError("a submitted mission run carries its own budget; no parent account")
+    prior = await mc.receipt_row(
+        connection,
+        args,
+        actor_ref=decision.idempotency_issuer,
+        action=mc.ADMIT_ACTION,
+        request_key=decision.request_id,
+    )
+    if prior is not None:
+        raise IdempotencyConflict("the run request was already admitted")
+    actor = mutation.transition.actor.actor_id
+    at = decision.recorded_at
+    await mc.insert_receipt(
+        connection,
+        args,
+        actor_ref=decision.idempotency_issuer,
+        action=mc.ADMIT_ACTION,
+        request_key=decision.request_id,
+        payload_digest=decision.request_fingerprint,
+        state="completed",
+        resource_ref=decision.run_id,
+        result=decision.model_dump(mode="json"),
+        recorded_at=at,
+    )
+    run_uuid = await mc.insert_run_for_mission(
+        connection,
+        args,
+        mutation.projection,
+        created_by,
+        mission_id=mission_id,
+        revision_id=revision_id,
+    )
+    await mc.insert_budget(connection, args, mutation.budget, run_uuid, at, actor)
+    await mc.insert_effect_ledger(connection, args, mutation.effects, at, actor)
+    commit_id = await mc.append_events(
+        connection,
+        args,
+        run_key=mutation.projection.run_id,
+        commit_key=mutation.transition.transition_id,
+        expected_versions={f"run:{mutation.projection.run_id}": 0},
+        events=mutation.events,
+        actor_ref=actor,
+        run_hooks=False,
+    )
+    await mc.insert_transition(connection, args, mutation.transition, commit_id)
+    await mc.insert_budget_entries(connection, args, mutation.ledger_entries, actor)
+    return run_uuid
+
+
+_IMPORTANCE = {"primary": 100, "secondary": 50, "optional": 10}
+_NODE_KINDS = {
+    Behavior.STAGE_GRAPH: "stage_graph",
+    Behavior.GOAL_LOOP: "goal_directed",
+    Behavior.PARALLEL_SWARM: "operation",
+    Behavior.EVALUATOR_OPTIMIZER: "operation",
+    Behavior.AGENT_EXECUTOR: "operation",
+    Behavior.DETERMINISTIC_EXECUTOR: "operation",
+    Behavior.EVENT_WAIT: "wait",
+    Behavior.TIMER: "wait",
+    Behavior.HUMAN_GATE: "gate",
+    Behavior.PROOF_GATE: "gate",
+    Behavior.CHILD_MISSION_INVOCATION: "operation",
+}
+
+
+async def insert_definition_rows(
+    connection: asyncpg.Connection,
+    args: tuple[Any, ...],
+    revision_id: UUID,
+    definition: MissionDefinition,
+    actor_ref: str,
+    at: datetime,
+) -> None:
+    """The typed rows of ``MissionDefinition@1`` (mig/0002 ``goal``, ``objective``,
+    ``success_criterion``, ``program_node``, ``node_objective``) for one revision."""
+
+    goal_ids: dict[str, UUID] = {}
+    for goal in definition.goals:
+        goal_ids[goal.key] = uuid7()
+        await connection.execute(
+            """
+            INSERT INTO mission_control.goal (installation_id, application_id, tenant_id,
+                goal_id, revision_id, goal_key, description, importance, created_at,
+                created_by_actor_ref)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            """,
+            *args,
+            goal_ids[goal.key],
+            revision_id,
+            goal.key,
+            goal.description,
+            _IMPORTANCE[goal.importance],
+            at,
+            actor_ref,
+        )
+    objective_ids: dict[str, UUID] = {}
+    pending = list(definition.objectives)
+    while pending:
+        progressed = False
+        for objective in list(pending):
+            if objective.parent is not None and objective.parent not in objective_ids:
+                continue
+            objective_ids[objective.key] = uuid7()
+            await connection.execute(
+                """
+                INSERT INTO mission_control.objective (installation_id, application_id,
+                    tenant_id, objective_id, revision_id, objective_key, goal_id,
+                    parent_objective_id, description, created_at, created_by_actor_ref)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                """,
+                *args,
+                objective_ids[objective.key],
+                revision_id,
+                objective.key,
+                goal_ids[objective.goal_key],
+                objective_ids.get(objective.parent) if objective.parent else None,
+                objective.description,
+                at,
+                actor_ref,
+            )
+            pending.remove(objective)
+            progressed = True
+        if not progressed:
+            raise ValueError("objective parents form a cycle or name unknown objectives")
+    for criterion in definition.criteria:
+        await connection.execute(
+            """
+            INSERT INTO mission_control.success_criterion (installation_id, application_id,
+                tenant_id, criterion_id, revision_id, goal_id, criterion_key, description,
+                criterion_contract, created_at, created_by_actor_ref)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11)
+            """,
+            *args,
+            uuid7(),
+            revision_id,
+            goal_ids[criterion.goal_key],
+            f"{criterion.goal_key}.{criterion.key}",
+            criterion.description,
+            dump(
+                {
+                    "evidence": list(criterion.evidence),
+                    "acceptance": criterion.acceptance.model_dump(mode="json"),
+                }
+            ),
+            at,
+            actor_ref,
+        )
+    policy_digest = sha256_digest(definition.policies)
+
+    async def node(item: DefinitionNode, parent: str | None) -> None:
+        node_id = uuid7()
+        body = stable_json_dump(item, exclude={"nodes"})
+        await connection.execute(
+            """
+            INSERT INTO mission_control.program_node (installation_id, application_id,
+                tenant_id, program_node_id, revision_id, node_key, parent_node_key,
+                behavior_kind, definition_digest, policy_digest, node_definition, created_at,
+                created_by_actor_ref)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13)
+            """,
+            *args,
+            node_id,
+            revision_id,
+            item.key,
+            parent,
+            _NODE_KINDS[item.behavior],
+            sha256_digest(body),
+            policy_digest,
+            dump(body),
+            at,
+            actor_ref,
+        )
+        for key in item.objectives:
+            objective_id = objective_ids.get(key)
+            if objective_id is None:
+                continue  # a goal key, not an objective: recorded in the node definition
+            await connection.execute(
+                """
+                INSERT INTO mission_control.node_objective (installation_id, application_id,
+                    tenant_id, node_objective_id, revision_id, program_node_id, objective_id,
+                    created_at, created_by_actor_ref)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                """,
+                *args,
+                uuid7(),
+                revision_id,
+                node_id,
+                objective_id,
+                at,
+                actor_ref,
+            )
+        for child in item.nodes:
+            await node(child, item.key)
+
+    await node(definition.program, None)

@@ -18,26 +18,30 @@ from mission_control.adapters.postgres.control_plane.definition_repository impor
 )
 from mission_control.adapters.postgres.frames.repository import PostgresFrameRepository
 from mission_control.adapters.postgres.frames.transcript_reads import PostgresMissionEventReader
+from mission_control.adapters.storage.control_plane_payloads import UnavailablePayloadStore
 from mission_control.application.chains.service import ChainInspectionService
 from mission_control.application.coordinator.coordinator_facade import (
     CoordinatorLimits,
     ProductionCoordinatorFacade,
 )
 from mission_control.application.frames.transcript import TranscriptService
+from mission_control.bootstrap.catalog import compose_catalog_service
 from mission_control.bootstrap.coordinator_composition import (
     CoordinatorProductionDependencies,
     ReadOnlyCoordinatorRuntimeReadiness,
     build_production_coordinator_facade,
     load_coordinator_catalog_bindings,
 )
+from mission_control.bootstrap.manifests import compose_manifest_service
 from mission_control.bootstrap.settings import Settings, get_settings
 from mission_control.contracts.identities import parse_request_scope
+from mission_control.domain.authoring.extensions import ExtensionRegistry
 from mission_control.interfaces.mcp.coordinator_server import (
     CoordinatorPrincipal,
     StaticPrincipalResolver,
     create_coordinator_server,
 )
-from mission_control.interfaces.mcp.mission_tools import ScopedChains
+from mission_control.interfaces.mcp.mission_tools import ScopedChains, ScopedManifests
 from mission_control.interfaces.mcp.transcript_tools import ScopedTranscripts
 
 
@@ -134,6 +138,7 @@ async def _serve(args: argparse.Namespace) -> None:
             StaticPrincipalResolver(principal),
             transcripts=_transcripts(application_pool, principal.request_scope),
             chains=_chains(application_pool, principal.request_scope),
+            manifests=_manifests(settings, application_pool, principal.request_scope),
         )
         await server.run_http_async(
             transport="streamable-http",
@@ -180,6 +185,32 @@ def _chains(application_pool: PostgresPool, request_scope: str) -> ScopedChains 
             )
         }
     )
+
+
+def _manifests(
+    settings: Settings, application_pool: PostgresPool, request_scope: str
+) -> ScopedManifests | None:
+    """SPEC-05 (FT-E2): manifest compile for the principal's scope. Submit and start need run
+    control and a launcher; the API composes them, this development server does not."""
+
+    try:
+        parse_request_scope(request_scope)
+    except ValueError:
+        return None
+    if not settings.mission_control_catalog_scope:
+        return None
+    pool = cast(asyncpg.Pool, application_pool)
+    catalog = compose_catalog_service(
+        pool, request_scope=request_scope, catalog_scope=settings.mission_control_catalog_scope
+    )
+    service = compose_manifest_service(
+        pool,
+        request_scope=request_scope,
+        catalog=catalog,
+        extensions=ExtensionRegistry(),
+        payload_store=UnavailablePayloadStore(),
+    )
+    return ScopedManifests({request_scope: service})
 
 
 def main() -> None:

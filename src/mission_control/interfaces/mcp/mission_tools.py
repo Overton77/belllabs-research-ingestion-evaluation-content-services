@@ -5,6 +5,9 @@
   each member's run, the same document `GET /chains/{id}` returns for the same principal.
 - tool `mission_manifest_compile(manifest_yaml)` (read-only; mission read + catalog read): the
   Validation Report with the `mc.manifest_resolution.v1` document, as `POST /missions:compile`.
+- tools `mission_manifest_submit(manifest_yaml, request_id)` (consequential; `mission.author`)
+  and `mission_run_start(run_id)` (consequential; `mission.start`), as `POST /missions:submit`
+  and `POST /missions:start`.
 
 The principal's canonical request scope selects the tenant's service; a principal from
 another application is refused.
@@ -23,7 +26,14 @@ from mission_control.application.authoring.manifest_service import (
     ManifestPermissionDenied,
     MissionManifestService,
 )
+from mission_control.application.authoring.manifest_submit import (
+    ManifestBlocked,
+    ManifestIdempotencyConflict,
+    ManifestStartUnavailable,
+    SubmitRequest,
+)
 from mission_control.application.chains.service import ChainInspectionService, ChainNotFound
+from mission_control.application.execution.run_launch import RunLaunchRejected
 from mission_control.contracts.identities import parse_request_scope
 from mission_control.domain.coordinator.errors import CoordinatorDomainError, CoordinatorErrorCode
 from mission_control.domain.policies.contracts import ActorContext
@@ -134,13 +144,27 @@ def register_chain_tools(
 # ------------------------------------------------------------------------------------------
 
 COMPILE_TOOL = "mission_manifest_compile"
+SUBMIT_TOOL = "mission_manifest_submit"
+START_TOOL = "mission_run_start"
 
 
 class ScopedManifests:
-    """Selects the manifest service of the principal's verified tenant scope."""
+    """Selects the manifest service of the principal's verified tenant scope.
 
-    def __init__(self, services: Mapping[str, MissionManifestService]) -> None:
+    ``sponsorship_refs`` are the run sponsorships this coordinator deployment may bind on a
+    submit (an MCP principal carries permissions, not sponsorships).
+    """
+
+    def __init__(
+        self,
+        services: Mapping[str, MissionManifestService],
+        *,
+        sponsorship_refs: frozenset[str] = frozenset(),
+        approval_refs: frozenset[str] = frozenset(),
+    ) -> None:
         self._services = dict(services)
+        self._sponsorships = sponsorship_refs
+        self._approvals = approval_refs
 
     def service(self, principal: MissionToolPrincipal) -> MissionManifestService:
         service = self._services.get(scope_of(principal, None))
@@ -163,6 +187,64 @@ class ScopedManifests:
             ) from None
         return compilation.report.model_dump(mode="json", by_alias=True)
 
+    def _lifecycle(self, principal: MissionToolPrincipal) -> Any:
+        lifecycle = self.service(principal).lifecycle
+        if lifecycle is None:
+            raise CoordinatorDomainError(
+                code=CoordinatorErrorCode.DEPENDENCY_UNAVAILABLE,
+                message="manifest submit and start are not composed",
+            )
+        return lifecycle
+
+    @staticmethod
+    def _actor(principal: MissionToolPrincipal) -> ActorContext:
+        return ActorContext(
+            actor_id=principal.actor_id,
+            authority_refs=frozenset(),
+            permissions=frozenset(principal.permissions),
+        )
+
+    async def submit(
+        self, principal: MissionToolPrincipal, manifest_yaml: str, request_id: str
+    ) -> object:
+        try:
+            receipt, replayed = await self._lifecycle(principal).submit(
+                SubmitRequest(
+                    manifest_yaml=manifest_yaml,
+                    request_id=UUID(request_id),
+                    actor=self._actor(principal),
+                    sponsorship_refs=self._sponsorships,
+                    approval_refs=self._approvals,
+                )
+            )
+        except ManifestPermissionDenied as denied:
+            raise CoordinatorDomainError(
+                code=CoordinatorErrorCode.FORBIDDEN, message=str(denied)
+            ) from None
+        except ManifestIdempotencyConflict as conflict:
+            raise CoordinatorDomainError(
+                code=CoordinatorErrorCode.IDEMPOTENCY_CONFLICT, message=str(conflict)
+            ) from None
+        except ManifestBlocked as blocked:
+            raise CoordinatorDomainError(
+                code=CoordinatorErrorCode.ADMISSION_REJECTED,
+                message=str(blocked) or "the manifest has blockers",
+            ) from None
+        return {"replayed": replayed, **receipt.model_dump(mode="json")}
+
+    async def start(self, principal: MissionToolPrincipal, run_id: str) -> object:
+        try:
+            receipt = await self._lifecycle(principal).start(run_id, self._actor(principal))
+        except ManifestPermissionDenied as denied:
+            raise CoordinatorDomainError(
+                code=CoordinatorErrorCode.FORBIDDEN, message=str(denied)
+            ) from None
+        except (ManifestStartUnavailable, RunLaunchRejected) as error:
+            raise CoordinatorDomainError(
+                code=CoordinatorErrorCode.CONFLICT, message=str(error)
+            ) from None
+        return receipt.model_dump(mode="json")
+
 
 def register_manifest_tools(
     server: FastMCP,
@@ -177,5 +259,43 @@ def register_manifest_tools(
 
         async def invoke(principal: Any) -> object:
             return await manifests.compile(principal, manifest_yaml)
+
+        return await call(context, principals, invoke)
+
+    @server.tool(
+        name=SUBMIT_TOOL,
+        annotations={
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        },
+        tags={"consequential"},
+    )
+    async def mission_manifest_submit(
+        manifest_yaml: str, request_id: str, context: Context
+    ) -> dict[str, object]:
+        """Commit the manifest as a revision and admit its run (or chain); never starts."""
+
+        async def invoke(principal: Any) -> object:
+            return await manifests.submit(principal, manifest_yaml, request_id)
+
+        return await call(context, principals, invoke)
+
+    @server.tool(
+        name=START_TOOL,
+        annotations={
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+        tags={"consequential"},
+    )
+    async def mission_run_start(run_id: str, context: Context) -> dict[str, object]:
+        """Launch an admitted manifest run (the only verb that starts agents)."""
+
+        async def invoke(principal: Any) -> object:
+            return await manifests.start(principal, run_id)
 
         return await call(context, principals, invoke)

@@ -43,10 +43,11 @@ no blockers and the `links` section of the report shows every link resolved.
 
 ## 2. Submit and start
 
-`missionctl mission submit chain.yml --json` returns `chain_id` and one `mission_id` per mission.
-`missionctl mission start RUN_ID` (the admitted run of the first mission) starts only missions with no unreleased upstream
-link; later missions start when their link releases. Availability: FT-E3 (submit), FT-D2
-(release).
+`missionctl mission submit chain.yml --json` returns `chain_id` and one `mission_id` per mission;
+only the first mission (no incoming link) has an admitted `run_id`, every link is `armed`.
+`missionctl mission start RUN_ID` starts that run; later missions are admitted with their
+Context Packet when their link releases and the chain relay starts them. Available (FT-E3
+submit and start, FT-D2 release).
 
 ## 3. How state moves
 
@@ -58,7 +59,7 @@ packet in `.mission/context.md` and `/inputs/<name>/`.
 
 ## 4. Inspect
 
-`missionctl chain inspect CHAIN_ID --json` (FT-D2) lists missions, link states (`armed |
+`missionctl chain inspect CHAIN_ID --json` (available, FT-D2; MCP `mission_chain_inspect`) lists missions, link states (`armed |
 released | blocked | detached | cancelled`), the condition each waits for and the packet digest it released
 with. Cancelling an upstream mission applies each link's `on_upstream_cancel`.
 

@@ -321,3 +321,15 @@ GRANT SELECT, INSERT ON mission_control.mission_relationship TO mission_control_
 -- Supplier outputs are read as custody metadata (never bytes) to seal the consumer packet.
 GRANT SELECT ON mission_control.artifact, mission_control.workspace_candidate_descriptor
 TO mission_control_family_writer;
+
+-- FT-E3: a manifest submit writes the typed MissionDefinition@1 rows of each revision (the
+-- mig/0002 authoring tables had no writer before); the runtime inserts and reads them, the
+-- read-only role reads them. They stay immutable (0002 triggers).
+GRANT SELECT, INSERT ON mission_control.goal, mission_control.objective,
+    mission_control.success_criterion, mission_control.program_node,
+    mission_control.node_objective
+TO mission_control_runtime;
+GRANT SELECT ON mission_control.goal, mission_control.objective,
+    mission_control.success_criterion, mission_control.program_node,
+    mission_control.node_objective
+TO mission_control_readonly;
