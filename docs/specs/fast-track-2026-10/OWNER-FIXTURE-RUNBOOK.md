@@ -435,8 +435,22 @@ archive it.
   0025 to 0030, replay `noop`, verify) and a fresh 1.1.0 install with seeds
   `plan/apply/replay` both passed on the disposable server; the scratch databases were
   dropped. The schema fingerprint of 1.1.0 is `sha256:7da7567a...`.
-- `pytest -m common_db tests/integration/postgres tests/qualification` on 1.1.0: 175
-  passed. One failure, `test_mission_worker_startup`, is B4.
+- `pytest -m common_db` over `tests/integration/postgres`, `tests/qualification` and the
+  acceptance suites `test_manifest_lifecycle`, `test_chain_two_goal_loops` and
+  `test_postgres_runtime_parity` at the final readiness head: 176 passed. Two tests failed
+  and five errored, all with the same `CapabilityPinError` from the drifted workspace
+  `agent-browser` skill (B4). The three acceptance suites therefore could not run in this
+  environment; they passed in the wave B and C integrations before the drift.
+- Temporal: `test_replay_histories`, `test_lane_replay_histories`,
+  `test_frames_expire_workflow`, `test_lane_turn` and `tests/integration/cursor`: 65
+  passed, 4 skipped (the paid live drills). No workflow code changed in this pass.
+- `make lane-qualify PROFILE=cursor_local` and `PROFILE=cursor_cloud` (offline) passed.
+- `make check`: lint, format, ty, deptry and architecture pass. Unit tests: 1916 passed,
+  8 failed. Of the 8, seven are environmental (the missing `../biotech-kg` and the drifted
+  `agent-browser` pin), and one is the pre-existing
+  `test_live_settings_pin_workspace_npx_and_bundled_node`. The other pre-existing failure,
+  `test_committed_bundles_match_their_repository_sources`, now passes (approved-assets
+  succession). `make typecheck` (mypy) passes.
 - Dry runs (`scripts/fast_track_dry_run.py`, both modes): results in section 0. Local
   evidence is under `.scratch/fast-track-2026-10-07/readiness/` (not versioned).
 - Time-bomb scan: the unit suite was run with the production clock shifted by 60 and by
