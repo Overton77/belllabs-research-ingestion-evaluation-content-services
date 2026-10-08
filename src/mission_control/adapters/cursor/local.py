@@ -875,7 +875,9 @@ class CursorLocalHarness:
         if session.token_context is not None:
             await self._hooks.revoke(session.token_context)
         # The lease is released only after the patch is stored (SPEC-07 section 5.3).
-        await self._leaser.release(session.lease, patch_artifact_ref=patch_ref)
+        await self._leaser.release(
+            session.lease, patch_artifact_ref=patch_ref, snapshot_ref=frozen.snapshot_ref
+        )
         self._sessions.pop(request.harness_execution_id, None)
         return CleanupReceipt(
             released=True, artifact_refs=(patch_ref, *outputs), patch_ref=patch_ref

@@ -27,6 +27,7 @@ from mission_control.adapters.postgres.control_plane.definition_repository impor
 from mission_control.adapters.postgres.frames.repository import PostgresFrameRepository
 from mission_control.adapters.postgres.frames.transcript_projection import PostgresRunMissionIds
 from mission_control.adapters.postgres.frames.transcript_reads import PostgresMissionEventReader
+from mission_control.adapters.postgres.lanes.workspace_leases import PostgresWorkspaceLeaseStore
 from mission_control.adapters.postgres.orchestration.stagegraph_repository import (
     PostgresStageGraphOperationTemplateRepository,
 )
@@ -205,6 +206,8 @@ async def compose_application_services(
             PostgresAsyncSubagentAuthority(runtime_pool)
         ),
         commands=LedgerPendingCommands(run_control),
+        # FT-G4: a fork of a Cursor Local run restores the workspace its last session froze.
+        lane_snapshots=PostgresWorkspaceLeaseStore(runtime_pool),
     )
     forks = SemanticForkService(snapshots=snapshot_repository, saga=saga, policies=fork_policies)
     recovery = compose_postgres_operation_recovery(

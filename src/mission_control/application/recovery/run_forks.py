@@ -335,6 +335,7 @@ def build_run_snapshot(
     *,
     taken_at: datetime,
     unapplied_commands: tuple[str, ...] = (),
+    sandbox_snapshot_refs: tuple[str, ...] = (),
 ) -> RunSnapshotManifest:
     """Build the manifest at a declared safe boundary, or reject `snapshot_not_quiescent`.
 
@@ -488,6 +489,8 @@ def build_run_snapshot(
             for effect_id, claim in sorted(effects.claims.items())
         ),
         async_children=tuple(sorted(async_children, key=lambda item: item.child_execution_id)),
+        # FT-G4: the lane workspace a fork restores (empty for lanes without one).
+        sandbox_snapshot_refs=tuple(sandbox_snapshot_refs),
         linked_runs=tuple(sorted(linked, key=lambda item: item.link_id)),
         pending_commands=(),
         taken_at=taken_at,
@@ -710,6 +713,13 @@ def _family_boundary(
     return position, "goal_verifier_settled", reasons
 
 
+class LaneSnapshotRefReader(Protocol):
+    """FT-G4: the lane workspace snapshot a run's file-based lane froze at session end
+    (`cursor-snapshot:<ref>`), recorded so a fork restores the workspace from it."""
+
+    async def sandbox_snapshot_refs(self, request_scope: str, run_id: str) -> tuple[str, ...]: ...
+
+
 class RunSnapshotService:
     """Take and read immutable run snapshots at safe boundaries (EXEC-016)."""
 
@@ -722,6 +732,7 @@ class RunSnapshotService:
         async_children: AsyncChildForkClassifier,
         commands: PendingCommandReader,
         clock: Clock | None = None,
+        lane_snapshots: LaneSnapshotRefReader | None = None,
     ) -> None:
         self._reads = reads
         self._sources = sources
@@ -729,6 +740,7 @@ class RunSnapshotService:
         self._async_children = async_children
         self._commands = commands
         self._clock = clock or (lambda: datetime.now(UTC))
+        self._lane_snapshots = lane_snapshots
 
     async def take(
         self,
@@ -756,12 +768,18 @@ class RunSnapshotService:
                 request_scope, run_id, read.async_children
             )
             unapplied = await self._commands.unapplied_command_receipts(request_scope, run_id)
+            sandbox_refs = (
+                await self._lane_snapshots.sandbox_snapshot_refs(request_scope, run_id)
+                if self._lane_snapshots is not None
+                else ()
+            )
             manifest = build_run_snapshot(
                 read,
                 facts,
                 dispositions,
                 taken_at=self._clock(),
                 unapplied_commands=tuple(unapplied),
+                sandbox_snapshot_refs=sandbox_refs,
             )
             return await self._snapshots.put(manifest)
         raise ForkRejected("snapshot_source_moving", "run authority kept moving while it was read")

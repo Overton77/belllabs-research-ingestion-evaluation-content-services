@@ -286,6 +286,7 @@ def compose_in_memory_forks(
     async_children: Any = None,
     children: DetailChildLineage | None = None,
     commands: Any = None,
+    lane_snapshots: Any = None,
 ) -> InMemoryForks:
     snapshot_store = InMemoryRunSnapshotRepository()
     lineage = InMemoryExecutionLineageRepository()
@@ -305,6 +306,7 @@ def compose_in_memory_forks(
             async_children=async_children or LineageAsyncChildForkClassifier(child_lineage),
             commands=commands or LedgerPendingCommands(run_control),
             clock=lambda: NOW,
+            lane_snapshots=lane_snapshots,
         ),
         forks=SemanticForkService(snapshots=snapshot_store, saga=saga, policies=policies),
         repository=fork_repository,

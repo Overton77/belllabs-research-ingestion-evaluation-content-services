@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from mission_control.adapters.postgres.async_subagents.async_subagents import (
     PostgresAsyncSubagentAuthority,
 )
+from mission_control.adapters.postgres.lanes.workspace_leases import PostgresWorkspaceLeaseStore
 from mission_control.adapters.postgres.run_control.inspection_repository import (
     PostgresInspectionReadRepository,
 )
@@ -144,6 +145,8 @@ def compose_run_fork_services(
             async_children=async_children
             or LineageAsyncChildForkClassifier(PostgresAsyncSubagentAuthority(pool)),
             commands=commands or LedgerPendingCommands(run_control),
+            # FT-G4: a fork of a Cursor Local run restores the workspace its last session froze.
+            lane_snapshots=PostgresWorkspaceLeaseStore(pool),
         ),
         forks=SemanticForkService(snapshots=snapshots, saga=saga, policies=policies),
         receipts=repository,

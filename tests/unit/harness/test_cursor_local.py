@@ -224,6 +224,12 @@ async def test_a_full_turn_runs_through_lane_turn_with_kernel_hooks(tmp_path: Pa
     )
     (lease,) = stack.leases._leases.values()
     assert lease.released and lease.patch_artifact_ref == facts.patch_ref
+    # FT-G4: the snapshot the session froze is recorded on the lease; a fork restores it.
+    assert lease.snapshot_ref is not None and lease.snapshot_ref.startswith("cursor-snapshot:")
+    assert lease.snapshot_ref in facts.output_refs
+    assert await stack.leases.sandbox_snapshot_refs(lease.request_scope, lease.run_id) == (
+        lease.snapshot_ref,
+    )
     assert not await asyncio.to_thread(Path(lease.path).exists)
     # The token is revoked with the session.
     (token,) = stack.tokens._tokens.values()

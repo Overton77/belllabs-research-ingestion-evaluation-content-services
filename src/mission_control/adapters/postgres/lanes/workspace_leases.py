@@ -47,6 +47,7 @@ def _lease(row: asyncpg.Record, request_scope: str) -> WorkspaceLease:
         expires_at=row["lease_expires_at"],
         released_at=datetime.fromisoformat(released_at) if released_at else None,
         patch_artifact_ref=row["patch_ref"],
+        snapshot_ref=detail.get("snapshot_ref"),
     )
 
 
@@ -121,7 +122,11 @@ class PostgresWorkspaceLeaseStore:
         *,
         patch_artifact_ref: str | None,
         released_at: datetime,
+        snapshot_ref: str | None = None,
     ) -> WorkspaceLease:
+        released = {"released_at": released_at.isoformat()}
+        if snapshot_ref is not None:
+            released["snapshot_ref"] = snapshot_ref
         async with self._pool.acquire() as connection, connection.transaction():
             args = await begin(connection, request_scope)
             await connection.execute(
@@ -129,19 +134,38 @@ class PostgresWorkspaceLeaseStore:
                 UPDATE mission_control.workspace_lease
                 SET desired_state = 'released', observed_state = 'released',
                     cleanup_status = 'completed', patch_ref = $5,
-                    detail = detail || jsonb_build_object('released_at', $6::text),
+                    detail = detail || $6::jsonb,
                     version = version + 1, updated_at = clock_timestamp()
                 WHERE {SCOPE} AND workspace_lease_id = $4 AND desired_state = 'active'
                 """,
                 *args,
                 lease_id,
                 patch_artifact_ref,
-                released_at.isoformat(),
+                json.dumps(released, sort_keys=True),
             )
             row = await self._fetch(connection, args, lease_id)
         if row is None:
             raise LookupError(f"workspace lease {lease_id} is not recorded")
         return _lease(row, request_scope)
+
+    async def sandbox_snapshot_refs(self, request_scope: str, run_id: str) -> tuple[str, ...]:
+        """FT-G4 `LaneSnapshotRefReader`: the snapshot frozen when the run's newest released
+        lease ended its session (a fork restores the workspace from it)."""
+
+        async with self._pool.acquire() as connection, connection.transaction():
+            args = await begin(connection, request_scope)
+            ref = await connection.fetchval(
+                f"""
+                SELECT detail->>'snapshot_ref' FROM mission_control.workspace_lease
+                WHERE {SCOPE} AND detail->>'run_id' = $4 AND detail ? 'snapshot_ref'
+                    AND desired_state = 'released'
+                ORDER BY updated_at DESC, workspace_lease_id DESC
+                LIMIT 1
+                """,
+                *args,
+                run_id,
+            )
+        return (str(ref),) if ref else ()
 
 
 __all__ = ["PostgresWorkspaceLeaseStore"]
