@@ -12,11 +12,21 @@ from pydantic_core import to_jsonable_python
 CANONICAL_SCHEMA_VERSION = "canonical-json/1"
 
 
+def _excluded_if(field: Any, value: Any) -> bool:
+    """A field declared `exclude_if` (an optional field added after contracts were recorded)
+    is left out of the digest exactly when it is left out of dumps, so adding it changes no
+    existing digest or fingerprint."""
+
+    predicate = getattr(field, "exclude_if", None)
+    return predicate is not None and bool(predicate(value))
+
+
 def _normalize(value: Any) -> Any:
     if isinstance(value, BaseModel):
         return {
             field_name: _normalize(getattr(value, field_name))
-            for field_name in type(value).model_fields
+            for field_name, field in type(value).model_fields.items()
+            if not _excluded_if(field, getattr(value, field_name))
         }
     if isinstance(value, datetime):
         if value.tzinfo is None or value.utcoffset() is None:
@@ -81,7 +91,9 @@ def contract_fingerprint(value: BaseModel, *, exclude: set[str] | None = None) -
         {
             name: getattr(value, name)
             for name, field in type(value).model_fields.items()
-            if name not in skipped and not field.exclude
+            if name not in skipped
+            and not field.exclude
+            and not _excluded_if(field, getattr(value, name))
         }
     )
 

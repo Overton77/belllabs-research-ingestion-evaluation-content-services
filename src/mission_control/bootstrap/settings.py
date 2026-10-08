@@ -263,6 +263,15 @@ class Settings(BaseSettings):
     temporal_deployment_name: str = "mission-control"
     temporal_build_id: str | None = None
     temporal_promote_on_start: bool = True
+    # FT-G1 lanes: a bound Cursor credential registers the Cursor lane profiles; unqualified
+    # lanes are admitted only when this local-proof policy is explicitly enabled.
+    cursor_api_key: SecretStr | None = None
+    mission_control_allow_unqualified_lanes: bool = False
+
+    @property
+    def allow_unqualified_lanes(self) -> bool:
+        return self.mission_control_allow_unqualified_lanes
+
     temporal_task_queue: str = "biotech-research-ingestion"
     sandbox_image: str = "python:3.12-slim"
 

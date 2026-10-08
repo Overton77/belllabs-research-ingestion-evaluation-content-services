@@ -70,6 +70,13 @@ class MissionClient:
             raise ValueError("unknown catalog action")
         return self.client.post(f"{self.prefix}/catalog/{action}", json=body)
 
+    def lanes(self, profile: str | None = None) -> httpx.Response:
+        """FT-G1: `lane list` and `lane describe PROFILE`."""
+
+        if profile is None:
+            return self.client.get(f"{self.prefix}/lanes")
+        return self.client.get(f"{self.prefix}/lanes/{self._id(profile)}")
+
     @staticmethod
     def _id(value: str) -> str:
         if not value or value in {".", ".."}:
@@ -121,6 +128,11 @@ def main(argv: list[str] | None = None) -> int:
     for action in ("resolve", "search", "discover", "inspect", "components"):
         operation = catalog_commands.add_parser(action, parents=[common])
         operation.add_argument("--request-file", required=True)
+    lane = groups.add_parser("lane", parents=[common])
+    lane_commands = lane.add_subparsers(dest="action", required=True)
+    lane_commands.add_parser("list", parents=[common])
+    lane_describe = lane_commands.add_parser("describe", parents=[common])
+    lane_describe.add_argument("lane_profile")
     args = parser.parse_args(argv)
     application = getattr(args, "application", os.environ.get("MISSION_CONTROL_APPLICATION_ID"))
     base_url = getattr(args, "url", os.environ.get("MISSION_CONTROL_URL", "http://127.0.0.1:8000"))
@@ -158,6 +170,8 @@ def main(argv: list[str] | None = None) -> int:
                     )
                 if args.group == "catalog":
                     response = client.catalog(args.action, body)
+                elif args.group == "lane":
+                    response = client.lanes(getattr(args, "lane_profile", None))
                 elif args.action == "inspect":
                     response = client.inspection(args.run_id)
                 elif args.action == "admit" and body is not None:

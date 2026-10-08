@@ -11,6 +11,9 @@ from datetime import UTC, datetime
 from typing import Protocol
 
 from mission_control.application.authoring.service import ControlPlaneService
+from mission_control.application.execution.harness.deep_agents_harness import DeepAgentsHarness
+from mission_control.application.execution.harness.protocol import OperationLane
+from mission_control.application.execution.harness.registry import LaneRegistry
 from mission_control.application.execution.operations.checkpoint_lineage import (
     CheckpointLineageService,
     UnitAttempt,
@@ -618,10 +621,14 @@ class OperationExecutionService:
         lineage: CheckpointLineageService | None = None,
         fork_reuse: ForkReusePort | None = None,
         children: AsyncChildCancellationPort | None = None,
+        lanes: LaneRegistry | None = None,
     ) -> None:
         self._authority = authority
         self._bindings = bindings
         self._runtime = runtime
+        # FT-G1: dispatch by lane. Without an explicit registry the given runtime is the
+        # `deep_agents` lane, exactly as before.
+        self._lanes = lanes if lanes is not None else LaneRegistry([DeepAgentsHarness(runtime)])
         self._sandbox = sandbox
         self._assets = assets
         self._mcp = mcp
@@ -643,7 +650,8 @@ class OperationExecutionService:
 
         if self._lineage is not None and attempt is None:
             raise ValueError("lineage-qualified execution requires the Activity attempt (EXEC-014)")
-        if request.execution_runtime == "deep_agent" and self._lineage is None:
+        lane = self._lanes.lane_for(request)
+        if lane.requires_checkpoint_lineage(request) and self._lineage is None:
             raise ValueError(
                 "Deep Agent execution requires checkpoint lineage composition (REQ-CP-DA-016)"
             )
@@ -703,6 +711,9 @@ class OperationExecutionService:
                 "settlement is visible or explicitly reconcile the claim"
             )
         return await self._dispatch_and_settle(request, binding, claim, attempt=attempt)
+
+    def _lane(self, binding: OperationExecutionBinding) -> OperationLane:
+        return self._lanes.lane_for(binding)
 
     async def _execute_unit(
         self,
@@ -1029,7 +1040,7 @@ class OperationExecutionService:
     async def _observe_latest(
         self, invocation: RuntimeInvocation, resolved_secrets: Mapping[str, str]
     ) -> RuntimeResult:
-        observe = getattr(self._runtime, "observe_latest", None)
+        observe = getattr(self._lanes.lane_for(invocation.binding), "observe_latest", None)
         if observe is None:
             raise CheckpointLineageInDoubt(
                 "the runtime cannot report the latest durable checkpoint of a cancelled unit",
@@ -1236,7 +1247,7 @@ class OperationExecutionService:
             runtime_invoked = True
             report_phase("cognition")
             try:
-                runtime_result = await self._runtime.execute(invocation, resolved_secrets)
+                runtime_result = await self._lane(binding).execute(invocation, resolved_secrets)
             except asyncio.CancelledError:
                 # REQ-CP-EXEC-008 step 3: a requested Temporal cancel reached this Activity
                 # through its heartbeat and interrupted the in-flight step. The holder
@@ -1810,6 +1821,8 @@ def _binding_for(request: OperationExecutionRequest, fingerprint: str) -> Operat
         execution_runtime=request.execution_runtime,
         native_placement=request.native_placement,
         deep_agent_binding=request.deep_agent_binding,
+        lane_profile=request.lane_profile,
+        cursor_binding=request.cursor_binding,
         side_effect_key=request.idempotency_key,
         bound_at=request.requested_at,
         runtime_unit=request.runtime_unit,
