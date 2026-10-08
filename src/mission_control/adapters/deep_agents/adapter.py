@@ -28,6 +28,7 @@ from mission_control.adapters.deep_agents.checkpoint_reads import (
     checkpoint_parent_id,
     root_checkpoint_config,
 )
+from mission_control.adapters.deep_agents.frames import DeepAgentFrameRecorder
 from mission_control.adapters.deep_agents.materializer import (
     ExactDeepAgentMaterializer,
     MaterializedDeepAgentArguments,
@@ -36,6 +37,12 @@ from mission_control.adapters.langsmith.tracing import trace_deep_agent_execute
 from mission_control.application.execution.operations.operation_progress import (
     register_checkpoint_reader,
 )
+from mission_control.application.frames.sink import (
+    FrameStore,
+    HarnessExecutionNotFound,
+    harness_execution_id,
+)
+from mission_control.application.frames.writer import FrameWriter
 from mission_control.domain.authoring.canonical import sha256_digest
 from mission_control.domain.execution.async_subagent_reconciliation import (
     AsyncServedGraphIdentity,
@@ -63,6 +70,11 @@ from mission_control.domain.execution.contracts import (
 from mission_control.domain.execution.errors import (
     DeepAgentMaterializationError,
     RuntimeInvocationFailure,
+)
+from mission_control.domain.frames.contracts import (
+    DEFAULT_EXCERPT_CAP_BYTES,
+    HarnessExecutionStart,
+    LaneProfile,
 )
 from mission_control.domain.graph_runtime.identities import QualifiedCheckpointKey
 
@@ -104,10 +116,16 @@ class DeepAgentRuntimeAdapter:
         *,
         async_subagents: AsyncSubagentMiddlewareFactory | None = None,
         workspace_outputs: WorkspaceOutputCapturePort | None = None,
+        frames: FrameStore | None = None,
+        frame_excerpt_cap_bytes: int = DEFAULT_EXCERPT_CAP_BYTES,
     ) -> None:
         self._materializer = materializer
         self._async_subagents = async_subagents
         self._workspace_outputs = workspace_outputs
+        # SPEC-03 (C1): the Native Event Store. When configured, cognition streams through
+        # `astream` v2 and every observed provider event is persisted before derivation.
+        self._frames = frames
+        self._frame_excerpt_cap = frame_excerpt_cap_bytes
 
     async def build_hosted_async_subagent_graph(
         self,
@@ -199,6 +217,7 @@ class DeepAgentRuntimeAdapter:
             # closed as `in_doubt` with typed candidates.
             classified = await _classify(checkpointer, agent, plan)
             source_key = classified.source_key
+            recorder = await self._frame_recorder(invocation, binding, plan, resolved_secrets)
             thread_config: RunnableConfig = {
                 "configurable": {
                     "thread_id": plan.namespace,
@@ -210,6 +229,13 @@ class DeepAgentRuntimeAdapter:
             # namespace while cognition runs (keys only; REQ-CP-EXEC-008 step 3).
             register_checkpoint_reader(_latest_checkpoint_reader(checkpointer, plan))
             try:
+                if recorder is not None:
+                    await recorder.begin(
+                        body={
+                            "classification": classified.kind.value,
+                            "operation_id": binding.operation_id,
+                        }
+                    )
                 if source_key is not None:
                     prior_snapshot = await agent.aget_state(
                         root_checkpoint_config(plan.namespace, source_key.checkpoint_id)
@@ -244,14 +270,12 @@ class DeepAgentRuntimeAdapter:
                     invoke_input = (
                         None if classified.kind == CheckpointClassification.INTERRUPTED else state
                     )
-                    result = cast(
-                        dict[str, Any],
-                        await agent.ainvoke(
-                            cast(Any, invoke_input),
-                            context=materialized.context,
-                            config=config,
-                            durability="sync",
-                        ),
+                    result = await _invoke(
+                        agent,
+                        invoke_input,
+                        context=materialized.context,
+                        config=config,
+                        recorder=recorder,
                     )
                     # Capture this attempt's own result tip, never the thread's latest
                     # checkpoint (which a superseded attempt may have written).
@@ -311,6 +335,14 @@ class DeepAgentRuntimeAdapter:
                     disclosed_skills=disclosure_observer.disclosed_skills,
                     operation_secret_refs=invocation.binding.secret_refs,
                 )
+                if recorder is not None:
+                    await recorder.finish(
+                        messages=messages,
+                        own_messages=own_messages,
+                        output_text=output_text,
+                        structured_keys=sorted(structured) if isinstance(structured, dict) else (),
+                        checkpoint_id=capture.result_key.checkpoint_id,
+                    )
                 return RuntimeResult(
                     output_text=output_text,
                     structured_output=structured if isinstance(structured, dict) else None,
@@ -319,9 +351,13 @@ class DeepAgentRuntimeAdapter:
                     event_payloads=(inspection,),
                     checkpoint=capture,
                 )
-            except CheckpointLineageError:
+            except CheckpointLineageError as error:
+                if recorder is not None:
+                    await recorder.fail(error, unknown_state=True)
                 raise
             except Exception as error:
+                if recorder is not None:
+                    await recorder.fail(error, unknown_state=False)
                 # REQ-CP-RUN-007 (narrowed): report whether a terminal result exists after the
                 # failure, so the boundary settles `failed` only when none does. RRM-008: the
                 # latest durable checkpoint of a unique stamped lineage travels with the
@@ -407,6 +443,66 @@ class DeepAgentRuntimeAdapter:
                 checkpoint=capture,
             )
 
+    async def _frame_recorder(
+        self,
+        invocation: RuntimeInvocation,
+        binding: DeepAgentExecutionBinding,
+        plan: CheckpointInvocationPlan,
+        resolved_secrets: Mapping[str, str],
+    ) -> DeepAgentFrameRecorder | None:
+        """Open this attempt's harness execution in the Native Event Store (SPEC-03).
+
+        One harness execution per runtime-unit attempt (attempt = execution generation);
+        the native session is the cognitive namespace (thread) and the native turn is the
+        invocation. Every resolved secret value is redacted from every frame body.
+        """
+
+        unit = binding.runtime_unit
+        if self._frames is None or unit is None:
+            return None
+        lane = LaneProfile.DEEP_AGENTS
+        start = HarnessExecutionStart(
+            harness_execution_id=harness_execution_id(
+                request_scope=unit.request_scope,
+                run_key=unit.belllabs_run_id,
+                activation_key=unit.unit_key,
+                attempt_no=binding.execution_generation,
+                lane=lane.value,
+            ),
+            request_scope=unit.request_scope,
+            run_key=unit.belllabs_run_id,
+            activation_key=unit.unit_key,
+            attempt_no=binding.execution_generation,
+            generation=binding.execution_generation,
+            lane_profile=lane,
+            native_session_ref=plan.namespace,
+            runtime_kind="deep_agent",
+            provider_kind="langgraph",
+            placement_kind=binding.placement,
+            intended_binding_digest=binding.binding_digest,
+            launch_key=plan.invocation_id,
+            native_identity={
+                "checkpointer_ref_digest": plan.checkpointer_ref_digest,
+                "operation_id": binding.operation_id,
+                "binding_id": invocation.binding.binding_id,
+            },
+        )
+        try:
+            handle = await self._frames.open_execution(start)
+        except HarnessExecutionNotFound as error:
+            raise DeepAgentMaterializationError(
+                "provider frames require the recorded runtime unit attempt"
+            ) from error
+        writer = FrameWriter(
+            self._frames,
+            handle,
+            excerpt_cap_bytes=self._frame_excerpt_cap,
+            secret_values=tuple(value for value in resolved_secrets.values() if value),
+        )
+        return DeepAgentFrameRecorder(
+            writer, thread_id=plan.namespace, invocation_id=plan.invocation_id
+        )
+
     async def _capture_workspace_outputs(
         self,
         backend: BackendProtocol,
@@ -431,6 +527,49 @@ class DeepAgentRuntimeAdapter:
                 }
             )
         return captured
+
+
+async def _invoke(
+    agent: Any,
+    invoke_input: Any,
+    *,
+    context: Any,
+    config: RunnableConfig,
+    recorder: DeepAgentFrameRecorder | None,
+) -> dict[str, Any]:
+    """Run one invocation; with a frame recorder, stream it and persist every part.
+
+    The streamed form returns exactly what `ainvoke` returns: the root graph's latest
+    values, with LangGraph interrupts under `__interrupt__`.
+    """
+
+    if recorder is None:
+        return cast(
+            dict[str, Any],
+            await agent.ainvoke(invoke_input, context=context, config=config, durability="sync"),
+        )
+    latest: Any = None
+    interrupts: list[Any] = []
+    async for part in agent.astream(
+        invoke_input,
+        config,
+        context=context,
+        stream_mode=["updates", "messages", "custom", "values"],
+        subgraphs=True,
+        version="v2",
+        durability="sync",
+    ):
+        if part.get("type") == "values":
+            if not part.get("ns"):
+                latest = part.get("data")
+                interrupts.extend(part.get("interrupts") or ())
+            continue
+        await recorder.observe(part)
+    await recorder.flush()
+    result = dict(latest) if isinstance(latest, Mapping) else {}
+    if interrupts:
+        result["__interrupt__"] = interrupts
+    return result
 
 
 def _effective_permissions(

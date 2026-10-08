@@ -84,6 +84,7 @@ from mission_control.adapters.postgres.capability_bundles import PostgresCapabil
 from mission_control.adapters.postgres.coordinator.workflow_result_repository import (
     PostgresWorkflowResultRepository,
 )
+from mission_control.adapters.postgres.frames.repository import PostgresFrameRepository
 from mission_control.adapters.postgres.operations.operation_binding_repository import (
     PostgresOperationBindingRepository,
 )
@@ -661,6 +662,8 @@ class ProductionWorkerActivityCompositionFactory:
                 ExactDeepAgentMaterializer(capabilities.registry),
                 async_subagents=children,
                 workspace_outputs=candidates,
+                # SPEC-03 (C1): provider frames persist before any derivation.
+                frames=PostgresFrameRepository(postgres_pool),
             ),
             children,
             pool=postgres_pool,
