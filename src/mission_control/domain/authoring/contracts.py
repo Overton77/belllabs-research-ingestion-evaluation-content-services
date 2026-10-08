@@ -11,10 +11,45 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    JsonValue,
     ValidationInfo,
     field_validator,
     model_validator,
 )
+
+from mission_control.domain.capabilities.hooks import (
+    HookCallback,
+    HookEvent,
+    HookInterpreter,
+    unsupported_events,
+)
+from mission_control.domain.capabilities.host_support import (
+    AgentCapabilityKind,
+    CapabilityHostSupport,
+)
+from mission_control.domain.capabilities.plugins import PluginManifest
+from mission_control.domain.capabilities.subagents import SubagentProfile
+
+# Additive fields declared with this marker do not change the canonical digest while they
+# hold their default, so definitions published before the field existed keep their digest.
+DIGEST_NEUTRAL_DEFAULT: dict[str, JsonValue] = {"digest_omit_default": True}
+
+
+def _host_support_field() -> Any:
+    return Field(default_factory=CapabilityHostSupport, json_schema_extra=DIGEST_NEUTRAL_DEFAULT)
+
+
+def _secret_refs_field() -> Any:
+    return Field(default=(), json_schema_extra=DIGEST_NEUTRAL_DEFAULT)
+
+
+def _check_secret_ref_names(values: tuple[str, ...]) -> tuple[str, ...]:
+    if len(values) != len(set(values)):
+        raise ValueError("secret_refs must be unique")
+    for value in values:
+        if not re.fullmatch(r"[A-Z][A-Z0-9_]*", value):
+            raise ValueError("secret_refs are environment-style names, never values")
+    return values
 
 
 class Contract(BaseModel):
@@ -40,7 +75,10 @@ class DefinitionKind(StrEnum):
     SKILL = "skill"
     MCP_SERVER = "mcp_server"
     MCP_TOOL = "mcp_tool"
-    PLUGIN_PACKAGE = "plugin_package"
+    # Agent-composition kinds (ADR-0023, SPEC-01); plugin replaced plugin_package.
+    HOOK_SCRIPT = "hook_script"
+    SUBAGENT_PROFILE = "subagent_profile"
+    PLUGIN = "plugin"
     MODEL = "model"
     MIDDLEWARE = "middleware"
     SANDBOX_PROFILE = "sandbox_profile"
@@ -1607,9 +1645,13 @@ class SkillDefinition(DefinitionBase):
         default_factory=lambda: frozenset({"control-plane-definitions/1"})
     )
     conflicts_with: frozenset[ExactDefinitionRef] = Field(default_factory=frozenset)
+    host_support: CapabilityHostSupport = _host_support_field()
+    secret_refs: tuple[str, ...] = _secret_refs_field()
 
     @model_validator(mode="after")
     def validate_manifest(self) -> SkillDefinition:
+        _check_secret_ref_names(self.secret_refs)
+        self.host_support.validate_for(AgentCapabilityKind.SKILL_BUNDLE)
         paths = [entry.path for entry in self.file_manifest]
         if len(paths) != len(set(paths)):
             raise ValueError("Skill Definition file paths must be unique")
@@ -1622,6 +1664,22 @@ class MCPNetworkRequirement(Contract):
     host: str = Field(min_length=1)
     port: int = Field(ge=1, le=65535)
     protocol: Literal["https", "http", "stdio"]
+
+
+class MCPOAuthRefs(Contract):
+    client_id_ref: str = Field(pattern=r"^[A-Z][A-Z0-9_]*$")
+    client_secret_ref: str | None = Field(default=None, pattern=r"^[A-Z][A-Z0-9_]*$")
+    scopes: tuple[str, ...] = ()
+
+
+class MCPToolSummary(Contract):
+    name: str = Field(min_length=1, pattern=r"^[A-Za-z0-9_.:-]+$")
+    description: str = ""
+    side_effect_class: Literal["read_only", "bounded_write", "consequential"] = "read_only"
+    read_only_hint: bool | None = None
+
+
+_PACKAGE_PIN = r"^(npm|pypi|oci|git|uvx):\S+$"
 
 
 class MCPServerDefinition(DefinitionBase):
@@ -1645,6 +1703,54 @@ class MCPServerDefinition(DefinitionBase):
         default_factory=lambda: frozenset({"control-plane-definitions/1"})
     )
     conflicts_with: frozenset[ExactDefinitionRef] = Field(default_factory=frozenset)
+    # SPEC-01 provider-neutral core; digest-neutral at their defaults.
+    host_support: CapabilityHostSupport = _host_support_field()
+    secret_refs: tuple[str, ...] = _secret_refs_field()
+    env: dict[str, str] = Field(default_factory=dict, json_schema_extra=DIGEST_NEUTRAL_DEFAULT)
+    env_refs: dict[str, str] = Field(default_factory=dict, json_schema_extra=DIGEST_NEUTRAL_DEFAULT)
+    header_refs: dict[str, str] = Field(
+        default_factory=dict, json_schema_extra=DIGEST_NEUTRAL_DEFAULT
+    )
+    oauth: MCPOAuthRefs | None = Field(default=None, json_schema_extra=DIGEST_NEUTRAL_DEFAULT)
+    package_pin: str | None = Field(
+        default=None, pattern=_PACKAGE_PIN, json_schema_extra=DIGEST_NEUTRAL_DEFAULT
+    )
+    tools: tuple[MCPToolSummary, ...] = Field(default=(), json_schema_extra=DIGEST_NEUTRAL_DEFAULT)
+    tools_list_digest: str | None = Field(
+        default=None, pattern=r"^sha256:[0-9a-f]{64}$", json_schema_extra=DIGEST_NEUTRAL_DEFAULT
+    )
+    tool_allowlist: frozenset[str] | None = Field(
+        default=None, json_schema_extra=DIGEST_NEUTRAL_DEFAULT
+    )
+
+    @model_validator(mode="after")
+    def validate_capability_core(self) -> MCPServerDefinition:
+        _check_secret_ref_names(self.secret_refs)
+        self.host_support.validate_for(AgentCapabilityKind.MCP_SERVER)
+        for name in (*self.env, *self.env_refs):
+            if not re.fullmatch(r"[A-Z][A-Z0-9_]*", name):
+                raise ValueError("MCP environment names must be upper-case identifiers")
+        if set(self.env) & set(self.env_refs):
+            raise ValueError("an MCP environment name is either a value or a secret ref")
+        referenced = {*self.env_refs.values(), *self.header_refs.values()}
+        if self.oauth is not None:
+            referenced.add(self.oauth.client_id_ref)
+            if self.oauth.client_secret_ref is not None:
+                referenced.add(self.oauth.client_secret_ref)
+        missing = sorted(referenced - set(self.secret_refs))
+        if missing:
+            raise ValueError(f"MCP secret references not declared in secret_refs: {missing}")
+        names = [tool.name for tool in self.tools]
+        if len(names) != len(set(names)):
+            raise ValueError("MCP tool names must be unique")
+        if self.tool_allowlist is not None and names and not self.tool_allowlist <= set(names):
+            raise ValueError("MCP tool_allowlist may name only listed tools")
+        return self
+
+    def exposed_tools(self) -> tuple[MCPToolSummary, ...]:
+        if self.tool_allowlist is None:
+            return self.tools
+        return tuple(tool for tool in self.tools if tool.name in self.tool_allowlist)
 
     @model_validator(mode="after")
     def validate_transport_recipe(self) -> MCPServerDefinition:
@@ -1692,6 +1798,80 @@ class MCPToolDefinition(DefinitionBase):
         return self
 
 
+class HookScriptDefinition(DefinitionBase):
+    """A Hook Script row: one script directory, one event set, one JSON contract (ADR-0026)."""
+
+    kind: Literal[DefinitionKind.HOOK_SCRIPT] = DefinitionKind.HOOK_SCRIPT
+    events: tuple[HookEvent, ...] = Field(min_length=1)
+    required_events: frozenset[HookEvent] = Field(default_factory=frozenset)
+    matcher: str | None = Field(default=None, min_length=1)
+    timeout_seconds: int = Field(default=30, ge=1, le=600)
+    fail_closed: bool = False
+    side_effect_class: Literal["read_only", "bounded_write", "consequential"] = "read_only"
+    file_manifest: tuple[SkillFileManifestEntry, ...] = Field(min_length=1)
+    manifest_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    bundle_ref: CatalogPayloadRef | None = None
+    entrypoint: str = Field(min_length=1)
+    interpreter: HookInterpreter
+    callback: HookCallback = HookCallback.NONE
+    source_provenance: SourceProvenance | None = None
+    host_support: CapabilityHostSupport = Field(default_factory=CapabilityHostSupport)
+    secret_refs: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_hook_script(self) -> HookScriptDefinition:
+        _check_secret_ref_names(self.secret_refs)
+        self.host_support.validate_for(AgentCapabilityKind.HOOK_SCRIPT)
+        if len(self.events) != len(set(self.events)):
+            raise ValueError("hook events must be unique")
+        if not self.required_events <= set(self.events):
+            raise ValueError("required_events must be a subset of events")
+        if self.matcher is not None:
+            try:
+                re.compile(self.matcher)
+            except re.error as error:
+                raise ValueError(f"hook matcher is not a valid regex: {error}") from None
+        paths = [entry.path for entry in self.file_manifest]
+        if len(paths) != len(set(paths)):
+            raise ValueError("hook script file paths must be unique")
+        if self.entrypoint.replace("\\", "/") not in paths:
+            raise ValueError("hook script entrypoint must be a file of its manifest")
+        for profile in self.host_support.supported_profiles():
+            lost = unsupported_events(profile, self.required_events)
+            if lost:
+                raise ValueError(
+                    f"hook declares {profile.value} supported but cannot run required "
+                    f"event(s) {[event.value for event in lost]} there"
+                )
+        return self
+
+
+class SubagentProfileDefinition(DefinitionBase):
+    kind: Literal[DefinitionKind.SUBAGENT_PROFILE] = DefinitionKind.SUBAGENT_PROFILE
+    profile: SubagentProfile
+    host_support: CapabilityHostSupport = Field(default_factory=CapabilityHostSupport)
+    secret_refs: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_subagent(self) -> SubagentProfileDefinition:
+        _check_secret_ref_names(self.secret_refs)
+        self.host_support.validate_for(AgentCapabilityKind.SUBAGENT_PROFILE)
+        return self
+
+
+class PluginDefinition(DefinitionBase):
+    kind: Literal[DefinitionKind.PLUGIN] = DefinitionKind.PLUGIN
+    manifest: PluginManifest
+    host_support: CapabilityHostSupport = Field(default_factory=CapabilityHostSupport)
+    secret_refs: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_plugin(self) -> PluginDefinition:
+        _check_secret_ref_names(self.secret_refs)
+        self.host_support.validate_for(AgentCapabilityKind.PLUGIN)
+        return self
+
+
 class ModelPolicy(Contract):
     provider: str = Field(min_length=1)
     model: str = Field(min_length=1)
@@ -1705,6 +1885,9 @@ class CapabilityKind(StrEnum):
     MODEL = "model"
     MIDDLEWARE = "middleware"
     TOOL = "tool"
+    HOOK_SCRIPT = "hook_script"
+    SUBAGENT_PROFILE = "subagent_profile"
+    PLUGIN = "plugin"
 
 
 class CapabilityRequirement(Contract):
@@ -1729,6 +1912,9 @@ class CapabilityRequirement(Contract):
             CapabilityKind.MODEL: {DefinitionKind.MODEL},
             CapabilityKind.MIDDLEWARE: {DefinitionKind.MIDDLEWARE},
             CapabilityKind.TOOL: {DefinitionKind.TOOL, DefinitionKind.MCP_TOOL},
+            CapabilityKind.HOOK_SCRIPT: {DefinitionKind.HOOK_SCRIPT},
+            CapabilityKind.SUBAGENT_PROFILE: {DefinitionKind.SUBAGENT_PROFILE},
+            CapabilityKind.PLUGIN: {DefinitionKind.PLUGIN},
         }[self.capability_kind]
         refs = set(self.allowed_refs)
         if self.degraded_ref is not None:
@@ -1874,6 +2060,9 @@ Definition = (
     | SkillDefinition
     | MCPServerDefinition
     | MCPToolDefinition
+    | HookScriptDefinition
+    | SubagentProfileDefinition
+    | PluginDefinition
     | AgentProfileDefinition
     | DeepAgentPlacementDefinition
     | CapabilityDefinition

@@ -106,6 +106,9 @@ def test_plugin_search_preserves_trust_and_host_filters_and_does_not_install():
         async def list_published_definition_refs(self):
             return ()
 
+        async def list_published_definitions(self):
+            return ()
+
         async def get(self, ref):
             raise AssertionError("plugin search cannot execute authoring")
 

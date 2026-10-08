@@ -24,6 +24,7 @@ from mission_control.domain.agentic_components.contracts import (
 )
 from mission_control.domain.authoring.contracts import ExactDefinitionRef, PublishedDefinition
 from mission_control.domain.authoring.errors import DefinitionNotFound
+from mission_control.domain.capabilities.catalog_entry import CatalogEntrySummary, summarize
 from mission_control.domain.coordinator.contracts import CapabilitySearchRequest
 from mission_control.interfaces.http.mission_control import (
     MissionPrincipal,
@@ -80,6 +81,8 @@ class DiscoveryRequest(BaseModel):
 class DefinitionsResponse(BaseModel):
     catalog_scope: str
     definitions: tuple[ExactDefinitionRef, ...]
+    # Per row: kind, agent-composition kind and lane-profile support (SPEC-01, FT-A1).
+    capabilities: tuple[CatalogEntrySummary, ...] = ()
 
 
 class ComponentsResponse(BaseModel):
@@ -89,9 +92,11 @@ class ComponentsResponse(BaseModel):
 @router.get("/definitions")
 async def definitions(principal: Principal, service: Service) -> DefinitionsResponse:
     permitted(principal, "catalog:read")
+    published = await service.definitions.list_published_definitions()
     return DefinitionsResponse(
         catalog_scope=service.catalog_scope,
-        definitions=await service.definitions.list_published_definition_refs(),
+        definitions=tuple(item.ref for item in published),
+        capabilities=tuple(summarize(item) for item in published),
     )
 
 

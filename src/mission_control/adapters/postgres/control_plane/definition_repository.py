@@ -25,6 +25,7 @@ from mission_control.adapters.postgres.control_plane.catalog_assets import (
     CATALOG_SERVICE_ACTOR,
     PUBLICATION_POLICY_REF,
     PUBLISHED_DEFINITION_CONTRACT,
+    capability_core_columns,
     definition_asset_id,
     definition_manifest_ref,
     insert_projection_job,
@@ -317,9 +318,10 @@ class PostgresDefinitionRepository:
                 """INSERT INTO mission_control.asset_version
                    (installation_id, application_id, asset_version_id, asset_id, version, kind,
                     contract, manifest_ref, manifest_digest, manifest, required_compatibility,
-                    status, version_no, updated_at, created_at, created_by_actor_ref)
+                    status, version_no, updated_at, created_at, created_by_actor_ref,
+                    host_support, secret_refs)
                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,'{}'::text[],'admitted',1,$11,
-                           clock_timestamp(),$12)""",
+                           clock_timestamp(),$12,$13::jsonb,$14::text[])""",
                 *self._scope,
                 asset_version_id,
                 definition_asset_id(definition.kind, logical_id),
@@ -331,6 +333,7 @@ class PostgresDefinitionRepository:
                 json.dumps(manifest, allow_nan=False),
                 published_at,
                 actor_id,
+                *capability_core_columns(definition),
             )
             await self._decision(
                 connection, asset_version_id, "admit", "published", actor_id, published_at
@@ -613,6 +616,10 @@ class PostgresDefinitionRepository:
 
     async def list_published_definition_refs(self) -> tuple[ExactDefinitionRef, ...]:
         """List only this installation's verified immutable publication identities."""
+        return tuple(item.ref for item in await self.list_published_definitions())
+
+    async def list_published_definitions(self) -> tuple[PublishedDefinition, ...]:
+        """Verified published definitions (not proposed), ordered by kind, id and revision."""
         async with self._transaction() as connection:
             rows = await connection.fetch(
                 """SELECT manifest FROM mission_control.asset_version
@@ -622,11 +629,13 @@ class PostgresDefinitionRepository:
                 *self._scope,
                 PUBLISHED_DEFINITION_CONTRACT,
             )
-            refs = []
+            published = []
             for row in rows:
                 publication = PublishedDefinition.model_validate(json_value(row["manifest"]))
-                verified = await self._get(connection, publication.ref)
-                refs.append(verified.ref)
+                published.append(await self._get(connection, publication.ref))
             return tuple(
-                sorted(refs, key=lambda ref: (ref.kind.value, ref.logical_id, ref.revision))
+                sorted(
+                    published,
+                    key=lambda item: (item.ref.kind.value, item.ref.logical_id, item.ref.revision),
+                )
             )
