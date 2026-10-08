@@ -32,8 +32,8 @@ has real values.
 
 ```text
 missionctl command send RUN_ID --request-file command.json --json
-missionctl command queue RUN_ID --request-file queue.json --json
-missionctl command inject RUN_ID --request-file inject.json --json
+missionctl command queue RUN_ID --file queue.json --json
+missionctl command inject RUN_ID --file inject.json --json
 missionctl command cancel RUN_ID --urgency immediate --reason "…" --json
 ```
 
@@ -47,7 +47,7 @@ lane used. Report `requested` and `delivered` separately; `emulated` carries a n
 
 ```text
 missionctl run snapshot RUN_ID --request-file snapshot.json --json
-missionctl run fork RUN_ID --from-snapshot SNAPSHOT_ID --instruction-file note.md --json
+missionctl run fork RUN_ID --from-snapshot SNAPSHOT_ID --instruction-file note.json --json
 ```
 
 A snapshot captures a safe boundary and fails elsewhere. A fork admits a new run seeded from the

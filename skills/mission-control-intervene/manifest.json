@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "service_contract_range": ">=0.1.0,<0.2.0",
   "files": {
-    "references/command-templates.md": "sha256:40a738db53cae5a947b3fcb015e67a04e207bd4bd0d916a48987ef560e82f5e3",
-    "SKILL.md": "sha256:9266084be9fcd655e1e6a62613b124deb6a12a0193a75143fb6bc3556fcbfaf8"
+    "SKILL.md": "sha256:380f93e97baf0e296852d4b11ef54f70d42ba9e670700f4f11d22652aa464eb9",
+    "references/command-templates.md": "sha256:75327c1cb9105c8e0deb32bfaecceb5e29d3653945b46edc5ee87c1003a22b3d"
   }
 }

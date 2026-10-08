@@ -30,7 +30,8 @@ missionctl run search RUN_ID --query "pytest failed" --json
 ```
 
 Availability: FT-C4. `run list` is a Temporal visibility query over the typed search attributes
-`mc_mission_id`, `mc_run_id`, `mc_lane`, `mc_phase`; `run search` is a text search over a run's
+`mc_mission_id`, `mc_run_id`, `mc_lane`, `mc_application_id`, `mc_phase`,
+`mc_forked_from_run_id`; `run search` is a text search over a run's
 transcript index and returns transcript cursors you can pass to `--since`.
 
 ## 3. Transcript
@@ -51,22 +52,25 @@ call in the transcript proves the agent attempted it; the effect ledger proves i
 missionctl chain inspect CHAIN_ID --json
 ```
 
-Availability: FT-D2. Shows each mission in the chain, each link's state (`pending | released |
-detached | cancelled`), the acceptance condition it waits for and the Context Packet digest it
+Availability: FT-D2. Shows each mission in the chain, each link's state (`armed | released |
+blocked | detached | cancelled`), the acceptance condition it waits for and the Context Packet digest it
 released with.
 
 ## 5. Watch and subscribe
 
 ```text
 missionctl events watch MISSION_ID --after-seq 0
-missionctl subscribe --mission MISSION_ID --events human_task.opened,run.completed --webhook https://…
-missionctl subscribe --mission MISSION_ID --events "*" --stream
+missionctl subscribe --mission MISSION_ID --events human_task.opened,run.completed \n  --webhook https://… --secret-ref WEBHOOK_SECRET_REF
+missionctl subscribe --run RUN_ID --events run.completed --webhook https://… --secret-ref REF
+missionctl subscribe list
+missionctl subscribe close SUBSCRIPTION_ID
 ```
 
 Availability: FT-F5. Events replay from `after_seq` then follow live; dedupe on `event_id`,
 detect gaps on `seq`, and on `CURSOR_EXPIRED` resync from inspection rather than skipping.
-Webhook deliveries are at least once and HMAC-signed; a subscription is a durable row you can
-list and delete. Done when the subscription id is recorded with the mission.
+Webhook deliveries are at least once and HMAC-signed with a secret the deployment resolves from
+`--secret-ref` (never pass the secret itself); a subscription is a durable row you can list and
+close. Stream consumers use `events watch` (SSE); an MCP session uses `mission_subscribe`. Done when the subscription id is recorded with the mission.
 
 ## Reading a Delivery Report
 
