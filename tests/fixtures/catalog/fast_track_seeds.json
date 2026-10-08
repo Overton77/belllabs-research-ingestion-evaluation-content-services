@@ -1,0 +1,897 @@
+{
+ "schema": "mc.fast_track_fixture_catalog.v1",
+ "definitions": [
+  {
+   "schema_version": "1",
+   "logical_id": "skill.mission-control-observe",
+   "title": "Mission Control observe",
+   "description": "Observe Mission Control runs: inspect, transcript, events watch and chain inspect.",
+   "kind": "skill",
+   "skill_name": "mission-control-observe",
+   "frontmatter": {
+    "name": "mission-control-observe",
+    "description": "Observe Mission Control runs: inspect, transcript, events watch and chain inspect."
+   },
+   "body_summary": "Observe Mission Control runs: inspect, transcript, events watch and chain inspect.",
+   "bundle_ref": {
+    "uri": "repo://tests/fixtures/catalog/skill.mission-control-observe",
+    "digest": "sha256:9c713c61dfef8f771164dfee76b9897ba4acd194bbb6b2cbec73ae7fd4c7d3e3",
+    "media_type": "application/vnd.belllabs.skill-manifest+json",
+    "size_bytes": 256
+   },
+   "manifest_digest": "sha256:9c713c61dfef8f771164dfee76b9897ba4acd194bbb6b2cbec73ae7fd4c7d3e3",
+   "file_manifest": [
+    {
+     "path": "SKILL.md",
+     "digest": "sha256:0e95f5a3666031d6fac42bc6ca698b40b61648f4974c8ec355181ed4888c5c26",
+     "size_bytes": 8,
+     "executable": false
+    },
+    {
+     "path": "references/procedure.md",
+     "digest": "sha256:9d759ea50f5ecb47a4917507f2dd8031472cfd54dac4fac025150e075a61c379",
+     "size_bytes": 23,
+     "executable": false
+    }
+   ],
+   "required_capabilities": [],
+   "compatibility": {
+    "runtimes": [],
+    "executables": [],
+    "network_capabilities": [],
+    "workspace_capabilities": []
+   },
+   "source_provenance": {
+    "source": "belllabs",
+    "locator": "repo://tests/fixtures/catalog/skill.mission-control-observe",
+    "upstream_identity": "skill.mission-control-observe",
+    "upstream_version": "0.2.0",
+    "commit_digest": null,
+    "license": null
+   },
+   "review_status": "approved",
+   "maturity": "qualified",
+   "attachment_targets": [
+    "agent.main"
+   ],
+   "compatible_compiler_versions": [
+    "control-plane-definitions/1"
+   ],
+   "conflicts_with": [],
+   "host_support": {
+    "schema_version": "mc.capability_host_support.v1",
+    "profiles": {
+     "deep_agents": {
+      "status": "supported",
+      "overlay": {},
+      "evidence_ref": null
+     },
+     "cursor_local": {
+      "status": "supported",
+      "overlay": {},
+      "evidence_ref": null
+     },
+     "cursor_cloud": {
+      "status": "supported",
+      "overlay": {},
+      "evidence_ref": null
+     }
+    }
+   },
+   "secret_refs": []
+  },
+  {
+   "schema_version": "1",
+   "logical_id": "skill.biotech-literature-review",
+   "title": "Biotech literature review procedure",
+   "description": "Biotech literature review procedure: search, screen, extract claims, cite.",
+   "kind": "skill",
+   "skill_name": "biotech-literature-review",
+   "frontmatter": {
+    "name": "biotech-literature-review",
+    "description": "Biotech literature review procedure: search, screen, extract claims, cite."
+   },
+   "body_summary": "Biotech literature review procedure: search, screen, extract claims, cite.",
+   "bundle_ref": {
+    "uri": "repo://tests/fixtures/catalog/skill.biotech-literature-review",
+    "digest": "sha256:9d718bf565855ee9f95e6dc4c36c43f14b2f41b4dbba82e595086eeebae5a4a0",
+    "media_type": "application/vnd.belllabs.skill-manifest+json",
+    "size_bytes": 256
+   },
+   "manifest_digest": "sha256:9d718bf565855ee9f95e6dc4c36c43f14b2f41b4dbba82e595086eeebae5a4a0",
+   "file_manifest": [
+    {
+     "path": "SKILL.md",
+     "digest": "sha256:0e95f5a3666031d6fac42bc6ca698b40b61648f4974c8ec355181ed4888c5c26",
+     "size_bytes": 8,
+     "executable": false
+    },
+    {
+     "path": "references/procedure.md",
+     "digest": "sha256:9d759ea50f5ecb47a4917507f2dd8031472cfd54dac4fac025150e075a61c379",
+     "size_bytes": 23,
+     "executable": false
+    }
+   ],
+   "required_capabilities": [],
+   "compatibility": {
+    "runtimes": [],
+    "executables": [],
+    "network_capabilities": [],
+    "workspace_capabilities": []
+   },
+   "source_provenance": {
+    "source": "belllabs",
+    "locator": "repo://tests/fixtures/catalog/skill.biotech-literature-review",
+    "upstream_identity": "skill.biotech-literature-review",
+    "upstream_version": "1.0.0",
+    "commit_digest": null,
+    "license": null
+   },
+   "review_status": "approved",
+   "maturity": "qualified",
+   "attachment_targets": [
+    "agent.main"
+   ],
+   "compatible_compiler_versions": [
+    "control-plane-definitions/1"
+   ],
+   "conflicts_with": [],
+   "host_support": {
+    "schema_version": "mc.capability_host_support.v1",
+    "profiles": {
+     "deep_agents": {
+      "status": "supported",
+      "overlay": {},
+      "evidence_ref": null
+     },
+     "cursor_local": {
+      "status": "supported",
+      "overlay": {},
+      "evidence_ref": null
+     },
+     "cursor_cloud": {
+      "status": "supported",
+      "overlay": {},
+      "evidence_ref": null
+     }
+    }
+   },
+   "secret_refs": []
+  },
+  {
+   "schema_version": "1",
+   "logical_id": "context.biotech-schema-muscle-aging",
+   "title": "Biotech schema context: muscle aging",
+   "description": "Biotech schema context bundle for muscle aging entities and claim fields.",
+   "kind": "skill",
+   "skill_name": "biotech-schema-muscle-aging",
+   "frontmatter": {
+    "name": "biotech-schema-muscle-aging",
+    "description": "Biotech schema context bundle for muscle aging entities and claim fields."
+   },
+   "body_summary": "Biotech schema context bundle for muscle aging entities and claim fields.",
+   "bundle_ref": {
+    "uri": "repo://tests/fixtures/catalog/context.biotech-schema-muscle-aging",
+    "digest": "sha256:4c178101f6d71565f43933283abfe24979a8eb022937a5892aa05c5dd6196ba9",
+    "media_type": "application/vnd.belllabs.skill-manifest+json",
+    "size_bytes": 256
+   },
+   "manifest_digest": "sha256:4c178101f6d71565f43933283abfe24979a8eb022937a5892aa05c5dd6196ba9",
+   "file_manifest": [
+    {
+     "path": "SKILL.md",
+     "digest": "sha256:0e95f5a3666031d6fac42bc6ca698b40b61648f4974c8ec355181ed4888c5c26",
+     "size_bytes": 8,
+     "executable": false
+    },
+    {
+     "path": "references/procedure.md",
+     "digest": "sha256:9d759ea50f5ecb47a4917507f2dd8031472cfd54dac4fac025150e075a61c379",
+     "size_bytes": 23,
+     "executable": false
+    }
+   ],
+   "required_capabilities": [],
+   "compatibility": {
+    "runtimes": [],
+    "executables": [],
+    "network_capabilities": [],
+    "workspace_capabilities": []
+   },
+   "source_provenance": {
+    "source": "belllabs",
+    "locator": "repo://tests/fixtures/catalog/context.biotech-schema-muscle-aging",
+    "upstream_identity": "context.biotech-schema-muscle-aging",
+    "upstream_version": "1.0.0",
+    "commit_digest": null,
+    "license": null
+   },
+   "review_status": "approved",
+   "maturity": "qualified",
+   "attachment_targets": [
+    "agent.main"
+   ],
+   "compatible_compiler_versions": [
+    "control-plane-definitions/1"
+   ],
+   "conflicts_with": [],
+   "host_support": {
+    "schema_version": "mc.capability_host_support.v1",
+    "profiles": {
+     "deep_agents": {
+      "status": "supported",
+      "overlay": {},
+      "evidence_ref": null
+     },
+     "cursor_local": {
+      "status": "supported",
+      "overlay": {},
+      "evidence_ref": null
+     },
+     "cursor_cloud": {
+      "status": "supported",
+      "overlay": {},
+      "evidence_ref": null
+     }
+    }
+   },
+   "secret_refs": []
+  },
+  {
+   "schema_version": "1",
+   "logical_id": "skill.agent-browser",
+   "title": "agent-browser browser automation skill",
+   "description": "Drive a real browser with agent-browser: open, snapshot, click, fill, screenshot.",
+   "kind": "skill",
+   "skill_name": "agent-browser",
+   "frontmatter": {
+    "name": "agent-browser",
+    "description": "Drive a real browser with agent-browser: open, snapshot, click, fill, screenshot."
+   },
+   "body_summary": "Drive a real browser with agent-browser: open, snapshot, click, fill, screenshot.",
+   "bundle_ref": {
+    "uri": "repo://tests/fixtures/catalog/skill.agent-browser",
+    "digest": "sha256:f7d09b055b435af9108787d801dc4b12991fa4dcc1cac232b6cd6bc2c644162d",
+    "media_type": "application/vnd.belllabs.skill-manifest+json",
+    "size_bytes": 256
+   },
+   "manifest_digest": "sha256:f7d09b055b435af9108787d801dc4b12991fa4dcc1cac232b6cd6bc2c644162d",
+   "file_manifest": [
+    {
+     "path": "SKILL.md",
+     "digest": "sha256:0e95f5a3666031d6fac42bc6ca698b40b61648f4974c8ec355181ed4888c5c26",
+     "size_bytes": 8,
+     "executable": false
+    },
+    {
+     "path": "references/procedure.md",
+     "digest": "sha256:9d759ea50f5ecb47a4917507f2dd8031472cfd54dac4fac025150e075a61c379",
+     "size_bytes": 23,
+     "executable": false
+    }
+   ],
+   "required_capabilities": [],
+   "compatibility": {
+    "runtimes": [],
+    "executables": [],
+    "network_capabilities": [],
+    "workspace_capabilities": []
+   },
+   "source_provenance": {
+    "source": "belllabs",
+    "locator": "repo://tests/fixtures/catalog/skill.agent-browser",
+    "upstream_identity": "skill.agent-browser",
+    "upstream_version": "0.4.0",
+    "commit_digest": null,
+    "license": null
+   },
+   "review_status": "approved",
+   "maturity": "qualified",
+   "attachment_targets": [
+    "agent.main"
+   ],
+   "compatible_compiler_versions": [
+    "control-plane-definitions/1"
+   ],
+   "conflicts_with": [],
+   "host_support": {
+    "schema_version": "mc.capability_host_support.v1",
+    "profiles": {
+     "deep_agents": {
+      "status": "supported",
+      "overlay": {},
+      "evidence_ref": null
+     },
+     "cursor_local": {
+      "status": "supported",
+      "overlay": {},
+      "evidence_ref": null
+     },
+     "cursor_cloud": {
+      "status": "unsupported",
+      "overlay": {},
+      "evidence_ref": null
+     }
+    }
+   },
+   "secret_refs": []
+  },
+  {
+   "schema_version": "1",
+   "logical_id": "mcp.pubmed-remote",
+   "title": "PubMed MCP behind a self-hosted Streamable HTTP endpoint",
+   "description": "Cloud-lane deployment of the PubMed MCP server (same tools as mcp.pubmed) behind a self-hosted Streamable HTTP endpoint, for cursor_cloud.",
+   "kind": "mcp_server",
+   "transport": "streamable_http",
+   "endpoint": "https://pubmed-mcp.fixture.invalid/mcp",
+   "launch_template": null,
+   "credential_refs": [],
+   "allowed_tools": [
+    "pubmed_spell_check",
+    "pubmed_convert_ids",
+    "pubmed_lookup_mesh",
+    "pubmed_europepmc_search",
+    "pubmed_format_citations",
+    "pubmed_search_articles",
+    "pubmed_europepmc_fetch",
+    "pubmed_lookup_citation",
+    "pubmed_fetch_articles",
+    "pubmed_fetch_fulltext",
+    "pubmed_find_related"
+   ],
+   "approval_policy": {},
+   "network_requirements": [],
+   "schema_snapshot_ref": {
+    "uri": "repo://tests/fixtures/mcp/mcp.pubmed.tools.json",
+    "digest": "sha256:9930c728962b99b325d6fb1413e1fdd4f149f675b6a5b59bc387b0629d1fa336",
+    "media_type": "application/json",
+    "size_bytes": 3420
+   },
+   "schema_digest": "sha256:7647d27c158f7421c1b09c2b76dda95cb5820368e3ca8c9b1c0896a480292598",
+   "source_provenance": {
+    "source": "git",
+    "locator": "https://github.com/cyanheads/pubmed-mcp-server",
+    "upstream_identity": "@cyanheads/pubmed-mcp-server",
+    "upstream_version": "2.10.20",
+    "commit_digest": null,
+    "license": "Apache-2.0"
+   },
+   "review_status": "approved",
+   "maturity": "experimental",
+   "attachment_targets": [
+    "agent.main"
+   ],
+   "compatible_compiler_versions": [
+    "control-plane-definitions/1"
+   ],
+   "conflicts_with": [],
+   "host_support": {
+    "schema_version": "mc.capability_host_support.v1",
+    "profiles": {
+     "deep_agents": {
+      "status": "supported",
+      "overlay": {},
+      "evidence_ref": null
+     },
+     "cursor_local": {
+      "status": "supported",
+      "overlay": {},
+      "evidence_ref": null
+     },
+     "cursor_cloud": {
+      "status": "supported",
+      "overlay": {},
+      "evidence_ref": null
+     }
+    }
+   },
+   "secret_refs": [
+    "NCBI_API_KEY",
+    "NCBI_ADMIN_EMAIL",
+    "UNPAYWALL_EMAIL"
+   ],
+   "env": {},
+   "env_refs": {
+    "NCBI_ADMIN_EMAIL": "NCBI_ADMIN_EMAIL",
+    "NCBI_API_KEY": "NCBI_API_KEY",
+    "UNPAYWALL_EMAIL": "UNPAYWALL_EMAIL"
+   },
+   "header_refs": {},
+   "oauth": null,
+   "package_pin": null,
+   "tools": [
+    {
+     "name": "pubmed_search_articles",
+     "description": "PubMed query syntax with filters and date ranges; optional summaries.",
+     "side_effect_class": "read_only",
+     "read_only_hint": true
+    },
+    {
+     "name": "pubmed_fetch_articles",
+     "description": "Article metadata by PMID (up to 200 per call).",
+     "side_effect_class": "read_only",
+     "read_only_hint": true
+    },
+    {
+     "name": "pubmed_fetch_fulltext",
+     "description": "Full text by PMID, PMCID or DOI with PMC, Europe PMC and Unpaywall fallback.",
+     "side_effect_class": "read_only",
+     "read_only_hint": true
+    },
+    {
+     "name": "pubmed_europepmc_search",
+     "description": "Europe PMC search including preprints and patents.",
+     "side_effect_class": "read_only",
+     "read_only_hint": true
+    },
+    {
+     "name": "pubmed_europepmc_fetch",
+     "description": "Full Europe PMC records (up to 25 per call).",
+     "side_effect_class": "read_only",
+     "read_only_hint": true
+    },
+    {
+     "name": "pubmed_format_citations",
+     "description": "Format citations as APA, MLA, BibTeX, RIS or Vancouver.",
+     "side_effect_class": "read_only",
+     "read_only_hint": true
+    },
+    {
+     "name": "pubmed_find_related",
+     "description": "Similar, cited-by and reference articles.",
+     "side_effect_class": "read_only",
+     "read_only_hint": true
+    },
+    {
+     "name": "pubmed_spell_check",
+     "description": "NCBI ESpell query correction.",
+     "side_effect_class": "read_only",
+     "read_only_hint": true
+    },
+    {
+     "name": "pubmed_lookup_mesh",
+     "description": "MeSH descriptors, tree numbers and scope notes.",
+     "side_effect_class": "read_only",
+     "read_only_hint": true
+    },
+    {
+     "name": "pubmed_lookup_citation",
+     "description": "Partial citations to PMIDs via ECitMatch.",
+     "side_effect_class": "read_only",
+     "read_only_hint": true
+    },
+    {
+     "name": "pubmed_convert_ids",
+     "description": "DOI, PMID and PMCID conversion.",
+     "side_effect_class": "read_only",
+     "read_only_hint": true
+    }
+   ],
+   "tools_list_digest": "sha256:7647d27c158f7421c1b09c2b76dda95cb5820368e3ca8c9b1c0896a480292598",
+   "tool_allowlist": null
+  },
+  {
+   "schema_version": "1",
+   "logical_id": "mcp.biotech-kg",
+   "title": "Biotech knowledge graph ingestion server (fixture stand-in)",
+   "description": "Stand-in for the Biotech knowledge-graph capability: applies claim ingestion intents and returns receipts (noop_echo-backed in tests).",
+   "kind": "mcp_server",
+   "transport": "stdio",
+   "endpoint": null,
+   "launch_template": [
+    "npx",
+    "-y",
+    "@cyanheads/pubmed-mcp-server@2.10.20"
+   ],
+   "credential_refs": [],
+   "allowed_tools": [
+    "kg_ingest"
+   ],
+   "approval_policy": {},
+   "network_requirements": [],
+   "schema_snapshot_ref": {
+    "uri": "repo://tests/fixtures/mcp/mcp.pubmed.tools.json",
+    "digest": "sha256:9930c728962b99b325d6fb1413e1fdd4f149f675b6a5b59bc387b0629d1fa336",
+    "media_type": "application/json",
+    "size_bytes": 3420
+   },
+   "schema_digest": "sha256:7647d27c158f7421c1b09c2b76dda95cb5820368e3ca8c9b1c0896a480292598",
+   "source_provenance": {
+    "source": "git",
+    "locator": "https://github.com/cyanheads/pubmed-mcp-server",
+    "upstream_identity": "@cyanheads/pubmed-mcp-server",
+    "upstream_version": "2.10.20",
+    "commit_digest": null,
+    "license": "Apache-2.0"
+   },
+   "review_status": "approved",
+   "maturity": "experimental",
+   "attachment_targets": [
+    "agent.main"
+   ],
+   "compatible_compiler_versions": [
+    "control-plane-definitions/1"
+   ],
+   "conflicts_with": [],
+   "host_support": {
+    "schema_version": "mc.capability_host_support.v1",
+    "profiles": {
+     "deep_agents": {
+      "status": "supported",
+      "overlay": {},
+      "evidence_ref": null
+     },
+     "cursor_local": {
+      "status": "supported",
+      "overlay": {},
+      "evidence_ref": null
+     },
+     "cursor_cloud": {
+      "status": "unsupported",
+      "overlay": {},
+      "evidence_ref": null
+     }
+    }
+   },
+   "secret_refs": [],
+   "env": {
+    "MCP_TRANSPORT_TYPE": "stdio"
+   },
+   "env_refs": {},
+   "header_refs": {},
+   "oauth": null,
+   "package_pin": "npm:@cyanheads/pubmed-mcp-server@2.10.20",
+   "tools": [],
+   "tools_list_digest": "sha256:7647d27c158f7421c1b09c2b76dda95cb5820368e3ca8c9b1c0896a480292598",
+   "tool_allowlist": null
+  },
+  {
+   "schema_version": "1",
+   "logical_id": "mcp.biotech-kg.tool.kg-ingest",
+   "title": "kg_ingest",
+   "description": "Knowledge graph ingestion of accepted claims with provenance receipts.",
+   "kind": "mcp_tool",
+   "server_ref": {
+    "kind": "mcp_server",
+    "logical_id": "mcp.biotech-kg",
+    "schema_version": "1",
+    "revision": 1,
+    "digest": "sha256:251f2c5cd89b59eb787164c91b2a836f6794c352304cec2f0c872d3db3bfc77d",
+    "lifecycle_status": "published",
+    "payload_ref": null
+   },
+   "tool_name": "kg_ingest",
+   "input_schema": {
+    "type": "object"
+   },
+   "output_schema": null,
+   "annotations": {},
+   "schema_digest": "sha256:9915dabbe8a875274b26c1f445b8c691bbfc5ea078251ec783c14aac1d1d07a4",
+   "side_effect_class": "bounded_write",
+   "maturity": "qualified",
+   "attachment_targets": [
+    "agent.main"
+   ],
+   "compatible_compiler_versions": [
+    "control-plane-definitions/1"
+   ],
+   "conflicts_with": []
+  },
+  {
+   "schema_version": "1",
+   "logical_id": "hook.citation-check",
+   "title": "Citation presence check",
+   "description": "Citation presence check: every new claim line carries a resolvable citation.",
+   "kind": "hook_script",
+   "events": [
+    "after_tool",
+    "after_file_edit",
+    "stop"
+   ],
+   "required_events": [],
+   "matcher": null,
+   "timeout_seconds": 30,
+   "fail_closed": false,
+   "side_effect_class": "read_only",
+   "file_manifest": [
+    {
+     "path": "hook.py",
+     "digest": "sha256:acc2eafa82de4ae1333157512585394dd0dce62d4b1b932679f179dc6df0f270",
+     "size_bytes": 7,
+     "executable": false
+    }
+   ],
+   "manifest_digest": "sha256:fd1a6ae2d2f131bb297fd0949a12c1236b407375844f3eefb9155654493c42e5",
+   "bundle_ref": null,
+   "entrypoint": "hook.py",
+   "interpreter": "python",
+   "callback": "none",
+   "source_provenance": null,
+   "host_support": {
+    "schema_version": "mc.capability_host_support.v1",
+    "profiles": {
+     "deep_agents": {
+      "status": "supported",
+      "overlay": {},
+      "evidence_ref": null
+     },
+     "cursor_local": {
+      "status": "supported",
+      "overlay": {},
+      "evidence_ref": null
+     },
+     "cursor_cloud": {
+      "status": "supported",
+      "overlay": {},
+      "evidence_ref": null
+     }
+    }
+   },
+   "secret_refs": []
+  },
+  {
+   "schema_version": "1",
+   "logical_id": "hook.shell-policy",
+   "title": "Shell command policy",
+   "description": "Shell command policy: deny destructive shell commands before they run.",
+   "kind": "hook_script",
+   "events": [
+    "before_shell"
+   ],
+   "required_events": [],
+   "matcher": null,
+   "timeout_seconds": 30,
+   "fail_closed": true,
+   "side_effect_class": "read_only",
+   "file_manifest": [
+    {
+     "path": "hook.py",
+     "digest": "sha256:acc2eafa82de4ae1333157512585394dd0dce62d4b1b932679f179dc6df0f270",
+     "size_bytes": 7,
+     "executable": false
+    }
+   ],
+   "manifest_digest": "sha256:8f24f793052d159eeabe19085d733700d30478a9372cbe1f252f71a69e59dad3",
+   "bundle_ref": null,
+   "entrypoint": "hook.py",
+   "interpreter": "python",
+   "callback": "none",
+   "source_provenance": null,
+   "host_support": {
+    "schema_version": "mc.capability_host_support.v1",
+    "profiles": {
+     "deep_agents": {
+      "status": "supported",
+      "overlay": {},
+      "evidence_ref": null
+     },
+     "cursor_local": {
+      "status": "supported",
+      "overlay": {},
+      "evidence_ref": null
+     },
+     "cursor_cloud": {
+      "status": "supported",
+      "overlay": {},
+      "evidence_ref": null
+     }
+    }
+   },
+   "secret_refs": []
+  },
+  {
+   "schema_version": "1",
+   "logical_id": "subagent.literature-verifier",
+   "title": "Literature verifier subagent",
+   "description": "Literature verifier subagent: checks claims against cited sources, read only.",
+   "kind": "subagent_profile",
+   "profile": {
+    "schema_version": "mc.subagent_profile.v1",
+    "name": "literature-verifier",
+    "description": "Literature verifier subagent: checks claims against cited sources, read only.",
+    "prompt": "You are the Literature verifier subagent. Report findings; never edit files.",
+    "prompt_bundle_ref": null,
+    "model": "inherit",
+    "tools": [],
+    "skills": [],
+    "mcp_servers": [],
+    "readonly": true,
+    "background": false,
+    "context_mode": "isolated",
+    "interrupt_on": [],
+    "max_turns": null
+   },
+   "host_support": {
+    "schema_version": "mc.capability_host_support.v1",
+    "profiles": {
+     "deep_agents": {
+      "status": "supported",
+      "overlay": {},
+      "evidence_ref": null
+     },
+     "cursor_local": {
+      "status": "supported",
+      "overlay": {},
+      "evidence_ref": null
+     },
+     "cursor_cloud": {
+      "status": "supported",
+      "overlay": {},
+      "evidence_ref": null
+     }
+    }
+   },
+   "secret_refs": []
+  },
+  {
+   "schema_version": "1",
+   "logical_id": "subagent.code-verifier",
+   "title": "Code verifier subagent",
+   "description": "Code verifier subagent, readonly: reviews a diff against the issue text.",
+   "kind": "subagent_profile",
+   "profile": {
+    "schema_version": "mc.subagent_profile.v1",
+    "name": "code-verifier",
+    "description": "Code verifier subagent, readonly: reviews a diff against the issue text.",
+    "prompt": "You are the Code verifier subagent. Report findings; never edit files.",
+    "prompt_bundle_ref": null,
+    "model": "inherit",
+    "tools": [],
+    "skills": [],
+    "mcp_servers": [],
+    "readonly": true,
+    "background": false,
+    "context_mode": "isolated",
+    "interrupt_on": [],
+    "max_turns": null
+   },
+   "host_support": {
+    "schema_version": "mc.capability_host_support.v1",
+    "profiles": {
+     "deep_agents": {
+      "status": "supported",
+      "overlay": {},
+      "evidence_ref": null
+     },
+     "cursor_local": {
+      "status": "supported",
+      "overlay": {},
+      "evidence_ref": null
+     },
+     "cursor_cloud": {
+      "status": "supported",
+      "overlay": {},
+      "evidence_ref": null
+     }
+    }
+   },
+   "secret_refs": []
+  },
+  {
+   "schema_version": "1",
+   "logical_id": "plugin.agent-browser",
+   "title": "agent-browser browser automation plugin",
+   "description": "agent-browser browser automation bundle: the agent-browser skill and its MCP server.",
+   "kind": "plugin",
+   "manifest": {
+    "schema_version": "mc.plugin_manifest.v1",
+    "members": [
+     {
+      "pin": {
+       "capability_id": "skill.agent-browser",
+       "version": "0.4.0",
+       "digest": "sha256:e146089ac0a9cebf5f4d348e8a0d98379359e459ff9505f8a11f431583c28818"
+      },
+      "role": "skill",
+      "optional": false,
+      "overlay": {}
+     },
+     {
+      "pin": {
+       "capability_id": "mcp.agent-browser",
+       "version": "0.38.2",
+       "digest": "sha256:0adefa4043827cb505858f7f76060f08140d0fc9a3aeeb580f6b0d2ecc6e3282"
+      },
+      "role": "mcp_server",
+      "optional": false,
+      "overlay": {}
+     }
+    ],
+    "prompts": [],
+    "resources": []
+   },
+   "host_support": {
+    "schema_version": "mc.capability_host_support.v1",
+    "profiles": {
+     "deep_agents": {
+      "status": "supported",
+      "overlay": {},
+      "evidence_ref": null
+     },
+     "cursor_local": {
+      "status": "supported",
+      "overlay": {},
+      "evidence_ref": null
+     },
+     "cursor_cloud": {
+      "status": "unsupported",
+      "overlay": {},
+      "evidence_ref": null
+     }
+    }
+   },
+   "secret_refs": []
+  },
+  {
+   "schema_version": "1",
+   "logical_id": "assessment.evidence-coverage",
+   "title": "Evidence coverage assessment",
+   "description": "Evidence coverage assessment of a claim table against the included studies.",
+   "kind": "tool",
+   "capability_kind": "tool",
+   "maturity": "qualified",
+   "attachment_targets": [
+    "agent.main"
+   ],
+   "compatible_compiler_versions": [],
+   "conflicts_with": []
+  },
+  {
+   "schema_version": "1",
+   "logical_id": "assessment.code-change-verification",
+   "title": "Code change verification",
+   "description": "Code change verification against issue acceptance criteria.",
+   "kind": "tool",
+   "capability_kind": "tool",
+   "maturity": "qualified",
+   "attachment_targets": [
+    "agent.main"
+   ],
+   "compatible_compiler_versions": [],
+   "conflicts_with": []
+  },
+  {
+   "schema_version": "1",
+   "logical_id": "executor.claim-schema-validation",
+   "title": "Claim schema validation",
+   "description": "Claim schema validation deterministic executor for claim tables.",
+   "kind": "tool",
+   "capability_kind": "tool",
+   "maturity": "qualified",
+   "attachment_targets": [
+    "agent.main"
+   ],
+   "compatible_compiler_versions": [],
+   "conflicts_with": []
+  },
+  {
+   "schema_version": "1",
+   "logical_id": "executor.test-run",
+   "title": "Test run",
+   "description": "Run the declared test command and capture a test report.",
+   "kind": "tool",
+   "capability_kind": "tool",
+   "maturity": "qualified",
+   "attachment_targets": [
+    "agent.main"
+   ],
+   "compatible_compiler_versions": [],
+   "conflicts_with": []
+  },
+  {
+   "schema_version": "1",
+   "logical_id": "executor.git-snapshot",
+   "title": "Git snapshot",
+   "description": "Record the branch commit snapshot as a git ref artifact.",
+   "kind": "tool",
+   "capability_kind": "tool",
+   "maturity": "qualified",
+   "attachment_targets": [
+    "agent.main"
+   ],
+   "compatible_compiler_versions": [],
+   "conflicts_with": []
+  }
+ ]
+}

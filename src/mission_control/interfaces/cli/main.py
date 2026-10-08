@@ -43,6 +43,11 @@ class MissionClient:
     def commands(self, run_id: str) -> httpx.Response:
         return self.client.get(f"{self.prefix}/runs/{self._id(run_id)}/commands")
 
+    def manifest(self, verb: str, body: dict[str, Any]) -> httpx.Response:
+        """FT-E2/E3: ``POST /missions:compile`` and ``POST /missions:submit``."""
+
+        return self.client.post(f"{self.prefix}/missions:{verb}", json=body)
+
     def chain(self, chain_id: str) -> httpx.Response:
         """FT-D2: the ``mc.chain.v1`` projection with each member's run."""
 
@@ -500,6 +505,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     compile_ = mission_commands.add_parser("compile", parents=[common])
     compile_.add_argument("file")
+    compile_.add_argument(
+        "--offline",
+        action="store_true",
+        help="structure-only compile without the service (no catalog resolution)",
+    )
     # FT-D2: Mission Chains (read-only; members are cancelled individually in v1).
     chain = groups.add_parser("chain", parents=[common])
     chain_commands = chain.add_subparsers(dest="action", required=True)
@@ -559,7 +569,7 @@ def main(argv: list[str] | None = None) -> int:
     publish.add_argument("--version")
     publish.add_argument("--definition-file", dest="definition_file")
     args = parser.parse_args(argv)
-    if args.group == "mission":
+    if args.group == "mission" and (args.action == "schema" or getattr(args, "offline", False)):
         return mission_local(args)
     application = getattr(args, "application", os.environ.get("MISSION_CONTROL_APPLICATION_ID"))
     base_url = getattr(args, "url", os.environ.get("MISSION_CONTROL_URL", "http://127.0.0.1:8000"))
@@ -604,6 +614,8 @@ def main(argv: list[str] | None = None) -> int:
             return status
         if args.group == "subscribe":
             args.action = args.action or "create"
+        if args.group == "mission" and args.action == "compile":
+            body = {"manifest_yaml": Path(args.file).read_text(encoding="utf-8")}
         if args.group == "subscribe" and args.action == "create":
             body = subscription_body(args)
         with httpx.Client(
@@ -635,6 +647,8 @@ def main(argv: list[str] | None = None) -> int:
                     )
                 elif args.group == "chain":
                     response = client.chain(args.chain_id)
+                elif args.group == "mission" and body is not None:
+                    response = client.manifest(args.action, body)
                 elif args.action == "inspect":
                     response = client.inspection(args.run_id)
                 elif args.action == "admit" and body is not None:

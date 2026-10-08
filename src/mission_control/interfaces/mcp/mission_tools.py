@@ -3,6 +3,8 @@
 - tool `mission_chain_inspect(chain_id)` (read-only) and resource
   `mc://applications/{application_id}/chains/{chain_id}`: the `mc.chain.v1` projection with
   each member's run, the same document `GET /chains/{id}` returns for the same principal.
+- tool `mission_manifest_compile(manifest_yaml)` (read-only; mission read + catalog read): the
+  Validation Report with the `mc.manifest_resolution.v1` document, as `POST /missions:compile`.
 
 The principal's canonical request scope selects the tenant's service; a principal from
 another application is refused.
@@ -17,6 +19,10 @@ from uuid import UUID
 
 from fastmcp import Context, FastMCP
 
+from mission_control.application.authoring.manifest_service import (
+    ManifestPermissionDenied,
+    MissionManifestService,
+)
 from mission_control.application.chains.service import ChainInspectionService, ChainNotFound
 from mission_control.contracts.identities import parse_request_scope
 from mission_control.domain.coordinator.errors import CoordinatorDomainError, CoordinatorErrorCode
@@ -121,3 +127,55 @@ def register_chain_tools(
         principal = await principals.resolve(context)
         document = await chains.inspect(principal, chain_id, application_id=application_id)
         return json.dumps(document, sort_keys=True)
+
+
+# ------------------------------------------------------------------------------------------
+# Mission Manifest tools (SPEC-05): compile (read-only); submit and start come with FT-E3.
+# ------------------------------------------------------------------------------------------
+
+COMPILE_TOOL = "mission_manifest_compile"
+
+
+class ScopedManifests:
+    """Selects the manifest service of the principal's verified tenant scope."""
+
+    def __init__(self, services: Mapping[str, MissionManifestService]) -> None:
+        self._services = dict(services)
+
+    def service(self, principal: MissionToolPrincipal) -> MissionManifestService:
+        service = self._services.get(scope_of(principal, None))
+        if service is None:
+            raise CoordinatorDomainError(
+                code=CoordinatorErrorCode.FORBIDDEN, message="no manifest service for scope"
+            )
+        return service
+
+    async def compile(self, principal: MissionToolPrincipal, manifest_yaml: str) -> object:
+        try:
+            compilation = await self.service(principal).compile(
+                manifest_yaml,
+                actor_id=principal.actor_id,
+                permissions=frozenset(principal.permissions),
+            )
+        except ManifestPermissionDenied as denied:
+            raise CoordinatorDomainError(
+                code=CoordinatorErrorCode.FORBIDDEN, message=str(denied)
+            ) from None
+        return compilation.report.model_dump(mode="json", by_alias=True)
+
+
+def register_manifest_tools(
+    server: FastMCP,
+    manifests: ScopedManifests,
+    principals: PrincipalResolver,
+    *,
+    call: Any,
+) -> None:
+    @server.tool(name=COMPILE_TOOL, annotations={"readOnlyHint": True})
+    async def mission_manifest_compile(manifest_yaml: str, context: Context) -> dict[str, object]:
+        """Compile a Mission Manifest: Validation Report and resolution; persists nothing."""
+
+        async def invoke(principal: Any) -> object:
+            return await manifests.compile(principal, manifest_yaml)
+
+        return await call(context, principals, invoke)

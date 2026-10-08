@@ -1,0 +1,1489 @@
+{
+ "actor_ref": "owner",
+ "application_id": "biotech",
+ "blockers": [],
+ "capabilities": [
+  {
+   "capabilities": [
+    {
+     "alias": "schema_context",
+     "attributes": {},
+     "kind": "context_bundle",
+     "pin": null,
+     "pointer": "/mission/environment/workspace/context/0",
+     "resolved": {
+      "capability_id": "context.biotech-schema-muscle-aging",
+      "digest": "sha256:192f1b52c6ee91dd730862e7d1ed5843c89003a5e383a267adbf12584cb5eeec",
+      "version": "1.0.0"
+     },
+     "role": "context",
+     "search": {
+      "query": "biotech schema context muscle aging",
+      "require": []
+     }
+    },
+    {
+     "alias": null,
+     "attributes": {},
+     "kind": null,
+     "pin": {
+      "capability_id": "skill.mission-control-observe",
+      "digest": null,
+      "version": "latest"
+     },
+     "pointer": "/mission/environment/workspace/skills/0",
+     "resolved": {
+      "capability_id": "skill.mission-control-observe",
+      "digest": "sha256:4972ce4660971b06771a7f78d4d1962ab5d2fc8a9e923dbc17e3427d7807f2af",
+      "version": "0.2.0"
+     },
+     "role": "skill",
+     "search": null
+    },
+    {
+     "alias": "lit_review",
+     "attributes": {},
+     "kind": "skill_bundle",
+     "pin": null,
+     "pointer": "/mission/environment/workspace/skills/1",
+     "resolved": {
+      "capability_id": "skill.biotech-literature-review",
+      "digest": "sha256:a5f52a8d5b4dab28700851bbdcc04c03e330fe0f0d860bea38498b41345aae48",
+      "version": "1.0.0"
+     },
+     "role": "skill",
+     "search": {
+      "query": "biotech literature review procedure",
+      "require": []
+     }
+    },
+    {
+     "alias": "pubmed",
+     "attributes": {
+      "tools": [
+       "search_articles",
+       "get_article_metadata",
+       "find_related_articles"
+      ]
+     },
+     "kind": "mcp_server",
+     "pin": null,
+     "pointer": "/mission/environment/capabilities/0",
+     "resolved": {
+      "capability_id": "mcp.pubmed",
+      "digest": "sha256:39bb8510e8fc14ad611fb2c5a66f58e68fb634c5b6426b00ddc2c1351ab81599",
+      "version": "2.10.20"
+     },
+     "role": "capability",
+     "search": {
+      "query": "pubmed literature retrieval",
+      "require": []
+     }
+    },
+    {
+     "alias": "tavily",
+     "attributes": {},
+     "kind": "mcp_server",
+     "pin": null,
+     "pointer": "/mission/environment/capabilities/1",
+     "resolved": {
+      "capability_id": "mcp.tavily",
+      "digest": "sha256:0ddb64e0269e50f242bd52ca3dbb0eaea8ce6bebf28d3a52b5692829f50785f2",
+      "version": "0.2.22"
+     },
+     "role": "capability",
+     "search": {
+      "query": "tavily web search extract",
+      "require": []
+     }
+    },
+    {
+     "alias": "firecrawl",
+     "attributes": {
+      "tools": [
+       "firecrawl_scrape",
+       "firecrawl_search"
+      ]
+     },
+     "kind": "mcp_server",
+     "pin": null,
+     "pointer": "/mission/environment/capabilities/2",
+     "resolved": {
+      "capability_id": "mcp.firecrawl",
+      "digest": "sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+      "version": "3.28.2"
+     },
+     "role": "capability",
+     "search": {
+      "query": "scrape web page to markdown",
+      "require": []
+     }
+    },
+    {
+     "alias": "kg_ingest",
+     "attributes": {},
+     "kind": "mcp_tool",
+     "pin": null,
+     "pointer": "/mission/environment/capabilities/3",
+     "resolved": {
+      "capability_id": "mcp.biotech-kg.tool.kg-ingest",
+      "digest": "sha256:8e3bd986500c150e4eb5ce0089ba5c9d8cd5964351f56e868bfeebb356b55018",
+      "version": "1"
+     },
+     "role": "capability",
+     "search": {
+      "query": "knowledge graph ingestion claims",
+      "require": []
+     }
+    },
+    {
+     "alias": "citation_check",
+     "attributes": {
+      "events": [
+       "after_tool",
+       "stop"
+      ],
+      "fail_closed": false
+     },
+     "kind": "hook_script",
+     "pin": null,
+     "pointer": "/mission/environment/hooks/0",
+     "resolved": {
+      "capability_id": "hook.citation-check",
+      "digest": "sha256:e5193e46c79a029cc40d6c22bdccd1060ecc94618c1c1224c2f5292368841216",
+      "version": "1"
+     },
+     "role": "hook",
+     "search": {
+      "query": "citation presence check",
+      "require": []
+     }
+    },
+    {
+     "alias": "coverage_check",
+     "attributes": {},
+     "kind": "assessment",
+     "pin": null,
+     "pointer": "/mission/goals/0/criteria/0/acceptance/assessment/capability",
+     "resolved": {
+      "capability_id": "assessment.evidence-coverage",
+      "digest": "sha256:4b957b843d033debe5c2fc5039c6d9d50324968ac38bbbd757ef310494d4b575",
+      "version": "1"
+     },
+     "role": "assessment",
+     "search": {
+      "query": "evidence coverage assessment claim table",
+      "require": []
+     }
+    },
+    {
+     "alias": "kg_ingest",
+     "attributes": {},
+     "kind": "mcp_tool",
+     "pin": null,
+     "pointer": "/mission/program/nodes/3/environment/capabilities/0",
+     "resolved": {
+      "capability_id": "mcp.biotech-kg.tool.kg-ingest",
+      "digest": "sha256:8e3bd986500c150e4eb5ce0089ba5c9d8cd5964351f56e868bfeebb356b55018",
+      "version": "1"
+     },
+     "role": "capability",
+     "search": {
+      "query": "knowledge graph ingestion claims",
+      "require": []
+     }
+    }
+   ],
+   "mission_key": "nad-muscle-research-ingestion"
+  }
+ ],
+ "catalog_resolution": "resolved",
+ "chain": null,
+ "hook_events": [
+  {
+   "event": "after_tool",
+   "hook_alias": "citation_check",
+   "lane": "deep_agents",
+   "mission_key": "nad-muscle-research-ingestion",
+   "native_event": "wrap_tool_call",
+   "node_key": "root",
+   "unsupported_on_lane": false
+  },
+  {
+   "event": "stop",
+   "hook_alias": "citation_check",
+   "lane": "deep_agents",
+   "mission_key": "nad-muscle-research-ingestion",
+   "native_event": "after_agent",
+   "node_key": "root",
+   "unsupported_on_lane": false
+  },
+  {
+   "event": "after_tool",
+   "hook_alias": "citation_check",
+   "lane": "deep_agents",
+   "mission_key": "nad-muscle-research-ingestion",
+   "native_event": "wrap_tool_call",
+   "node_key": "collect",
+   "unsupported_on_lane": false
+  },
+  {
+   "event": "stop",
+   "hook_alias": "citation_check",
+   "lane": "deep_agents",
+   "mission_key": "nad-muscle-research-ingestion",
+   "native_event": "after_agent",
+   "node_key": "collect",
+   "unsupported_on_lane": false
+  },
+  {
+   "event": "after_tool",
+   "hook_alias": "citation_check",
+   "lane": "deep_agents",
+   "mission_key": "nad-muscle-research-ingestion",
+   "native_event": "wrap_tool_call",
+   "node_key": "synthesize",
+   "unsupported_on_lane": false
+  },
+  {
+   "event": "stop",
+   "hook_alias": "citation_check",
+   "lane": "deep_agents",
+   "mission_key": "nad-muscle-research-ingestion",
+   "native_event": "after_agent",
+   "node_key": "synthesize",
+   "unsupported_on_lane": false
+  },
+  {
+   "event": "after_tool",
+   "hook_alias": "citation_check",
+   "lane": "deep_agents",
+   "mission_key": "nad-muscle-research-ingestion",
+   "native_event": "wrap_tool_call",
+   "node_key": "review",
+   "unsupported_on_lane": false
+  },
+  {
+   "event": "stop",
+   "hook_alias": "citation_check",
+   "lane": "deep_agents",
+   "mission_key": "nad-muscle-research-ingestion",
+   "native_event": "after_agent",
+   "node_key": "review",
+   "unsupported_on_lane": false
+  },
+  {
+   "event": "after_tool",
+   "hook_alias": "citation_check",
+   "lane": "deep_agents",
+   "mission_key": "nad-muscle-research-ingestion",
+   "native_event": "wrap_tool_call",
+   "node_key": "ingest",
+   "unsupported_on_lane": false
+  },
+  {
+   "event": "stop",
+   "hook_alias": "citation_check",
+   "lane": "deep_agents",
+   "mission_key": "nad-muscle-research-ingestion",
+   "native_event": "after_agent",
+   "node_key": "ingest",
+   "unsupported_on_lane": false
+  }
+ ],
+ "lane_support": [
+  {
+   "behavior": "stage_graph",
+   "lane": "deep_agents",
+   "mission_key": "nad-muscle-research-ingestion",
+   "node_key": "root",
+   "reason": null,
+   "role": "node",
+   "supported": true
+  },
+  {
+   "behavior": "goal_loop",
+   "lane": "deep_agents",
+   "mission_key": "nad-muscle-research-ingestion",
+   "node_key": "collect",
+   "reason": null,
+   "role": "node",
+   "supported": true
+  },
+  {
+   "behavior": "agent_executor",
+   "lane": "deep_agents",
+   "mission_key": "nad-muscle-research-ingestion",
+   "node_key": "synthesize",
+   "reason": null,
+   "role": "node",
+   "supported": true
+  },
+  {
+   "behavior": "human_gate",
+   "lane": "deep_agents",
+   "mission_key": "nad-muscle-research-ingestion",
+   "node_key": "review",
+   "reason": null,
+   "role": "node",
+   "supported": true
+  },
+  {
+   "behavior": "agent_executor",
+   "lane": "deep_agents",
+   "mission_key": "nad-muscle-research-ingestion",
+   "node_key": "ingest",
+   "reason": null,
+   "role": "node",
+   "supported": true
+  }
+ ],
+ "lowering": [
+  {
+   "blueprint_digest": "sha256:8023f218d762b59d006c3426c55b07e4c606c548f1c884de473a7dabcbd3d9e3",
+   "definition_digest": "sha256:d54ad8c3ff29b3c5d89dc7f55f3ae42393f9a179edd7842fc4660a665c6651cf",
+   "family": "StageGraph",
+   "lowering_version": "mc.manifest-lowering/1",
+   "mission_key": "nad-muscle-research-ingestion",
+   "runtime_profile_digest": "sha256:6718911ff0e3c18568c082d5cd8076a80abfb4d27792201e2db30f5c2a370ea1"
+  }
+ ],
+ "manifest_digest": "sha256:fc93183ad85b5d3db8e68886969c929b14ed86d6b69bcacd2bf012f49158d592",
+ "nodes": [
+  {
+   "effective_environment": {
+    "agents": null,
+    "budget": {
+     "tokens": 3000000,
+     "tool_calls": 600,
+     "usd": "40",
+     "wall_clock": 21600
+    },
+    "capabilities": [
+     {
+      "as": "pubmed",
+      "kind": "mcp_server",
+      "pin": null,
+      "require": null,
+      "search": "pubmed literature retrieval",
+      "tools": [
+       "search_articles",
+       "get_article_metadata",
+       "find_related_articles"
+      ]
+     },
+     {
+      "as": "tavily",
+      "kind": "mcp_server",
+      "pin": null,
+      "require": null,
+      "search": "tavily web search extract",
+      "tools": null
+     },
+     {
+      "as": "firecrawl",
+      "kind": "mcp_server",
+      "pin": null,
+      "require": null,
+      "search": "scrape web page to markdown",
+      "tools": [
+       "firecrawl_scrape",
+       "firecrawl_search"
+      ]
+     },
+     {
+      "as": "kg_ingest",
+      "kind": "mcp_tool",
+      "pin": null,
+      "require": null,
+      "search": "knowledge graph ingestion claims",
+      "tools": null
+     }
+    ],
+    "governors": {
+     "depth": 2,
+     "fan_out": 6,
+     "iterations": 8,
+     "patience": 2,
+     "rounds": null,
+     "transfers": 3
+    },
+    "hooks": [
+     {
+      "as": "citation_check",
+      "events": [
+       "after_tool",
+       "stop"
+      ],
+      "fail_closed": false,
+      "kind": "hook_script",
+      "matcher": null,
+      "pin": null,
+      "require": null,
+      "search": "citation presence check"
+     }
+    ],
+    "lane": "deep_agents",
+    "model": {
+     "profile": "frontier.default",
+     "settings": null
+    },
+    "plugins": null,
+    "sandbox": {
+     "egress": [
+      "pubmed",
+      "biorxiv",
+      "tavily",
+      "firecrawl"
+     ],
+     "profile": "research.standard"
+    },
+    "side_effects": [
+     "read_only",
+     "workspace_write",
+     "external_write_reversible"
+    ],
+    "workspace": {
+     "context": [
+      {
+       "artifact": null,
+       "as": "schema_context",
+       "expand": null,
+       "kind": "context_bundle",
+       "path": null,
+       "pin": null,
+       "search": "biotech schema context muscle aging"
+      }
+     ],
+     "repo": null,
+     "skills": [
+      {
+       "as": null,
+       "kind": null,
+       "pin": "skill.mission-control-observe@latest",
+       "require": null,
+       "search": null
+      },
+      {
+       "as": "lit_review",
+       "kind": "skill_bundle",
+       "pin": null,
+       "require": null,
+       "search": "biotech literature review procedure"
+      }
+     ]
+    }
+   },
+   "field_provenance": {
+    "budget.tokens": "inherited",
+    "budget.tool_calls": "inherited",
+    "budget.usd": "inherited",
+    "budget.wall_clock": "inherited",
+    "capabilities": "inherited",
+    "governors.depth": "inherited",
+    "governors.fan_out": "inherited",
+    "governors.iterations": "inherited",
+    "governors.patience": "inherited",
+    "governors.transfers": "inherited",
+    "hooks": "inherited",
+    "lane": "inherited",
+    "model.profile": "inherited",
+    "sandbox.egress": "inherited",
+    "sandbox.profile": "inherited",
+    "side_effects": "inherited",
+    "workspace.context": "inherited",
+    "workspace.skills": "inherited"
+   },
+   "lane": "deep_agents",
+   "lane_changed_from": null,
+   "mission_key": "nad-muscle-research-ingestion",
+   "node_key": "root",
+   "pointer": "/mission/program",
+   "role": "node"
+  },
+  {
+   "effective_environment": {
+    "agents": null,
+    "budget": {
+     "tokens": 3000000,
+     "tool_calls": 600,
+     "usd": "12",
+     "wall_clock": 21600
+    },
+    "capabilities": [
+     {
+      "as": "pubmed",
+      "kind": "mcp_server",
+      "pin": null,
+      "require": null,
+      "search": "pubmed literature retrieval",
+      "tools": [
+       "search_articles",
+       "get_article_metadata",
+       "find_related_articles"
+      ]
+     },
+     {
+      "as": "tavily",
+      "kind": "mcp_server",
+      "pin": null,
+      "require": null,
+      "search": "tavily web search extract",
+      "tools": null
+     },
+     {
+      "as": "firecrawl",
+      "kind": "mcp_server",
+      "pin": null,
+      "require": null,
+      "search": "scrape web page to markdown",
+      "tools": [
+       "firecrawl_scrape",
+       "firecrawl_search"
+      ]
+     },
+     {
+      "as": "kg_ingest",
+      "kind": "mcp_tool",
+      "pin": null,
+      "require": null,
+      "search": "knowledge graph ingestion claims",
+      "tools": null
+     }
+    ],
+    "governors": {
+     "depth": 2,
+     "fan_out": 6,
+     "iterations": 6,
+     "patience": 2,
+     "rounds": null,
+     "transfers": 3
+    },
+    "hooks": [
+     {
+      "as": "citation_check",
+      "events": [
+       "after_tool",
+       "stop"
+      ],
+      "fail_closed": false,
+      "kind": "hook_script",
+      "matcher": null,
+      "pin": null,
+      "require": null,
+      "search": "citation presence check"
+     }
+    ],
+    "lane": "deep_agents",
+    "model": {
+     "profile": "frontier.default",
+     "settings": null
+    },
+    "plugins": null,
+    "sandbox": {
+     "egress": [
+      "pubmed",
+      "biorxiv",
+      "tavily",
+      "firecrawl"
+     ],
+     "profile": "research.standard"
+    },
+    "side_effects": [
+     "read_only",
+     "workspace_write",
+     "external_write_reversible"
+    ],
+    "workspace": {
+     "context": [
+      {
+       "artifact": null,
+       "as": "schema_context",
+       "expand": null,
+       "kind": "context_bundle",
+       "path": null,
+       "pin": null,
+       "search": "biotech schema context muscle aging"
+      }
+     ],
+     "repo": null,
+     "skills": [
+      {
+       "as": null,
+       "kind": null,
+       "pin": "skill.mission-control-observe@latest",
+       "require": null,
+       "search": null
+      },
+      {
+       "as": "lit_review",
+       "kind": "skill_bundle",
+       "pin": null,
+       "require": null,
+       "search": "biotech literature review procedure"
+      }
+     ]
+    }
+   },
+   "field_provenance": {
+    "budget.tokens": "inherited",
+    "budget.tool_calls": "inherited",
+    "budget.usd": "overlay",
+    "budget.wall_clock": "inherited",
+    "capabilities": "inherited",
+    "governors.depth": "inherited",
+    "governors.fan_out": "inherited",
+    "governors.iterations": "overlay",
+    "governors.patience": "overlay",
+    "governors.transfers": "inherited",
+    "hooks": "inherited",
+    "lane": "inherited",
+    "model.profile": "inherited",
+    "sandbox.egress": "inherited",
+    "sandbox.profile": "inherited",
+    "side_effects": "inherited",
+    "workspace.context": "inherited",
+    "workspace.skills": "inherited"
+   },
+   "lane": "deep_agents",
+   "lane_changed_from": null,
+   "mission_key": "nad-muscle-research-ingestion",
+   "node_key": "collect",
+   "pointer": "/mission/program/nodes/0",
+   "role": "node"
+  },
+  {
+   "effective_environment": {
+    "agents": null,
+    "budget": {
+     "tokens": 3000000,
+     "tool_calls": 600,
+     "usd": "40",
+     "wall_clock": 21600
+    },
+    "capabilities": [
+     {
+      "as": "pubmed",
+      "kind": "mcp_server",
+      "pin": null,
+      "require": null,
+      "search": "pubmed literature retrieval",
+      "tools": [
+       "search_articles",
+       "get_article_metadata",
+       "find_related_articles"
+      ]
+     },
+     {
+      "as": "tavily",
+      "kind": "mcp_server",
+      "pin": null,
+      "require": null,
+      "search": "tavily web search extract",
+      "tools": null
+     },
+     {
+      "as": "firecrawl",
+      "kind": "mcp_server",
+      "pin": null,
+      "require": null,
+      "search": "scrape web page to markdown",
+      "tools": [
+       "firecrawl_scrape",
+       "firecrawl_search"
+      ]
+     },
+     {
+      "as": "kg_ingest",
+      "kind": "mcp_tool",
+      "pin": null,
+      "require": null,
+      "search": "knowledge graph ingestion claims",
+      "tools": null
+     }
+    ],
+    "governors": {
+     "depth": 2,
+     "fan_out": 6,
+     "iterations": 8,
+     "patience": 2,
+     "rounds": null,
+     "transfers": 3
+    },
+    "hooks": [
+     {
+      "as": "citation_check",
+      "events": [
+       "after_tool",
+       "stop"
+      ],
+      "fail_closed": false,
+      "kind": "hook_script",
+      "matcher": null,
+      "pin": null,
+      "require": null,
+      "search": "citation presence check"
+     }
+    ],
+    "lane": "deep_agents",
+    "model": {
+     "profile": "frontier.long_context",
+     "settings": null
+    },
+    "plugins": null,
+    "sandbox": {
+     "egress": [
+      "pubmed",
+      "biorxiv",
+      "tavily",
+      "firecrawl"
+     ],
+     "profile": "research.standard"
+    },
+    "side_effects": [
+     "read_only",
+     "workspace_write",
+     "external_write_reversible"
+    ],
+    "workspace": {
+     "context": [
+      {
+       "artifact": null,
+       "as": "schema_context",
+       "expand": null,
+       "kind": "context_bundle",
+       "path": null,
+       "pin": null,
+       "search": "biotech schema context muscle aging"
+      }
+     ],
+     "repo": null,
+     "skills": [
+      {
+       "as": null,
+       "kind": null,
+       "pin": "skill.mission-control-observe@latest",
+       "require": null,
+       "search": null
+      },
+      {
+       "as": "lit_review",
+       "kind": "skill_bundle",
+       "pin": null,
+       "require": null,
+       "search": "biotech literature review procedure"
+      }
+     ]
+    }
+   },
+   "field_provenance": {
+    "budget.tokens": "inherited",
+    "budget.tool_calls": "inherited",
+    "budget.usd": "inherited",
+    "budget.wall_clock": "inherited",
+    "capabilities": "inherited",
+    "governors.depth": "inherited",
+    "governors.fan_out": "inherited",
+    "governors.iterations": "inherited",
+    "governors.patience": "inherited",
+    "governors.transfers": "inherited",
+    "hooks": "inherited",
+    "lane": "inherited",
+    "model.profile": "overlay",
+    "sandbox.egress": "inherited",
+    "sandbox.profile": "inherited",
+    "side_effects": "inherited",
+    "workspace.context": "inherited",
+    "workspace.skills": "inherited"
+   },
+   "lane": "deep_agents",
+   "lane_changed_from": null,
+   "mission_key": "nad-muscle-research-ingestion",
+   "node_key": "synthesize",
+   "pointer": "/mission/program/nodes/1",
+   "role": "node"
+  },
+  {
+   "effective_environment": {
+    "agents": null,
+    "budget": {
+     "tokens": 3000000,
+     "tool_calls": 600,
+     "usd": "40",
+     "wall_clock": 21600
+    },
+    "capabilities": [
+     {
+      "as": "pubmed",
+      "kind": "mcp_server",
+      "pin": null,
+      "require": null,
+      "search": "pubmed literature retrieval",
+      "tools": [
+       "search_articles",
+       "get_article_metadata",
+       "find_related_articles"
+      ]
+     },
+     {
+      "as": "tavily",
+      "kind": "mcp_server",
+      "pin": null,
+      "require": null,
+      "search": "tavily web search extract",
+      "tools": null
+     },
+     {
+      "as": "firecrawl",
+      "kind": "mcp_server",
+      "pin": null,
+      "require": null,
+      "search": "scrape web page to markdown",
+      "tools": [
+       "firecrawl_scrape",
+       "firecrawl_search"
+      ]
+     },
+     {
+      "as": "kg_ingest",
+      "kind": "mcp_tool",
+      "pin": null,
+      "require": null,
+      "search": "knowledge graph ingestion claims",
+      "tools": null
+     }
+    ],
+    "governors": {
+     "depth": 2,
+     "fan_out": 6,
+     "iterations": 8,
+     "patience": 2,
+     "rounds": null,
+     "transfers": 3
+    },
+    "hooks": [
+     {
+      "as": "citation_check",
+      "events": [
+       "after_tool",
+       "stop"
+      ],
+      "fail_closed": false,
+      "kind": "hook_script",
+      "matcher": null,
+      "pin": null,
+      "require": null,
+      "search": "citation presence check"
+     }
+    ],
+    "lane": "deep_agents",
+    "model": {
+     "profile": "frontier.default",
+     "settings": null
+    },
+    "plugins": null,
+    "sandbox": {
+     "egress": [
+      "pubmed",
+      "biorxiv",
+      "tavily",
+      "firecrawl"
+     ],
+     "profile": "research.standard"
+    },
+    "side_effects": [
+     "read_only",
+     "workspace_write",
+     "external_write_reversible"
+    ],
+    "workspace": {
+     "context": [
+      {
+       "artifact": null,
+       "as": "schema_context",
+       "expand": null,
+       "kind": "context_bundle",
+       "path": null,
+       "pin": null,
+       "search": "biotech schema context muscle aging"
+      }
+     ],
+     "repo": null,
+     "skills": [
+      {
+       "as": null,
+       "kind": null,
+       "pin": "skill.mission-control-observe@latest",
+       "require": null,
+       "search": null
+      },
+      {
+       "as": "lit_review",
+       "kind": "skill_bundle",
+       "pin": null,
+       "require": null,
+       "search": "biotech literature review procedure"
+      }
+     ]
+    }
+   },
+   "field_provenance": {
+    "budget.tokens": "inherited",
+    "budget.tool_calls": "inherited",
+    "budget.usd": "inherited",
+    "budget.wall_clock": "inherited",
+    "capabilities": "inherited",
+    "governors.depth": "inherited",
+    "governors.fan_out": "inherited",
+    "governors.iterations": "inherited",
+    "governors.patience": "inherited",
+    "governors.transfers": "inherited",
+    "hooks": "inherited",
+    "lane": "inherited",
+    "model.profile": "inherited",
+    "sandbox.egress": "inherited",
+    "sandbox.profile": "inherited",
+    "side_effects": "inherited",
+    "workspace.context": "inherited",
+    "workspace.skills": "inherited"
+   },
+   "lane": "deep_agents",
+   "lane_changed_from": null,
+   "mission_key": "nad-muscle-research-ingestion",
+   "node_key": "review",
+   "pointer": "/mission/program/nodes/2",
+   "role": "node"
+  },
+  {
+   "effective_environment": {
+    "agents": null,
+    "budget": {
+     "tokens": 3000000,
+     "tool_calls": 600,
+     "usd": "6",
+     "wall_clock": 21600
+    },
+    "capabilities": [
+     {
+      "as": "kg_ingest",
+      "kind": "mcp_tool",
+      "pin": null,
+      "require": null,
+      "search": "knowledge graph ingestion claims",
+      "tools": null
+     }
+    ],
+    "governors": {
+     "depth": 2,
+     "fan_out": 6,
+     "iterations": 8,
+     "patience": 2,
+     "rounds": null,
+     "transfers": 3
+    },
+    "hooks": [
+     {
+      "as": "citation_check",
+      "events": [
+       "after_tool",
+       "stop"
+      ],
+      "fail_closed": false,
+      "kind": "hook_script",
+      "matcher": null,
+      "pin": null,
+      "require": null,
+      "search": "citation presence check"
+     }
+    ],
+    "lane": "deep_agents",
+    "model": {
+     "profile": "frontier.default",
+     "settings": null
+    },
+    "plugins": null,
+    "sandbox": {
+     "egress": [
+      "pubmed",
+      "biorxiv",
+      "tavily",
+      "firecrawl"
+     ],
+     "profile": "research.standard"
+    },
+    "side_effects": [
+     "read_only",
+     "workspace_write",
+     "external_write_reversible"
+    ],
+    "workspace": {
+     "context": [
+      {
+       "artifact": null,
+       "as": "schema_context",
+       "expand": null,
+       "kind": "context_bundle",
+       "path": null,
+       "pin": null,
+       "search": "biotech schema context muscle aging"
+      }
+     ],
+     "repo": null,
+     "skills": [
+      {
+       "as": null,
+       "kind": null,
+       "pin": "skill.mission-control-observe@latest",
+       "require": null,
+       "search": null
+      },
+      {
+       "as": "lit_review",
+       "kind": "skill_bundle",
+       "pin": null,
+       "require": null,
+       "search": "biotech literature review procedure"
+      }
+     ]
+    }
+   },
+   "field_provenance": {
+    "budget.tokens": "inherited",
+    "budget.tool_calls": "inherited",
+    "budget.usd": "overlay",
+    "budget.wall_clock": "inherited",
+    "capabilities": "overlay",
+    "governors.depth": "inherited",
+    "governors.fan_out": "inherited",
+    "governors.iterations": "inherited",
+    "governors.patience": "inherited",
+    "governors.transfers": "inherited",
+    "hooks": "inherited",
+    "lane": "inherited",
+    "model.profile": "inherited",
+    "sandbox.egress": "inherited",
+    "sandbox.profile": "inherited",
+    "side_effects": "overlay",
+    "workspace.context": "inherited",
+    "workspace.skills": "inherited"
+   },
+   "lane": "deep_agents",
+   "lane_changed_from": null,
+   "mission_key": "nad-muscle-research-ingestion",
+   "node_key": "ingest",
+   "pointer": "/mission/program/nodes/3",
+   "role": "node"
+  }
+ ],
+ "plugins": [],
+ "resolved": [
+  {
+   "alias": "schema_context",
+   "blocker": null,
+   "candidates": [
+    "context.biotech-schema-muscle-aging@1.0.0#sha256:192f1b52c6ee91dd730862e7d1ed5843c89003a5e383a267adbf12584cb5eeec",
+    "skill.biotech-literature-review@1.0.0#sha256:a5f52a8d5b4dab28700851bbdcc04c03e330fe0f0d860bea38498b41345aae48"
+   ],
+   "lanes": [
+    "deep_agents"
+   ],
+   "mission_key": "nad-muscle-research-ingestion",
+   "pointer": "/mission/environment/workspace/context/0",
+   "provenance": null,
+   "request": {
+    "kind": "skill",
+    "search": "biotech schema context muscle aging"
+   },
+   "result": {
+    "capability_id": "context.biotech-schema-muscle-aging",
+    "digest": "sha256:192f1b52c6ee91dd730862e7d1ed5843c89003a5e383a267adbf12584cb5eeec",
+    "exact_ref": {
+     "digest": "sha256:192f1b52c6ee91dd730862e7d1ed5843c89003a5e383a267adbf12584cb5eeec",
+     "kind": "skill",
+     "lifecycle_status": "published",
+     "logical_id": "context.biotech-schema-muscle-aging",
+     "payload_ref": null,
+     "revision": 1,
+     "schema_version": "1"
+    },
+    "kind": "skill",
+    "pin": "context.biotech-schema-muscle-aging@1.0.0#sha256:192f1b52c6ee91dd730862e7d1ed5843c89003a5e383a267adbf12584cb5eeec",
+    "supported_profiles": [
+     "deep_agents",
+     "cursor_local",
+     "cursor_cloud"
+    ],
+    "version": "1.0.0"
+   },
+   "role": "context"
+  },
+  {
+   "alias": null,
+   "blocker": null,
+   "candidates": [],
+   "lanes": [
+    "deep_agents"
+   ],
+   "mission_key": "nad-muscle-research-ingestion",
+   "pointer": "/mission/environment/workspace/skills/0",
+   "provenance": null,
+   "request": {
+    "kind": "skill",
+    "pin": "skill.mission-control-observe@latest"
+   },
+   "result": {
+    "capability_id": "skill.mission-control-observe",
+    "digest": "sha256:4972ce4660971b06771a7f78d4d1962ab5d2fc8a9e923dbc17e3427d7807f2af",
+    "exact_ref": {
+     "digest": "sha256:4972ce4660971b06771a7f78d4d1962ab5d2fc8a9e923dbc17e3427d7807f2af",
+     "kind": "skill",
+     "lifecycle_status": "published",
+     "logical_id": "skill.mission-control-observe",
+     "payload_ref": null,
+     "revision": 1,
+     "schema_version": "1"
+    },
+    "kind": "skill",
+    "pin": "skill.mission-control-observe@0.2.0#sha256:4972ce4660971b06771a7f78d4d1962ab5d2fc8a9e923dbc17e3427d7807f2af",
+    "supported_profiles": [
+     "deep_agents",
+     "cursor_local",
+     "cursor_cloud"
+    ],
+    "version": "0.2.0"
+   },
+   "role": "skill"
+  },
+  {
+   "alias": "lit_review",
+   "blocker": null,
+   "candidates": [
+    "skill.biotech-literature-review@1.0.0#sha256:a5f52a8d5b4dab28700851bbdcc04c03e330fe0f0d860bea38498b41345aae48",
+    "context.biotech-schema-muscle-aging@1.0.0#sha256:192f1b52c6ee91dd730862e7d1ed5843c89003a5e383a267adbf12584cb5eeec"
+   ],
+   "lanes": [
+    "deep_agents"
+   ],
+   "mission_key": "nad-muscle-research-ingestion",
+   "pointer": "/mission/environment/workspace/skills/1",
+   "provenance": null,
+   "request": {
+    "kind": "skill",
+    "search": "biotech literature review procedure"
+   },
+   "result": {
+    "capability_id": "skill.biotech-literature-review",
+    "digest": "sha256:a5f52a8d5b4dab28700851bbdcc04c03e330fe0f0d860bea38498b41345aae48",
+    "exact_ref": {
+     "digest": "sha256:a5f52a8d5b4dab28700851bbdcc04c03e330fe0f0d860bea38498b41345aae48",
+     "kind": "skill",
+     "lifecycle_status": "published",
+     "logical_id": "skill.biotech-literature-review",
+     "payload_ref": null,
+     "revision": 1,
+     "schema_version": "1"
+    },
+    "kind": "skill",
+    "pin": "skill.biotech-literature-review@1.0.0#sha256:a5f52a8d5b4dab28700851bbdcc04c03e330fe0f0d860bea38498b41345aae48",
+    "supported_profiles": [
+     "deep_agents",
+     "cursor_local",
+     "cursor_cloud"
+    ],
+    "version": "1.0.0"
+   },
+   "role": "skill"
+  },
+  {
+   "alias": "pubmed",
+   "blocker": null,
+   "candidates": [
+    "mcp.pubmed@2.10.20#sha256:39bb8510e8fc14ad611fb2c5a66f58e68fb634c5b6426b00ddc2c1351ab81599",
+    "mcp.pubmed-remote@2.10.20#sha256:48ad50c40d11a6152e8694ebb2a806c87a3cc297573ff4c4bac60e0b39d20257",
+    "mcp.biomcp@0.9.1#sha256:4f7617b49d40ab0b58ac6d34918b99850cbac9782b3ed73a92a7b7f178d433f2",
+    "mcp.firecrawl@3.28.2#sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+    "mcp.biotech-kg@2.10.20#sha256:251f2c5cd89b59eb787164c91b2a836f6794c352304cec2f0c872d3db3bfc77d"
+   ],
+   "lanes": [
+    "deep_agents"
+   ],
+   "mission_key": "nad-muscle-research-ingestion",
+   "pointer": "/mission/environment/capabilities/0",
+   "provenance": null,
+   "request": {
+    "kind": "mcp_server",
+    "search": "pubmed literature retrieval"
+   },
+   "result": {
+    "capability_id": "mcp.pubmed",
+    "digest": "sha256:39bb8510e8fc14ad611fb2c5a66f58e68fb634c5b6426b00ddc2c1351ab81599",
+    "exact_ref": {
+     "digest": "sha256:39bb8510e8fc14ad611fb2c5a66f58e68fb634c5b6426b00ddc2c1351ab81599",
+     "kind": "mcp_server",
+     "lifecycle_status": "published",
+     "logical_id": "mcp.pubmed",
+     "payload_ref": null,
+     "revision": 1,
+     "schema_version": "1"
+    },
+    "kind": "mcp_server",
+    "pin": "mcp.pubmed@2.10.20#sha256:39bb8510e8fc14ad611fb2c5a66f58e68fb634c5b6426b00ddc2c1351ab81599",
+    "supported_profiles": [
+     "deep_agents",
+     "cursor_local",
+     "claude_agent_sdk",
+     "codex"
+    ],
+    "version": "2.10.20"
+   },
+   "role": "capability"
+  },
+  {
+   "alias": "tavily",
+   "blocker": null,
+   "candidates": [
+    "mcp.tavily@0.2.22#sha256:0ddb64e0269e50f242bd52ca3dbb0eaea8ce6bebf28d3a52b5692829f50785f2",
+    "mcp.firecrawl@3.28.2#sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+    "mcp.edgartools@5.61.1#sha256:fa757ab0c00da175bd51c261389e0ed8b7e776c83a907b7a489950dab2c8cbde",
+    "mcp.pubmed@2.10.20#sha256:39bb8510e8fc14ad611fb2c5a66f58e68fb634c5b6426b00ddc2c1351ab81599",
+    "mcp.biomcp@0.9.1#sha256:4f7617b49d40ab0b58ac6d34918b99850cbac9782b3ed73a92a7b7f178d433f2"
+   ],
+   "lanes": [
+    "deep_agents"
+   ],
+   "mission_key": "nad-muscle-research-ingestion",
+   "pointer": "/mission/environment/capabilities/1",
+   "provenance": null,
+   "request": {
+    "kind": "mcp_server",
+    "search": "tavily web search extract"
+   },
+   "result": {
+    "capability_id": "mcp.tavily",
+    "digest": "sha256:0ddb64e0269e50f242bd52ca3dbb0eaea8ce6bebf28d3a52b5692829f50785f2",
+    "exact_ref": {
+     "digest": "sha256:0ddb64e0269e50f242bd52ca3dbb0eaea8ce6bebf28d3a52b5692829f50785f2",
+     "kind": "mcp_server",
+     "lifecycle_status": "published",
+     "logical_id": "mcp.tavily",
+     "payload_ref": null,
+     "revision": 1,
+     "schema_version": "1"
+    },
+    "kind": "mcp_server",
+    "pin": "mcp.tavily@0.2.22#sha256:0ddb64e0269e50f242bd52ca3dbb0eaea8ce6bebf28d3a52b5692829f50785f2",
+    "supported_profiles": [
+     "deep_agents",
+     "cursor_local",
+     "cursor_cloud",
+     "claude_agent_sdk",
+     "codex"
+    ],
+    "version": "0.2.22"
+   },
+   "role": "capability"
+  },
+  {
+   "alias": "firecrawl",
+   "blocker": null,
+   "candidates": [
+    "mcp.firecrawl@3.28.2#sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+    "mcp.tavily@0.2.22#sha256:0ddb64e0269e50f242bd52ca3dbb0eaea8ce6bebf28d3a52b5692829f50785f2",
+    "mcp.agent-browser@0.38.2#sha256:0adefa4043827cb505858f7f76060f08140d0fc9a3aeeb580f6b0d2ecc6e3282",
+    "mcp.edgartools@5.61.1#sha256:fa757ab0c00da175bd51c261389e0ed8b7e776c83a907b7a489950dab2c8cbde",
+    "mcp.biomcp@0.9.1#sha256:4f7617b49d40ab0b58ac6d34918b99850cbac9782b3ed73a92a7b7f178d433f2"
+   ],
+   "lanes": [
+    "deep_agents"
+   ],
+   "mission_key": "nad-muscle-research-ingestion",
+   "pointer": "/mission/environment/capabilities/2",
+   "provenance": null,
+   "request": {
+    "kind": "mcp_server",
+    "search": "scrape web page to markdown"
+   },
+   "result": {
+    "capability_id": "mcp.firecrawl",
+    "digest": "sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+    "exact_ref": {
+     "digest": "sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+     "kind": "mcp_server",
+     "lifecycle_status": "published",
+     "logical_id": "mcp.firecrawl",
+     "payload_ref": null,
+     "revision": 1,
+     "schema_version": "1"
+    },
+    "kind": "mcp_server",
+    "pin": "mcp.firecrawl@3.28.2#sha256:c97558d2fdb993b1ec66a529445065b9648de5674f1cd8ede0529fa9503e79bf",
+    "supported_profiles": [
+     "deep_agents",
+     "cursor_local",
+     "cursor_cloud",
+     "claude_agent_sdk",
+     "codex"
+    ],
+    "version": "3.28.2"
+   },
+   "role": "capability"
+  },
+  {
+   "alias": "kg_ingest",
+   "blocker": null,
+   "candidates": [
+    "mcp.biotech-kg.tool.kg-ingest@1#sha256:8e3bd986500c150e4eb5ce0089ba5c9d8cd5964351f56e868bfeebb356b55018"
+   ],
+   "lanes": [
+    "deep_agents"
+   ],
+   "mission_key": "nad-muscle-research-ingestion",
+   "pointer": "/mission/environment/capabilities/3",
+   "provenance": null,
+   "request": {
+    "kind": "mcp_tool",
+    "search": "knowledge graph ingestion claims"
+   },
+   "result": {
+    "capability_id": "mcp.biotech-kg.tool.kg-ingest",
+    "digest": "sha256:8e3bd986500c150e4eb5ce0089ba5c9d8cd5964351f56e868bfeebb356b55018",
+    "exact_ref": {
+     "digest": "sha256:8e3bd986500c150e4eb5ce0089ba5c9d8cd5964351f56e868bfeebb356b55018",
+     "kind": "mcp_tool",
+     "lifecycle_status": "published",
+     "logical_id": "mcp.biotech-kg.tool.kg-ingest",
+     "payload_ref": null,
+     "revision": 1,
+     "schema_version": "1"
+    },
+    "kind": "mcp_tool",
+    "pin": "mcp.biotech-kg.tool.kg-ingest@1#sha256:8e3bd986500c150e4eb5ce0089ba5c9d8cd5964351f56e868bfeebb356b55018",
+    "supported_profiles": [],
+    "version": "1"
+   },
+   "role": "capability"
+  },
+  {
+   "alias": "citation_check",
+   "blocker": null,
+   "candidates": [
+    "hook.citation-check@1#sha256:e5193e46c79a029cc40d6c22bdccd1060ecc94618c1c1224c2f5292368841216"
+   ],
+   "lanes": [
+    "deep_agents"
+   ],
+   "mission_key": "nad-muscle-research-ingestion",
+   "pointer": "/mission/environment/hooks/0",
+   "provenance": null,
+   "request": {
+    "kind": "hook_script",
+    "search": "citation presence check"
+   },
+   "result": {
+    "capability_id": "hook.citation-check",
+    "digest": "sha256:e5193e46c79a029cc40d6c22bdccd1060ecc94618c1c1224c2f5292368841216",
+    "exact_ref": {
+     "digest": "sha256:e5193e46c79a029cc40d6c22bdccd1060ecc94618c1c1224c2f5292368841216",
+     "kind": "hook_script",
+     "lifecycle_status": "published",
+     "logical_id": "hook.citation-check",
+     "payload_ref": null,
+     "revision": 1,
+     "schema_version": "1"
+    },
+    "kind": "hook_script",
+    "pin": "hook.citation-check@1#sha256:e5193e46c79a029cc40d6c22bdccd1060ecc94618c1c1224c2f5292368841216",
+    "supported_profiles": [
+     "deep_agents",
+     "cursor_local",
+     "cursor_cloud"
+    ],
+    "version": "1"
+   },
+   "role": "hook"
+  },
+  {
+   "alias": "coverage_check",
+   "blocker": null,
+   "candidates": [
+    "assessment.evidence-coverage@1#sha256:4b957b843d033debe5c2fc5039c6d9d50324968ac38bbbd757ef310494d4b575",
+    "assessment.code-change-verification@1#sha256:852724a28fb42c8d2025f22a95442f294c32911b9055961ba6f1d3acbccc8213",
+    "executor.claim-schema-validation@1#sha256:40ff1df93ddfdf01cbbaeaa5ef1829c95c0a77a59fb5ac1f2828508ff6c516f9"
+   ],
+   "lanes": [
+    "deep_agents"
+   ],
+   "mission_key": "nad-muscle-research-ingestion",
+   "pointer": "/mission/goals/0/criteria/0/acceptance/assessment/capability",
+   "provenance": null,
+   "request": {
+    "kind": "tool",
+    "search": "evidence coverage assessment claim table"
+   },
+   "result": {
+    "capability_id": "assessment.evidence-coverage",
+    "digest": "sha256:4b957b843d033debe5c2fc5039c6d9d50324968ac38bbbd757ef310494d4b575",
+    "exact_ref": {
+     "digest": "sha256:4b957b843d033debe5c2fc5039c6d9d50324968ac38bbbd757ef310494d4b575",
+     "kind": "tool",
+     "lifecycle_status": "published",
+     "logical_id": "assessment.evidence-coverage",
+     "payload_ref": null,
+     "revision": 1,
+     "schema_version": "1"
+    },
+    "kind": "tool",
+    "pin": "assessment.evidence-coverage@1#sha256:4b957b843d033debe5c2fc5039c6d9d50324968ac38bbbd757ef310494d4b575",
+    "supported_profiles": [],
+    "version": "1"
+   },
+   "role": "assessment"
+  },
+  {
+   "alias": "kg_ingest",
+   "blocker": null,
+   "candidates": [
+    "mcp.biotech-kg.tool.kg-ingest@1#sha256:8e3bd986500c150e4eb5ce0089ba5c9d8cd5964351f56e868bfeebb356b55018"
+   ],
+   "lanes": [
+    "deep_agents"
+   ],
+   "mission_key": "nad-muscle-research-ingestion",
+   "pointer": "/mission/program/nodes/3/environment/capabilities/0",
+   "provenance": null,
+   "request": {
+    "kind": "mcp_tool",
+    "search": "knowledge graph ingestion claims"
+   },
+   "result": {
+    "capability_id": "mcp.biotech-kg.tool.kg-ingest",
+    "digest": "sha256:8e3bd986500c150e4eb5ce0089ba5c9d8cd5964351f56e868bfeebb356b55018",
+    "exact_ref": {
+     "digest": "sha256:8e3bd986500c150e4eb5ce0089ba5c9d8cd5964351f56e868bfeebb356b55018",
+     "kind": "mcp_tool",
+     "lifecycle_status": "published",
+     "logical_id": "mcp.biotech-kg.tool.kg-ingest",
+     "payload_ref": null,
+     "revision": 1,
+     "schema_version": "1"
+    },
+    "kind": "mcp_tool",
+    "pin": "mcp.biotech-kg.tool.kg-ingest@1#sha256:8e3bd986500c150e4eb5ce0089ba5c9d8cd5964351f56e868bfeebb356b55018",
+    "supported_profiles": [],
+    "version": "1"
+   },
+   "role": "capability"
+  }
+ ],
+ "resolved_at": "2026-10-08T12:00:00Z",
+ "schema_version": "mc.manifest_resolution.v1",
+ "tenant_id": "9287e246-224b-5814-bc00-44bb5396e0c5",
+ "warnings": [
+  {
+   "code": "UNSUPPORTED_BEHAVIOR",
+   "message": "nested Goal Loop collect is lowered as one Stage Graph stage (the kernel has no nested-loop family yet)",
+   "pointer": "/mission/program/nodes/0",
+   "reason": "nested_goal_loop_lowered_as_stage"
+  }
+ ]
+}

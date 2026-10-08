@@ -59,6 +59,7 @@ from mission_control.bootstrap.composition import (
     MissionApplicationServices,
     compose_application_services,
 )
+from mission_control.bootstrap.manifests import compose_manifest_service
 from mission_control.bootstrap.settings import get_settings
 from mission_control.bootstrap.subscriptions import (
     compose_subscription_service,
@@ -76,6 +77,7 @@ from mission_control.interfaces.http.mission_control import (
     get_mission_principal,
     router,
 )
+from mission_control.interfaces.http.missions import router as missions_router
 from mission_control.interfaces.http.stop_fence import router as stop_fence_router
 from mission_control.interfaces.http.subscriptions import router as subscriptions_router
 from mission_control.interfaces.http.transcript import router as transcript_router
@@ -319,6 +321,16 @@ def create_application(
                                 "catalog composition differs from authenticated scope"
                             )
                         application.state.mission_control_catalog_services[key] = catalog
+                        # FT-E2: Mission Manifest compile through the tenant catalog.
+                        application.state.mission_control_manifest_services[key] = (
+                            compose_manifest_service(
+                                pool,
+                                request_scope=request_scope(identity),
+                                catalog=catalog,
+                                extensions=options.extensions,
+                                payload_store=options.payload_store,
+                            )
+                        )
                         # SPEC-03 (C3): the run transcript, read under the tenant scope.
                         application.state.mission_control_transcript_services[key] = (
                             TranscriptService(
@@ -361,6 +373,7 @@ def create_application(
     application.state.mission_control_transcript_services = {}
     application.state.mission_control_subscription_services = {}
     application.state.mission_control_chain_services = {}
+    application.state.mission_control_manifest_services = {}
     application.state.mission_control_compositions = {}
     application.state.mission_control_ready = False
     # FT-G1: the API lists and describes lanes; workers execute them.
@@ -377,6 +390,7 @@ def create_application(
     application.include_router(transcript_router)
     application.include_router(subscriptions_router)
     application.include_router(chains_router)
+    application.include_router(missions_router)
 
     @application.get("/health/live")
     def live() -> dict[str, bool]:

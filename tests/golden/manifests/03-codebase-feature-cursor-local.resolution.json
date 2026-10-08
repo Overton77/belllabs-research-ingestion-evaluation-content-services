@@ -1,0 +1,893 @@
+{
+ "actor_ref": "owner",
+ "application_id": "ai-engineer",
+ "blockers": [],
+ "capabilities": [
+  {
+   "capabilities": [
+    {
+     "alias": null,
+     "attributes": {},
+     "kind": null,
+     "pin": {
+      "capability_id": "skill.mission-control-observe",
+      "digest": null,
+      "version": "latest"
+     },
+     "pointer": "/mission/environment/workspace/skills/0",
+     "resolved": {
+      "capability_id": "skill.mission-control-observe",
+      "digest": "sha256:4972ce4660971b06771a7f78d4d1962ab5d2fc8a9e923dbc17e3427d7807f2af",
+      "version": "0.2.0"
+     },
+     "role": "skill",
+     "search": null
+    },
+    {
+     "alias": "test_run",
+     "attributes": {},
+     "kind": "deterministic_executor",
+     "pin": null,
+     "pointer": "/mission/environment/capabilities/0",
+     "resolved": {
+      "capability_id": "executor.test-run",
+      "digest": "sha256:c1cdd0d869c7af5bb0bd10c14f5d601d52f84c062884ba6031c8e866cb1101af",
+      "version": "1"
+     },
+     "role": "capability",
+     "search": {
+      "query": "run declared test command capture report",
+      "require": []
+     }
+    },
+    {
+     "alias": "git_snapshot",
+     "attributes": {},
+     "kind": "deterministic_executor",
+     "pin": null,
+     "pointer": "/mission/environment/capabilities/1",
+     "resolved": {
+      "capability_id": "executor.git-snapshot",
+      "digest": "sha256:c52636b522bffd7810e4dbea51b8f20e621f1bbbc2ab5b99f54105fdb9f6297d",
+      "version": "1"
+     },
+     "role": "capability",
+     "search": {
+      "query": "record branch commit snapshot",
+      "require": []
+     }
+    },
+    {
+     "alias": "verifier",
+     "attributes": {
+      "overlay": {
+       "is_background": false,
+       "model": "inherit",
+       "readonly": true
+      }
+     },
+     "kind": "subagent_profile",
+     "pin": null,
+     "pointer": "/mission/environment/agents/0",
+     "resolved": {
+      "capability_id": "subagent.code-verifier",
+      "digest": "sha256:1d68913fb018220a94afc9031bd57f79d9a9745b04ec27e972de6624c810cb81",
+      "version": "1"
+     },
+     "role": "agent",
+     "search": {
+      "query": "code verifier subagent readonly",
+      "require": []
+     }
+    },
+    {
+     "alias": "shell_policy",
+     "attributes": {
+      "events": [
+       "before_shell"
+      ],
+      "fail_closed": true
+     },
+     "kind": "hook_script",
+     "pin": null,
+     "pointer": "/mission/environment/hooks/0",
+     "resolved": {
+      "capability_id": "hook.shell-policy",
+      "digest": "sha256:a8f532251f396213a7bb7125c66772dd3799072b30510a8f9afa777a288449d8",
+      "version": "1"
+     },
+     "role": "hook",
+     "search": {
+      "query": "shell command policy deny destructive",
+      "require": []
+     }
+    },
+    {
+     "alias": "agent_browser",
+     "attributes": {},
+     "kind": "plugin",
+     "pin": null,
+     "pointer": "/mission/environment/plugins/0",
+     "resolved": {
+      "capability_id": "plugin.agent-browser",
+      "digest": "sha256:97a0a3cb54722ca4fa1ee7dc794349309ce1288cae1c5808902b7c3f236c94f9",
+      "version": "1"
+     },
+     "role": "plugin",
+     "search": {
+      "query": "agent-browser browser automation",
+      "require": []
+     }
+    },
+    {
+     "alias": "verify_change",
+     "attributes": {},
+     "kind": "assessment",
+     "pin": null,
+     "pointer": "/mission/goals/0/criteria/2/acceptance/assessment/capability",
+     "resolved": {
+      "capability_id": "assessment.code-change-verification",
+      "digest": "sha256:852724a28fb42c8d2025f22a95442f294c32911b9055961ba6f1d3acbccc8213",
+      "version": "1"
+     },
+     "role": "assessment",
+     "search": {
+      "query": "code change verification against issue",
+      "require": []
+     }
+    },
+    {
+     "alias": null,
+     "attributes": {
+      "optional": false,
+      "plugin_member_role": "skill",
+      "provenance": "plugin:agent_browser"
+     },
+     "kind": null,
+     "pin": {
+      "capability_id": "skill.agent-browser",
+      "digest": "sha256:e146089ac0a9cebf5f4d348e8a0d98379359e459ff9505f8a11f431583c28818",
+      "version": "0.4.0"
+     },
+     "pointer": "/mission/environment/plugins/0/members/0",
+     "resolved": {
+      "capability_id": "skill.agent-browser",
+      "digest": "sha256:e146089ac0a9cebf5f4d348e8a0d98379359e459ff9505f8a11f431583c28818",
+      "version": "0.4.0"
+     },
+     "role": "skill",
+     "search": null
+    },
+    {
+     "alias": null,
+     "attributes": {
+      "optional": false,
+      "plugin_member_role": "mcp_server",
+      "provenance": "plugin:agent_browser"
+     },
+     "kind": null,
+     "pin": {
+      "capability_id": "mcp.agent-browser",
+      "digest": "sha256:0adefa4043827cb505858f7f76060f08140d0fc9a3aeeb580f6b0d2ecc6e3282",
+      "version": "0.38.2"
+     },
+     "pointer": "/mission/environment/plugins/0/members/1",
+     "resolved": {
+      "capability_id": "mcp.agent-browser",
+      "digest": "sha256:0adefa4043827cb505858f7f76060f08140d0fc9a3aeeb580f6b0d2ecc6e3282",
+      "version": "0.38.2"
+     },
+     "role": "capability",
+     "search": null
+    }
+   ],
+   "mission_key": "mission-control-transcript-cli"
+  }
+ ],
+ "catalog_resolution": "resolved",
+ "chain": null,
+ "hook_events": [
+  {
+   "event": "before_shell",
+   "hook_alias": "shell_policy",
+   "lane": "cursor_local",
+   "mission_key": "mission-control-transcript-cli",
+   "native_event": "beforeShellExecution",
+   "node_key": "root",
+   "unsupported_on_lane": false
+  },
+  {
+   "event": "before_shell",
+   "hook_alias": "shell_policy",
+   "lane": "deep_agents",
+   "mission_key": "mission-control-transcript-cli",
+   "native_event": "wrap_tool_call",
+   "node_key": "root",
+   "unsupported_on_lane": false
+  }
+ ],
+ "lane_support": [
+  {
+   "behavior": "goal_loop",
+   "lane": "cursor_local",
+   "mission_key": "mission-control-transcript-cli",
+   "node_key": "root",
+   "reason": null,
+   "role": "node",
+   "supported": true
+  },
+  {
+   "behavior": "goal_loop",
+   "lane": "deep_agents",
+   "mission_key": "mission-control-transcript-cli",
+   "node_key": "root",
+   "reason": null,
+   "role": "verifier",
+   "supported": true
+  }
+ ],
+ "lowering": [
+  {
+   "blueprint_digest": "sha256:b50aa90e8d2a23e92f760851ba67b4b51ee7b26a78abc36236dd303549a04347",
+   "definition_digest": "sha256:ee67d18bda290f5372534b4b18f4fbb6456973604e291c9e20271f9706b2e6fe",
+   "family": "GoalDirected",
+   "lowering_version": "mc.manifest-lowering/1",
+   "mission_key": "mission-control-transcript-cli",
+   "runtime_profile_digest": "sha256:60105b500623d413c2a3298496d1ee4e229f59e9155fc46469e140b135c4e76d"
+  }
+ ],
+ "manifest_digest": "sha256:70ef0ac39e1eeacbcf330cb3f89bf938f23426c4badc44c7d83a92c7009cb9fc",
+ "nodes": [
+  {
+   "effective_environment": {
+    "agents": [
+     {
+      "as": "verifier",
+      "kind": "subagent_profile",
+      "overlay": {
+       "is_background": false,
+       "model": "inherit",
+       "readonly": true
+      },
+      "pin": null,
+      "require": null,
+      "search": "code verifier subagent readonly"
+     }
+    ],
+    "budget": {
+     "tokens": 2000000,
+     "tool_calls": 500,
+     "usd": "20",
+     "wall_clock": 10800
+    },
+    "capabilities": [
+     {
+      "as": "test_run",
+      "kind": "deterministic_executor",
+      "pin": null,
+      "require": null,
+      "search": "run declared test command capture report",
+      "tools": null
+     },
+     {
+      "as": "git_snapshot",
+      "kind": "deterministic_executor",
+      "pin": null,
+      "require": null,
+      "search": "record branch commit snapshot",
+      "tools": null
+     }
+    ],
+    "governors": {
+     "depth": 1,
+     "fan_out": 2,
+     "iterations": 12,
+     "patience": 3,
+     "rounds": null,
+     "transfers": 4
+    },
+    "hooks": [
+     {
+      "as": "shell_policy",
+      "events": [
+       "before_shell"
+      ],
+      "fail_closed": true,
+      "kind": "hook_script",
+      "matcher": null,
+      "pin": null,
+      "require": null,
+      "search": "shell command policy deny destructive"
+     }
+    ],
+    "lane": "cursor_local",
+    "model": {
+     "profile": "cursor.default",
+     "settings": null
+    },
+    "plugins": [
+     {
+      "as": "agent_browser",
+      "kind": "plugin",
+      "pin": null,
+      "require": null,
+      "search": "agent-browser browser automation"
+     }
+    ],
+    "sandbox": null,
+    "side_effects": [
+     "read_only",
+     "workspace_write",
+     "external_write_reversible"
+    ],
+    "workspace": {
+     "context": [
+      {
+       "artifact": "artifact://ai-engineer/issues/FT-C3.md",
+       "as": "issue",
+       "expand": "inline",
+       "kind": null,
+       "path": null,
+       "pin": null,
+       "search": null
+      }
+     ],
+     "repo": {
+      "path": "C:\\Users\\Pinda\\Proyectos\\Biotech\\mission-control",
+      "ref": "main",
+      "url": null
+     },
+     "skills": [
+      {
+       "as": null,
+       "kind": null,
+       "pin": "skill.mission-control-observe@latest",
+       "require": null,
+       "search": null
+      }
+     ]
+    }
+   },
+   "field_provenance": {
+    "agents": "inherited",
+    "budget.tokens": "inherited",
+    "budget.tool_calls": "inherited",
+    "budget.usd": "inherited",
+    "budget.wall_clock": "inherited",
+    "capabilities": "inherited",
+    "governors.depth": "inherited",
+    "governors.fan_out": "inherited",
+    "governors.iterations": "inherited",
+    "governors.patience": "inherited",
+    "governors.transfers": "inherited",
+    "hooks": "inherited",
+    "lane": "inherited",
+    "model.profile": "inherited",
+    "plugins": "inherited",
+    "plugins.agent_browser.mcp.agent-browser": "plugin:agent_browser",
+    "plugins.agent_browser.skill.agent-browser": "plugin:agent_browser",
+    "side_effects": "inherited",
+    "workspace.context": "inherited",
+    "workspace.repo": "inherited",
+    "workspace.skills": "inherited"
+   },
+   "lane": "cursor_local",
+   "lane_changed_from": null,
+   "mission_key": "mission-control-transcript-cli",
+   "node_key": "root",
+   "pointer": "/mission/program",
+   "role": "node"
+  },
+  {
+   "effective_environment": {
+    "agents": [
+     {
+      "as": "verifier",
+      "kind": "subagent_profile",
+      "overlay": {
+       "is_background": false,
+       "model": "inherit",
+       "readonly": true
+      },
+      "pin": null,
+      "require": null,
+      "search": "code verifier subagent readonly"
+     }
+    ],
+    "budget": {
+     "tokens": 2000000,
+     "tool_calls": 500,
+     "usd": "20",
+     "wall_clock": 10800
+    },
+    "capabilities": [
+     {
+      "as": "test_run",
+      "kind": "deterministic_executor",
+      "pin": null,
+      "require": null,
+      "search": "run declared test command capture report",
+      "tools": null
+     },
+     {
+      "as": "git_snapshot",
+      "kind": "deterministic_executor",
+      "pin": null,
+      "require": null,
+      "search": "record branch commit snapshot",
+      "tools": null
+     }
+    ],
+    "governors": {
+     "depth": 1,
+     "fan_out": 2,
+     "iterations": 12,
+     "patience": 3,
+     "rounds": null,
+     "transfers": 4
+    },
+    "hooks": [
+     {
+      "as": "shell_policy",
+      "events": [
+       "before_shell"
+      ],
+      "fail_closed": true,
+      "kind": "hook_script",
+      "matcher": null,
+      "pin": null,
+      "require": null,
+      "search": "shell command policy deny destructive"
+     }
+    ],
+    "lane": "deep_agents",
+    "model": {
+     "profile": "frontier.default",
+     "settings": null
+    },
+    "plugins": [
+     {
+      "as": "agent_browser",
+      "kind": "plugin",
+      "pin": null,
+      "require": null,
+      "search": "agent-browser browser automation"
+     }
+    ],
+    "sandbox": null,
+    "side_effects": [
+     "read_only",
+     "workspace_write",
+     "external_write_reversible"
+    ],
+    "workspace": {
+     "context": [
+      {
+       "artifact": "artifact://ai-engineer/issues/FT-C3.md",
+       "as": "issue",
+       "expand": "inline",
+       "kind": null,
+       "path": null,
+       "pin": null,
+       "search": null
+      }
+     ],
+     "repo": {
+      "path": "C:\\Users\\Pinda\\Proyectos\\Biotech\\mission-control",
+      "ref": "main",
+      "url": null
+     },
+     "skills": [
+      {
+       "as": null,
+       "kind": null,
+       "pin": "skill.mission-control-observe@latest",
+       "require": null,
+       "search": null
+      }
+     ]
+    }
+   },
+   "field_provenance": {
+    "agents": "inherited",
+    "budget.tokens": "inherited",
+    "budget.tool_calls": "inherited",
+    "budget.usd": "inherited",
+    "budget.wall_clock": "inherited",
+    "capabilities": "inherited",
+    "governors.depth": "inherited",
+    "governors.fan_out": "inherited",
+    "governors.iterations": "inherited",
+    "governors.patience": "inherited",
+    "governors.transfers": "inherited",
+    "hooks": "inherited",
+    "lane": "overlay",
+    "model.profile": "overlay",
+    "plugins": "inherited",
+    "plugins.agent_browser.mcp.agent-browser": "plugin:agent_browser",
+    "plugins.agent_browser.skill.agent-browser": "plugin:agent_browser",
+    "side_effects": "inherited",
+    "workspace.context": "inherited",
+    "workspace.repo": "inherited",
+    "workspace.skills": "inherited"
+   },
+   "lane": "deep_agents",
+   "lane_changed_from": "cursor_local",
+   "mission_key": "mission-control-transcript-cli",
+   "node_key": "root",
+   "pointer": "/mission/program/verifier",
+   "role": "verifier"
+  }
+ ],
+ "plugins": [
+  {
+   "alias": "agent_browser",
+   "members": [
+    "skill.agent-browser@0.4.0#sha256:e146089ac0a9cebf5f4d348e8a0d98379359e459ff9505f8a11f431583c28818",
+    "mcp.agent-browser@0.38.2#sha256:0adefa4043827cb505858f7f76060f08140d0fc9a3aeeb580f6b0d2ecc6e3282"
+   ],
+   "mission_key": "mission-control-transcript-cli",
+   "plugin_pin": "plugin.agent-browser@1#sha256:97a0a3cb54722ca4fa1ee7dc794349309ce1288cae1c5808902b7c3f236c94f9",
+   "pointer": "/mission/environment/plugins/0"
+  }
+ ],
+ "resolved": [
+  {
+   "alias": null,
+   "blocker": null,
+   "candidates": [],
+   "lanes": [
+    "cursor_local",
+    "deep_agents"
+   ],
+   "mission_key": "mission-control-transcript-cli",
+   "pointer": "/mission/environment/workspace/skills/0",
+   "provenance": null,
+   "request": {
+    "kind": "skill",
+    "pin": "skill.mission-control-observe@latest"
+   },
+   "result": {
+    "capability_id": "skill.mission-control-observe",
+    "digest": "sha256:4972ce4660971b06771a7f78d4d1962ab5d2fc8a9e923dbc17e3427d7807f2af",
+    "exact_ref": {
+     "digest": "sha256:4972ce4660971b06771a7f78d4d1962ab5d2fc8a9e923dbc17e3427d7807f2af",
+     "kind": "skill",
+     "lifecycle_status": "published",
+     "logical_id": "skill.mission-control-observe",
+     "payload_ref": null,
+     "revision": 1,
+     "schema_version": "1"
+    },
+    "kind": "skill",
+    "pin": "skill.mission-control-observe@0.2.0#sha256:4972ce4660971b06771a7f78d4d1962ab5d2fc8a9e923dbc17e3427d7807f2af",
+    "supported_profiles": [
+     "deep_agents",
+     "cursor_local",
+     "cursor_cloud"
+    ],
+    "version": "0.2.0"
+   },
+   "role": "skill"
+  },
+  {
+   "alias": "test_run",
+   "blocker": null,
+   "candidates": [
+    "executor.test-run@1#sha256:c1cdd0d869c7af5bb0bd10c14f5d601d52f84c062884ba6031c8e866cb1101af"
+   ],
+   "lanes": [
+    "cursor_local",
+    "deep_agents"
+   ],
+   "mission_key": "mission-control-transcript-cli",
+   "pointer": "/mission/environment/capabilities/0",
+   "provenance": null,
+   "request": {
+    "kind": "tool",
+    "search": "run declared test command capture report"
+   },
+   "result": {
+    "capability_id": "executor.test-run",
+    "digest": "sha256:c1cdd0d869c7af5bb0bd10c14f5d601d52f84c062884ba6031c8e866cb1101af",
+    "exact_ref": {
+     "digest": "sha256:c1cdd0d869c7af5bb0bd10c14f5d601d52f84c062884ba6031c8e866cb1101af",
+     "kind": "tool",
+     "lifecycle_status": "published",
+     "logical_id": "executor.test-run",
+     "payload_ref": null,
+     "revision": 1,
+     "schema_version": "1"
+    },
+    "kind": "tool",
+    "pin": "executor.test-run@1#sha256:c1cdd0d869c7af5bb0bd10c14f5d601d52f84c062884ba6031c8e866cb1101af",
+    "supported_profiles": [],
+    "version": "1"
+   },
+   "role": "capability"
+  },
+  {
+   "alias": "git_snapshot",
+   "blocker": null,
+   "candidates": [
+    "executor.git-snapshot@1#sha256:c52636b522bffd7810e4dbea51b8f20e621f1bbbc2ab5b99f54105fdb9f6297d"
+   ],
+   "lanes": [
+    "cursor_local",
+    "deep_agents"
+   ],
+   "mission_key": "mission-control-transcript-cli",
+   "pointer": "/mission/environment/capabilities/1",
+   "provenance": null,
+   "request": {
+    "kind": "tool",
+    "search": "record branch commit snapshot"
+   },
+   "result": {
+    "capability_id": "executor.git-snapshot",
+    "digest": "sha256:c52636b522bffd7810e4dbea51b8f20e621f1bbbc2ab5b99f54105fdb9f6297d",
+    "exact_ref": {
+     "digest": "sha256:c52636b522bffd7810e4dbea51b8f20e621f1bbbc2ab5b99f54105fdb9f6297d",
+     "kind": "tool",
+     "lifecycle_status": "published",
+     "logical_id": "executor.git-snapshot",
+     "payload_ref": null,
+     "revision": 1,
+     "schema_version": "1"
+    },
+    "kind": "tool",
+    "pin": "executor.git-snapshot@1#sha256:c52636b522bffd7810e4dbea51b8f20e621f1bbbc2ab5b99f54105fdb9f6297d",
+    "supported_profiles": [],
+    "version": "1"
+   },
+   "role": "capability"
+  },
+  {
+   "alias": "verifier",
+   "blocker": null,
+   "candidates": [
+    "subagent.code-verifier@1#sha256:1d68913fb018220a94afc9031bd57f79d9a9745b04ec27e972de6624c810cb81",
+    "subagent.literature-verifier@1#sha256:a199f70434ebb93d7ffb69ad1cfe790b1c160f126fa66b4b6b036e513f6854fb"
+   ],
+   "lanes": [
+    "cursor_local",
+    "deep_agents"
+   ],
+   "mission_key": "mission-control-transcript-cli",
+   "pointer": "/mission/environment/agents/0",
+   "provenance": null,
+   "request": {
+    "kind": "subagent_profile",
+    "search": "code verifier subagent readonly"
+   },
+   "result": {
+    "capability_id": "subagent.code-verifier",
+    "digest": "sha256:1d68913fb018220a94afc9031bd57f79d9a9745b04ec27e972de6624c810cb81",
+    "exact_ref": {
+     "digest": "sha256:1d68913fb018220a94afc9031bd57f79d9a9745b04ec27e972de6624c810cb81",
+     "kind": "subagent_profile",
+     "lifecycle_status": "published",
+     "logical_id": "subagent.code-verifier",
+     "payload_ref": null,
+     "revision": 1,
+     "schema_version": "1"
+    },
+    "kind": "subagent_profile",
+    "pin": "subagent.code-verifier@1#sha256:1d68913fb018220a94afc9031bd57f79d9a9745b04ec27e972de6624c810cb81",
+    "supported_profiles": [
+     "deep_agents",
+     "cursor_local",
+     "cursor_cloud"
+    ],
+    "version": "1"
+   },
+   "role": "agent"
+  },
+  {
+   "alias": "shell_policy",
+   "blocker": null,
+   "candidates": [
+    "hook.shell-policy@1#sha256:a8f532251f396213a7bb7125c66772dd3799072b30510a8f9afa777a288449d8"
+   ],
+   "lanes": [
+    "cursor_local",
+    "deep_agents"
+   ],
+   "mission_key": "mission-control-transcript-cli",
+   "pointer": "/mission/environment/hooks/0",
+   "provenance": null,
+   "request": {
+    "kind": "hook_script",
+    "search": "shell command policy deny destructive"
+   },
+   "result": {
+    "capability_id": "hook.shell-policy",
+    "digest": "sha256:a8f532251f396213a7bb7125c66772dd3799072b30510a8f9afa777a288449d8",
+    "exact_ref": {
+     "digest": "sha256:a8f532251f396213a7bb7125c66772dd3799072b30510a8f9afa777a288449d8",
+     "kind": "hook_script",
+     "lifecycle_status": "published",
+     "logical_id": "hook.shell-policy",
+     "payload_ref": null,
+     "revision": 1,
+     "schema_version": "1"
+    },
+    "kind": "hook_script",
+    "pin": "hook.shell-policy@1#sha256:a8f532251f396213a7bb7125c66772dd3799072b30510a8f9afa777a288449d8",
+    "supported_profiles": [
+     "deep_agents",
+     "cursor_local",
+     "cursor_cloud"
+    ],
+    "version": "1"
+   },
+   "role": "hook"
+  },
+  {
+   "alias": "agent_browser",
+   "blocker": null,
+   "candidates": [
+    "plugin.agent-browser@1#sha256:97a0a3cb54722ca4fa1ee7dc794349309ce1288cae1c5808902b7c3f236c94f9"
+   ],
+   "lanes": [
+    "cursor_local",
+    "deep_agents"
+   ],
+   "mission_key": "mission-control-transcript-cli",
+   "pointer": "/mission/environment/plugins/0",
+   "provenance": null,
+   "request": {
+    "kind": "plugin",
+    "search": "agent-browser browser automation"
+   },
+   "result": {
+    "capability_id": "plugin.agent-browser",
+    "digest": "sha256:97a0a3cb54722ca4fa1ee7dc794349309ce1288cae1c5808902b7c3f236c94f9",
+    "exact_ref": {
+     "digest": "sha256:97a0a3cb54722ca4fa1ee7dc794349309ce1288cae1c5808902b7c3f236c94f9",
+     "kind": "plugin",
+     "lifecycle_status": "published",
+     "logical_id": "plugin.agent-browser",
+     "payload_ref": null,
+     "revision": 1,
+     "schema_version": "1"
+    },
+    "kind": "plugin",
+    "pin": "plugin.agent-browser@1#sha256:97a0a3cb54722ca4fa1ee7dc794349309ce1288cae1c5808902b7c3f236c94f9",
+    "supported_profiles": [
+     "deep_agents",
+     "cursor_local"
+    ],
+    "version": "1"
+   },
+   "role": "plugin"
+  },
+  {
+   "alias": "verify_change",
+   "blocker": null,
+   "candidates": [
+    "assessment.code-change-verification@1#sha256:852724a28fb42c8d2025f22a95442f294c32911b9055961ba6f1d3acbccc8213",
+    "assessment.evidence-coverage@1#sha256:4b957b843d033debe5c2fc5039c6d9d50324968ac38bbbd757ef310494d4b575"
+   ],
+   "lanes": [
+    "cursor_local"
+   ],
+   "mission_key": "mission-control-transcript-cli",
+   "pointer": "/mission/goals/0/criteria/2/acceptance/assessment/capability",
+   "provenance": null,
+   "request": {
+    "kind": "tool",
+    "search": "code change verification against issue"
+   },
+   "result": {
+    "capability_id": "assessment.code-change-verification",
+    "digest": "sha256:852724a28fb42c8d2025f22a95442f294c32911b9055961ba6f1d3acbccc8213",
+    "exact_ref": {
+     "digest": "sha256:852724a28fb42c8d2025f22a95442f294c32911b9055961ba6f1d3acbccc8213",
+     "kind": "tool",
+     "lifecycle_status": "published",
+     "logical_id": "assessment.code-change-verification",
+     "payload_ref": null,
+     "revision": 1,
+     "schema_version": "1"
+    },
+    "kind": "tool",
+    "pin": "assessment.code-change-verification@1#sha256:852724a28fb42c8d2025f22a95442f294c32911b9055961ba6f1d3acbccc8213",
+    "supported_profiles": [],
+    "version": "1"
+   },
+   "role": "assessment"
+  },
+  {
+   "alias": null,
+   "blocker": null,
+   "candidates": [],
+   "lanes": [
+    "cursor_local"
+   ],
+   "mission_key": "mission-control-transcript-cli",
+   "pointer": "/mission/environment/plugins/0/members/0",
+   "provenance": "plugin:agent_browser",
+   "request": {
+    "kind": "skill",
+    "pin": "skill.agent-browser@0.4.0#sha256:e146089ac0a9cebf5f4d348e8a0d98379359e459ff9505f8a11f431583c28818"
+   },
+   "result": {
+    "capability_id": "skill.agent-browser",
+    "digest": "sha256:e146089ac0a9cebf5f4d348e8a0d98379359e459ff9505f8a11f431583c28818",
+    "exact_ref": {
+     "digest": "sha256:e146089ac0a9cebf5f4d348e8a0d98379359e459ff9505f8a11f431583c28818",
+     "kind": "skill",
+     "lifecycle_status": "published",
+     "logical_id": "skill.agent-browser",
+     "payload_ref": null,
+     "revision": 1,
+     "schema_version": "1"
+    },
+    "kind": "skill",
+    "pin": "skill.agent-browser@0.4.0#sha256:e146089ac0a9cebf5f4d348e8a0d98379359e459ff9505f8a11f431583c28818",
+    "supported_profiles": [
+     "deep_agents",
+     "cursor_local"
+    ],
+    "version": "0.4.0"
+   },
+   "role": "skill"
+  },
+  {
+   "alias": null,
+   "blocker": null,
+   "candidates": [],
+   "lanes": [
+    "cursor_local"
+   ],
+   "mission_key": "mission-control-transcript-cli",
+   "pointer": "/mission/environment/plugins/0/members/1",
+   "provenance": "plugin:agent_browser",
+   "request": {
+    "kind": null,
+    "pin": "mcp.agent-browser@0.38.2#sha256:0adefa4043827cb505858f7f76060f08140d0fc9a3aeeb580f6b0d2ecc6e3282"
+   },
+   "result": {
+    "capability_id": "mcp.agent-browser",
+    "digest": "sha256:0adefa4043827cb505858f7f76060f08140d0fc9a3aeeb580f6b0d2ecc6e3282",
+    "exact_ref": {
+     "digest": "sha256:0adefa4043827cb505858f7f76060f08140d0fc9a3aeeb580f6b0d2ecc6e3282",
+     "kind": "mcp_server",
+     "lifecycle_status": "published",
+     "logical_id": "mcp.agent-browser",
+     "payload_ref": null,
+     "revision": 1,
+     "schema_version": "1"
+    },
+    "kind": "mcp_server",
+    "pin": "mcp.agent-browser@0.38.2#sha256:0adefa4043827cb505858f7f76060f08140d0fc9a3aeeb580f6b0d2ecc6e3282",
+    "supported_profiles": [
+     "deep_agents",
+     "cursor_local",
+     "claude_agent_sdk",
+     "codex"
+    ],
+    "version": "0.38.2"
+   },
+   "role": "capability"
+  }
+ ],
+ "resolved_at": "2026-10-08T12:00:00Z",
+ "schema_version": "mc.manifest_resolution.v1",
+ "tenant_id": "9287e246-224b-5814-bc00-44bb5396e0c5",
+ "warnings": [
+  {
+   "code": "INVALID_DEFINITION",
+   "message": "deep_agents node without a sandbox profile uses the deployment default",
+   "pointer": "/mission/program/verifier/environment/sandbox",
+   "reason": "sandbox_defaulted"
+  },
+  {
+   "code": "CAPABILITY_UNAVAILABLE",
+   "message": "search 'code verifier subagent readonly' is ambiguous between subagent.code-verifier@1#sha256:1d68913fb018220a94afc9031bd57f79d9a9745b04ec27e972de6624c810cb81 and subagent.literature-verifier@1#sha256:a199f70434ebb93d7ffb69ad1cfe790b1c160f126fa66b4b6b036e513f6854fb; the top hit was pinned",
+   "pointer": "/mission/environment/agents/0",
+   "reason": "ambiguous_search"
+  }
+ ]
+}
