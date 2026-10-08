@@ -234,9 +234,14 @@ class GitWorktreeLeaser:
         return files
 
     async def release(
-        self, lease: WorkspaceLease, *, patch_artifact_ref: str | None
+        self,
+        lease: WorkspaceLease,
+        *,
+        patch_artifact_ref: str | None,
+        snapshot_ref: str | None = None,
     ) -> WorkspaceLease:
-        """Remove the worktree only after its patch is stored (the caller passes its ref)."""
+        """Remove the worktree only after its patch is stored (the caller passes its ref, and
+        the frozen lane snapshot a fork of the run restores)."""
 
         if lease.released:
             return lease
@@ -246,6 +251,7 @@ class GitWorktreeLeaser:
             lease.lease_id,
             patch_artifact_ref=patch_artifact_ref,
             released_at=self._clock(),
+            snapshot_ref=snapshot_ref,
         )
 
     def _remove(self, path: Path, repository: str | None) -> None:

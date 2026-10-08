@@ -132,7 +132,7 @@ def caller() -> ActorContext:
 class World:
     """A settled StageGraph source run with fork authority, seeds and inspection."""
 
-    async def build(self, request_scope: str = SCOPE) -> World:
+    async def build(self, request_scope: str = SCOPE, lane_snapshots: Any = None) -> World:
         self.harness = await recovery_harness(request_scope=request_scope)
         unit = stage_recovery_unit(self.harness.run_id, "draft", request_scope=request_scope)
         result = await self.harness.run(await self.harness.request(unit))
@@ -148,6 +148,7 @@ class World:
                 heads={self.harness.run_id: (stagegraph_head(stages={"draft": "completed"}),)},
             ),
             policies=policies,
+            lane_snapshots=lane_snapshots,
         )
         self.scope = request_scope
         self.runtime = MissionControlRuntimeService(
@@ -186,6 +187,17 @@ class World:
         }
         values.update(overrides)
         return MissionForkRequest.model_validate(values)
+
+
+class _LaneSnapshots:
+    """The Cursor Local lease store's view: the snapshot the run's last session froze."""
+
+    def __init__(self, refs: dict[str, tuple[str, ...]]) -> None:
+        self.refs = refs
+
+    async def sandbox_snapshot_refs(self, request_scope: str, run_id: str) -> tuple[str, ...]:
+        del request_scope
+        return self.refs.get(run_id, ())
 
 
 async def _counts(world: World, run_id: str) -> tuple[int, int, int]:
@@ -610,3 +622,24 @@ async def test_a_unit_the_fork_reuses_takes_no_queued_content() -> None:
         unit_key="unit:executed",
     )
     assert [entry.kind for entry in taken] == ["queue_instruction", "add_context"]
+
+
+@pytest.mark.asyncio
+async def test_fork_restores_the_lane_snapshot_the_source_session_froze() -> None:
+    """FT-G4 / FT-F4: a fork of a Cursor Local run names the `cursor-snapshot:` ref its last
+    session recorded, not the run snapshot the lane cannot restore."""
+
+    lane = _LaneSnapshots({})
+    world = await World().build(lane_snapshots=lane)
+    frozen = "cursor-snapshot:payload://cursor-local/heid/1/snapshot.json"
+    lane.refs[world.run_id] = (frozen,)
+    receipt = await world.runtime.fork(world.run_id, world.request(), caller(), **GRANTS)
+    snapshot = await world.forks.snapshot_store.latest(world.scope, world.run_id)
+    assert snapshot is not None and snapshot.sandbox_snapshot_refs == (frozen,)
+    assert receipt.seed is not None
+    entries = await world.repository.mailbox.list_entries(
+        world.scope, receipt.receipt.target_run_id
+    )
+    (workspace,) = [entry for entry in entries if entry.expand == "workspace"]
+    assert workspace.content_ref == frozen
+    assert workspace.content_digest == snapshot.snapshot_digest

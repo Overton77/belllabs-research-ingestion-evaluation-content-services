@@ -3,3 +3,7 @@ packages/mission-control-db-contract/component/** text eol=lf
 packages/mission-control-db-contract/runtime/** text eol=lf
 packages/mission-control-db-contract/seeds/** text eol=lf
 deployments/*/release.lock.json text eol=lf
+# Applied 1.0.0 migrations whose live receipts hash the original bytes (0002 CRLF, 0004 mixed):
+# keep them byte-exact; an edited applied migration is RECEIPT_DRIFT on every installed target.
+packages/mission-control-db-contract/component/migrations/0002_authoring.sql -text
+packages/mission-control-db-contract/component/migrations/0004_capability_artifacts.sql -text

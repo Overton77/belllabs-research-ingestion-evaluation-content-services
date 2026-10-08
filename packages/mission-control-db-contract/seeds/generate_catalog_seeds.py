@@ -330,6 +330,12 @@ def approved_assets() -> dict[str, Any]:
 # by file SHA-256 and never regenerated. Later target facts ship as a new seed version
 # with a new asset version, so nothing is overwritten.
 FROZEN_BUNDLES = {
+    # Applied to both live projects on 2026-10-03 (seed digest sha256:f45e04f9...). Its
+    # sources moved on (FT-A1 relabelled the coordinator skill kind, the router manifest is
+    # newer), so the successor below carries only the logical keys 1.0.0 does not hold.
+    "common/mc.catalog.approved-assets-1.0.0.json": (
+        "7c0e1f497726f776aeafc943b3eda9207c6c932b1529e37b44dae2b6b464ec1b"
+    ),
     "biotech/mc.app.bindings-1.0.0.json": (
         "4cc5c1203b0fd0b9cabc8e0ebcaba2662cda427a4e5f4b876eb2f9b7790802c4"
     ),
@@ -345,6 +351,35 @@ def frozen_bundle(relative: str) -> dict[str, Any]:
     if _sha256_bytes(payload) != "sha256:" + FROZEN_BUNDLES[relative]:
         raise SystemExit(f"frozen applied seed bundle changed: {relative}")
     return dict(json.loads(payload))
+
+
+APPROVED_ASSETS_FROZEN = "common/mc.catalog.approved-assets-1.0.0.json"
+
+
+def approved_assets_successor() -> dict[str, Any]:
+    """`mc.catalog.approved-assets@1.0.1`: the approved-asset records whose logical keys the
+    applied 1.0.0 bundle does not hold (today the newer `skills/mission-control` manifest).
+
+    Records 1.0.0 already holds are never re-emitted, even when their sources changed: an
+    applied logical key with different bytes is a seed conflict. A changed definition needs
+    a new definition revision (an owner decision), not new bytes under revision 1.
+    """
+
+    frozen = frozen_bundle(APPROVED_ASSETS_FROZEN)
+    held = {record["logical_key"] for record in frozen["records"]}
+    current = approved_assets()
+    return {
+        **current,
+        "seed_version": "1.0.1",
+        "depends_on": [{"seed_key": "mc.catalog.approved-assets", "seed_version": "1.0.0"}],
+        "description": (
+            "Successor of mc.catalog.approved-assets@1.0.0 (applied, frozen): the reviewed "
+            "approved assets whose logical keys 1.0.0 does not hold, currently the canonical "
+            "skills/mission-control bundle manifest at its present version. The coordinator "
+            "skill and prompt definitions stay at the applied revision 1."
+        ),
+        "records": [record for record in current["records"] if record["logical_key"] not in held],
+    }
 
 
 def app_bindings(app: str) -> dict[str, Any]:
@@ -539,7 +574,7 @@ def build_bundles() -> dict[str, dict[str, Any]]:
     bundles = {
         "common/mc.catalog.workflow-parity-1.0.0.json": workflow_parity(),
         "common/mc.catalog.runtime-profiles-1.0.0.json": runtime_profiles(),
-        "common/mc.catalog.approved-assets-1.0.0.json": approved_assets(),
+        "common/mc.catalog.approved-assets-1.0.1.json": approved_assets_successor(),
         "qualification/mc.qualification.parity-1.0.0.json": qualification_parity(),
     }
     for relative in FROZEN_BUNDLES:

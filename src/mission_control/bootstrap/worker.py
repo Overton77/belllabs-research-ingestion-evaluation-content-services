@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import sys
 from collections.abc import AsyncIterator
@@ -13,6 +14,8 @@ from urllib.parse import urlsplit
 import asyncpg
 import uvicorn
 from pydantic import SecretStr
+from temporalio.client import Client
+from temporalio.service import RPCError
 from temporalio.worker import Worker
 
 from mission_control.adapters.deep_agents.persistence import RuntimeConninfoError
@@ -25,6 +28,7 @@ from mission_control.adapters.postgres.chains.store import install_chain_release
 from mission_control.adapters.postgres.control_plane.definition_repository import (
     PostgresDefinitionRepository,
 )
+from mission_control.adapters.postgres.frames.retention import PostgresFrameRetention
 from mission_control.adapters.postgres.orchestration.linked_run_repository import (
     PostgresLinkedRunRepository,
 )
@@ -34,6 +38,10 @@ from mission_control.adapters.postgres.run_control.run_control_repository import
 from mission_control.adapters.storage.control_plane_payloads import (
     S3PayloadStore,
     UnavailablePayloadStore,
+)
+from mission_control.adapters.temporal.activities.frames_expire import (
+    FramesExpireActivities,
+    ensure_frames_expire_schedule,
 )
 from mission_control.adapters.temporal.client import connect_temporal, resolve_temporal_connection
 from mission_control.adapters.temporal.coordinator_runtime import coordinator_task_queues
@@ -58,6 +66,7 @@ from mission_control.adapters.temporal.worker import (
     production_workers_or_close,
 )
 from mission_control.adapters.temporal.workflow_sandbox import coordinator_workflow_runner
+from mission_control.adapters.temporal.workflows.frames_expire import FramesExpireWorkflow
 from mission_control.adapters.temporal.workflows.mission_run import MissionRunWorkflow
 from mission_control.application.authoring.service import ControlPlaneService
 from mission_control.application.execution.harness.hook_callbacks import HookCallbackService
@@ -69,6 +78,8 @@ from mission_control.application.execution.service import (
 from mission_control.application.installations.registry import (
     ApplicationBinding,
     InstallationUnavailable,
+    VerifiedApplicationIdentity,
+    request_scope,
 )
 from mission_control.application.programs.linked_runs import LinkedRunService
 from mission_control.bootstrap.api import (
@@ -88,6 +99,37 @@ from mission_control.bootstrap.settings import Settings, get_settings
 from mission_control.domain.authoring.extensions import ExtensionRegistry
 from mission_control.domain.policies.contracts import ActorContext
 from mission_control.interfaces.http.hook_callback import create_hook_callback_app
+
+_LOGGER = logging.getLogger(__name__)
+
+
+def maintenance_task_queue(base: str) -> str:
+    """The worker's maintenance queue (FT-C1 `mc.frames_expire.v1` retention runs)."""
+
+    return f"{base}-maintenance"
+
+
+def tenant_request_scopes(item: ApplicationDeployment) -> list[str]:
+    """Every tenant scope the deployment grants for this application, in a stable order.
+
+    Retention runs per tenant scope because row-level security binds one tenant per
+    transaction (SPEC-03 retention)."""
+
+    config = item.authentication
+    binding = config.binding
+    tenants = sorted({tenant for grant in config.grants for tenant in grant.tenant_ids}, key=str)
+    return [
+        request_scope(
+            VerifiedApplicationIdentity(
+                issuer=config.issuer,
+                audiences=frozenset({config.audience}),
+                application_id=binding.application_id,
+                installation_id=binding.installation_id,
+                tenant_id=tenant,
+            )
+        )
+        for tenant in tenants
+    ]
 
 
 @dataclass(frozen=True)
@@ -356,6 +398,19 @@ async def run_worker(
                 deployment_config=deployment_config,
             )
         )
+        # FT-C1: Native Event Store retention (`frames.expire`) on the maintenance queue.
+        maintenance_queue = maintenance_task_queue(settings.temporal_task_queue)
+        workers.append(
+            Worker(
+                client,
+                task_queue=maintenance_queue,
+                workflows=[FramesExpireWorkflow],
+                activities=[
+                    FramesExpireActivities(PostgresFrameRetention(prepared.runtime_pool)).expire
+                ],
+                deployment_config=deployment_config,
+            )
+        )
         for worker in workers:
             await stack.enter_async_context(worker)
         if deployment_config is not None and settings.temporal_promote_on_start:
@@ -363,7 +418,40 @@ async def run_worker(
             await promote_worker_deployment_version(
                 client, connection.namespace, deployment_config.version
             )
+        if settings.mission_control_frames_expire_schedule:
+            await ensure_retention_schedule(
+                client,
+                application_id=application_id,
+                request_scopes=tenant_request_scopes(prepared.application),
+                task_queue=maintenance_queue,
+            )
         await (stop or asyncio.Event()).wait()
+
+
+async def ensure_retention_schedule(
+    client: Client, *, application_id: str, request_scopes: list[str], task_queue: str
+) -> str | None:
+    """Create or update the per-application `frames.expire` Schedule (daily).
+
+    Retention is housekeeping: a namespace that refuses Schedules leaves frames unexpired
+    and is reported, but does not stop the worker from executing missions."""
+
+    if not request_scopes:
+        _LOGGER.warning("frames.expire schedule skipped: the deployment grants no tenant")
+        return None
+    try:
+        return await ensure_frames_expire_schedule(
+            client,
+            application_id=application_id,
+            request_scopes=request_scopes,
+            task_queue=task_queue,
+        )
+    except RPCError as error:
+        _LOGGER.warning(
+            "frames.expire schedule was not created (%s); provider frames will not expire",
+            error.status.name if error.status is not None else "unknown",
+        )
+        return None
 
 
 async def start_hook_callback_listener(

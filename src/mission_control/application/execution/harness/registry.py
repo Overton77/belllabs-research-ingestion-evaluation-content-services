@@ -30,6 +30,10 @@ from mission_control.domain.execution.lanes import (
     LaneProfileName,
 )
 
+# The application policy that admits unqualified lanes for a local proof (Settings field
+# `mission_control_allow_unqualified_lanes`).
+UNQUALIFIED_LANES_FLAG = "MISSION_CONTROL_ALLOW_UNQUALIFIED_LANES"
+
 
 class UnknownLaneProfile(LookupError):
     """No harness is registered for the requested lane profile."""
@@ -47,7 +51,9 @@ class LaneNotQualified(PermissionError):
     def __init__(self, lane_profile: str) -> None:
         super().__init__(
             f"lane profile {lane_profile!r} is not qualified; admission requires a recorded "
-            "qualification or an application policy that allows unqualified lanes (local proof)"
+            "qualification (docs/qualification/lanes/README.md, "
+            f"`make lane-qualify PROFILE={lane_profile} LIVE=1`) or, for a local proof, "
+            f"{UNQUALIFIED_LANES_FLAG}=true on the worker that runs the lane"
         )
         self.lane_profile = lane_profile
 
@@ -167,6 +173,7 @@ def describe_only_registry(*, cursor_bound: bool, allow_unqualified: bool) -> La
 
 
 __all__ = [
+    "UNQUALIFIED_LANES_FLAG",
     "DescribeOnlyLane",
     "LaneNotExecutable",
     "LaneNotQualified",

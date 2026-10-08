@@ -1,9 +1,11 @@
 {
-  "compatible_previous_fingerprints": [],
+  "compatible_previous_fingerprints": [
+    "sha256:ef5a9e71c9c4a4fe23f343a5708c476a757bc1c5a61f9aacae3a76577b209c09"
+  ],
   "component": "mission_control",
-  "component_version": "1.0.0",
+  "component_version": "1.1.0",
   "contract_path": "generated/contract.json",
-  "contract_schema_digest": "sha256:ba7ac824a04d8039e8ab6e4eedacc02f7d8eac25500da62580d4d17c5556430a",
+  "contract_schema_digest": "sha256:d300a38959b088712bbf22111b57c36bfc3822d991c445b53468f70b7bd219be",
   "installer_protocol": "mission-control-sql/v2",
   "min_postgres_version": 170000,
   "ordered_migrations": [
@@ -15,7 +17,7 @@
     {
       "key": "0002_authoring",
       "path": "migrations/0002_authoring.sql",
-      "sha256": "0bda2c01feb68a4a3030be57ebedd6ef102cca85ce8baf26dec1ee1ed3207a37"
+      "sha256": "fe9f2f9adc7675db24b9458ea9be0d7e32a2c10aa4e708dd069d6a19af49e7b5"
     },
     {
       "key": "0003_execution",
@@ -25,7 +27,7 @@
     {
       "key": "0004_capability_artifacts",
       "path": "migrations/0004_capability_artifacts.sql",
-      "sha256": "a1f77703e20207fd03deac5eb4ad45358e8910b822a35d9a9efc20c162f38e38"
+      "sha256": "fe33a28c27f4fc9b965c417a407b5e1707a8bf8498c6dbf7b1cf90a47b8dfb07"
     },
     {
       "key": "0005_commands_effects_recovery",
@@ -98,14 +100,34 @@
       "sha256": "c6ca8f833dc46c0e055866e491858a565d9721c998e94bb6b3b6f09946581ed9"
     },
     {
+      "key": "0025_capability_kinds_and_host_support",
+      "path": "migrations/0025_capability_kinds_and_host_support.sql",
+      "sha256": "ecb7396860160969d95a4ec755d811c2a96b142de50c75fd8fc910e1c6715a46"
+    },
+    {
+      "key": "0026_search_projection_nullable_embedding",
+      "path": "migrations/0026_search_projection_nullable_embedding.sql",
+      "sha256": "be28e26099ac899f55125c748ab2bbc634c281965e8e4415172704acb44dc6b1"
+    },
+    {
+      "key": "0027_provider_frames",
+      "path": "migrations/0027_provider_frames.sql",
+      "sha256": "5d81a799d9c01683deecdc21adf6a39239a5abda6c4de99a4dfd9afc3073d664"
+    },
+    {
       "key": "0028_mission_chains",
       "path": "migrations/0028_mission_chains.sql",
-      "sha256": "f6155bbf7215dea327fdbecfc3fc923bc085f51292a1e2a2d2176159f1ff9107"
+      "sha256": "6fc1ed497bb166e2e8cfbd9772bcf1216719aa7ab97999c1a268911a15381a2c"
     },
     {
       "key": "0029_command_mailbox_stop_fence_subscriptions",
       "path": "migrations/0029_command_mailbox_stop_fence_subscriptions.sql",
-      "sha256": "e6c6195776adbb2699a3b038b612eab1729d6fed91da3c9faedb31efa3cd1f01"
+      "sha256": "c6d571e692e13100d235c80b40e1542a95990fab6b22f5fcc3c77371fff20549"
+    },
+    {
+      "key": "0030_lane_bindings",
+      "path": "migrations/0030_lane_bindings.sql",
+      "sha256": "c057bc275ab7162f1109646323a0aba82fd8c8b89bc9240df48ebc44501027cf"
     }
   ],
   "owned_schemas": [
@@ -116,6 +138,13 @@
   "required_extensions": [
     {
       "name": "vector",
+      "required_by": [
+        "mission_control_search"
+      ],
+      "schema": "extensions"
+    },
+    {
+      "name": "pg_trgm",
       "required_by": [
         "mission_control_search"
       ],
@@ -133,11 +162,11 @@
     "mission_control_outbox_worker",
     "mission_control_readonly"
   ],
-  "schema_fingerprint": "sha256:6a0f9d8446169fec8c866084ba4c8bbcde002f51f300737d74dcb09bb0e65bd0",
+  "schema_fingerprint": "sha256:7da7567a7e9c547015e9f9add3769720a42ad18b6c47e11017dcb416998989ac",
   "schema_fingerprint_algorithm": "mc-pg-catalog-v2",
   "schema_fingerprints": {
-    "mission_control": "sha256:5b14f40a6706fe1defbd6338cfc7c4d7a8a150f9ff32ae823216ba329eefae86",
-    "mission_control_search": "sha256:1df2cc3c968448828537bd0dc171b97fde614b00c85c6f8b6c9552ab2c796c89"
+    "mission_control": "sha256:ff43be9ed48e718daabaf396f48583ba113748c81314d80060abdcd3b55d1b28",
+    "mission_control_search": "sha256:cbfb0a943e40439dcce7d32008b59a58f4387a43aafe3b8a1afda13e2fff0533"
   },
   "seed_compatibility": {
     "bundle_format": "mission-control-seed/v1",
@@ -148,12 +177,18 @@
       "mc.catalog.runtime-profiles",
       "mc.catalog.approved-assets",
       "mc.app.bindings",
-      "mc.qualification.parity"
+      "mc.qualification.parity",
+      "mc.catalog.agent-capabilities",
+      "mc.app.biotech.agent-capabilities",
+      "mc.app.ai-engineer.agent-capabilities",
+      "mc.storage.capability-bundles",
+      "mc.app.biotech.agent-skills",
+      "mc.app.ai-engineer.agent-skills"
     ]
   },
   "source_identity": "mission-control-db-contract",
-  "source_inputs_digest": "sha256:5e85c5a7b45ace6962c5e2912a8065194f55b1fc905f8f0b1f7f8325ed6c019d",
-  "source_revision": "git:2b221dc1bdab6b59b02df9862ab408be1fa8eb4a+inputs:sha256:5e85c5a7b45ace6962c5e2912a8065194f55b1fc905f8f0b1f7f8325ed6c019d",
+  "source_inputs_digest": "sha256:51a391b5727f8aaa2108e8fc5f48f1881577ad6a8f321c9bf1febcf68c9e3e52",
+  "source_revision": "git:f9f19c508fb3887630aaa59837911b49c4078f57+inputs:sha256:51a391b5727f8aaa2108e8fc5f48f1881577ad6a8f321c9bf1febcf68c9e3e52",
   "supported_reader_versions": [
     "mission-control-runtime/1"
   ],

@@ -36,9 +36,10 @@ from mission_control.bootstrap.settings import Settings
 from mission_control.domain.authoring.contracts import DefinitionKind
 
 
-def _default_generation() -> str:
+def _default_generation(lexical_only: bool = False) -> str:
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
-    return f"capability-search-v1-openai-1536-{timestamp}"
+    route = "lexical" if lexical_only else "openai-1536"
+    return f"capability-search-v1-{route}-{timestamp}"
 
 
 def _arguments() -> argparse.Namespace:
@@ -53,12 +54,20 @@ def _arguments() -> argparse.Namespace:
         help="Stable generation identity for resumable rebuilds; defaults to a new value.",
     )
     parser.add_argument("--batch-size", type=int)
+    parser.add_argument(
+        "--lexical-only",
+        action="store_true",
+        help=(
+            "Write lexical search columns only (no embedding provider call); search runs "
+            "lexical until a later rebuild with embeddings fills the vectors (FT-A3)."
+        ),
+    )
     return parser.parse_args()
 
 
 async def _run(args: argparse.Namespace) -> dict[str, Any]:
     settings = Settings()
-    generation = args.generation or _default_generation()
+    generation = args.generation or _default_generation(args.lexical_only)
     scope = configured_catalog_scope(settings, requested=getattr(args, "tenant", None))
     postgres_pool = await create_postgres_pool(settings)
     try:
@@ -77,7 +86,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
         projector = CatalogProjector(
             definitions=definitions,
             search=search,
-            embeddings=OpenAICapabilityEmbeddingAdapter(settings),
+            embeddings=None if args.lexical_only else OpenAICapabilityEmbeddingAdapter(settings),
             embedding_model_id=settings.capability_embedding_model,
             embedding_dimensions=settings.capability_embedding_dimensions,
             projection_generation=generation,

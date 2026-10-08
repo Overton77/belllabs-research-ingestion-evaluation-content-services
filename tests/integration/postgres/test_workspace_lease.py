@@ -87,6 +87,48 @@ async def test_workspace_leases_are_recorded_once_and_released_after_the_patch(
         await pool.close()
 
 
+async def test_released_lease_records_the_lane_snapshot_a_fork_restores(
+    common_db: CommonDatabase,  # noqa: F811
+) -> None:
+    """FT-G4: the newest released lease of a run names its frozen `cursor-snapshot:` ref."""
+
+    pool = await common_db.pool("mission_control_runtime")
+    try:
+        store = PostgresWorkspaceLeaseStore(pool)
+        scope = common_db.scope("tenant-1")
+        run = f"run-{uuid4()}"
+        assert await store.sandbox_snapshot_refs(scope, run) == ()
+        first, second = _lease(scope, run_id=run), _lease(scope, run_id=run)
+        for lease in (first, second):
+            await store.record(lease)
+        await store.release(
+            scope,
+            first.lease_id,
+            patch_artifact_ref="payload://patch-1",
+            released_at=NOW,
+            snapshot_ref="cursor-snapshot:payload://snap-1",
+        )
+        assert await store.sandbox_snapshot_refs(scope, run) == (
+            "cursor-snapshot:payload://snap-1",
+        )
+        released = await store.release(
+            scope,
+            second.lease_id,
+            patch_artifact_ref="payload://patch-2",
+            released_at=NOW,
+            snapshot_ref="cursor-snapshot:payload://snap-2",
+        )
+        assert released.snapshot_ref == "cursor-snapshot:payload://snap-2"
+        assert await store.sandbox_snapshot_refs(scope, run) == (
+            "cursor-snapshot:payload://snap-2",
+        )
+        # Tenant scoped under forced RLS; another run has none.
+        assert await store.sandbox_snapshot_refs(common_db.scope("tenant-2"), run) == ()
+        assert await store.sandbox_snapshot_refs(scope, "run-other") == ()
+    finally:
+        await pool.close()
+
+
 async def test_tokens_store_only_digests_and_intents_are_insert_only(
     common_db: CommonDatabase,  # noqa: F811
 ) -> None:
