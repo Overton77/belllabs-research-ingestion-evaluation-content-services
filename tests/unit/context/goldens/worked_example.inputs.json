@@ -1,0 +1,18 @@
+{
+  "inputs": [
+    {
+      "artifact_ref": "artifact://inst-1/run-1/source-manifest",
+      "binding_name": "sources",
+      "bytes": 215040,
+      "content_digest": "sha256:168b5aa3a40e6c735a763bc2dd27b75e2a9c8e66942ff9a337ba14e3db856231",
+      "durable_ref": "payload://objects/source-manifest#sha256:168b5aa3a40e6c735a763bc2dd27b75e2a9c8e66942ff9a337ba14e3db856231:215040",
+      "item_id": "sha256:de95362a444a3c06ea1d386335a6aeb8be228f1f15516da23af6dfceb7cd7f11",
+      "media_type": "application/json",
+      "mode": "read_only",
+      "path": "/inputs/sources/source_manifest.json"
+    }
+  ],
+  "packet_digest": "sha256:74993de91293a2ddcafb17e7d6805f4bbe659dbbc3d0be22377fd9fe952fd9a3",
+  "schema_version": "mc.mission_inputs.v1",
+  "workspace": null
+}

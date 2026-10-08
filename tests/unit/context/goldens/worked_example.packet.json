@@ -1,0 +1,298 @@
+{
+  "schema_version": "mc.context_packet.v1",
+  "packet_id": "0199b8f0-0000-7000-8000-000000000001",
+  "packer_version": "mc.context_packer/1",
+  "scope": {
+    "installation_id": "inst-1",
+    "application_id": "biotech",
+    "tenant_id": "tenant-1"
+  },
+  "target": {
+    "mission_id": "mission-1",
+    "run_id": "run-1",
+    "revision_id": "rev-1",
+    "node_key": "synthesize",
+    "activation_id": "act-synthesize-1",
+    "attempt_no": 1,
+    "generation": 0,
+    "purpose": "stage_start"
+  },
+  "producer_refs": [
+    "act-collect-1"
+  ],
+  "budget": {
+    "model_profile_ref": "frontier.long_context",
+    "tokenizer_ref": "o200k_base",
+    "context_window": 400000,
+    "reserved_output": 16000,
+    "fixed_overhead": 11500,
+    "control_reserve": 8000,
+    "safety_margin": 20000,
+    "available_input": 344500,
+    "inline_allocated": 255,
+    "inline_remaining": 344245,
+    "counting": "exact"
+  },
+  "items": [
+    {
+      "item_id": "sha256:1ae436d27f175ae48545482b56063630e5349d82eed3067d05129a4ee50aa08f",
+      "binding_name": null,
+      "source_kind": "operating_contract",
+      "source_ref": "state://run-1/synthesize/operating_contract",
+      "content_digest": "sha256:f0a1b7dbd1bd78ae727f097627a5db6bd3600eac3de675cb696fbf6e456900d1",
+      "bytes": 72,
+      "media_type": "text/markdown",
+      "schema_ref": null,
+      "trust": "authoritative",
+      "tier": "inline",
+      "mandatory": true,
+      "inline": {
+        "text": "Synthesize the collected sources into an evidence map. Cite every claim.",
+        "tokens": 37
+      },
+      "reference": null,
+      "materialize": null,
+      "workspace": null,
+      "provenance": {
+        "producer_activation_id": "act-collect-1",
+        "producer_generation": null,
+        "accepted_decision_ref": "decision://act-collect-1/accepted",
+        "iteration_id": null,
+        "chain_link_id": null,
+        "provisional": false
+      }
+    },
+    {
+      "item_id": "sha256:98f721296b48dcfeaa1bfefa0b2e7ab5ab73587388c8005783516173a9f0e159",
+      "binding_name": null,
+      "source_kind": "pending_commitments",
+      "source_ref": "state://run-1/pending_commitments",
+      "content_digest": "sha256:407873747bddac32afdbf310ec2794ed4fda9cfbc4ec3cfd215e8af23ef5f7d4",
+      "bytes": 40,
+      "media_type": "text/markdown",
+      "schema_ref": null,
+      "trust": "authoritative",
+      "tier": "inline",
+      "mandatory": true,
+      "inline": {
+        "text": "Human gate review runs after this stage.",
+        "tokens": 33
+      },
+      "reference": null,
+      "materialize": null,
+      "workspace": null,
+      "provenance": {
+        "producer_activation_id": "act-collect-1",
+        "producer_generation": null,
+        "accepted_decision_ref": "decision://act-collect-1/accepted",
+        "iteration_id": null,
+        "chain_link_id": null,
+        "provisional": false
+      }
+    },
+    {
+      "item_id": "sha256:db21044225df3bfb8fc48aae4dfce3bcbafe1a4652d963b2979f5353741406f0",
+      "binding_name": null,
+      "source_kind": "budget_remaining",
+      "source_ref": "state://run-1/budget_remaining",
+      "content_digest": "sha256:7774bb45a8a73d34f59b109d1d3e84b40739b270ff7969d21cbc8271888dd666",
+      "bytes": 34,
+      "media_type": "text/markdown",
+      "schema_ref": null,
+      "trust": "authoritative",
+      "tier": "inline",
+      "mandatory": true,
+      "inline": {
+        "text": "usd 14.20 of 25; tokens 1.3M of 2M",
+        "tokens": 34
+      },
+      "reference": null,
+      "materialize": null,
+      "workspace": null,
+      "provenance": {
+        "producer_activation_id": "act-collect-1",
+        "producer_generation": null,
+        "accepted_decision_ref": "decision://act-collect-1/accepted",
+        "iteration_id": null,
+        "chain_link_id": null,
+        "provisional": false
+      }
+    },
+    {
+      "item_id": "sha256:27a649a72965746b5d9282a29ec39423e420c042e7e49ebcd1245aeb1b9d6cea",
+      "binding_name": null,
+      "source_kind": "journal_digest",
+      "source_ref": "journal://act-collect-1/seg-07",
+      "content_digest": "sha256:db1904a0d1cd93b3c7d115d5071abb47afdb0f964c1d68feb9925b47c0cf3e1b",
+      "bytes": 4096,
+      "media_type": "application/json",
+      "schema_ref": null,
+      "trust": "authoritative",
+      "tier": "reference",
+      "mandatory": true,
+      "inline": null,
+      "reference": {
+        "summary": "sealed journal head of collect (7 segments)",
+        "tokens": 27,
+        "retrieval": {
+          "kind": "missionctl",
+          "path": null,
+          "tool": null,
+          "command": "missionctl journal read journal://act-collect-1/seg-07",
+          "resource_uri": null,
+          "range_hint": null
+        }
+      },
+      "materialize": null,
+      "workspace": null,
+      "provenance": {
+        "producer_activation_id": null,
+        "producer_generation": null,
+        "accepted_decision_ref": null,
+        "iteration_id": null,
+        "chain_link_id": null,
+        "provisional": false
+      }
+    },
+    {
+      "item_id": "sha256:8c5306d1582cf33735aa05fe9a0cdd433b74ef6c491475240992512d46981a8a",
+      "binding_name": null,
+      "source_kind": "workspace_map",
+      "source_ref": "state://run-1/synthesize/workspace_map",
+      "content_digest": "sha256:e82335b8655df369637fb9bb00c64b573bb616cbdb9577249e50fc3ef272876f",
+      "bytes": 72,
+      "media_type": "text/markdown",
+      "schema_ref": null,
+      "trust": "authoritative",
+      "tier": "inline",
+      "mandatory": true,
+      "inline": {
+        "text": "/inputs read-only; /outputs writable; .mission/context.md is this index.",
+        "tokens": 34
+      },
+      "reference": null,
+      "materialize": null,
+      "workspace": null,
+      "provenance": {
+        "producer_activation_id": "act-collect-1",
+        "producer_generation": null,
+        "accepted_decision_ref": "decision://act-collect-1/accepted",
+        "iteration_id": null,
+        "chain_link_id": null,
+        "provisional": false
+      }
+    },
+    {
+      "item_id": "sha256:de95362a444a3c06ea1d386335a6aeb8be228f1f15516da23af6dfceb7cd7f11",
+      "binding_name": "sources",
+      "source_kind": "accepted_output",
+      "source_ref": "artifact://inst-1/run-1/source-manifest",
+      "content_digest": "sha256:168b5aa3a40e6c735a763bc2dd27b75e2a9c8e66942ff9a337ba14e3db856231",
+      "bytes": 215040,
+      "media_type": "application/json",
+      "schema_ref": null,
+      "trust": "untrusted_content",
+      "tier": "materialize",
+      "mandatory": false,
+      "inline": null,
+      "reference": null,
+      "materialize": {
+        "path": "/inputs/sources/source_manifest.json",
+        "mode": "read_only",
+        "manifest_entry_ref": ".mission/inputs.json#sha256:de95362a444a3c06ea1d386335a6aeb8be228f1f15516da23af6dfceb7cd7f11",
+        "durable_ref": "payload://objects/source-manifest#sha256:168b5aa3a40e6c735a763bc2dd27b75e2a9c8e66942ff9a337ba14e3db856231:215040",
+        "summary": "180 PubMed records with abstracts",
+        "tokens": 22
+      },
+      "workspace": null,
+      "provenance": {
+        "producer_activation_id": "act-collect-1",
+        "producer_generation": null,
+        "accepted_decision_ref": "decision://act-collect-1/accepted",
+        "iteration_id": null,
+        "chain_link_id": null,
+        "provisional": false
+      }
+    },
+    {
+      "item_id": "sha256:0f99d377846aa72d785b69bb9ac70c5b7a06ba7ce86865b9c41ed68bf1a95d63",
+      "binding_name": "coverage",
+      "source_kind": "accepted_output",
+      "source_ref": "artifact://inst-1/run-1/coverage-review",
+      "content_digest": "sha256:014137ad9694f6010b2e62dfc51f104ccb368983a5157c59b84b326cefe07a37",
+      "bytes": 69,
+      "media_type": "text/markdown",
+      "schema_ref": null,
+      "trust": "admitted_input",
+      "tier": "inline",
+      "mandatory": false,
+      "inline": {
+        "text": "Coverage is adequate for NAD+ and muscle aging; gaps in human trials.",
+        "tokens": 37
+      },
+      "reference": null,
+      "materialize": null,
+      "workspace": null,
+      "provenance": {
+        "producer_activation_id": "act-collect-1",
+        "producer_generation": null,
+        "accepted_decision_ref": "decision://act-collect-1/accepted",
+        "iteration_id": null,
+        "chain_link_id": null,
+        "provisional": false
+      }
+    },
+    {
+      "item_id": "sha256:bb94971ab9e48a2b1f628a941e856b0a1fda97e6ed31084df5b5773b17d4ba4e",
+      "binding_name": "schema_context",
+      "source_kind": "catalog_context",
+      "source_ref": "catalog://biotech.schema_context@1.3.0",
+      "content_digest": "sha256:444fc897329265ff99569140a317a98b047a2d51cfb69f409b78687936aae03c",
+      "bytes": 480000,
+      "media_type": "text/markdown",
+      "schema_ref": null,
+      "trust": "admitted_input",
+      "tier": "reference",
+      "mandatory": false,
+      "inline": null,
+      "reference": {
+        "summary": "Biotech knowledge graph schema context for muscle aging NAD",
+        "tokens": 31,
+        "retrieval": {
+          "kind": "tool_call",
+          "path": null,
+          "tool": {
+            "name": "biotech.schema_context.select",
+            "args_digest": "sha256:5396c9ec3f600d467079f3a888bec080e5ab87c91fa58bcdc8585e67b6579c6c",
+            "args_excerpt": "search=\"muscle aging NAD\""
+          },
+          "command": null,
+          "resource_uri": null,
+          "range_hint": null
+        }
+      },
+      "materialize": null,
+      "workspace": null,
+      "provenance": {
+        "producer_activation_id": null,
+        "producer_generation": null,
+        "accepted_decision_ref": null,
+        "iteration_id": null,
+        "chain_link_id": null,
+        "provisional": false
+      }
+    }
+  ],
+  "omitted": [],
+  "mandatory_item_ids": [
+    "sha256:1ae436d27f175ae48545482b56063630e5349d82eed3067d05129a4ee50aa08f",
+    "sha256:98f721296b48dcfeaa1bfefa0b2e7ab5ab73587388c8005783516173a9f0e159",
+    "sha256:db21044225df3bfb8fc48aae4dfce3bcbafe1a4652d963b2979f5353741406f0",
+    "sha256:27a649a72965746b5d9282a29ec39423e420c042e7e49ebcd1245aeb1b9d6cea",
+    "sha256:8c5306d1582cf33735aa05fe9a0cdd433b74ef6c491475240992512d46981a8a"
+  ],
+  "workspace_snapshot_ref": null,
+  "packet_digest": "sha256:74993de91293a2ddcafb17e7d6805f4bbe659dbbc3d0be22377fd9fe952fd9a3",
+  "sealed_at": "2026-10-07T12:00:00Z",
+  "context_selection_ref": "context_selection:0199b8f0-0000-7000-8000-0000000000aa"
+}
