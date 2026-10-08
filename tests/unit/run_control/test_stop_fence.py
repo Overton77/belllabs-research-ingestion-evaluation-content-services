@@ -249,7 +249,9 @@ async def test_normal_cancel_writes_no_fence() -> None:
 async def test_milestones_complete_the_report() -> None:
     fences = InMemoryStopFenceRepository()
     await fences.record_milestone("tenant-1", "run-1", None, "settled")  # no fence: ignored
-    await fences.persist(_fence())
+    # Pin the persisted time: the repository otherwise stamps the wall clock, which would
+    # make the milestones below (relative to NOW) precede the fence once NOW is past.
+    await fences.persist(_fence().model_copy(update={"fenced_at": NOW + timedelta(seconds=1)}))
     await fences.record_milestone(
         "tenant-1",
         "run-1",
