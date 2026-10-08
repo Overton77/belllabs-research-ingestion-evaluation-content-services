@@ -189,6 +189,45 @@ class LaneDescribe(LaneContract):
         )
 
 
+# --- Segmented lane turns (FT-G2) ----------------------------------------------------------
+
+
+class LaneSegmentBounds(LaneContract):
+    """How long one `lane.turn` segment may observe before the workflow re-schedules it.
+
+    `start_to_close_s` bounds the activity (30 to 60 min per SPEC-07); a segment returns
+    `done=False` at `max_duration_s` or `max_frames`, well inside it. `heartbeat_timeout_s`
+    detects a lost worker; heartbeats are throttled, so the persisted frames, not the
+    heartbeat details, are the resume truth. `status_poll_*` bound the cancel path's
+    `lane.status` reconciliation, after which the unit is `in_doubt`; `busy_wait_s` bounds
+    `wait_then_send` before the attempt classifies `failed(capacity)`.
+    """
+
+    max_duration_s: int = Field(default=1_800, ge=1, le=3_600)
+    max_frames: int = Field(default=5_000, ge=1, le=100_000)
+    start_to_close_s: int = Field(default=2_700, ge=2, le=3_600)
+    heartbeat_timeout_s: int = Field(default=30, ge=1, le=600)
+    status_poll_limit: int = Field(default=12, ge=1, le=1_000)
+    status_poll_interval_s: int = Field(default=5, ge=1, le=600)
+    busy_wait_s: int = Field(default=900, ge=1, le=86_400)
+    max_segments: int = Field(default=400, ge=1, le=100_000)
+
+    @model_validator(mode="after")
+    def segment_ends_inside_the_activity(self) -> LaneSegmentBounds:
+        if self.max_duration_s >= self.start_to_close_s:
+            raise ValueError("a segment must end before its activity's start-to-close timeout")
+        return self
+
+
+class LaneResumePoint(LaneContract):
+    """Where the segment loop stands, carried across continue-as-new (SPEC-07 section 4.4)."""
+
+    phase: Literal["start", "resume"] = "start"
+    cursor: str | None = Field(default=None, min_length=1, max_length=1_024)
+    segment_no: int = Field(default=1, ge=1)
+    turn_no: int = Field(default=1, ge=1)
+
+
 # --- AgentHarness request and handle contracts --------------------------------------------------
 
 
@@ -247,6 +286,9 @@ class SessionHandle(LaneContract):
     harness_execution_id: str = Field(min_length=1)
     generation: int = Field(ge=1)
     native_session_ref: str | None = Field(default=None, min_length=1)
+    # FT-G3: secret-free placement facts the lane records with the native identity
+    # (`cursor_sdk_version`, `bridge_state_root`, `cloud_branch`, `cloud_agent_url`).
+    native_details: dict[str, str] = Field(default_factory=dict)
 
 
 class ReattachRequest(HarnessRequest):
@@ -299,6 +341,14 @@ class LaneFrame(LaneContract):
     terminal: bool = False
     digest: str = Field(pattern=DIGEST_PATTERN)
     excerpt: str = Field(default="", max_length=4_096)
+    # FT-G2: what `lane.turn` hands the frame writer (SPEC-03 `FrameObservation`). The body
+    # is the provider payload as JSON values; the writer redacts, digests and excerpts it
+    # before anything is stored. Absent on lanes that persist their own frames.
+    raw_kind: str | None = Field(default=None, min_length=1, max_length=256)
+    body: Any = None
+    native_turn_ref: str | None = Field(default=None, min_length=1, max_length=1_024)
+    tool_call_ref: str | None = Field(default=None, min_length=1, max_length=1_024)
+    provider_timestamp: AwareDatetime | None = None
 
 
 class SnapshotRequest(HarnessRequest):
@@ -345,6 +395,25 @@ class EndSessionRequest(HarnessRequest):
 class CleanupReceipt(LaneContract):
     released: bool
     artifact_refs: tuple[str, ...] = ()
+    # FT-G3: the session's patch artifact (git diff plus untracked files), stored before the
+    # workspace lease was released.
+    patch_ref: str | None = None
+
+
+class StatusRequest(HarnessRequest):
+    """`lane.status`: reconcile a session (and turn) by native identity (FT-G2)."""
+
+    session: SessionHandle
+    turn: TurnHandle | None = None
+
+
+class ProviderStatus(LaneContract):
+    """What the provider says about a session now: run status, terminal or not, idle."""
+
+    status: str = Field(min_length=1, max_length=64)
+    terminal: bool
+    idle: bool = False
+    usage: UsageReport | None = None
 
 
 # --- mc.cursor_binding.v1 ----------------------------------------------------------------------
@@ -384,6 +453,20 @@ class CursorCloudOptions(LaneContract):
     env_vars_ref: str | None = Field(default=None, min_length=1)
     metadata: dict[str, str] = Field(default_factory=dict)
     environment: Literal["cloud", "pool", "machine"] = "cloud"
+    # FT-G5: create idempotently with a client-supplied `agentId` (`409 agent_id_conflict`
+    # means already created). The API refuses `envVars` with `agentId`, so a binding that
+    # needs env vars sets this false and creates with an `Idempotency-Key` (dedupe window
+    # UNVERIFIED). Omitted from dumps and digests at its default.
+    client_agent_id: bool = Field(default=True, exclude_if=lambda value: value is True)
+
+    @model_validator(mode="after")
+    def env_vars_need_server_minted_ids(self) -> CursorCloudOptions:
+        if self.env_vars_ref is not None and self.client_agent_id:
+            raise ValueError(
+                "env_vars cannot be combined with a client-supplied agent id; "
+                "set client_agent_id false (Idempotency-Key create)"
+            )
+        return self
 
 
 class CursorBudgets(LaneContract):
@@ -409,6 +492,11 @@ class CursorExecutionBinding(LaneContract):
     hook_callback: CursorHookCallback | None = None
     cloud: CursorCloudOptions | None = None
     budgets: CursorBudgets
+    # FT-G2: the worker task queue that serves this binding's `lane.*` activities (absent:
+    # left out of dumps and digests, as for every binding sealed before it existed).
+    task_queue: str | None = Field(
+        default=None, min_length=1, max_length=255, exclude_if=lambda value: value is None
+    )
     binding_digest: str = Field(pattern=DIGEST_PATTERN)
 
     @model_validator(mode="after")
@@ -462,6 +550,8 @@ LANE_CONTRACTS: Final[dict[str, type[BaseModel]]] = {
     "usage_report": UsageReport,
     "end_session_request": EndSessionRequest,
     "cleanup_receipt": CleanupReceipt,
+    "status_request": StatusRequest,
+    "provider_status": ProviderStatus,
 }
 
 

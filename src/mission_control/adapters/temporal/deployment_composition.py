@@ -45,6 +45,18 @@ from mission_control.adapters.capabilities.capability_bundles import (
 )
 from mission_control.adapters.capabilities.capability_pins import CapabilityPins
 from mission_control.adapters.cursor import cursor_lane_stubs
+from mission_control.adapters.cursor.bridge import SdkBridgeLauncher
+from mission_control.adapters.cursor.cloud import CursorCloudHarness
+from mission_control.adapters.cursor.cloud_api import CloudAgentsClient
+from mission_control.adapters.cursor.hooks_callback import CursorHookMapper
+from mission_control.adapters.cursor.local import CursorLocalHarness, CursorLocalSettings
+from mission_control.adapters.cursor.projection import (
+    CatalogRows,
+    RenderedProjectionSource,
+    hook_context_index,
+)
+from mission_control.adapters.cursor.scm import GitBranchPublisher
+from mission_control.adapters.cursor.workspace import GitWorktreeLeaser
 from mission_control.adapters.deep_agents import (
     DeepAgentRuntimeAdapter,
     DeepAgentsAsyncSubagentAdapter,
@@ -86,10 +98,21 @@ from mission_control.adapters.postgres.context.artifact_bytes import PostgresArt
 from mission_control.adapters.postgres.context.selection_repository import (
     PostgresContextSelectionRepository,
 )
+from mission_control.adapters.postgres.control_plane.definition_repository import (
+    PostgresDefinitionRepository,
+)
 from mission_control.adapters.postgres.coordinator.workflow_result_repository import (
     PostgresWorkflowResultRepository,
 )
 from mission_control.adapters.postgres.frames.repository import PostgresFrameRepository
+from mission_control.adapters.postgres.lanes.execution_state import (
+    PostgresLaneExecutionStateStore,
+)
+from mission_control.adapters.postgres.lanes.hook_tokens import (
+    PostgresHookIntentLedger,
+    PostgresHookTokenStore,
+)
+from mission_control.adapters.postgres.lanes.workspace_leases import PostgresWorkspaceLeaseStore
 from mission_control.adapters.postgres.operations.operation_binding_repository import (
     PostgresOperationBindingRepository,
 )
@@ -159,6 +182,8 @@ from mission_control.application.coordinator.coordinator_results import (
     TerminalWorkflowCompletionService,
 )
 from mission_control.application.execution.harness.deep_agents_harness import DeepAgentsHarness
+from mission_control.application.execution.harness.hook_callbacks import HookCallbackService
+from mission_control.application.execution.harness.lane_turns import LaneTurnService
 from mission_control.application.execution.harness.protocol import AgentHarness
 from mission_control.application.execution.harness.registry import LaneRegistry
 from mission_control.application.execution.operations.checkpoint_lineage import DEFAULT_CLAIM_LEASE
@@ -175,6 +200,7 @@ from mission_control.application.execution.operations.operation_journal import (
     OperationJournalService,
 )
 from mission_control.application.execution.service import RunControlService
+from mission_control.application.execution.stop_fence import KernelHookFenceGate
 from mission_control.application.frames.reducer import FrameFactProjector
 from mission_control.application.programs.orchestration_routing import SemanticHandlerRegistry
 from mission_control.application.programs.service import (
@@ -423,15 +449,99 @@ class ProductionAsyncChildCancellation:
         return await service.cancel_children(binding, reason=reason, requested_at=requested_at)
 
 
-def compose_lane_registry(settings: Settings, deep_agents: DeepAgentsHarness) -> LaneRegistry:
-    """`deep_agents` always; the Cursor profiles (unqualified stubs until FT-G3/FT-G5) when a
-    Cursor credential is bound. Unqualified lanes are admitted only under the application's
-    local-proof policy (`MISSION_CONTROL_ALLOW_UNQUALIFIED_LANES`)."""
+def compose_lane_registry(
+    settings: Settings,
+    deep_agents: DeepAgentsHarness,
+    *,
+    cursor_local: AgentHarness | None = None,
+    cursor_cloud: AgentHarness | None = None,
+) -> LaneRegistry:
+    """`deep_agents` always; the Cursor profiles when a Cursor credential is bound: the real
+    `cursor_local` (FT-G3) and `cursor_cloud` (FT-G5) harnesses when composed, otherwise
+    unqualified stubs. Unqualified lanes are admitted only under the application's local-proof
+    policy (`MISSION_CONTROL_ALLOW_UNQUALIFIED_LANES`)."""
 
     harnesses: list[AgentHarness] = [deep_agents]
     if settings.cursor_api_key is not None:
-        harnesses.extend(cursor_lane_stubs())
+        local_stub, cloud_stub = cursor_lane_stubs()
+        harnesses.append(cursor_local if cursor_local is not None else local_stub)
+        harnesses.append(cursor_cloud if cursor_cloud is not None else cloud_stub)
     return LaneRegistry(harnesses, allow_unqualified=settings.allow_unqualified_lanes)
+
+
+def compose_cursor_cloud(
+    settings: Settings, pool: asyncpg.Pool, payloads: ArtifactPayloadPort
+) -> tuple[CursorCloudHarness, CloudAgentsClient] | None:
+    """The `cursor_cloud` lane (FT-G5) over the Cloud Agents API v1 when a Cursor credential
+    is bound. Branches are published through the worker's git configuration; the cloud
+    projection carries catalog command hooks only (the VM cannot reach the worker)."""
+
+    if settings.cursor_api_key is None:
+        return None
+    files = PayloadContextFiles(payloads)
+    root = settings.cursor_lease_root or (
+        (settings.deep_agent_sandbox_workspace_root or DEFAULT_WORKSPACE_ROOT) / "cursor-leases"
+    )
+    client = CloudAgentsClient(settings.cursor_api_key)
+    harness = CursorCloudHarness(
+        client=client,
+        publisher=GitBranchPublisher(root / "cloud-mirrors"),
+        projections=RenderedProjectionSource(
+            CatalogRows(
+                PostgresDefinitionRepository(
+                    pool, catalog_scope=settings.mission_control_catalog_scope or ""
+                )
+            ),
+            kernel_hooks=(),
+        ),
+        artifacts=files,
+        inputs=files,
+    )
+    return harness, client
+
+
+def compose_cursor_local(
+    settings: Settings, pool: asyncpg.Pool, payloads: ArtifactPayloadPort
+) -> tuple[CursorLocalHarness, HookCallbackService] | None:
+    """The `cursor_local` lane (FT-G3) and its Kernel Hook callback service, when a Cursor
+    credential is bound. Leases, tokens, intents and frames persist in the common component;
+    the packet and the patch artifacts go through the content-addressed payload store; the
+    projection resolves the binding's exact catalog pins."""
+
+    if settings.cursor_api_key is None:
+        return None
+    files = PayloadContextFiles(payloads)
+    hooks = HookCallbackService(
+        tokens=PostgresHookTokenStore(pool),
+        intents=PostgresHookIntentLedger(pool),
+        mapper=CursorHookMapper(),
+        fences=KernelHookFenceGate(PostgresStopFenceRepository(pool)),
+        frames=PostgresFrameRepository(pool),
+        context_reader=hook_context_index,
+    )
+    lease_root = settings.cursor_lease_root or (
+        (settings.deep_agent_sandbox_workspace_root or DEFAULT_WORKSPACE_ROOT) / "cursor-leases"
+    )
+    harness = CursorLocalHarness(
+        launcher=SdkBridgeLauncher(settings.cursor_api_key),
+        leaser=GitWorktreeLeaser(PostgresWorkspaceLeaseStore(pool), lease_root=lease_root),
+        projections=RenderedProjectionSource(
+            CatalogRows(
+                PostgresDefinitionRepository(
+                    pool, catalog_scope=settings.mission_control_catalog_scope or ""
+                )
+            )
+        ),
+        hooks=hooks,
+        artifacts=files,
+        inputs=files,
+        settings=CursorLocalSettings(
+            lease_root=lease_root,
+            callback_base_url=f"http://127.0.0.1:{settings.mission_control_hook_callback_port}",
+            default_repository=settings.cursor_local_repository,
+        ),
+    )
+    return harness, hooks
 
 
 class DeploymentOperationRuntime:
@@ -708,8 +818,19 @@ class ProductionWorkerActivityCompositionFactory:
             launch_verifier=verifier,
         )
         secrets = EnvironmentSecretResolver()
+        # FT-G3: the real `cursor_local` lane and its hook callbacks when Cursor is bound.
+        cursor = compose_cursor_local(settings, postgres_pool, payloads)
+        # FT-G5: the real `cursor_cloud` lane over the Cloud Agents API v1.
+        cloud = compose_cursor_cloud(settings, postgres_pool, payloads)
+        if cloud is not None:
+            resources.push_async_callback(cloud[1].aclose)
         # FT-G1: the lane registry is built once per worker (SPEC-07 section 3).
-        lanes = compose_lane_registry(settings, DeepAgentsHarness(adapter, secrets))
+        lanes = compose_lane_registry(
+            settings,
+            DeepAgentsHarness(adapter, secrets),
+            cursor_local=cursor[0] if cursor is not None else None,
+            cursor_cloud=cloud[0] if cloud is not None else None,
+        )
         service = OperationExecutionService(
             lanes=lanes,
             # FT-F3: immediate-cancel Delivery Report milestones on the run's Stop Fence.
@@ -741,6 +862,18 @@ class ProductionWorkerActivityCompositionFactory:
             children=ProductionAsyncChildCancellation(
                 children, PostgresAsyncSubagentAuthority(postgres_pool), secrets
             ),
+        )
+        # FT-G2: `lane.turn`, `lane.status`, `lane.cancel` on the cognitive queues. Session
+        # Lanes persist frames through the FrameSink and lane state on harness_execution;
+        # the Deep Agents lane runs its governed body through `lane.turn` unchanged.
+        frame_store = PostgresFrameRepository(postgres_pool)
+        lane_turns = LaneTurnService(
+            lanes=lanes,
+            boundary=service,
+            frames=frame_store,
+            states=PostgresLaneExecutionStateStore(postgres_pool),
+            secrets=secrets,
+            frame_facts=FrameFactProjector(frame_store, run_control, actor=actor),
         )
         self.operation = ProductionOperationComposition(
             service=service,
@@ -794,9 +927,12 @@ class ProductionWorkerActivityCompositionFactory:
         )
         return WorkerActivityComposition(
             coordinator=coordinator,
-            operation=OperationExecutionActivities(service, worker_identity=self._worker_identity),
+            operation=OperationExecutionActivities(
+                service, worker_identity=self._worker_identity, lane_turns=lane_turns
+            ),
             artifacts=ArtifactPromotionActivities(service=promotion, candidates=candidates),
             resources=resources,
+            hook_callbacks=cursor[1] if cursor is not None else None,
         )
 
 

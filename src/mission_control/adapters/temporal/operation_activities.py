@@ -13,6 +13,7 @@ from temporalio.exceptions import ApplicationError
 from temporalio.worker import Worker, WorkerDeploymentConfig
 
 from mission_control.adapters.temporal.registration.activities import agent_cognitive_activities
+from mission_control.application.execution.harness.lane_turns import LaneTurnService
 from mission_control.application.execution.operations.operation_execution import (
     ForkMaterializationPending,
     OperationExecutionInProgress,
@@ -60,9 +61,26 @@ class OperationExecutionActivities:
         service: OperationExecutionService,
         *,
         worker_identity: str | None = None,
+        lane_turns: LaneTurnService | None = None,
     ) -> None:
         self._service = service
         self._worker_identity = worker_identity or default_worker_identity()
+        # FT-G2: `lane.turn`, `lane.status`, `lane.cancel` beside the operation pair; every
+        # worker that serves `operation.execute` serves them on the same queue.
+        self._lanes: Any = None
+        if lane_turns is not None:
+            from mission_control.adapters.temporal.activities.lane_turn import (
+                LaneTurnActivities,
+            )
+
+            self._lanes = LaneTurnActivities(lane_turns, self)
+
+    def lane_activities(self) -> tuple[Any, ...]:
+        """The lane activity surface (empty when no lane turn service is composed)."""
+
+        if self._lanes is None:
+            return ()
+        return (self._lanes.turn, self._lanes.status, self._lanes.cancel)
 
     @activity.defn(name="operation.execute")
     async def execute(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -77,6 +95,26 @@ class OperationExecutionActivities:
         """
 
         return await self._run(payload, self._service.cancel)
+
+    async def run_governed(
+        self, payload: dict[str, Any], *, cancel: bool = False
+    ) -> dict[str, Any]:
+        """FT-G2: the governed `execute` (or `cancel`) body inside another activity.
+
+        `lane.turn` and `lane.cancel` run the Deep Agents lane through exactly this path,
+        with the same heartbeats, cancel probe, claim lease and error classification as
+        `operation.execute` / `operation.cancel` (which stay registered until FT-G6).
+        """
+
+        return await self._run(payload, self._service.cancel if cancel else self._service.execute)
+
+    @property
+    def service(self) -> OperationExecutionService:
+        return self._service
+
+    @property
+    def worker_identity(self) -> str:
+        return self._worker_identity
 
     async def _run(
         self,

@@ -62,3 +62,116 @@ ALTER TABLE mission_control.execution_binding
         CHECK (lane_profile NOT IN ('cursor_local', 'cursor_cloud') OR lane_binding IS NOT NULL);
 CREATE INDEX execution_binding_lane_profile_idx
     ON mission_control.execution_binding (lane_profile);
+
+-- section: G2 (FT-G2, OVE-51) harness_execution lane state --------------------------------
+-- `lane.turn` records the native session and turn on the harness execution before it
+-- observes (a recorded turn is never sent again), the provider cursor and segment time at
+-- every segment boundary, and the usage disposition at settlement. The Cursor profiles'
+-- pinned versions, bridge state root and cloud branch/agent URL are recorded alongside.
+-- The row itself is opened by the frame store (0027); these columns are nullable and
+-- additive, so existing rows and the Deep Agents writer are unchanged.
+ALTER TABLE mission_control.harness_execution
+    ADD COLUMN IF NOT EXISTS native_session_ref text CHECK (native_session_ref <> ''),
+    ADD COLUMN IF NOT EXISTS native_turn_ref text CHECK (native_turn_ref <> ''),
+    ADD COLUMN IF NOT EXISTS provider_cursor text CHECK (provider_cursor <> ''),
+    ADD COLUMN IF NOT EXISTS cursor_sdk_version text CHECK (cursor_sdk_version <> ''),
+    ADD COLUMN IF NOT EXISTS bridge_state_root text CHECK (bridge_state_root <> ''),
+    ADD COLUMN IF NOT EXISTS cloud_branch text CHECK (cloud_branch <> ''),
+    ADD COLUMN IF NOT EXISTS cloud_agent_url text CHECK (cloud_agent_url <> ''),
+    ADD COLUMN IF NOT EXISTS usage_disposition text
+        CHECK (usage_disposition IN ('estimated', 'settled', 'unknown')),
+    ADD COLUMN IF NOT EXISTS last_segment_at timestamptz;
+
+GRANT UPDATE (native_session_ref, native_turn_ref, provider_cursor, cursor_sdk_version,
+    bridge_state_root, cloud_branch, cloud_agent_url, usage_disposition, last_segment_at)
+ON mission_control.harness_execution TO mission_control_runtime;
+-- end section: G2
+
+-- section: G3 (FT-G3, OVE-52) Cursor local: workspace leases, hook task tokens, intents ------
+-- The Cursor local lane leases a git worktree per harness execution generation in the
+-- existing `workspace_lease` table (0003; the runtime had no grants on it). A Kernel Hook
+-- callback authenticates with a task token minted for (scope, run, attempt, generation,
+-- harness execution): only the token's digest is stored, with a secret-free context, and it
+-- expires with the lease or is revoked at session end. A permission Kernel Hook writes the
+-- Operation Intent of the effect it admits (keyed on the provider's effect ref) before it
+-- answers allow. Tokens and intents are tenant scoped under forced RLS; intents are
+-- insert-only.
+GRANT SELECT, INSERT ON mission_control.workspace_lease TO mission_control_runtime;
+GRANT UPDATE (desired_state, observed_state, cleanup_status, patch_ref, native_workspace_ref,
+    lease_expires_at, fencing_token, detail, version, updated_at)
+ON mission_control.workspace_lease TO mission_control_runtime;
+GRANT SELECT ON mission_control.workspace_lease TO mission_control_readonly;
+
+CREATE TABLE mission_control.hook_task_token (
+    installation_id uuid NOT NULL,
+    application_id text NOT NULL,
+    tenant_id uuid NOT NULL,
+    token_hash text PRIMARY KEY CHECK (token_hash ~ '^sha256:[0-9a-f]{64}$'),
+    harness_execution_id uuid NOT NULL,
+    generation bigint NOT NULL CHECK (generation > 0),
+    run_key text NOT NULL CHECK (run_key <> ''),
+    lane_profile text NOT NULL REFERENCES mission_control.lane_profile (lane_profile),
+    context jsonb NOT NULL CHECK (jsonb_typeof(context) = 'object'),
+    issued_at timestamptz NOT NULL,
+    expires_at timestamptz NOT NULL,
+    revoked_at timestamptz,
+    CHECK (expires_at > issued_at),
+    CHECK (revoked_at IS NULL OR revoked_at >= issued_at),
+    UNIQUE (installation_id, application_id, tenant_id, token_hash),
+    FOREIGN KEY (installation_id, application_id, tenant_id)
+        REFERENCES mission_control.tenant (installation_id, application_id, tenant_id)
+);
+CREATE INDEX hook_task_token_execution_idx ON mission_control.hook_task_token
+    (installation_id, application_id, tenant_id, harness_execution_id, generation);
+
+CREATE TABLE mission_control.hook_effect_intent (
+    installation_id uuid NOT NULL,
+    application_id text NOT NULL,
+    tenant_id uuid NOT NULL,
+    intent_id uuid PRIMARY KEY,
+    run_key text NOT NULL CHECK (run_key <> ''),
+    generation bigint NOT NULL CHECK (generation > 0),
+    harness_execution_id uuid NOT NULL,
+    effect_ref text NOT NULL CHECK (effect_ref <> '' AND length(effect_ref) <= 512),
+    effect_kind text NOT NULL
+        CHECK (effect_kind IN ('shell', 'mcp', 'file', 'task', 'model', 'other')),
+    hook_event text NOT NULL CHECK (hook_event <> ''),
+    lane_profile text NOT NULL REFERENCES mission_control.lane_profile (lane_profile),
+    input_digest text NOT NULL CHECK (input_digest ~ '^sha256:[0-9a-f]{64}$'),
+    recorded_at timestamptz NOT NULL,
+    UNIQUE (installation_id, application_id, tenant_id, run_key, generation, effect_ref),
+    FOREIGN KEY (installation_id, application_id, tenant_id)
+        REFERENCES mission_control.tenant (installation_id, application_id, tenant_id)
+);
+CREATE INDEX hook_effect_intent_execution_idx ON mission_control.hook_effect_intent
+    (installation_id, application_id, tenant_id, harness_execution_id, generation);
+CREATE TRIGGER hook_effect_intent_immutable
+    BEFORE UPDATE OR DELETE ON mission_control.hook_effect_intent
+    FOR EACH ROW EXECUTE FUNCTION mission_control.reject_mutation();
+
+DO $policies$
+DECLARE
+    table_name text;
+BEGIN
+    FOREACH table_name IN ARRAY ARRAY['hook_task_token', 'hook_effect_intent'] LOOP
+        EXECUTE pg_catalog.format('ALTER TABLE mission_control.%I ENABLE ROW LEVEL SECURITY', table_name);
+        EXECUTE pg_catalog.format('ALTER TABLE mission_control.%I FORCE ROW LEVEL SECURITY', table_name);
+        EXECUTE pg_catalog.format(
+            'CREATE POLICY %I ON mission_control.%I '
+            'USING (installation_id = mission_control.ctx_installation_id() '
+            'AND application_id = mission_control.ctx_application_id() '
+            'AND tenant_id = mission_control.ctx_tenant_id()) '
+            'WITH CHECK (installation_id = mission_control.ctx_installation_id() '
+            'AND application_id = mission_control.ctx_application_id() '
+            'AND tenant_id = mission_control.ctx_tenant_id())',
+            table_name || '_scope', table_name);
+    END LOOP;
+END
+$policies$;
+
+REVOKE ALL ON mission_control.hook_task_token, mission_control.hook_effect_intent FROM PUBLIC;
+GRANT SELECT, INSERT ON mission_control.hook_task_token TO mission_control_runtime;
+GRANT UPDATE (revoked_at) ON mission_control.hook_task_token TO mission_control_runtime;
+GRANT SELECT, INSERT ON mission_control.hook_effect_intent TO mission_control_runtime;
+GRANT SELECT ON mission_control.hook_effect_intent TO mission_control_readonly;
+-- end section: G3

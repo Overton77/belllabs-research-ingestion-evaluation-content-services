@@ -25,6 +25,8 @@ from mission_control.domain.execution.lanes import (
     CursorExecutionBinding,
     ExecutionRuntime,
     LaneProfileName,
+    LaneResumePoint,
+    LaneSegmentBounds,
 )
 from mission_control.domain.graph_runtime.identities import (
     QualifiedCheckpointKey,
@@ -62,6 +64,12 @@ def _absent(value: object) -> bool:
     every canonical digest, so contracts and fingerprints recorded before it existed hold."""
 
     return value is None
+
+
+def _empty(value: object) -> bool:
+    """`exclude_if` predicate for an FT collection field that is empty (digest-neutral)."""
+
+    return not value
 
 
 def _verify_lane_pairing(
@@ -1646,6 +1654,19 @@ class OperationWorkflowRequest(Contract):
     # REQ-CP-EXEC-015: the family passes its Search Attribute policy to the operation
     # child; absent means `disabled` (time-skipping tests and captured-history replay).
     search_attribute_policy: SearchAttributePolicy = "disabled"
+    # FT-G2 (SPEC-07 section 4.2): `lane.turn` segment bounds. Present (or a `cursor`
+    # operation) means the segment loop drives the unit; absent keeps `operation.execute`.
+    segments: LaneSegmentBounds | None = Field(default=None, exclude_if=_absent)
+    # FT-G2 (SPEC-07 section 4.4): command ids already applied by earlier runs of this
+    # workflow id, and where the segment loop stands, carried across continue-as-new.
+    seen_cmds: tuple[str, ...] = Field(default=(), max_length=4_096, exclude_if=_empty)
+    lane_resume: LaneResumePoint | None = Field(default=None, exclude_if=_absent)
+
+    @property
+    def segment_driven(self) -> bool:
+        """Whether the unit runs through `lane.turn` segments (always for `cursor`)."""
+
+        return self.segments is not None or self.operation.execution_runtime == "cursor"
 
     @model_validator(mode="after")
     def exact_bound_operation(self) -> OperationWorkflowRequest:
@@ -1669,6 +1690,10 @@ class OperationWorkflowRequest(Contract):
         binding = self.operation.deep_agent_binding
         if binding is not None:
             return binding.task_queue
+        cursor = self.operation.cursor_binding
+        if cursor is not None and cursor.task_queue is not None:
+            # FT-G2: the worker queue serving this Cursor lane's `lane.*` activities.
+            return cursor.task_queue
         placement = self.operation.native_placement
         if placement is None:
             raise ValueError("operation execution has no exact activity placement")

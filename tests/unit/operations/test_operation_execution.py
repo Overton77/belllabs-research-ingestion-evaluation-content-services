@@ -363,8 +363,18 @@ def test_native_placement_identifier_and_queue_lengths_are_bounded() -> None:
         )
 
 
+def _workflow_request() -> OperationWorkflowRequest:
+    operation = operation_request()
+    return OperationWorkflowRequest(
+        semantic_attempt_id=operation.identity.semantic_key,
+        operation_kind="bound_operation",
+        operation=operation,
+    )
+
+
 def test_operation_workflow_async_child_signal_bounds_fail_closed() -> None:
-    operation_workflow = OperationWorkflow()
+    # FT-G2: the workflow receives its input at `@workflow.init` (carried command ids).
+    operation_workflow = OperationWorkflow(_workflow_request())
     with pytest.raises(ApplicationError) as invalid:
         operation_workflow.record_async_child("c" * 513)
     assert invalid.value.type == "invalid_async_child_identity"
@@ -383,9 +393,6 @@ def test_operation_workflow_async_child_signal_bounds_fail_closed() -> None:
 
 @pytest.mark.asyncio
 async def test_operation_run_rejects_combined_request_and_prestart_signal_overflow() -> None:
-    operation_workflow = OperationWorkflow()
-    for index in range(1_024):
-        operation_workflow.record_async_child(f"signal-child-{index}")
     operation = operation_request()
     request = OperationWorkflowRequest(
         semantic_attempt_id=operation.identity.semantic_key,
@@ -393,6 +400,9 @@ async def test_operation_run_rejects_combined_request_and_prestart_signal_overfl
         operation=operation,
         active_async_child_ids=("request-child",),
     )
+    operation_workflow = OperationWorkflow(request)
+    for index in range(1_024):
+        operation_workflow.record_async_child(f"signal-child-{index}")
 
     with pytest.raises(ApplicationError) as overflow:
         await operation_workflow.run(request)

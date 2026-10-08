@@ -274,6 +274,15 @@ class Settings(BaseSettings):
     # lanes are admitted only when this local-proof policy is explicitly enabled.
     cursor_api_key: SecretStr | None = None
     mission_control_allow_unqualified_lanes: bool = False
+    # FT-G2: Deep Agents units run through the `lane.turn` segment loop instead of
+    # `operation.execute` (Cursor units always do). Off until FT-G6 retires the old path.
+    mission_control_lane_segment_loop: bool = False
+    # FT-G3 cursor_local: where workspace leases (git worktrees) live on the worker, the
+    # worker-local checkout used when a binding names no repository, and the loopback port of
+    # the Kernel Hook callback listener (127.0.0.1 only; started with the worker).
+    cursor_lease_root: Path | None = None
+    cursor_local_repository: str | None = None
+    mission_control_hook_callback_port: int = Field(default=47555, ge=1024, le=65535)
 
     @property
     def allow_unqualified_lanes(self) -> bool:

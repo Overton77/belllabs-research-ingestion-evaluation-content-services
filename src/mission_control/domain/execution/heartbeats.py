@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from mission_control.domain.execution.contracts import OperationExecutionRequest
+from mission_control.domain.execution.lanes import LaneSegmentBounds
 
 OperationHeartbeatClass = Literal["deep_agent", "deep_agent_async_children", "bound"]
 # temporalio throttles heartbeat sends to `heartbeat_timeout * 0.8`, capped by the worker's
@@ -60,6 +61,9 @@ class OperationHeartbeatPolicy:
     deep_agent_seconds: int = 30
     deep_agent_async_children_seconds: int = 30
     bound_seconds: int = 30
+    # FT-G2: run Deep Agents units through the `lane.turn` segment loop (Cursor units always
+    # are). Off by default: `operation.execute` stays the Deep Agents path until FT-G6.
+    deep_agent_segment_loop: bool = False
 
     def __post_init__(self) -> None:
         for value in self.timeouts().values():
@@ -78,6 +82,22 @@ class OperationHeartbeatPolicy:
 
     def timeout_for(self, operation: OperationExecutionRequest) -> int:
         return self.timeouts()[operation_heartbeat_class(operation)]
+
+    def segments_for(self, operation: OperationExecutionRequest) -> LaneSegmentBounds | None:
+        """`OperationWorkflowRequest.segments`: present when the unit runs through the
+        `lane.turn` segment loop (SPEC-07 section 4.2)."""
+
+        if operation.execution_runtime == "cursor":
+            binding = operation.cursor_binding
+            assert binding is not None
+            # `wait_then_send` is bounded by the binding's wall clock (SPEC-07 Further Notes).
+            return LaneSegmentBounds(
+                heartbeat_timeout_s=min(self.timeout_for(operation), 600),
+                busy_wait_s=min(binding.budgets.wall_clock_s, 86_400),
+            )
+        if self.deep_agent_segment_loop and operation.execution_runtime == "deep_agent":
+            return LaneSegmentBounds()
+        return None
 
     @property
     def shortest_seconds(self) -> int:

@@ -28,6 +28,7 @@ from mission_control.adapters.temporal.registration.task_queues import (
     generic_artifact_task_queue,
 )
 from mission_control.application.authoring.service import ControlPlaneService
+from mission_control.application.execution.harness.hook_callbacks import HookCallbackService
 from mission_control.application.execution.run_control_repository import RunControlRepository
 from mission_control.application.execution.service import (
     AdmissionPolicyRegistry,
@@ -56,6 +57,9 @@ class WorkerActivityComposition:
     operation: OperationExecutionActivities
     artifacts: ArtifactPromotionActivities | None = None
     resources: AsyncExitStack | None = None
+    # FT-G3: the Kernel Hook callback service the worker serves on its loopback listener
+    # (present when a file-based lane such as `cursor_local` is composed).
+    hook_callbacks: HookCallbackService | None = None
 
 
 class WorkerActivityCompositionFactory(Protocol):
@@ -95,6 +99,7 @@ def operation_heartbeat_policy(settings: Settings) -> OperationHeartbeatPolicy:
             settings.operation_async_children_heartbeat_timeout_seconds
         ),
         bound_seconds=settings.operation_bound_heartbeat_timeout_seconds,
+        deep_agent_segment_loop=settings.mission_control_lane_segment_loop,
     )
 
 
