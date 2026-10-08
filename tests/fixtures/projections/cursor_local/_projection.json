@@ -1,0 +1,42 @@
+{
+  "files": {
+    ".cursor/agents/summarizer.md": "0o644",
+    ".cursor/agents/verifier.md": "0o644",
+    ".cursor/hooks.json": "0o644",
+    ".cursor/mcp.json": "0o644",
+    ".cursor/rules/mc-mission.mdc": "0o644",
+    ".cursor/skills/agent-browser/SKILL.md": "0o644",
+    ".cursor/skills/agent-browser/scripts/open.sh": "0o755",
+    ".mission/hooks/hook.mc-policy-template/policy.py": "0o755",
+    "AGENTS.md": "0o644"
+  },
+  "in_process": null,
+  "report": {
+    "degraded": [],
+    "overflow": [],
+    "plugin_expansions": [
+      [
+        "plugin.web-research@1.0.0#sha256:5e689e2b01672bf33996e75d5e372ff60c536ce1599a1458e867cd8f4bef5160",
+        [
+          "mcp.tavily@0.2.22#sha256:5e2d82cbc971f731d22f59e8993f63865f0dd4b85c27a052a0709bc07e8ac009",
+          "skill.agent-browser@0.38.2#sha256:9c53c074d7ac6a2728b638ac1f376c5fa9eb8f71603017c3ea638c2fd40548df",
+          "mcp.agent-browser@0.38.2#sha256:c01113dab94c0ed749a6086d3de01b1baf49f0f6c926e43ae642af798deac473"
+        ]
+      ]
+    ],
+    "requires_trust": [],
+    "skipped_members": [],
+    "unsupported_on_lane": [
+      {
+        "event": "before_model",
+        "hook_id": "hook.mc-policy-template",
+        "required": false
+      }
+    ]
+  },
+  "send_options": {
+    "setting_sources": [
+      "project"
+    ]
+  }
+}

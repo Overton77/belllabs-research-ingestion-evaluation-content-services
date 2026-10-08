@@ -4,7 +4,8 @@ import json
 from hashlib import sha256
 
 from mission_control.application.agentic_components.projections import (
-    render_host_files,
+    HOOK_RUNNER_SCRIPT,
+    render_release_host_files,
     skill_target_path,
 )
 from mission_control.application.agentic_components.repository import AgenticComponentRepository
@@ -36,7 +37,7 @@ class MaterializationPlanner:
             if request.model_id
             else None
         )
-        generated_files = render_host_files(request.host, releases)
+        generated_files = render_release_host_files(request.host, releases)
         steps: list[MaterializationStep] = []
 
         def add(
@@ -59,6 +60,17 @@ class MaterializationPlanner:
             )
 
         for release in releases:
+            if release.plugin is not None:
+                members = ", ".join(
+                    f"{member.component_id}@{member.version}" for member in release.plugin.members
+                )
+                add(
+                    "stage",
+                    f"Expand plugin {release.coordinate.component_id} into members in position "
+                    f"order: {members}",
+                    release=release,
+                )
+                continue
             add(
                 "retrieve",
                 f"Retrieve immutable payloads for {release.coordinate.component_id}",
@@ -80,6 +92,20 @@ class MaterializationPlanner:
                 add("stage", f"Install and verify skill manifest at {target}", release=release)
             if release.workspace is not None:
                 add("provision_workspace", release.workspace.description, release=release)
+            if release.hook_script is not None:
+                events = ", ".join(event.value for event in release.hook_script.events)
+                add(
+                    "configure_host",
+                    f"Install hook script {release.hook_script.hook_id} for {events} "
+                    f"behind {HOOK_RUNNER_SCRIPT}; kernel hooks stay first",
+                    release=release,
+                )
+            if release.subagent_profile is not None:
+                add(
+                    "configure_host",
+                    f"Render subagent profile {release.subagent_profile.name}",
+                    release=release,
+                )
             if release.mcp is not None:
                 refs = tuple(item.secret_ref for item in release.mcp.secret_environment)
                 if refs:
@@ -137,7 +163,9 @@ class MaterializationPlanner:
         if len(request.component_digests) != len(set(request.component_digests)):
             raise MaterializationRejected("component digests must be unique")
         releases: list[AgenticComponentRelease] = []
-        for digest in request.component_digests:
+        seen: set[str] = set()
+
+        async def load(digest: str, *, optional: bool = False) -> AgenticComponentRelease | None:
             release = await self._repository.get_by_digest(digest)
             if release is None:
                 raise MaterializationRejected(f"unknown component digest: {digest}")
@@ -153,11 +181,39 @@ class MaterializationPlanner:
                 and request.architecture in item.architectures
             ]
             if not compatible:
+                if optional:
+                    return None
                 raise MaterializationRejected(
                     f"component is incompatible with the requested host: "
                     f"{release.coordinate.component_id}"
                 )
+            return release
+
+        for digest in request.component_digests:
+            release = await load(digest)
+            assert release is not None
+            if digest in seen:
+                continue
+            seen.add(digest)
             releases.append(release)
+            if release.plugin is None:
+                continue
+            for member in release.plugin.members:
+                if member.digest in seen:
+                    continue
+                expanded = await load(
+                    member.digest, optional=member.digest in release.plugin.optional_digests
+                )
+                if expanded is None:
+                    continue
+                if expanded.coordinate != member:
+                    raise MaterializationRejected(
+                        f"plugin member drifted from its pinned coordinate: {member.component_id}"
+                    )
+                if expanded.plugin is not None:
+                    raise MaterializationRejected("plugins cannot nest other plugins")
+                seen.add(member.digest)
+                releases.append(expanded)
         workspace_ids = {
             release.workspace.sandbox_snapshot_id for release in releases if release.workspace
         }

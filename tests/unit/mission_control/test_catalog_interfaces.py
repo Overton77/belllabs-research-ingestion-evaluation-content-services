@@ -99,7 +99,16 @@ def test_plugin_search_preserves_trust_and_host_filters_and_does_not_install():
         InstallationObservation(principal.installation_id, "biotech", "test", frozenset({"1"})),
     )
     values = mcp_release().model_dump(mode="python")
-    values.update(kind="plugin", mcp=None, definition_ref=None)
+    values.update(
+        kind="plugin",
+        mcp=None,
+        definition_ref=None,
+        plugin={
+            "members": [
+                {"component_id": "mcp.member", "version": "1", "digest": "sha256:" + "e" * 64}
+            ]
+        },
+    )
     plugin = AgenticComponentRelease.model_validate(values)
 
     class Definitions:

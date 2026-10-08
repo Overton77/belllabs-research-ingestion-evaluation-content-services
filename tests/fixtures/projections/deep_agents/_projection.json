@@ -1,0 +1,173 @@
+{
+  "files": {
+    ".mission/hooks/hook.mc-policy-template/policy.py": "0o755",
+    "memory/AGENTS.md": "0o644",
+    "skills/mission/agent-browser/SKILL.md": "0o644",
+    "skills/mission/agent-browser/scripts/open.sh": "0o755"
+  },
+  "in_process": {
+    "hook_middleware": [
+      {
+        "events": [
+          "before_tool",
+          "before_shell",
+          "before_mcp",
+          "subagent_start"
+        ],
+        "hook_id": "mc.stop_fence",
+        "kernel": true
+      },
+      {
+        "events": [
+          "before_tool",
+          "before_shell",
+          "before_mcp",
+          "subagent_start"
+        ],
+        "hook_id": "mc.operation_intent",
+        "kernel": true
+      },
+      {
+        "events": [
+          "session_start",
+          "session_end",
+          "before_prompt",
+          "before_model",
+          "after_model",
+          "before_tool",
+          "after_tool",
+          "after_tool_failure",
+          "before_shell",
+          "after_shell",
+          "before_mcp",
+          "after_file_edit",
+          "before_compaction",
+          "after_compaction",
+          "subagent_start",
+          "subagent_stop",
+          "stop"
+        ],
+        "hook_id": "mc.frame_capture",
+        "kernel": true
+      },
+      {
+        "events": [
+          "after_model",
+          "after_tool",
+          "stop"
+        ],
+        "hook_id": "mc.usage",
+        "kernel": true
+      },
+      {
+        "callback": "none",
+        "entrypoint": ".mission/hooks/hook.mc-policy-template/policy.py",
+        "events": [
+          "before_shell",
+          "before_tool",
+          "session_start",
+          "before_model"
+        ],
+        "fail_closed": true,
+        "hook_id": "hook.mc-policy-template",
+        "interpreter": "python",
+        "kernel": false,
+        "matcher": null,
+        "timeout_seconds": 10
+      }
+    ],
+    "mcp_connections": {
+      "agent-browser": {
+        "args": [
+          "mcp",
+          "--tools",
+          "core"
+        ],
+        "command": "agent-browser",
+        "tool_allowlist": [
+          "agent_browser_open"
+        ],
+        "transport": "stdio"
+      },
+      "firecrawl": {
+        "header_refs": {
+          "Authorization": "FIRECRAWL_API_KEY"
+        },
+        "tool_allowlist": [
+          "firecrawl_scrape"
+        ],
+        "transport": "streamable_http",
+        "url": "https://mcp.firecrawl.dev/v2/mcp"
+      },
+      "tavily": {
+        "args": [
+          "-y",
+          "tavily-mcp@0.2.22"
+        ],
+        "command": "npx",
+        "env_refs": {
+          "TAVILY_API_KEY": "TAVILY_API_KEY"
+        },
+        "tool_allowlist": [
+          "tavily_crawl",
+          "tavily_extract",
+          "tavily_search"
+        ],
+        "transport": "stdio"
+      }
+    },
+    "memory": [
+      "/memory/AGENTS.md"
+    ],
+    "skills": [
+      "/skills/mission/"
+    ],
+    "subagents": [
+      {
+        "description": "Validates completed work. Use proactively after any task is done.",
+        "name": "verifier",
+        "permissions": [
+          {
+            "mode": "deny",
+            "operations": [
+              "write",
+              "edit",
+              "execute"
+            ],
+            "path": "/"
+          }
+        ],
+        "skills": [
+          "agent-browser"
+        ],
+        "system_prompt": "You are a skeptical validator. Run the tests before agreeing."
+      },
+      {
+        "description": "Summarizes collected sources into short notes.",
+        "name": "summarizer",
+        "system_prompt": "Summarize each source in three bullets."
+      }
+    ],
+    "system_prompt": "Collect peer-reviewed evidence on rapamycin and lifespan.\nCite every claim."
+  },
+  "report": {
+    "degraded": [
+      "subagent summarizer: background requested without an Agent Server; projected synchronous"
+    ],
+    "overflow": [],
+    "plugin_expansions": [
+      [
+        "plugin.web-research@1.0.0#sha256:5e689e2b01672bf33996e75d5e372ff60c536ce1599a1458e867cd8f4bef5160",
+        [
+          "mcp.tavily@0.2.22#sha256:5e2d82cbc971f731d22f59e8993f63865f0dd4b85c27a052a0709bc07e8ac009",
+          "skill.agent-browser@0.38.2#sha256:9c53c074d7ac6a2728b638ac1f376c5fa9eb8f71603017c3ea638c2fd40548df",
+          "mcp.agent-browser@0.38.2#sha256:c01113dab94c0ed749a6086d3de01b1baf49f0f6c926e43ae642af798deac473"
+        ]
+      ]
+    ],
+    "requires_trust": [],
+    "skipped_members": [],
+    "unsupported_on_lane": []
+  },
+  "send_options": {}
+}
