@@ -11,6 +11,7 @@ from mission_control.domain.authoring.canonical import sha256_digest
 from mission_control.domain.execution.contracts import OperationWorkflowRequest
 from mission_control.domain.policies.contracts import ExecutionTarget, RunOutcome
 from mission_control.domain.policies.family_admission import AtomicFamilyMutation
+from mission_control.domain.programs.human_gate import HumanGateOutcome, HumanGateSpec
 from mission_control.domain.programs.search_attributes import SearchAttributePolicy
 
 StageStatus = Literal[
@@ -964,6 +965,10 @@ class StageGraphRunInput:
     # RRM-008: see `GoalDirectedRunInput`.
     cancellation_retry_seconds: int = 30
     cancel_requested: bool = False
+    # MP-10: stages executed as Human Gate control activations (keyed by stage id) instead
+    # of operation children; empty for every run admitted before MP-10.
+    human_gates: tuple[HumanGateSpec, ...] = ()
+    human_gate_poll_seconds: int = 300
 
 
 @dataclass(frozen=True)
@@ -1018,6 +1023,9 @@ GoalConvergenceReason = Literal[
     "continue",
     "scope_expansion",
     "compaction_failure",
+    # MP-10: a human review of a verified completion (SPEC-03 "Explicit Human Gate").
+    "human_review_changes_requested",
+    "human_review_rejected",
 ]
 
 
@@ -1357,6 +1365,12 @@ class GoalDirectedRunInput:
     # Fresh Mission Control roots bind the admitted Workflow Type independently of
     # the blueprint. Older inputs omit it; scoped admission fills the exact digest.
     workflow_type_digest: str = ""
+    # MP-10: a human review of the verified completion (`acceptance.human`), its rounds
+    # used so far and the feedback of earlier rounds, carried across Continue-As-New.
+    human_review: HumanGateSpec | None = None
+    human_review_round: int = 0
+    human_review_feedback: tuple[HumanGateOutcome, ...] = ()
+    human_gate_poll_seconds: int = 300
 
 
 @dataclass(frozen=True)

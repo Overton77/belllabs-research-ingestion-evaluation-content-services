@@ -37,10 +37,10 @@ Running the Cursor lane drill now is useful and is the only paid step that is re
 
 | # | Blocker | Affects | What closes it |
 | --- | --- | --- | --- |
-| B1 | **No production author of a manifest run's semantic input binding.** `mission start RUN` needs the lane execution templates for every lowered stage or Goal Loop role: model component, prompt segments, MCP servers, skills, capability grant, workspace contract, output schema, plus the Cursor binding for Cursor lanes. Only the test author `StagedLaunchInputs` (`tests/fixtures/manifest_runtime.py`, deterministic models) exists. The API composes `launch_inputs=None`, so `mission start` answers `409 start_unavailable`. The chain relay that starts Mission 2's `ingestion` needs the same author through `ChainLaunchInputPort`, so it is not composed either. No interface persists templates, so `mission start --request-file` is not a workaround. | I1, I2, I3 | A follow-up ticket: a production `LaunchInputPort` and `ChainLaunchInputPort` that author templates from the compiled manifest. It needs owner decisions first. Which pinned model does `frontier.default` (and `frontier.long_context`, `cursor.default`) map to? Which sandbox do `research.standard` and `ingestion.standard` map to? Which secret refs may each lane use? |
+| B1 | **No production author of a manifest run's semantic input binding.** `mission start RUN` needs the lane execution templates for every lowered stage or Goal Loop role: model component, prompt segments, MCP servers, skills, capability grant, workspace contract, output schema, plus the Cursor binding for Cursor lanes. Only the test author `StagedLaunchInputs` (`tests/fixtures/manifest_runtime.py`, deterministic models) exists. The API composes `launch_inputs=None`, so `mission start` answers `409 start_unavailable`. The chain relay that starts Mission 2's `ingestion` needs the same author through `ChainLaunchInputPort`, so it is not composed either. No interface persists templates, so `mission start --request-file` is not a workaround. | I1, I2, I3 | A follow-up ticket: a production `LaunchInputPort` and `ChainLaunchInputPort` that author templates from the compiled manifest. It needs owner decisions first. Which pinned model does `frontier.default` (and `frontier.long_context`, `cursor.default`) map to? Which sandbox do `research.standard` and `ingestion.standard` map to? Which secret refs may each lane use? **Update (MP-02/MP-22, 2026-10-08):** the production author exists for `deep_agents`; it reads the owner's `mc.manifest_launch_bindings.v1` file (`MANIFEST_LAUNCH_BINDINGS_PATH`). Start from `deployments/examples/manifest-launch-bindings.deep-agents.example.json` and resolve every pointer the readiness report lists (section 2.8). |
 | B2 | **Production seeds lack many capabilities the manifests search for.** With the production seeds only, compile blocks on these searches. Mission 1: `skill.biotech-literature-review`, context bundle `biotech schema context muscle aging`, the Biotech `kg_ingest` tool, hook `citation presence check`, assessment `evidence coverage`. Mission 2 adds a cloud-qualified PubMed (`mcp.pubmed` is unqualified on `cursor_cloud`), `literature verifier subagent` and `claim schema validation`. Mission 3: executors `test_run` and `git_snapshot`, subagent `code verifier`, hook `shell command policy`, assessment `code change verification`. | I1, I2, I3 | Publish real definitions for them (`missionctl catalog publish` for skills, hooks and subagent profiles, or new seed versions). The FT-E2 stand-ins in `tests/fixtures/catalog/fast_track_seeds.json` are test rows, not reviewed capabilities. The Biotech `kg_ingest` capability must be the real app-owned one, otherwise Mission 1 ends with a visible blocker, as the spec requires. |
 | B3 | **The worker can launch only components in its pin file.** `infra/capability-pins/research-capabilities.json` pins one OpenAI model (`model.wp-cp-040`), `mcp.tavily`, `mcp.firecrawl` and the `agent-browser` skill. PubMed, the Biotech KG MCP server and the mission skills are not pinned. The worker refuses any other launch. | I1, I2 | Extend the pin file, or `DeploymentCapabilityComponents` in a reviewed runtime-options factory, together with B1. |
-| B4 | **Worker startup fails on the drifted `agent-browser` skill.** The pin above reads `../.agents/skills/agent-browser` (workspace `.agents/`). Its bytes changed on 2026-10-08, so `CapabilityPinError: Skill bundle agent-browser differs from its pinned bundle digest` stops `make worker`. The same cause produces the known `test_capability_pins_and_runtime_ports` failure. | all | Restore that directory to the pinned bytes (bundle digest `sha256:30722859...`), or re-pin it with `scripts/pin_research_capabilities.py` in a reviewed change. |
+| B4 | **Worker startup fails on the drifted `agent-browser` skill.** The pin above reads `../.agents/skills/agent-browser` (workspace `.agents/`). Its bytes changed on 2026-10-08, so `CapabilityPinError: Skill bundle agent-browser differs from its pinned bundle digest` stops `make worker`. The same cause produces the known `test_capability_pins_and_runtime_ports` failure. | all | Restore that directory to the pinned bytes (bundle digest `sha256:30722859...`), or re-pin it with `scripts/pin_research_capabilities.py` in a reviewed change. **Root cause (MP-22 readiness, 2026-10-08):** the top-level `SKILL.md` still matches its pin (`skill_md_digest` `sha256:328161bf...` under the pin's `legacy_text_v1` algorithm; its raw-byte sha256 is `9f28168d...`). The directory now also contains a nested `agent-browser/agent-browser/` copy (11 files), which the bundle walk includes, so the computed bundle digest is `sha256:f65791f5...`. Moving that nested directory out of `Biotech/.agents/skills/agent-browser/` restores the pinned digest exactly, with no re-pin. |
 | B5 | **Cursor lanes are unqualified.** Admission refuses `cursor_local` and `cursor_cloud`. The refusal names the remedy. | I2, I3 | Run the qualification drill (section 2.7). For a local proof only, set `MISSION_CONTROL_ALLOW_UNQUALIFIED_LANES=true` on the worker (and on the API, for `lane describe`). |
 | B6 | **`cursor_local` needs a Proactor or Unix event loop.** The worker runs a SelectorEventLoop on Windows (psycopg), so the SDK bridge cannot launch there. | I3 | Run the worker under WSL or Linux. Mission 3's `repo.path` is a Windows path (`C:\Users\Pinda\Proyectos\Biotech\mission-control`), so a WSL worker needs a `/mnt/c/...` path or a clone (owner decision, section 8). |
 | B7 | **Subscription event names in the manifests are not emitted.** The manifests subscribe to `activation.completed`, `human_task.opened` and `run.completed`. Mission 3 also uses `command.completed`, which the kernel does emit. The kernel stream names the first three `activation.lifecycle_changed`, `workflow_run.set_wait` and `workflow_run.terminalize`. Filters match exact names, so those subscriptions register but never deliver. | I1, I2, I3 | Owner decision: emit the SPEC-06 names from the kernel, or add an alias table to subscription filters. Until then, use `events watch` (all events) or subscribe with kernel names (section 2.6). |
@@ -270,6 +270,79 @@ sets `CAPABILITY_EMBEDDING_PROFILE`. The paid Cursor drill is
 `make lane-qualify PROFILE=cursor_local LIVE=1` (then `cursor_cloud`) with `CURSOR_API_KEY`,
 a finite `MC_PAID_BUDGET_USD` and, for cloud, `MC_CURSOR_CLOUD_REPO`. Follow the
 [qualification README](../../qualification/lanes/README.md).
+
+### 2.8 Real local profile readiness (MP-22)
+
+Before any paid run, check the run's inputs. The readiness gate makes no composition, worker
+start, login or provider call:
+
+```bash
+uv run python -m mission_control.bootstrap.preflight   --profile deployments/<app>/local-run-profile.json   --workspace-root <the directory that holds .agents/ and .tools/>   --db-dsn-env MC_LOCAL_DSN readiness
+```
+
+`--db-dsn-env` takes the name of an environment variable, never a DSN. The report
+(`mc.local_readiness.v1`) lists every unresolved pointer as `<file>#<json-pointer>`. Exit code
+2 means a blocking input is missing. `make preflight` (`python -m mission_control.bootstrap.preflight`)
+runs the same gate first when `MISSION_CONTROL_LOCAL_RUN_PROFILE` names the profile.
+
+| Check | Refuses |
+| --- | --- |
+| profile | a missing or invalid `mc.local_run_profile.v1` file, or a value still marked `OWNER-SELECT:` |
+| lane_hosts | a lane on an unsupported OS: `cursor_local`, `claude_agent_sdk` and `codex` need a Linux, macOS or WSL worker. On Windows the worker runs a SelectorEventLoop (psycopg), and asyncio spawns subprocesses only on the Proactor loop. `claude_cloud` and `codex_cloud` are refused on every host (Outcome 3). |
+| launch_bindings | a missing or invalid bindings file, an `OWNER-SELECT:` value or the `sha256:000...0` digest placeholder, or a model, sandbox, checkpointer, store or capability that the pins and settings do not serve |
+| auth_routes | a lane without a registered `mc.auth_profile.v1` profile, a lane mismatch, an unqualified, policy-restricted or unsupported route, or an `env:` credential reference whose variable is not set (it checks presence only and never reads the value) |
+| capability_pins | every pinned MCP module, tool entrypoint and Skill bundle, checked against the explicit workspace root; each issue names the pin, its locator, the expected digest and the computed digest |
+| db_release | a stale `deployments/<app>/release.lock.json`, or an installed `release_attestation` whose fingerprint or algorithm differs from the pinned `mission-db` release (a `fixture-unqualified` database is refused) |
+
+Compose the owner's bindings file from the example. The scaffold profile and placement carry
+content digests, so do not hand-edit inside them:
+
+```bash
+uv run python -m mission_control.bootstrap.preflight compose-bindings   --base deployments/examples/manifest-launch-bindings.deep-agents.example.json   --selections deployments/<app>/launch-binding-selections.json   --out deployments/<app>/manifest-launch-bindings.json
+```
+
+The selections file is a reviewable `{json-pointer: value}` object. The command re-seals the
+profile and placement digests and prints any pointer that is still unresolved.
+
+**WSL or Linux worker path.** Run the API and Temporal anywhere. Run the worker for
+`cursor_local`, `claude_agent_sdk` or `codex` inside WSL 2 (Ubuntu) or on Linux: clone the
+repository into the Linux filesystem (not `/mnt/c`, so git and file watching stay fast),
+`uv sync --frozen`, and export the same settings. From WSL 2, the host's PostgreSQL and Temporal
+are reachable at the Windows host address, or at `localhost` with mirrored networking. Give
+`--workspace-root` the WSL path of the workspace that holds `.agents/` and `.tools/`, then rerun
+the readiness gate with `--platform` unset, so the gate reports `system=Linux`, `wsl=true`.
+
+### 2.9 Temporal: new-run selection, persistence and a cloud outage (MP-22)
+
+- **Selection.** The local run profile declares its `temporal_clusters` (cluster id, target,
+  address, namespace, task queue) and `new_run_cluster`. New runs target only
+  `new_run_cluster`. Every run stays on the cluster it was first bound to. Workflow code and
+  contracts are the same on local Temporal and on Temporal Cloud.
+- **Durable local persistence.** `make temporal-up` runs Temporal 1.31 on its own PostgreSQL 16
+  (`temporal-postgres`, a named volume), so history survives restarts. Back up that database
+  (`make psql-temporal`, `pg_dump`) as you would the application database. The single-process
+  `temporal server start-dev` used by some tests is development infrastructure, not a
+  production HA claim.
+- **Run binding.** `preflight guard-launch --run-id <run> --cluster <id> --run-phase <phase>
+  --ledger <dir>` writes `mc.run_cluster_binding.v1` (write-once, exclusive create) before
+  the start. It refuses with these codes:
+  - `RUN_BOUND_TO_OTHER_CLUSTER`: the run is already bound to another cluster.
+  - `RUN_NOT_PENDING`: the run has left `pending`.
+  - `ACTIVE_IN_OTHER_CLUSTER`: `belllabs-run/<run>` exists in another cluster.
+
+  A cluster that cannot be probed is reported in `unverified_clusters`; it is never counted as
+  checked.
+- **Cloud outage.** There is no automatic cross-cluster replay.
+  1. Pause new dispatch to the cloud cluster.
+  2. Switch `new_run_cluster` to `local` for new missions.
+  3. Leave active cloud runs alone. Their effects and native handles stay with the cloud
+     history.
+  4. After recovery, the original workers resume them. If a run must move, use an explicit,
+     reconciled successor: cancel or terminate the original once its cluster is reachable,
+     record the reconciliation, and fork a successor run. The successor gets a new run id, so a
+     new workflow id, and is bound to `local`. Never relaunch the same run id elsewhere.
+
+  `tests/integration/temporal/test_mp22_outage_drill.py` runs this drill on two real namespaces.
 
 ## 3. Mission 1: research and ingestion on Deep Agents (I1, OVE-59)
 

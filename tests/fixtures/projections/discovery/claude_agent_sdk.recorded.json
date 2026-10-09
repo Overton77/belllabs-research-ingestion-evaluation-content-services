@@ -1,0 +1,128 @@
+{
+  "cli": {
+    "binary": "claude",
+    "version": "2.1.295 (Claude Code)"
+  },
+  "discovered": {
+    "agents": [
+      "Explore",
+      "Plan",
+      "claude",
+      "discovery-reviewer",
+      "general-purpose",
+      "statusline-setup"
+    ],
+    "mcp_servers": [
+      {
+        "name": "discovery-stub",
+        "status": "connected"
+      }
+    ],
+    "mcp_tools": [
+      "mcp__discovery-stub__discovery_echo"
+    ],
+    "skills": [
+      "agent-browser",
+      "batch",
+      "claude-api",
+      "code-review",
+      "dataviz",
+      "debug",
+      "deep-research",
+      "doctor",
+      "fewer-permission-prompts",
+      "loop",
+      "plugin-authoring",
+      "run",
+      "run-skill-generator",
+      "simplify",
+      "update-config",
+      "verify",
+      "workflow-authoring"
+    ],
+    "slash_commands": [
+      "__remote-workflow",
+      "agent-browser",
+      "agents",
+      "auto-mode-setup",
+      "autocompact",
+      "batch",
+      "claude-api",
+      "clear",
+      "code-review",
+      "color",
+      "compact",
+      "config",
+      "context",
+      "dataviz",
+      "debug",
+      "deep-research",
+      "doctor",
+      "effort",
+      "fast",
+      "fewer-permission-prompts",
+      "focus",
+      "goal",
+      "heapdump",
+      "init",
+      "insights",
+      "list-agents",
+      "loop",
+      "mcp",
+      "model",
+      "output-style",
+      "plugin-authoring",
+      "recap",
+      "reload-plugins",
+      "reload-skills",
+      "rename",
+      "run",
+      "run-skill-generator",
+      "security-review",
+      "simplify",
+      "team-onboarding",
+      "update-config",
+      "usage",
+      "verify",
+      "workflow-authoring",
+      "workflow-launch-exec"
+    ]
+  },
+  "evidence": "local_cli_discovery",
+  "fixture": true,
+  "hooks_fired": [
+    "fired-session_start.json"
+  ],
+  "host": {
+    "os": "Windows",
+    "python": "3.12.7"
+  },
+  "invocation": [
+    "claude",
+    "-p",
+    "<prompt>",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--setting-sources",
+    "project",
+    "--max-turns",
+    "1"
+  ],
+  "lane_profile": "claude_agent_sdk",
+  "projected_paths": [
+    ".claude/agents/discovery-reviewer.md",
+    ".claude/settings.json",
+    ".claude/skills/agent-browser/SKILL.md",
+    ".claude/skills/agent-browser/scripts/open.sh",
+    ".mcp.json",
+    ".mission/hooks/hook.discovery-marker/hook.json",
+    ".mission/hooks/hook.discovery-marker/marker.py",
+    ".mission/hooks/run.py",
+    "CLAUDE.md"
+  ],
+  "projection_digest": "sha256:7d26d975524bc399b918cb1a80434067aa02134cf874cc6e9f2307a9d30f8821",
+  "provider_call": "none: ANTHROPIC_BASE_URL=http://127.0.0.1:9 (closed loopback port), placeholder API key, fresh CLAUDE_CONFIG_DIR; the process is stopped after system/init",
+  "recorded_on": "2026-10-08",
+  "schema_version": "mc.discovery_recording.v1"
+}

@@ -182,12 +182,24 @@ A program behavior that performs work directly: an Agent Executor (bounded cogni
 **Durable Control**:
 A program behavior that waits rather than works: Event Wait, Timer, Human Gate, Proof Gate.
 
+**Human Gate**:
+The durable control that opens exactly one Human Task per activation attempt and waits on its resolution or deadline; approve, reject and request-changes release, close or route the node. Timeout is never approval.
+_Avoid_: approval node, checkpoint (the LangGraph word)
+
 **Human Task**:
 The durable record of a decision only a human can make, resolved by an attributed action: approved, denied, answered, selected, review_accept, review_reject or overridden.
 _Avoid_: approval request, HITL item
 
 **Review Decision**:
 The payload of a review-kind human task: approve, reject, request_changes or abstain. It is not a second state machine.
+
+**Approval Binding**:
+The correlation of one Human Task with the native provider request it answers: origin, generation, session, turn, request, tool name, input digest and policy digest. The decision applies to that digest only.
+_Avoid_: permission callback, approval handle
+
+**Governed Effect**:
+A Mission Control-owned tool effect that the governed MCP gateway admits in three steps: prepare without executing, review as a Human Task, execute the bound intent once.
+_Avoid_: gated tool, protected call
 
 **Completion Candidate**:
 An executor's submitted claim that its activation is done, with evidence.
@@ -263,6 +275,14 @@ The owned filesystem an attempt works in, with read-only mission context, skill 
 **Workspace Lease**:
 The fenced, time-bounded ownership of a workspace by one attempt generation; a stale lease cannot write or publish results.
 
+**Workspace Snapshot**:
+The immutable capture of a workspace's base commit, staged, unstaged and included untracked content with a manifest digest, produced by one lease generation. A `git diff` is not one.
+_Avoid_: patch, diff
+
+**Environment Binding**:
+The immutable resolution of where an attempt executes: a local workspace profile, or a provider-hosted environment with its revision, setup pins, network and secret policy and readiness evidence.
+_Avoid_: environment config, provider settings
+
 **Task Token**:
 A short-lived credential bound to one attempt, generation and permitted action that a hook or sandbox CLI uses to call the service.
 _Avoid_: API key, session token
@@ -277,6 +297,10 @@ An immutable, digest-registered output. A file becomes an artifact only after re
 Bounded sync or async work delegated by an activation, with a dependency class of required_blocking, degradable_blocking, nonblocking or advisory.
 _Avoid_: subagent (the runtime's word), child (that is a child mission)
 
+**Subordinate Lineage**:
+The recorded graph that attaches a subordinate's harness execution to its parent by stable native references, with its kind (provider subagent, Agent Server child or linked mission) and how much of it is visible.
+_Avoid_: agent tree, call stack
+
 **Context Packet**:
 The sealed, budgeted bundle an attempt receives to start or continue work: inline facts, references with retrieval instructions and files materialized into the workspace.
 _Avoid_: prompt, context dump, handoff blob
@@ -288,20 +312,32 @@ How one item of a context packet reaches the agent: inline (bytes in the prompt)
 The deterministic function that builds a context packet from accepted outputs, state, checkpoints and selected context under a model profile's budget.
 
 **Lane Profile**:
-One placement of a lane with its own qualified control matrix and workspace contract: `deep_agents`, `cursor_local` (Cursor Local) or `cursor_cloud` (Cursor Cloud).
+One placement of a lane with its own qualified control matrix and workspace contract: `deep_agents`, `cursor_local`, `cursor_cloud`, `claude_agent_sdk` (Claude Code Local), `claude_cloud`, `codex` (Codex Local) or `codex_cloud`.
 _Avoid_: runtime mode, deployment target
+
+**Placement**:
+Where a lane profile's agent loop runs: worker-hosted (a process on a Mission Control worker) or cloud (the provider's own hosted product). Our own remote worker is never a cloud placement.
+_Avoid_: deployment, hosting mode
 
 **Harness Execution**:
 The recorded native identity of one lane run of an attempt generation: provider session and turn refs, provider cursor and usage disposition. Provider frames are keyed by it.
 _Avoid_: run (that is a mission run), job
 
 **Lane Describe**:
-A lane profile's declared control matrix (`mc.lane_describe.v1`): each control native, emulated, unsupported or unqualified, the delivery semantics per command, hooks, identity map and placement. Tests hold each lane to it.
+A lane profile's declared control matrix (`mc.lane_describe.v1`, or `.v2` for the four profiles added for Claude Code and Codex): each control native, emulated, unsupported or unqualified, the delivery semantics per command, hooks, identity map and placement. Tests hold each lane to it.
 _Avoid_: capability list, feature flags
 
 **Lane Qualification**:
 The recorded evidence, from a live drill, that flips a lane profile's `qualified` flag through a reviewed release. Offline fixtures never flip it.
 _Avoid_: certification, approval
+
+**Session Owner**:
+The one worker process allowed to drive a worker-hosted provider session at a time, holding a renewable lease; a takeover after expiry fences the previous owner out, and a fenced owner can neither send nor settle.
+_Avoid_: session holder, sticky worker
+
+**Dispatch Journal**:
+The durable record of every native session create and turn send, written before the provider is called and resolved as acknowledged, declined, not received or in doubt. A dispatch the provider may have accepted is reconciled or parked in doubt, never sent again blindly.
+_Avoid_: send log, retry queue
 
 ### Control and recovery
 
@@ -376,6 +412,10 @@ _Avoid_: trace (LangSmith's word), chat log, history
 **Subscription**:
 A durable registration to receive selected mission events by webhook, stream or agent notification, delivered at least once from the outbox.
 _Avoid_: callback hook, listener, watcher
+
+**Stream Subscription**:
+A connection-scoped registration on the mission stream that names its target, streams, filters and cursors and lives only as long as the socket; it is not a Subscription and confers no authorization.
+_Avoid_: room, channel, listener
 
 ### Catalog and capabilities
 
@@ -509,8 +549,18 @@ The first execution lane: bounded operation cognition on LangGraph.
 **Cursor**:
 The second lane family, with two lane profiles: Cursor Local (the agent loop in a bridge process on a worker) and Cursor Cloud (a Cursor-hosted machine driven through its API).
 
+**Claude Code**:
+The third lane family, with two lane profiles: Claude Code Local (`claude_agent_sdk`, the Python Agent SDK client on a worker) and Claude Cloud (`claude_cloud`, Anthropic's hosted product).
+
+**Codex**:
+The fourth lane family, with two lane profiles: Codex Local (`codex`, the app-server protocol on a worker) and Codex Cloud (`codex_cloud`, OpenAI's hosted product).
+
 **Temporal**:
 The only mission scheduler.
+
+**Cluster Binding**:
+The write-once record of the Temporal cluster and namespace a run was first launched in. A run never starts in another cluster; a cluster outage lets new runs target another binding but never moves an active run.
+_Avoid_: failover, cluster affinity
 
 **LangSmith**:
 The sandbox and tracing provider. Traces are not the ledger.

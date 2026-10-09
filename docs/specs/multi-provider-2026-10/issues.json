@@ -1,0 +1,834 @@
+{
+  "parent": {
+    "id": "31fddc27-6262-4a6f-b48c-7163746f58cc",
+    "identifier": "OVE-63",
+    "title": "[MP-EPIC] Multi-provider lifecycle and workflow parity: local and provider-hosted",
+    "url": "https://linear.app/overtonbell/issue/OVE-63/mp-epic-multi-provider-lifecycle-and-workflow-parity-local-and"
+  },
+  "issues": [
+    {
+      "id": "MP-01",
+      "title": "Freeze provider profiles and versioned execution contracts",
+      "owner": "Integrator",
+      "deps": [],
+      "spec": "ARCHITECTURE.md",
+      "problem": "Reconcile the existing three runtime profiles with five projection profiles and add provider-hosted Claude/Codex without conflating placement or capability evidence.",
+      "paths": [
+        "domain/execution/lanes.py",
+        "domain/capabilities/host_support.py",
+        "domain/frames/contracts.py",
+        "domain/authoring/manifest.py",
+        "contracts/schemas/"
+      ],
+      "work": [
+        "Define mc.lane_describe.v2, execution binding, approval correlation and mission/v2; retain exact v1 parsing/lowering and old compiled digests.",
+        "Replace duplicated profile/hook vocabularies with checked derivations; distinguish implemented, qualified and account-enabled.",
+        "Record a proposed/accepted-as-authorized ADR delta and reconcile sibling runtime annex; allocate common SQL migration slots."
+      ],
+      "acceptance": [
+        "Every runtime/projection/frame/manifest profile enum matches; required unsupported features reject with JSON pointers.",
+        "Old v1 fixtures and saved workflow inputs remain readable; schema/SDK generation is reproducible.",
+        "A reviewed shared contract fixture unblocks specialists without each editing shared enums."
+      ],
+      "file": "MP-01-freeze-provider-profiles-and-versioned-execution-contracts.md",
+      "linear": {
+        "id": "04c6f177-1cce-483e-8223-be12834fb488",
+        "identifier": "OVE-64",
+        "title": "[MP-01] Freeze provider profiles and versioned execution contracts",
+        "url": "https://linear.app/overtonbell/issue/OVE-64/mp-01-freeze-provider-profiles-and-versioned-execution-contracts"
+      }
+    },
+    {
+      "id": "MP-02",
+      "title": "Wire production launch inputs and the mission-chain relay",
+      "owner": "Integrator",
+      "deps": [
+        "MP-01"
+      ],
+      "spec": "SPEC-01-runtime.md",
+      "problem": "mission start has no production LaunchInputPort and chain start intents have no composed production relay.",
+      "paths": [
+        "application/authoring/manifest_submit.py",
+        "bootstrap/manifests.py",
+        "application/chains/relay.py",
+        "bootstrap/api.py",
+        "bootstrap/worker.py"
+      ],
+      "work": [
+        "Implement configuration-backed model/auth/environment/capability resolution into StageGraphRunInput and GoalDirectedRunInput.",
+        "Compose one production launch author for HTTP/CLI/MCP and ChainLaunchInputPort; run ChainIntentRelay in the correct process.",
+        "Preserve submit-without-start, frozen resolutions and idempotent outbox release; report missing bindings rather than fabricate models."
+      ],
+      "acceptance": [
+        "A deterministic locally bound manifest starts through real public entrypoints, not a fixture-injected LaunchInputPort.",
+        "Real PostgreSQL/Temporal two-member chain starts the consumer once under duplicate relay delivery.",
+        "Missing model/auth/environment bindings fail before provider dispatch."
+      ],
+      "file": "MP-02-wire-production-launch-inputs-and-the-mission-chain-relay.md",
+      "linear": {
+        "id": "b74af2a0-24b5-4cad-953b-4a85c608170e",
+        "identifier": "OVE-65",
+        "title": "[MP-02] Wire production launch inputs and the mission-chain relay",
+        "url": "https://linear.app/overtonbell/issue/OVE-65/mp-02-wire-production-launch-inputs-and-the-mission-chain-relay"
+      }
+    },
+    {
+      "id": "MP-03",
+      "title": "Extend capability projections and hosted environment materialization",
+      "owner": "Environment",
+      "deps": [
+        "MP-01"
+      ],
+      "spec": "SPEC-02-environments.md",
+      "problem": "Skills/MCP/plugins/hooks have renderers but runtime loading and hosted setup ordering need an attested contract.",
+      "paths": [
+        "application/agentic_components/projections.py",
+        "application/agentic_components/materialization.py",
+        "domain/capabilities/hooks.py",
+        "application/environments/ (new)"
+      ],
+      "work": [
+        "Materialize pinned complete bundles; validate paths, interpreters, names and plugin dependency expansion.",
+        "Generate exact local provider configs and evidence-backed per-event hook mappings; remove assumed Claude Python/TypeScript/Codex equivalence.",
+        "Resolve provider-hosted environment/setup refs and attest preparation; reject missing pre-agent setup/config injection."
+      ],
+      "acceptance": [
+        "Digest-identical inputs render identical bytes; traversal/collision/unsupported required hook cases fail.",
+        "Actual adapter discovery fixtures prove skills, MCP and subagents load; native config parsability alone is insufficient.",
+        "Hosted profiles with no proven bootstrap route remain unqualified; no first-prompt self-install of mandatory controls."
+      ],
+      "file": "MP-03-extend-capability-projections-and-hosted-environment-materialization.md",
+      "linear": {
+        "id": "fd635847-e5ec-4e61-9d4e-ebbe7760239b",
+        "identifier": "OVE-66",
+        "title": "[MP-03] Extend capability projections and hosted environment materialization",
+        "url": "https://linear.app/overtonbell/issue/OVE-66/mp-03-extend-capability-projections-and-hosted-environment"
+      }
+    },
+    {
+      "id": "MP-04",
+      "title": "Generalize explicit workspace leases, worktrees and snapshots",
+      "owner": "Environment",
+      "deps": [
+        "MP-01"
+      ],
+      "spec": "SPEC-02-environments.md",
+      "problem": "Existing Cursor workspace support needs provider-neutral allocation and complete portable snapshot semantics.",
+      "paths": [
+        "application/execution/harness/leases.py",
+        "adapters/cursor/ workspace modules",
+        "adapters/postgres/lanes/workspace_leases.py",
+        "application/workspaces/ (new)"
+      ],
+      "work": [
+        "Add managed_worktree/provider_workspace policy, reuse bounds and fenced allocation from dedicated clones.",
+        "Persist branch/base commit, patch and untracked/binary artifact manifest; validate restored digests.",
+        "Clean up only owned released leases after artifact custody; record actual cloud branch snapshot refs."
+      ],
+      "acceptance": [
+        "Concurrent lease acquisition and stale-generation writes are rejected on real PostgreSQL.",
+        "Fork/restore preserves staged, unstaged, deleted and untracked included content.",
+        "Resolved path/symlink escape, branch collision and dirty primary checkout cannot be silently accepted."
+      ],
+      "file": "MP-04-generalize-explicit-workspace-leases-worktrees-and-snapshots.md",
+      "linear": {
+        "id": "6c71611c-9a95-42df-9b3a-e68291b8572c",
+        "identifier": "OVE-67",
+        "title": "[MP-04] Generalize explicit workspace leases, worktrees and snapshots",
+        "url": "https://linear.app/overtonbell/issue/OVE-67/mp-04-generalize-explicit-workspace-leases-worktrees-and-snapshots"
+      }
+    },
+    {
+      "id": "MP-05",
+      "title": "Qualify auth routes, subscription usage and account capabilities",
+      "owner": "Environment",
+      "deps": [
+        "MP-01"
+      ],
+      "spec": "SPEC-02-environments.md",
+      "problem": "The owner's subscription priority must not be mistaken for permission to silently use API billing or for all-provider entitlement.",
+      "paths": [
+        "bootstrap/settings.py",
+        "application/execution/ admission services",
+        "adapters/provider_auth/ (new)",
+        "deployments/"
+      ],
+      "work": [
+        "Define auth profile and account/billing identity refs separately from model and environment selection.",
+        "Preflight supported owner-local authentication versus API routes and hosted product sign-in; redact all credentials.",
+        "Add quota/rate-limit classification, finite usage bounds and unknown cost handling without resetting mission counters."
+      ],
+      "acceptance": [
+        "Invalid/missing auth rejects before launch; no automatic subscription-to-API fallback.",
+        "Provider fixture records identify the route without exposing tokens; billing unavailable stays unknown.",
+        "Rate-limit reset waits are bounded by deadline and cancellation still reaches pending work."
+      ],
+      "file": "MP-05-qualify-auth-routes-subscription-usage-and-account-capabilities.md",
+      "linear": {
+        "id": "7e03a950-d7af-4cf4-8bea-3c314dd3f271",
+        "identifier": "OVE-68",
+        "title": "[MP-05] Qualify auth routes, subscription usage and account capabilities",
+        "url": "https://linear.app/overtonbell/issue/OVE-68/mp-05-qualify-auth-routes-subscription-usage-and-account-capabilities"
+      }
+    },
+    {
+      "id": "MP-06",
+      "title": "Harden shared session ownership, dispatch recovery and interventions",
+      "owner": "Runtime",
+      "deps": [
+        "MP-01",
+        "MP-04"
+      ],
+      "spec": "SPEC-01-runtime.md",
+      "problem": "Segmented activities need durable native dispatch ownership and control semantics across local process and hosted caller failures.",
+      "paths": [
+        "application/execution/harness/",
+        "adapters/temporal/activities/lane_turn.py",
+        "adapters/temporal/workflows/operation.py",
+        "adapters/postgres/lanes/execution_state.py"
+      ],
+      "work": [
+        "Implement worker-owned session manager with fenced ownership and routing; observation segment end must not destroy an active local session.",
+        "Persist create/send intents and native acknowledgements; reconcile ambiguous outcomes before retry; no blind resend.",
+        "Exercise queued boundary delivery, explicit steering versus cancel-and-replace, pause disclosure and four cancel timestamps."
+      ],
+      "acceptance": [
+        "Crash between native send and local receipt creates no duplicate turn; unrecoverable uncertainty parks in_doubt.",
+        "A resumed observation activity never resends prompt; stale owner/generation cannot settle results.",
+        "Cancel races preserve pre-fence effects, reject post-fence governed effects and block replacement until settled."
+      ],
+      "file": "MP-06-harden-shared-session-ownership-dispatch-recovery-and-interventions.md",
+      "linear": {
+        "id": "36584f41-79ed-4a1e-b69b-d1ca32becfc8",
+        "identifier": "OVE-69",
+        "title": "[MP-06] Harden shared session ownership, dispatch recovery and interventions",
+        "url": "https://linear.app/overtonbell/issue/OVE-69/mp-06-harden-shared-session-ownership-dispatch-recovery-and"
+      }
+    },
+    {
+      "id": "MP-07",
+      "title": "Implement the local Claude Agent SDK lane",
+      "owner": "Runtime",
+      "deps": [
+        "MP-03",
+        "MP-05",
+        "MP-06"
+      ],
+      "spec": "SPEC-01-runtime.md",
+      "problem": "Claude projections exist but no production Claude harness is registered.",
+      "paths": [
+        "adapters/claude/ (new)",
+        "tests/unit/claude/ (new)",
+        "tests/fixtures/provider_frames/claude/ (new)"
+      ],
+      "work": [
+        "Implement all supported AgentHarness/SessionLane methods against a pinned Python SDK/CLI pair.",
+        "Map native session/tool/result/subagent identities and callbacks; persist local session state; drain interrupted responses.",
+        "Integrate permission binding ports and native-compaction observations honestly; no TypeScript-only callback assumptions."
+      ],
+      "acceptance": [
+        "Recorded fixture conformance covers start/observe/cancel/resume/history loss and unknown frames.",
+        "Two-turn interrupt/replacement reads the intended response, not leftover interrupted messages.",
+        "Bounded live local drill proves effective config and controls before profile qualification."
+      ],
+      "file": "MP-07-implement-the-local-claude-agent-sdk-lane.md",
+      "linear": {
+        "id": "e66b36c0-8545-4d98-9279-1fe0e25eab3f",
+        "identifier": "OVE-70",
+        "title": "[MP-07] Implement the local Claude Agent SDK lane",
+        "url": "https://linear.app/overtonbell/issue/OVE-70/mp-07-implement-the-local-claude-agent-sdk-lane"
+      }
+    },
+    {
+      "id": "MP-08",
+      "title": "Implement the local Codex app-server lane",
+      "owner": "Runtime",
+      "deps": [
+        "MP-03",
+        "MP-05",
+        "MP-06"
+      ],
+      "spec": "SPEC-01-runtime.md",
+      "problem": "Codex file projection is not a lifecycle adapter; the product needs RPC/event/approval ownership.",
+      "paths": [
+        "adapters/codex/ (new)",
+        "tests/unit/codex/ (new)",
+        "tests/fixtures/provider_frames/codex/ (new)"
+      ],
+      "work": [
+        "Build typed app-server transport from the pinned generated schema; separate requests, responses and server-originated requests.",
+        "Map threads/turns/items, interrupts, expected-turn steering, history inspection and explicit compaction.",
+        "Persist pending approval correlations; do not depend on unstable rollout parsing or assume hosted product access."
+      ],
+      "acceptance": [
+        "RPC ordering, lost responses, disconnect and concurrent completion/steer fixtures have deterministic outcomes.",
+        "Queued instructions never accidentally become active-turn steering.",
+        "Bounded local live drill proves approvals, subagent visibility and restart classification for the exact pin."
+      ],
+      "file": "MP-08-implement-the-local-codex-app-server-lane.md",
+      "linear": {
+        "id": "c9fe6b16-4982-493a-8e0a-94ac6d5563a7",
+        "identifier": "OVE-71",
+        "title": "[MP-08] Implement the local Codex app-server lane",
+        "url": "https://linear.app/overtonbell/issue/OVE-71/mp-08-implement-the-local-codex-app-server-lane"
+      }
+    },
+    {
+      "id": "MP-09",
+      "title": "Close Cursor local/cloud parity and qualification gaps",
+      "owner": "Runtime",
+      "deps": [
+        "MP-03",
+        "MP-06"
+      ],
+      "spec": "SPEC-01-runtime.md",
+      "problem": "Existing Cursor adapters require completion and qualified limits, not a replacement.",
+      "paths": [
+        "adapters/cursor/",
+        "application/execution/harness/describe.py",
+        "tests/qualification/ or existing lane drill paths"
+      ],
+      "work": [
+        "Retain cursor-sdk 1.0.37 unless an explicit separately tested upgrade is needed.",
+        "Complete cloud snapshot production, option rehydration, stream-expiry reconciliation and headless approval coverage reporting.",
+        "Handle Windows local worker constraint with explicit supported WSL/Linux path; preserve cloud/local distinction."
+      ],
+      "acceptance": [
+        "Busy cloud agent never causes duplicate send or tight retry loop; persisted cursor resumes correctly.",
+        "Cloud frames/status reconcile after disconnect/retention expiry; unknown usage remains unknown.",
+        "Qualify supported controls and leave unproven hook/gate coverage rejected; cite OVE-55 evidence."
+      ],
+      "file": "MP-09-close-cursor-local-cloud-parity-and-qualification-gaps.md",
+      "linear": {
+        "id": "6f85a91a-aaa0-4ed3-8e83-03a439eabe29",
+        "identifier": "OVE-72",
+        "title": "[MP-09] Close Cursor local/cloud parity and qualification gaps",
+        "url": "https://linear.app/overtonbell/issue/OVE-72/mp-09-close-cursor-localcloud-parity-and-qualification-gaps"
+      }
+    },
+    {
+      "id": "MP-10",
+      "title": "Execute Human Gate nodes and review-with-feedback paths",
+      "owner": "Environment",
+      "deps": [
+        "MP-01",
+        "MP-02"
+      ],
+      "spec": "SPEC-03-human-control.md",
+      "problem": "HumanGateNode is an authoring shape today; run waits/runtime approval rows do not implement the general workflow node.",
+      "paths": [
+        "domain/programs/ control contracts",
+        "application/programs/",
+        "application/human_tasks/ (new or shared service)",
+        "interfaces/http/human_tasks.py (new)"
+      ],
+      "work": [
+        "Implement typed control activation lowering/execution using existing Human Task rows and resolution semantics.",
+        "Add approve/reject/request-changes remediation with packet/version binding, deadlines and finite review rounds.",
+        "Expose HTTP/MCP service parity and durable task events; no cognitive Activity slot held for human waiting."
+      ],
+      "acceptance": [
+        "Stage Graph and GoalDirected review waits survive worker/API restart and accept one attributed resolution.",
+        "Concurrent/stale reviewers and changed artifact digests cannot reuse approval.",
+        "Feedback reaches the declared remediation action without changing criteria or resetting budgets."
+      ],
+      "file": "MP-10-execute-human-gate-nodes-and-review-with-feedback-paths.md",
+      "linear": {
+        "id": "861da488-901b-4943-9a44-e67f758077cf",
+        "identifier": "OVE-73",
+        "title": "[MP-10] Execute Human Gate nodes and review-with-feedback paths",
+        "url": "https://linear.app/overtonbell/issue/OVE-73/mp-10-execute-human-gate-nodes-and-review-with-feedback-paths"
+      }
+    },
+    {
+      "id": "MP-11",
+      "title": "Implement native approval bindings and governed MCP fallback",
+      "owner": "Environment",
+      "deps": [
+        "MP-06",
+        "MP-10"
+      ],
+      "spec": "SPEC-03-human-control.md",
+      "problem": "Provider permission callbacks, MCP elicitation and domain effect authorization must share durable tasks without assuming identical protocols.",
+      "paths": [
+        "application/human_tasks/",
+        "application/execution/ approval ports",
+        "interfaces/mcp/ governed gateway modules",
+        "adapters/postgres/ approval correlation"
+      ],
+      "work": [
+        "Persist approval origin/native identity/generation/input and policy digests; map provider approve/deny/question replies.",
+        "Implement bounded callback wait and explicit expired/lost-request recovery.",
+        "For owned effect tools add prepare/review/execute intent/receipt protocol; negotiate MCP elicitation and reject unenforceable requirements."
+      ],
+      "acceptance": [
+        "Restart/timeout never replays approval into a different request or modified arguments.",
+        "Repeated pending/execute calls return stable pending state/receipt and never double-execute.",
+        "Unsupported elicitation/gate coverage yields typed rejection; deny and cancel produce distinct outcomes."
+      ],
+      "file": "MP-11-implement-native-approval-bindings-and-governed-mcp-fallback.md",
+      "linear": {
+        "id": "d2f2124a-db86-4dfd-8850-058799880b7c",
+        "identifier": "OVE-74",
+        "title": "[MP-11] Implement native approval bindings and governed MCP fallback",
+        "url": "https://linear.app/overtonbell/issue/OVE-74/mp-11-implement-native-approval-bindings-and-governed-mcp-fallback"
+      }
+    },
+    {
+      "id": "MP-12",
+      "title": "Wire continuation and independent compaction policies into workflows",
+      "owner": "Runtime",
+      "deps": [
+        "MP-02",
+        "MP-06"
+      ],
+      "spec": "SPEC-01-runtime.md",
+      "problem": "ContinuationService exists but worker/family call sites do not fulfill requests; context pressure must not be treated as goal progress.",
+      "paths": [
+        "application/context/continuation.py",
+        "adapters/temporal/activities/continuation.py",
+        "adapters/temporal/workflows/goal_directed.py",
+        "adapters/temporal/workflows/stagegraph.py"
+      ],
+      "work": [
+        "Register seal/transfer activities and per-lane hydrators; persist resumable phase progress and mailbox holds.",
+        "Implement native compaction where qualified and checkpoint/hydration fallback at safe boundaries.",
+        "Separate context occupancy, turn limits, goal iterations and Temporal history rollover; patch workflow changes."
+      ],
+      "acceptance": [
+        "Crash at every continuation phase yields one activated generation with matching packet/workspace digests.",
+        "Provider compaction does not advance goal iteration or reset budget/retry counters.",
+        "Old histories replay; pending handlers/commands survive Continue-As-New; unknown occupancy is never invented."
+      ],
+      "file": "MP-12-wire-continuation-and-independent-compaction-policies-into-workflows.md",
+      "linear": {
+        "id": "51ff1898-f82e-4c30-9164-1015ada1a35b",
+        "identifier": "OVE-75",
+        "title": "[MP-12] Wire continuation and independent compaction policies into workflows",
+        "url": "https://linear.app/overtonbell/issue/OVE-75/mp-12-wire-continuation-and-independent-compaction-policies-into"
+      }
+    },
+    {
+      "id": "MP-13",
+      "title": "Extend event projections, native frames and subordinate lineage",
+      "owner": "Events",
+      "deps": [
+        "MP-01"
+      ],
+      "spec": "SPEC-04-realtime.md",
+      "problem": "Mission aliases currently miss kernel events; new adapters need raw event fidelity and accurate child visibility.",
+      "paths": [
+        "application/frames/",
+        "domain/frames/",
+        "application/subscriptions/ filters",
+        "adapters/postgres/frames/",
+        "interfaces/http/transcript.py"
+      ],
+      "work": [
+        "Add provider mapping fixtures, explicit unknown kinds, per-stream cursors and stable child/parent correlation.",
+        "Implement public completion/opened aliases as derived notifications linked to canonical events.",
+        "Compose full artifact body reading/transcript refresh; report visibility coverage and usage aggregation rules."
+      ],
+      "acceptance": [
+        "Requested run.completed/activation.completed/human_task.opened filters receive only correct derived transitions.",
+        "Duplicate/reordered closing frames settle once; unknown/delta frames cannot terminalize work.",
+        "Provider children, Agent Server children and linked missions remain distinct; no double-counted usage."
+      ],
+      "file": "MP-13-extend-event-projections-native-frames-and-subordinate-lineage.md",
+      "linear": {
+        "id": "d3646afc-848f-4003-8cd5-652c7ab61c67",
+        "identifier": "OVE-76",
+        "title": "[MP-13] Extend event projections, native frames and subordinate lineage",
+        "url": "https://linear.app/overtonbell/issue/OVE-76/mp-13-extend-event-projections-native-frames-and-subordinate-lineage"
+      }
+    },
+    {
+      "id": "MP-14",
+      "title": "Add scoped mission Socket.IO handlers with durable replay",
+      "owner": "Events",
+      "deps": [
+        "MP-01",
+        "MP-13"
+      ],
+      "spec": "SPEC-04-realtime.md",
+      "problem": "Existing runtime socket handlers do not provide mission-wide authenticated subscriptions/replay over the public API.",
+      "paths": [
+        "interfaces/socketio/ (new)",
+        "application/streams/ (new)",
+        "bootstrap/realtime.py (new)",
+        "adapters/realtime/"
+      ],
+      "work": [
+        "Compose AsyncServer/ASGIApp around the public FastAPI app with lifecycle preserved.",
+        "Implement subscribe/unsubscribe/ack, snapshot/high-watermark replay, mission and frame streams, typed errors and thin mutation handlers.",
+        "Add reauthorization, private rooms, slow-consumer bounds and optional Redis multi-process fanout."
+      ],
+      "acceptance": [
+        "Two clients reconnect across commit/fanout races without missing durable events.",
+        "Forged scope/room/cursor and expired credentials cannot leak data or apply commands.",
+        "FastAPI/MCP startup and shutdown run once; slow clients cannot block workers or exhaust unbounded memory."
+      ],
+      "file": "MP-14-add-scoped-mission-socket-io-handlers-with-durable-replay.md",
+      "linear": {
+        "id": "594f0832-20d5-43be-a5bb-5b19f2296229",
+        "identifier": "OVE-77",
+        "title": "[MP-14] Add scoped mission Socket.IO handlers with durable replay",
+        "url": "https://linear.app/overtonbell/issue/OVE-77/mp-14-add-scoped-mission-socketio-handlers-with-durable-replay"
+      }
+    },
+    {
+      "id": "MP-15",
+      "title": "Deliver bounded coordinator subscriptions and callbacks",
+      "owner": "Events",
+      "deps": [
+        "MP-13",
+        "MP-14"
+      ],
+      "spec": "SPEC-04-realtime.md",
+      "problem": "Coordinators need useful durable notifications without per-token wakeups or assumptions that MCP notifications awaken arbitrary agents.",
+      "paths": [
+        "application/subscriptions/",
+        "adapters/subscriptions/webhook.py",
+        "interfaces/mcp/subscriptions.py",
+        "application/execution/mailbox.py"
+      ],
+      "work": [
+        "Extend existing outbox channels with bounded summary filters, durable inbox cursor and causation/recursion controls.",
+        "Authenticate/sign webhook delivery and keep retries/dead-letter state separate from task execution.",
+        "Support qualified connected MCP consumers and polling fallback; dispatch coordinator prompts only through admitted mailbox semantics."
+      ],
+      "acceptance": [
+        "Offline coordinator recovers pending notifications once by ID; callback retries never rerun agent work.",
+        "Notification-command feedback loops hit a defined recursion/rate bound.",
+        "One run requiring approval produces actionable notification while token deltas remain off by default."
+      ],
+      "file": "MP-15-deliver-bounded-coordinator-subscriptions-and-callbacks.md",
+      "linear": {
+        "id": "bb3f5d55-bcde-475f-a017-826e7965b912",
+        "identifier": "OVE-78",
+        "title": "[MP-15] Deliver bounded coordinator subscriptions and callbacks",
+        "url": "https://linear.app/overtonbell/issue/OVE-78/mp-15-deliver-bounded-coordinator-subscriptions-and-callbacks"
+      }
+    },
+    {
+      "id": "MP-16",
+      "title": "Qualify the Anthropic-hosted Claude Code control surface",
+      "owner": "Hosted",
+      "deps": [],
+      "spec": "RESEARCH.md",
+      "problem": "Official hosted launch/message submission is documented but a full distributable observe/cancel/approval lifecycle has not been established.",
+      "paths": [
+        "docs/qualification/lanes/claude_cloud/ (new)",
+        "adapters/claude_cloud/ protocol fixtures only"
+      ],
+      "work": [
+        "Verify exact documented/account-available API or CLI transport for launch, native identity, status, replay, cancel, follow-up and usage.",
+        "Establish environment selection, configuration bootstrap, artifacts, human requests and subordinate visibility.",
+        "Return a feature matrix with supported operation signatures and evidence, or precise vendor blockers; no private endpoint/browser/session-cookie fallback."
+      ],
+      "acceptance": [
+        "Every required feature has a source/schema and observed finite drill result or an explicit blocked disposition.",
+        "The evidence targets Anthropic-hosted Claude Code, not our own hosted SDK or another managed-agent product.",
+        "A negative finding leaves MP-18 evidence-blocked even if this investigation is marked complete."
+      ],
+      "file": "MP-16-qualify-the-anthropic-hosted-claude-code-control-surface.md",
+      "linear": {
+        "id": "fcee9545-63c9-4170-ae80-53ed7faa9b78",
+        "identifier": "OVE-79",
+        "title": "[MP-16] Qualify the Anthropic-hosted Claude Code control surface",
+        "url": "https://linear.app/overtonbell/issue/OVE-79/mp-16-qualify-the-anthropic-hosted-claude-code-control-surface"
+      }
+    },
+    {
+      "id": "MP-17",
+      "title": "Qualify the OpenAI-hosted Codex product control surface",
+      "owner": "Hosted",
+      "deps": [],
+      "spec": "RESEARCH.md",
+      "problem": "Cloud CLI start/list does not prove provider-hosted turn control, streamed children or programmatic approval resumption.",
+      "paths": [
+        "docs/qualification/lanes/codex_cloud/ (new)",
+        "adapters/codex_cloud/ protocol fixtures only"
+      ],
+      "work": [
+        "Inspect documented cloud CLI/API schema, account auth and environment identity for the exact product.",
+        "Prove status/replay, follow-up, cancel, approvals, output custody, config materialization and continuation, or record unavailable operations.",
+        "Keep app-server/local SDK and OpenAI Agents API as distinct products; do not substitute them."
+      ],
+      "acceptance": [
+        "Each required hosted operation has evidence and a reproducible bounded probe or explicit vendor blocker.",
+        "This desktop app's internal chat tools are not assumed to be an external Mission Control API.",
+        "A negative finding leaves MP-19 evidence-blocked; limited start/list does not certify parity."
+      ],
+      "file": "MP-17-qualify-the-openai-hosted-codex-product-control-surface.md",
+      "linear": {
+        "id": "6115ffa7-9774-472d-822a-a972d6c7793e",
+        "identifier": "OVE-80",
+        "title": "[MP-17] Qualify the OpenAI-hosted Codex product control surface",
+        "url": "https://linear.app/overtonbell/issue/OVE-80/mp-17-qualify-the-openai-hosted-codex-product-control-surface"
+      }
+    },
+    {
+      "id": "MP-18",
+      "title": "Implement the qualified Claude-hosted lane",
+      "owner": "Hosted",
+      "deps": [
+        "MP-01",
+        "MP-03",
+        "MP-05",
+        "MP-06",
+        "MP-11",
+        "MP-12",
+        "MP-16"
+      ],
+      "spec": "SPEC-01-runtime.md",
+      "problem": "Implement the provider-hosted lane only after MP-16 establishes the required integration surface.",
+      "paths": [
+        "adapters/claude_cloud/ (new)",
+        "tests/fixtures/provider_frames/claude_cloud/ (new)"
+      ],
+      "work": [
+        "Implement documented qualified methods behind SessionLane with environment/materialization receipts.",
+        "Persist hosted native IDs independently of caller lifetime and reconcile ambiguous creates/sends.",
+        "Map native controls, approvals, usage and child visibility with exact capability limits."
+      ],
+      "acceptance": [
+        "Caller/worker restart does not start a duplicate cloud task.",
+        "Admitted required features work against Anthropic-hosted Claude Code in a bounded drill.",
+        "Any MP-16 missing operation remains a visible blocker; no self-hosted substitution or fake qualification."
+      ],
+      "file": "MP-18-implement-the-qualified-claude-hosted-lane.md",
+      "linear": {
+        "id": "918dbbcd-5b09-402b-89d9-355d83a16d83",
+        "identifier": "OVE-81",
+        "title": "[MP-18] Implement the qualified Claude-hosted lane",
+        "url": "https://linear.app/overtonbell/issue/OVE-81/mp-18-implement-the-qualified-claude-hosted-lane"
+      }
+    },
+    {
+      "id": "MP-19",
+      "title": "Implement the qualified Codex-hosted lane",
+      "owner": "Hosted",
+      "deps": [
+        "MP-01",
+        "MP-03",
+        "MP-05",
+        "MP-06",
+        "MP-11",
+        "MP-12",
+        "MP-17"
+      ],
+      "spec": "SPEC-01-runtime.md",
+      "problem": "Implement the provider-hosted lane only after MP-17 establishes the required integration surface.",
+      "paths": [
+        "adapters/codex_cloud/ (new)",
+        "tests/fixtures/provider_frames/codex_cloud/ (new)"
+      ],
+      "work": [
+        "Implement qualified hosted product operations, distinct from local app-server.",
+        "Bind published environment and repo revision, collect output artifacts and persist native identity before follow-ups.",
+        "Respect exact hosted control/approval/replay guarantees in describe and admission."
+      ],
+      "acceptance": [
+        "Caller/worker restart reconciles existing hosted work without duplicate dispatch.",
+        "Bounded hosted fixture proves configuration load, result custody and required controls.",
+        "Unsupported follow-up/cancel/approval/replay prevents affected workflow admission and release qualification."
+      ],
+      "file": "MP-19-implement-the-qualified-codex-hosted-lane.md",
+      "linear": {
+        "id": "df369b3f-9fe0-43e2-8c25-b8adf83671f8",
+        "identifier": "OVE-82",
+        "title": "[MP-19] Implement the qualified Codex-hosted lane",
+        "url": "https://linear.app/overtonbell/issue/OVE-82/mp-19-implement-the-qualified-codex-hosted-lane"
+      }
+    },
+    {
+      "id": "MP-20",
+      "title": "Prove local and Cursor workflow parity across all three workflow forms",
+      "owner": "Integrator",
+      "deps": [
+        "MP-02",
+        "MP-07",
+        "MP-08",
+        "MP-09",
+        "MP-10",
+        "MP-11",
+        "MP-12",
+        "MP-15",
+        "MP-22"
+      ],
+      "spec": "VALIDATION.md",
+      "problem": "Adapters must demonstrate Stage Graph, GoalDirected and linked-mission behavior through the actual production path.",
+      "paths": [
+        "tests/acceptance/mission_control/",
+        "tests/integration/temporal/",
+        "docs/qualification/lanes/"
+      ],
+      "work": [
+        "Parameterize a shared Stage Graph, multi-iteration goal and two-member chain over Deep Agents/Cursor/Claude local/Codex local and qualified Cursor Cloud.",
+        "Exercise review, queue, interrupt/cancel, context rollover, artifacts and mixed-provider handoffs.",
+        "Preserve old acceptance tests and compare resulting receipts/events, not just final assistant text."
+      ],
+      "acceptance": [
+        "V02/V04\u201319 pass at their required offline/DB/Temporal/live levels with exact version records.",
+        "No fixture-only LaunchInputPort or fake catalog is used to claim production readiness.",
+        "Report per-profile unsupported features and usage dispositions; do not call new Claude/Codex hosted support complete."
+      ],
+      "file": "MP-20-prove-local-and-cursor-workflow-parity-across-all-three-workflow-forms.md",
+      "linear": {
+        "id": "66d5a30d-8aa1-47ea-8962-a065c2a0fa44",
+        "identifier": "OVE-83",
+        "title": "[MP-20] Prove local and Cursor workflow parity across all three workflow forms",
+        "url": "https://linear.app/overtonbell/issue/OVE-83/mp-20-prove-local-and-cursor-workflow-parity-across-all-three-workflow"
+      }
+    },
+    {
+      "id": "MP-21",
+      "title": "Prove Claude and Codex hosted workflow parity",
+      "owner": "Integrator",
+      "deps": [
+        "MP-18",
+        "MP-19",
+        "MP-20"
+      ],
+      "spec": "VALIDATION.md",
+      "problem": "The all-provider objective requires the actual hosted products to satisfy the same workflow requirements.",
+      "paths": [
+        "tests/acceptance/mission_control/ hosted fixtures",
+        "docs/qualification/lanes/claude_cloud/",
+        "docs/qualification/lanes/codex_cloud/"
+      ],
+      "work": [
+        "Run the three common workflow forms against each qualified hosted product with finite approved caps.",
+        "Verify remote setup, child visibility, human gates, queue/cancel, continuation and accepted artifact transfer.",
+        "Record unsupported requirements as failures/blockers and preserve hosted environment/account evidence."
+      ],
+      "acceptance": [
+        "Both hosted products pass required lifecycle and environment matrix cells with reproducible evidence.",
+        "Network/caller loss and stream-expiry scenarios reconcile without duplicate tasks.",
+        "No local VM/SDK or unrelated managed-agent service is counted toward hosted parity."
+      ],
+      "file": "MP-21-prove-claude-and-codex-hosted-workflow-parity.md",
+      "linear": {
+        "id": "141176bd-7cd8-4826-935f-90b43a8f056a",
+        "identifier": "OVE-84",
+        "title": "[MP-21] Prove Claude and Codex hosted workflow parity",
+        "url": "https://linear.app/overtonbell/issue/OVE-84/mp-21-prove-claude-and-codex-hosted-workflow-parity"
+      }
+    },
+    {
+      "id": "MP-22",
+      "title": "Prepare real local profiles and Temporal fallback operations",
+      "owner": "Integrator",
+      "deps": [
+        "MP-01",
+        "MP-02",
+        "MP-03",
+        "MP-05"
+      ],
+      "spec": "VALIDATION.md",
+      "problem": "Existing local fixture readiness has profile/catalog/pin/host blockers; local Temporal fallback needs explicit run binding.",
+      "paths": [
+        "deployments/",
+        "bootstrap/preflight.py",
+        "infra/",
+        "docs/MISSION_CONTROL_LOCAL_API.md",
+        "docs/specs/fast-track-2026-10/OWNER-FIXTURE-RUNBOOK.md"
+      ],
+      "work": [
+        "Expose exact missing model/auth/environment/capability inputs and compose approved real bindings without fixture stand-ins.",
+        "Resolve current workspace pin/host readiness through authorized changes; document WSL/Linux local worker path.",
+        "Document new-run local Temporal selection, durable local persistence and explicit reconciliation for active cloud-cluster outage; no automatic cross-cluster replay."
+      ],
+      "acceptance": [
+        "Deterministic public start and chain succeed on disposable real PostgreSQL/Temporal.",
+        "Preflight rejects missing profile, unsupported OS, wrong DB release or environment digest before paid work.",
+        "An outage drill never launches a second copy of an active mission in another cluster; known baseline failures reported separately."
+      ],
+      "file": "MP-22-prepare-real-local-profiles-and-temporal-fallback-operations.md",
+      "linear": {
+        "id": "7a58ff37-16a6-4723-b639-16f1280b958e",
+        "identifier": "OVE-85",
+        "title": "[MP-22] Prepare real local profiles and Temporal fallback operations",
+        "url": "https://linear.app/overtonbell/issue/OVE-85/mp-22-prepare-real-local-profiles-and-temporal-fallback-operations"
+      }
+    },
+    {
+      "id": "MP-23",
+      "title": "Publish per-profile release evidence and reconcile documentation",
+      "owner": "Integrator",
+      "deps": [
+        "MP-20",
+        "MP-21",
+        "MP-22"
+      ],
+      "spec": "ARCHITECTURE.md",
+      "problem": "Complete release must reflect actual parity, API contracts and operational limits rather than merged adapter code alone.",
+      "paths": [
+        "docs/knowledge/",
+        "docs/MISSION_CONTROL_IMPLEMENTATION_STATUS.md",
+        "docs/MISSION_CONTROL_LOCAL_API.md",
+        "GLOSSARY.md",
+        "docs/adr/",
+        "AGENTS.md generated index"
+      ],
+      "work": [
+        "Update knowledge, operator guide, schema/CLI/MCP discovery and describe matrices from accepted evidence.",
+        "Reconcile sibling normative annex/ADRs and mark hosted limitations explicitly if full release remains blocked.",
+        "Integrate checks, historical replay, DB release artifacts and per-profile qualification report; retain prior provenance."
+      ],
+      "acceptance": [
+        "Docs links/OKF/index and required code checks pass with passed/failed/blocked/unrun results recorded.",
+        "Every qualified flag links to exact profile/version/account/environment proof.",
+        "All-provider completion remains open until MP-21 passes; no deployment or paid authorization is inferred from documentation."
+      ],
+      "file": "MP-23-publish-per-profile-release-evidence-and-reconcile-documentation.md",
+      "linear": {
+        "id": "75e40695-1dfc-4f0b-a10b-2c294d1ec3be",
+        "identifier": "OVE-86",
+        "title": "[MP-23] Publish per-profile release evidence and reconcile documentation",
+        "url": "https://linear.app/overtonbell/issue/OVE-86/mp-23-publish-per-profile-release-evidence-and-reconcile-documentation"
+      }
+    }
+  ],
+  "waves": [
+    [
+      "MP-01",
+      "MP-16",
+      "MP-17"
+    ],
+    [
+      "MP-02",
+      "MP-03",
+      "MP-04",
+      "MP-05",
+      "MP-13"
+    ],
+    [
+      "MP-06",
+      "MP-10",
+      "MP-14",
+      "MP-22"
+    ],
+    [
+      "MP-07",
+      "MP-08",
+      "MP-09",
+      "MP-11",
+      "MP-12",
+      "MP-15"
+    ],
+    [
+      "MP-18",
+      "MP-19",
+      "MP-20"
+    ],
+    [
+      "MP-21"
+    ],
+    [
+      "MP-23"
+    ]
+  ],
+  "blocking_relations": 58
+}

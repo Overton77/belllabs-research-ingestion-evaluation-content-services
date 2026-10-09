@@ -1,5 +1,5 @@
-"""FT-G1 migration 0030 on a disposable PostgreSQL 17: the lane profile registry and the
-execution binding lane columns, through real grants and forced RLS."""
+"""FT-G1 migration 0030 (+ MP-01 migration 0031) on a disposable PostgreSQL 17: the lane
+profile registry and the execution binding lane columns, through real grants and forced RLS."""
 
 from __future__ import annotations
 
@@ -17,6 +17,8 @@ from tests.integration.postgres.runtime_common import common_db  # noqa: F401
 pytestmark = pytest.mark.common_db
 
 DIGEST = "sha256:" + "d" * 64
+# MP-01: the seven Lane Profiles the registry seeds (0030 three + 0031 four v2 stubs).
+SEEDED_PROFILES = sorted(DECLARED_LANE_MATRICES)
 
 
 async def test_lane_profiles_are_seeded_with_their_declared_describes(
@@ -30,7 +32,8 @@ async def test_lane_profiles_are_seeded_with_their_declared_describes(
         )
     finally:
         await owner.close()
-    assert [row["lane_profile"] for row in rows] == ["cursor_cloud", "cursor_local", "deep_agents"]
+    assert [row["lane_profile"] for row in rows] == SEEDED_PROFILES
+    assert len(rows) == 7
     for row in rows:
         declared = DECLARED_LANE_MATRICES[row["lane_profile"]]
         assert json.loads(row["describe"]) == declared.model_dump(mode="json")
@@ -46,7 +49,7 @@ async def test_runtime_reads_but_never_writes_lane_profiles(
     try:
         async with pool.acquire() as connection:
             count = await connection.fetchval("SELECT count(*) FROM mission_control.lane_profile")
-            assert count == 3
+            assert count == len(SEEDED_PROFILES)
             with pytest.raises(asyncpg.InsufficientPrivilegeError):
                 await connection.execute(
                     "UPDATE mission_control.lane_profile SET qualified = true "
@@ -55,7 +58,7 @@ async def test_runtime_reads_but_never_writes_lane_profiles(
             with pytest.raises(asyncpg.InsufficientPrivilegeError):
                 await connection.execute(
                     "INSERT INTO mission_control.lane_profile (lane_profile, lane, placement, "
-                    "describe) VALUES ('codex', 'cursor', 'cloud', '{}'::jsonb)"
+                    "describe) VALUES ('gemini_local', 'cursor', 'cloud', '{}'::jsonb)"
                 )
     finally:
         await pool.close()
@@ -112,20 +115,55 @@ async def test_execution_bindings_default_to_deep_agents_and_cursor_requires_its
                 "cursor_local",
                 {"schema_version": "mc.cursor_binding.v1", "lane_profile": "cursor_cloud"},
             )
+        # MP-01: an unknown profile is still the FK violation; the seeded `codex` profile needs
+        # its typed `mc.execution_binding.v2` document (a cursor binding or none is refused).
         with pytest.raises(asyncpg.ForeignKeyViolationError):
-            await _insert_binding(owner, common_db, "codex", None)
+            await _insert_binding(owner, common_db, "gemini_local", None)
+        for profile in ("claude_agent_sdk", "codex", "claude_cloud", "codex_cloud"):
+            with pytest.raises(asyncpg.CheckViolationError):
+                await _insert_binding(owner, common_db, profile, None)
+        with pytest.raises(asyncpg.CheckViolationError):
+            await _insert_binding(
+                owner,
+                common_db,
+                "codex",
+                {"schema_version": "mc.cursor_binding.v1", "lane_profile": "codex"},
+            )
+        with pytest.raises(asyncpg.CheckViolationError):
+            await _insert_binding(
+                owner,
+                common_db,
+                "codex",
+                {
+                    "schema_version": "mc.execution_binding.v2",
+                    "lane_profile": "claude_agent_sdk",
+                    "binding_digest": DIGEST,
+                },
+            )
         await _insert_binding(
             owner,
             common_db,
             "cursor_local",
             {"schema_version": "mc.cursor_binding.v1", "lane_profile": "cursor_local"},
         )
-        assert (
-            await owner.fetchval(
-                "SELECT count(*) FROM mission_control.execution_binding WHERE lane_profile = $1",
-                "cursor_local",
-            )
-            == 1
+        await _insert_binding(
+            owner,
+            common_db,
+            "codex",
+            {
+                "schema_version": "mc.execution_binding.v2",
+                "lane_profile": "codex",
+                "binding_digest": DIGEST,
+            },
         )
+        for profile in ("cursor_local", "codex"):
+            assert (
+                await owner.fetchval(
+                    "SELECT count(*) FROM mission_control.execution_binding "
+                    "WHERE lane_profile = $1",
+                    profile,
+                )
+                == 1
+            )
     finally:
         await owner.close()

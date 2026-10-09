@@ -2,8 +2,8 @@
   "files": {
     ".agents/skills/agent-browser/SKILL.md": "0o644",
     ".agents/skills/agent-browser/scripts/open.sh": "0o755",
-    ".codex/agents/summarizer.md": "0o644",
-    ".codex/agents/verifier.md": "0o644",
+    ".codex/agents/summarizer.toml": "0o644",
+    ".codex/agents/verifier.toml": "0o644",
     ".codex/config.toml": "0o644",
     ".codex/hooks.json": "0o644",
     ".mission/hooks/hook.mc-policy-template/hook.json": "0o644",
@@ -13,7 +13,13 @@
   },
   "in_process": null,
   "report": {
-    "degraded": [],
+    "degraded": [
+      "mc.frame_capture: no native hook on codex for before_model, after_model, after_tool_failure",
+      "mc.usage: no native hook on codex for after_model",
+      "subagent verifier: codex custom agents have no per-agent skill restriction; it inherits the parent session",
+      "subagent verifier: codex custom agents have no per-agent MCP server restriction; it inherits the parent session",
+      "subagent summarizer: codex has no background custom-agent setting; projected as a normal spawned agent"
+    ],
     "overflow": [],
     "plugin_expansions": [
       [
@@ -26,13 +32,19 @@
       ]
     ],
     "requires_trust": [
+      "mcp.tavily",
+      "mcp.agent-browser",
+      "mcp.firecrawl",
       "mc.stop_fence",
       "mc.operation_intent",
       "mc.frame_capture",
       "mc.usage",
-      "hook.mc-policy-template"
+      "hook.mc-policy-template",
+      "subagent.verifier",
+      "subagent.summarizer"
     ],
     "skipped_members": [],
+    "unqualified": [],
     "unsupported_on_lane": [
       {
         "event": "before_model",

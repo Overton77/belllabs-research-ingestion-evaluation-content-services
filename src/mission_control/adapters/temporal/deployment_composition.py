@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from contextlib import AsyncExitStack
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from hashlib import sha256
 from typing import Any
@@ -106,6 +106,7 @@ from mission_control.adapters.postgres.coordinator.workflow_result_repository im
     PostgresWorkflowResultRepository,
 )
 from mission_control.adapters.postgres.frames.repository import PostgresFrameRepository
+from mission_control.adapters.postgres.human_tasks.repository import PostgresHumanTaskRepository
 from mission_control.adapters.postgres.lanes.execution_state import (
     PostgresLaneExecutionStateStore,
 )
@@ -151,6 +152,7 @@ from mission_control.adapters.storage.artifact_payloads import S3ArtifactPayload
 from mission_control.adapters.storage.context_files import PayloadContextFiles
 from mission_control.adapters.storage.filesystem_workspace import FilesystemWorkspaceProvisioner
 from mission_control.adapters.supabase_storage.bundles import configured_supabase_bundle_reader
+from mission_control.adapters.temporal.activities.human_gate import HumanGateActivities
 from mission_control.adapters.temporal.artifact_activities import ArtifactPromotionActivities
 from mission_control.adapters.temporal.coordinator_runtime import (
     GoalDirectedCoordinatorDependencies,
@@ -189,6 +191,10 @@ from mission_control.application.execution.harness.inject import InterruptAndInj
 from mission_control.application.execution.harness.lane_turns import LaneTurnService
 from mission_control.application.execution.harness.protocol import AgentHarness
 from mission_control.application.execution.harness.registry import LaneRegistry
+from mission_control.application.execution.harness.sessions import (
+    WorkerSessionManager,
+    default_owner_ref,
+)
 from mission_control.application.execution.mailbox import MailboxDeliveryService
 from mission_control.application.execution.operations.checkpoint_lineage import DEFAULT_CLAIM_LEASE
 from mission_control.application.execution.operations.journaled_operation_execution import (
@@ -206,6 +212,7 @@ from mission_control.application.execution.operations.operation_journal import (
 from mission_control.application.execution.service import RunControlService
 from mission_control.application.execution.stop_fence import KernelHookFenceGate
 from mission_control.application.frames.reducer import FrameFactProjector
+from mission_control.application.programs.human_gates import GateReservationSettlement
 from mission_control.application.programs.orchestration_routing import SemanticHandlerRegistry
 from mission_control.application.programs.service import (
     F1OrchestrationBindingVerifier,
@@ -225,6 +232,7 @@ from mission_control.bootstrap.operation_recovery_composition import (
     compose_postgres_operation_recovery,
 )
 from mission_control.bootstrap.settings import PROJECT_ROOT, Settings
+from mission_control.domain.authoring.canonical import sha256_digest
 from mission_control.domain.execution.contracts import (
     AsyncChildCancellationRecord,
     AsyncSubagentContract,
@@ -235,6 +243,10 @@ from mission_control.domain.execution.contracts import (
     RuntimeResult,
 )
 from mission_control.domain.policies.contracts import ActorContext
+from mission_control.domain.programs.goal_directed_runtime import (
+    GoalExecutorObservation,
+    GoalVerifierObservation,
+)
 
 DEFAULT_ARTIFACT_PAYLOAD_ROOT = PROJECT_ROOT / ".artifact-payloads"
 ASYNC_CHILD_COMPLETION_KIND = "async_child_completion.v1"
@@ -451,6 +463,36 @@ class ProductionAsyncChildCancellation:
         resolved = await self._secrets.resolve(binding.secret_refs)
         service, _adapter = self._children.service(binding, resolved)
         return await service.cancel_children(binding, reason=reason, requested_at=requested_at)
+
+
+def registered_lane_profiles(settings: Settings) -> tuple[str, ...]:
+    """The profiles `compose_lane_registry` registers for these settings (MP-22 host gate)."""
+
+    profiles = ["deep_agents"]
+    if settings.cursor_api_key is not None:
+        profiles += ["cursor_local", "cursor_cloud"]
+    return tuple(profiles)
+
+
+def goal_output_schemas() -> dict[str, type[Any]]:
+    """MP-22 delta 4: the strict GoalDirected executor/verifier observation schemas under the
+    digests the manifest launch bindings carry (`sha256_digest(Model.model_json_schema())`),
+    so a bound `goal_output_schemas` entry materializes with a `response_format`."""
+
+    return {
+        sha256_digest(model.model_json_schema()): model
+        for model in (GoalExecutorObservation, GoalVerifierObservation)
+    }
+
+
+def with_goal_output_schemas(
+    additional: DeploymentCapabilityComponents | None,
+) -> DeploymentCapabilityComponents:
+    extra = additional or DeploymentCapabilityComponents()
+    return replace(
+        extra,
+        structured_output_schemas={**goal_output_schemas(), **extra.structured_output_schemas},
+    )
 
 
 def compose_lane_registry(
@@ -729,7 +771,7 @@ class ProductionWorkerActivityCompositionFactory:
             pins,
             saver=persistence.saver,
             store=persistence.store,
-            additional=self._additional,
+            additional=with_goal_output_schemas(self._additional),
             bundle_reader=bundle_reader,
         )
         actor = orchestration_lifecycle_actor()
@@ -903,6 +945,16 @@ class ProductionWorkerActivityCompositionFactory:
             mailbox=mailbox,
             injections=injections,
             frame_reader=frame_store,
+            # MP-06: fenced session ownership held by this worker process (restart = new
+            # owner), and the Stop Fence every new native dispatch (create/send) is admitted
+            # against before it is issued.
+            sessions=WorkerSessionManager(
+                owner_ref=default_owner_ref(self._worker_identity),
+                min_lease=timedelta(seconds=settings.mission_control_session_lease_min_s),
+                lease_heartbeats=settings.mission_control_session_lease_heartbeats,
+            ),
+            fences=PostgresStopFenceRepository(postgres_pool),
+            receipt_grace_s=settings.mission_control_dispatch_receipt_grace_s,
         )
         self.operation = ProductionOperationComposition(
             service=service,
@@ -926,6 +978,12 @@ class ProductionWorkerActivityCompositionFactory:
         coordinator = create_routed_coordinator_activities(
             bindings=semantic_bindings,
             handlers=SemanticHandlerRegistry(),
+            # MP-10: Human Gate tasks on the common `human_task` rows; a gate stage's
+            # reservation is released through run control before its result is decided.
+            human_gates=HumanGateActivities(
+                PostgresHumanTaskRepository(postgres_pool),
+                settlement=GateReservationSettlement(run_control),
+            ),
             lifecycle=RunControlLifecycleGateway(
                 run_control, F1OrchestrationBindingVerifier(control_plane), actor
             ),

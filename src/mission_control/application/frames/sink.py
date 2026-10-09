@@ -187,6 +187,9 @@ class InMemoryFrameStore:
             execution.sessions.setdefault(
                 session, {"state": "open", "started_frame": frame.frame_id}
             )
+        if frame.subordinate_ref is not None:
+            # A provider subagent's turns and result never open, close or end the parent's.
+            return
         if frame.kind == FrameKind.TURN_STARTED:
             execution.open_turn = {
                 "native_turn_ref": frame.native_turn_ref,

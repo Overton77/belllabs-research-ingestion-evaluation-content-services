@@ -1,0 +1,102 @@
+{
+  "documents": 78,
+  "local_links": 498,
+  "issues": 44,
+  "requirements": 26,
+  "schema_definitions": 23,
+  "fixture_sets": 4,
+  "categories": {
+    "foundation": 10,
+    "feature": 25,
+    "data": 3,
+    "integration": 3,
+    "release": 3
+  },
+  "ready_frontier": [
+    "MC-D002",
+    "MC-P001",
+    "MC-P008",
+    "MC-P009"
+  ],
+  "dependency_waves": [
+    [
+      "MC-D002",
+      "MC-P001",
+      "MC-P008",
+      "MC-P009"
+    ],
+    [
+      "MC-F001",
+      "MC-P002",
+      "MC-P003",
+      "MC-P004",
+      "MC-P005",
+      "MC-P006",
+      "MC-P010"
+    ],
+    [
+      "MC-F002",
+      "MC-F004",
+      "MC-P007"
+    ],
+    [
+      "MC-F003"
+    ],
+    [
+      "MC-F005",
+      "MC-F006"
+    ],
+    [
+      "MC-D001",
+      "MC-F007",
+      "MC-F014"
+    ],
+    [
+      "MC-F008"
+    ],
+    [
+      "MC-F009",
+      "MC-F019"
+    ],
+    [
+      "MC-F010"
+    ],
+    [
+      "MC-F011",
+      "MC-F013",
+      "MC-F018",
+      "MC-F020"
+    ],
+    [
+      "MC-F012",
+      "MC-F016",
+      "MC-F017",
+      "MC-F021",
+      "MC-F022",
+      "MC-I001"
+    ],
+    [
+      "MC-D003",
+      "MC-F015",
+      "MC-F023",
+      "MC-F024",
+      "MC-F025"
+    ],
+    [
+      "MC-I002",
+      "MC-I003"
+    ],
+    [
+      "MC-R001"
+    ],
+    [
+      "MC-R002"
+    ],
+    [
+      "MC-R003"
+    ]
+  ],
+  "status": "passed_documentation_checks",
+  "runtime_tests_run": false,
+  "metered_calls": 0
+}

@@ -1,0 +1,33 @@
+{
+  "schema_version": "mc.local_run_profile.v1",
+  "app": "biotech",
+  "lanes": [
+    {
+      "lane_profile": "deep_agents",
+      "auth_profile_id": "deep-agents-openai-api"
+    },
+    {
+      "lane_profile": "cursor_local",
+      "auth_profile_id": "cursor-local-key"
+    }
+  ],
+  "manifest_launch_bindings": "deployments/examples/manifest-launch-bindings.deep-agents.example.json",
+  "auth_profiles": "deployments/examples/provider-auth-profiles.example.json",
+  "temporal_clusters": [
+    {
+      "cluster_id": "local",
+      "target": "local",
+      "address": "localhost:7233",
+      "namespace": "default",
+      "task_queue": "biotech-research-ingestion"
+    },
+    {
+      "cluster_id": "cloud",
+      "target": "cloud",
+      "address": "OWNER-SELECT:Temporal Cloud frontend <namespace>.<account>.tmprl.cloud:7233",
+      "namespace": "OWNER-SELECT:Temporal Cloud namespace <namespace>.<account>",
+      "task_queue": "biotech-research-ingestion"
+    }
+  ],
+  "new_run_cluster": "local"
+}

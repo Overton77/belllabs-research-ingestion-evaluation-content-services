@@ -7,6 +7,16 @@ reference syntax (``${env:NAME}`` on Cursor, ``${NAME}`` on Claude, ``env_vars``
 unresolved ``*_refs`` on Deep Agents). Kernel hooks come first in every hook array and are
 fail-closed on Cursor. Anything a profile cannot run is reported, never silently dropped.
 
+Inputs are checked before anything is written: every row must declare host support for the
+profile (``unsupported`` fails, ``unqualified`` is reported), plugin expansion rejects cycles,
+repeated selections and conflicting versions, bundle bytes must match their pinned manifest
+digests, and a hook's required event that the profile cannot run fails the projection.
+
+Native formats are per provider, not shared: Claude settings-file hooks and the Python SDK
+callback union differ (``CLAUDE_SDK_CALLBACK_EVENTS``), so on ``claude_agent_sdk`` Kernel Hooks
+are in-process callbacks described in ``send_options`` and only catalog hooks reach
+``.claude/settings.json``; Codex custom agents are TOML files, not Markdown.
+
 ``render_release_host_files`` is the older MCP-only renderer over Agentic Component
 releases used by the materialization planner.
 """
@@ -44,12 +54,20 @@ from mission_control.domain.authoring.contracts import (
     SkillDefinition,
     SubagentProfileDefinition,
 )
-from mission_control.domain.capabilities.hooks import HookEvent, NativeHook, native_hook
+from mission_control.domain.capabilities.hooks import (
+    CLAUDE_SDK_CALLBACK_EVENTS,
+    HookEvent,
+    NativeHook,
+    native_hook,
+)
 from mission_control.domain.capabilities.host_support import HostSupportStatus, LaneProfile
 
 HOOK_RUNNER_SCRIPT = ".mission/hooks/run.py"
 CODEX_AGENTS_MD_LIMIT = 32 * 1024
 CURSOR_CLOUD_SUBAGENT_LIMIT = 20
+# Claude Code and Codex both reject skill names longer than 64 characters.
+SKILL_NAME_LIMIT = 64
+KERNEL_HOOK_TIMEOUT_SECONDS = 30
 _READ_ONLY_PREFIXES = ("inputs/", ".mission/inputs/", ".git/")
 _HOOK_ROOT = ".mission/hooks"
 _INTERPRETER_COMMAND = {"sh": "sh", "bash": "bash", "python": "python", "node": "node"}
@@ -58,6 +76,8 @@ _SKILL_ROOTS = {
     LaneProfile.CURSOR_CLOUD: ".cursor/skills",
     LaneProfile.CLAUDE_AGENT_SDK: ".claude/skills",
     LaneProfile.CODEX: ".agents/skills",
+    LaneProfile.CLAUDE_CLOUD: ".claude/skills",
+    LaneProfile.CODEX_CLOUD: ".agents/skills",
 }
 _EXEC = 0o755
 _FILE = 0o644
@@ -88,6 +108,8 @@ def render_host_files(
     _check_unique_names(skills, servers, agents)
     for row in hooks:
         _report_hook_events(row, lane, state)
+    _reject_lost_required_events(lane, state)
+    _report_kernel_gaps(lane, kernel_hooks, state)
     instructions = _instruction_text(instruction, packet_index)
 
     if lane is LaneProfile.DEEP_AGENTS:
@@ -105,10 +127,13 @@ def render_host_files(
         return state.result(in_process=in_process)
 
     _write_skills(skills, _SKILL_ROOTS[lane], state)
+    if lane is LaneProfile.CODEX_CLOUD:
+        _codex_cloud(servers, hooks, agents, kernel_hooks, instructions, state)
+        return state.result()
     _write_hook_scripts(hooks, state)
     if lane in {LaneProfile.CURSOR_LOCAL, LaneProfile.CURSOR_CLOUD}:
         _cursor(servers, hooks, agents, kernel_hooks, instructions, state)
-    elif lane is LaneProfile.CLAUDE_AGENT_SDK:
+    elif lane in {LaneProfile.CLAUDE_AGENT_SDK, LaneProfile.CLAUDE_CLOUD}:
         _claude(servers, hooks, agents, kernel_hooks, instructions, state)
     else:
         _codex(servers, hooks, agents, kernel_hooks, instructions, state)
@@ -127,6 +152,7 @@ class _State:
     unsupported: list[UnsupportedHookEvent] = field(default_factory=list)
     requires_trust: list[str] = field(default_factory=list)
     degraded: list[str] = field(default_factory=list)
+    unqualified: list[str] = field(default_factory=list)
     overflow: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
     expansions: list[tuple[str, tuple[str, ...]]] = field(default_factory=list)
@@ -147,6 +173,7 @@ class _State:
                 unsupported_on_lane=tuple(self.unsupported),
                 requires_trust=tuple(dict.fromkeys(self.requires_trust)),
                 degraded=tuple(self.degraded),
+                unqualified=tuple(self.unqualified),
                 overflow=tuple(self.overflow),
                 skipped_members=tuple(self.skipped),
                 plugin_expansions=tuple(self.expansions),
@@ -172,9 +199,29 @@ def _safe_path(path: str) -> str:
 def _expand(
     rows: Iterable[ResolvedCapability], lane: LaneProfile, state: _State
 ) -> list[ResolvedCapability]:
-    """Flatten plugins into their members in position order; skip unsupported optionals."""
+    """Flatten plugins into their members in position order; skip unsupported optionals.
+
+    Deterministic: the output is the depth-first manifest order. A capability may be selected
+    once per projection; a plugin that (transitively) contains itself, the same pin reached
+    twice, or two versions of one capability are rejected with the selection path.
+    """
     out: list[ResolvedCapability] = []
-    for row in rows:
+    selected: dict[str, tuple[str, str]] = {}
+
+    def visit(row: ResolvedCapability, parents: tuple[str, ...]) -> None:
+        rendered = row.pin.render()
+        trail = " > ".join((*parents, rendered))
+        if rendered in parents:
+            raise ProjectionError(f"plugin dependency cycle: {trail}")
+        _check_host_support(row, lane, state, trail)
+        capability = row.pin.capability_id
+        previous = selected.get(capability)
+        if previous is not None:
+            version, where = previous
+            if version == row.pin.version:
+                raise ProjectionError(f"capability selected more than once: {where} and {trail}")
+            raise ProjectionError(f"conflicting versions of {capability}: {where} and {trail}")
+        selected[capability] = (row.pin.version, trail)
         definition = row.definition
         if isinstance(definition, PluginDefinition):
             optional = {m.pin for m in definition.manifest.members if m.optional}
@@ -183,17 +230,37 @@ def _expand(
                 if member.pin in optional and not _runs_on(member, lane):
                     state.skipped.append(member.pin.render())
                     continue
-                out.extend(_expand((member,), lane, state))
+                visit(member, (*parents, rendered))
                 taken.append(member.pin.render())
-            state.expansions.append((row.pin.render(), tuple(taken)))
-            continue
+            state.expansions.append((rendered, tuple(taken)))
+            return
         out.append(row)
+
+    for row in rows:
+        visit(row, ())
     return out
 
 
-def _runs_on(row: ResolvedCapability, lane: LaneProfile) -> bool:
+def _host_status(row: ResolvedCapability, lane: LaneProfile) -> HostSupportStatus:
     host_support = getattr(row.definition, "host_support", None)
-    return host_support is not None and host_support.status(lane) is HostSupportStatus.SUPPORTED
+    return HostSupportStatus.UNSUPPORTED if host_support is None else host_support.status(lane)
+
+
+def _runs_on(row: ResolvedCapability, lane: LaneProfile) -> bool:
+    return _host_status(row, lane) is HostSupportStatus.SUPPORTED
+
+
+def _check_host_support(
+    row: ResolvedCapability, lane: LaneProfile, state: _State, trail: str
+) -> None:
+    status = _host_status(row, lane)
+    if status is HostSupportStatus.UNSUPPORTED:
+        raise ProjectionError(f"{trail} declares no support for lane profile {lane.value}")
+    if status is HostSupportStatus.UNQUALIFIED:
+        state.unqualified.append(
+            f"{row.pin.render()}: host support on {lane.value} is unqualified; projected "
+            "without materialization proof"
+        )
 
 
 def _check_unique_names(
@@ -254,17 +321,61 @@ def _skill_name(row: ResolvedCapability) -> str:
     return definition.skill_name
 
 
+def _verify_pinned_bytes(row: ResolvedCapability, label: str) -> None:
+    """Every resolved file must be exactly the manifest entry it claims to be."""
+    definition = row.definition
+    assert isinstance(definition, SkillDefinition | HookScriptDefinition)
+    entries = {entry.path: entry for entry in definition.file_manifest}
+    if {item.path for item in row.files} != set(entries):
+        raise ProjectionError(f"{label} {row.pin.render()} files differ from its manifest")
+    for item in row.files:
+        entry = entries[item.path]
+        digest = "sha256:" + sha256(item.content).hexdigest()
+        if digest != entry.digest or len(item.content) != entry.size_bytes:
+            raise ProjectionError(
+                f"{label} {row.pin.render()} file {item.path} does not match its pinned digest"
+            )
+
+
+def _skill_frontmatter(content: bytes) -> dict[str, str]:
+    """Top-level scalar keys of a SKILL.md YAML frontmatter block (the fields providers read)."""
+    text = content.decode("utf-8").replace("\r\n", "\n")
+    if not text.startswith("---\n"):
+        return {}
+    end = text.find("\n---", 4)
+    if end < 0:
+        return {}
+    fields: dict[str, str] = {}
+    for line in text[4:end].split("\n"):
+        if not line or line[0] in " \t#" or ":" not in line:
+            continue
+        key, _, value = line.partition(":")
+        fields[key.strip()] = value.strip().strip("\"'")
+    return fields
+
+
 def _skill_files(row: ResolvedCapability) -> list[tuple[str, bytes, int]]:
     definition = row.definition
     assert isinstance(definition, SkillDefinition)
+    label = "skill bundle"
     if not row.files:
-        raise ProjectionError(f"skill bundle {row.pin.render()} has no resolved files")
-    names = {item.path for item in row.files}
-    if "SKILL.md" not in names:
-        raise ProjectionError(f"skill bundle {row.pin.render()} has no SKILL.md")
-    expected = {entry.path for entry in definition.file_manifest}
-    if names != expected:
-        raise ProjectionError(f"skill bundle {row.pin.render()} files differ from its manifest")
+        raise ProjectionError(f"{label} {row.pin.render()} has no resolved files")
+    by_path = {item.path: item for item in row.files}
+    if "SKILL.md" not in by_path:
+        raise ProjectionError(f"{label} {row.pin.render()} has no SKILL.md")
+    _verify_pinned_bytes(row, label)
+    name = definition.skill_name
+    if len(name) > SKILL_NAME_LIMIT:
+        raise ProjectionError(f"skill name {name!r} exceeds {SKILL_NAME_LIMIT} characters")
+    # Claude Code and Codex discover a skill by its SKILL.md frontmatter, not by the directory.
+    frontmatter = _skill_frontmatter(by_path["SKILL.md"].content)
+    if frontmatter.get("name") != name:
+        raise ProjectionError(
+            f"{label} {row.pin.render()} SKILL.md frontmatter name "
+            f"{frontmatter.get('name')!r} does not match skill_name {name!r}"
+        )
+    if not frontmatter.get("description"):
+        raise ProjectionError(f"{label} {row.pin.render()} SKILL.md has no description")
     return [
         (item.path, item.content, _EXEC if item.executable else _FILE)
         for item in sorted(row.files, key=lambda item: item.path)
@@ -300,10 +411,7 @@ def _write_hook_scripts(
     for row in hooks:
         definition = row.definition
         assert isinstance(definition, HookScriptDefinition)
-        expected = {entry.path for entry in definition.file_manifest}
-        names = {item.path for item in row.files}
-        if names != expected:
-            raise ProjectionError(f"hook script {row.pin.render()} files differ from its manifest")
+        _verify_pinned_bytes(row, "hook script")
         for item in sorted(row.files, key=lambda item: item.path):
             executable = item.executable or item.path == definition.entrypoint
             state.write(
@@ -339,6 +447,65 @@ def _report_hook_events(row: ResolvedCapability, lane: LaneProfile, state: _Stat
             )
 
 
+def _reject_lost_required_events(lane: LaneProfile, state: _State) -> None:
+    lost = [item for item in state.unsupported if item.required]
+    if lost:
+        named = ", ".join(f"{item.hook_id} {item.event.value}" for item in lost)
+        raise ProjectionError(
+            f"required hook event(s) have no native hook on lane profile {lane.value}: {named}"
+        )
+
+
+def _kernel_in_process(lane: LaneProfile) -> bool:
+    """Kernel Hooks run as SDK callbacks, outside agent-writable files, on the local SDK lane."""
+    return lane is LaneProfile.CLAUDE_AGENT_SDK
+
+
+def _kernel_delivers(lane: LaneProfile, event: HookEvent) -> NativeHook | None:
+    native = native_hook(lane, event)
+    if native is not None and _kernel_in_process(lane) and event not in CLAUDE_SDK_CALLBACK_EVENTS:
+        return None
+    return native
+
+
+def _report_kernel_gaps(
+    lane: LaneProfile, kernel_hooks: Sequence[KernelHook], state: _State
+) -> None:
+    """Name every Kernel Hook event the profile cannot deliver (codex_cloud reports wholesale)."""
+    if lane is LaneProfile.CODEX_CLOUD:
+        return
+    surface = "Python SDK callback" if _kernel_in_process(lane) else "native hook"
+    for kernel in kernel_hooks:
+        missing = [event.value for event in kernel.events if _kernel_delivers(lane, event) is None]
+        if missing:
+            state.degraded.append(
+                f"{kernel.hook_id}: no {surface} on {lane.value} for {', '.join(missing)}"
+            )
+
+
+def _kernel_callbacks(
+    lane: LaneProfile, kernel_hooks: Sequence[KernelHook]
+) -> list[dict[str, object]]:
+    """In-process callback registrations, in Kernel Hook order, for the lane's SDK adapter."""
+    callbacks: list[dict[str, object]] = []
+    for kernel in kernel_hooks:
+        for event in kernel.events:
+            native = _kernel_delivers(lane, event)
+            if native is None:
+                continue
+            callback: dict[str, object] = {
+                "hook_id": kernel.hook_id,
+                "mc_event": event.value,
+                "native_event": native.native_event,
+                "timeout": KERNEL_HOOK_TIMEOUT_SECONDS,
+                "fail_closed": True,
+            }
+            if native.matcher:
+                callback["matcher"] = native.matcher
+            callbacks.append(callback)
+    return callbacks
+
+
 def _catalog_hook_command(row: ResolvedCapability, event: HookEvent) -> list[str]:
     """Exec form: the lane's hook runner adapts native stdin to ``mc.hook_input.v1``."""
     return ["python", HOOK_RUNNER_SCRIPT, _hook_slug(row.definition.logical_id), event.value]
@@ -370,7 +537,7 @@ def _hook_entries(
     entries: list[_HookEntry] = []
     for kernel in kernel_hooks:
         for event in kernel.events:
-            native = native_hook(lane, event)
+            native = _kernel_delivers(lane, event)
             if native is None:
                 continue
             entries.append(
@@ -379,7 +546,7 @@ def _hook_entries(
                     event=event,
                     native=native,
                     command=_kernel_hook_command(kernel, event),
-                    timeout=30,
+                    timeout=KERNEL_HOOK_TIMEOUT_SECONDS,
                     fail_closed=True,
                     matcher=native.matcher,
                     overlay={},
@@ -713,13 +880,68 @@ def _claude(
                 }
             ),
         )
-    settings = _matcher_hooks(lane, kernel_hooks, hooks, exec_form=True)
+    in_process = _kernel_in_process(lane)
+    # Exec form (`command` + `args`): fired by Claude Code 2.1.295 in the recorded discovery
+    # fixture tests/fixtures/projections/discovery/claude_agent_sdk.recorded.json.
+    settings = _matcher_hooks(lane, () if in_process else kernel_hooks, hooks, exec_form=True)
     if settings:
         state.write(".claude/settings.json", _dumps({"hooks": settings}))
+    if in_process:
+        # Omitting setting_sources loads user, project and local settings (Agent SDK migration
+        # guide, "Settings sources default"); pin the projected project layer only.
+        state.send_options["setting_sources"] = ["project"]
+        callbacks = _kernel_callbacks(lane, kernel_hooks)
+        if callbacks:
+            state.send_options["hook_callbacks"] = callbacks
+    if lane is LaneProfile.CLAUDE_CLOUD and kernel_hooks:
+        # The repository's settings-file hooks run in the cloud session, but the session
+        # cannot reach the worker's loopback callback: no Kernel Hook fails closed there
+        # (docs/qualification/lanes/claude_cloud/FEASIBILITY.md; mirrors cursor_cloud).
+        state.degraded.extend(
+            f"{hook.hook_id}: claude_cloud cannot reach the worker loopback callback; "
+            "the hook runs without a fail-closed decision"
+            for hook in kernel_hooks
+        )
     names = {row.pin.capability_id: _server_name(row) for row in servers}
     for row in agents:
         profile = _agent(row).profile
         state.write(f".claude/agents/{profile.name}.md", _claude_agent_md(row, lane, names))
+
+
+def _codex_cloud(
+    servers: Sequence[ResolvedCapability],
+    hooks: Sequence[ResolvedCapability],
+    agents: Sequence[ResolvedCapability],
+    kernel_hooks: Sequence[KernelHook],
+    instructions: str,
+    state: _State,
+) -> None:
+    """Codex Cloud reads the checked-out repository's `AGENTS.md` and skills only: a task
+    carries no per-task MCP, hook, approval or sandbox configuration, and no command/local
+    hooks run under cloud orchestration (docs/qualification/lanes/codex_cloud/FEASIBILITY.md).
+    Everything else is reported, not silently dropped."""
+    data = instructions.encode("utf-8")
+    if len(data) > CODEX_AGENTS_MD_LIMIT:
+        state.overflow.append(
+            f"AGENTS.md is {len(data)} bytes; Codex reads at most {CODEX_AGENTS_MD_LIMIT}"
+        )
+        marker = b"\n\n[truncated by Mission Control: Codex 32 KiB AGENTS.md cap]\n"
+        data = data[: CODEX_AGENTS_MD_LIMIT - len(marker)].decode("utf-8", "ignore").encode()
+        data += marker
+    state.write("AGENTS.md", data)
+    state.degraded.extend(
+        f"{_server_name(row)}: codex_cloud accepts no per-task MCP configuration; configure "
+        "the server on the Codex Cloud environment"
+        for row in sorted(servers, key=_server_name)
+    )
+    state.degraded.extend(
+        f"{hook.hook_id}: codex_cloud runs no command hooks under cloud orchestration"
+        for hook in kernel_hooks
+    )
+    for row in hooks:
+        state.skipped.append(row.pin.render())
+    for row in agents:
+        state.skipped.append(row.pin.render())
 
 
 def _codex(
@@ -740,8 +962,11 @@ def _codex(
         data = data[: CODEX_AGENTS_MD_LIMIT - len(marker)].decode("utf-8", "ignore").encode()
         data += marker
     state.write("AGENTS.md", data)
+    # Codex loads the project `.codex/` layer (config.toml, hooks, agents) only for a trusted
+    # project (learn.chatgpt.com/docs/config-file/config-advanced), so each entry needs trust.
     if servers:
         state.write(".codex/config.toml", _codex_config(servers, lane))
+        state.requires_trust.extend(row.definition.logical_id for row in servers)
     settings = _matcher_hooks(lane, kernel_hooks, hooks, exec_form=False)
     if settings:
         state.write(".codex/hooks.json", _dumps({"hooks": settings}))
@@ -750,7 +975,47 @@ def _codex(
         )
     for row in agents:
         profile = _agent(row).profile
-        state.write(f".codex/agents/{profile.name}.md", _cursor_agent_md(row, lane))
+        state.write(f".codex/agents/{profile.name}.toml", _codex_agent_toml(row, lane, state))
+        state.requires_trust.append(row.definition.logical_id)
+
+
+def _codex_agent_toml(row: ResolvedCapability, lane: LaneProfile, state: _State) -> str:
+    """A Codex custom agent file: `name`, `description`, `developer_instructions` plus config
+    keys (learn.chatgpt.com/docs/agent-configuration/subagents). Settings it omits inherit
+    from the parent session, so per-agent restrictions Codex cannot express are reported."""
+    profile = _agent(row).profile
+    lines = [
+        "# Generated by Mission Control Host Projection (SPEC-01). Do not edit.",
+        f"name = {_toml(profile.name)}",
+        f"description = {_toml(profile.description)}",
+    ]
+    model = _agent_model(row, lane)
+    if model != "inherit":
+        lines.append(f"model = {_toml(model)}")
+    if profile.readonly:
+        lines.append(f"sandbox_mode = {_toml('read-only')}")
+    lines.append(f"developer_instructions = {_toml(_agent_prompt(row))}")
+    for label, values in (
+        ("tool allowlist", profile.tools),
+        ("skill restriction", profile.skills),
+        ("MCP server restriction", profile.mcp_servers),
+        ("interrupt_on", profile.interrupt_on),
+    ):
+        if values:
+            state.degraded.append(
+                f"subagent {profile.name}: codex custom agents have no per-agent {label}; "
+                "it inherits the parent session"
+            )
+    if profile.background:
+        state.degraded.append(
+            f"subagent {profile.name}: codex has no background custom-agent setting; "
+            "projected as a normal spawned agent"
+        )
+    if profile.max_turns is not None:
+        state.degraded.append(
+            f"subagent {profile.name}: codex custom agents have no max_turns setting"
+        )
+    return "\n".join(lines) + "\n"
 
 
 def _matcher_hooks(
@@ -773,6 +1038,9 @@ def _matcher_hooks(
         else:
             handler["command"] = _shell_join(entry.command)
             handler["timeout"] = entry.timeout
+            limit = entry.overlay.get("additional_context_limit")
+            if isinstance(limit, int) and not isinstance(limit, bool):
+                handler["additionalContextLimit"] = limit
         group: dict[str, object] = {"hooks": [handler]}
         if entry.matcher:
             group["matcher"] = entry.matcher

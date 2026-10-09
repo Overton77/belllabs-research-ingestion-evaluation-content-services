@@ -111,6 +111,9 @@ _CURSOR_CLOUD: dict[HookEvent, NativeHook] = {
     if event not in {E.SESSION_START, E.SESSION_END, E.BEFORE_MCP}
 }
 
+# Claude Code settings-file hooks (`.claude/settings.json`, loaded through `setting_sources`),
+# which is how the materialized `.mission/hooks/run.py` reaches the session. Evidence:
+# docs/research/2026-10-07-coding-lane-surfaces.md ("Python callback hooks" paragraph).
 _CLAUDE: dict[HookEvent, NativeHook] = {
     E.SESSION_START: _N(native_event="SessionStart"),
     E.SESSION_END: _N(native_event="SessionEnd"),
@@ -129,15 +132,61 @@ _CLAUDE: dict[HookEvent, NativeHook] = {
     E.STOP: _N(native_event="Stop"),
 }
 
+# The subset of `_CLAUDE` that the pinned Python `claude_agent_sdk.types.HookEvent` union
+# also exposes as in-process callbacks (`PreToolUse`, `PostToolUse`, `PostToolUseFailure`,
+# `UserPromptSubmit`, `Stop`, `SubagentStop`, `PreCompact`, `Notification`, `SubagentStart`,
+# `PermissionRequest`). `SessionStart`, `SessionEnd` and `PostCompact` fire only as
+# settings-file hooks; an in-process kernel hook on them is `unsupported_on_lane`
+# (multi-provider RESEARCH.md "Claude SDK language mismatch").
+CLAUDE_SDK_CALLBACK_EVENTS: frozenset[HookEvent] = frozenset(
+    {
+        E.BEFORE_PROMPT,
+        E.BEFORE_TOOL,
+        E.AFTER_TOOL,
+        E.AFTER_TOOL_FAILURE,
+        E.BEFORE_SHELL,
+        E.AFTER_SHELL,
+        E.BEFORE_MCP,
+        E.AFTER_FILE_EDIT,
+        E.BEFORE_COMPACTION,
+        E.SUBAGENT_START,
+        E.SUBAGENT_STOP,
+        E.STOP,
+    }
+)
+
+# Codex hooks (`hooks.json` / `[hooks]` in config.toml) expose twelve events: PreToolUse,
+# PermissionRequest, PostToolUse, PreCompact, PostCompact, SessionStart, SessionEnd,
+# UserPromptSubmit, SubagentStart, SubagentStop, Stop, Interrupt
+# (codex-rs/protocol/src/protocol.rs `HookEventName`). There is no PostToolUseFailure. The
+# canonical shell tool_name is "Bash"; file edits are `apply_patch` (matcher aliases
+# Write|Edit) (codex-rs/core/src/tools/hook_names.rs).
 _CODEX: dict[HookEvent, NativeHook] = {
-    event: (
-        _N(native_event="PostToolUse", matcher="apply_patch")
-        if event == E.AFTER_FILE_EDIT
-        else hook
-    )
-    for event, hook in _CLAUDE.items()
-    if event != E.AFTER_TOOL_FAILURE
+    E.SESSION_START: _N(native_event="SessionStart"),
+    E.SESSION_END: _N(native_event="SessionEnd"),
+    E.BEFORE_PROMPT: _N(native_event="UserPromptSubmit"),
+    E.BEFORE_TOOL: _N(native_event="PreToolUse"),
+    E.AFTER_TOOL: _N(native_event="PostToolUse"),
+    E.BEFORE_SHELL: _N(native_event="PreToolUse", matcher="Bash"),
+    E.AFTER_SHELL: _N(native_event="PostToolUse", matcher="Bash"),
+    E.BEFORE_MCP: _N(native_event="PreToolUse", matcher="mcp__.*"),
+    E.AFTER_FILE_EDIT: _N(native_event="PostToolUse", matcher="apply_patch"),
+    E.BEFORE_COMPACTION: _N(native_event="PreCompact"),
+    E.AFTER_COMPACTION: _N(native_event="PostCompact"),
+    E.SUBAGENT_START: _N(native_event="SubagentStart"),
+    E.SUBAGENT_STOP: _N(native_event="SubagentStop"),
+    E.STOP: _N(native_event="Stop"),
 }
+
+# Provider-hosted Claude Code runs the repository's `.claude/settings.json` hooks, so the
+# vocabulary is the settings-file one; the lane profile itself stays unqualified until the
+# qualification drill in docs/qualification/lanes/claude_cloud/FEASIBILITY.md runs.
+_CLAUDE_CLOUD: dict[HookEvent, NativeHook] = dict(_CLAUDE)
+
+# Codex Cloud tasks accept no command, local or plugin hooks under cloud orchestration
+# (docs/qualification/lanes/codex_cloud/FEASIBILITY.md, "Configuration materialization");
+# every Hook Event is `unsupported_on_lane` there.
+_CODEX_CLOUD: dict[HookEvent, NativeHook] = {}
 
 HOOK_EVENT_MAPPING: Mapping[LaneProfile, Mapping[HookEvent, NativeHook]] = {
     LaneProfile.DEEP_AGENTS: _DEEP_AGENTS,
@@ -145,7 +194,12 @@ HOOK_EVENT_MAPPING: Mapping[LaneProfile, Mapping[HookEvent, NativeHook]] = {
     LaneProfile.CURSOR_CLOUD: _CURSOR_CLOUD,
     LaneProfile.CLAUDE_AGENT_SDK: _CLAUDE,
     LaneProfile.CODEX: _CODEX,
+    LaneProfile.CLAUDE_CLOUD: _CLAUDE_CLOUD,
+    LaneProfile.CODEX_CLOUD: _CODEX_CLOUD,
 }
+
+if set(HOOK_EVENT_MAPPING) != set(LaneProfile):  # pragma: no cover - import-time guard
+    raise RuntimeError("HOOK_EVENT_MAPPING must cover every LaneProfile")
 
 
 def native_hook(profile: LaneProfile | str, event: HookEvent | str) -> NativeHook | None:

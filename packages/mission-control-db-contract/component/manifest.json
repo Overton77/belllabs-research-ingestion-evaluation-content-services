@@ -5,7 +5,7 @@
   "component": "mission_control",
   "component_version": "1.1.0",
   "contract_path": "generated/contract.json",
-  "contract_schema_digest": "sha256:d300a38959b088712bbf22111b57c36bfc3822d991c445b53468f70b7bd219be",
+  "contract_schema_digest": "sha256:6b5f9634bc1bce78129e073795b3d0e073a6f8f51e32988cdc2adce06486a0ae",
   "installer_protocol": "mission-control-sql/v2",
   "min_postgres_version": 170000,
   "ordered_migrations": [
@@ -128,6 +128,16 @@
       "key": "0030_lane_bindings",
       "path": "migrations/0030_lane_bindings.sql",
       "sha256": "c057bc275ab7162f1109646323a0aba82fd8c8b89bc9240df48ebc44501027cf"
+    },
+    {
+      "key": "0031_multi_provider_lanes",
+      "path": "migrations/0031_multi_provider_lanes.sql",
+      "sha256": "21ac0c9ae225d322f6fa44a9f49187d3f5d9018f663558a999ff42f5b80d2df1"
+    },
+    {
+      "key": "0032_run_cluster_binding_stream_hints",
+      "path": "migrations/0032_run_cluster_binding_stream_hints.sql",
+      "sha256": "8e5f588a21e4ab63b8bb353fd4d3ace256271d5b6e88b28f2e366935aa6be4a8"
     }
   ],
   "owned_schemas": [
@@ -162,11 +172,11 @@
     "mission_control_outbox_worker",
     "mission_control_readonly"
   ],
-  "schema_fingerprint": "sha256:7da7567a7e9c547015e9f9add3769720a42ad18b6c47e11017dcb416998989ac",
+  "schema_fingerprint": "sha256:672549cd78eda02e30f5f153ffdbf6882ec9643af0864ebf94232a1a041a84d6",
   "schema_fingerprint_algorithm": "mc-pg-catalog-v2",
   "schema_fingerprints": {
-    "mission_control": "sha256:ff43be9ed48e718daabaf396f48583ba113748c81314d80060abdcd3b55d1b28",
-    "mission_control_search": "sha256:cbfb0a943e40439dcce7d32008b59a58f4387a43aafe3b8a1afda13e2fff0533"
+    "mission_control": "sha256:136b93d6109e663110fdad55164a0eb396ae1820bb50b73b70bf612c40f58b03",
+    "mission_control_search": "sha256:14a2d768afd5067353cf46a33fefaad20d62f210517b945d3c043995ef47049c"
   },
   "seed_compatibility": {
     "bundle_format": "mission-control-seed/v1",
@@ -187,8 +197,8 @@
     ]
   },
   "source_identity": "mission-control-db-contract",
-  "source_inputs_digest": "sha256:51a391b5727f8aaa2108e8fc5f48f1881577ad6a8f321c9bf1febcf68c9e3e52",
-  "source_revision": "git:f9f19c508fb3887630aaa59837911b49c4078f57+inputs:sha256:51a391b5727f8aaa2108e8fc5f48f1881577ad6a8f321c9bf1febcf68c9e3e52",
+  "source_inputs_digest": "sha256:eb7349e623d811bfc86123c8d478b6071fd0f759e972045843a78e5b9e3703cd",
+  "source_revision": "git:7c9b755d75c4417ae364f33c340b9891446a391a+inputs:sha256:eb7349e623d811bfc86123c8d478b6071fd0f759e972045843a78e5b9e3703cd",
   "supported_reader_versions": [
     "mission-control-runtime/1"
   ],

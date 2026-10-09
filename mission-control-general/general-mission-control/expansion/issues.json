@@ -1,0 +1,2564 @@
+{
+  "schema_version": "mc.issue_packet.v1",
+  "requirements": {
+    "R01": "General Python runtime; Temporal; separate app Supabase; entity-store isolation; clean break",
+    "R02": "Deep Agents plus required Agent Server and frontier route; later required Python Cursor Cloud/direct profiles",
+    "R03": "Sandboxed dashboard interview discovers/refines/validates/spawns complete missions",
+    "R04": "MCP, CLI and canonical skill discover/configure/spawn/track/intervene/revise",
+    "R05": "Search catalog of skills, MCP servers/tools, plugins, spawn contracts and environment config",
+    "R06": "Validated authorized materialization including extra processes and memory",
+    "R07": "Sourced complete PDF deliverable with inspectable citations and artifact lineage",
+    "R08": "Implemented feature patch/tests/review; app/deploy navigation only from authorized receipts",
+    "R09": "Experiment reports and reproducible knowledge research/seed runs in both apps",
+    "R10": "Durable HITL approval/rejection/feedback, notifications and enforced exact-target review",
+    "R11": "Immediate stop request/fence and truthful remote interruption/irreversible effect semantics",
+    "R12": "Context injection/queue/pause/resume/cancel/fork/retry with ordered/stale-safe delivery",
+    "R13": "Active mission revision, impact/carry-forward and concurrency/ordering",
+    "R14": "Stage and Goal Loop iteration state handoff and bounded loops/governors",
+    "R15": "Context selection/provenance/budgeting/checkpoints/files/operational memory",
+    "R16": "Parent/subagent messages/progress/state, cancellation/recovery and exact middleware",
+    "R17": "Public progress without hidden chain of thought; extensions-versus-fork evidence",
+    "R18": "Knowledge inspect/ingest/verify/classify/query specialized service/skill ports",
+    "R19": "Versioned intent files and deterministic writes, auth/idempotency/partial receipts/approvals",
+    "R20": "Sandbox scratch offload via Tavily/Firecrawl CLI; selective consumption and custody",
+    "R21": "Workspace persistence/cleanup/isolation/secrets/quotas/processes/reproducibility",
+    "R22": "WebSockets durable aggregation/reconnect/replay/backpressure/views/analytics",
+    "R23": "Observability/provider cost accounting/bounded verified live budgets",
+    "R24": "Retrieval and educational/recommendation experiments with baselines/datasets/evals",
+    "R25": "Skill/CLI/MCP/web/mobile release; desktop later",
+    "R26": "Required generative UI + MCP Apps/MCP-UI with secure host/fallback prototype"
+  },
+  "issues": [
+    {
+      "id": "MC-P001",
+      "title": "Freeze canonical contracts and pinned-source capability baseline",
+      "category": "foundation",
+      "dependencies": [],
+      "repository": "mission-control",
+      "ownership_paths": [
+        "src/mission_control/contracts/",
+        "tests/contract/",
+        "docs/qualification/"
+      ],
+      "goal": "Freeze canonical contracts and pinned-source capability baseline",
+      "input_contracts": [
+        "Current canonical spec/workflow annex",
+        "schemas.json seed definitions",
+        "Existing accepted proof and dependency metadata"
+      ],
+      "output_contracts": [
+        "Generated strict Pydantic/JSON Schema/OpenAPI contract set",
+        "Golden canonical bytes/digests",
+        "Availability/evidence matrix and source digest manifest"
+      ],
+      "acceptance_tests": [
+        "Unknown fields and invalid discriminators reject",
+        "Cross-language canonical digest fixtures agree",
+        "Pinned installed methods and runtime/host gaps recorded without invented results"
+      ],
+      "requirements": [
+        "R01",
+        "R02",
+        "R04",
+        "R17",
+        "R23"
+      ],
+      "spec": "ARCHITECTURE-AND-ADRS.md",
+      "compute_profile": "C1",
+      "status": "ready",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 2,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-P002",
+      "title": "Prove two-project schema identity and role isolation",
+      "category": "foundation",
+      "dependencies": [
+        "MC-P001"
+      ],
+      "repository": "mission-control (packages/mission-control-db-contract; ownership amendment 2026-10-03)",
+      "ownership_paths": [
+        "packages/mission-control-db-contract/tests/",
+        "packages/mission-control-db-contract/component/generated/"
+      ],
+      "goal": "Prove two-project schema identity and role isolation",
+      "input_contracts": [
+        "Common schema inventory and installation identities",
+        "Disposable PostgreSQL fixture pair with unrelated app schemas"
+      ],
+      "output_contracts": [
+        "Normalized MC schema fingerprint/role test contract",
+        "Isolation qualification report"
+      ],
+      "acceptance_tests": [
+        "Equal tenant/resource UUIDs cannot cross app",
+        "RLS role and pool context leakage denied",
+        "Same common shape without domain FKs/helpers"
+      ],
+      "requirements": [
+        "R01",
+        "R19",
+        "R21"
+      ],
+      "spec": "DEPLOYMENT-AND-RELEASE.md",
+      "compute_profile": "C1",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 2,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-P003",
+      "title": "Prove Stage and Goal Loop typed state handoff",
+      "category": "foundation",
+      "dependencies": [
+        "MC-P001"
+      ],
+      "repository": "mission-control",
+      "ownership_paths": [
+        "src/mission_control/domain/programs/",
+        "tests/contract/handoff/"
+      ],
+      "goal": "Prove Stage and Goal Loop typed state handoff",
+      "input_contracts": [
+        "StateHandoff and typed source/target states",
+        "Recorded BP StageGraph/GoalDirected invariants"
+      ],
+      "output_contracts": [
+        "Pure reducer/merge and iteration fixtures",
+        "Sealed handoff/journal proof manifest"
+      ],
+      "acceptance_tests": [
+        "Conflicting deltas reject under base-version check",
+        "Accepted producer gate and crash/duplicate handoff retain identity",
+        "Loop replay preserves counters and unresolved obligations"
+      ],
+      "requirements": [
+        "R14",
+        "R15",
+        "R16"
+      ],
+      "spec": "CONTEXT-STATE-AND-CONTROL.md",
+      "compute_profile": "C1",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 2,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-P004",
+      "title": "Prove context budget selection and bidirectional subagent projection",
+      "category": "foundation",
+      "dependencies": [
+        "MC-P001"
+      ],
+      "repository": "mission-control",
+      "ownership_paths": [
+        "src/mission_control/application/artifacts/",
+        "tests/contract/context/"
+      ],
+      "goal": "Prove context budget selection and bidirectional subagent projection",
+      "input_contracts": [
+        "ContextSelection policies/tokenizer and captured candidates",
+        "Parent/child channel and runtime-context schemas"
+      ],
+      "output_contracts": [
+        "Selection/offload algorithm",
+        "Explicit outgoing and returning channel/context projection"
+      ],
+      "acceptance_tests": [
+        "Mandatory context overflow blocks",
+        "Cross-tenant memory and prompt-injection grants denied",
+        "Child cannot overwrite parent authority/budget/journal; context hydration explicit"
+      ],
+      "requirements": [
+        "R06",
+        "R15",
+        "R16",
+        "R17",
+        "R20"
+      ],
+      "spec": "CONTEXT-STATE-AND-CONTROL.md",
+      "compute_profile": "C1",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 2,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-P005",
+      "title": "Prove guarded effects and ordered urgent stop",
+      "category": "foundation",
+      "dependencies": [
+        "MC-P001"
+      ],
+      "repository": "mission-control",
+      "ownership_paths": [
+        "src/mission_control/application/execution/",
+        "tests/contract/control/"
+      ],
+      "goal": "Prove guarded effects and ordered urgent stop",
+      "input_contracts": [
+        "Command/message/effect envelopes and generations",
+        "Fake irreversible tool and uncertain cancellation scenarios"
+      ],
+      "output_contracts": [
+        "Stop-fence/admission ordering protocol",
+        "Safe-boundary queued versus interrupt receipts"
+      ],
+      "acceptance_tests": [
+        "Stop races effect admission without new post-fence claims",
+        "Already applied effect retained after cancel",
+        "Duplicate/out-of-order/stale messages yield correct receipts"
+      ],
+      "requirements": [
+        "R11",
+        "R12",
+        "R13",
+        "R16"
+      ],
+      "spec": "CONTEXT-STATE-AND-CONTROL.md",
+      "compute_profile": "C1",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 2,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-P006",
+      "title": "Prove Agent Server lost-launch and native lifecycle contract",
+      "category": "foundation",
+      "dependencies": [
+        "MC-P001"
+      ],
+      "repository": "mission-control",
+      "ownership_paths": [
+        "src/mission_control/adapters/agent_server/qualification/",
+        "tests/contract/agent_server/"
+      ],
+      "goal": "Prove Agent Server lost-launch and native lifecycle contract",
+      "input_contracts": [
+        "Pinned Agent Protocol/native launch identities",
+        "Fake/disposable app-bound servers and reservations"
+      ],
+      "output_contracts": [
+        "Idempotent launch/reconciliation wrapper profile",
+        "Observed cancellation/result/usage qualification"
+      ],
+      "acceptance_tests": [
+        "Concurrent launch cannot use non-atomic list-then-create as guarantee",
+        "Lost acknowledgement paginated/visibility recovery does not duplicate child",
+        "Cancel ack differs from settled terminal and stale output denied"
+      ],
+      "requirements": [
+        "R02",
+        "R16",
+        "R21"
+      ],
+      "spec": "CONTEXT-STATE-AND-CONTROL.md",
+      "compute_profile": "C1",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 2,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-P007",
+      "title": "Prove checkpoint hydration retry fork and replay",
+      "category": "foundation",
+      "dependencies": [
+        "MC-P003",
+        "MC-P004",
+        "MC-P006"
+      ],
+      "repository": "mission-control",
+      "ownership_paths": [
+        "src/mission_control/application/recovery/",
+        "tests/contract/recovery/"
+      ],
+      "goal": "Prove checkpoint hydration retry fork and replay",
+      "input_contracts": [
+        "Sealed checkpoint/handoff/context frontiers",
+        "Current fork saga and captured-history evidence"
+      ],
+      "output_contracts": [
+        "Durable app-scoped recovery protocol",
+        "Fork copy/hydration gating and diagnostic replay fixtures"
+      ],
+      "acceptance_tests": [
+        "Fork gets new thread/run/budget and copies no live ownership",
+        "Start dispatch held until hydrate/continuity validation",
+        "Nonterminal retry preserves identity; diagnostic replay effects disabled"
+      ],
+      "requirements": [
+        "R12",
+        "R14",
+        "R15",
+        "R16"
+      ],
+      "spec": "CONTEXT-STATE-AND-CONTROL.md",
+      "compute_profile": "C1",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 2,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-P008",
+      "title": "Prove secure MCP Apps host and native fallback",
+      "category": "foundation",
+      "dependencies": [],
+      "repository": "mission-control",
+      "ownership_paths": [
+        "clients/ui-prototype/",
+        "tests/contract/mcp_apps/"
+      ],
+      "goal": "Prove secure MCP Apps host and native fallback",
+      "input_contracts": [
+        "Official stable Apps protocol and host SDK sources",
+        "Mock authorized UiPresentation/action/resource bundles"
+      ],
+      "output_contracts": [
+        "Host/build compatibility matrix",
+        "Sandbox/CSP/handshake prototype and fallback evidence"
+      ],
+      "acceptance_tests": [
+        "Spoofed frame tool requests or stale actions denied",
+        "Unknown host renders meaningful native/text/link fallback",
+        "No credentials arbitrary iframe egress or hidden approvals"
+      ],
+      "requirements": [
+        "R25",
+        "R26"
+      ],
+      "spec": "EXPERIENCE-AND-STREAMS.md",
+      "compute_profile": "C1",
+      "status": "ready",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 2,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-P009",
+      "title": "Qualify supported runtime storage and AWS topology assumptions",
+      "category": "foundation",
+      "dependencies": [],
+      "repository": "mission-control",
+      "ownership_paths": [
+        "deploy/qualification/",
+        "docs/qualification/topology/"
+      ],
+      "goal": "Qualify supported runtime storage and AWS topology assumptions",
+      "input_contracts": [
+        "Current pinned Agent Server/checkpointer packaging docs",
+        "App-local private schema target profiles and AWS baseline"
+      ],
+      "output_contracts": [
+        "Supported topology decision record",
+        "Offline image/schema configuration validation and live preflight checklist"
+      ],
+      "acceptance_tests": [
+        "Do not assume unsupported shared Supabase schema routing",
+        "Independent app pools/namespaces/secrets and backup inventory validated",
+        "No account purchase or metered probe is performed by offline proof"
+      ],
+      "requirements": [
+        "R01",
+        "R02",
+        "R21",
+        "R23"
+      ],
+      "spec": "DEPLOYMENT-AND-RELEASE.md",
+      "compute_profile": "C1",
+      "status": "ready",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 2,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-P010",
+      "title": "Prove knowledge approval and uncertain write receipt semantics",
+      "category": "foundation",
+      "dependencies": [
+        "MC-P001"
+      ],
+      "repository": "ai-engineer-knowledge-services",
+      "ownership_paths": [
+        "packages/knowledge-db/src/ingestion/tests/",
+        "contracts/mission-control-integration/"
+      ],
+      "goal": "Prove knowledge approval and uncertain write receipt semantics",
+      "input_contracts": [
+        "Native intent/plan/apply contracts",
+        "Domain effect identity and approval trust",
+        "Fake PG/Neo4j commit-response-loss scenarios"
+      ],
+      "output_contracts": [
+        "DomainOperationEnvelope and receipt recovery fixtures",
+        "Classification mapping proposal and no-downgrade policy"
+      ],
+      "acceptance_tests": [
+        "Changed payload/plan approvals reject",
+        "Partial admitted subset and uncertainty differ",
+        "Post-commit response loss recovered from same scoped marker without repeat"
+      ],
+      "requirements": [
+        "R18",
+        "R19"
+      ],
+      "spec": "KNOWLEDGE-SERVICES.md",
+      "compute_profile": "C1",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 2,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-F001",
+      "title": "Transform backend into neutral Python distribution",
+      "category": "feature",
+      "dependencies": [
+        "MC-P001"
+      ],
+      "repository": "mission-control",
+      "ownership_paths": [
+        "pyproject.toml",
+        "uv.lock",
+        "src/mission_control/",
+        "bootstrap/"
+      ],
+      "goal": "Transform backend into neutral Python distribution",
+      "input_contracts": [
+        "Current backend reusable modules and source digest baseline",
+        "Clean-break organization contract"
+      ],
+      "output_contracts": [
+        "Isolated mission-control Python build",
+        "No Mongo/domain imports and one composition root"
+      ],
+      "acceptance_tests": [
+        "Build in isolated checkout without sibling imports",
+        "No legacy alias/history migration requirement",
+        "Current reusable invariants preserved under new names and no concurrent edits deleted"
+      ],
+      "requirements": [
+        "R01",
+        "R02"
+      ],
+      "spec": "ARCHITECTURE-AND-ADRS.md",
+      "compute_profile": "C2",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 1,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-F002",
+      "title": "Implement common SQL component and new expansion records",
+      "category": "feature",
+      "dependencies": [
+        "MC-P002"
+      ],
+      "repository": "mission-control (packages/mission-control-db-contract; ownership amendment 2026-10-03)",
+      "ownership_paths": [
+        "packages/mission-control-db-contract/component/migrations/",
+        "packages/mission-control-db-contract/component/generated/",
+        "packages/mission-control-db-contract/component/manifest.json"
+      ],
+      "goal": "Implement common SQL component and new expansion records",
+      "input_contracts": [
+        "Base DATABASE inventory plus expansion records",
+        "Role/fingerprint proofs"
+      ],
+      "output_contracts": [
+        "Checksummed self-contained release and generated DB contract",
+        "New context/message/process/interview/view/eval records"
+      ],
+      "acceptance_tests": [
+        "Both disposable installs fingerprint equal",
+        "Scoped FKs lifecycle/actor keys/append-only integrity tested",
+        "No app entity schema or vendor-table hand edits"
+      ],
+      "requirements": [
+        "R01",
+        "R10",
+        "R15",
+        "R16",
+        "R22"
+      ],
+      "spec": "DEPLOYMENT-AND-RELEASE.md",
+      "compute_profile": "C2",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 1,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-F003",
+      "title": "Implement app resolution and pinned installation tooling",
+      "category": "feature",
+      "dependencies": [
+        "MC-F001",
+        "MC-F002",
+        "MC-P009"
+      ],
+      "repository": "mission-control; biotech-postgres-db-contract",
+      "ownership_paths": [
+        "src/mission_control/application/installations/",
+        "src/biotech_postgres_db_contract/",
+        "installation/"
+      ],
+      "goal": "Implement app resolution and pinned installation tooling",
+      "input_contracts": [
+        "ApplicationBinding and component manifest",
+        "Secret references and disposable identity fixtures"
+      ],
+      "output_contracts": [
+        "Auth-first app router/least-privilege pools",
+        "Plan verify apply tooling and idempotent seeds (no live apply)"
+      ],
+      "acceptance_tests": [
+        "App spoofing/issuer mismatch denied",
+        "Schema drift/unavailable app cannot fall back",
+        "Repeat seed/version digest conflicts and nonmutating plan verified"
+      ],
+      "requirements": [
+        "R01",
+        "R21"
+      ],
+      "spec": "DEPLOYMENT-AND-RELEASE.md",
+      "compute_profile": "C2",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 1,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-F004",
+      "title": "Implement immutable compiler and first recursive workflow vertical",
+      "category": "feature",
+      "dependencies": [
+        "MC-F001",
+        "MC-P003"
+      ],
+      "repository": "mission-control",
+      "ownership_paths": [
+        "src/mission_control/domain/authoring/",
+        "src/mission_control/domain/programs/",
+        "tests/contract/compiler/"
+      ],
+      "goal": "Implement immutable compiler and first recursive workflow vertical",
+      "input_contracts": [
+        "Workflow suite and strict program/revision schemas",
+        "State handoff reducer contracts"
+      ],
+      "output_contracts": [
+        "Deterministic compiler/StageGraph/GoalLoop interpretations",
+        "Exact bindings and completion criteria"
+      ],
+      "acceptance_tests": [
+        "Cycles/fanout unbounded or capability missing reject before side effects",
+        "Producer acceptance and typed projection enforced",
+        "Repeat compile gives same bytes/digests"
+      ],
+      "requirements": [
+        "R13",
+        "R14"
+      ],
+      "spec": "CONTEXT-STATE-AND-CONTROL.md",
+      "compute_profile": "C1",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 2,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-F005",
+      "title": "Implement transactional intents budgets outbox and Temporal kernel",
+      "category": "feature",
+      "dependencies": [
+        "MC-F003",
+        "MC-F004",
+        "MC-P005"
+      ],
+      "repository": "mission-control",
+      "ownership_paths": [
+        "src/mission_control/application/execution/",
+        "src/mission_control/adapters/temporal/",
+        "src/mission_control/adapters/postgres/"
+      ],
+      "goal": "Implement transactional intents budgets outbox and Temporal kernel",
+      "input_contracts": [
+        "Scoped contracts/schema",
+        "Approved deterministic program",
+        "Command/effect/usage proof fixtures"
+      ],
+      "output_contracts": [
+        "Root/activation/operation workflows",
+        "Atomic request/effect/reservation/event/outbox writer and reconciliation"
+      ],
+      "acceptance_tests": [
+        "Worker death before/after commit/effect/receipt resumes same identity",
+        "Integer exposure includes unsettled children and unknown billing",
+        "No IO in workflow replay and no duplicate root dispatch"
+      ],
+      "requirements": [
+        "R01",
+        "R11",
+        "R12",
+        "R23"
+      ],
+      "spec": "DEPLOYMENT-AND-RELEASE.md",
+      "compute_profile": "C1",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 2,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-F006",
+      "title": "Implement scoped capability search and exact configuration assembly",
+      "category": "feature",
+      "dependencies": [
+        "MC-F003",
+        "MC-P004"
+      ],
+      "repository": "mission-control",
+      "ownership_paths": [
+        "src/mission_control/application/catalog/",
+        "src/mission_control/adapters/postgres/catalog/",
+        "tests/contract/catalog/"
+      ],
+      "goal": "Implement scoped capability search and exact configuration assembly",
+      "input_contracts": [
+        "CatalogAsset/Environment/Spawn contracts",
+        "Seed assets and grants"
+      ],
+      "output_contracts": [
+        "Authorized lexical search/index and config validator",
+        "Pinned selection/binding manifests"
+      ],
+      "acceptance_tests": [
+        "Revoked/missing/transitive dependency drift rejects",
+        "Search cannot leak foreign snippets or resolve aliases at run time",
+        "Spawn depth/grants/budgets narrower than parent"
+      ],
+      "requirements": [
+        "R05",
+        "R06"
+      ],
+      "spec": "CATALOG-AND-ENVIRONMENTS.md",
+      "compute_profile": "C2",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 1,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-F007",
+      "title": "Implement workspace custody offload and process leases",
+      "category": "feature",
+      "dependencies": [
+        "MC-F005",
+        "MC-F006",
+        "MC-P004"
+      ],
+      "repository": "mission-control",
+      "ownership_paths": [
+        "src/mission_control/adapters/langsmith/",
+        "src/mission_control/application/artifacts/",
+        "src/mission_control/application/workspaces/"
+      ],
+      "goal": "Implement workspace custody offload and process leases",
+      "input_contracts": [
+        "WorkspaceManifest and admitted CLI/process profiles",
+        "Selected context/skill/input artifacts"
+      ],
+      "output_contracts": [
+        "Idempotent materializer/process lifecycle",
+        "Bounded retrieval captures and artifact registration/cleanup"
+      ],
+      "acceptance_tests": [
+        "Traversal/symlink/secret/egress tests fail closed",
+        "Lost sandbox launch/partial upload/cleanup uncertainty visible",
+        "Large retrieval uses selective reads and cited bytes survive teardown"
+      ],
+      "requirements": [
+        "R06",
+        "R20",
+        "R21"
+      ],
+      "spec": "CATALOG-AND-ENVIRONMENTS.md",
+      "compute_profile": "C2",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 1,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-F008",
+      "title": "Implement governed Deep Agents middleware and state channels",
+      "category": "feature",
+      "dependencies": [
+        "MC-F007",
+        "MC-P003",
+        "MC-P004",
+        "MC-P005"
+      ],
+      "repository": "mission-control",
+      "ownership_paths": [
+        "src/mission_control/adapters/deep_agents/",
+        "tests/contract/deep_agents/"
+      ],
+      "goal": "Implement governed Deep Agents middleware and state channels",
+      "input_contracts": [
+        "Pinned source hook matrix and extension profile",
+        "Tool wrappers and bidirectional context projections"
+      ],
+      "output_contracts": [
+        "Exact effective middleware order/materializer",
+        "Typed public progress and guarded default tools"
+      ],
+      "acceptance_tests": [
+        "Sync task cannot return parent authority fields",
+        "Runtime context explicitly reconstructed under grants",
+        "Guard covers native execute/dynamic launch and private reasoning never required"
+      ],
+      "requirements": [
+        "R02",
+        "R14",
+        "R15",
+        "R16",
+        "R17"
+      ],
+      "spec": "CONTEXT-STATE-AND-CONTROL.md",
+      "compute_profile": "C1",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 2,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-F009",
+      "title": "Implement required Agent Server and subordinate mailbox",
+      "category": "feature",
+      "dependencies": [
+        "MC-F008",
+        "MC-P006",
+        "MC-P009"
+      ],
+      "repository": "mission-control",
+      "ownership_paths": [
+        "agent_server/",
+        "src/mission_control/adapters/agent_server/",
+        "src/mission_control/application/subordinates/"
+      ],
+      "goal": "Implement required Agent Server and subordinate mailbox",
+      "input_contracts": [
+        "Admitted graph/profile/endpoint and launch wrapper",
+        "Message mailboxes and dependency policies"
+      ],
+      "output_contracts": [
+        "App-bound graphs/native persistence",
+        "Ordered parent-child delivery and settlement receipts"
+      ],
+      "acceptance_tests": [
+        "Queue does not invoke unconditional native interrupt",
+        "Restart/lost update/concurrent launch recovers handles",
+        "Required unresolved child blocks completion; stale/late result preserved but not admitted"
+      ],
+      "requirements": [
+        "R02",
+        "R12",
+        "R16"
+      ],
+      "spec": "CONTEXT-STATE-AND-CONTROL.md",
+      "compute_profile": "C1",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 2,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-F010",
+      "title": "Implement full control recovery and active revision transitions",
+      "category": "feature",
+      "dependencies": [
+        "MC-F005",
+        "MC-F009",
+        "MC-P007"
+      ],
+      "repository": "mission-control",
+      "ownership_paths": [
+        "src/mission_control/application/recovery/",
+        "src/mission_control/application/missions/revisions/",
+        "tests/acceptance/control/"
+      ],
+      "goal": "Implement full control recovery and active revision transitions",
+      "input_contracts": [
+        "Fork/checkpoint/retry protocol and command mailbox",
+        "Revision impact/carry-forward contracts"
+      ],
+      "output_contracts": [
+        "Inspect/queue/interrupt/pause/resume/cancel/fork/retry/replay endpoints",
+        "Recorded revision reconciliation"
+      ],
+      "acceptance_tests": [
+        "Urgent stop observed versus settled states truthful",
+        "Competing revision/commands fail by expected version",
+        "In-flight pins unchanged and changed artifact invalidates approval"
+      ],
+      "requirements": [
+        "R11",
+        "R12",
+        "R13"
+      ],
+      "spec": "CONTEXT-STATE-AND-CONTROL.md",
+      "compute_profile": "C1",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 2,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-F011",
+      "title": "Ship canonical public API MCP CLI and skill parity",
+      "category": "feature",
+      "dependencies": [
+        "MC-F006",
+        "MC-F010"
+      ],
+      "repository": "mission-control",
+      "ownership_paths": [
+        "src/mission_control/interfaces/",
+        "skills/mission-control/",
+        "clients/typescript/"
+      ],
+      "goal": "Ship canonical public API MCP CLI and skill parity",
+      "input_contracts": [
+        "Single operation catalog and error/auth schemas",
+        "Authoring/run/control/catalog handlers"
+      ],
+      "output_contracts": [
+        "FastAPI/OpenAPI HTTP client CLI remote MCP/stdio bridge",
+        "Digest-pinned skill/reference bundle"
+      ],
+      "acceptance_tests": [
+        "Same mutation across transports returns same semantic receipt",
+        "Lost response same request identity",
+        "Host onboarding auth and complete skill bundle loaded; no direct table mutation"
+      ],
+      "requirements": [
+        "R04",
+        "R25"
+      ],
+      "spec": "CATALOG-AND-ENVIRONMENTS.md",
+      "compute_profile": "C2",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 1,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-F012",
+      "title": "Implement sandbox interview and draft-to-workflow coordinator",
+      "category": "feature",
+      "dependencies": [
+        "MC-F007",
+        "MC-F008",
+        "MC-F011"
+      ],
+      "repository": "mission-control",
+      "ownership_paths": [
+        "src/mission_control/application/interviews/",
+        "src/mission_control/interfaces/http/interviews/",
+        "clients/web/interviews/"
+      ],
+      "goal": "Implement sandbox interview and draft-to-workflow coordinator",
+      "input_contracts": [
+        "InterviewCreate/Turn and scoped interview event schemas",
+        "Catalog/config/context operations and drafts"
+      ],
+      "output_contracts": [
+        "Recoverable interview sessions and explicit validate/commit/start UI",
+        "Coordinator manifest and durable draft links"
+      ],
+      "acceptance_tests": [
+        "Interview is not fictitious Mission Run",
+        "Unpermitted chat cannot launch effects",
+        "Start response loss recovered and warnings/effect grants visible"
+      ],
+      "requirements": [
+        "R03",
+        "R04",
+        "R06"
+      ],
+      "spec": "EXPERIENCE-AND-STREAMS.md",
+      "compute_profile": "C2",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 1,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-F013",
+      "title": "Implement durable Human Tasks feedback and notification intents",
+      "category": "feature",
+      "dependencies": [
+        "MC-F005",
+        "MC-F010"
+      ],
+      "repository": "mission-control",
+      "ownership_paths": [
+        "src/mission_control/application/reviews/",
+        "src/mission_control/application/notifications/",
+        "tests/acceptance/review/"
+      ],
+      "goal": "Implement durable Human Tasks feedback and notification intents",
+      "input_contracts": [
+        "ReviewPacket/Decision exact target digest",
+        "Notification/profile and artifact relations"
+      ],
+      "output_contracts": [
+        "Attributable resolutions/remediation versions",
+        "Durable inbox/push adapter contract with duplicate-safe delivery"
+      ],
+      "acceptance_tests": [
+        "Competing/stale/digest-changed approvals reject",
+        "Timeout cannot approve and notification cannot resolve",
+        "Response loss or duplicate notification does not duplicate decision"
+      ],
+      "requirements": [
+        "R10",
+        "R13"
+      ],
+      "spec": "EXPERIENCE-AND-STREAMS.md",
+      "compute_profile": "C2",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 1,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-F014",
+      "title": "Implement durable event aggregation WebSocket SSE and views",
+      "category": "feature",
+      "dependencies": [
+        "MC-F005",
+        "MC-P005"
+      ],
+      "repository": "mission-control",
+      "ownership_paths": [
+        "src/mission_control/interfaces/http/streams/",
+        "src/mission_control/application/views/",
+        "src/mission_control/application/events/"
+      ],
+      "goal": "Implement durable event aggregation WebSocket SSE and views",
+      "input_contracts": [
+        "Existing canonical mc.event.v1 and snapshot frontiers",
+        "Stream profile/ticket/frame schemas"
+      ],
+      "output_contracts": [
+        "App-scoped replayable WS/SSE adapters and idempotent projectors",
+        "Per-mission watermarks/backpressure/usage views"
+      ],
+      "acceptance_tests": [
+        "Replay-to-tail race/duplicate/gap/retention paths correct",
+        "Slow consumer disconnect never drops durable events",
+        "Revocation/ticket expiry and projection rebuild tested; no cross-mission total order promised"
+      ],
+      "requirements": [
+        "R17",
+        "R22",
+        "R23"
+      ],
+      "spec": "EXPERIENCE-AND-STREAMS.md",
+      "compute_profile": "C2",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 1,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-F015",
+      "title": "Integrate both web dashboards and navigable artifacts decisions",
+      "category": "feature",
+      "dependencies": [
+        "MC-F012",
+        "MC-F013",
+        "MC-F014"
+      ],
+      "repository": "aiengineerapp; mission-control",
+      "ownership_paths": [
+        "aiengineerapp/app/mission-control/",
+        "aiengineerapp/components/mission-control/",
+        "mission-control/clients/web/"
+      ],
+      "goal": "Integrate both web dashboards and navigable artifacts decisions",
+      "input_contracts": [
+        "Generated scoped client and interviews/views",
+        "Artifact/review/publication receipts"
+      ],
+      "output_contracts": [
+        "Shared mission debugger/interview/review experience in both apps",
+        "Authorized PDF/patch/result/big-decision/app navigation"
+      ],
+      "acceptance_tests": [
+        "Only registered deploy URL displayed as finished app",
+        "Stale views/conflicting controls clearly refresh",
+        "Both app tokens cannot select other installation"
+      ],
+      "requirements": [
+        "R03",
+        "R07",
+        "R08",
+        "R10",
+        "R22",
+        "R25"
+      ],
+      "spec": "EXPERIENCE-AND-STREAMS.md",
+      "compute_profile": "C2",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 1,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-F016",
+      "title": "Build mobile client and durable fallback review controls",
+      "category": "feature",
+      "dependencies": [
+        "MC-F011",
+        "MC-F013",
+        "MC-F014",
+        "MC-P008"
+      ],
+      "repository": "mission-control",
+      "ownership_paths": [
+        "clients/mobile/",
+        "tests/mobile/"
+      ],
+      "goal": "Build mobile client and durable fallback review controls",
+      "input_contracts": [
+        "Generated API and native component contracts",
+        "App auth and configured push profile"
+      ],
+      "output_contracts": [
+        "Proposed Expo/React Native client with native fallback",
+        "iOS/Android proof artifacts and framework decision"
+      ],
+      "acceptance_tests": [
+        "Background/resume reconnect and task refresh correct",
+        "No offline automatic approval",
+        "Push/deep links/document access/control and no token leakage qualified on both platforms"
+      ],
+      "requirements": [
+        "R10",
+        "R25",
+        "R26"
+      ],
+      "spec": "EXPERIENCE-AND-STREAMS.md",
+      "compute_profile": "C2",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 1,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-F017",
+      "title": "Implement generative UI and standard MCP Apps resources",
+      "category": "feature",
+      "dependencies": [
+        "MC-F011",
+        "MC-F013",
+        "MC-P008"
+      ],
+      "repository": "mission-control",
+      "ownership_paths": [
+        "clients/ui-components/",
+        "src/mission_control/interfaces/mcp/ui/",
+        "tests/contract/ui/"
+      ],
+      "goal": "Implement generative UI and standard MCP Apps resources",
+      "input_contracts": [
+        "UiPresentation/UiActionIntent/component allowlist",
+        "Pinned MCP Apps resource and host matrix"
+      ],
+      "output_contracts": [
+        "Schema-valid generated components and secure Apps bundle",
+        "MCP-UI dashboard prototype + native/text fallback"
+      ],
+      "acceptance_tests": [
+        "Malformed props/arbitrary JS/unknown actions denied",
+        "Iframe handshake source/CSP/egress/spoofed mediation tests",
+        "Fallback retains review/stop functions; stale action uses existing receipt/version semantics"
+      ],
+      "requirements": [
+        "R26",
+        "R25"
+      ],
+      "spec": "EXPERIENCE-AND-STREAMS.md",
+      "compute_profile": "C2",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 1,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-F018",
+      "title": "Qualify and implement Python Cursor Cloud harness",
+      "category": "feature",
+      "dependencies": [
+        "MC-F007",
+        "MC-F010",
+        "MC-P001"
+      ],
+      "repository": "mission-control",
+      "ownership_paths": [
+        "src/mission_control/adapters/cursor_cloud/",
+        "tests/contract/cursor/"
+      ],
+      "goal": "Qualify and implement Python Cursor Cloud harness",
+      "input_contracts": [
+        "Locked Python SDK/bridge profile",
+        "Repository workspace and common harness contracts"
+      ],
+      "output_contracts": [
+        "Qualified create/reattach/observe/cancel/usage adapter",
+        "Patch/test/artifact custody and emulated fork profile"
+      ],
+      "acceptance_tests": [
+        "Lost launch/native handle recovery without blind paid repeat",
+        "Queue versus cancel/new-run semantics correctly reported",
+        "Fork native unsupported unless proved; no operator dirty-worktree writes or unauthorized auto-PR"
+      ],
+      "requirements": [
+        "R02",
+        "R08",
+        "R12",
+        "R21"
+      ],
+      "spec": "CATALOG-AND-ENVIRONMENTS.md",
+      "compute_profile": "C1",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 2,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-F019",
+      "title": "Implement bounded frontier routes and cost accounting",
+      "category": "feature",
+      "dependencies": [
+        "MC-F005",
+        "MC-F008"
+      ],
+      "repository": "mission-control",
+      "ownership_paths": [
+        "src/mission_control/adapters/frontier/",
+        "src/mission_control/application/accounting/"
+      ],
+      "goal": "Implement bounded frontier routes and cost accounting",
+      "input_contracts": [
+        "Provider profile and current price snapshots when authorized",
+        "Usage/reservation/correction schemas"
+      ],
+      "output_contracts": [
+        "Pinned Deep Agents model route and subsequent direct executor profiles",
+        "Per-dimension usage settlement/reconciliation"
+      ],
+      "acceptance_tests": [
+        "Unknown usage is not zero",
+        "Failover never changes uncertain billed identity",
+        "Stateless profile rejects unsupported continuation; double settlement impossible"
+      ],
+      "requirements": [
+        "R02",
+        "R23"
+      ],
+      "spec": "DEPLOYMENT-AND-RELEASE.md",
+      "compute_profile": "C2",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 1,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-F020",
+      "title": "Complete Swarm Optimizer Child Missions and recursive semantics",
+      "category": "feature",
+      "dependencies": [
+        "MC-F004",
+        "MC-F009",
+        "MC-F010"
+      ],
+      "repository": "mission-control",
+      "ownership_paths": [
+        "src/mission_control/domain/programs/",
+        "src/mission_control/application/invocations/",
+        "tests/acceptance/workflow_systems/"
+      ],
+      "goal": "Complete Swarm Optimizer Child Missions and recursive semantics",
+      "input_contracts": [
+        "Workflow 00-09 suite",
+        "Admission/handoff/control/evaluator contracts"
+      ],
+      "output_contracts": [
+        "Four-system recursive interpreter/conformance fixtures",
+        "Bounded revisit/fanout/convergence/child projections"
+      ],
+      "acceptance_tests": [
+        "Quorum/patience/no-progress/governor outcomes explicit",
+        "Evaluator independent context cannot accept itself",
+        "Child mission independently admitted and active revision impacts proven"
+      ],
+      "requirements": [
+        "R13",
+        "R14",
+        "R16"
+      ],
+      "spec": "CONTEXT-STATE-AND-CONTROL.md",
+      "compute_profile": "C1",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 2,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-F021",
+      "title": "Publish knowledge operation and deterministic PostgreSQL intent adapter",
+      "category": "feature",
+      "dependencies": [
+        "MC-P010",
+        "MC-F011",
+        "MC-F013"
+      ],
+      "repository": "ai-engineer-knowledge-services",
+      "ownership_paths": [
+        "packages/application/src/operations/",
+        "packages/knowledge-db/src/",
+        "skills/knowledge integration/",
+        "published clients/"
+      ],
+      "goal": "Publish knowledge operation and deterministic PostgreSQL intent adapter",
+      "input_contracts": [
+        "Native immutable intent/read/plan/receipt schemas",
+        "Generic external DomainOperationEnvelope",
+        "Trusted approval/oracle bindings"
+      ],
+      "output_contracts": [
+        "Published inspect/query/retrieve/verify/classify proposal/plan/apply/receipt ports",
+        "No internal-import Python adapter and advertised availability"
+      ],
+      "acceptance_tests": [
+        "Executor-only routes not falsely advertised as transport parity",
+        "Classifier mapping rejects downgrade/unknown labels",
+        "Plan digest/head drift/partial/uncertain response tested with public handlers"
+      ],
+      "requirements": [
+        "R18",
+        "R19"
+      ],
+      "spec": "KNOWLEDGE-SERVICES.md",
+      "compute_profile": "C1",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 2,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-F022",
+      "title": "Implement governed Neo4j intent writer and receipt marker",
+      "category": "feature",
+      "dependencies": [
+        "MC-P010",
+        "MC-F011",
+        "MC-F013"
+      ],
+      "repository": "biotech-kg",
+      "ownership_paths": [
+        "src/ingestion/",
+        "operations/ingestion/",
+        "tests/intent_writer/"
+      ],
+      "goal": "Implement governed Neo4j intent writer and receipt marker",
+      "input_contracts": [
+        "Exact app graph schema and domain proposal families",
+        "Scoped intent/effect/approval contracts"
+      ],
+      "output_contracts": [
+        "Atomic graph marker/precondition/write/receipt transaction",
+        "Authenticated receipt/read-back adapter"
+      ],
+      "acceptance_tests": [
+        "Graph commit response loss recovers marker without duplicate write",
+        "Changed identity payload or stale domain preconditions reject",
+        "Partial policy preserved and no PG-Neo4j distributed transaction assumed"
+      ],
+      "requirements": [
+        "R18",
+        "R19",
+        "R09"
+      ],
+      "spec": "KNOWLEDGE-SERVICES.md",
+      "compute_profile": "C1",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 2,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-F023",
+      "title": "Implement advisory memory admission and recall policy",
+      "category": "feature",
+      "dependencies": [
+        "MC-P004",
+        "MC-F006",
+        "MC-F021"
+      ],
+      "repository": "mission-control; ai-engineer-knowledge-services; biotech-kg",
+      "ownership_paths": [
+        "mission-control/src/mission_control/application/memory/",
+        "mission-control/tests/contract/memory/",
+        "ai-engineer-knowledge-services/packages/application/src/memory/",
+        "biotech-kg/src/memory/"
+      ],
+      "goal": "Implement advisory memory admission and recall policy",
+      "input_contracts": [
+        "MemoryRecall/admission/namespace policy",
+        "Consent/expiry/provenance and service bindings"
+      ],
+      "output_contracts": [
+        "Scoped recall/write-proposal/revocation receipts",
+        "Bounded episodic/tenant/domain projections"
+      ],
+      "acceptance_tests": [
+        "No automatic chat/checkpoint ingestion",
+        "Personal-public and cross-tenant filters applied before ranking",
+        "Revoked/expired memory not authority and retained audit policy explicit"
+      ],
+      "requirements": [
+        "R06",
+        "R15",
+        "R18"
+      ],
+      "spec": "CONTEXT-STATE-AND-CONTROL.md",
+      "compute_profile": "C2",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 1,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-F024",
+      "title": "Implement sourced PDF production validation and revision workflow",
+      "category": "feature",
+      "dependencies": [
+        "MC-F007",
+        "MC-F013",
+        "MC-F021"
+      ],
+      "repository": "mission-control",
+      "ownership_paths": [
+        "src/mission_control/adapters/report_rendering/",
+        "catalog/report_profiles/",
+        "tests/acceptance/pdf/"
+      ],
+      "goal": "Implement sourced PDF production validation and revision workflow",
+      "input_contracts": [
+        "Accepted report schema/captured source selectors",
+        "Render profile/font/tool versions",
+        "Human review contract"
+      ],
+      "output_contracts": [
+        "Registered complete PDF plus citation/claim index/source manifest",
+        "Render/schema/citation assessment and revision lineage"
+      ],
+      "acceptance_tests": [
+        "Every required report section/table/citation survives PDF rendering",
+        "Broken source selector/page overflow/missing font detected",
+        "Rejected revised bytes require fresh gate; no model text called finished PDF"
+      ],
+      "requirements": [
+        "R07",
+        "R10"
+      ],
+      "spec": "WORKED-SCENARIOS.md",
+      "compute_profile": "C2",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 1,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-F025",
+      "title": "Implement reproducible retrieval and recommendation experiment runner",
+      "category": "feature",
+      "dependencies": [
+        "MC-F020",
+        "MC-F021",
+        "MC-F019",
+        "MC-D002"
+      ],
+      "repository": "mission-control",
+      "ownership_paths": [
+        "src/mission_control/application/evaluations/",
+        "catalog/evaluation/",
+        "tests/acceptance/experiments/"
+      ],
+      "goal": "Implement reproducible retrieval and recommendation experiment runner",
+      "input_contracts": [
+        "Dataset/split/license/consent and frozen baseline",
+        "Treatment/rubric/metric/seed/profile/budget manifests"
+      ],
+      "output_contracts": [
+        "Reproducible paired evaluation/report artifacts",
+        "Independent admission and statistical uncertainty policy"
+      ],
+      "acceptance_tests": [
+        "No train/test leakage or changing baseline mid-run",
+        "Captured replay reproduces metrics; treatment failures/abstention included",
+        "Recommendations cite evidence, disclose uncertainty and do not claim medical efficacy"
+      ],
+      "requirements": [
+        "R09",
+        "R24",
+        "R23"
+      ],
+      "spec": "WORKED-SCENARIOS.md",
+      "compute_profile": "C3",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 1,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-D001",
+      "title": "Prepare separate app seed catalogs policies and endpoint bindings",
+      "category": "data",
+      "dependencies": [
+        "MC-F003",
+        "MC-F006"
+      ],
+      "repository": "biotech-postgres-db-contract / AI Engineer installer",
+      "ownership_paths": [
+        "seeds/",
+        "application binding manifests/"
+      ],
+      "goal": "Prepare separate app seed catalogs policies and endpoint bindings",
+      "input_contracts": [
+        "Same common component version",
+        "Actual operator identity/endpoint references or offline fakes"
+      ],
+      "output_contracts": [
+        "Versioned idempotent separate app seeds",
+        "Template capability/rubric/data readiness manifests"
+      ],
+      "acceptance_tests": [
+        "Same-version changed seed digest conflicts",
+        "Missing endpoint remains unavailable",
+        "Seeds cannot manufacture users/operator authority or cross-project credentials"
+      ],
+      "requirements": [
+        "R01",
+        "R05",
+        "R09",
+        "R18"
+      ],
+      "spec": "DEPLOYMENT-AND-RELEASE.md",
+      "compute_profile": "C2",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 1,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-D002",
+      "title": "Prepare licensed captured benchmark datasets and split manifest",
+      "category": "data",
+      "dependencies": [],
+      "repository": "mission-control",
+      "ownership_paths": [
+        "catalog/evaluation/biotech/",
+        "catalog/evaluation/ai_engineer/",
+        "tests/fixtures/evaluation/"
+      ],
+      "goal": "Prepare licensed captured benchmark datasets and split manifest",
+      "input_contracts": [
+        "Owner-approved public/licensed captures or synthetic fixtures",
+        "Engineering/biotech educational task definitions"
+      ],
+      "output_contracts": [
+        "Immutable dataset source/consent/provenance/split/digest manifest",
+        "Baseline metrics and safety/abstention rubric specification"
+      ],
+      "acceptance_tests": [
+        "No PHI/consent leakage or duplicated train/test entities",
+        "Ambiguous labels/absent evidence flagged",
+        "Offline baselines include negative/conflicting-source cases; no unsupported clinical inference"
+      ],
+      "requirements": [
+        "R09",
+        "R24",
+        "R17"
+      ],
+      "spec": "WORKED-SCENARIOS.md",
+      "compute_profile": "C3",
+      "status": "ready",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 1,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-D003",
+      "title": "Close knowledge-service availability and source readiness",
+      "category": "data",
+      "dependencies": [
+        "MC-F021",
+        "MC-F022",
+        "MC-D001"
+      ],
+      "repository": "mission-control; app knowledge services",
+      "ownership_paths": [
+        "catalog/readiness/",
+        "tests/acceptance/knowledge/"
+      ],
+      "goal": "Close knowledge-service availability and source readiness",
+      "input_contracts": [
+        "Domain endpoint/contracts and seeded grants",
+        "Source evidence/custody and schema mappings"
+      ],
+      "output_contracts": [
+        "Both-app capability readiness/unsupported matrix",
+        "Verified source fixtures and receipt access"
+      ],
+      "acceptance_tests": [
+        "Unavailable read-intent retrieval not relabeled success",
+        "Classification mapping and domains differ explicitly",
+        "All required seed items inspectable and every write has recovery receipt"
+      ],
+      "requirements": [
+        "R18",
+        "R19",
+        "R09"
+      ],
+      "spec": "KNOWLEDGE-SERVICES.md",
+      "compute_profile": "C2",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 1,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-I001",
+      "title": "Qualify Deep Agents Agent Server parity in both installations",
+      "category": "integration",
+      "dependencies": [
+        "MC-F009",
+        "MC-F010",
+        "MC-F019",
+        "MC-D001",
+        "MC-F011"
+      ],
+      "repository": "mission-control",
+      "ownership_paths": [
+        "tests/acceptance/two_app_parity/",
+        "docs/qualification/"
+      ],
+      "goal": "Qualify Deep Agents Agent Server parity in both installations",
+      "input_contracts": [
+        "Same release/lock/schema plus different app grants",
+        "Approved finite live allocation only for live variant"
+      ],
+      "output_contracts": [
+        "Offline/disposable/live-separated parity report",
+        "Deep Agents stage/goal/child recovery artifacts"
+      ],
+      "acceptance_tests": [
+        "Both apps same build isolated writes",
+        "Real required async path persists/restarts under chosen topology when authorized",
+        "Lost launch/pause/cancel/usage and host loaded skill truthfully qualified"
+      ],
+      "requirements": [
+        "R01",
+        "R02",
+        "R14",
+        "R16",
+        "R23"
+      ],
+      "spec": "DEPLOYMENT-AND-RELEASE.md",
+      "compute_profile": "C4",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 1,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-I002",
+      "title": "Qualify all public surfaces and UI compatibility",
+      "category": "integration",
+      "dependencies": [
+        "MC-F015",
+        "MC-F016",
+        "MC-F017",
+        "MC-F011"
+      ],
+      "repository": "mission-control / app clients",
+      "ownership_paths": [
+        "tests/acceptance/public_surfaces/",
+        "host compatibility manifest/"
+      ],
+      "goal": "Qualify all public surfaces and UI compatibility",
+      "input_contracts": [
+        "Operation catalog/skill/UI resource digests",
+        "Web/mobile/MCP/CLI auth fixtures"
+      ],
+      "output_contracts": [
+        "Parity report plus secure host/fallback matrix",
+        "Mobile and web actual-shell results"
+      ],
+      "acceptance_tests": [
+        "Same app grants and mutation receipts across clients",
+        "Host unsupported rich UI falls back safely",
+        "Offline mobile stale approvals and spoofed frame/tool context denied"
+      ],
+      "requirements": [
+        "R03",
+        "R04",
+        "R10",
+        "R25",
+        "R26",
+        "R22"
+      ],
+      "spec": "EXPERIENCE-AND-STREAMS.md",
+      "compute_profile": "C2",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 1,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-I003",
+      "title": "Qualify PDF coding seed and research experiment scenarios",
+      "category": "integration",
+      "dependencies": [
+        "MC-I001",
+        "MC-F018",
+        "MC-F024",
+        "MC-F025",
+        "MC-D003",
+        "MC-F023"
+      ],
+      "repository": "mission-control / app domain owners",
+      "ownership_paths": [
+        "tests/acceptance/worked_scenarios/",
+        "docs/qualification/scenarios/"
+      ],
+      "goal": "Qualify PDF coding seed and research experiment scenarios",
+      "input_contracts": [
+        "All scenario input/output/dependency manifests",
+        "Finite allocation for any live variant"
+      ],
+      "output_contracts": [
+        "Both-app artifacts and requirement criterion receipts",
+        "Patch/tests/PDF/ingestion/experiment provenance packets"
+      ],
+      "acceptance_tests": [
+        "Real byte artifacts complete and navigable",
+        "Adversarial feedback/revision/partial failure cases settle",
+        "Feature output not deployed unless explicitly separate admitted stage; no unexplained skipped cases"
+      ],
+      "requirements": [
+        "R07",
+        "R08",
+        "R09",
+        "R10",
+        "R18",
+        "R19",
+        "R24"
+      ],
+      "spec": "WORKED-SCENARIOS.md",
+      "compute_profile": "C4",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 1,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-R001",
+      "title": "Qualify security load failure recovery and accounting",
+      "category": "release",
+      "dependencies": [
+        "MC-I001",
+        "MC-I002",
+        "MC-I003",
+        "MC-P009"
+      ],
+      "repository": "mission-control / infrastructure owner",
+      "ownership_paths": [
+        "tests/release/",
+        "deploy/qualification/",
+        "runbooks/"
+      ],
+      "goal": "Qualify security load failure recovery and accounting",
+      "input_contracts": [
+        "Release manifest and measured limits",
+        "Disposable load/failure/security/billing fixtures"
+      ],
+      "output_contracts": [
+        "Capacity/latency/isolation/restore/reconciliation evidence",
+        "Revocation/redaction/budget enforcement runbooks"
+      ],
+      "acceptance_tests": [
+        "Restore bytes plus DB/workflow/checkpoint frontiers",
+        "Slow sockets/DB outage/worker loss preserve event/receipt truth",
+        "Unknown spend and irreversible effects visible; no hidden reasoning/secret leakage"
+      ],
+      "requirements": [
+        "R11",
+        "R12",
+        "R21",
+        "R22",
+        "R23"
+      ],
+      "spec": "DEPLOYMENT-AND-RELEASE.md",
+      "compute_profile": "C3",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 1,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-R002",
+      "title": "Package release artifacts skill CLI MCP web mobile and schema",
+      "category": "release",
+      "dependencies": [
+        "MC-R001"
+      ],
+      "repository": "mission-control / app installers",
+      "ownership_paths": [
+        "release manifest/",
+        "clients releases/",
+        "skills/",
+        "deploy/"
+      ],
+      "goal": "Package release artifacts skill CLI MCP web mobile and schema",
+      "input_contracts": [
+        "All passed gates/source hashes",
+        "Compatible common component and app registry refs"
+      ],
+      "output_contracts": [
+        "Signed/checksummed reproducible artifact manifest",
+        "Installer plans and consumer compatibility report"
+      ],
+      "acceptance_tests": [
+        "Isolated build installs exact dependencies with no domain/Mongo imports",
+        "Skill references and UI bundle hashes complete",
+        "Two projects same MC shape and unsupported capabilities remain disabled"
+      ],
+      "requirements": [
+        "R01",
+        "R04",
+        "R25",
+        "R26"
+      ],
+      "spec": "DEPLOYMENT-AND-RELEASE.md",
+      "compute_profile": "C2",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 1,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    },
+    {
+      "id": "MC-R003",
+      "title": "Prepare and execute separately authorized production qualification",
+      "category": "release",
+      "dependencies": [
+        "MC-R002"
+      ],
+      "repository": "infrastructure operator / app owners",
+      "ownership_paths": [
+        "deploy/production plans/",
+        "docs/qualification/production/"
+      ],
+      "goal": "Prepare and execute separately authorized production qualification",
+      "input_contracts": [
+        "Concrete target identities/roles/backups/regions and owner-approved finite budget",
+        "Reviewed nonmutating install/deploy/rollback plans"
+      ],
+      "output_contracts": [
+        "Preflight/proposed production change packet first",
+        "Only after authorization: deployed proof and release disposition"
+      ],
+      "acceptance_tests": [
+        "No purchases/provisioning/migrations until concrete approval",
+        "Per-app readiness/namespace/security/notification/network actual targets qualified",
+        "Deployment status distinct from local tests; stop on cost/authority/backup mismatch"
+      ],
+      "requirements": [
+        "R01",
+        "R02",
+        "R18",
+        "R21",
+        "R23",
+        "R25",
+        "R26"
+      ],
+      "spec": "DEPLOYMENT-AND-RELEASE.md",
+      "compute_profile": "C4",
+      "status": "blocked_by_dependencies",
+      "non_goals": [
+        "No live deployment, schema apply or metered provider work without separate concrete authorization.",
+        "No domain logic in the general scheduler or private SDK APIs without a reviewed exception."
+      ],
+      "proof_artifacts": [
+        "Fixture inputs and expected outputs with digests",
+        "Machine-readable test report, dependency/profile/build hashes and skipped-test reasons",
+        "Failure-injection or semantic trace and reviewer disposition"
+      ],
+      "concurrency": {
+        "writers_per_owned_region": 1,
+        "max_agents": 1,
+        "reviewer_independent": true
+      },
+      "stop_conditions": [
+        "Dependency proof rejected or missing: do not advertise dependent capability.",
+        "Concurrent edit/ownership collision: preserve changes and hand off to integrator.",
+        "Authority, irreversible-effect uncertainty, unknown spend or unqualified provider behavior: fail/hold visibly; do not retry blindly.",
+        "Required external identity/budget unavailable: record blocker and continue offline independent work."
+      ]
+    }
+  ]
+}

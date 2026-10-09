@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: Public interfaces
-description: The HTTP routers, missionctl command groups and coordinator MCP tools that exist today (including the fast-track manifest, chain, transcript, subscription, lane and catalog-pin surfaces), set against the specified operation catalog, scope vocabulary, error envelope and OAuth rule.
+description: The HTTP routers, the /missions Socket.IO entrypoint, missionctl command groups and coordinator MCP tools that exist today (including the fast-track manifest, chain, transcript, subscription, lane and catalog-pin surfaces and the multi-provider Human Task routes), set against the specified operation catalog, scope vocabulary, error envelope and OAuth rule.
 tags: [mission-control, interfaces, http, cli, mcp, implementation]
 ---
 
@@ -27,6 +27,7 @@ Mounted by the configured API (`bootstrap/api.py`, `create_app`):
 | `/v1/applications/{application_id}` | `interfaces/http/subscriptions.py` | `POST` and `GET /subscriptions`, `DELETE /subscriptions/{id}`, `POST /subscriptions/{id}/resume`, `GET missions/{id}/events` (SSE) |
 | `/v1/applications/{application_id}` | `interfaces/http/continuation.py`, `stop_fence.py` | `GET runs/{id}/checkpoints[/{checkpoint_id}]`, `GET runs/{id}/stop-fence` |
 | `/v1/applications/{application_id}/lanes` | `interfaces/http/lanes.py` | `GET` (list), `GET {lane_profile}` |
+| `/v1/applications/{application_id}` | `interfaces/http/human_tasks.py` | `GET human-tasks`, `GET human-tasks/{id}`, `POST human-tasks/{id}/resolutions` ([Human Gates](human-gates.md)) |
 | (root) | `bootstrap/api.py` | `GET /health/live`, `GET /health/ready` (503 `installation_unavailable`) |
 
 Mounted only by the lower-level proof facade `bootstrap/technical_api.py` (FastAPI title
@@ -40,15 +41,18 @@ also mounts the graph-runtime schema router.
 
 The worker-only Kernel Hook callback `POST /v1/applications/{app}/internal/hook-callback`
 (`interfaces/http/hook_callback.py`) is served on the worker's loopback listener, never mounted
-on the public API.
+on the public API. `bootstrap.realtime:create_asgi_app` serves the same API plus the `/missions`
+Socket.IO namespace (subscribe, ack, command, `resolve_human_task`; typed `stream_error` codes
+including `UNAVAILABLE` and `UNSUPPORTED_OPERATION`), described in
+[mission stream](mission-stream.md).
 
 Not implemented from the spec's catalog: `GET /system`, `/schemas`, `/capabilities`,
 `POST /context:select`, mission drafting (`POST /missions`, draft patch, `:validate`),
-proposals and `revisions/{id}:activate`, mission and artifact reads, human tasks,
-`/recoveries`, `/requests/{request_id}`, `/attempts/{id}/completion-candidates`, interviews
-and stream tickets. Manifest compile, submit and start replace drafting for manifests
-([authoring](authoring.md)); `missions:start` answers `409 start_unavailable` in the configured
-deployment today.
+proposals and `revisions/{id}:activate`, mission and artifact reads, `/recoveries`,
+`/requests/{request_id}`, `/attempts/{id}/completion-candidates`, interviews and stream tickets.
+Manifest compile, submit and start replace drafting ([authoring](authoring.md)); `missions:start`
+answers `409 start_unavailable` with a manifest pointer until the operator's launch bindings file
+binds every node ([mission manifest](mission-manifest.md)).
 
 ## missionctl
 
@@ -66,14 +70,15 @@ the environment inputs; HTTP is allowed only to loopback. Exit codes follow the 
 0 success, 2 invalid, 3 denied, 4 conflict, 5 unavailable, 6 wait timeout or blocked
 terminal result. Spec commands absent: `auth login`, `system describe`, `context select`,
 `proposal *`, `revision activate`, `human-task *`, `run retry`, `run replay`,
-`recovery get`, `request get`, `--tenant`. (`events watch` takes `--after-seq`.)
+`recovery get`, `request get`, `--tenant`. (`events watch` takes `--after-seq`.) `preflight`
+subcommands are a separate module ([operations](operations.md)).
 
 ## Coordinator MCP server
 
 `interfaces/mcp/coordinator_server.py` builds a FastMCP server (Streamable HTTP) whose
 production tools are `coordinator_bootstrap`, `search_capabilities`, `get_capability`,
 `discover_mcp_servers`, `discover_agent_skills`, `inspect_external_candidate`,
-`validate_workflow_design`, `prepare_workflow_launch`, `launch_workflow` and
+`validate_workflow_design`, `prepare_workflow_launch`, `launch_workflow`,
 `get_workflow_result`, plus the fast-track tools registered on the same server:
 `pin_capability` (catalog pins), `mission_manifest_compile`, `mission_manifest_submit`,
 `mission_run_start`, `mission_chain_inspect`, `mission_command_send`, `mission_run_inspect`,
@@ -88,9 +93,11 @@ resources for chains and run transcripts; prompts are registered from
 verified access token (claims `tenant_scope`, `request_scopes`, `roles`, `permissions`);
 the local runner in `interfaces/mcp/__main__.py` uses a static principal with grants
 `catalog.read`, `capability.discover`, `workflow.design.validate`, `workflow.prepare`,
-`workflow.launch`, `workflow.result.read`. The spec's draft and proposal tools
-(`mission_create`, `mission_validate`, `mission_proposal_create`, `mission_revision_activate`,
-`mission_human_task_resolve`) are not implemented.
+`workflow.launch`, `workflow.result.read`. `interfaces/mcp/human_task_tools.py` defines
+`mission_human_task_list|get|resolve` over the one `HumanTaskService`, but no served MCP server
+registers them yet (reported, not resolved). The spec's draft and proposal tools
+(`mission_create`, `mission_validate`, `mission_proposal_create`, `mission_revision_activate`) are
+not implemented.
 
 ## Scopes, errors and OAuth
 
@@ -113,8 +120,11 @@ recovery_ref?}` with codes such as `APPLICATION_FORBIDDEN`, `TENANT_FORBIDDEN`,
 Implemented: FastAPI `detail: {code, message}` with lower-case codes (`unauthorized`,
 `stale_version`, `stale_generation`, `resource_not_found`, `request_conflict`,
 `idempotency_key_mismatch`, `unsupported_control`, `installation_unavailable`) mapped to
-403, 409, 404, 422 and 503 in `interfaces/http/mission_control.py`; the only upper-case
-spec code present is `IDEMPOTENCY_CONFLICT` in `domain/coordinator/errors.py`.
+403, 409, 404, 422 and 503 in `interfaces/http/mission_control.py`; Human Task refusals use
+their own lower-case codes (`not_reviewer`, `stale_version`, `packet_digest_mismatch`, ...). The
+upper-case codes are `IDEMPOTENCY_CONFLICT` (`domain/coordinator/errors.py`) and the socket's
+`mc.stream_subscription.v1` codes, which overlap the spec only in `CURSOR_EXPIRED` and
+`STALE_GENERATION`.
 
 ADR-0015 requires resource-bound OAuth with PKCE for remote MCP onboarding, resource
 tokens scoped to application, tenant and scopes, and forbids forwarding application JWTs.
@@ -131,29 +141,20 @@ never minted (no `auth login`).
   `../mission-control-general/general-mission-control/RUNTIME-CONTRACTS.md` (public
   operation additions).
 - ADR: [0015](../adr/0015-remote-mcp-oauth-no-jwt-forwarding.md).
-- Code: [configured API](../../src/mission_control/bootstrap/api.py),
-  [technical facade](../../src/mission_control/bootstrap/technical_api.py),
-  [scoped router](../../src/mission_control/interfaces/http/mission_control.py),
-  [catalog router](../../src/mission_control/interfaces/http/catalog.py),
-  [manifest router](../../src/mission_control/interfaces/http/missions.py),
-  [chain router](../../src/mission_control/interfaces/http/chains.py),
-  [transcript router](../../src/mission_control/interfaces/http/transcript.py),
-  [subscription router](../../src/mission_control/interfaces/http/subscriptions.py),
-  [lane router](../../src/mission_control/interfaces/http/lanes.py),
-  [manifest MCP tools](../../src/mission_control/interfaces/mcp/mission_tools.py),
+- Code: [configured API](../../src/mission_control/bootstrap/api.py), [technical facade](../../src/mission_control/bootstrap/technical_api.py),
+  [scoped router](../../src/mission_control/interfaces/http/mission_control.py), [catalog router](../../src/mission_control/interfaces/http/catalog.py),
+  [manifest router](../../src/mission_control/interfaces/http/missions.py), [chain router](../../src/mission_control/interfaces/http/chains.py),
+  [transcript router](../../src/mission_control/interfaces/http/transcript.py), [subscription router](../../src/mission_control/interfaces/http/subscriptions.py),
+  [lane router](../../src/mission_control/interfaces/http/lanes.py), [Human Task router](../../src/mission_control/interfaces/http/human_tasks.py),
+  [realtime entrypoint](../../src/mission_control/bootstrap/realtime.py), [manifest MCP tools](../../src/mission_control/interfaces/mcp/mission_tools.py),
   [run control MCP tools](../../src/mission_control/interfaces/mcp/run_control_tools.py),
   [transcript MCP tools](../../src/mission_control/interfaces/mcp/transcript_tools.py),
-  [subscription MCP tools](../../src/mission_control/interfaces/mcp/subscriptions.py),
-  [run control](../../src/mission_control/interfaces/http/run_control.py),
-  [CLI](../../src/mission_control/interfaces/cli/main.py),
-  [MCP server](../../src/mission_control/interfaces/mcp/coordinator_server.py),
+  [subscription MCP tools](../../src/mission_control/interfaces/mcp/subscriptions.py), [run control](../../src/mission_control/interfaces/http/run_control.py),
+  [CLI](../../src/mission_control/interfaces/cli/main.py), [MCP server](../../src/mission_control/interfaces/mcp/coordinator_server.py),
   [MCP auth](../../src/mission_control/interfaces/mcp/coordinator_auth.py).
-- Tests: [manifest interfaces](../../tests/unit/authoring/test_manifest_interfaces.py),
-  [chain interfaces](../../tests/unit/chains/test_chain_interfaces.py),
-  [transcript interfaces](../../tests/unit/frames/test_transcript_interfaces.py),
-  [catalog CLI](../../tests/unit/capability/test_catalog_cli.py),
-  [command cancel CLI](../../tests/unit/run_control/test_cli_command_cancel.py),
-  [subscribe MCP](../../tests/unit/coordinator/test_mission_subscribe_mcp.py),
-  [public interfaces](../../tests/unit/mission_control/test_public_interfaces.py),
+- Tests: [manifest interfaces](../../tests/unit/authoring/test_manifest_interfaces.py), [chain interfaces](../../tests/unit/chains/test_chain_interfaces.py),
+  [transcript interfaces](../../tests/unit/frames/test_transcript_interfaces.py), [catalog CLI](../../tests/unit/capability/test_catalog_cli.py),
+  [command cancel CLI](../../tests/unit/run_control/test_cli_command_cancel.py), [subscribe MCP](../../tests/unit/coordinator/test_mission_subscribe_mcp.py),
+  [Human Task interfaces](../../tests/unit/human_tasks/test_human_task_interfaces.py), [public interfaces](../../tests/unit/mission_control/test_public_interfaces.py),
   [MCP HTTP deployment](../../tests/unit/coordinator/test_coordinator_mcp_http_deployment.py),
   [authenticated scoped runtime](../../tests/acceptance/mission_control/test_authenticated_scoped_runtime.py).

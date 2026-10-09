@@ -19,6 +19,10 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validato
 
 from mission_control.contracts.identities import RequestScope, parse_request_scope
 
+# The one Lane Profile vocabulary (MP-01): frames use the canonical enum rather than a copy,
+# so a profile added for the runtime is a profile that may write frames, and vice versa.
+from mission_control.domain.capabilities.host_support import LaneProfile as LaneProfile
+
 DIGEST_PATTERN = r"^sha256:[0-9a-f]{64}$"
 PROVIDER_FRAME_SCHEMA = "mc.provider_frame.v1"
 DEFAULT_EXCERPT_CAP_BYTES = 8_192
@@ -28,16 +32,6 @@ NATIVE_EVENT_REF_PREFIX = "provider_frame:"
 
 class FrameContract(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-
-
-class LaneProfile(StrEnum):
-    """Execution lane profiles that may write frames (rows reserved for future lanes)."""
-
-    DEEP_AGENTS = "deep_agents"
-    CURSOR_LOCAL = "cursor_local"
-    CURSOR_CLOUD = "cursor_cloud"
-    CLAUDE_AGENT_SDK = "claude_agent_sdk"
-    CODEX = "codex"
 
 
 class FrameKind(StrEnum):

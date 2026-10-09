@@ -23,6 +23,7 @@ from uuid import UUID, uuid5
 import asyncpg
 
 from mission_control.adapters.postgres.run_control.canonical import SCOPE
+from mission_control.application.frames.lineage import counts_usage_frame, usage_body
 from mission_control.domain.frames.body import frame_body_object
 from mission_control.domain.frames.contracts import FrameKind, ProviderFrame, native_event_ref
 from mission_control.domain.frames.usage import usage_report
@@ -73,6 +74,9 @@ async def apply(
     actor_ref: str,
 ) -> None:
     session_id = await ensure_session(connection, args, execution, frame, actor_ref=actor_ref)
+    if frame.subordinate_ref is not None:
+        # A provider subagent's turns and result never open, close or end the parent's.
+        return
     if frame.kind == FrameKind.TURN_STARTED:
         await _open_turn(connection, args, frame)
     elif frame.kind == FrameKind.TURN_ENDED:
@@ -220,13 +224,25 @@ async def _close_turn(
             frame.harness_execution_id,
         )
     )
+    if frame.native_turn_ref is not None and await connection.fetchval(
+        f"""
+        SELECT 1 FROM mission_control.session_turn
+        WHERE {SCOPE} AND session_id = $4 AND native_turn_ref = $5 AND execution_generation = $6
+        """,
+        *args,
+        session_id,
+        frame.native_turn_ref,
+        frame.generation,
+    ):
+        return
     opened = current.get("open_turn") if isinstance(current.get("open_turn"), dict) else None
     if opened is not None and int(opened.get("generation", frame.generation)) != frame.generation:
         opened = None
     started_ordinal = int(opened["started_ordinal"]) if opened else 0
     usage_rows = await connection.fetch(
         f"""
-        SELECT frame_id, body_excerpt, body_bytes FROM mission_control.provider_frame
+        SELECT frame_id, body_excerpt, body_bytes, subordinate_ref
+        FROM mission_control.provider_frame
         WHERE {SCOPE} AND harness_execution_id = $4 AND generation = $5 AND kind = 'usage'
           AND arrival_ordinal > $6 AND arrival_ordinal < $7
         ORDER BY arrival_ordinal
@@ -237,17 +253,22 @@ async def _close_turn(
         started_ordinal,
         frame.arrival_ordinal,
     )
-    usage_bodies: list[tuple[str, dict[str, Any]]] = []
+    lane = frame.lane_profile
+    usage_bodies: list[tuple[str, Mapping[str, Any]]] = []
     for row in usage_rows:
+        if not counts_usage_frame(lane, row["subordinate_ref"]):
+            continue
         text = bytes(row["body_excerpt"]).decode("utf-8", errors="replace")
         try:
             parsed = json.loads(text) if len(text.encode("utf-8")) >= row["body_bytes"] else {}
         except ValueError:
             parsed = {}
-        usage_bodies.append((str(row["frame_id"]), parsed if isinstance(parsed, dict) else {}))
+        usage_bodies.append(
+            (str(row["frame_id"]), usage_body(lane, parsed if isinstance(parsed, dict) else {}))
+        )
     body = body_object(frame)
     if not usage_bodies and body:
-        usage_bodies.append((str(frame.frame_id), body))
+        usage_bodies.append((str(frame.frame_id), usage_body(lane, body)))
     report = usage_report(frame.lane_profile, usage_bodies)
     turn_no = int(
         await connection.fetchval(

@@ -1,0 +1,24 @@
+# Proposed mission/v2 environment fragment. Hosted feasibility is gated by MP-16.
+# These requirements must reject until the actual hosted product qualifies.
+environment:
+  lane: claude_cloud
+  model: {profile: "<admitted-claude-cloud-model-profile>"}
+  auth: {profile: "<claude-cloud-account-profile>"}
+  execution_environment:
+    kind: provider_hosted
+    provider: anthropic
+    environment_ref: "<anthropic-hosted-environment-id>"
+    expected_revision: "<provider-revision-or-attested-digest>"
+    setup: {pin: "<setup-bundle-version-pin>"}
+  workspace:
+    repo: {url: "https://github.com/<owner>/<repo>", ref: "<branch>"}
+    policy:
+      mode: provider_workspace
+      reuse: within_session
+      dirty_input: reject
+      cleanup: retain_until_artifacts_registered
+  requires:
+    controls: [queue_instruction, cancel, request_continuation]
+    approvals: [workflow_gate, governed_mcp]
+    observation: [terminal_result, subordinate_lifecycle]
+  budget: {tokens: 200000, wall_clock: 1h, tool_calls: 100}

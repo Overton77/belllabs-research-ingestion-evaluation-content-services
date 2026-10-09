@@ -33,6 +33,11 @@ GROUPS: list[tuple[Path, str, bool]] = [
     (REPO_ROOT / "docs" / "research", "docs/research", True),
     (REPO_ROOT / "docs" / "specs" / "fast-track-2026-10", "docs/specs/fast-track-2026-10", True),
     (
+        REPO_ROOT / "docs" / "specs" / "multi-provider-2026-10",
+        "docs/specs/multi-provider-2026-10",
+        True,
+    ),
+    (
         REPO_ROOT / "docs" / "specs" / "fast-track-2026-10" / "research",
         "docs/specs/fast-track-2026-10/research",
         True,

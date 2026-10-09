@@ -1,11 +1,18 @@
-"""Lane contracts: `mc.lane_describe.v1`, the AgentHarness request and handle contracts and
-`mc.cursor_binding.v1` (SPEC-07 sections 1 to 3, ADR-0018, ADR-0030; FT-G1).
+"""Lane contracts: `mc.lane_describe.v1`/`.v2`, the AgentHarness request and handle contracts
+and `mc.cursor_binding.v1` (SPEC-07 sections 1 to 3, ADR-0018, ADR-0030; FT-G1; MP-01).
 
 A Harness is the provider-neutral protocol; a Lane is a qualified implementation; a Lane
 Profile is one placement of a lane with its own control matrix. Everything here is a strict,
 frozen, secret-free value: handles carry native identity, never credentials. The protocol
 itself lives in `application/execution/harness/protocol.py`; these contracts are domain values
-so that `domain/execution/contracts.py` can pair a `cursor` runtime with its binding.
+so that `domain/execution/contracts.py` can pair a runtime with its binding.
+
+Profile identity (MP-01, multi-provider ARCHITECTURE "Profile identity"): the single source of
+the Lane Profile vocabulary is `domain/capabilities/host_support.LaneProfile`; the `Literal`
+below is checked against it at import so the runtime, projection, frame and manifest
+vocabularies cannot drift. `claude_cloud` and `codex_cloud` name the provider-hosted
+products only; an Anthropic model running through Cursor, or our own remote worker running
+the Claude SDK, is not that profile.
 """
 
 from __future__ import annotations
@@ -15,14 +22,25 @@ from typing import Any, Final, Literal
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationInfo, model_validator
 
 from mission_control.domain.authoring.canonical import stable_json_digest
+from mission_control.domain.capabilities.hooks import HookEvent
+from mission_control.domain.capabilities.host_support import LaneProfile
 
 LANE_DESCRIBE_SCHEMA: Final = "mc.lane_describe.v1"
+LANE_DESCRIBE_SCHEMA_V2: Final = "mc.lane_describe.v2"
 CURSOR_BINDING_SCHEMA: Final = "mc.cursor_binding.v1"
 DIGEST_PATTERN: Final = r"^sha256:[0-9a-f]{64}$"
 
-LaneProfileName = Literal["deep_agents", "cursor_local", "cursor_cloud"]
-LaneName = Literal["deep_agents", "cursor"]
-ExecutionRuntime = Literal["native", "deep_agent", "cursor"]
+LaneProfileName = Literal[
+    "deep_agents",
+    "cursor_local",
+    "cursor_cloud",
+    "claude_agent_sdk",
+    "codex",
+    "claude_cloud",
+    "codex_cloud",
+]
+LaneName = Literal["deep_agents", "cursor", "claude", "codex"]
+ExecutionRuntime = Literal["native", "deep_agent", "cursor", "claude", "codex"]
 ControlSupport = Literal["native", "emulated", "unsupported", "unqualified"]
 DeliverySemantics = Literal[
     "turn_boundary_guaranteed",
@@ -36,17 +54,101 @@ DeliverySemantics = Literal[
 Placement = Literal["worker_hosted", "cloud"]
 UsageDisposition = Literal["settled", "estimated", "unknown"]
 
-LANE_PROFILES: Final[tuple[LaneProfileName, ...]] = ("deep_agents", "cursor_local", "cursor_cloud")
+LANE_PROFILES: Final[tuple[LaneProfileName, ...]] = (
+    "deep_agents",
+    "cursor_local",
+    "cursor_cloud",
+    "claude_agent_sdk",
+    "codex",
+    "claude_cloud",
+    "codex_cloud",
+)
 LANE_OF_PROFILE: Final[dict[str, LaneName]] = {
     "deep_agents": "deep_agents",
     "cursor_local": "cursor",
     "cursor_cloud": "cursor",
+    "claude_agent_sdk": "claude",
+    "claude_cloud": "claude",
+    "codex": "codex",
+    "codex_cloud": "codex",
+}
+PLACEMENT_OF_PROFILE: Final[dict[str, Placement]] = {
+    "deep_agents": "worker_hosted",
+    "cursor_local": "worker_hosted",
+    "cursor_cloud": "cloud",
+    "claude_agent_sdk": "worker_hosted",
+    "claude_cloud": "cloud",
+    "codex": "worker_hosted",
+    "codex_cloud": "cloud",
 }
 RUNTIME_OF_LANE: Final[dict[str, ExecutionRuntime]] = {
     "deep_agents": "deep_agent",
     "cursor": "cursor",
+    "claude": "claude",
+    "codex": "codex",
 }
+# Lanes whose attempts carry a typed provider binding beside the operation (`cursor` carries
+# `mc.cursor_binding.v1`; `claude` and `codex` carry `mc.execution_binding.v2`).
+BOUND_LANES: Final[frozenset[LaneName]] = frozenset({"cursor", "claude", "codex"})
+# Profiles that are provider-hosted cloud products (not our own remote workers).
+HOSTED_PROFILES: Final[frozenset[LaneProfileName]] = frozenset(
+    {"cursor_cloud", "claude_cloud", "codex_cloud"}
+)
 DEFAULT_LANE_PROFILE: Final[LaneProfileName] = "deep_agents"
+
+if {profile.value for profile in LaneProfile} != set(LANE_PROFILES):  # pragma: no cover
+    raise RuntimeError(
+        "lane profile vocabularies drifted: host_support.LaneProfile "
+        f"{sorted(profile.value for profile in LaneProfile)} vs lanes.LANE_PROFILES "
+        f"{sorted(LANE_PROFILES)}"
+    )
+if set(LANE_OF_PROFILE) != set(LANE_PROFILES) or set(PLACEMENT_OF_PROFILE) != set(
+    LANE_PROFILES
+):  # pragma: no cover
+    raise RuntimeError("every lane profile needs exactly one lane and one placement")
+
+# The hosted-feasibility checklist (RESEARCH "Provider-hosted feasibility exit criteria"):
+# the features a `mc.lane_describe.v2` carries evidence for, one cell each.
+LANE_FEATURES: Final[tuple[str, ...]] = (
+    "launch",
+    "status",
+    "observe",
+    "follow_up",
+    "cancel",
+    "usage",
+    "output_custody",
+    "environment_selection",
+    "configuration_materialization",
+    "approval_suspension",
+    "subordinate_lineage",
+    "continuation",
+)
+ApprovalMode = Literal[
+    "workflow_gate",
+    "provider_permission",
+    "provider_question",
+    "mcp_elicitation",
+    "governed_effect",
+]
+APPROVAL_MODES: Final[tuple[ApprovalMode, ...]] = (
+    "workflow_gate",
+    "provider_permission",
+    "provider_question",
+    "mcp_elicitation",
+    "governed_effect",
+)
+ObservationFeature = Literal[
+    "terminal_result", "tool_lifecycle", "subordinate_lifecycle", "usage", "compaction"
+]
+OBSERVATION_FEATURES: Final[tuple[ObservationFeature, ...]] = (
+    "terminal_result",
+    "tool_lifecycle",
+    "subordinate_lifecycle",
+    "usage",
+    "compaction",
+)
+SubordinateVisibility = Literal["full", "lifecycle_only", "unavailable", "unqualified"]
+AccountEnablement = Literal["enabled", "disabled", "unknown"]
 
 # The nine AgentHarness operations beside `describe` (SPEC-07 section 1).
 HARNESS_OPERATIONS: Final = (
@@ -83,16 +185,20 @@ HOOK_EVENTS: Final = frozenset(
         "after_tool_failure",
         "before_shell",
         "after_shell",
+        "before_mcp",
         "after_file_edit",
         "before_model",
         "after_model",
         "before_compaction",
+        "after_compaction",
         "subagent_start",
         "subagent_stop",
         "stop",
         "session_end",
     }
 )
+if {event.value for event in HookEvent} != HOOK_EVENTS:  # pragma: no cover - import guard
+    raise RuntimeError("lanes.HOOK_EVENTS drifted from capabilities.hooks.HookEvent")
 
 
 class LaneContract(BaseModel):
@@ -110,11 +216,17 @@ class LaneIdentityMap(LaneContract):
 
 class LaneHooks(LaneContract):
     mechanism: str = Field(min_length=1)
-    events_supported: tuple[str, ...] = Field(min_length=1)
+    events_supported: tuple[str, ...] = ()
     fail_closed: bool
 
     @model_validator(mode="after")
     def known_events(self) -> LaneHooks:
+        if not self.events_supported and self.mechanism != "none":
+            raise ValueError("a lane with a hook mechanism declares its supported events")
+        if self.events_supported and self.mechanism == "none":
+            raise ValueError("a lane without a hook mechanism declares no events")
+        if self.fail_closed and not self.events_supported:
+            raise ValueError("no hook can fail closed on a lane that runs none")
         unknown = set(self.events_supported) - HOOK_EVENTS
         if unknown:
             raise ValueError(f"undeclared hook events: {sorted(unknown)}")
@@ -134,10 +246,60 @@ class LaneUsage(LaneContract):
     cost: str = Field(min_length=1)
 
 
-class LaneDescribe(LaneContract):
-    """`mc.lane_describe.v1`: one lane profile's honest control matrix (pure, cheap)."""
+class FeatureEvidence(LaneContract):
+    """One `mc.lane_describe.v2` feature cell: support plus the evidence behind it.
 
-    schema_version: Literal["mc.lane_describe.v1"] = LANE_DESCRIBE_SCHEMA
+    `implemented` (an adapter exists), `account_enabled` (the bound account/product exposes
+    it) and `qualified` (a recorded live drill for this exact profile) are separate facts; no
+    one of them proves another. Evidence names the transport, SDK language/version, provider
+    scope, OS and deployment digest the qualification applies to, so a different pin or
+    placement cannot inherit it.
+    """
+
+    status: ControlSupport
+    implemented: bool = False
+    account_enabled: AccountEnablement = "unknown"
+    qualified: bool = False
+    evidence_ref: str | None = Field(default=None, min_length=1, max_length=1_024)
+    transport: str | None = Field(default=None, min_length=1, max_length=128)
+    sdk_language: str | None = Field(default=None, min_length=1, max_length=32)
+    sdk_version: str | None = Field(default=None, min_length=1, max_length=128)
+    provider_scope: str | None = Field(default=None, min_length=1, max_length=256)
+    os: str | None = Field(default=None, min_length=1, max_length=64)
+    deployment_digest: str | None = Field(default=None, pattern=DIGEST_PATTERN)
+    qualified_at: AwareDatetime | None = None
+
+    @model_validator(mode="after")
+    def evidence_backs_the_claim(self) -> FeatureEvidence:
+        if self.qualified:
+            if self.status == "unqualified":
+                raise ValueError("a qualified feature cannot carry status unqualified")
+            if self.evidence_ref is None or self.qualified_at is None:
+                raise ValueError("a qualified feature cites evidence_ref and qualified_at")
+            if not self.implemented and self.status in {"native", "emulated"}:
+                raise ValueError("a qualified native/emulated feature must be implemented")
+        if self.status == "unsupported" and self.implemented:
+            raise ValueError("an unsupported feature cannot be implemented")
+        return self
+
+
+def unqualified_features() -> dict[str, FeatureEvidence]:
+    """Every feature `unqualified` with no evidence: the v2 stub of a lane without a drill."""
+
+    return {feature: FeatureEvidence(status="unqualified") for feature in LANE_FEATURES}
+
+
+class LaneDescribe(LaneContract):
+    """`mc.lane_describe.v1`/`.v2`: one lane profile's honest control matrix (pure, cheap).
+
+    v1 is the FT-G1 shape and stays readable and digest-stable. v2 (MP-01) adds per-feature
+    evidence, the approval modes the lane can bind to Human Tasks, whether native compaction
+    can be controlled, how much of a subordinate's lifecycle is visible, and which tool
+    families a required approval can actually be enforced on. A v1 describe carries none of
+    the v2 fields; a v2 describe carries evidence for every feature in `LANE_FEATURES`.
+    """
+
+    schema_version: Literal["mc.lane_describe.v1", "mc.lane_describe.v2"] = LANE_DESCRIBE_SCHEMA
     lane: LaneName
     lane_profile: LaneProfileName
     versions: dict[str, str] = Field(default_factory=dict)
@@ -150,18 +312,72 @@ class LaneDescribe(LaneContract):
     usage: LaneUsage
     placement: Placement
     qualified: bool = False
+    # --- mc.lane_describe.v2 (absent from v1 dumps and digests) ---
+    features: dict[str, FeatureEvidence] = Field(default_factory=dict, exclude_if=lambda v: not v)
+    approval_modes: tuple[ApprovalMode, ...] = Field(default=(), exclude_if=lambda v: not v)
+    compaction_control: ControlSupport | None = Field(default=None, exclude_if=lambda v: v is None)
+    subordinate_visibility: SubordinateVisibility | None = Field(
+        default=None, exclude_if=lambda v: v is None
+    )
+    enforcement_coverage: dict[str, ControlSupport] = Field(
+        default_factory=dict, exclude_if=lambda v: not v
+    )
 
     @model_validator(mode="after")
     def complete_matrix(self) -> LaneDescribe:
         if LANE_OF_PROFILE[self.lane_profile] != self.lane:
             raise ValueError(f"lane profile {self.lane_profile} does not belong to {self.lane}")
+        if PLACEMENT_OF_PROFILE[self.lane_profile] != self.placement:
+            raise ValueError(
+                f"lane profile {self.lane_profile} is placed "
+                f"{PLACEMENT_OF_PROFILE[self.lane_profile]}, not {self.placement}"
+            )
         if set(self.controls) != set(LANE_CONTROLS):
             raise ValueError(f"controls must name exactly {list(LANE_CONTROLS)}")
         if set(self.delivery_semantics) != set(DELIVERY_COMMANDS):
             raise ValueError(f"delivery_semantics must name exactly {list(DELIVERY_COMMANDS)}")
         if self.qualified and "unqualified" in self.controls.values():
             raise ValueError("a qualified lane cannot report unqualified controls")
+        v2_present = (
+            bool(self.features)
+            or bool(self.approval_modes)
+            or self.compaction_control is not None
+            or self.subordinate_visibility is not None
+            or bool(self.enforcement_coverage)
+        )
+        if self.schema_version == LANE_DESCRIBE_SCHEMA:
+            if v2_present:
+                raise ValueError("feature evidence requires schema_version mc.lane_describe.v2")
+            return self
+        if set(self.features) != set(LANE_FEATURES):
+            raise ValueError(f"a v2 describe carries evidence for exactly {list(LANE_FEATURES)}")
+        if self.compaction_control is None or self.subordinate_visibility is None:
+            raise ValueError("a v2 describe states compaction_control and subordinate_visibility")
+        if len(set(self.approval_modes)) != len(self.approval_modes):
+            raise ValueError("approval modes must be unique")
+        if self.qualified:
+            unproven = sorted(
+                name
+                for name, evidence in self.features.items()
+                if evidence.status != "unsupported" and not evidence.qualified
+            )
+            if unproven:
+                raise ValueError(f"a qualified lane cannot carry unqualified features: {unproven}")
         return self
+
+    @property
+    def is_v2(self) -> bool:
+        return self.schema_version == LANE_DESCRIBE_SCHEMA_V2
+
+    def feature(self, name: str) -> FeatureEvidence:
+        """The evidence cell of one feature; a v1 describe reports every feature unqualified."""
+
+        if name not in LANE_FEATURES:
+            raise ValueError(f"undeclared lane feature: {name}")
+        return self.features.get(name) or FeatureEvidence(status="unqualified")
+
+    def feature_implemented(self, name: str) -> bool:
+        return self.feature(name).status in {"native", "emulated"}
 
     def control(self, operation: str) -> ControlSupport:
         try:
@@ -179,14 +395,25 @@ class LaneDescribe(LaneContract):
         return stable_json_digest(self)
 
     def unqualified(self) -> LaneDescribe:
-        """The same profile with every control `unqualified` (a registered stub)."""
+        """The same profile with every control (and v2 feature) `unqualified`: a registered
+        stub whose declared delivery semantics are design intent, not proof."""
 
-        return self.model_copy(
-            update={
-                "controls": dict.fromkeys(LANE_CONTROLS, "unqualified"),
-                "qualified": False,
+        update: dict[str, Any] = {
+            "controls": dict.fromkeys(LANE_CONTROLS, "unqualified"),
+            "qualified": False,
+        }
+        if self.is_v2:
+            # `unsupported` is a stronger, still-honest statement than `unqualified`: a stub
+            # keeps it (the hosted feasibility findings survive registration).
+            update["features"] = {
+                name: (
+                    evidence
+                    if evidence.status == "unsupported"
+                    else FeatureEvidence(status="unqualified")
+                )
+                for name, evidence in self.features.items()
             }
-        )
+        return self.model_copy(update=update)
 
 
 # --- Segmented lane turns (FT-G2) ----------------------------------------------------------
@@ -532,6 +759,7 @@ class CursorExecutionBinding(LaneContract):
 
 LANE_CONTRACTS: Final[dict[str, type[BaseModel]]] = {
     "lane_describe": LaneDescribe,
+    "feature_evidence": FeatureEvidence,
     "cursor_binding": CursorExecutionBinding,
     "prepare_request": PrepareRequest,
     "prepared_session": PreparedSession,

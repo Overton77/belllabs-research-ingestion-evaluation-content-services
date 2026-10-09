@@ -25,7 +25,7 @@
         },
         {
           "arguments": "document jsonb",
-          "definition": "CREATE OR REPLACE FUNCTION mission_control.capability_host_support_valid(document jsonb)\n RETURNS boolean\n LANGUAGE sql\n IMMUTABLE PARALLEL SAFE\n SET search_path TO 'pg_catalog'\nAS $function$\n    SELECT document->>'schema_version' = 'mc.capability_host_support.v1'\n       AND jsonb_typeof(document->'profiles') = 'object'\n       AND NOT EXISTS (\n           SELECT 1\n             FROM jsonb_each(document->'profiles') AS profile(lane, entry)\n            WHERE profile.lane NOT IN\n                      ('deep_agents', 'cursor_local', 'cursor_cloud', 'claude_agent_sdk', 'codex')\n               OR jsonb_typeof(profile.entry) <> 'object'\n               OR coalesce(profile.entry->>'status', '') NOT IN\n                      ('supported', 'unsupported', 'unqualified')\n               OR (profile.entry ? 'overlay'\n                   AND jsonb_typeof(profile.entry->'overlay') <> 'object'))\n$function$\n",
+          "definition": "CREATE OR REPLACE FUNCTION mission_control.capability_host_support_valid(document jsonb)\n RETURNS boolean\n LANGUAGE sql\n IMMUTABLE PARALLEL SAFE\n SET search_path TO 'pg_catalog'\nAS $function$\n    SELECT document->>'schema_version' = 'mc.capability_host_support.v1'\n       AND jsonb_typeof(document->'profiles') = 'object'\n       AND NOT EXISTS (\n           SELECT 1\n             FROM jsonb_each(document->'profiles') AS profile(lane, entry)\n            WHERE profile.lane NOT IN\n                      ('deep_agents', 'cursor_local', 'cursor_cloud', 'claude_agent_sdk', 'codex',\n                       'claude_cloud', 'codex_cloud')\n               OR jsonb_typeof(profile.entry) <> 'object'\n               OR coalesce(profile.entry->>'status', '') NOT IN\n                      ('supported', 'unsupported', 'unqualified')\n               OR (profile.entry ? 'overlay'\n                   AND jsonb_typeof(profile.entry->'overlay') <> 'object'))\n$function$\n",
           "name": "capability_host_support_valid"
         },
         {
@@ -72,6 +72,11 @@
           "arguments": "",
           "definition": "CREATE OR REPLACE FUNCTION mission_control.mission_chain_transition_guard()\n RETURNS trigger\n LANGUAGE plpgsql\n SET search_path TO 'pg_catalog'\nAS $function$\nBEGIN\n    IF TG_OP = 'DELETE' THEN\n        RAISE EXCEPTION 'mission_control.mission_chain rows are never deleted'\n            USING ERRCODE = 'restrict_violation';\n    END IF;\n    IF (NEW.installation_id, NEW.application_id, NEW.tenant_id, NEW.chain_id, NEW.chain_key,\n        NEW.title, NEW.manifest_digest, NEW.members, NEW.created_at, NEW.created_by_actor_ref)\n       IS DISTINCT FROM\n       (OLD.installation_id, OLD.application_id, OLD.tenant_id, OLD.chain_id, OLD.chain_key,\n        OLD.title, OLD.manifest_digest, OLD.members, OLD.created_at, OLD.created_by_actor_ref)\n       OR NEW.version <> OLD.version + 1\n       OR OLD.lifecycle = 'completed'\n       OR NOT (\n           NEW.lifecycle = OLD.lifecycle\n           OR (OLD.lifecycle = 'pending' AND NEW.lifecycle IN ('running', 'completed'))\n           OR (OLD.lifecycle = 'running' AND NEW.lifecycle = 'completed')\n       ) THEN\n        RAISE EXCEPTION 'mission chains only move forward'\n            USING ERRCODE = 'restrict_violation';\n    END IF;\n    RETURN NEW;\nEND;\n$function$\n",
           "name": "mission_chain_transition_guard"
+        },
+        {
+          "arguments": "",
+          "definition": "CREATE OR REPLACE FUNCTION mission_control.notify_stream_hint()\n RETURNS trigger\n LANGUAGE plpgsql\n SET search_path TO 'pg_catalog'\nAS $function$\nBEGIN\n    IF TG_TABLE_NAME = 'mission_event' THEN\n        PERFORM pg_notify('mc_stream_hint', json_build_object(\n            'scope', 'mc/' || NEW.installation_id || '/' || NEW.application_id || '/' || NEW.tenant_id,\n            'mission_id', NEW.mission_id)::text);\n    ELSE\n        PERFORM pg_notify('mc_stream_hint', json_build_object(\n            'scope', 'mc/' || NEW.installation_id || '/' || NEW.application_id || '/' || NEW.tenant_id,\n            'execution_id', NEW.harness_execution_id)::text);\n    END IF;\n    RETURN NULL;\nEND;\n$function$\n",
+          "name": "notify_stream_hint"
         },
         {
           "arguments": "",
@@ -585,6 +590,12 @@
         ],
         "function:mission_chain_transition_guard()": [
           "$OWNER:EXECUTE"
+        ],
+        "function:notify_stream_hint()": [
+          "$OWNER:EXECUTE",
+          "mission_control_family_writer:EXECUTE",
+          "mission_control_outbox_worker:EXECUTE",
+          "mission_control_runtime:EXECUTE"
         ],
         "function:plugin_admission_guard()": [
           "$OWNER:EXECUTE"
@@ -1956,6 +1967,19 @@
           "$OWNER:TRUNCATE",
           "$OWNER:UPDATE"
         ],
+        "relation:run_cluster_binding": [
+          "$OWNER:DELETE",
+          "$OWNER:INSERT",
+          "$OWNER:MAINTAIN",
+          "$OWNER:REFERENCES",
+          "$OWNER:SELECT",
+          "$OWNER:TRIGGER",
+          "$OWNER:TRUNCATE",
+          "$OWNER:UPDATE",
+          "mission_control_readonly:SELECT",
+          "mission_control_runtime:INSERT",
+          "mission_control_runtime:SELECT"
+        ],
         "relation:run_composition_link": [
           "$OWNER:DELETE",
           "$OWNER:INSERT",
@@ -2755,6 +2779,10 @@
           "$OWNER:USAGE",
           "PUBLIC:USAGE"
         ],
+        "type:_run_cluster_binding": [
+          "$OWNER:USAGE",
+          "PUBLIC:USAGE"
+        ],
         "type:_run_composition_link": [
           "$OWNER:USAGE",
           "PUBLIC:USAGE"
@@ -3272,6 +3300,10 @@
           "PUBLIC:USAGE"
         ],
         "type:revision_proposal": [
+          "$OWNER:USAGE",
+          "PUBLIC:USAGE"
+        ],
+        "type:run_cluster_binding": [
           "$OWNER:USAGE",
           "PUBLIC:USAGE"
         ],
@@ -12920,7 +12952,7 @@
               "type": "u"
             },
             {
-              "definition": "CHECK (lane_profile = ANY (ARRAY['deep_agents'::text, 'cursor_local'::text, 'cursor_cloud'::text, 'claude_agent_sdk'::text, 'codex'::text]))",
+              "definition": "CHECK (lane_profile = ANY (ARRAY['deep_agents'::text, 'cursor_local'::text, 'cursor_cloud'::text, 'claude_agent_sdk'::text, 'codex'::text, 'claude_cloud'::text, 'codex_cloud'::text]))",
               "name": "continuation_transfer_lane_profile_check",
               "type": "c"
             },
@@ -15149,7 +15181,7 @@
               "type": "c"
             },
             {
-              "definition": "CHECK ((lane_profile <> ALL (ARRAY['cursor_local'::text, 'cursor_cloud'::text])) OR lane_binding IS NOT NULL)",
+              "definition": "CHECK ((lane_profile <> ALL (ARRAY['cursor_local'::text, 'cursor_cloud'::text, 'claude_agent_sdk'::text, 'codex'::text, 'claude_cloud'::text, 'codex_cloud'::text])) OR lane_binding IS NOT NULL)",
               "name": "execution_binding_cursor_lane_binding",
               "type": "c"
             },
@@ -15184,7 +15216,7 @@
               "type": "u"
             },
             {
-              "definition": "CHECK (lane_binding IS NULL OR jsonb_typeof(lane_binding) = 'object'::text AND ((lane_profile <> ALL (ARRAY['cursor_local'::text, 'cursor_cloud'::text])) OR (lane_binding ->> 'schema_version'::text) = 'mc.cursor_binding.v1'::text AND (lane_binding ->> 'lane_profile'::text) = lane_profile))",
+              "definition": "CHECK (lane_binding IS NULL OR jsonb_typeof(lane_binding) = 'object'::text AND ((lane_profile <> ALL (ARRAY['cursor_local'::text, 'cursor_cloud'::text])) OR (lane_binding ->> 'schema_version'::text) = 'mc.cursor_binding.v1'::text AND (lane_binding ->> 'lane_profile'::text) = lane_profile) AND ((lane_profile <> ALL (ARRAY['claude_agent_sdk'::text, 'codex'::text, 'claude_cloud'::text, 'codex_cloud'::text])) OR (lane_binding ->> 'schema_version'::text) = 'mc.execution_binding.v2'::text AND (lane_binding ->> 'lane_profile'::text) = lane_profile AND (lane_binding ->> 'binding_digest'::text) ~ '^sha256:[0-9a-f]{64}$'::text))",
               "name": "execution_binding_lane_binding_shape",
               "type": "c"
             },
@@ -17748,7 +17780,7 @@
               "type": "c"
             },
             {
-              "definition": "CHECK (lane_profile = ANY (ARRAY['deep_agents'::text, 'cursor_local'::text, 'cursor_cloud'::text, 'claude_agent_sdk'::text, 'codex'::text]))",
+              "definition": "CHECK (lane_profile = ANY (ARRAY['deep_agents'::text, 'cursor_local'::text, 'cursor_cloud'::text, 'claude_agent_sdk'::text, 'codex'::text, 'claude_cloud'::text, 'codex_cloud'::text]))",
               "name": "harness_execution_lane_profile_check",
               "type": "c"
             },
@@ -19019,7 +19051,7 @@
           ],
           "constraints": [
             {
-              "definition": "CHECK (((describe ->> 'schema_version'::text) = 'mc.lane_describe.v1'::text AND (describe ->> 'lane_profile'::text) = lane_profile AND (describe ->> 'lane'::text) = lane AND (describe ->> 'placement'::text) = placement AND (describe -> 'qualified'::text) = to_jsonb(qualified)) IS TRUE)",
+              "definition": "CHECK ((((describe ->> 'schema_version'::text) = ANY (ARRAY['mc.lane_describe.v1'::text, 'mc.lane_describe.v2'::text])) AND (describe ->> 'lane_profile'::text) = lane_profile AND (describe ->> 'lane'::text) = lane AND (describe ->> 'placement'::text) = placement AND (describe -> 'qualified'::text) = to_jsonb(qualified) AND ((describe ->> 'schema_version'::text) = 'mc.lane_describe.v1'::text OR jsonb_typeof(describe -> 'features'::text) = 'object'::text AND describe ? 'compaction_control'::text AND describe ? 'subordinate_visibility'::text)) IS TRUE)",
               "name": "lane_profile_check",
               "type": "c"
             },
@@ -19039,7 +19071,7 @@
               "type": "c"
             },
             {
-              "definition": "CHECK (lane = ANY (ARRAY['deep_agents'::text, 'cursor'::text]))",
+              "definition": "CHECK (lane = ANY (ARRAY['deep_agents'::text, 'cursor'::text, 'claude'::text, 'codex'::text]))",
               "name": "lane_profile_lane_check",
               "type": "c"
             },
@@ -20787,6 +20819,10 @@
             {
               "definition": "CREATE TRIGGER mission_event_immutable BEFORE DELETE OR UPDATE ON mission_control.mission_event FOR EACH ROW EXECUTE FUNCTION mission_control.reject_mutation()",
               "name": "mission_event_immutable"
+            },
+            {
+              "definition": "CREATE TRIGGER mission_event_stream_hint AFTER INSERT ON mission_control.mission_event FOR EACH ROW EXECUTE FUNCTION mission_control.notify_stream_hint()",
+              "name": "mission_event_stream_hint"
             }
           ]
         },
@@ -24904,7 +24940,7 @@
               "type": "c"
             },
             {
-              "definition": "CHECK (lane_profile = ANY (ARRAY['deep_agents'::text, 'cursor_local'::text, 'cursor_cloud'::text, 'claude_agent_sdk'::text, 'codex'::text]))",
+              "definition": "CHECK (lane_profile = ANY (ARRAY['deep_agents'::text, 'cursor_local'::text, 'cursor_cloud'::text, 'claude_agent_sdk'::text, 'codex'::text, 'claude_cloud'::text, 'codex_cloud'::text]))",
               "name": "provider_frame_lane_profile_check",
               "type": "c"
             },
@@ -24979,6 +25015,10 @@
             {
               "definition": "CREATE TRIGGER provider_frame_immutable BEFORE UPDATE ON mission_control.provider_frame FOR EACH ROW EXECUTE FUNCTION mission_control.reject_mutation()",
               "name": "provider_frame_immutable"
+            },
+            {
+              "definition": "CREATE TRIGGER provider_frame_stream_hint AFTER INSERT ON mission_control.provider_frame FOR EACH ROW EXECUTE FUNCTION mission_control.notify_stream_hint()",
+              "name": "provider_frame_stream_hint"
             }
           ]
         },
@@ -26363,6 +26403,169 @@
           ],
           "row_level_security": true,
           "triggers": []
+        },
+        "run_cluster_binding": {
+          "columns": [
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "installation_id",
+              "not_null": true,
+              "type": "uuid"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "application_id",
+              "not_null": true,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "tenant_id",
+              "not_null": true,
+              "type": "uuid"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "run_key",
+              "not_null": true,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "workflow_id",
+              "not_null": true,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "cluster_id",
+              "not_null": true,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "temporal_target",
+              "not_null": true,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "temporal_address",
+              "not_null": true,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "temporal_namespace",
+              "not_null": true,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "task_queue",
+              "not_null": true,
+              "type": "text"
+            },
+            {
+              "default": null,
+              "generated": null,
+              "identity": null,
+              "name": "recorded_at",
+              "not_null": true,
+              "type": "timestamp with time zone"
+            }
+          ],
+          "constraints": [
+            {
+              "definition": "CHECK (cluster_id <> ''::text AND length(cluster_id) <= 512)",
+              "name": "run_cluster_binding_cluster_id_check",
+              "type": "c"
+            },
+            {
+              "definition": "FOREIGN KEY (installation_id, application_id, tenant_id, run_key) REFERENCES mission_control.mission_run(installation_id, application_id, tenant_id, run_key)",
+              "name": "run_cluster_binding_installation_id_application_id_tenant__fkey",
+              "type": "f"
+            },
+            {
+              "definition": "PRIMARY KEY (installation_id, application_id, tenant_id, run_key)",
+              "name": "run_cluster_binding_pkey",
+              "type": "p"
+            },
+            {
+              "definition": "CHECK (run_key <> ''::text)",
+              "name": "run_cluster_binding_run_key_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (task_queue <> ''::text AND length(task_queue) <= 512)",
+              "name": "run_cluster_binding_task_queue_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (temporal_address <> ''::text AND length(temporal_address) <= 512)",
+              "name": "run_cluster_binding_temporal_address_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (temporal_namespace <> ''::text AND length(temporal_namespace) <= 512)",
+              "name": "run_cluster_binding_temporal_namespace_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (temporal_target = ANY (ARRAY['local'::text, 'cloud'::text]))",
+              "name": "run_cluster_binding_temporal_target_check",
+              "type": "c"
+            },
+            {
+              "definition": "CHECK (workflow_id <> ''::text AND length(workflow_id) <= 1024)",
+              "name": "run_cluster_binding_workflow_id_check",
+              "type": "c"
+            }
+          ],
+          "force_row_level_security": true,
+          "indexes": [
+            "CREATE UNIQUE INDEX run_cluster_binding_pkey ON mission_control.run_cluster_binding USING btree (installation_id, application_id, tenant_id, run_key)"
+          ],
+          "kind": "r",
+          "policies": [
+            {
+              "command": "*",
+              "name": "run_cluster_binding_scope",
+              "permissive": true,
+              "roles": [
+                "PUBLIC"
+              ],
+              "using": "((installation_id = mission_control.ctx_installation_id()) AND (application_id = mission_control.ctx_application_id()) AND (tenant_id = mission_control.ctx_tenant_id()))",
+              "with_check": "((installation_id = mission_control.ctx_installation_id()) AND (application_id = mission_control.ctx_application_id()) AND (tenant_id = mission_control.ctx_tenant_id()))"
+            }
+          ],
+          "row_level_security": true,
+          "triggers": [
+            {
+              "definition": "CREATE TRIGGER run_cluster_binding_immutable BEFORE DELETE OR UPDATE ON mission_control.run_cluster_binding FOR EACH ROW EXECUTE FUNCTION mission_control.reject_mutation()",
+              "name": "run_cluster_binding_immutable"
+            }
+          ]
         },
         "run_composition_link": {
           "columns": [
@@ -34012,7 +34215,7 @@
               "type": "c"
             },
             {
-              "definition": "CHECK (host_profiles <@ ARRAY['deep_agents'::text, 'cursor_local'::text, 'cursor_cloud'::text, 'claude_agent_sdk'::text, 'codex'::text])",
+              "definition": "CHECK (host_profiles <@ ARRAY['deep_agents'::text, 'cursor_local'::text, 'cursor_cloud'::text, 'claude_agent_sdk'::text, 'codex'::text, 'claude_cloud'::text, 'codex_cloud'::text])",
               "name": "search_document_host_profiles_known",
               "type": "c"
             },

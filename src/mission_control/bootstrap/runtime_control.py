@@ -49,6 +49,9 @@ from mission_control.adapters.postgres.async_subagents.async_subagents import (
 from mission_control.adapters.postgres.orchestration.stagegraph_repository import (
     PostgresStageGraphOperationTemplateRepository,
 )
+from mission_control.adapters.postgres.run_control.cluster_bindings import (
+    PostgresRunClusterBindings,
+)
 from mission_control.adapters.postgres.runtime.run_forks import PostgresForkMaterializationStore
 from mission_control.adapters.postgres.runtime.stage3_kernel_repository import (
     PostgresForkRepository,
@@ -79,6 +82,7 @@ from mission_control.application.subordinates.usage_reconciliation import (
     AsyncChildUsageReconciliation,
     ProviderNotComposed,
 )
+from mission_control.bootstrap.composition import temporal_cluster_identity
 from mission_control.bootstrap.settings import Settings
 from mission_control.interfaces.http.run_control import (
     get_boundary_intervention_service,
@@ -169,6 +173,14 @@ async def compose_runtime_control(
         materializations=PostgresForkMaterializationStore(pool),
         fork_templates=StageGraphForkTemplateDerivation(
             PostgresStageGraphOperationTemplateRepository(pool)
+        ),
+        # MP-22: the technical API binds runs to its configured cluster too.
+        cluster_bindings=PostgresRunClusterBindings(pool),
+        cluster=temporal_cluster_identity(
+            target=settings.temporal_target,
+            address=settings.temporal_address,
+            namespace=settings.temporal_namespace,
+            task_queue=settings.temporal_task_queue,
         ),
     )
     state.run_launch_service = launch

@@ -1,4 +1,4 @@
-"""Git worktree workspace leases for `cursor_local` (SPEC-07 section 5.1; FT-G3).
+"""Git worktree workspace leases for `cursor_local` (SPEC-07 section 5.1; FT-G3; MP-04).
 
 `prepare` leases a Workspace: a detached `git worktree` of the target repository at the
 binding's base ref (Mission 3), or an initialized repository with one empty base commit
@@ -6,6 +6,12 @@ binding's base ref (Mission 3), or an initialized repository with one empty base
 the session the patch (`git diff --binary` against the base commit, untracked files included,
 Mission Control's own projections and packet excluded) is captured and stored before the lease
 is released. Git runs in worker threads (`asyncio.to_thread`) so every event loop works.
+
+MP-04: a repository-backed lease is allocated by the provider-neutral `WorkspaceAllocator`
+under `CURSOR_LOCAL_POLICY` (one lease per holder generation): the worktree comes from a
+dedicated clone under the lease root (never added to the developer's checkout), its path is
+checked inside the root after symlink resolution, a dirty local checkout is refused, and the
+slot is acquired and released through the fenced ledger.
 """
 
 from __future__ import annotations
@@ -19,12 +25,27 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Final, cast
 from uuid import UUID
 
+from mission_control.adapters.cursor.git_workspaces import GitWorkspaceBackend
 from mission_control.application.execution.harness.leases import (
     WorkspaceLease,
-    WorkspaceLeaseStore,
+    WorkspaceLeaseLedger,
     lease_identity,
+)
+from mission_control.application.workspaces.policy import contained
+from mission_control.application.workspaces.service import AllocationRequest, WorkspaceAllocator
+from mission_control.domain.execution.bindings import WorkspacePolicyPin
+from mission_control.domain.execution.lanes import LaneProfileName
+
+# The FT-G3 behaviour expressed as a policy: one worktree per holder generation, removed after
+# its patch and snapshot are stored.
+CURSOR_LOCAL_POLICY: Final = WorkspacePolicyPin(
+    mode="managed_worktree",
+    reuse="none",
+    dirty_input="reject",
+    cleanup="retain_until_artifacts_registered",
 )
 
 BASE_COMMIT_MESSAGE = "mission control workspace base"
@@ -75,10 +96,6 @@ def git_bytes(*args: str, cwd: Path) -> bytes:
     return completed.stdout
 
 
-def _is_remote(repository: str) -> bool:
-    return "://" in repository or repository.startswith("git@")
-
-
 def _excludes(paths: Sequence[str]) -> list[str]:
     seen = dict.fromkeys((*ALWAYS_EXCLUDED, *paths))
     return [f":(exclude){path}" for path in seen if path]
@@ -97,16 +114,32 @@ class CapturedPatch:
 class GitWorktreeLeaser:
     def __init__(
         self,
-        store: WorkspaceLeaseStore,
+        store: WorkspaceLeaseLedger,
         *,
         lease_root: Path,
         clock: Callable[[], datetime] = _utc_now,
         lease_ttl: timedelta = timedelta(hours=4),
+        policy: WorkspacePolicyPin = CURSOR_LOCAL_POLICY,
     ) -> None:
         self._store = store
         self._root = lease_root
         self._clock = clock
         self._ttl = lease_ttl
+        self._policy = policy
+        self._backend = GitWorkspaceBackend(lease_root)
+        owner = hashlib.sha256(str(lease_root.expanduser().resolve()).encode()).hexdigest()
+        self._allocator = WorkspaceAllocator(
+            ledger=store,
+            backend=self._backend,
+            root=lease_root,
+            allocator_ref=f"git-worktree-leaser:{owner[:16]}",
+            clock=clock,
+            lease_ttl=lease_ttl,
+        )
+
+    @property
+    def allocator(self) -> WorkspaceAllocator:
+        return self._allocator
 
     def lease_path(self, run_id: str, attempt_no: int, generation: int) -> Path:
         run = hashlib.sha256(run_id.encode("utf-8")).hexdigest()[:16]
@@ -135,13 +168,29 @@ class GitWorktreeLeaser:
         repository: str | None,
         base_ref: str,
     ) -> WorkspaceLease:
+        path = self.lease_path(run_id, attempt_no, generation)
+        if repository is not None:
+            return await self._allocator.allocate(
+                AllocationRequest(
+                    request_scope=request_scope,
+                    lane_profile=cast(LaneProfileName, lane_profile),
+                    harness_execution_id=harness_execution_id,
+                    generation=generation,
+                    run_id=run_id,
+                    attempt_no=attempt_no,
+                    policy=self._policy,
+                    repository=repository,
+                    base_ref=base_ref,
+                    path=str(path),
+                    detached=True,
+                )
+            )
         lease_id, key = lease_identity(lane_profile, harness_execution_id, generation)
         existing = await self._store.get(request_scope, lease_id)
         if existing is not None and not existing.released:
             if await asyncio.to_thread(Path(existing.path).is_dir):
                 return existing
-        path = self.lease_path(run_id, attempt_no, generation)
-        base_commit = await asyncio.to_thread(self._materialize, path, repository, base_ref)
+        base_commit = await asyncio.to_thread(self._initialize, path)
         lease = WorkspaceLease(
             lease_id=lease_id,
             request_scope=request_scope,
@@ -152,7 +201,7 @@ class GitWorktreeLeaser:
             run_id=run_id,
             attempt_no=attempt_no,
             path=str(path),
-            repository=repository,
+            repository=None,
             base_ref=base_ref,
             base_commit=base_commit,
             fence=generation,
@@ -160,43 +209,25 @@ class GitWorktreeLeaser:
         )
         return await self._store.record(lease)
 
-    def _mirror(self, repository: str) -> Path:
-        if not _is_remote(repository):
-            return Path(repository)
-        return self._root / "_repos" / hashlib.sha256(repository.encode()).hexdigest()[:16]
+    def _initialize(self, path: Path) -> str:
+        """A research lease: an initialized repository with one empty base commit."""
 
-    def _source(self, repository: str) -> Path:
-        mirror = self._mirror(repository)
-        if not _is_remote(repository):
-            return mirror
-        if not (mirror / ".git").exists() and not (mirror / "HEAD").exists():
-            mirror.parent.mkdir(parents=True, exist_ok=True)
-            git("clone", "--quiet", "--no-checkout", repository, str(mirror), cwd=mirror.parent)
-        else:
-            git("fetch", "--quiet", "origin", cwd=mirror)
-        return mirror
-
-    def _materialize(self, path: Path, repository: str | None, base_ref: str) -> str:
-        if (path / ".git").exists():
-            # A re-lease after a lost worker: the worktree is still there; reuse it.
-            return git("rev-parse", "HEAD", cwd=path).strip()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if repository is not None:
-            source = self._source(repository)
-            git("worktree", "add", "--detach", "--force", str(path), base_ref, cwd=source)
-        else:
-            path.mkdir(parents=True, exist_ok=True)
-            git("init", "--quiet", cwd=path)
-            git(
-                *_IDENTITY,
-                "commit",
-                "--quiet",
-                "--allow-empty",
-                "-m",
-                BASE_COMMIT_MESSAGE,
-                cwd=path,
-            )
-        return git("rev-parse", "HEAD", cwd=path).strip()
+        target = contained(self._root, path)
+        if (target / ".git").exists():
+            # A re-lease after a lost worker: the repository is still there; reuse it.
+            return git("rev-parse", "HEAD", cwd=target).strip()
+        target.mkdir(parents=True, exist_ok=True)
+        git("init", "--quiet", cwd=target)
+        git(
+            *_IDENTITY,
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "-m",
+            BASE_COMMIT_MESSAGE,
+            cwd=target,
+        )
+        return git("rev-parse", "HEAD", cwd=target).strip()
 
     async def capture_patch(
         self, lease: WorkspaceLease, *, exclude: Sequence[str] = ()
@@ -240,27 +271,38 @@ class GitWorktreeLeaser:
         patch_artifact_ref: str | None,
         snapshot_ref: str | None = None,
     ) -> WorkspaceLease:
-        """Remove the worktree only after its patch is stored (the caller passes its ref, and
-        the frozen lane snapshot a fork of the run restores)."""
+        """Release the lease (fenced) and remove its worktree, only after its patch is stored
+        (the caller passes its ref, and the frozen lane snapshot a fork of the run restores)."""
 
         if lease.released:
             return lease
-        await asyncio.to_thread(self._remove, Path(lease.path), lease.repository)
-        return await self._store.release(
+        if lease.slot is None:
+            await asyncio.to_thread(self._remove_initialized, Path(lease.path))
+            return await self._store.release(
+                lease.request_scope,
+                lease.lease_id,
+                patch_artifact_ref=patch_artifact_ref,
+                released_at=self._clock(),
+                snapshot_ref=snapshot_ref,
+            )
+        released = await self._store.release_fenced(
             lease.request_scope,
             lease.lease_id,
+            fence=lease.fence,
             patch_artifact_ref=patch_artifact_ref,
-            released_at=self._clock(),
             snapshot_ref=snapshot_ref,
+            released_at=self._clock(),
+            cleanup_status="pending",
+        )
+        await self._backend.remove(released)
+        return await self._store.mark_cleanup(
+            released.request_scope, released.lease_id, status="completed"
         )
 
-    def _remove(self, path: Path, repository: str | None) -> None:
-        if repository is not None and path.exists():
-            source = self._mirror(repository)
-            git("worktree", "remove", "--force", str(path), cwd=source, check=False)
-            git("worktree", "prune", cwd=source, check=False)
-        if path.exists():
-            shutil.rmtree(path, ignore_errors=True)
+    def _remove_initialized(self, path: Path) -> None:
+        target = contained(self._root, path)
+        if target.exists():
+            shutil.rmtree(target, ignore_errors=True)
 
 
 __all__ = [

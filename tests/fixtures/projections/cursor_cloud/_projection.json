@@ -14,7 +14,11 @@
   },
   "in_process": null,
   "report": {
-    "degraded": [],
+    "degraded": [
+      "mc.stop_fence: no native hook on cursor_cloud for before_mcp",
+      "mc.operation_intent: no native hook on cursor_cloud for before_mcp",
+      "mc.frame_capture: no native hook on cursor_cloud for session_start, session_end, before_model, before_mcp, after_compaction"
+    ],
     "overflow": [],
     "plugin_expansions": [
       [
@@ -29,6 +33,7 @@
     "skipped_members": [
       "mcp.agent-browser@0.38.2#sha256:c01113dab94c0ed749a6086d3de01b1baf49f0f6c926e43ae642af798deac473"
     ],
+    "unqualified": [],
     "unsupported_on_lane": [
       {
         "event": "session_start",

@@ -23,6 +23,7 @@ from mission_control.domain.programs.contracts import (
     GoalVerificationResult,
     GoalVerifierDecision,
 )
+from mission_control.domain.programs.human_gate import HumanGateOutcome
 
 
 class GoalFamilyDecisionMutation(AtomicFamilyMutation):
@@ -94,6 +95,11 @@ class GoalOperationPreparationRequest(Contract):
     # RRM-016 review fix 2 (additive): 2 re-admits once after a stale admission, under a
     # new command identity, at the run version the stale result reported.
     admission_attempt: int = Field(default=1, ge=1, le=2)
+    # MP-10 (additive): human review feedback the executor of this iteration must address;
+    # left out of dumps when empty so preparations recorded before it keep their shape.
+    review_feedback: tuple[HumanGateOutcome, ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
 
     @model_validator(mode="after")
     def exact_revision(self) -> GoalOperationPreparationRequest:

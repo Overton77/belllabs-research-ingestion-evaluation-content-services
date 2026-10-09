@@ -8,6 +8,7 @@
 - [Implementation evidence](MISSION_CONTROL_IMPLEMENTATION_STATUS.md): supported and blocked behavior.
 - [Removal guide](REMOVAL_GUIDE.md): clean-break changes, replacements and recovery.
 - [Fast-track packet 2026-10](specs/fast-track-2026-10/README.md): architecture, specifications, mission manifests, ticket drafts and the agent team workspace for capabilities, context transfer, mission state, chains, the manifest, interventions and the Cursor lane.
+- [Multi-provider packet 2026-10](specs/multi-provider-2026-10/README.md): researched architecture, lifecycle/environment/human-control/realtime specifications, Linear issues and the implementation-team workspace for local and provider-hosted Claude Code, Codex and Cursor.
 - Tools (`tools/`): `okf_search.py` searches the whole corpus, `validate_okf.py` validates the bundle,
   `agents_docs_index.py` regenerates the compressed index in the root `AGENTS.md`, `okf_frontmatter.py`
   adds frontmatter to new documents, `check_links.py` checks links.

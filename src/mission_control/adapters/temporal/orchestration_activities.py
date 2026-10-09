@@ -7,6 +7,7 @@ from temporalio.client import Client
 from temporalio.exceptions import ApplicationError
 from temporalio.worker import Worker, WorkerDeploymentConfig
 
+from mission_control.adapters.temporal.activities.human_gate import HumanGateActivities
 from mission_control.adapters.temporal.boundary_activities import apply_boundary_fact
 from mission_control.adapters.temporal.registration.activities import coordinator_activities
 from mission_control.adapters.temporal.registration.workflows import coordinator_workflows
@@ -163,14 +164,21 @@ def create_stagegraph_worker(
     task_queue: str,
     activities: StageGraphActivities,
     deployment_config: WorkerDeploymentConfig | None = None,
+    human_gates: HumanGateActivities | None = None,
 ) -> Worker:
-    """Compose the F3 worker after F4 supplies concrete operation/evaluator ports."""
+    """Compose the F3 worker after F4 supplies concrete operation/evaluator ports.
+
+    MP-10: the Human Gate activities serve the family's gate stages on the same queue when
+    composed; without them a declared gate fails its `human_gate.open` activity (typed)."""
 
     return Worker(
         client,
         task_queue=task_queue,
         workflows=coordinator_workflows("StageGraph"),
         workflow_runner=coordinator_workflow_runner(),
-        activities=coordinator_activities("StageGraph", activities),
+        activities=[
+            *coordinator_activities("StageGraph", activities),
+            *(human_gates.functions if human_gates is not None else ()),
+        ],
         deployment_config=deployment_config,
     )

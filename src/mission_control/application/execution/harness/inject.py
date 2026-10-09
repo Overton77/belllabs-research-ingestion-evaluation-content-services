@@ -29,6 +29,7 @@ from datetime import UTC, datetime
 from typing import Protocol, runtime_checkable
 
 from mission_control.application.context.pack_service import ContextPackService
+from mission_control.application.execution.harness.dispatch import SteeringLane
 from mission_control.application.execution.harness.protocol import AgentHarness, OperationLane
 from mission_control.application.execution.mailbox import MailboxDeliveryService
 from mission_control.domain.authoring.canonical import sha256_digest
@@ -39,7 +40,9 @@ from mission_control.domain.execution.contracts import (
     RuntimeInvocation,
     RuntimeResult,
 )
+from mission_control.domain.execution.lane_turns import LANE_COMMAND_SEMANTICS
 from mission_control.domain.execution.lanes import (
+    CancelReceipt,
     CancelTurnRequest,
     LaneDescribe,
     LaneFrame,
@@ -88,6 +91,23 @@ class TurnRecord:
 
 def interrupt_semantics(describe: LaneDescribe) -> str:
     return describe.delivery_semantics.get(INJECT_KIND, "unsupported")
+
+
+def resolve_interrupt_mode(lane_profile: str, describe: LaneDescribe, lane: object) -> str:
+    """MP-06: the one mode `interrupt_and_inject` runs in, or `unsupported`.
+
+    The frozen per-profile `LANE_COMMAND_SEMANTICS` (what the workflow's receipts promise)
+    and the lane's describe must agree, and `cooperative_inject` needs a lane that steers the
+    exact native turn. Any disagreement refuses the command: there is no automatic fallback
+    from steering to cancel-and-replace or the reverse.
+    """
+
+    declared = LANE_COMMAND_SEMANTICS[INJECT_KIND].get(lane_profile, "unsupported")
+    if declared != interrupt_semantics(describe):
+        return "unsupported"
+    if declared == "cooperative_inject" and not isinstance(lane, SteeringLane):
+        return "unsupported"
+    return declared
 
 
 def unit_boundary(request: OperationExecutionRequest) -> tuple[MailboxFamily, str] | None:
@@ -319,6 +339,8 @@ async def cancel_and_replace_turn(
     after: str | None = None,
     on_frame: Callable[[LaneFrame], Awaitable[None]] | None = None,
     cancel_first: bool = True,
+    send: Callable[[SendTurnRequest], Awaitable[TurnHandle]] | None = None,
+    on_cancelled: Callable[[CancelReceipt], Awaitable[None]] | None = None,
 ) -> ReplacedTurn:
     """`cancel_and_replace` over the harness protocol: cancel the running turn (idempotent),
     observe it to its terminal frame, settle uncertain effects (raise `InjectionParked` when
@@ -328,11 +350,16 @@ async def cancel_and_replace_turn(
     FT-G4: `after` resumes the drain from the last persisted cursor and `on_frame` persists
     every drained frame (a tool call that completes during the cancel settles its effect);
     `cancel_first=False` replaces a turn already found terminal (a retried replacement).
+    MP-06: `send` issues the replacement through the caller's dispatch journal and Stop
+    Fence admission (default: the lane's own `send_turn`); `on_cancelled` receives the
+    provider's cancel receipt when it arrives (its own Delivery Report timestamp).
     """
 
     settings = settings or InjectionSettings()
     if cancel_first:
-        await lane.cancel_turn(cancel)
+        receipt = await lane.cancel_turn(cancel)
+        if on_cancelled is not None:
+            await on_cancelled(receipt)
     observe = ObserveRequest(
         **cancel.model_dump(exclude={"turn", "reason", "urgency"}),
         turn=cancel.turn,
@@ -353,7 +380,7 @@ async def cancel_and_replace_turn(
         pending = await unsettled()
     if pending:
         raise InjectionParked(pending)
-    handle = await lane.send_turn(replacement)
+    handle = await (send or lane.send_turn)(replacement)
     return ReplacedTurn(
         handle=handle,
         cancelled_turn_ref=cancel.turn.native_turn_ref,
@@ -371,5 +398,6 @@ __all__ = [
     "TurnRecord",
     "cancel_and_replace_turn",
     "interrupt_semantics",
+    "resolve_interrupt_mode",
     "unit_boundary",
 ]

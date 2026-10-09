@@ -317,6 +317,13 @@ class TranscriptSearchService:
         self._refresh = refresh
         self.request_scope = transcripts.request_scope
 
+    async def refresh(self, run_key: str, *, actor: ActorContext) -> ProjectionReceipt:
+        """Re-project the run's transcript documents now (the projection job, on demand)."""
+
+        if READ_PERMISSION not in actor.permissions:
+            raise TranscriptDenied("actor lacks workflow_run.read")
+        return await self._projector.project(run_key)
+
     async def search(
         self, run_key: str, text: str, *, actor: ActorContext, limit: int = 20
     ) -> TranscriptSearchPage:

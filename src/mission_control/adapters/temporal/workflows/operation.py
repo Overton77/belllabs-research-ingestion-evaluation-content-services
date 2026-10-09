@@ -7,7 +7,7 @@ from typing import Any
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
-from temporalio.exceptions import ApplicationError
+from temporalio.exceptions import ActivityError, ApplicationError
 
 with workflow.unsafe.imports_passed_through():
     from mission_control.adapters.temporal.search_attributes import (
@@ -40,6 +40,12 @@ with workflow.unsafe.imports_passed_through():
         pause_decision_for,
     )
     from mission_control.domain.execution.lanes import LaneResumePoint, LaneSegmentBounds
+    from mission_control.domain.execution.usage_admission import (
+        LimitWaitLedger,
+        ProviderLimitSignal,
+        plan_limit_response,
+        wait_for_limit_reset,
+    )
     from mission_control.domain.programs.search_attributes import (
         MissionPhase,
         phase_for_disposition,
@@ -60,6 +66,14 @@ SEGMENT_LOOP_PATCH = "ft-g2-segment-loop"
 # run boundary only; the marker is written only when a pause actually holds the next segment,
 # so every history recorded without a pause replays unchanged.
 LANE_PAUSE_PATCH = "ft-g4-lane-boundary-pause"
+# MP-05/MP-06: a `lane.turn` whose create/send a provider limit refused (nothing accepted,
+# journaled `declined`) fails `provider_capacity_limit`; the loop waits out the reset on a
+# Temporal timer (`plan_limit_response` / `wait_for_limit_reset`), woken by a cancel, then
+# runs the segment again, or settles `failed(capacity)` when the reset is past the deadline
+# or the waits are spent. The marker is written only when such a failure occurs; before
+# it the failure failed the workflow, which every earlier history replays unchanged.
+CAPACITY_WAIT_PATCH = "mp05-capacity-wait"
+PROVIDER_CAPACITY_LIMIT = "provider_capacity_limit"
 TERMINAL_DISPOSITIONS = frozenset({"completed", "cancelled", "failed", "in_doubt"})
 # `lane.turn` retries infrastructure failures (a lost worker, a heartbeat timeout) only:
 # rejections are non-retryable application errors raised by the activity.
@@ -81,6 +95,20 @@ def _parks(result: dict[str, object]) -> bool:
     return (
         result.get("status") == "in_doubt" and result.get("failure_code") != "generation_superseded"
     )
+
+
+def _capacity_signal(error: ActivityError) -> ProviderLimitSignal | None:
+    """The provider limit a failed `lane.turn` reported, if that is why it failed."""
+
+    cause = error.cause
+    if not isinstance(cause, ApplicationError) or cause.type != PROVIDER_CAPACITY_LIMIT:
+        return None
+    if not cause.details:
+        return None
+    try:
+        return ProviderLimitSignal.model_validate(cause.details[0])
+    except ValueError:
+        return None
 
 
 def superseded_generation(result: OperationWorkflowResult) -> bool:
@@ -214,6 +242,9 @@ class OperationWorkflow:
         self._lane_profile = default_lane_profile(request.operation)
         self._turn_in_flight = False
         self._paused = False
+        # MP-05: provider-limit waits spent by this run (not yet carried across
+        # continue-as-new; the request field is a proposed contract delta).
+        self._limit_ledger = LimitWaitLedger()
 
     @workflow.signal
     def request_cancel(self) -> None:
@@ -252,7 +283,7 @@ class OperationWorkflow:
         receipt = LaneCommandReceipt(
             command_id=command_id,
             kind="cancel",
-            delivery_semantics=LANE_COMMAND_SEMANTICS["cancel"],
+            delivery_semantics=LANE_COMMAND_SEMANTICS["cancel"][self._lane_profile],
         ).model_dump(mode="json")
         self._command_receipts.append(receipt)
         return receipt
@@ -560,7 +591,16 @@ class OperationWorkflow:
             except (Exception, asyncio.CancelledError):
                 _uncancel()
             return None
-        result = LaneTurnResult.model_validate(handle.result())
+        try:
+            raw = handle.result()
+        except ActivityError as error:
+            signal = _capacity_signal(error)
+            if signal is None or not workflow.patched(CAPACITY_WAIT_PATCH):
+                raise
+            self._turn_in_flight = False
+            await self._wait_out_capacity(loop, signal)
+            return None
+        result = LaneTurnResult.model_validate(raw)
         if result.native.session_ref is not None:
             loop.native = result.native
         # Between segments a sent turn is still running at the provider.
@@ -596,6 +636,42 @@ class OperationWorkflow:
 
     def _turn_ended_or_cancelled(self, handle: workflow.ActivityHandle[Any]) -> bool:
         return handle.done() or self._cancel_requested
+
+    async def _wait_out_capacity(self, loop: _SegmentLoop, signal: ProviderLimitSignal) -> None:
+        """Wait for a provider limit reset on a Temporal timer, bounded by the unit's
+        segment budget; a rejection or a spent wait settles `failed(capacity)` next."""
+
+        bounds = loop.bounds
+        deadline = workflow.info().workflow_start_time + timedelta(
+            seconds=bounds.max_segments * bounds.start_to_close_s
+        )
+        decision = plan_limit_response(
+            signal, now=workflow.now(), deadline=deadline, ledger=self._limit_ledger
+        )
+        if decision.disposition == "reject":
+            loop.capacity_exhausted = True
+            return
+        if decision.disposition != "wait":
+            return
+
+        async def timer(predicate: Any, timeout_s: float) -> bool:
+            try:
+                await workflow.wait_condition(predicate, timeout=timedelta(seconds=timeout_s))
+            except TimeoutError:
+                return False
+            return True
+
+        outcome = await wait_for_limit_reset(
+            decision,
+            now=workflow.now,
+            deadline=deadline,
+            wait=timer,
+            cancelled=lambda: self._cancel_requested,
+            ledger=self._limit_ledger,
+        )
+        self._limit_ledger = outcome.ledger
+        if outcome.outcome == "deadline_reached":
+            loop.capacity_exhausted = True
 
     async def _deliver_mailbox_at_boundary(self, request: OperationWorkflowRequest) -> None:
         """Segment boundary hook for `next_turn` mailbox items (FT-F1 fills it). The mailbox
@@ -830,6 +906,7 @@ class OperationWorkflow:
 
 __all__: tuple[str, ...] = (
     "CANCELLATION_SAGA_PATCH",
+    "CAPACITY_WAIT_PATCH",
     "LANE_PAUSE_PATCH",
     "SEGMENT_LOOP_PATCH",
     "OperationWorkflow",

@@ -1,0 +1,36 @@
+# Design fragment for proposed mission/v2. NOT accepted by the current mission/v1 parser.
+# Deployment values must resolve to actual admitted profiles before launch.
+environment:
+  lane: claude_agent_sdk
+  model: {profile: "<admitted-model-profile>"}
+  auth: {profile: "<owner-local-auth-profile>"}
+  execution_environment:
+    kind: local_workspace
+    profile: "<admitted-local-host-profile>"
+  workspace:
+    repo: {url: "https://github.com/<owner>/<repo>", ref: "<branch>"}
+    policy:
+      mode: managed_worktree
+      reuse: within_run
+      dirty_input: reject
+      cleanup: retain_until_artifacts_registered
+    skills: [{pin: "<skill-version-pin>"}]
+  capabilities: [{pin: "<mcp-server-version-pin>"}]
+  agents: [{pin: "<subagent-profile-version-pin>"}]
+  hooks:
+    - pin: "<hook-script-version-pin>"
+      events: [before_tool]
+      fail_closed: true
+  plugins: [{pin: "<plugin-version-pin>"}]
+  continuation:
+    native_compaction: preferred
+    fallback: sealed_checkpoint
+    soft_context_ratio: 0.70
+    hard_context_ratio: 0.85
+    max_session_turns: 12
+    max_transfers: 4
+  requires:
+    controls: [queue_instruction, cancel, request_continuation]
+    approvals: [workflow_gate, governed_mcp]
+    observation: [terminal_result, subordinate_lifecycle]
+  budget: {tokens: 200000, wall_clock: 1h, tool_calls: 100}

@@ -13,7 +13,10 @@
   },
   "in_process": null,
   "report": {
-    "degraded": [],
+    "degraded": [
+      "mc.frame_capture: no Python SDK callback on claude_agent_sdk for session_start, session_end, before_model, after_model, after_compaction",
+      "mc.usage: no Python SDK callback on claude_agent_sdk for after_model"
+    ],
     "overflow": [],
     "plugin_expansions": [
       [
@@ -27,6 +30,7 @@
     ],
     "requires_trust": [],
     "skipped_members": [],
+    "unqualified": [],
     "unsupported_on_lane": [
       {
         "event": "before_model",
@@ -35,5 +39,173 @@
       }
     ]
   },
-  "send_options": {}
+  "send_options": {
+    "hook_callbacks": [
+      {
+        "fail_closed": true,
+        "hook_id": "mc.stop_fence",
+        "mc_event": "before_tool",
+        "native_event": "PreToolUse",
+        "timeout": 30
+      },
+      {
+        "fail_closed": true,
+        "hook_id": "mc.stop_fence",
+        "matcher": "Bash",
+        "mc_event": "before_shell",
+        "native_event": "PreToolUse",
+        "timeout": 30
+      },
+      {
+        "fail_closed": true,
+        "hook_id": "mc.stop_fence",
+        "matcher": "mcp__.*",
+        "mc_event": "before_mcp",
+        "native_event": "PreToolUse",
+        "timeout": 30
+      },
+      {
+        "fail_closed": true,
+        "hook_id": "mc.stop_fence",
+        "mc_event": "subagent_start",
+        "native_event": "SubagentStart",
+        "timeout": 30
+      },
+      {
+        "fail_closed": true,
+        "hook_id": "mc.operation_intent",
+        "mc_event": "before_tool",
+        "native_event": "PreToolUse",
+        "timeout": 30
+      },
+      {
+        "fail_closed": true,
+        "hook_id": "mc.operation_intent",
+        "matcher": "Bash",
+        "mc_event": "before_shell",
+        "native_event": "PreToolUse",
+        "timeout": 30
+      },
+      {
+        "fail_closed": true,
+        "hook_id": "mc.operation_intent",
+        "matcher": "mcp__.*",
+        "mc_event": "before_mcp",
+        "native_event": "PreToolUse",
+        "timeout": 30
+      },
+      {
+        "fail_closed": true,
+        "hook_id": "mc.operation_intent",
+        "mc_event": "subagent_start",
+        "native_event": "SubagentStart",
+        "timeout": 30
+      },
+      {
+        "fail_closed": true,
+        "hook_id": "mc.frame_capture",
+        "mc_event": "before_prompt",
+        "native_event": "UserPromptSubmit",
+        "timeout": 30
+      },
+      {
+        "fail_closed": true,
+        "hook_id": "mc.frame_capture",
+        "mc_event": "before_tool",
+        "native_event": "PreToolUse",
+        "timeout": 30
+      },
+      {
+        "fail_closed": true,
+        "hook_id": "mc.frame_capture",
+        "mc_event": "after_tool",
+        "native_event": "PostToolUse",
+        "timeout": 30
+      },
+      {
+        "fail_closed": true,
+        "hook_id": "mc.frame_capture",
+        "mc_event": "after_tool_failure",
+        "native_event": "PostToolUseFailure",
+        "timeout": 30
+      },
+      {
+        "fail_closed": true,
+        "hook_id": "mc.frame_capture",
+        "matcher": "Bash",
+        "mc_event": "before_shell",
+        "native_event": "PreToolUse",
+        "timeout": 30
+      },
+      {
+        "fail_closed": true,
+        "hook_id": "mc.frame_capture",
+        "matcher": "Bash",
+        "mc_event": "after_shell",
+        "native_event": "PostToolUse",
+        "timeout": 30
+      },
+      {
+        "fail_closed": true,
+        "hook_id": "mc.frame_capture",
+        "matcher": "mcp__.*",
+        "mc_event": "before_mcp",
+        "native_event": "PreToolUse",
+        "timeout": 30
+      },
+      {
+        "fail_closed": true,
+        "hook_id": "mc.frame_capture",
+        "matcher": "Edit|Write",
+        "mc_event": "after_file_edit",
+        "native_event": "PostToolUse",
+        "timeout": 30
+      },
+      {
+        "fail_closed": true,
+        "hook_id": "mc.frame_capture",
+        "mc_event": "before_compaction",
+        "native_event": "PreCompact",
+        "timeout": 30
+      },
+      {
+        "fail_closed": true,
+        "hook_id": "mc.frame_capture",
+        "mc_event": "subagent_start",
+        "native_event": "SubagentStart",
+        "timeout": 30
+      },
+      {
+        "fail_closed": true,
+        "hook_id": "mc.frame_capture",
+        "mc_event": "subagent_stop",
+        "native_event": "SubagentStop",
+        "timeout": 30
+      },
+      {
+        "fail_closed": true,
+        "hook_id": "mc.frame_capture",
+        "mc_event": "stop",
+        "native_event": "Stop",
+        "timeout": 30
+      },
+      {
+        "fail_closed": true,
+        "hook_id": "mc.usage",
+        "mc_event": "after_tool",
+        "native_event": "PostToolUse",
+        "timeout": 30
+      },
+      {
+        "fail_closed": true,
+        "hook_id": "mc.usage",
+        "mc_event": "stop",
+        "native_event": "Stop",
+        "timeout": 30
+      }
+    ],
+    "setting_sources": [
+      "project"
+    ]
+  }
 }

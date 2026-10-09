@@ -26,6 +26,8 @@ from mission_control.domain.execution.contracts import (
 from mission_control.domain.execution.lanes import (
     DEFAULT_LANE_PROFILE,
     LANE_OF_PROFILE,
+    LANE_PROFILES,
+    RUNTIME_OF_LANE,
     LaneDescribe,
     LaneProfileName,
 )
@@ -135,10 +137,11 @@ def lane_profile_for(request: OperationExecutionRequest | OperationExecutionBind
     lane = LANE_OF_PROFILE.get(profile)
     if lane is None:
         raise UnknownLaneProfile(profile, LANE_OF_PROFILE)
-    if runtime == "cursor" and lane != "cursor":
-        raise ValueError("a cursor execution runtime requires a Cursor lane profile")
-    if runtime in {"native", "deep_agent"} and lane != "deep_agents":
-        raise ValueError(f"a {runtime} execution runtime runs on the deep_agents lane profile")
+    if runtime in {"native", "deep_agent"}:
+        if lane != "deep_agents":
+            raise ValueError(f"a {runtime} execution runtime runs on the deep_agents lane profile")
+    elif RUNTIME_OF_LANE[lane] != runtime:
+        raise ValueError(f"a {runtime} execution runtime requires a {runtime} lane profile")
     return profile
 
 
@@ -153,22 +156,37 @@ class DescribeOnlyLane(UnsupportedHarnessOperations):
         return self._describe
 
 
-def describe_only_registry(*, cursor_bound: bool, allow_unqualified: bool) -> LaneRegistry:
+def describe_only_registry(
+    *,
+    cursor_bound: bool,
+    allow_unqualified: bool,
+    claude_bound: bool = False,
+    codex_bound: bool = False,
+) -> LaneRegistry:
     """The registry a process that lists lanes but runs none publishes (the public API).
 
-    It mirrors the worker composition: `deep_agents` always, the Cursor profiles as
-    unqualified stubs when a Cursor credential is bound.
+    It mirrors the worker composition: `deep_agents` always; each bound lane's profiles as
+    unqualified stubs when that provider's credential is bound (`cursor_bound`,
+    `claude_bound`, `codex_bound`). Hosted profiles ride on their lane's credential.
     """
 
     from mission_control.application.execution.harness.describe import DECLARED_LANE_MATRICES
 
     lanes: list[AgentHarness] = [DescribeOnlyLane(DECLARED_LANE_MATRICES["deep_agents"])]
-    cursor_profiles: tuple[LaneProfileName, ...] = ("cursor_local", "cursor_cloud")
-    if cursor_bound:
-        lanes.extend(
-            DescribeOnlyLane(DECLARED_LANE_MATRICES[profile].unqualified())
-            for profile in cursor_profiles
-        )
+    bound_lanes = {
+        "cursor": cursor_bound,
+        "claude": claude_bound,
+        "codex": codex_bound,
+    }
+    bound_profiles: tuple[LaneProfileName, ...] = tuple(
+        profile
+        for profile in LANE_PROFILES
+        if profile != "deep_agents" and bound_lanes[LANE_OF_PROFILE[profile]]
+    )
+    lanes.extend(
+        DescribeOnlyLane(DECLARED_LANE_MATRICES[profile].unqualified())
+        for profile in bound_profiles
+    )
     return LaneRegistry(lanes, allow_unqualified=allow_unqualified)
 
 

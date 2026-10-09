@@ -15,12 +15,18 @@ reset never does.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import Any, TypeVar
+from datetime import UTC, datetime, timedelta
+from typing import Any, Final, TypeVar
 
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
 from mission_control.adapters.temporal.operation_activities import OperationExecutionActivities
+from mission_control.application.execution.harness.dispatch import (
+    ProviderCapacityLimited,
+    SessionOwnedElsewhere,
+    StaleSessionOwner,
+)
 from mission_control.application.execution.harness.lane_turns import (
     LaneNotSessionDriven,
     LaneTurnService,
@@ -49,6 +55,11 @@ from mission_control.domain.execution.lanes import CancelReceipt, UsageReport
 from mission_control.domain.policies.errors import IdempotencyConflict
 
 _ResultT = TypeVar("_ResultT")
+# MP-06 failure types the operation workflow reads (`provider_capacity_limit` carries the
+# MP-05 `ProviderLimitSignal` as its first detail).
+SESSION_OWNED_ELSEWHERE: Final = "session_owned_elsewhere"
+STALE_SESSION_OWNER: Final = "stale_session_owner"
+PROVIDER_CAPACITY_LIMIT: Final = "provider_capacity_limit"
 _DA_NATIVE_STATUS: dict[str, NativeStatus] = {
     "completed": "finished",
     "failed": "error",
@@ -132,6 +143,27 @@ class LaneTurnActivities:
             return await body()
         except OperationExecutionInProgress as error:
             raise ApplicationError(str(error), type="operation_execution_in_progress") from error
+        except SessionOwnedElsewhere as error:
+            # MP-06: another worker's session manager holds a live lease; retried once it
+            # can have expired (Temporal schedules the retry, nothing sleeps here).
+            delay = error.lease_expires_at - datetime.now(UTC)
+            raise ApplicationError(
+                str(error),
+                type=SESSION_OWNED_ELSEWHERE,
+                next_retry_delay=max(delay, timedelta(seconds=1)),
+            ) from error
+        except StaleSessionOwner as error:
+            # A takeover fenced this attempt out; its result must never be applied.
+            raise ApplicationError(
+                str(error), type=STALE_SESSION_OWNER, non_retryable=True
+            ) from error
+        except ProviderCapacityLimited as error:
+            raise ApplicationError(
+                str(error),
+                error.signal.model_dump(mode="json"),
+                type=PROVIDER_CAPACITY_LIMIT,
+                non_retryable=True,
+            ) from error
         except (
             LaneNotQualified,
             UnknownLaneProfile,
@@ -207,4 +239,11 @@ class LaneTurnActivities:
         return cancelled.model_dump(mode="json")
 
 
-__all__ = ["LaneTurnActivities", "TemporalTurnSignals", "governed_closing_facts"]
+__all__ = [
+    "PROVIDER_CAPACITY_LIMIT",
+    "SESSION_OWNED_ELSEWHERE",
+    "STALE_SESSION_OWNER",
+    "LaneTurnActivities",
+    "TemporalTurnSignals",
+    "governed_closing_facts",
+]

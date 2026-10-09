@@ -11,9 +11,12 @@ submitter starts the run-derived root workflow id with ``USE_EXISTING`` and
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any, Final, Literal, Protocol
 from uuid import UUID
 
@@ -182,6 +185,50 @@ class ChainIntentRelay:
             dead=tuple(dead),
             receipts=receipts,
         )
+
+
+class ChainRelayPump:
+    """The relay as a bounded, cancellable process loop (MP-02: the worker runs it).
+
+    Each pass leases at most ``limit`` due intents per tenant scope (row-level security binds
+    one tenant per transaction); a scope whose pass fails is logged and retried on the next
+    pass. The pump only delivers intents through the governed launch: Temporal stays the sole
+    scheduler of the runs it starts.
+    """
+
+    def __init__(
+        self,
+        relay: ChainIntentRelay,
+        request_scopes: Sequence[str],
+        *,
+        interval_seconds: float,
+        limit: int = 20,
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
+        if interval_seconds <= 0 or limit < 1:
+            raise ValueError("the chain relay pump needs a positive interval and batch limit")
+        self._relay = relay
+        self._scopes = tuple(request_scopes)
+        self._interval = interval_seconds
+        self._limit = limit
+        self._clock = clock or (lambda: datetime.now(UTC))
+
+    async def run_once(self) -> tuple[ChainRelayReport, ...]:
+        reports: list[ChainRelayReport] = []
+        for scope in self._scopes:
+            try:
+                reports.append(
+                    await self._relay.relay_once(scope, now=self._clock(), limit=self._limit)
+                )
+            except Exception:  # a scope's outage never stops the other scopes or the worker
+                _LOG.exception("chain relay pass failed for one tenant scope")
+        return tuple(reports)
+
+    async def run(self, stop: asyncio.Event) -> None:
+        while not stop.is_set():
+            await self.run_once()
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(stop.wait(), timeout=self._interval)
 
 
 class ChainLaunchInputPort(Protocol):

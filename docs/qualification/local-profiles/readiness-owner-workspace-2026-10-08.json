@@ -1,0 +1,256 @@
+{
+  "checks": {
+    "auth_routes": "failed",
+    "capability_pins": "failed",
+    "db_release": "failed",
+    "lane_hosts": "failed",
+    "launch_bindings": "failed",
+    "profile": "failed",
+    "temporal": "passed"
+  },
+  "host": {
+    "python": "3.12.7",
+    "release": "11",
+    "system": "Windows",
+    "workspace_root": "C:\\Users\\Pinda\\Proyectos\\Biotech",
+    "wsl": false
+  },
+  "issues": [
+    {
+      "code": "PROFILE_UNRESOLVED",
+      "expected": null,
+      "message": "owner must choose Temporal Cloud frontend <namespace>.<account>.tmprl.cloud:7233",
+      "observed": null,
+      "pointer": "deployments/examples/local-run-profile.example.json#/temporal_clusters/1/address",
+      "severity": "blocking"
+    },
+    {
+      "code": "PROFILE_UNRESOLVED",
+      "expected": null,
+      "message": "owner must choose Temporal Cloud namespace <namespace>.<account>",
+      "observed": null,
+      "pointer": "deployments/examples/local-run-profile.example.json#/temporal_clusters/1/namespace",
+      "severity": "blocking"
+    },
+    {
+      "code": "PIN_DRIFT",
+      "expected": "sha256:30722859c783baa15e5a073984e66e716566bc0bef28dbd2cef3ed78e2d1fab3",
+      "message": "Skill bundle agent-browser at workspace://.agents/skills/agent-browser differs from its reviewed pin",
+      "observed": "sha256:f65791f560252446d91923cfdc0d9989be71700a0a8420b6666d988bcfd8130d",
+      "pointer": "infra/capability-pins/research-capabilities.json#/skills/0/bundle_digest",
+      "severity": "blocking"
+    },
+    {
+      "code": "LANE_UNSUPPORTED_OS",
+      "expected": "Darwin | Linux",
+      "message": "cursor_local cannot run on a Windows worker: the worker runs a SelectorEventLoop on Windows (psycopg, bootstrap/worker.run_cli) and asyncio on Windows spawns subprocesses only on the Proactor loop; run this lane's worker under WSL or Linux",
+      "observed": "Windows",
+      "pointer": "deployments/examples/local-run-profile.example.json#/lanes/1/lane_profile",
+      "severity": "blocking"
+    },
+    {
+      "code": "BINDING_UNRESOLVED",
+      "expected": null,
+      "message": "owner must choose an exact reviewed digest",
+      "observed": null,
+      "pointer": "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/deep_agents/agent_profile_ref/digest",
+      "severity": "blocking"
+    },
+    {
+      "code": "BINDING_UNRESOLVED",
+      "expected": null,
+      "message": "owner must choose authority reference of the local deployment",
+      "observed": null,
+      "pointer": "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/deep_agents/authority_refs/0",
+      "severity": "blocking"
+    },
+    {
+      "code": "BINDING_UNRESOLVED",
+      "expected": null,
+      "message": "owner must choose an exact reviewed digest",
+      "observed": null,
+      "pointer": "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/deep_agents/profile/backend_ref/digest",
+      "severity": "blocking"
+    },
+    {
+      "code": "BINDING_UNRESOLVED",
+      "expected": null,
+      "message": "owner must choose an exact reviewed digest",
+      "observed": null,
+      "pointer": "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/deep_agents/profile/context_assembly_ref/digest",
+      "severity": "blocking"
+    },
+    {
+      "code": "BINDING_UNRESOLVED",
+      "expected": null,
+      "message": "owner must choose OpenAI model name served as model.wp-cp-040",
+      "observed": null,
+      "pointer": "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/deep_agents/profile/model/model_name",
+      "severity": "blocking"
+    },
+    {
+      "code": "BINDING_UNRESOLVED",
+      "expected": null,
+      "message": "owner must choose an exact reviewed digest",
+      "observed": null,
+      "pointer": "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/deep_agents/profile/prompt_refs/0/digest",
+      "severity": "blocking"
+    },
+    {
+      "code": "BINDING_UNRESOLVED",
+      "expected": null,
+      "message": "owner must choose an exact reviewed digest",
+      "observed": null,
+      "pointer": "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/deep_agents/profile/tracing_policy_ref/digest",
+      "severity": "blocking"
+    },
+    {
+      "code": "BINDING_UNRESOLVED",
+      "expected": null,
+      "message": "owner must choose redaction policy reference",
+      "observed": null,
+      "pointer": "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/deep_agents/redaction_policy_ref",
+      "severity": "blocking"
+    },
+    {
+      "code": "BINDING_UNRESOLVED",
+      "expected": null,
+      "message": "owner must choose sensitive-data policy reference",
+      "observed": null,
+      "pointer": "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/deep_agents/sensitive_data_policy_ref",
+      "severity": "blocking"
+    },
+    {
+      "code": "BINDING_UNRESOLVED",
+      "expected": null,
+      "message": "owner must choose snapshot policy reference",
+      "observed": null,
+      "pointer": "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/deep_agents/snapshot_policy_ref",
+      "severity": "blocking"
+    },
+    {
+      "code": "BINDING_UNRESOLVED",
+      "expected": null,
+      "message": "owner must choose tracing policy reference",
+      "observed": null,
+      "pointer": "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/deep_agents/tracing_policy_ref",
+      "severity": "blocking"
+    },
+    {
+      "code": "BINDING_UNRESOLVED",
+      "expected": null,
+      "message": "owner must choose an exact reviewed digest",
+      "observed": null,
+      "pointer": "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/deep_agents/workspace/environment_digest",
+      "severity": "blocking"
+    },
+    {
+      "code": "BINDING_UNRESOLVED",
+      "expected": null,
+      "message": "owner must choose an exact reviewed digest",
+      "observed": null,
+      "pointer": "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/deep_agents/workspace/image_digest",
+      "severity": "blocking"
+    },
+    {
+      "code": "BINDING_UNRESOLVED",
+      "expected": null,
+      "message": "owner must choose an exact reviewed digest",
+      "observed": null,
+      "pointer": "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/deep_agents/workspace/package_digest",
+      "severity": "blocking"
+    },
+    {
+      "code": "BINDING_UNRESOLVED",
+      "expected": null,
+      "message": "owner must choose workspace provider",
+      "observed": null,
+      "pointer": "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/deep_agents/workspace/provider",
+      "severity": "blocking"
+    },
+    {
+      "code": "BINDING_UNRESOLVED",
+      "expected": null,
+      "message": "owner must choose an exact reviewed digest",
+      "observed": null,
+      "pointer": "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/deep_agents/workspace/runtime_digest",
+      "severity": "blocking"
+    },
+    {
+      "code": "BINDING_UNRESOLVED",
+      "expected": null,
+      "message": "owner must choose OpenAI model name served as model.wp-cp-040",
+      "observed": null,
+      "pointer": "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/model_profiles/frontier.default/model_name",
+      "severity": "blocking"
+    },
+    {
+      "code": "BINDING_UNRESOLVED",
+      "expected": null,
+      "message": "owner must choose OpenAI model name served as model.wp-cp-040",
+      "observed": null,
+      "pointer": "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/model_profiles/frontier.long_context/model_name",
+      "severity": "blocking"
+    },
+    {
+      "code": "AUTH_CREDENTIAL_ABSENT",
+      "expected": null,
+      "message": "the environment variable OPENAI_API_KEY is not set in this process",
+      "observed": null,
+      "pointer": "deployments/examples/provider-auth-profiles.example.json#/profiles/0/credential_ref",
+      "severity": "blocking"
+    },
+    {
+      "code": "RELEASE_LOCK_DRIFT",
+      "expected": "0853a2c0376d7feb86167298035ad14cbb6e474e97b528696c849d1338f7aba8",
+      "message": "the component manifest differs from the release lock (rebuild and re-lock with `mission-db release-build` / `mission-db lock`)",
+      "observed": "47bf5f9eaa82405ffc3e33c8df831a01a1ee3e318245e2c6258fcbbe8812d6af",
+      "pointer": "deployments/biotech/release.lock.json#/files/manifest.json",
+      "severity": "blocking"
+    },
+    {
+      "code": "DB_RELEASE_UNCHECKED",
+      "expected": "mc-pg-catalog-v2:sha256:bdb4c93cbb3e7312fd47bad13d83659bb888111a156d1fefc7f6f623e59ed2ca",
+      "message": "no DSN environment variable named; the installed fingerprint is unread",
+      "observed": null,
+      "pointer": "--db-dsn-env",
+      "severity": "advisory"
+    },
+    {
+      "code": "NEW_RUNS_TARGET",
+      "expected": null,
+      "message": "new runs target local (local localhost:7233/default, queue biotech-research-ingestion); active runs stay on the cluster they are bound to",
+      "observed": null,
+      "pointer": "deployments/examples/local-run-profile.example.json#/new_run_cluster",
+      "severity": "advisory"
+    }
+  ],
+  "ready": false,
+  "schema_version": "mc.local_readiness.v1",
+  "unresolved_pointers": [
+    "deployments/biotech/release.lock.json#/files/manifest.json",
+    "deployments/examples/local-run-profile.example.json#/lanes/1/lane_profile",
+    "deployments/examples/local-run-profile.example.json#/temporal_clusters/1/address",
+    "deployments/examples/local-run-profile.example.json#/temporal_clusters/1/namespace",
+    "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/deep_agents/agent_profile_ref/digest",
+    "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/deep_agents/authority_refs/0",
+    "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/deep_agents/profile/backend_ref/digest",
+    "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/deep_agents/profile/context_assembly_ref/digest",
+    "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/deep_agents/profile/model/model_name",
+    "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/deep_agents/profile/prompt_refs/0/digest",
+    "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/deep_agents/profile/tracing_policy_ref/digest",
+    "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/deep_agents/redaction_policy_ref",
+    "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/deep_agents/sensitive_data_policy_ref",
+    "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/deep_agents/snapshot_policy_ref",
+    "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/deep_agents/tracing_policy_ref",
+    "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/deep_agents/workspace/environment_digest",
+    "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/deep_agents/workspace/image_digest",
+    "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/deep_agents/workspace/package_digest",
+    "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/deep_agents/workspace/provider",
+    "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/deep_agents/workspace/runtime_digest",
+    "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/model_profiles/frontier.default/model_name",
+    "deployments/examples/manifest-launch-bindings.deep-agents.example.json#/model_profiles/frontier.long_context/model_name",
+    "deployments/examples/provider-auth-profiles.example.json#/profiles/0/credential_ref",
+    "infra/capability-pins/research-capabilities.json#/skills/0/bundle_digest"
+  ]
+}

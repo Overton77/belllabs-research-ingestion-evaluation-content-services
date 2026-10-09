@@ -239,6 +239,21 @@ class Settings(BaseSettings):
     capability_pins_path: Path = (
         PROJECT_ROOT / "infra" / "capability-pins" / "research-capabilities.json"
     )
+    # MP-02: the operator-reviewed `mc.manifest_launch_bindings.v1` file (Deep Agent scaffold,
+    # model/sandbox profile and catalog capability components) the production manifest launch
+    # author resolves node environments against. Unset: manifest start needs a family input.
+    manifest_launch_bindings_path: Path | None = None
+    # Model provider -> the environment variable naming its credential. Launch templates carry
+    # `environment:<NAME>` references only; no process reads the value to author them.
+    manifest_provider_secret_env: dict[str, str] = Field(
+        default_factory=lambda: {"openai": "OPENAI_API_KEY"}
+    )
+    # MP-02: the worker's Mission Chain relay pump (`mc.chain.start_run` delivery through the
+    # governed launch). Off unless enabled; it also needs the manifest launch bindings.
+    chain_relay_enabled: bool = False
+    chain_relay_interval_seconds: float = Field(default=2.0, ge=0.1, le=300)
+    chain_relay_batch_limit: int = Field(default=20, ge=1, le=500)
+    chain_relay_lease_owner: str | None = Field(default=None, min_length=1)
     capability_bundle_backend: Literal["local", "supabase"] = "local"
     capability_bundle_namespace: str | None = None
     # FT-A2: custody credentials (never the service key). The publisher holds INSERT+SELECT
@@ -286,6 +301,41 @@ class Settings(BaseSettings):
     cursor_lease_root: Path | None = None
     cursor_local_repository: str | None = None
     mission_control_hook_callback_port: int = Field(default=47555, ge=1024, le=65535)
+    # MP-05 auth routes: the deployment-registry `mc.auth_profile.v1` records (JSON document
+    # `{"profiles": [...]}`, shape in deployments/examples/provider-auth-profiles.example.json).
+    # Unset: no profile resolves and credential-route lanes refuse before launch. The status
+    # probe runs only read-only vendor status commands (never a login); off by default.
+    mission_control_auth_profiles_path: Path | None = None
+    mission_control_allow_unqualified_auth_routes: bool = False
+    mission_control_auth_status_probe: bool = False
+    mission_control_auth_status_timeout_s: float = Field(default=10.0, gt=0, le=120)
+    # MP-05 capacity waits (`LimitWaitPolicy`): finite bounds for provider limit responses.
+    mission_control_capacity_max_waits: int = Field(default=3, ge=0, le=32)
+    mission_control_capacity_max_total_wait_s: int = Field(default=6 * 3600, ge=0)
+    mission_control_capacity_reset_margin_s: int = Field(default=5, ge=0, le=600)
+    mission_control_capacity_fallback_backoff_s: int = Field(default=30, ge=1)
+    mission_control_capacity_max_backoff_s: int = Field(default=900, ge=1)
+    # MP-06 session ownership (`WorkerSessionManager`): the minimum lease a worker holds on a
+    # harness execution, the lease as a multiple of the lane's heartbeat timeout, and the
+    # bounded grace a native dispatch's receipt gets before an activity cancel is honoured.
+    mission_control_session_lease_min_s: int = Field(default=10, ge=1, le=3_600)
+    mission_control_session_lease_heartbeats: int = Field(default=2, ge=1, le=10)
+    mission_control_dispatch_receipt_grace_s: float = Field(default=10.0, ge=0, le=300)
+    # MP-14 `/missions` socket (`bootstrap/realtime.py`): relay presence and commit hints
+    # between API processes over `redis_url`; off serves one process with PostgreSQL replay.
+    mission_socket_redis_fanout: bool = False
+    # The 0032 `mc_stream_hint` LISTEN source, one connection per application database.
+    mission_socket_postgres_hints: bool = True
+    # MP-15 webhook egress: callbacks go to global addresses over https only; loopback and
+    # private networks are admitted only when listed here (local development, in-cluster
+    # receivers). Every delivery is pinned to the validated address.
+    webhook_allow_loopback: bool = False
+    webhook_allowed_networks: tuple[str, ...] = ()
+    # MP-22 local readiness: the `mc.local_run_profile.v1` the preflight gate and the worker
+    # startup gate read, and the workspace root capability pins are verified under (unset:
+    # the checkout's parent, `workspace_root()`).
+    mission_control_local_run_profile: Path | None = None
+    mission_control_preflight_workspace_root: Path | None = None
 
     @property
     def allow_unqualified_lanes(self) -> bool:

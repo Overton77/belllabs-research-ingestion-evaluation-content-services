@@ -18,11 +18,27 @@ HOST_SUPPORT_SCHEMA: Final = "mc.capability_host_support.v1"
 
 
 class LaneProfile(StrEnum):
+    """The one Lane Profile vocabulary (MP-01): runtime (`domain/execution/lanes.py`),
+    frames, the manifest ``lane`` field and the common SQL CHECKs derive from or are checked
+    against it. ``claude_cloud``/``codex_cloud`` are the provider-hosted products only."""
+
     DEEP_AGENTS = "deep_agents"
     CURSOR_LOCAL = "cursor_local"
     CURSOR_CLOUD = "cursor_cloud"
     CLAUDE_AGENT_SDK = "claude_agent_sdk"
     CODEX = "codex"
+    CLAUDE_CLOUD = "claude_cloud"
+    CODEX_CLOUD = "codex_cloud"
+
+
+# Provider-hosted profiles: a capability's host support there is `unqualified` until its
+# hosted materialization is proven (SPEC-02 "Environment profiles"); never assumed supported.
+HOSTED_PROFILES: Final[frozenset[LaneProfile]] = frozenset(
+    {LaneProfile.CURSOR_CLOUD, LaneProfile.CLAUDE_CLOUD, LaneProfile.CODEX_CLOUD}
+)
+UNQUALIFIED_BY_DEFAULT: Final[frozenset[LaneProfile]] = frozenset(
+    {LaneProfile.CLAUDE_CLOUD, LaneProfile.CODEX_CLOUD}
+)
 
 
 class HostSupportStatus(StrEnum):
@@ -58,6 +74,10 @@ OVERLAY_KEYS: Mapping[AgentCapabilityKind, Mapping[LaneProfile, frozenset[str]]]
         LaneProfile.CURSOR_CLOUD: frozenset({"matcher"}),
         LaneProfile.CLAUDE_AGENT_SDK: frozenset({"matcher", "async"}),
         LaneProfile.CODEX: frozenset({"matcher", "additional_context_limit"}),
+        # Hosted products: the same native hook file formats as their local lanes, but
+        # whether a hosted session loads them is a qualification question (MP-16/MP-17).
+        LaneProfile.CLAUDE_CLOUD: frozenset({"matcher", "async"}),
+        LaneProfile.CODEX_CLOUD: frozenset({"matcher", "additional_context_limit"}),
     },
     AgentCapabilityKind.SUBAGENT_PROFILE: {
         LaneProfile.DEEP_AGENTS: frozenset({"model"}),
@@ -65,6 +85,8 @@ OVERLAY_KEYS: Mapping[AgentCapabilityKind, Mapping[LaneProfile, frozenset[str]]]
         LaneProfile.CURSOR_CLOUD: frozenset({"model", "readonly", "is_background"}),
         LaneProfile.CLAUDE_AGENT_SDK: frozenset({"model", "permission_mode"}),
         LaneProfile.CODEX: frozenset({"model"}),
+        LaneProfile.CLAUDE_CLOUD: frozenset({"model", "permission_mode"}),
+        LaneProfile.CODEX_CLOUD: frozenset({"model"}),
     },
 }
 
@@ -126,13 +148,24 @@ def all_profiles(
     status: HostSupportStatus = HostSupportStatus.SUPPORTED,
     **overrides: HostSupportStatus,
 ) -> CapabilityHostSupport:
-    """A matrix with every profile at ``status`` except the named overrides."""
+    """A matrix with every profile at ``status`` except the named overrides.
+
+    The provider-hosted Claude/Codex profiles (``UNQUALIFIED_BY_DEFAULT``) are never assumed
+    ``supported``: they take ``unqualified`` unless named explicitly, because no hosted
+    materialization has been proven for any capability yet (MP-16/MP-17).
+    """
     unknown = set(overrides) - {profile.value for profile in LaneProfile}
     if unknown:
         raise ValueError(f"unknown lane profile id(s): {', '.join(sorted(unknown))}")
+
+    def default_for(profile: LaneProfile) -> HostSupportStatus:
+        if profile in UNQUALIFIED_BY_DEFAULT and status == HostSupportStatus.SUPPORTED:
+            return HostSupportStatus.UNQUALIFIED
+        return status
+
     return CapabilityHostSupport(
         profiles={
-            profile: HostProfileSupport(status=overrides.get(profile.value, status))
+            profile: HostProfileSupport(status=overrides.get(profile.value, default_for(profile)))
             for profile in LaneProfile
         }
     )

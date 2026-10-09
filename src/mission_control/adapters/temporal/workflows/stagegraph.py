@@ -17,6 +17,10 @@ with workflow.unsafe.imports_passed_through():
         operation_workflow_search_attributes,
         upsert_family_phase,
     )
+    from mission_control.adapters.temporal.workflows.human_gate import (
+        HumanGateWorkflow,
+        HumanGateWorkflowInput,
+    )
     from mission_control.adapters.temporal.workflows.operation import (
         MissionOperationWorkflow,
         OperationWorkflow,
@@ -59,6 +63,16 @@ with workflow.unsafe.imports_passed_through():
         StageGraphRunResult,
         StageResultObservation,
     )
+    from mission_control.domain.programs.human_gate import (
+        GateReservationSettlementRequest,
+        GateReservationSettlementResult,
+        HumanGateOutcome,
+        HumanGateSpec,
+        ReviewPacketItem,
+        open_activation,
+        packet_item,
+        stagegraph_gate_result,
+    )
     from mission_control.domain.programs.interpreter import StageGraphInterpreter
     from mission_control.domain.programs.search_attributes import run_search_attributes
 
@@ -82,6 +96,13 @@ SETTLE_BASELINE_PATCH = "rrm-021-settle-stagegraph-baseline"
 # RRM-021 review: a family that fails with no admissible work (`stagegraph_blocked`) releases
 # the baseline before the failure is raised.
 RELEASE_BASELINE_ON_BLOCKED_PATCH = "rrm-021-release-baseline-on-blocked"
+# MP-10 (SPEC-03 "Explicit Human Gate"): a stage declared a Human Gate in the run input is
+# executed as a `mc.human_gate.v1` control activation child instead of an operation child: it
+# holds no activity or cognition slot while the human decides, releases its admitted
+# reservation against zero usage, and reports the resolution as the stage result (a
+# `request_changes` becomes the declared remediation workflow cycle). Runs without declared
+# gates never reach the patch.
+STAGEGRAPH_HUMAN_GATE_PATCH = "mp10-stagegraph-human-gate"
 LIABILITY_REJECTIONS = frozenset(
     {
         "budget_not_settled",
@@ -279,6 +300,7 @@ class StageGraphWorkflow:
             blueprint,
             effective_max_concurrency=run_input.max_concurrency,
         )
+        human_gates = _human_gates(run_input, blueprint)
         attribute_policy = run_input.search_attribute_policy
         ensure_workflow_search_attributes(
             attribute_policy,
@@ -350,6 +372,9 @@ class StageGraphWorkflow:
         accepted_order = len(projection.accepted_results)
         cancellation_requested_children: set[str] = set()
         pending_cycle: dict[str, Any] | None = None
+        # MP-10: a gate's `request_changes` cycle is applied before anything else is admitted,
+        # so no consumer of the gate runs on a review that was not accepted.
+        gate_cycle_pending = False
         liability_hints_seen = self._liability_hints
         baseline_settled = False
         cancellation_backoff = run_input.cancellation_retry_seconds
@@ -479,7 +504,7 @@ class StageGraphWorkflow:
             blocked_by_wait, unsatisfied_wait_ids, blocked_by_pause = blocked_candidates(projection)
             frontier = (
                 ()
-                if self._cancel_requested
+                if self._cancel_requested or gate_cycle_pending
                 else interpreter.frontier(
                     projection,
                     available_concurrency=available,
@@ -540,25 +565,36 @@ class StageGraphWorkflow:
                             type="InvalidMissionBinding",
                             non_retryable=True,
                         )
-                    handle = await workflow.start_child_workflow(
-                        MissionOperationWorkflow.run if mission_owned else OperationWorkflow.run,
-                        operation,
-                        id=(
-                            mission_operation_id(
-                                run_input.request_scope,
-                                run_input.run_id,
-                                operation.semantic_attempt_id,
-                            )
-                            if mission_owned
-                            else operation.workflow_id
-                        ),
-                        task_queue=workflow.info().task_queue,
-                        parent_close_policy=workflow.ParentClosePolicy.REQUEST_CANCEL,
-                        search_attributes=operation_attributes,
-                    )
+                    gate = human_gates.get(proposal.identity.candidate.stage_id)
+                    if gate is not None and workflow.patched(STAGEGRAPH_HUMAN_GATE_PATCH):
+                        handle, unit = await self._start_human_gate(
+                            run_input, blueprint, projection, proposal, operation, gate, timeout
+                        )
+                    else:
+                        handle = await workflow.start_child_workflow(
+                            (
+                                MissionOperationWorkflow.run
+                                if mission_owned
+                                else OperationWorkflow.run
+                            ),
+                            operation,
+                            id=(
+                                mission_operation_id(
+                                    run_input.request_scope,
+                                    run_input.run_id,
+                                    operation.semantic_attempt_id,
+                                )
+                                if mission_owned
+                                else operation.workflow_id
+                            ),
+                            task_queue=workflow.info().task_queue,
+                            parent_close_policy=workflow.ParentClosePolicy.REQUEST_CANCEL,
+                            search_attributes=operation_attributes,
+                        )
+                        unit = asyncio.ensure_future(handle)
                     active[proposal.identity.semantic_key] = (
                         handle,
-                        asyncio.ensure_future(handle),
+                        unit,
                         operation,
                         proposal.identity,
                     )
@@ -763,6 +799,7 @@ class StageGraphWorkflow:
                                 observed_payload.get("objective_contract_ref", "")
                             ),
                         }
+                        gate_cycle_pending = "human_gate" in observed_payload
                 continue
 
             if (blocked_by_wait or blocked_by_pause) and not self._cancel_requested:
@@ -870,6 +907,7 @@ class StageGraphWorkflow:
                 projection = cycled.projection
                 reused_outputs.update(cycled.proposal.reused_output_refs)
                 pending_cycle = None
+                gate_cycle_pending = False
                 continue
 
             if run_input.force_continue_as_new and not active:
@@ -1020,6 +1058,89 @@ class StageGraphWorkflow:
                 type="stagegraph_blocked",
                 non_retryable=True,
             )
+
+    async def _start_human_gate(
+        self,
+        run_input: StageGraphRunInput,
+        blueprint: StageGraphBlueprint,
+        projection: Any,
+        proposal: Any,
+        operation: OperationWorkflowRequest,
+        spec: HumanGateSpec,
+        activity_timeout: timedelta,
+    ) -> tuple[Any, asyncio.Future[OperationWorkflowResult]]:
+        """MP-10: open the gate stage's control activation; no operation child is started."""
+
+        candidate = proposal.identity.candidate
+        activation = open_activation(
+            request_scope=run_input.request_scope,
+            run_id=run_input.run_id,
+            family="StageGraph",
+            activation_key=f"stage:{operation.semantic_attempt_id}",
+            execution_epoch=run_input.execution_epoch,
+            review_round=min(candidate.workflow_cycle_ordinal + 1, spec.max_review_rounds),
+            spec=spec,
+            packet=_stage_review_packet(spec, blueprint, projection, candidate.stage_id),
+            opened_at=workflow.now(),
+        )
+        handle = await workflow.start_child_workflow(
+            HumanGateWorkflow.run,
+            HumanGateWorkflowInput(
+                activation=activation,
+                poll_seconds=run_input.human_gate_poll_seconds,
+                activity_timeout_seconds=run_input.task_timeout_seconds,
+            ),
+            id=activation.workflow_id,
+            task_queue=workflow.info().task_queue,
+            parent_close_policy=workflow.ParentClosePolicy.REQUEST_CANCEL,
+        )
+        policy = blueprint.workflow_cycle_policy
+
+        async def settle() -> None:
+            settled = await workflow.execute_activity(
+                "human_gate.settle_stage_reservation",
+                GateReservationSettlementRequest(
+                    request_scope=run_input.request_scope,
+                    run_id=run_input.run_id,
+                    reservation_id=operation.operation.budget_reservation_id,
+                    occurred_at=workflow.now(),
+                    idempotency_issuer=run_input.lifecycle_idempotency_issuer,
+                    correlation_id=run_input.correlation_id,
+                ),
+                result_type=GateReservationSettlementResult,
+                start_to_close_timeout=activity_timeout,
+                retry_policy=RetryPolicy(maximum_attempts=3),
+            )
+            if not settled.accepted:
+                raise ApplicationError(
+                    f"human gate reservation settlement rejected: {settled.reason_code}",
+                    non_retryable=True,
+                )
+
+        async def result() -> OperationWorkflowResult:
+            try:
+                outcome: HumanGateOutcome = await handle
+            except (Exception, asyncio.CancelledError):
+                # Never on eviction (GeneratorExit): a replayed history settles it again.
+                await settle()
+                raise
+            await settle()
+            disposition, payload = stagegraph_gate_result(
+                outcome,
+                evaluation_contract_ref=policy.evaluation_contract_ref if policy else None,
+                objective_contract_ref=policy.objective_contract_ref if policy else None,
+            )
+            return OperationWorkflowResult(
+                semantic_attempt_id=operation.semantic_attempt_id,
+                execution_generation=operation.execution_generation,
+                disposition=disposition,
+                result=payload,
+                message_cursor=operation.message_cursor,
+                effect_frontier=operation.effect_frontier,
+                active_async_child_ids=operation.active_async_child_ids,
+            )
+
+        return handle, asyncio.ensure_future(result())
 
     async def _release_baseline(
         self, run_input: StageGraphRunInput, activity_timeout: timedelta, retry: RetryPolicy
@@ -1198,6 +1319,71 @@ class StageGraphWorkflow:
             quiescent=self._quiescent,
             last_delivered_sequence=self._last_delivered_sequence,
         )
+
+
+def _human_gates(
+    run_input: StageGraphRunInput, blueprint: StageGraphBlueprint
+) -> dict[str, HumanGateSpec]:
+    """The declared gate stages, validated against the frozen blueprint (MP-10)."""
+
+    stage_ids = {stage.stage_id for stage in blueprint.stages}
+    gates: dict[str, HumanGateSpec] = {}
+    for item in run_input.human_gates:
+        spec = item if isinstance(item, HumanGateSpec) else HumanGateSpec.model_validate(item)
+        if spec.gate_key not in stage_ids:
+            raise ApplicationError(
+                f"human gate {spec.gate_key} is not a stage of the frozen blueprint",
+                non_retryable=True,
+            )
+        if spec.remediation_target is not None:
+            policy = blueprint.workflow_cycle_policy
+            if policy is None or spec.remediation_target not in stage_ids:
+                raise ApplicationError(
+                    f"human gate {spec.gate_key} declares remediation without a workflow "
+                    "cycle policy and a remediation stage in the frozen blueprint",
+                    non_retryable=True,
+                )
+            # The review-round governor never exceeds the blueprint's cycle governor.
+            spec = spec.model_copy(
+                update={"max_review_rounds": min(spec.max_review_rounds, policy.max_cycles + 1)}
+            )
+        gates[spec.gate_key] = spec
+    return gates
+
+
+def _stage_review_packet(
+    spec: HumanGateSpec, blueprint: StageGraphBlueprint, projection: Any, gate_stage_id: str
+) -> tuple[ReviewPacketItem, ...]:
+    """The accepted outputs the reviewer sees: the declared packet, else the gate's producers."""
+
+    sources = spec.packet_sources or tuple(
+        f"{edge.producer_stage_id}.{edge.producer_output_slot_id}"
+        for edge in blueprint.dependencies
+        if edge.consumer_stage_id == gate_stage_id
+    )
+    items: dict[tuple[str, str], ReviewPacketItem] = {}
+    for source in sources:
+        stage_id = source.split(".", 1)[0]
+        produced = [
+            instance
+            for instance in projection.stages.values()
+            if instance.candidate.stage_id == stage_id
+            and instance.output_refs
+            and instance.status != "invalidated"
+        ]
+        if not produced:
+            continue
+        latest = max(
+            produced,
+            key=lambda item: (
+                item.candidate.workflow_cycle_ordinal,
+                item.candidate.stage_cycle_ordinal,
+                item.semantic_attempt,
+            ),
+        )
+        for ref in latest.output_refs:
+            items[(source, ref)] = packet_item(source, ref)
+    return tuple(items.values())
 
 
 def _command_key(delivery: BoundaryCommandDelivery) -> tuple[str, str]:

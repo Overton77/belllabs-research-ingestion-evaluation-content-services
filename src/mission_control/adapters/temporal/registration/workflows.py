@@ -5,6 +5,7 @@ from typing import Any
 
 from mission_control.adapters.temporal.workflows.belllabs_run import BellLabsRunWorkflow
 from mission_control.adapters.temporal.workflows.goal_directed import GoalDirectedWorkflow
+from mission_control.adapters.temporal.workflows.human_gate import HumanGateWorkflow
 from mission_control.adapters.temporal.workflows.linked_run import (
     LinkedRunObserverWorkflow,
     LinkedRunWorkflow,
@@ -25,6 +26,8 @@ WORKFLOW_TYPES: tuple[type[Any], ...] = (
     OperationWorkflow,
     LinkedRunWorkflow,
     LinkedRunObserverWorkflow,
+    # MP-10: `mc.human_gate.v1`, started by both families on their own queue.
+    HumanGateWorkflow,
 )
 
 
@@ -42,6 +45,7 @@ def coordinator_workflows(family: str) -> Sequence[type[Any]]:
             StageGraphWorkflow,
             OperationWorkflow,
             MissionOperationWorkflow,
+            HumanGateWorkflow,
         )
     if family == "GoalDirected":
         return (
@@ -50,5 +54,6 @@ def coordinator_workflows(family: str) -> Sequence[type[Any]]:
             GoalDirectedWorkflow,
             OperationWorkflow,
             MissionOperationWorkflow,
+            HumanGateWorkflow,
         )
     raise ValueError(f"undeclared BellLabs workflow family: {family}")

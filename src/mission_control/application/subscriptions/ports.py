@@ -105,6 +105,24 @@ class WebhookResponse:
 class WebhookTransportError(Exception):
     """The request did not produce an HTTP response (connect, timeout, protocol)."""
 
+    error_class: str = "transport_error"
+
+
+class WebhookEgressRejected(WebhookTransportError):
+    """The destination resolves into a network the egress policy blocks; nothing was sent."""
+
+    error_class = "egress_rejected"
+
+
+def error_class_of(error: WebhookTransportError) -> str:
+    return error.error_class
+
+
+class WebhookDestinationPolicy(Protocol):
+    async def validate(self, url: str) -> None:
+        """Raise `WebhookEgressRejected` when the URL may not be called from this host."""
+        ...
+
 
 class WebhookTransport(Protocol):
     async def post(self, url: str, body: bytes, headers: Mapping[str, str]) -> WebhookResponse: ...

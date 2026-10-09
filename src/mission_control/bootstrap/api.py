@@ -36,10 +36,16 @@ from mission_control.adapters.postgres.frames.transcript_projection import (
     PostgresTranscriptDocuments,
 )
 from mission_control.adapters.postgres.frames.transcript_reads import PostgresMissionEventReader
+from mission_control.adapters.postgres.human_tasks.repository import PostgresHumanTaskRepository
 from mission_control.adapters.postgres.subscriptions.store import PostgresSubscriptionStore
+from mission_control.adapters.postgres.workspaces.artifact_metadata_repository import (
+    PostgresArtifactMetadataRepository,
+)
+from mission_control.adapters.realtime.stream_source import PostgresStreamSource
 from mission_control.adapters.storage.control_plane_payloads import UnavailablePayloadStore
 from mission_control.adapters.temporal.boundary_commands import TemporalBoundaryCommandTransport
 from mission_control.adapters.temporal.client import connect_temporal, resolve_temporal_connection
+from mission_control.adapters.temporal.human_gate_wake import TemporalHumanGateWake
 from mission_control.adapters.temporal.search_attributes import verify_belllabs_search_attributes
 from mission_control.adapters.temporal.submission import TemporalWorkflowSubmitter
 from mission_control.adapters.temporal.unit_reconciliation import TemporalUnitReconciliationNudge
@@ -52,8 +58,13 @@ from mission_control.application.execution.service import (
     AdmissionPolicyRegistry,
     FamilyAdmissionRegistry,
 )
+from mission_control.application.frames.artifact_bodies import (
+    ArtifactPayloadReader,
+    GrantedArtifactBodyReader,
+)
 from mission_control.application.frames.search import RunListService, TranscriptSearchService
 from mission_control.application.frames.transcript import TranscriptService
+from mission_control.application.human_tasks.service import HumanTaskService
 from mission_control.application.installations.registry import (
     ApplicationRegistry,
     VerifiedApplicationIdentity,
@@ -61,6 +72,7 @@ from mission_control.application.installations.registry import (
 )
 from mission_control.application.ports.payloads import ContentAddressedPayloadStore
 from mission_control.application.recovery.run_forks import ForkPatchPolicyRegistry
+from mission_control.application.streams.service import MissionStreamService
 from mission_control.bootstrap.catalog import (
     compose_catalog_service,
     configured_catalog_embeddings,
@@ -68,8 +80,12 @@ from mission_control.bootstrap.catalog import (
 from mission_control.bootstrap.composition import (
     MissionApplicationServices,
     compose_application_services,
+    temporal_cluster_identity,
 )
-from mission_control.bootstrap.manifests import compose_manifest_service
+from mission_control.bootstrap.manifests import (
+    compose_manifest_launch_inputs,
+    compose_manifest_service,
+)
 from mission_control.bootstrap.settings import get_settings
 from mission_control.bootstrap.subscriptions import (
     compose_subscription_service,
@@ -81,6 +97,7 @@ from mission_control.domain.authoring.extensions import ExtensionRegistry
 from mission_control.interfaces.http.catalog import router as catalog_router
 from mission_control.interfaces.http.chains import router as chains_router
 from mission_control.interfaces.http.continuation import router as continuation_router
+from mission_control.interfaces.http.human_tasks import router as human_tasks_router
 from mission_control.interfaces.http.lanes import router as lanes_router
 from mission_control.interfaces.http.middleware.body_limit import BodySizeLimitMiddleware
 from mission_control.interfaces.http.mission_control import (
@@ -144,6 +161,9 @@ class RuntimeOptions:
     family_admissions: FamilyAdmissionRegistry | None = None
     fork_policies: ForkPatchPolicyRegistry | None = None
     catalog_factory: CatalogFactory | None = None
+    # MP-13: the artifact payload store the transcript's `full=true` reads bodies from. The API
+    # has no payload store composed by default; unset keeps `501 full_body_unavailable`.
+    artifact_payloads: ArtifactPayloadReader | None = None
 
 
 def install_authentication(application: FastAPI, verifier: MissionTokenVerifier) -> None:
@@ -251,6 +271,8 @@ def create_application(
                     )
                     transport = submitter = nudge = None
                     run_visibility: TemporalRunVisibility | None = None
+                    gate_wake: TemporalHumanGateWake | None = None
+                    cluster = None
                     if item.temporal is not None:
                         temporal = item.temporal
                         # FT-G7: local server by default; Temporal Cloud only when
@@ -264,6 +286,8 @@ def create_application(
                         # FT-C4: run list over the typed Search Attributes.
                         run_visibility = TemporalRunVisibility(client)
                         nudge = TemporalUnitReconciliationNudge(client)
+                        # MP-10: a committed resolution nudges its waiting Human Gate.
+                        gate_wake = TemporalHumanGateWake(client)
                         submitter = TemporalWorkflowSubmitter.for_production(
                             client,
                             root_task_queue=temporal.root_task_queue,
@@ -272,6 +296,13 @@ def create_application(
                             search_attribute_policy="required",
                             mission_installation_id=binding.installation_id,
                             mission_application_id=binding.application_id,
+                        )
+                        # MP-22: every launch binds the run to this cluster first.
+                        cluster = temporal_cluster_identity(
+                            target=connection.target,
+                            address=temporal.address,
+                            namespace=connection.namespace,
+                            task_queue=temporal.root_task_queue,
                         )
                     tenants = {tenant for grant in config.grants for tenant in grant.tenant_ids}
                     if not tenants:
@@ -300,6 +331,7 @@ def create_application(
                             submitter=submitter,
                             nudge=nudge,
                             externalize_above_bytes=15_000_000,
+                            cluster=cluster,
                         )
                         key = (binding.installation_id, binding.application_id, tenant)
                         application.state.mission_control_services[key] = services.lifecycle
@@ -342,6 +374,18 @@ def create_application(
                             request_scope=request_scope(identity),
                         )
                         application.state.mission_control_transcript_services[key] = transcripts
+                        # MP-13: full artifact bodies, read under the same scope and the
+                        # `workflow.result.read` grant; only when a payload store is composed.
+                        if options.artifact_payloads is not None:
+                            application.state.mission_control_artifact_body_readers[key] = (
+                                GrantedArtifactBodyReader(
+                                    PostgresArtifactMetadataRepository(
+                                        pool, request_scope=request_scope(identity)
+                                    ),
+                                    options.artifact_payloads,
+                                    request_scope=request_scope(identity),
+                                )
+                            )
                         # SPEC-03 (C4): run list (Temporal Visibility + ledger) and search.
                         application.state.mission_control_run_list_services[key] = RunListService(
                             run_visibility,
@@ -361,7 +405,35 @@ def create_application(
                         )
                         subscriptions = compose_subscription_service(pool, request_scope(identity))
                         application.state.mission_control_subscription_services[key] = subscriptions
-                        # FT-E2/E3: Mission Manifest compile, submit and start for the tenant.
+                        # MP-10 (SPEC-03): Human Gate tasks under the tenant scope; HTTP, MCP
+                        # and the socket resolve through this one service.
+                        application.state.mission_control_human_task_services[key] = (
+                            HumanTaskService(
+                                PostgresHumanTaskRepository(pool),
+                                request_scope=request_scope(identity),
+                                wake=gate_wake,
+                            )
+                        )
+                        # MP-14 (SPEC-04): scoped mission/frame streams for the /missions
+                        # socket; replay reads PostgreSQL only (`bootstrap/realtime.py`).
+                        application.state.mission_control_stream_services[key] = (
+                            MissionStreamService(
+                                PostgresStreamSource(pool, request_scope(identity)),
+                                request_scope=request_scope(identity),
+                            )
+                        )
+                        # FT-E2/E3: Mission Manifest compile, submit and start for the tenant;
+                        # MP-02: start authors the launch inputs from the deployment bindings.
+                        launch_inputs = (
+                            compose_manifest_launch_inputs(
+                                pool,
+                                settings=get_settings(),
+                                run_control=services.run_control,
+                                control_plane=services.control_plane,
+                            )
+                            if services.launch is not None
+                            else None
+                        )
                         application.state.mission_control_manifest_services[key] = (
                             compose_manifest_service(
                                 pool,
@@ -373,6 +445,7 @@ def create_application(
                                 admission_policies=options.admission_policies,
                                 launches=services.launch,
                                 subscriptions=subscriptions,
+                                launch_inputs=launch_inputs,
                             )
                         )
                         # FT-D2: the Mission Chain projection, read under the tenant scope.
@@ -405,10 +478,13 @@ def create_application(
     application.state.mission_control_admission_services = {}
     application.state.mission_control_catalog_services = {}
     application.state.mission_control_transcript_services = {}
+    application.state.mission_control_artifact_body_readers = {}
     application.state.mission_control_checkpoint_services = {}
     application.state.mission_control_run_list_services = {}
     application.state.mission_control_transcript_search_services = {}
     application.state.mission_control_subscription_services = {}
+    application.state.mission_control_human_task_services = {}
+    application.state.mission_control_stream_services = {}
     application.state.mission_control_chain_services = {}
     application.state.mission_control_manifest_services = {}
     application.state.mission_control_compositions = {}
@@ -429,6 +505,7 @@ def create_application(
     application.include_router(subscriptions_router)
     application.include_router(chains_router)
     application.include_router(missions_router)
+    application.include_router(human_tasks_router)
 
     @application.get("/health/live")
     def live() -> dict[str, bool]:

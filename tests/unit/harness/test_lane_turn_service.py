@@ -241,7 +241,9 @@ async def test_an_unqualified_lane_is_refused_without_policy() -> None:
 def test_command_semantics_match_every_declared_lane_matrix() -> None:
     for describe in DECLARED_LANE_MATRICES.values():
         for command, semantics in LANE_COMMAND_SEMANTICS.items():
-            assert describe.delivery_semantics[command] == semantics
+            assert describe.delivery_semantics[command] == semantics[describe.lane_profile]
+    for table in LANE_COMMAND_SEMANTICS.values():
+        assert set(table) == set(DECLARED_LANE_MATRICES)
 
 
 def test_segment_bounds_end_before_the_activity_times_out() -> None:

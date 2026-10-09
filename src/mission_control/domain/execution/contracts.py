@@ -15,6 +15,7 @@ from pydantic import (
 
 from mission_control.domain.authoring.canonical import sha256_digest
 from mission_control.domain.authoring.contracts import ExactDefinitionRef, SecretRef
+from mission_control.domain.execution.bindings import ProviderExecutionBinding
 from mission_control.domain.execution.checkpoint_lineage import (
     CheckpointCapture,
     CheckpointInvocationPlan,
@@ -22,6 +23,7 @@ from mission_control.domain.execution.checkpoint_lineage import (
 )
 from mission_control.domain.execution.lanes import (
     LANE_OF_PROFILE,
+    RUNTIME_OF_LANE,
     CursorExecutionBinding,
     ExecutionRuntime,
     LaneProfileName,
@@ -76,12 +78,26 @@ def _verify_lane_pairing(
     execution_runtime: str,
     lane_profile: str | None,
     cursor_binding: CursorExecutionBinding | None,
+    provider_binding: ProviderExecutionBinding | None = None,
 ) -> None:
-    """FT-G1 pairing rule: a `cursor` runtime carries exactly one Cursor binding and a Cursor
-    lane profile; `native` and `deep_agent` carry neither and run on `deep_agents`."""
+    """Pairing rule (FT-G1, extended by MP-01): a `cursor` runtime carries exactly one Cursor
+    binding and a Cursor lane profile; a `claude` or `codex` runtime carries exactly one
+    `mc.execution_binding.v2` for a profile of that lane; `native` and `deep_agent` carry no
+    binding and run on `deep_agents`."""
 
     if (execution_runtime == "cursor") != (cursor_binding is not None):
         raise ValueError("cursor execution requires exactly one canonical Cursor binding")
+    provider_runtime = execution_runtime in {"claude", "codex"}
+    if provider_runtime != (provider_binding is not None):
+        raise ValueError(
+            f"{execution_runtime} execution requires exactly one mc.execution_binding.v2"
+            if provider_runtime
+            else "a provider execution binding belongs to a claude or codex runtime"
+        )
+    if provider_binding is not None and RUNTIME_OF_LANE[provider_binding.lane] != execution_runtime:
+        raise ValueError(
+            f"provider binding for lane {provider_binding.lane} cannot run as {execution_runtime}"
+        )
     if lane_profile is None:
         return
     lane = LANE_OF_PROFILE[lane_profile]
@@ -90,6 +106,13 @@ def _verify_lane_pairing(
             raise ValueError("cursor execution requires a Cursor lane profile")
         if cursor_binding.lane_profile != lane_profile:
             raise ValueError("Cursor binding lane profile differs from the operation's")
+    elif provider_runtime:
+        if RUNTIME_OF_LANE[lane] != execution_runtime or provider_binding is None:
+            raise ValueError(
+                f"{execution_runtime} execution requires a {execution_runtime} lane profile"
+            )
+        if provider_binding.lane_profile != lane_profile:
+            raise ValueError("provider binding lane profile differs from the operation's")
     elif lane != "deep_agents":
         raise ValueError(f"{execution_runtime} execution runs on the deep_agents lane profile")
 
@@ -1297,9 +1320,11 @@ class OperationExecutionRequest(Contract):
     native_placement: NativeOperationExecutionPlacement | None = None
     deep_agent_binding: DeepAgentExecutionBinding | None = None
     # FT-G1 (SPEC-07 section 3): the Lane Profile (absent: the runtime's default lane) and
-    # the `mc.cursor_binding.v1` of a `cursor` attempt.
+    # the `mc.cursor_binding.v1` of a `cursor` attempt; MP-01: the `mc.execution_binding.v2`
+    # of a `claude` or `codex` attempt. Absent fields stay out of dumps and digests.
     lane_profile: LaneProfileName | None = Field(default=None, exclude_if=_absent)
     cursor_binding: CursorExecutionBinding | None = Field(default=None, exclude_if=_absent)
+    provider_binding: ProviderExecutionBinding | None = Field(default=None, exclude_if=_absent)
     budget_reservation_id: str = Field(min_length=1)
     budget_limits: dict[str, int]
     tracing_policy_ref: str = Field(min_length=1)
@@ -1333,7 +1358,9 @@ class OperationExecutionRequest(Contract):
             )
         if (self.execution_runtime == "native") != (self.native_placement is not None):
             raise ValueError("native execution requires exactly one canonical native placement")
-        _verify_lane_pairing(self.execution_runtime, self.lane_profile, self.cursor_binding)
+        _verify_lane_pairing(
+            self.execution_runtime, self.lane_profile, self.cursor_binding, self.provider_binding
+        )
         if self.deep_agent_binding is not None:
             deep_binding = self.deep_agent_binding
             if (
@@ -1434,6 +1461,7 @@ class OperationExecutionBinding(Contract):
     deep_agent_binding: DeepAgentExecutionBinding | None = None
     lane_profile: LaneProfileName | None = Field(default=None, exclude_if=_absent)
     cursor_binding: CursorExecutionBinding | None = Field(default=None, exclude_if=_absent)
+    provider_binding: ProviderExecutionBinding | None = Field(default=None, exclude_if=_absent)
     side_effect_key: str
     bound_at: AwareDatetime
     runtime_unit: RuntimeUnitIdentity | None = None
@@ -1444,7 +1472,9 @@ class OperationExecutionBinding(Contract):
             raise ValueError("Deep Agent binding runtime placement is not exact")
         if (self.execution_runtime == "native") != (self.native_placement is not None):
             raise ValueError("native binding runtime placement is not exact")
-        _verify_lane_pairing(self.execution_runtime, self.lane_profile, self.cursor_binding)
+        _verify_lane_pairing(
+            self.execution_runtime, self.lane_profile, self.cursor_binding, self.provider_binding
+        )
         return self
 
 

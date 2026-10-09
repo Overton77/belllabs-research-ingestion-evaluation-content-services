@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 import json
+import shutil
+from collections.abc import Callable, Iterable
 from hashlib import sha256
+from pathlib import Path, PurePosixPath
+from typing import Final, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from mission_control.application.agentic_components.projections import (
     HOOK_RUNNER_SCRIPT,
@@ -17,11 +23,211 @@ from mission_control.domain.agentic_components.contracts import (
     MaterializationStep,
     TrustStage,
 )
+from mission_control.domain.agentic_components.projection import (
+    HostProjection,
+    ResolvedCapability,
+)
 from mission_control.domain.authoring.canonical import stable_json_dump
+from mission_control.domain.authoring.contracts import (
+    HookScriptDefinition,
+    MCPServerDefinition,
+    PluginDefinition,
+)
+from mission_control.domain.capabilities.host_support import HostSupportStatus, LaneProfile
+
+PROJECTION_MATERIALIZATION_SCHEMA: Final = "mc.projection_materialization.v1"
+_DIGEST = r"^sha256:[0-9a-f]{64}$"
 
 
 class MaterializationRejected(ValueError):
     pass
+
+
+# --- Host Projection into an admitted workspace (SPEC-02 "Local providers") -----------------
+
+
+class MaterializedFile(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    path: str = Field(min_length=1)
+    digest: str = Field(pattern=_DIGEST)
+    size_bytes: int = Field(ge=0)
+    mode: int = Field(ge=0, le=0o777)
+
+
+class ExecutableCheck(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    command: str = Field(min_length=1)
+    required_by: tuple[str, ...]
+    available: bool
+
+
+class ProjectionMaterialization(BaseModel):
+    """`mc.projection_materialization.v1`: what was written before the session started.
+
+    Secret-free and path-free (workspace-relative paths only). It proves which bytes are on
+    disk and which launch executables resolved; it does not prove that a provider loaded them,
+    which takes adapter discovery evidence (SPEC-02 "Capabilities and hook scripts").
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["mc.projection_materialization.v1"] = PROJECTION_MATERIALIZATION_SCHEMA
+    lane_profile: LaneProfile
+    projection_digest: str = Field(pattern=_DIGEST)
+    files: tuple[MaterializedFile, ...]
+    unchanged: tuple[str, ...] = ()
+    executables: tuple[ExecutableCheck, ...] = ()
+
+    @property
+    def missing_executables(self) -> tuple[str, ...]:
+        return tuple(item.command for item in self.executables if not item.available)
+
+
+def projection_digest(projection: HostProjection) -> str:
+    """Content identity of a projection: every path, mode and byte plus its send options.
+
+    Digest-identical rows render identical bytes, so equal inputs give equal digests and any
+    change to a projected file, mode or per-turn option changes the digest.
+    """
+    hasher = sha256()
+    hasher.update(projection.profile.value.encode() + b"\0")
+    for item in projection.files:
+        hasher.update(item.path.encode() + b"\0" + oct(item.mode).encode() + b"\0")
+        hasher.update(sha256(item.content).digest())
+    hasher.update(json.dumps(projection.send_options, sort_keys=True, default=str).encode())
+    return "sha256:" + hasher.hexdigest()
+
+
+def required_executables(
+    rows: Iterable[ResolvedCapability], profile: LaneProfile | str
+) -> dict[str, tuple[str, ...]]:
+    """Commands a profile's session must find on PATH: hook interpreters (and the hook runner's
+    ``python`` on file lanes) and stdio MCP launchers, mapped to the capabilities needing them.
+    Rows that the profile does not run (unsupported or unqualified optional members) are
+    excluded the same way the Host Projection excludes them."""
+    lane = LaneProfile(profile)
+    needed: dict[str, list[str]] = {}
+
+    def need(command: str, logical_id: str) -> None:
+        owners = needed.setdefault(command, [])
+        if logical_id not in owners:
+            owners.append(logical_id)
+
+    def visit(row: ResolvedCapability) -> None:
+        definition = row.definition
+        if isinstance(definition, PluginDefinition):
+            optional = {member.pin for member in definition.manifest.members if member.optional}
+            for member in row.members:
+                support = getattr(member.definition, "host_support", None)
+                runs = support is not None and support.status(lane) is HostSupportStatus.SUPPORTED
+                if member.pin in optional and not runs:
+                    continue
+                visit(member)
+            return
+        if isinstance(definition, HookScriptDefinition):
+            need(definition.interpreter.value, definition.logical_id)
+            if lane is not LaneProfile.DEEP_AGENTS:
+                need("python", f"{definition.logical_id} ({HOOK_RUNNER_SCRIPT})")
+        elif isinstance(definition, MCPServerDefinition):
+            overlay = definition.host_support.overlay(lane)
+            transport = str(overlay.get("transport", definition.transport))
+            if transport == "stdio" and definition.launch_template:
+                need(definition.launch_template[0], definition.logical_id)
+
+    for row in rows:
+        visit(row)
+    if lane is LaneProfile.CODEX_CLOUD:
+        return {}
+    return {command: tuple(owners) for command, owners in sorted(needed.items())}
+
+
+def _target(root: Path, relative: str) -> Path:
+    """Resolve a projected path under ``root``; refuse traversal and symlinked components."""
+    raw = relative.replace("\\", "/")
+    pure = PurePosixPath(raw)
+    if (
+        not pure.parts
+        or pure.is_absolute()
+        or raw.startswith("~")
+        or ".." in pure.parts
+        or ":" in pure.parts[0]
+    ):
+        raise MaterializationRejected(f"projected path escapes the workspace: {relative}")
+    current = root
+    for part in pure.parts:
+        current = current / part
+        if current.is_symlink():
+            raise MaterializationRejected(f"projected path crosses a symlink: {relative}")
+    resolved = current.resolve(strict=False)
+    if root != resolved and root not in resolved.parents:
+        raise MaterializationRejected(f"projected path resolves outside the workspace: {relative}")
+    return current
+
+
+def materialize_projection(
+    projection: HostProjection,
+    workspace_root: Path,
+    *,
+    expected_digest: str | None = None,
+    executables: dict[str, tuple[str, ...]] | None = None,
+    which: Callable[[str], str | None] = shutil.which,
+    require_executables: bool = True,
+) -> ProjectionMaterialization:
+    """Write a Host Projection into an admitted workspace before the session starts.
+
+    Fails closed before writing anything when the projection digest differs from the pinned
+    one, a path would escape the root (traversal, absolute, drive, symlinked component), an
+    existing file holds different bytes (collision; identical bytes are an idempotent re-run),
+    or a required launch executable is missing.
+    """
+    digest = projection_digest(projection)
+    if expected_digest is not None and digest != expected_digest:
+        raise MaterializationRejected(
+            f"projection digest {digest} differs from the pinned {expected_digest}"
+        )
+    root = workspace_root.resolve(strict=True)
+    if not root.is_dir():
+        raise MaterializationRejected("workspace root is not a directory")
+    checks = tuple(
+        ExecutableCheck(command=command, required_by=owners, available=which(command) is not None)
+        for command, owners in sorted((executables or {}).items())
+    )
+    missing = [item.command for item in checks if not item.available]
+    if missing and require_executables:
+        raise MaterializationRejected(f"launch executable(s) not found: {', '.join(missing)}")
+    plan: list[tuple[Path, bytes, int, str]] = []
+    unchanged: list[str] = []
+    for item in projection.files:
+        target = _target(root, item.path)
+        if target.exists():
+            if not target.is_file() or target.read_bytes() != item.content:
+                raise MaterializationRejected(
+                    f"projected path collides with different existing content: {item.path}"
+                )
+            unchanged.append(item.path)
+            continue
+        plan.append((target, item.content, item.mode, item.path))
+    for target, content, mode, _ in plan:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+        target.chmod(mode)
+    return ProjectionMaterialization(
+        lane_profile=projection.profile,
+        projection_digest=digest,
+        files=tuple(
+            MaterializedFile(
+                path=item.path,
+                digest="sha256:" + sha256(item.content).hexdigest(),
+                size_bytes=len(item.content),
+                mode=item.mode,
+            )
+            for item in projection.files
+        ),
+        unchanged=tuple(unchanged),
+        executables=checks,
+    )
 
 
 class MaterializationPlanner:

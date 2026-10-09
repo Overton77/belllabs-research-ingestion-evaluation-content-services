@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: Durable controls and human tasks
-description: How Event Wait, Timer, Human Gate and Proof Gate hold a wait as program nodes, how a human task is resolved by an attributed action, and what the code persists today.
+description: How Event Wait, Timer, Human Gate and Proof Gate hold a wait as program nodes, how a human task is resolved by an attributed action, and what the code persists today (Human Gate runs as a control activation; the other three are not nodes yet).
 tags: [mission-control, durable-controls, human-task, implementation]
 ---
 
@@ -56,7 +56,12 @@ The gate's outcome follows the resolution: `approved`, `answered`, `selected`,
 
 ## Implemented today
 
-There are no Event Wait, Timer, Human Gate or Proof Gate program nodes. What exists:
+**Human Gate** runs as the `mc.human_gate.v1` control activation over the common Human Task rows,
+resolved through one `HumanTaskService` from HTTP, the `/missions` socket and MCP tools; the
+StageGraph gate stage and the GoalDirected review sit behind the `mp10-stagegraph-human-gate` and
+`mp10-goal-human-review` workflow patches. Detail, evidence and the open gaps (the production
+launch does not yet lower manifest gates) are in [Human Gates](human-gates.md). Event Wait, Timer
+and Proof Gate are still not program nodes. What else exists:
 
 - Run-level waits. `WaitCondition.kind` in
   `src/mission_control/domain/policies/contracts.py` is `dependency`, `timer`,
@@ -72,23 +77,23 @@ There are no Event Wait, Timer, Human Gate or Proof Gate program nodes. What exi
   hold a typed request packet, `kind`, `assignee_scope`, `deadline_at`, `on_timeout`
   and a lifecycle check of `open | resolved | expired | cancelled`; a resolution
   stores the attributed `actor_ref`, the `answer` JSON with its digest and the
-  `expected_task_version`, exactly once per task. Two writers use them:
+  `expected_task_version`, exactly once per task. Three writers use them: the Human Gate
+  repository (`adapters/postgres/human_tasks/repository.py`, kind `human_gate:<KIND>`),
   `PostgresDecisionRepository` in
   `src/mission_control/adapters/postgres/runtime/stage3_kernel_repository.py`
-  (kind prefix `runtime_decision:`, `DecisionRequest`/`DecisionResponse` from
-  `src/mission_control/domain/graph_runtime/kernel.py`) and
-  `PostgresRedisApprovalGateway` in `src/mission_control/adapters/realtime/postgres_redis.py`
-  (kind `runtime_approval`, expiry on deadline). Both are tested in
+  (kind prefix `runtime_decision:`) and `PostgresRedisApprovalGateway` in
+  `src/mission_control/adapters/realtime/postgres_redis.py` (kind `runtime_approval`).
+  The older two are tested in
   `tests/integration/postgres/test_stage3_kernel_postgres_integration.py` and
   `tests/unit/runtime/test_runtime_decisions_stage3.py`.
 - An `event_receipt` table (`wait_key`, `source_event_key`, `matched_at`,
   `rearm_ordinal`) in the same migration, with no writer in `src/`.
 
 The schema does not enforce the spec's `claimed` lifecycle value, the task-kind
-vocabulary or the resolution vocabulary; the code records `approved` booleans and
-`answered` statuses on its own request types rather than the seven resolution
-actions. Proof Gate has no code or table beyond `evidence_assessment`
-(see [completion](completion.md)).
+vocabulary or the resolution vocabulary. The Human Gate rules use `approved`, `denied`,
+`review_accept` and `review_reject`; `answered`, `selected` and `overridden` have no writer, and
+the two older writers record their own request types. Proof Gate has no code or table beyond
+`evidence_assessment` (see [completion](completion.md)).
 
 # Citations
 
@@ -103,6 +108,7 @@ actions. Proof Gate has no code or table beyond `evidence_assessment`
 - [Decision repository](../../src/mission_control/adapters/postgres/runtime/stage3_kernel_repository.py),
   [approval gateway](../../src/mission_control/adapters/realtime/postgres_redis.py),
   [kernel decision contracts](../../src/mission_control/domain/graph_runtime/kernel.py).
+- [Human Gates](human-gates.md) for the control activation, service and evidence.
 - [Stage-3 kernel PostgreSQL proof](../../tests/integration/postgres/test_stage3_kernel_postgres_integration.py),
   [decision tests](../../tests/unit/runtime/test_runtime_decisions_stage3.py).
 - [`0005_commands_effects_recovery.sql`](../../packages/mission-control-db-contract/component/migrations/0005_commands_effects_recovery.sql).

@@ -1,0 +1,8 @@
+{"_fixture": "codex/exec_json", "recorded": false, "note": "FIXTURE, not a live recording: hand-written from the `codex exec --json` event stream documented at learn.chatgpt.com non-interactive mode (ctx7 /llmstxt/learn_chatgpt_llms-full_txt): thread.started, turn.started, item.started/updated/completed with snake_case item types, turn.completed{usage}."}
+{"type": "thread.started", "thread_id": "thr_exec_1"}
+{"type": "turn.started"}
+{"type": "item.started", "item": {"id": "item_0", "type": "command_execution", "command": "bash -lc ls", "aggregated_output": "", "status": "in_progress"}}
+{"type": "item.updated", "item": {"id": "item_1", "type": "todo_list", "items": [{"text": "read notes", "completed": false}]}}
+{"type": "item.completed", "item": {"id": "item_0", "type": "command_execution", "command": "bash -lc ls", "aggregated_output": "notes.md\n", "exit_code": 0, "status": "completed"}}
+{"type": "item.completed", "item": {"id": "item_2", "type": "agent_message", "text": "The repository has one notes file."}}
+{"type": "turn.completed", "usage": {"input_tokens": 24763, "cached_input_tokens": 24448, "output_tokens": 122, "reasoning_output_tokens": 64}}

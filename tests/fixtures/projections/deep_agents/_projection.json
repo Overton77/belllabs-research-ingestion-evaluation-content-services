@@ -167,6 +167,7 @@
     ],
     "requires_trust": [],
     "skipped_members": [],
+    "unqualified": [],
     "unsupported_on_lane": []
   },
   "send_options": {}

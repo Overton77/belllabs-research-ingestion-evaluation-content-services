@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from datetime import datetime
 from typing import Any
 
 import pytest
 
 from mission_control.application.execution.run_launch import (
+    RunClusterBinding,
     RunLaunchRejected,
     RunLaunchRequest,
     RunLaunchService,
+    TemporalClusterIdentity,
     fork_semantic_input_binding_ref,
 )
 from mission_control.application.recovery.run_forks import ForkOfRun
@@ -92,6 +95,87 @@ def _launch(run_id: str, payload: dict[str, Any], **extra: Any) -> RunLaunchRequ
     return RunLaunchRequest(
         request_scope=SCOPE, run_id=run_id, family="StageGraph", stagegraph=payload, **extra
     )
+
+
+class RecordingClusterBindings:
+    """FIXTURE: the first bind wins; later binds return the stored row (0032 semantics)."""
+
+    def __init__(self) -> None:
+        self.bound: dict[str, RunClusterBinding] = {}
+
+    async def bind(
+        self,
+        request_scope: str,
+        run_id: str,
+        *,
+        workflow_id: str,
+        cluster: TemporalClusterIdentity,
+        now: datetime,
+    ) -> RunClusterBinding:
+        key = f"{request_scope}/{run_id}"
+        if key not in self.bound:
+            self.bound[key] = RunClusterBinding(
+                run_id=run_id, workflow_id=workflow_id, cluster=cluster, recorded_at=now
+            )
+        return self.bound[key]
+
+
+LOCAL_CLUSTER = TemporalClusterIdentity(
+    cluster_id="local:127.0.0.1:7233/default",
+    target="local",
+    address="127.0.0.1:7233",
+    namespace="default",
+    task_queue="mc-root",
+)
+CLOUD_CLUSTER = TemporalClusterIdentity(
+    cluster_id="cloud:example.tmprl.cloud:7233/mc.acct",
+    target="cloud",
+    address="example.tmprl.cloud:7233",
+    namespace="mc.acct",
+    task_queue="mc-root",
+)
+
+
+@pytest.mark.asyncio
+async def test_launch_binds_the_run_to_its_first_cluster_and_refuses_another() -> None:
+    """MP-22: the binding is written before the submit; a service in another cluster never
+    starts a second copy of the run, and the same cluster stays idempotent."""
+
+    run_control, _ = service()
+    admitted = await run_control.admit(request(request_id="launch-cluster"))
+    run_id = admitted.run_id
+    assert run_id is not None
+    bindings = RecordingClusterBindings()
+    with pytest.raises(ValueError, match="composed together"):
+        RunLaunchService(
+            run_control=run_control, submitter=RecordingSubmitter(), cluster=LOCAL_CLUSTER
+        )
+    elsewhere = RecordingSubmitter()
+    cloud = RunLaunchService(
+        run_control=run_control,
+        submitter=elsewhere,
+        cluster_bindings=bindings,
+        cluster=CLOUD_CLUSTER,
+    )
+    local_submitter = RecordingSubmitter()
+    local = RunLaunchService(
+        run_control=run_control,
+        submitter=local_submitter,
+        cluster_bindings=bindings,
+        cluster=LOCAL_CLUSTER,
+    )
+    receipt = await local.launch(_launch(run_id, _input(run_id)), actor())
+    assert receipt.workflow_id == f"belllabs-run/{run_id}"
+    bound = bindings.bound[f"{SCOPE}/{run_id}"]
+    assert bound.cluster == LOCAL_CLUSTER and bound.workflow_id == receipt.workflow_id
+    with pytest.raises(RunLaunchRejected) as refused:
+        await cloud.launch(_launch(run_id, _input(run_id)), actor())
+    assert refused.value.code == "run_bound_to_other_cluster"
+    assert elsewhere.submissions == [], "the other cluster never submitted"
+    # The bound cluster may launch again (the submitter's duplicate policy decides).
+    await local.launch(_launch(run_id, _input(run_id)), actor())
+    assert len(local_submitter.submissions) == 2
+    assert bindings.bound[f"{SCOPE}/{run_id}"] == bound
 
 
 @pytest.mark.asyncio

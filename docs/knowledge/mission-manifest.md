@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: Mission Manifest
-description: The Mission Manifest v1 YAML authoring surface - schema, environment inheritance, lowering to MissionDefinition, the compile, submit and start verbs and their interfaces and grants, and why start is blocked in the configured deployment (B1).
+description: The Mission Manifest v1 YAML authoring surface - schema, environment inheritance, lowering to MissionDefinition, the compile, submit and start verbs and their interfaces and grants, and the deployment launch bindings start needs (B1, MP-02).
 tags: [mission-control, authoring, manifest, compile, implementation]
 ---
 
@@ -52,17 +52,27 @@ nested-loop family. Lane execution bindings are never named by the manifest.
   manifest's `controls.subscriptions` and then launches the admitted run through the governed
   `RunLaunchService`, with the mission id written to the root's `mc_mission_id` search attribute.
 
-**Mission start is blocked (B1).** `start` needs the lane execution templates for every lowered
-stage or Goal Loop role (model component, prompt segments, MCP servers, skills, capability
-grant, workspace contract, output schema, plus the Cursor binding). The API composes
-`compose_manifest_service` with `launch_inputs=None` (`bootstrap/api.py`, `bootstrap/manifests.py`),
-so `ManifestSubmitService.start` raises `ManifestStartUnavailable` and the route answers
-`409 start_unavailable` unless the caller passes `--request-file` family input. Only the test
-author `StagedLaunchInputs` (`tests/fixtures/manifest_runtime.py`, deterministic models)
-exists. The chain relay needs the same author (`ChainLaunchInputPort`). Closing B1 needs
-owner decisions first: which pinned model backs `frontier.default`, `frontier.long_context` and
-`cursor.default`, which sandbox backs `research.standard` and `ingestion.standard`, and which
-secret refs each lane may use ([owner runbook](../specs/fast-track-2026-10/OWNER-FIXTURE-RUNBOOK.md)).
+**Mission start needs a deployment bindings file (B1, MP-02).** `start` needs the lane
+execution templates for every lowered stage or Goal Loop role. The production author is
+`ManifestLaunchInputAuthor` (`application/authoring/manifest_launch_inputs.py`), composed by
+`compose_manifest_launch_inputs` (`bootstrap/manifests.py`) for the API (HTTP, and the CLI over
+HTTP) and for the worker's chain relay. It resolves each node's effective environment against
+the operator-reviewed `mc.manifest_launch_bindings.v1` file at `MANIFEST_LAUNCH_BINDINGS_PATH`
+(Deep Agent profile scaffold and placement, `model_profiles`, `sandbox_profiles`, catalog
+`capabilities` → exact MCP/Skill/tool components) and the components the workers serve;
+credentials are `SecretRef`s named by `MANIFEST_PROVIDER_SECRET_ENV`. It persists the
+templates once under `semantic-input:manifest:{run_id}` and reuses them on any later call.
+Anything without an exact binding (a non-`deep_agents` lane, an unbound or unserved model,
+sandbox or capability, a missing provider credential name, an unmapped model setting, hook
+scripts, subagent profiles, plugins, context bundles) fails before dispatch with
+`409 start_unavailable` whose message starts with the manifest pointer that selected it.
+With the variable unset, start still needs `--request-file` family input. The worker runs the
+chain relay when `CHAIN_RELAY_ENABLED=1` (`CHAIN_RELAY_INTERVAL_SECONDS`,
+`CHAIN_RELAY_BATCH_LIMIT`, `CHAIN_RELAY_LEASE_OWNER`); it requires the bindings file. Which
+pinned model backs `frontier.default`, `frontier.long_context` and `cursor.default`, which
+sandbox backs `research.standard` and `ingestion.standard`, and which secret refs each lane may
+use stay owner decisions recorded in that file
+([owner runbook](../specs/fast-track-2026-10/OWNER-FIXTURE-RUNBOOK.md)).
 Compile and submit of the three fixture manifests were proven on a scratch 1.1.0 installation
 (`scripts/fast_track_dry_run.py`): with the production seeds only they block on missing
 capabilities (B2); with the test stand-in rows they compile cleanly and submit admits the runs.

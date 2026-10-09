@@ -14,6 +14,7 @@ from mission_control.adapters.temporal.activities.goal_directed import (
     compose_goal_directed_activities,
     create_goal_directed_worker,
 )
+from mission_control.adapters.temporal.activities.human_gate import HumanGateActivities
 from mission_control.adapters.temporal.orchestration_activities import (
     StageGraphActivities,
     create_stagegraph_worker,
@@ -75,6 +76,8 @@ class CoordinatorTaskQueues:
 class CoordinatorWorkerActivities:
     stagegraph: StageGraphActivities
     goal_directed: GoalDirectedActivities
+    # MP-10: Human Gate open/observe/cancel/settle, served by both family workers.
+    human_gates: HumanGateActivities | None = None
 
     @property
     def completion_configured(self) -> bool:
@@ -122,6 +125,7 @@ def create_routed_coordinator_activities(
     stagegraph: StageGraphCoordinatorDependencies,
     operation_bindings: OperationExecutionBindingReader | None = None,
     completion: TerminalWorkflowCompletionPort | None = None,
+    human_gates: HumanGateActivities | None = None,
 ) -> CoordinatorWorkerActivities:
     """Compose production activity ports from durable bindings and exact handlers."""
 
@@ -161,6 +165,7 @@ def create_routed_coordinator_activities(
             context_packs=goal_directed.context_packs,
             mailbox=goal_directed.mailbox,
         ),
+        human_gates=human_gates,
     )
 
 
@@ -214,12 +219,14 @@ def create_coordinator_workers(
             task_queue=task_queues.stagegraph,
             activities=activities.stagegraph,
             deployment_config=deployment_config,
+            human_gates=activities.human_gates,
         ),
         goal_directed=create_goal_directed_worker(
             client,
             task_queue=task_queues.goal_directed,
             activities=activities.goal_directed,
             deployment_config=deployment_config,
+            human_gates=activities.human_gates,
         ),
         task_queues=task_queues,
     )

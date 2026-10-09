@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: Coordinator authoring and launch
-description: How a coordinator or a human takes a mission from description to an explicit start - the coordinator MCP launch path and the Mission Manifest v1 compile, submit and start path - and which steps run today; mission start is blocked in the configured deployment by blocker B1 (no production launch input author).
+description: How a coordinator or a human takes a mission from description to an explicit start - the coordinator MCP launch path and the Mission Manifest v1 compile, submit and start path - and which steps run today; mission start now has a production launch input author (MP-02) but answers start_unavailable until the operator's launch bindings file binds every node.
 tags: [mission-control, authoring, coordinator, mcp, implementation]
 ---
 
@@ -100,11 +100,13 @@ deterministically into a typed `MissionDefinition@1`, a Compiled Program and a V
 `missionctl mission`, `/missions:compile|submit|start` and MCP `mission_manifest_*` /
 `mission_run_start`. Detail is in [mission manifest](mission-manifest.md).
 
-**Mission start is blocked (B1).** The API composes the manifest service with
-`launch_inputs=None`, so `start` answers `409 start_unavailable`; only a test author of the lane
-execution templates exists. Closing it needs owner decisions (model, sandbox and secret-ref
-mappings) and a production launch input author for the run and the chain relay
-([owner runbook](../specs/fast-track-2026-10/OWNER-FIXTURE-RUNBOOK.md)).
+**Mission start needs the operator's bindings (B1).** Since MP-02 the API composes
+`ManifestLaunchInputAuthor` from `MANIFEST_LAUNCH_BINDINGS_PATH` (`bootstrap/manifests.py`), and the
+worker's chain relay uses the same author. Without that file, or for any node it does not bind
+(every non-`deep_agents` lane among them), `start` answers `409 start_unavailable` with the
+manifest pointer. No production bindings file exists; its model, sandbox and secret-ref choices
+are owner decisions ([mission manifest](mission-manifest.md),
+[owner runbook](../specs/fast-track-2026-10/OWNER-FIXTURE-RUNBOOK.md)).
 
 ## Specified only
 

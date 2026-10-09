@@ -31,6 +31,9 @@ from mission_control.adapters.postgres.lanes.workspace_leases import PostgresWor
 from mission_control.adapters.postgres.orchestration.stagegraph_repository import (
     PostgresStageGraphOperationTemplateRepository,
 )
+from mission_control.adapters.postgres.run_control.cluster_bindings import (
+    PostgresRunClusterBindings,
+)
 from mission_control.adapters.postgres.run_control.inspection_repository import (
     PostgresInspectionReadRepository,
 )
@@ -67,7 +70,11 @@ from mission_control.application.execution.operations.unit_reconciliation import
     AcceptedCheckpointVerifier,
     UnitReconciliationNudge,
 )
-from mission_control.application.execution.run_launch import RunLaunchService, RunWorkflowSubmitter
+from mission_control.application.execution.run_launch import (
+    RunLaunchService,
+    RunWorkflowSubmitter,
+    TemporalClusterIdentity,
+)
 from mission_control.application.execution.service import (
     AdmissionPolicyRegistry,
     F1RunConfigurationVerifier,
@@ -127,6 +134,23 @@ class MissionApplicationServices:
     forks: SemanticForkService
     fork_receipts: PostgresForkRepository
     materializations: PostgresForkMaterializationStore
+    # MP-15: the tenant's mailbox delivery service (lane semantics for coordinator prompts).
+    mailbox: MailboxDeliveryService | None = None
+
+
+def temporal_cluster_identity(
+    *, target: str, address: str, namespace: str, task_queue: str
+) -> TemporalClusterIdentity:
+    """The cluster this process submits to (MP-22): `TEMPORAL_TARGET` plus the bound address
+    and namespace; the label is `<target>:<address>/<namespace>`."""
+
+    return TemporalClusterIdentity(
+        cluster_id=f"{target}:{address}/{namespace}",
+        target=target,
+        address=address,
+        namespace=namespace,
+        task_queue=task_queue,
+    )
 
 
 async def compose_application_services(
@@ -147,6 +171,7 @@ async def compose_application_services(
     nudge: UnitReconciliationNudge | None = None,
     checkpoint_verifier: AcceptedCheckpointVerifier | None = None,
     externalize_above_bytes: int = 256_000,
+    cluster: TemporalClusterIdentity | None = None,
 ) -> MissionApplicationServices:
     if registry is not None:
         registry.disable(binding.application_id)
@@ -224,12 +249,20 @@ async def compose_application_services(
             ),
             # FT-C4: the root starts with the ledger mission as `mc_mission_id`.
             mission_ids=PostgresRunMissionIds(runtime_pool),
+            # MP-22: the run is bound to this cluster before its first submit.
+            cluster_bindings=(
+                PostgresRunClusterBindings(runtime_pool) if cluster is not None else None
+            ),
+            cluster=cluster,
         )
         if submitter is not None
         else None
     )
+    # FT-F1 / MP-15: one mailbox service per tenant; the coordinator inbox prompts through it.
+    mailbox = MailboxDeliveryService(PostgresCommandMailbox(runtime_pool), run_control)
     result = MissionApplicationServices(
         binding=binding,
+        mailbox=mailbox,
         readiness=readiness,
         catalog_scope=catalog_scope,
         control_plane=catalog,
@@ -248,7 +281,7 @@ async def compose_application_services(
                 request_scope=scope,
             ),
             # FT-F1: queue_instruction / add_context admit into the Run's command mailbox.
-            mailbox=MailboxDeliveryService(PostgresCommandMailbox(runtime_pool), run_control),
+            mailbox=mailbox,
             forks=materializations,
             # FT-F6: inspection sections from frames, the ledger, chains and subscriptions.
             inspection=InspectionSources(

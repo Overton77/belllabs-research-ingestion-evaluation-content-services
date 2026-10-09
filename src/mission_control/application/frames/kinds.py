@@ -29,7 +29,10 @@ K = FrameKind
 
 @dataclass(frozen=True)
 class ByField:
-    """A raw kind whose frame kind is decided by one body field's value."""
+    """A raw kind whose frame kind is decided by one body field's value.
+
+    `field` may be a dotted path (`item.status`) into nested provider payloads.
+    """
 
     field: str
     values: Mapping[str, FrameKind | ByField]
@@ -151,13 +154,141 @@ CURSOR_CLOUD_KINDS: dict[str, KindRule] = {
     "done": K.STATUS,
 }
 
+# Claude Agent SDK (Python) `Message` union, as `provider_mapping.claude_agent_sdk_observations`
+# names it: `<type>` or `<type>.<subtype>` for SystemMessage subclasses, one
+# `assistant.tool_use` / `user.tool_result` per content block, and two synthetic frames per
+# `ResultMessage` (`result.turn_ended`, then `result`). Shapes: claude_agent_sdk.types
+# (AssistantMessage, UserMessage, SystemMessage/Task*Message, ResultMessage, StreamEvent),
+# via ctx7 /anthropics/claude-agent-sdk-python. Subagent task lifecycle is STATUS: a child
+# finishing never closes the parent's turn or run.
+CLAUDE_AGENT_SDK_KINDS: dict[str, KindRule] = {
+    "system.init": K.SESSION_INIT,
+    "system.task_started": K.STATUS,
+    "system.task_progress": K.STATUS,
+    "system.task_updated": K.STATUS,
+    "system.task_notification": K.STATUS,
+    "system.hook_started": K.HOOK_INVOKED,
+    "system.hook_response": K.HOOK_RESULT,
+    "stream_event": K.MESSAGE_DELTA,
+    "assistant": K.MESSAGE,
+    "assistant.tool_use": K.TOOL_CALL_STARTED,
+    "user": K.MESSAGE,
+    "user.tool_result": ByField(
+        "is_error",
+        {"true": K.TOOL_CALL_FAILED, "false": K.TOOL_CALL_COMPLETED},
+        default=K.TOOL_CALL_COMPLETED,
+    ),
+    "rate_limit_event": K.STATUS,
+    "permission.requested": K.APPROVAL_REQUESTED,
+    "permission.resolved": K.APPROVAL_RESOLVED,
+    "result.turn_ended": K.TURN_ENDED,
+    "result": K.RUN_RESULT,
+}
+
+# Codex app-server v2 notifications and server requests (method names) plus `codex exec
+# --json` JSONL event types. Item kinds are decided by the nested `item.type` / `item.status`.
+# Shapes: codex-rs app-server-protocol (notification registry, ThreadItem, ThreadTokenUsage)
+# via ctx7 /openai/codex; approvals and exec JSONL via ctx7 learn.chatgpt.com app-server and
+# non-interactive-mode docs. `turn/completed` yields `turn_ended` plus a synthetic
+# `turn/completed.result`; a child thread's frames carry `subordinate_ref`.
+_CODEX_TOOL_ITEMS = ("commandExecution", "fileChange", "mcpToolCall", "webSearch")
+_CODEX_ITEM_STATUS = ByField(
+    "item.status",
+    {
+        "completed": K.TOOL_CALL_COMPLETED,
+        "failed": K.TOOL_CALL_FAILED,
+        "declined": K.TOOL_CALL_FAILED,
+    },
+)
+_CODEX_EXEC_TOOL_ITEMS = ("command_execution", "file_change", "mcp_tool_call", "web_search")
+_CODEX_EXEC_ITEM_STATUS = ByField(
+    "item.status",
+    {
+        "completed": K.TOOL_CALL_COMPLETED,
+        "failed": K.TOOL_CALL_FAILED,
+        "declined": K.TOOL_CALL_FAILED,
+    },
+    default=K.TOOL_CALL_COMPLETED,
+)
+CODEX_KINDS: dict[str, KindRule] = {
+    "thread/started": K.SESSION_INIT,
+    "thread/status/changed": K.STATUS,
+    "turn/started": K.TURN_STARTED,
+    "turn/plan/updated": K.STATUS,
+    "turn/diff/updated": K.STATUS,
+    "item/started": ByField(
+        "item.type",
+        {
+            **dict.fromkeys(_CODEX_TOOL_ITEMS, K.TOOL_CALL_STARTED),
+            "agentMessage": K.STATUS,
+            "userMessage": K.STATUS,
+            "reasoning": K.STATUS,
+            "collabAgentToolCall": K.STATUS,
+        },
+    ),
+    "item/completed": ByField(
+        "item.type",
+        {
+            **dict.fromkeys(_CODEX_TOOL_ITEMS, _CODEX_ITEM_STATUS),
+            "agentMessage": K.MESSAGE,
+            "userMessage": K.MESSAGE,
+            "reasoning": K.STATUS,
+            "collabAgentToolCall": K.STATUS,
+        },
+    ),
+    "item/agentMessage/delta": K.MESSAGE_DELTA,
+    "item/reasoning/summaryTextDelta": K.THINKING_DELTA,
+    "item/reasoning/textDelta": K.THINKING_DELTA,
+    "item/commandExecution/outputDelta": K.TOOL_CALL_DELTA,
+    "item/fileChange/outputDelta": K.TOOL_CALL_DELTA,
+    "item/commandExecution/requestApproval": K.APPROVAL_REQUESTED,
+    "item/fileChange/requestApproval": K.APPROVAL_REQUESTED,
+    "serverRequest/resolved": K.APPROVAL_RESOLVED,
+    "hook/started": K.HOOK_INVOKED,
+    "hook/completed": K.HOOK_RESULT,
+    "thread/compacted": K.AFTER_COMPACTION,
+    "thread/tokenUsage/updated": K.USAGE,
+    "account/rateLimits/updated": K.STATUS,
+    "turn/completed": K.TURN_ENDED,
+    "turn/completed.result": K.RUN_RESULT,
+    "error": K.ERROR,
+    # `codex exec --json`
+    "thread.started": K.SESSION_INIT,
+    "turn.started": K.TURN_STARTED,
+    "item.started": ByField(
+        "item.type",
+        {
+            **dict.fromkeys(_CODEX_EXEC_TOOL_ITEMS, K.TOOL_CALL_STARTED),
+            "agent_message": K.STATUS,
+            "reasoning": K.STATUS,
+            "todo_list": K.STATUS,
+        },
+    ),
+    "item.updated": K.STATUS,
+    "item.completed": ByField(
+        "item.type",
+        {
+            **dict.fromkeys(_CODEX_EXEC_TOOL_ITEMS, _CODEX_EXEC_ITEM_STATUS),
+            "agent_message": K.MESSAGE,
+            "reasoning": K.STATUS,
+            "todo_list": K.STATUS,
+        },
+    ),
+    "turn.completed": K.TURN_ENDED,
+    "turn.completed.result": K.RUN_RESULT,
+    "turn.failed": K.TURN_ENDED,
+    "turn.failed.result": K.RUN_RESULT,
+}
+
 KIND_TABLES: dict[LaneProfile, dict[str, KindRule]] = {
     LaneProfile.DEEP_AGENTS: DEEP_AGENTS_KINDS,
     LaneProfile.CURSOR_LOCAL: CURSOR_LOCAL_KINDS,
     LaneProfile.CURSOR_CLOUD: CURSOR_CLOUD_KINDS,
-    # Reserved lanes (ADR-0018 order): rows are added when their writers are built.
-    LaneProfile.CLAUDE_AGENT_SDK: {},
-    LaneProfile.CODEX: {},
+    LaneProfile.CLAUDE_AGENT_SDK: CLAUDE_AGENT_SDK_KINDS,
+    LaneProfile.CODEX: CODEX_KINDS,
+    # Provider-hosted profiles are unqualified (Outcome 3); rows are added with MP-18/19.
+    LaneProfile.CLAUDE_CLOUD: {},
+    LaneProfile.CODEX_CLOUD: {},
 }
 
 # How a dedupe key is formed, per lane (documented for lane implementers; SPEC-03 table).
@@ -168,8 +299,23 @@ DEDUPE_KEY_RULES: dict[LaneProfile, str] = {
     ),
     LaneProfile.CURSOR_LOCAL: "bridge:<RunStreamEvent.offset> (durable for ObserveRun)",
     LaneProfile.CURSOR_CLOUD: "sse:<event id>; run:<run_id>:final after 410 stream_expired",
-    LaneProfile.CLAUDE_AGENT_SDK: "message.uuid (fallback session_id:message_id:block_index)",
-    LaneProfile.CODEX: "threadId:turnId:itemId:method",
+    LaneProfile.CLAUDE_AGENT_SDK: (
+        "claude:<message.uuid>[:<block_index>]:<raw_kind> "
+        "(fallback session_id:message_id when uuid is absent)"
+    ),
+    LaneProfile.CODEX: (
+        "codex:threadId:turnId:itemId:method; token usage "
+        "codex:threadId:turnId:usage:<total.totalTokens> (each update is one model call)"
+    ),
+    # Hosted profiles: the observation transport is undocumented; the rule is fixed with the
+    # qualification drill (docs/qualification/lanes/{claude_cloud,codex_cloud}/FEASIBILITY.md).
+    LaneProfile.CLAUDE_CLOUD: (
+        "cloud_session_id:message.uuid; session:<id>:final from the terminal poll "
+        "(transport unqualified)"
+    ),
+    LaneProfile.CODEX_CLOUD: (
+        "task:<task_id>:<poll_status>; task:<task_id>:final (transport unqualified)"
+    ),
 }
 
 
@@ -198,10 +344,17 @@ class UnknownKindCounter:
 UNKNOWN_KINDS = UnknownKindCounter()
 
 
+def _field(body: Any, path: str) -> Any:
+    value = body
+    for part in path.split("."):
+        value = value.get(part) if isinstance(value, Mapping) else None
+    return value
+
+
 def _resolve(rule: KindRule, body: Any) -> Classification:
     if isinstance(rule, FrameKind):
         return Classification(rule, True)
-    value = body.get(rule.field) if isinstance(body, Mapping) else None
+    value = _field(body, rule.field)
     nested = rule.values.get(str(value).lower() if value is not None else "")
     if nested is None:
         nested = rule.values.get(str(value)) if value is not None else None
@@ -260,6 +413,18 @@ def cursor_cloud_key(event_id: str) -> str:
 
 def cursor_cloud_final_key(run_id: str) -> str:
     return bounded_key("run", run_id, "final")
+
+
+def claude_agent_sdk_key(message_ref: str, raw_kind: str, block_index: int | None = None) -> str:
+    return bounded_key("claude", message_ref, block_index, raw_kind)
+
+
+def codex_key(thread_id: str, turn_id: str | None, item_id: str | None, method: str) -> str:
+    return bounded_key("codex", thread_id, turn_id, item_id, method)
+
+
+def codex_usage_key(thread_id: str, turn_id: str | None, total_tokens: int | str) -> str:
+    return bounded_key("codex", thread_id, turn_id, "usage", total_tokens)
 
 
 def hook_key(event: str, ref: str, invocation_ordinal: int, phase: str) -> str:

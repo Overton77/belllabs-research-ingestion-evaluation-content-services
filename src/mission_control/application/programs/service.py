@@ -92,6 +92,7 @@ from mission_control.domain.programs.contracts import (
     WorkflowEvaluationResult,
     WorkflowInvalidationProposal,
 )
+from mission_control.domain.programs.human_gate import HumanGateSpec
 from mission_control.domain.programs.interpreter import StageGraphInterpreter
 from mission_control.domain.programs.runtime_units import stage_runtime_unit
 
@@ -162,6 +163,7 @@ class StageGraphLaunchService:
         task_timeout_seconds: int = 30,
         orchestration_authority_ref: str = ORCHESTRATION_AUTHORITY_REF,
         semantic_input_binding_ref: str = "",
+        human_gates: tuple[HumanGateSpec, ...] = (),
     ) -> StageGraphRunInput:
         if execution_epoch != 1:
             raise ValueError(
@@ -198,6 +200,7 @@ class StageGraphLaunchService:
             correlation_id=f"orchestration:{run_id}:epoch:{execution_epoch}",
             baseline_reservation=dict(budget.reservations.get("baseline", {})),
             semantic_input_binding_ref=semantic_input_binding_ref,
+            human_gates=human_gates,
         )
 
 
@@ -1208,6 +1211,7 @@ class GoalDirectedLaunchService:
         task_timeout_seconds: int = 300,
         orchestration_authority_ref: str = ORCHESTRATION_AUTHORITY_REF,
         semantic_input_binding_ref: str = "",
+        human_review: HumanGateSpec | None = None,
     ) -> GoalDirectedRunInput:
         if not initial_goal.strip():
             raise ValueError("GoalDirected launch requires a concrete initial goal")
@@ -1319,6 +1323,7 @@ class GoalDirectedLaunchService:
                 sorted(configuration.workflow_type.output_contracts)
             ),
             semantic_input_binding_ref=semantic_input_binding_ref,
+            human_review=human_review,
         )
 
 
@@ -1350,6 +1355,8 @@ class WorkflowLaunchDispatcher:
         task_timeout_seconds: int = 300,
         orchestration_authority_ref: str = ORCHESTRATION_AUTHORITY_REF,
         semantic_input_binding_ref: str = "",
+        human_gates: tuple[HumanGateSpec, ...] = (),
+        human_review: HumanGateSpec | None = None,
     ) -> PreparedWorkflowInput:
         projection = await self._run_control.get_run(request_scope, run_id)
         configuration = await self._control_plane.retrieve_for_admission(
@@ -1361,18 +1368,23 @@ class WorkflowLaunchDispatcher:
                 raise ValueError("StageGraph execution family is unavailable")
             if initial_goal is not None:
                 raise ValueError("StageGraph launch does not accept a GoalDirected initial goal")
+            if human_review is not None:
+                raise ValueError("StageGraph launch does not accept a GoalDirected human review")
             return await self._stagegraph.prepare(
                 request_scope,
                 run_id,
                 task_timeout_seconds=task_timeout_seconds,
                 orchestration_authority_ref=orchestration_authority_ref,
                 semantic_input_binding_ref=semantic_input_binding_ref,
+                human_gates=human_gates,
             )
         if isinstance(blueprint, GoalDirectedBlueprint):
             if self._goal_directed is None:
                 raise ValueError("GoalDirected execution family is unavailable")
             if initial_goal is None:
                 raise ValueError("GoalDirected launch requires a concrete initial goal")
+            if human_gates:
+                raise ValueError("GoalDirected launch does not accept Stage Graph human gates")
             return await self._goal_directed.prepare(
                 request_scope,
                 run_id,
@@ -1380,6 +1392,7 @@ class WorkflowLaunchDispatcher:
                 task_timeout_seconds=task_timeout_seconds,
                 orchestration_authority_ref=orchestration_authority_ref,
                 semantic_input_binding_ref=semantic_input_binding_ref,
+                human_review=human_review,
             )
         raise ValueError(f"unsupported admitted blueprint family: {type(blueprint).__name__}")
 

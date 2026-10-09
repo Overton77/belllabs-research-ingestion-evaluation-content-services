@@ -1,0 +1,78 @@
+"""Application-layer alias of the MP-05 usage/limit contracts.
+
+The definitions live in `mission_control.domain.execution.usage_admission` (pure contracts and
+decisions, consumed by the operation workflow). This module keeps the application import path
+for adapters, bootstrap and tests.
+"""
+
+from __future__ import annotations
+
+from mission_control.domain.execution.usage_admission import (
+    KERNEL_ENFORCED_DIMENSIONS,
+    LIMIT_AUTH_REJECTED,
+    LIMIT_BILLING_UNAVAILABLE,
+    LIMIT_ENTITLEMENT_MISSING,
+    LIMIT_QUOTA_EXHAUSTED,
+    LIMIT_RESET_AFTER_DEADLINE,
+    LIMIT_UNCLASSIFIED,
+    LIMIT_WAIT,
+    LIMIT_WAITS_EXHAUSTED,
+    USAGE_BOUND_EXCEEDED,
+    USAGE_BOUND_REQUIRED,
+    USAGE_COST_CAP_UNENFORCEABLE,
+    USAGE_DIMENSIONS,
+    LimitDecision,
+    LimitKind,
+    LimitWaitLedger,
+    LimitWaitOutcome,
+    LimitWaitPolicy,
+    OverageState,
+    ProviderLimitSignal,
+    UsageAccount,
+    UsageBoundExceeded,
+    UsageBounds,
+    UsageDimension,
+    UsageIssue,
+    UsageObservation,
+    WaitPrimitive,
+    plan_limit_response,
+    require_finite_bounds,
+    reserve,
+    settle,
+    wait_for_limit_reset,
+)
+
+__all__ = [
+    "KERNEL_ENFORCED_DIMENSIONS",
+    "LIMIT_AUTH_REJECTED",
+    "LIMIT_BILLING_UNAVAILABLE",
+    "LIMIT_ENTITLEMENT_MISSING",
+    "LIMIT_QUOTA_EXHAUSTED",
+    "LIMIT_RESET_AFTER_DEADLINE",
+    "LIMIT_UNCLASSIFIED",
+    "LIMIT_WAIT",
+    "LIMIT_WAITS_EXHAUSTED",
+    "USAGE_BOUND_EXCEEDED",
+    "USAGE_BOUND_REQUIRED",
+    "USAGE_COST_CAP_UNENFORCEABLE",
+    "USAGE_DIMENSIONS",
+    "LimitDecision",
+    "LimitKind",
+    "LimitWaitLedger",
+    "LimitWaitOutcome",
+    "LimitWaitPolicy",
+    "OverageState",
+    "ProviderLimitSignal",
+    "UsageAccount",
+    "UsageBoundExceeded",
+    "UsageBounds",
+    "UsageDimension",
+    "UsageIssue",
+    "UsageObservation",
+    "WaitPrimitive",
+    "plan_limit_response",
+    "require_finite_bounds",
+    "reserve",
+    "settle",
+    "wait_for_limit_reset",
+]

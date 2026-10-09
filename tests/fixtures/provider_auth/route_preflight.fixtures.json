@@ -1,0 +1,176 @@
+{
+  "fixture": true,
+  "label": "SYNTHETIC FIXTURE - hand-written from vendor documentation; not a live provider observation. No login, no status command and no provider call was run to produce it.",
+  "sources": [
+    "https://code.claude.com/docs/en/authentication",
+    "https://code.claude.com/docs/en/agent-sdk/quickstart",
+    "https://github.com/openai/codex/blob/main/codex-rs/cli/src/login.rs",
+    "https://cursor.com/docs/cli/reference/authentication",
+    "docs/qualification/lanes/claude_cloud/FEASIBILITY.md",
+    "docs/qualification/lanes/codex_cloud/FEASIBILITY.md"
+  ],
+  "planted_markers": ["FAKE0FIXTURE", "owner@example.invalid", "acct-fixture-0001"],
+  "scenarios": [
+    {
+      "id": "claude_sdk_subscription_login_admitted",
+      "profile": {"profile_id": "claude-owner-local", "lane_profile": "claude_agent_sdk", "route": "owner_cli_login", "billing_mode": "subscription", "owner_attestation_ref": "decision:owner-local-personal-use"},
+      "context": {"platform": "linux", "env_names": ["PATH", "HOME"], "files_present": [".claude/.credentials.json"]},
+      "status": {"exit_code": 0, "stdout": "{\"loggedIn\": true, \"authMethod\": \"claude.ai\", \"email\": \"owner@example.invalid\"}", "stderr": ""},
+      "expect": {"admitted": true, "route": "owner_cli_login", "billing_mode": "subscription", "route_support": "policy_restricted"}
+    },
+    {
+      "id": "claude_sdk_subscription_shadowed_by_api_key",
+      "profile": {"profile_id": "claude-owner-local", "lane_profile": "claude_agent_sdk", "route": "owner_cli_login", "billing_mode": "subscription", "owner_attestation_ref": "decision:owner-local-personal-use"},
+      "context": {"platform": "linux", "env_names": ["PATH", "ANTHROPIC_API_KEY"], "files_present": [".claude/.credentials.json"]},
+      "status": {"exit_code": 0, "stdout": "{\"loggedIn\": true, \"authMethod\": \"claude.ai\"}", "stderr": ""},
+      "expect": {"admitted": false, "codes": ["AUTH_ROUTE_SHADOWED"], "message_contains": "ANTHROPIC_API_KEY"}
+    },
+    {
+      "id": "claude_sdk_subscription_api_key_unset_by_policy",
+      "profile": {"profile_id": "claude-owner-local-scrub", "lane_profile": "claude_agent_sdk", "route": "owner_cli_login", "billing_mode": "subscription", "owner_attestation_ref": "decision:owner-local-personal-use", "shadowing": "unset"},
+      "context": {"platform": "linux", "env_names": ["PATH", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"], "files_present": [".claude/.credentials.json"]},
+      "status": {"exit_code": 0, "stdout": "{\"loggedIn\": true, \"authMethod\": \"claude.ai\"}", "stderr": ""},
+      "expect": {"admitted": true, "route": "owner_cli_login", "billing_mode": "subscription", "env_unset": ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"]}
+    },
+    {
+      "id": "claude_sdk_subscription_shadowed_by_settings_helper",
+      "profile": {"profile_id": "claude-owner-local-scrub", "lane_profile": "claude_agent_sdk", "route": "owner_cli_login", "billing_mode": "subscription", "owner_attestation_ref": "decision:owner-local-personal-use", "shadowing": "unset"},
+      "context": {"platform": "linux", "env_names": ["PATH"], "files_present": [".claude/.credentials.json"], "settings": {"project/.claude/settings.json": {"keys": ["apiKeyHelper", "env"], "env_keys": ["ANTHROPIC_API_KEY"]}}},
+      "status": {"exit_code": 0, "stdout": "{\"loggedIn\": true}", "stderr": ""},
+      "expect": {"admitted": false, "codes": ["AUTH_ROUTE_SHADOWED"], "message_contains": "settings"}
+    },
+    {
+      "id": "claude_sdk_subscription_without_attestation",
+      "profile": {"profile_id": "claude-owner-unattested", "lane_profile": "claude_agent_sdk", "route": "owner_cli_login", "billing_mode": "subscription"},
+      "context": {"platform": "linux", "env_names": ["PATH"], "files_present": [".claude/.credentials.json"]},
+      "status": null,
+      "expect": {"admitted": false, "codes": ["AUTH_ROUTE_POLICY_RESTRICTED"]}
+    },
+    {
+      "id": "claude_sdk_signed_out",
+      "profile": {"profile_id": "claude-owner-local", "lane_profile": "claude_agent_sdk", "route": "owner_cli_login", "billing_mode": "subscription", "owner_attestation_ref": "decision:owner-local-personal-use"},
+      "context": {"platform": "linux", "env_names": ["PATH"], "files_present": []},
+      "status": {"exit_code": 1, "stdout": "{\"loggedIn\": false}", "stderr": ""},
+      "expect": {"admitted": false, "codes": ["AUTH_NOT_SIGNED_IN"]}
+    },
+    {
+      "id": "claude_sdk_keychain_without_status_probe",
+      "profile": {"profile_id": "claude-owner-local", "lane_profile": "claude_agent_sdk", "route": "owner_cli_login", "billing_mode": "subscription", "owner_attestation_ref": "decision:owner-local-personal-use"},
+      "context": {"platform": "darwin", "env_names": ["PATH"], "files_present": []},
+      "status": null,
+      "expect": {"admitted": false, "codes": ["AUTH_STATUS_UNKNOWN"]}
+    },
+    {
+      "id": "claude_sdk_file_only_is_not_proof",
+      "profile": {"profile_id": "claude-owner-local", "lane_profile": "claude_agent_sdk", "route": "owner_cli_login", "billing_mode": "subscription", "owner_attestation_ref": "decision:owner-local-personal-use"},
+      "context": {"platform": "linux", "env_names": ["PATH"], "files_present": [".claude/.credentials.json"]},
+      "status": null,
+      "expect": {"admitted": false, "codes": ["AUTH_STATUS_UNKNOWN"]}
+    },
+    {
+      "id": "claude_sdk_config_dir_relocates_credentials",
+      "profile": {"profile_id": "claude-owner-local", "lane_profile": "claude_agent_sdk", "route": "owner_cli_login", "billing_mode": "subscription", "owner_attestation_ref": "decision:owner-local-personal-use"},
+      "context": {"platform": "linux", "env_names": ["PATH", "CLAUDE_CONFIG_DIR"], "path_env": {"CLAUDE_CONFIG_DIR": "/srv/mc/claude-state"}, "files_present": ["/srv/mc/claude-state/.credentials.json"]},
+      "status": {"exit_code": 0, "stdout": "{\"loggedIn\": true}", "stderr": ""},
+      "expect": {"admitted": true, "route": "owner_cli_login", "billing_mode": "subscription"}
+    },
+    {
+      "id": "claude_sdk_api_key_admitted",
+      "profile": {"profile_id": "claude-api", "lane_profile": "claude_agent_sdk", "route": "api_key", "billing_mode": "api", "credential_ref": "env:ANTHROPIC_API_KEY"},
+      "context": {"platform": "linux", "env_names": ["PATH", "ANTHROPIC_API_KEY"], "files_present": [".claude/.credentials.json"]},
+      "status": null,
+      "expect": {"admitted": true, "route": "api_key", "billing_mode": "api"}
+    },
+    {
+      "id": "claude_sdk_api_key_missing",
+      "profile": {"profile_id": "claude-api", "lane_profile": "claude_agent_sdk", "route": "api_key", "billing_mode": "api", "credential_ref": "env:ANTHROPIC_API_KEY"},
+      "context": {"platform": "linux", "env_names": ["PATH"], "files_present": []},
+      "status": null,
+      "expect": {"admitted": false, "codes": ["AUTH_CREDENTIAL_MISSING"]}
+    },
+    {
+      "id": "claude_sdk_unclassified_profile_credential",
+      "profile": {"profile_id": "claude-api", "lane_profile": "claude_agent_sdk", "route": "api_key", "billing_mode": "api", "credential_ref": "env:ANTHROPIC_API_KEY"},
+      "context": {"platform": "linux", "env_names": ["ANTHROPIC_API_KEY", "ANTHROPIC_PROFILE"], "files_present": []},
+      "status": null,
+      "expect": {"admitted": false, "codes": ["AUTH_ROUTE_AMBIGUOUS"]}
+    },
+    {
+      "id": "codex_chatgpt_login_admitted",
+      "profile": {"profile_id": "codex-owner-chatgpt", "lane_profile": "codex", "route": "owner_cli_login", "billing_mode": "subscription"},
+      "context": {"platform": "linux", "env_names": ["PATH"], "files_present": [".codex/auth.json"]},
+      "status": {"exit_code": 0, "stdout": "", "stderr": "Logged in using ChatGPT\n"},
+      "expect": {"admitted": true, "route": "owner_cli_login", "billing_mode": "subscription", "route_support": "documented"}
+    },
+    {
+      "id": "codex_stored_api_key_is_not_subscription",
+      "profile": {"profile_id": "codex-owner-chatgpt", "lane_profile": "codex", "route": "owner_cli_login", "billing_mode": "subscription"},
+      "context": {"platform": "linux", "env_names": ["PATH"], "files_present": [".codex/auth.json"]},
+      "status": {"exit_code": 0, "stdout": "", "stderr": "Logged in using an API key - sk-proj-***FAKE0FIXTURE\n"},
+      "expect": {"admitted": false, "codes": ["AUTH_ROUTE_SHADOWED"], "message_contains": "bills api"}
+    },
+    {
+      "id": "codex_chatgpt_shadowed_by_env_key",
+      "profile": {"profile_id": "codex-owner-chatgpt", "lane_profile": "codex", "route": "owner_cli_login", "billing_mode": "subscription"},
+      "context": {"platform": "linux", "env_names": ["PATH", "OPENAI_API_KEY"], "files_present": [".codex/auth.json"]},
+      "status": {"exit_code": 0, "stdout": "", "stderr": "Logged in using ChatGPT\n"},
+      "expect": {"admitted": false, "codes": ["AUTH_ROUTE_SHADOWED"], "message_contains": "OPENAI_API_KEY"}
+    },
+    {
+      "id": "codex_not_logged_in",
+      "profile": {"profile_id": "codex-owner-chatgpt", "lane_profile": "codex", "route": "owner_cli_login", "billing_mode": "subscription"},
+      "context": {"platform": "linux", "env_names": ["PATH"], "files_present": []},
+      "status": {"exit_code": 1, "stdout": "", "stderr": "Not logged in\n"},
+      "expect": {"admitted": false, "codes": ["AUTH_NOT_SIGNED_IN"]}
+    },
+    {
+      "id": "codex_auth_file_mode_unknown_without_status",
+      "profile": {"profile_id": "codex-owner-chatgpt", "lane_profile": "codex", "route": "owner_cli_login", "billing_mode": "subscription"},
+      "context": {"platform": "linux", "env_names": ["PATH"], "files_present": [".codex/auth.json"]},
+      "status": null,
+      "expect": {"admitted": false, "codes": ["AUTH_STATUS_UNKNOWN"]}
+    },
+    {
+      "id": "codex_api_profile_without_api_consent",
+      "profile": {"profile_id": "codex-api-unconsented", "lane_profile": "codex", "route": "api_key", "billing_mode": "api", "allowed_billing_modes": ["subscription"], "credential_ref": "env:OPENAI_API_KEY"},
+      "context": {"platform": "linux", "env_names": ["PATH", "OPENAI_API_KEY"], "files_present": []},
+      "status": null,
+      "expect": {"admitted": false, "codes": ["AUTH_BILLING_NOT_CONSENTED"]}
+    },
+    {
+      "id": "codex_cloud_api_key_unsupported",
+      "profile": {"profile_id": "codex-cloud-api", "lane_profile": "codex_cloud", "route": "api_key", "billing_mode": "api", "credential_ref": "env:OPENAI_API_KEY"},
+      "context": {"platform": "linux", "env_names": ["OPENAI_API_KEY"], "files_present": []},
+      "status": null,
+      "expect": {"admitted": false, "codes": ["AUTH_ROUTE_UNSUPPORTED"]}
+    },
+    {
+      "id": "codex_cloud_chatgpt_signin_admitted",
+      "profile": {"profile_id": "codex-cloud-owner", "lane_profile": "codex_cloud", "route": "hosted_product_signin", "billing_mode": "subscription", "account_ref": "registry:acct-fixture-0001"},
+      "context": {"platform": "linux", "env_names": ["PATH"], "files_present": [".codex/auth.json"]},
+      "status": {"exit_code": 0, "stdout": "", "stderr": "Logged in using ChatGPT\n"},
+      "expect": {"admitted": true, "route": "hosted_product_signin", "billing_mode": "subscription"}
+    },
+    {
+      "id": "claude_cloud_signin_admitted",
+      "profile": {"profile_id": "claude-cloud-owner", "lane_profile": "claude_cloud", "route": "hosted_product_signin", "billing_mode": "subscription"},
+      "context": {"platform": "linux", "env_names": ["PATH", "ANTHROPIC_API_KEY"], "files_present": [".claude/.credentials.json"]},
+      "status": {"exit_code": 0, "stdout": "{\"loggedIn\": true, \"authMethod\": \"claude.ai\", \"email\": \"owner@example.invalid\"}", "stderr": ""},
+      "expect": {"admitted": true, "route": "hosted_product_signin", "billing_mode": "subscription"}
+    },
+    {
+      "id": "cursor_local_api_key_billing_unknown",
+      "profile": {"profile_id": "cursor-key", "lane_profile": "cursor_local", "route": "api_key", "billing_mode": "unknown", "allowed_billing_modes": ["unknown"], "credential_ref": "settings:cursor_api_key"},
+      "context": {"platform": "linux", "env_names": ["PATH", "CURSOR_API_KEY"], "bound_settings": ["cursor_api_key"], "files_present": []},
+      "status": null,
+      "expect": {"admitted": true, "route": "api_key", "billing_mode": "unknown", "disclosure_contains": "billing_unknown"}
+    },
+    {
+      "id": "cursor_local_cli_login_unqualified",
+      "profile": {"profile_id": "cursor-login", "lane_profile": "cursor_local", "route": "owner_cli_login", "billing_mode": "unknown", "allowed_billing_modes": ["unknown"]},
+      "context": {"platform": "linux", "env_names": ["PATH"], "files_present": []},
+      "status": {"exit_code": 0, "stdout": "Logged in as owner@example.invalid", "stderr": ""},
+      "expect": {"admitted": false, "codes": ["AUTH_ROUTE_UNQUALIFIED"]}
+    }
+  ]
+}

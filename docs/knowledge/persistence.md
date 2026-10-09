@@ -1,7 +1,7 @@
 ---
 type: Architecture Reference
 title: PostgreSQL persistence and installation
-description: How the common mission_control component (release 1.1.0, migrations 0001 to 0030) stores scoped application state, what the fast-track migrations add, how an installation upgraded from 1.0.0 is verified, and which releases are applied live versus only proven on scratch databases.
+description: How the common mission_control component (release 1.1.0, migrations 0001 to 0032 in the working tree) stores scoped application state, what the fast-track and multi-provider migrations add, how an installation upgraded from 1.0.0 is verified, and which releases are applied live versus only proven on scratch databases or still unlocked.
 tags: [mission-control, implementation]
 ---
 
@@ -41,7 +41,9 @@ legacy-schema or `public` fallback.
 Release 1.0.0 (migrations 0001-0005, 0010-0017, 0020-0024) is applied and immutable in both
 Supabase projects, so the fast-track additions ship as the additive minor
 `mission_control` 1.1.0 (`component/manifest.json`, `component_version: 1.1.0`, minimum
-PostgreSQL 17, installer `mission-control-sql/v2`). All six migrations are additive:
+PostgreSQL 17, installer `mission-control-sql/v2`). The multi-provider packet extends the same
+unreleased 1.1.0 with 0031 and 0032 rather than a new version, because no 1.1.0 build has been
+installed anywhere (integrator decision in the packet ledger). Every migration is additive:
 
 | Migration | Adds |
 | --- | --- |
@@ -51,6 +53,8 @@ PostgreSQL 17, installer `mission-control-sql/v2`). All six migrations are addit
 | `0028_mission_chains` | `mission_chain`, `chain_link`, `chain_member_admission`, `authoring_provenance`, transition guards ([mission chains](mission-chains.md)) |
 | `0029_command_mailbox_stop_fence_subscriptions` | `command_mailbox`, `command_mailbox_claim`, `stop_fence`, milestones and effect admissions, `mission_subscription`, `subscription_delivery` |
 | `0030_lane_bindings` | `lane_profile` reference data, lane columns on `execution_binding` and `harness_execution`, `hook_task_token`, `hook_effect_intent`, workspace lease grants ([lanes and harness](lanes-and-harness.md)) |
+| `0031_multi_provider_lanes` | four unqualified `lane_profile` seeds (`claude_agent_sdk`, `codex`, `claude_cloud`, `codex_cloud`, `mc.lane_describe.v2`) generated from `DECLARED_LANE_MATRICES`; `mc.execution_binding.v2` for the `claude` and `codex` lanes; widened lane CHECKs on frames, continuation, search and execution records; `capability_host_support_valid` replaced to admit all seven profiles; FORCE row-level security lifted only around the seed so a non-superuser migrator can apply it |
+| `0032_run_cluster_binding_stream_hints` | `run_cluster_binding` (scope plus `run_key`, FK to `mission_run`, forced RLS, immutable, runtime SELECT and INSERT) for the Temporal cluster guard ([operations](operations.md)); `notify_stream_hint()` AFTER INSERT triggers on `mission_event` and `provider_frame` notifying `mc_stream_hint` with scope and id only ([mission stream](mission-stream.md)) |
 
 Everything stays tenant scoped with forced row-level security except `lane_profile`, which is
 installation-independent read-only reference data. `pg_trgm` must exist in schema `extensions`
@@ -74,9 +78,18 @@ and the storage seed `mc.storage.capability-bundles@1.0.0` are new
 (`packages/mission-control-db-contract/seeds/`).
 
 Evidence and status. Scratch databases on the disposable PostgreSQL 17 server proved a
-1.0.0-to-1.1.0 plan, apply, replay `noop` and verify, and a fresh 1.1.0 install with seeds; the
-1.1.0 schema fingerprint is `sha256:7da7567a...`. This is local disposable proof. Release 1.1.0 has
-not been applied to either live Supabase project.
+1.0.0-to-1.1.0 plan, apply, replay `noop` and verify, and a fresh 1.1.0 install with seeds, for the
+committed 0001-0030 build (fingerprint `sha256:7da7567a...`). With 0031 and 0032 the working-tree
+`component/manifest.json` was rebuilt by `mission-db release-build` on the disposable server:
+schema fingerprint `sha256:672549cd...` (`mc-pg-catalog-v2`), source
+`git:7c9b755...+inputs:sha256:eb7349e6...`, with `generated/contract.{json,md}` regenerated. The
+0032 table and triggers are proven by `test_release_0032_cluster_binding_and_stream_hints.py`, the
+0031 seeds and CHECKs by `test_lane_bindings.py`. `deployments/biotech/release.lock.json` and
+`deployments/ai-engineer/release.lock.json` still pin the committed 1.1.0 manifest
+(`0853a2c0...`, 0001-0030), so readiness reports `RELEASE_LOCK_DRIFT` until the owner accepts
+and re-locks. This is local disposable proof. The live Supabase projects hold 1.0.0; no 1.1.0
+build has been applied to either. The db-contract package suite has two failures that predate
+this work (they still expect version `1.0.0`).
 
 `mission-db` (`packages/mission-control-db-contract`) is the only installer: release
 build and lock, a plan bound to the before-fingerprint, atomic apply with receipts and
@@ -91,10 +104,12 @@ Mongo and legacy schema data remain untouched; no backfill or purge is implied.
 - [Composition and role verification](../../src/mission_control/bootstrap/composition.py).
 - [Independent two-project qualification](../../tests/qualification/two_project/test_release_parity.py).
 - [Legacy round trip with poisoned schemas](../../tests/qualification/two_project/test_legacy_poison_round_trip.py).
-- Common migrations: `packages/mission-control-db-contract/component/migrations/` (1.1.0: 0025-0030);
+- Common migrations: `packages/mission-control-db-contract/component/migrations/` (1.1.0: 0025-0032);
   release spec `component/release-spec.json`, manifest `component/manifest.json`.
 - [Receipt acceptance for upgraded installations](../../tests/unit/mission_control/test_common_installation_receipts.py),
   [lane bindings](../../tests/integration/postgres/test_lane_bindings.py),
+  [0032 cluster binding and stream hints](../../tests/integration/postgres/test_release_0032_cluster_binding_and_stream_hints.py),
+  [host support 0025 with seven profiles](../../tests/integration/postgres/test_catalog_kinds_0025.py),
   [mission chain tables](../../tests/integration/postgres/test_mission_chain_tables.py),
   [owner runbook](../specs/fast-track-2026-10/OWNER-FIXTURE-RUNBOOK.md) (section 9 evidence).
 - Historical chain archive: `docs/organization/legacy-belllabs-control-chain.json`.

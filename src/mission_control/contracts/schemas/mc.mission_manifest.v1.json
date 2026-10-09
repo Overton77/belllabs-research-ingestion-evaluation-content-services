@@ -174,7 +174,7 @@
           "anyOf": [
             {
               "items": {
-                "$ref": "#/$defs/Lane"
+                "$ref": "#/$defs/LaneProfile"
               },
               "type": "array"
             },
@@ -533,7 +533,7 @@
           "anyOf": [
             {
               "items": {
-                "$ref": "#/$defs/Lane"
+                "$ref": "#/$defs/LaneProfile"
               },
               "type": "array"
             },
@@ -653,7 +653,7 @@
           "anyOf": [
             {
               "items": {
-                "$ref": "#/$defs/Lane"
+                "$ref": "#/$defs/LaneProfile"
               },
               "type": "array"
             },
@@ -1328,7 +1328,7 @@
         "lane": {
           "anyOf": [
             {
-              "$ref": "#/$defs/Lane"
+              "$ref": "#/$defs/LaneProfile"
             },
             {
               "type": "null"
@@ -2094,7 +2094,7 @@
           "anyOf": [
             {
               "items": {
-                "$ref": "#/$defs/Lane"
+                "$ref": "#/$defs/LaneProfile"
               },
               "type": "array"
             },
@@ -2412,15 +2412,18 @@
       "title": "InputBinding",
       "type": "object"
     },
-    "Lane": {
+    "LaneProfile": {
+      "description": "The one Lane Profile vocabulary (MP-01): runtime (`domain/execution/lanes.py`),\nframes, the manifest ``lane`` field and the common SQL CHECKs derive from or are checked\nagainst it. ``claude_cloud``/``codex_cloud`` are the provider-hosted products only.",
       "enum": [
         "deep_agents",
         "cursor_local",
         "cursor_cloud",
         "claude_agent_sdk",
-        "codex"
+        "codex",
+        "claude_cloud",
+        "codex_cloud"
       ],
-      "title": "Lane",
+      "title": "LaneProfile",
       "type": "string"
     },
     "MissionBlock": {

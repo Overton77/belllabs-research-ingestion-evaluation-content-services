@@ -14,7 +14,9 @@
   },
   "in_process": null,
   "report": {
-    "degraded": [],
+    "degraded": [
+      "mc.frame_capture: no native hook on cursor_local for before_model, after_compaction"
+    ],
     "overflow": [],
     "plugin_expansions": [
       [
@@ -28,6 +30,7 @@
     ],
     "requires_trust": [],
     "skipped_members": [],
+    "unqualified": [],
     "unsupported_on_lane": [
       {
         "event": "before_model",

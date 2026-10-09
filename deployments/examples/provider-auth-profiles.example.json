@@ -1,0 +1,62 @@
+{
+  "$comment": "EXAMPLE ONLY (MP-05). Deployment-registry auth profiles in mc.auth_profile.v1 shape. References, never credentials: credential_ref names env:/settings:/secret:/keyring: entries; login routes carry no ref. No profile here is account-enabled or qualified; hosted lanes stay unqualified (Outcome 3) whatever their route. A subscription profile admits only subscription billing unless allowed_billing_modes lists more - there is no implicit API fallback.",
+  "profiles": [
+    {
+      "schema_version": "mc.auth_profile.v1",
+      "profile_id": "deep-agents-openai-api",
+      "lane_profile": "deep_agents",
+      "route": "api_key",
+      "billing_mode": "api",
+      "credential_ref": "env:OPENAI_API_KEY"
+    },
+    {
+      "schema_version": "mc.auth_profile.v1",
+      "profile_id": "claude-sdk-owner-subscription",
+      "lane_profile": "claude_agent_sdk",
+      "route": "owner_cli_login",
+      "billing_mode": "subscription",
+      "owner_attestation_ref": "decision:<owner-local-personal-use-record>",
+      "shadowing": "reject"
+    },
+    {
+      "schema_version": "mc.auth_profile.v1",
+      "profile_id": "claude-sdk-api",
+      "lane_profile": "claude_agent_sdk",
+      "route": "api_key",
+      "billing_mode": "api",
+      "credential_ref": "env:ANTHROPIC_API_KEY"
+    },
+    {
+      "schema_version": "mc.auth_profile.v1",
+      "profile_id": "codex-owner-chatgpt",
+      "lane_profile": "codex",
+      "route": "owner_cli_login",
+      "billing_mode": "subscription"
+    },
+    {
+      "schema_version": "mc.auth_profile.v1",
+      "profile_id": "cursor-local-key",
+      "lane_profile": "cursor_local",
+      "route": "api_key",
+      "billing_mode": "unknown",
+      "allowed_billing_modes": ["unknown"],
+      "credential_ref": "settings:cursor_api_key"
+    },
+    {
+      "schema_version": "mc.auth_profile.v1",
+      "profile_id": "claude-cloud-owner",
+      "lane_profile": "claude_cloud",
+      "route": "hosted_product_signin",
+      "billing_mode": "subscription",
+      "account_ref": "registry:<claude-account-ref>"
+    },
+    {
+      "schema_version": "mc.auth_profile.v1",
+      "profile_id": "codex-cloud-owner",
+      "lane_profile": "codex_cloud",
+      "route": "hosted_product_signin",
+      "billing_mode": "subscription",
+      "account_ref": "registry:<chatgpt-account-ref>"
+    }
+  ]
+}

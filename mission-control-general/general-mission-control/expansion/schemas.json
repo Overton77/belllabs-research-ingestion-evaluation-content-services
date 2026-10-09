@@ -1,0 +1,1376 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:mc:expansion:v1",
+  "$defs": {
+    "Scope": {
+      "type": "object",
+      "properties": {
+        "installation_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "application_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tenant_id": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "required": [
+        "installation_id",
+        "application_id",
+        "tenant_id"
+      ],
+      "additionalProperties": false
+    },
+    "ArtifactRef": {
+      "type": "object",
+      "properties": {
+        "resource_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "issuer": {
+          "type": "string",
+          "minLength": 1
+        },
+        "schema_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "resource_id",
+        "scope",
+        "issuer",
+        "schema_ref",
+        "digest"
+      ],
+      "additionalProperties": false
+    },
+    "ContextItem": {
+      "type": "object",
+      "properties": {
+        "artifact": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "locator": {
+          "type": "string",
+          "minLength": 1
+        },
+        "token_bound": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "trust": {
+          "enum": [
+            "untrusted_source",
+            "admitted_evidence",
+            "operating_contract",
+            "advisory_memory"
+          ]
+        }
+      },
+      "required": [
+        "artifact",
+        "locator",
+        "token_bound",
+        "trust"
+      ],
+      "additionalProperties": false
+    },
+    "Omission": {
+      "type": "object",
+      "properties": {
+        "candidate_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "enum": [
+            "budget",
+            "not_authorized",
+            "expired",
+            "duplicate",
+            "irrelevant",
+            "unqualified"
+          ]
+        }
+      },
+      "required": [
+        "candidate_ref",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "ContextSelection": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": "mc.context_selection.v1"
+        },
+        "selection_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "request_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "target_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "purpose": {
+          "type": "string",
+          "minLength": 1
+        },
+        "policy_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tokenizer_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "candidate_capture_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "selected": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ContextItem"
+          }
+        },
+        "omitted": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Omission"
+          }
+        },
+        "max_input_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "total_token_bound": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "file_manifest_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "grants_snapshot_ref": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "schema_version",
+        "selection_id",
+        "request_id",
+        "scope",
+        "target_ref",
+        "purpose",
+        "policy_ref",
+        "tokenizer_ref",
+        "candidate_capture_refs",
+        "selected",
+        "omitted",
+        "max_input_tokens",
+        "total_token_bound",
+        "file_manifest_ref",
+        "grants_snapshot_ref"
+      ],
+      "additionalProperties": false
+    },
+    "StateHandoff": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": "mc.state_handoff.v1"
+        },
+        "handoff_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "producer_attempt_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "producer_generation": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "target_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "base_version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "base_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "revision_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "binding_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "input_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "delta": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "journal_through_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "liability_manifest_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "state_schema_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "admission_decision_ref": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "schema_version",
+        "handoff_id",
+        "scope",
+        "producer_attempt_id",
+        "producer_generation",
+        "target_ref",
+        "base_version",
+        "base_digest",
+        "revision_digest",
+        "binding_digest",
+        "input_digest",
+        "delta",
+        "outputs",
+        "journal_through_seq",
+        "liability_manifest_ref",
+        "state_schema_ref",
+        "admission_decision_ref"
+      ],
+      "additionalProperties": false
+    },
+    "Message": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": "mc.message.v1"
+        },
+        "request_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "target_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target_generation": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "sender_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "client_message_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "kind": {
+          "enum": [
+            "instruction",
+            "context",
+            "progress",
+            "question",
+            "answer",
+            "result"
+          ]
+        },
+        "boundary": {
+          "enum": [
+            "next_turn",
+            "next_iteration",
+            "after_checkpoint"
+          ]
+        },
+        "content": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "deadline": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "scope",
+        "target_ref",
+        "target_generation",
+        "sender_ref",
+        "client_message_id",
+        "kind",
+        "boundary",
+        "content",
+        "deadline"
+      ],
+      "additionalProperties": false
+    },
+    "Progress": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": "mc.progress.v1"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "attempt_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "completed": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "remaining": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "blocker_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "usage_disposition": {
+          "enum": [
+            "settled",
+            "estimated",
+            "unknown"
+          ]
+        },
+        "journal_through_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        }
+      },
+      "required": [
+        "schema_version",
+        "scope",
+        "attempt_id",
+        "generation",
+        "summary",
+        "completed",
+        "remaining",
+        "blocker_refs",
+        "outputs",
+        "usage_disposition",
+        "journal_through_seq"
+      ],
+      "additionalProperties": false
+    },
+    "PriceDimension": {
+      "type": "object",
+      "properties": {
+        "dimension": {
+          "type": "string",
+          "minLength": 1
+        },
+        "billing_unit": {
+          "type": "string",
+          "minLength": 1
+        },
+        "max_units": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "rate_micros_numerator": {
+          "type": "string",
+          "pattern": "^[0-9]+$"
+        },
+        "rate_units_denominator": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "price_snapshot_ref": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "dimension",
+        "billing_unit",
+        "max_units",
+        "rate_micros_numerator",
+        "rate_units_denominator",
+        "price_snapshot_ref"
+      ],
+      "additionalProperties": false
+    },
+    "ProofBudget": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": "mc.proof_budget.v1"
+        },
+        "budget_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "actor_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "profile_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        },
+        "dimensions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PriceDimension"
+          }
+        },
+        "reserved_micros": {
+          "type": "string",
+          "pattern": "^[0-9]+$"
+        },
+        "max_concurrency": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "stop_conditions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "authorization_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expiry": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "schema_version",
+        "budget_id",
+        "scope",
+        "actor_ref",
+        "target_refs",
+        "profile_refs",
+        "currency",
+        "dimensions",
+        "reserved_micros",
+        "max_concurrency",
+        "stop_conditions",
+        "authorization_ref",
+        "expiry"
+      ],
+      "additionalProperties": false
+    },
+    "KnowledgeEnvelope": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": "mc.knowledge_request.v1"
+        },
+        "request_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "run_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "activation_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "attempt_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "operation": {
+          "enum": [
+            "inspect",
+            "capture",
+            "verify",
+            "classify_propose",
+            "classify_admit",
+            "query",
+            "retrieve",
+            "ingestion_plan",
+            "ingestion_apply",
+            "receipt_get",
+            "verify_result"
+          ]
+        },
+        "capability_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "executor_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "input_manifest": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "native_schema_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "native_payload_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "effect_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "precondition_manifest": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "approval_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "admission_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "governor_profile_ref": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "scope",
+        "run_id",
+        "activation_id",
+        "attempt_id",
+        "generation",
+        "operation",
+        "capability_ref",
+        "executor_digest",
+        "input_manifest",
+        "native_schema_ref",
+        "native_payload_digest",
+        "effect_key",
+        "precondition_manifest",
+        "approval_refs",
+        "admission_ref",
+        "governor_profile_ref"
+      ],
+      "additionalProperties": false
+    },
+    "UiPresentation": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": "mc.ui_presentation.v1"
+        },
+        "presentation_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "component_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "component_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "props_schema_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "props_artifact_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "source_resource_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "as_of_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "allowed_action_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "fallback_text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expires_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "schema_version",
+        "presentation_id",
+        "scope",
+        "component_ref",
+        "component_version",
+        "props_schema_ref",
+        "props_artifact_ref",
+        "source_resource_refs",
+        "as_of_seq",
+        "allowed_action_refs",
+        "fallback_text"
+      ],
+      "additionalProperties": false
+    },
+    "UiActionIntent": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": "mc.ui_action_intent.v1"
+        },
+        "request_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "presentation_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "action_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expected_resource_version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "payload_artifact_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "scope",
+        "presentation_id",
+        "action_ref",
+        "target_ref",
+        "expected_resource_version",
+        "payload_artifact_ref"
+      ],
+      "additionalProperties": false
+    },
+    "FileEntry": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "artifact": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "mode": {
+          "enum": [
+            "read_only",
+            "candidate_output"
+          ]
+        }
+      },
+      "required": [
+        "path",
+        "artifact",
+        "bytes",
+        "mode"
+      ],
+      "additionalProperties": false
+    },
+    "WorkspaceManifest": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": "mc.workspace_manifest.v1"
+        },
+        "workspace_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "attempt_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "environment_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "image_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FileEntry"
+          }
+        },
+        "output_prefixes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "scratch_prefixes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "process_profile_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "network_policy_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "quota_profile_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "lease_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cleanup_policy_ref": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "schema_version",
+        "workspace_id",
+        "scope",
+        "attempt_id",
+        "generation",
+        "environment_ref",
+        "image_digest",
+        "files",
+        "output_prefixes",
+        "scratch_prefixes",
+        "process_profile_refs",
+        "network_policy_ref",
+        "quota_profile_ref",
+        "lease_ref",
+        "cleanup_policy_ref"
+      ],
+      "additionalProperties": false
+    },
+    "Subscription": {
+      "type": "object",
+      "properties": {
+        "mission_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "after_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        }
+      },
+      "required": [
+        "mission_id",
+        "after_seq"
+      ],
+      "additionalProperties": false
+    },
+    "StreamControl": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "mc.stream_control.v1"
+            },
+            "type": {
+              "const": "subscribe"
+            },
+            "subscriptions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Subscription"
+              }
+            }
+          },
+          "required": [
+            "schema",
+            "type",
+            "subscriptions"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "mc.stream_control.v1"
+            },
+            "type": {
+              "const": "ack"
+            },
+            "mission_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "through_seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            }
+          },
+          "required": [
+            "schema",
+            "type",
+            "mission_id",
+            "through_seq"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "EventExecution": {
+      "type": "object",
+      "properties": {
+        "node_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "activation_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "attempt_no": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "harness_execution_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "native_session_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "native_turn_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "EventSource": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "enum": [
+            "mission_control",
+            "adapter",
+            "human",
+            "agent"
+          ]
+        },
+        "actor_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "native_event_ref": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false
+    },
+    "MissionEvent": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": "mc.event.v1"
+        },
+        "event_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "mission_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "run_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "revision_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "ledger_commit_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "occurred_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "recorded_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "event_type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "event_version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "execution": {
+          "$ref": "#/$defs/EventExecution"
+        },
+        "source": {
+          "$ref": "#/$defs/EventSource"
+        },
+        "causation_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "correlation_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "payload_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        }
+      },
+      "required": [
+        "schema_version",
+        "event_id",
+        "scope",
+        "mission_id",
+        "seq",
+        "ledger_commit_id",
+        "occurred_at",
+        "recorded_at",
+        "event_type",
+        "event_version",
+        "execution",
+        "source",
+        "payload_ref"
+      ],
+      "additionalProperties": false
+    },
+    "StreamFrame": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "mc.stream_frame.v1"
+            },
+            "type": {
+              "const": "event"
+            },
+            "event": {
+              "$ref": "#/$defs/MissionEvent"
+            }
+          },
+          "required": [
+            "schema",
+            "type",
+            "event"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "mc.stream_frame.v1"
+            },
+            "type": {
+              "const": "heartbeat"
+            },
+            "recorded_at": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "required": [
+            "schema",
+            "type",
+            "recorded_at"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "mc.stream_frame.v1"
+            },
+            "type": {
+              "const": "resync_required"
+            },
+            "mission_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "retained_floor": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "snapshot_ref": {
+              "type": "string",
+              "minLength": 1
+            },
+            "snapshot_seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "code": {
+              "const": "CURSOR_EXPIRED"
+            }
+          },
+          "required": [
+            "schema",
+            "type",
+            "mission_id",
+            "retained_floor",
+            "snapshot_ref",
+            "snapshot_seq",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "mc.stream_frame.v1"
+            },
+            "type": {
+              "const": "auth_expiring"
+            },
+            "reconnect_required": {
+              "const": true
+            }
+          },
+          "required": [
+            "schema",
+            "type",
+            "reconnect_required"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "InterviewCreate": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": "mc.interview_create.v1"
+        },
+        "request_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "tenant_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "draft_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "environment_profile_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "admitted_agent_config_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "initial_message_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "context_request_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "budget_profile_ref": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "tenant_id",
+        "environment_profile_ref",
+        "admitted_agent_config_ref",
+        "initial_message_ref",
+        "context_request_ref",
+        "budget_profile_ref"
+      ],
+      "additionalProperties": false
+    },
+    "ReviewDecision": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": "mc.review_decision.v1"
+        },
+        "request_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "human_task_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "expected_task_version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "target_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "decision": {
+          "enum": [
+            "approve",
+            "reject",
+            "request_changes",
+            "abstain"
+          ]
+        },
+        "feedback_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "selected_evidence_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "human_task_id",
+        "expected_task_version",
+        "target_digest",
+        "decision",
+        "selected_evidence_refs"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "decision": {
+                "enum": [
+                  "reject",
+                  "request_changes"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "feedback_ref"
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

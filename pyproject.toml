@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 dependencies = [
   "aioboto3>=15,<16",
   "asyncpg>=0.30,<1",
+  "claude-agent-sdk==0.2.165",
   "cursor-sdk==1.0.37",
   "deepagents==0.7.5",
   "fastapi>=0.116,<1",
@@ -205,6 +206,8 @@ known-first-party = ["mission_control", "mission_control_db_contract", "biotech_
 "scripts/**" = ["T201"]
 "docs/tools/**" = ["T201"]
 "docs/specs/**" = ["T201", "E501"]
+# Imported specification tooling prints reports and retains long prose/template literals.
+"mission-control-general/**" = ["T201", "E501"]
 "packages/*/scripts/**" = ["T201"]
 "packages/*/seeds/**" = ["T201"]
 "packages/*/runtime/**" = ["T201"]
@@ -301,6 +304,8 @@ langgraph-checkpoint-postgres = "langgraph"
 # Loaded by configuration/CLI rather than imported: provider routes, Agent Server runtime,
 # `langgraph dev`, the ASGI server, and the OpenTelemetry pins behind temporalio[opentelemetry].
 DEP002 = [
+  # Pinned for the partial MP-07 lane; remove this exception when its SDK harness lands.
+  "claude-agent-sdk",
   "langchain-anthropic",
   "langchain-quickjs",
   "langgraph-api",

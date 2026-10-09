@@ -1,0 +1,4028 @@
+{
+  "$defs": {
+    "Acceptance": {
+      "additionalProperties": false,
+      "description": "The authoring form of the Completion Contract's closed typed AST (ADR-0010).",
+      "oneOf": [
+        {
+          "required": [
+            "assessment"
+          ]
+        },
+        {
+          "required": [
+            "human"
+          ]
+        },
+        {
+          "required": [
+            "schema"
+          ]
+        },
+        {
+          "required": [
+            "all"
+          ]
+        },
+        {
+          "required": [
+            "any"
+          ]
+        }
+      ],
+      "properties": {
+        "all": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/Acceptance"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "All"
+        },
+        "any": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/Acceptance"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Any"
+        },
+        "assessment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AssessmentAcceptance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "human": {
+          "anyOf": [
+            {
+              "enum": [
+                "review_accept",
+                "approved"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Human"
+        },
+        "schema": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_.-]*@[0-9]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Schema"
+        }
+      },
+      "title": "Acceptance",
+      "type": "object"
+    },
+    "AgentEntry": {
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "required": [
+            "pin"
+          ]
+        },
+        {
+          "required": [
+            "search"
+          ]
+        }
+      ],
+      "properties": {
+        "as": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "As"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CapabilityKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "overlay": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentOverlay"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "pin": {
+          "anyOf": [
+            {
+              "pattern": "^(?P<capability_id>[a-z0-9][a-z0-9._:-]*)@(?P<version>latest|[0-9A-Za-z][0-9A-Za-z.+_-]*)(?:#(?P<digest>sha256:[0-9a-f]{64}))?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pin"
+        },
+        "require": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/LaneProfile"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Require"
+        },
+        "search": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Search"
+        }
+      },
+      "title": "AgentEntry",
+      "type": "object"
+    },
+    "AgentExecutorNodeV2": {
+      "additionalProperties": false,
+      "properties": {
+        "behavior": {
+          "const": "agent_executor",
+          "default": "agent_executor",
+          "title": "Behavior",
+          "type": "string"
+        },
+        "completion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeCompletion"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "depends_on": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "environment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EnvironmentV2"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "inputs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/InputBinding"
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "instruction": {
+          "minLength": 1,
+          "title": "Instruction",
+          "type": "string"
+        },
+        "join": {
+          "anyOf": [
+            {
+              "enum": [
+                "all",
+                "any"
+              ],
+              "type": "string"
+            },
+            {
+              "$ref": "#/$defs/QuorumJoin"
+            }
+          ],
+          "default": "all",
+          "title": "Join"
+        },
+        "key": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+          "title": "Key",
+          "type": "string"
+        },
+        "missing_output_policy": {
+          "anyOf": [
+            {
+              "const": "not_accepted",
+              "type": "string"
+            },
+            {
+              "$ref": "#/$defs/FollowUpTurnPolicy"
+            }
+          ],
+          "default": "not_accepted",
+          "title": "Missing Output Policy"
+        },
+        "objectives": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "title": "Objectives",
+          "type": "array"
+        },
+        "operating_contract": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Operating Contract"
+        },
+        "outputs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/OutputDeclaration"
+          },
+          "title": "Outputs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "key",
+        "instruction"
+      ],
+      "title": "AgentExecutorNodeV2",
+      "type": "object"
+    },
+    "AgentOverlay": {
+      "additionalProperties": false,
+      "properties": {
+        "is_background": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Is Background"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "const": "inherit",
+              "type": "string"
+            },
+            {
+              "pattern": "^[a-z0-9][a-z0-9._:-]{0,191}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "readonly": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Readonly"
+        }
+      },
+      "title": "AgentOverlay",
+      "type": "object"
+    },
+    "AssessmentAcceptance": {
+      "additionalProperties": false,
+      "properties": {
+        "capability": {
+          "$ref": "#/$defs/CapabilityReference"
+        },
+        "threshold": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            }
+          ],
+          "title": "Threshold"
+        }
+      },
+      "required": [
+        "capability",
+        "threshold"
+      ],
+      "title": "AssessmentAcceptance",
+      "type": "object"
+    },
+    "AuthSelection": {
+      "additionalProperties": false,
+      "description": "The authentication/billing route a node runs under; a profile reference, never a\ncredential. Local CLI sign-in, API credentials and provider cloud accounts are distinct\nroutes resolved by the deployment registry (SPEC-02 \"Authentication\").",
+      "properties": {
+        "profile": {
+          "pattern": "^[a-z0-9][a-z0-9._:-]{0,191}$",
+          "title": "Profile",
+          "type": "string"
+        }
+      },
+      "required": [
+        "profile"
+      ],
+      "title": "AuthSelection",
+      "type": "object"
+    },
+    "Budget": {
+      "additionalProperties": false,
+      "properties": {
+        "tokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tokens"
+        },
+        "tool_calls": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Calls"
+        },
+        "usd": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,19}0*$)\\d{0,12}\\.\\d{0,6}0*$)",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Usd"
+        },
+        "wall_clock": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "minLength": 2,
+                  "pattern": "^(?=[0-9])(?:[0-9]+d)?(?:[0-9]+h)?(?:[0-9]+m)?(?:[0-9]+s)?$",
+                  "type": "string"
+                }
+              ],
+              "description": "Seconds, or [Nd][Nh][Nm][Ns] such as 4h or 1h30m."
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Wall Clock"
+        }
+      },
+      "title": "Budget",
+      "type": "object"
+    },
+    "CapabilityEntry": {
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "required": [
+            "pin"
+          ]
+        },
+        {
+          "required": [
+            "search"
+          ]
+        }
+      ],
+      "properties": {
+        "as": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "As"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CapabilityKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "pin": {
+          "anyOf": [
+            {
+              "pattern": "^(?P<capability_id>[a-z0-9][a-z0-9._:-]*)@(?P<version>latest|[0-9A-Za-z][0-9A-Za-z.+_-]*)(?:#(?P<digest>sha256:[0-9a-f]{64}))?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pin"
+        },
+        "require": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/LaneProfile"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Require"
+        },
+        "search": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Search"
+        },
+        "tools": {
+          "anyOf": [
+            {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tools"
+        }
+      },
+      "title": "CapabilityEntry",
+      "type": "object"
+    },
+    "CapabilityKind": {
+      "description": "Catalog Capability Kinds a manifest entry may name (ADR-0020, ADR-0023).",
+      "enum": [
+        "mcp_server",
+        "mcp_tool",
+        "skill_bundle",
+        "hook_script",
+        "subagent_profile",
+        "plugin",
+        "deterministic_executor",
+        "assessment",
+        "model_profile",
+        "sandbox_profile",
+        "context_bundle"
+      ],
+      "title": "CapabilityKind",
+      "type": "string"
+    },
+    "CapabilityReference": {
+      "additionalProperties": false,
+      "description": "A pin-or-search entry with no kind-specific fields (skills, plugins, models).",
+      "oneOf": [
+        {
+          "required": [
+            "pin"
+          ]
+        },
+        {
+          "required": [
+            "search"
+          ]
+        }
+      ],
+      "properties": {
+        "as": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "As"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CapabilityKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "pin": {
+          "anyOf": [
+            {
+              "pattern": "^(?P<capability_id>[a-z0-9][a-z0-9._:-]*)@(?P<version>latest|[0-9A-Za-z][0-9A-Za-z.+_-]*)(?:#(?P<digest>sha256:[0-9a-f]{64}))?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pin"
+        },
+        "require": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/LaneProfile"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Require"
+        },
+        "search": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Search"
+        }
+      },
+      "title": "CapabilityReference",
+      "type": "object"
+    },
+    "ChainLinkDeclaration": {
+      "additionalProperties": false,
+      "description": "Shape of one ``links`` entry; graph and binding semantics live in\n``domain/composition/chain.py`` (SPEC-04).",
+      "properties": {
+        "from": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+          "title": "From",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "supplies",
+            "depends_on"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "on": {
+          "anyOf": [
+            {
+              "enum": [
+                "goal_accepted",
+                "mission_accepted",
+                "execution_complete"
+              ],
+              "type": "string"
+            },
+            {
+              "$ref": "#/$defs/GoalAcceptedCondition"
+            }
+          ],
+          "default": "goal_accepted",
+          "title": "On"
+        },
+        "on_upstream_cancel": {
+          "default": "cancel_downstream",
+          "enum": [
+            "cancel_downstream",
+            "detach"
+          ],
+          "title": "On Upstream Cancel",
+          "type": "string"
+        },
+        "on_upstream_not_accepted": {
+          "const": "stop",
+          "default": "stop",
+          "title": "On Upstream Not Accepted",
+          "type": "string"
+        },
+        "outputs": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "to": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+          "title": "To",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "kind"
+      ],
+      "title": "ChainLinkDeclaration",
+      "type": "object"
+    },
+    "ChildAwait": {
+      "additionalProperties": false,
+      "properties": {
+        "until": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+          "title": "Until",
+          "type": "string"
+        }
+      },
+      "required": [
+        "until"
+      ],
+      "title": "ChildAwait",
+      "type": "object"
+    },
+    "ChildMissionInvocationNodeV2": {
+      "additionalProperties": false,
+      "properties": {
+        "await": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChildAwait"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "behavior": {
+          "const": "child_mission_invocation",
+          "default": "child_mission_invocation",
+          "title": "Behavior",
+          "type": "string"
+        },
+        "child": {
+          "$ref": "#/$defs/ChildSourceV2"
+        },
+        "completion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeCompletion"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "depends_on": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "environment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EnvironmentV2"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "inputs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/InputBinding"
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "join": {
+          "anyOf": [
+            {
+              "enum": [
+                "all",
+                "any"
+              ],
+              "type": "string"
+            },
+            {
+              "$ref": "#/$defs/QuorumJoin"
+            }
+          ],
+          "default": "all",
+          "title": "Join"
+        },
+        "key": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+          "title": "Key",
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "spawn",
+            "attach"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "objectives": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "title": "Objectives",
+          "type": "array"
+        },
+        "on_parent_cancel": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "On Parent Cancel"
+        },
+        "outputs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/OutputDeclaration"
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "portal": {
+          "default": "peek",
+          "enum": [
+            "peek",
+            "peek_and_command"
+          ],
+          "title": "Portal",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "mode",
+        "child"
+      ],
+      "title": "ChildMissionInvocationNodeV2",
+      "type": "object"
+    },
+    "ChildSourceV2": {
+      "additionalProperties": false,
+      "properties": {
+        "existing": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Existing"
+        },
+        "inline": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MissionBlockV2"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "template": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Template"
+        }
+      },
+      "title": "ChildSourceV2",
+      "type": "object"
+    },
+    "CommandKind": {
+      "enum": [
+        "pause",
+        "resume",
+        "satisfy_wait",
+        "cancel",
+        "queue_instruction",
+        "add_context",
+        "interrupt_and_inject",
+        "fork",
+        "request_continuation"
+      ],
+      "title": "CommandKind",
+      "type": "string"
+    },
+    "ContextEntry": {
+      "additionalProperties": false,
+      "description": "A read-only context item: a catalog entry, an artifact, or a workspace path.",
+      "oneOf": [
+        {
+          "required": [
+            "pin"
+          ]
+        },
+        {
+          "required": [
+            "search"
+          ]
+        },
+        {
+          "required": [
+            "artifact"
+          ]
+        },
+        {
+          "required": [
+            "path"
+          ]
+        }
+      ],
+      "properties": {
+        "artifact": {
+          "anyOf": [
+            {
+              "pattern": "^artifact://\\S+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifact"
+        },
+        "as": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "As"
+        },
+        "expand": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExpansionTier"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CapabilityKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "path": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "pin": {
+          "anyOf": [
+            {
+              "pattern": "^(?P<capability_id>[a-z0-9][a-z0-9._:-]*)@(?P<version>latest|[0-9A-Za-z][0-9A-Za-z.+_-]*)(?:#(?P<digest>sha256:[0-9a-f]{64}))?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pin"
+        },
+        "search": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Search"
+        }
+      },
+      "title": "ContextEntry",
+      "type": "object"
+    },
+    "ContinuationPolicy": {
+      "additionalProperties": false,
+      "description": "Context pressure policy: soft/hard watermarks, native compaction preference and the\nsealed-checkpoint fallback (SPEC-01 \"Four independent progress mechanisms\"). The\ndefaults are qualification tuning inputs, not provider guarantees.",
+      "properties": {
+        "fallback": {
+          "default": "sealed_checkpoint",
+          "enum": [
+            "sealed_checkpoint",
+            "fail"
+          ],
+          "title": "Fallback",
+          "type": "string"
+        },
+        "hard_context_ratio": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0.0,
+              "maximum": 1.0,
+              "type": "number"
+            },
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d{0,4}0*$",
+              "type": "string"
+            }
+          ],
+          "default": "0.85",
+          "title": "Hard Context Ratio"
+        },
+        "max_compaction_failures": {
+          "default": 2,
+          "minimum": 0,
+          "title": "Max Compaction Failures",
+          "type": "integer"
+        },
+        "max_session_turns": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Session Turns"
+        },
+        "max_transfers": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Transfers"
+        },
+        "native_compaction": {
+          "default": "preferred",
+          "enum": [
+            "preferred",
+            "disabled",
+            "required"
+          ],
+          "title": "Native Compaction",
+          "type": "string"
+        },
+        "reserve_ratio": {
+          "anyOf": [
+            {
+              "exclusiveMaximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d{0,4}0*$",
+              "type": "string"
+            }
+          ],
+          "default": "0.15",
+          "title": "Reserve Ratio"
+        },
+        "soft_context_ratio": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0.0,
+              "maximum": 1.0,
+              "type": "number"
+            },
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d{0,4}0*$",
+              "type": "string"
+            }
+          ],
+          "default": "0.70",
+          "title": "Soft Context Ratio"
+        }
+      },
+      "title": "ContinuationPolicy",
+      "type": "object"
+    },
+    "Controls": {
+      "additionalProperties": false,
+      "properties": {
+        "chain_autostart": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Chain Autostart"
+        },
+        "commands_allowed": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/CommandKind"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Commands Allowed"
+        },
+        "notifications": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NotificationDeclaration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "subscriptions": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SubscriptionDeclaration"
+          },
+          "title": "Subscriptions",
+          "type": "array"
+        }
+      },
+      "title": "Controls",
+      "type": "object"
+    },
+    "DeterministicExecutorKind": {
+      "enum": [
+        "verification_dispatch",
+        "artifact_register",
+        "git_snapshot",
+        "schema_validate",
+        "test_run",
+        "coalesce",
+        "agreement_check",
+        "noop_echo"
+      ],
+      "title": "DeterministicExecutorKind",
+      "type": "string"
+    },
+    "DeterministicExecutorNodeV2": {
+      "additionalProperties": false,
+      "properties": {
+        "behavior": {
+          "const": "deterministic_executor",
+          "default": "deterministic_executor",
+          "title": "Behavior",
+          "type": "string"
+        },
+        "completion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeCompletion"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "depends_on": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "environment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EnvironmentV2"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "inputs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/InputBinding"
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "join": {
+          "anyOf": [
+            {
+              "enum": [
+                "all",
+                "any"
+              ],
+              "type": "string"
+            },
+            {
+              "$ref": "#/$defs/QuorumJoin"
+            }
+          ],
+          "default": "all",
+          "title": "Join"
+        },
+        "key": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+          "title": "Key",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/DeterministicExecutorKind"
+        },
+        "objectives": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "title": "Objectives",
+          "type": "array"
+        },
+        "outputs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/OutputDeclaration"
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "params": {
+          "additionalProperties": true,
+          "title": "Params",
+          "type": "object"
+        }
+      },
+      "required": [
+        "key",
+        "kind"
+      ],
+      "title": "DeterministicExecutorNodeV2",
+      "type": "object"
+    },
+    "EnvironmentV2": {
+      "additionalProperties": false,
+      "description": "A v1 Environment plus the multi-provider selections. Every field stays optional so a\nnode can overlay any subset; the v2 lane rules apply to the effective environment.",
+      "properties": {
+        "agents": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/AgentEntry"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agents"
+        },
+        "auth": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AuthSelection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "budget": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Budget"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "capabilities": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/CapabilityEntry"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Capabilities"
+        },
+        "continuation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ContinuationPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "execution_environment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExecutionEnvironmentSelection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "governors": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Governors"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "hooks": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/HookEntry"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hooks"
+        },
+        "lane": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LaneProfile"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "model": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelSelection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "plugins": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/CapabilityReference"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Plugins"
+        },
+        "requires": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RequiredFeatures"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sandbox": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SandboxSelection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "side_effects": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/SideEffect"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Side Effects"
+        },
+        "workspace": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkspaceSelectionV2"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "EnvironmentV2",
+      "type": "object"
+    },
+    "EvaluatorOptimizerNodeV2": {
+      "additionalProperties": false,
+      "properties": {
+        "action_space": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "title": "Action Space",
+          "type": "array"
+        },
+        "behavior": {
+          "const": "evaluator_optimizer",
+          "default": "evaluator_optimizer",
+          "title": "Behavior",
+          "type": "string"
+        },
+        "completion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeCompletion"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "depends_on": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "environment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EnvironmentV2"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "inputs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/InputBinding"
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "join": {
+          "anyOf": [
+            {
+              "enum": [
+                "all",
+                "any"
+              ],
+              "type": "string"
+            },
+            {
+              "$ref": "#/$defs/QuorumJoin"
+            }
+          ],
+          "default": "all",
+          "title": "Join"
+        },
+        "key": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+          "title": "Key",
+          "type": "string"
+        },
+        "objective": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Objective"
+        },
+        "objectives": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "title": "Objectives",
+          "type": "array"
+        },
+        "outputs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/OutputDeclaration"
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "params": {
+          "additionalProperties": true,
+          "title": "Params",
+          "type": "object"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "title": "EvaluatorOptimizerNodeV2",
+      "type": "object"
+    },
+    "EventWaitNodeV2": {
+      "additionalProperties": false,
+      "properties": {
+        "behavior": {
+          "const": "event_wait",
+          "default": "event_wait",
+          "title": "Behavior",
+          "type": "string"
+        },
+        "completion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeCompletion"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "depends_on": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "environment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EnvironmentV2"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "event_type": {
+          "pattern": "^[a-z][a-z0-9_]*(?:\\.(?:[a-z][a-z0-9_]*|\\*))*$",
+          "title": "Event Type",
+          "type": "string"
+        },
+        "inputs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/InputBinding"
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "join": {
+          "anyOf": [
+            {
+              "enum": [
+                "all",
+                "any"
+              ],
+              "type": "string"
+            },
+            {
+              "$ref": "#/$defs/QuorumJoin"
+            }
+          ],
+          "default": "all",
+          "title": "Join"
+        },
+        "key": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+          "title": "Key",
+          "type": "string"
+        },
+        "match": {
+          "additionalProperties": true,
+          "title": "Match",
+          "type": "object"
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "const": "once",
+              "type": "string"
+            },
+            {
+              "$ref": "#/$defs/RearmMode"
+            }
+          ],
+          "default": "once",
+          "title": "Mode"
+        },
+        "objectives": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "title": "Objectives",
+          "type": "array"
+        },
+        "on_timeout": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "On Timeout"
+        },
+        "outputs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/OutputDeclaration"
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "timeout": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "minLength": 2,
+                  "pattern": "^(?=[0-9])(?:[0-9]+d)?(?:[0-9]+h)?(?:[0-9]+m)?(?:[0-9]+s)?$",
+                  "type": "string"
+                }
+              ],
+              "description": "Seconds, or [Nd][Nh][Nm][Ns] such as 4h or 1h30m."
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timeout"
+        }
+      },
+      "required": [
+        "key",
+        "event_type"
+      ],
+      "title": "EventWaitNodeV2",
+      "type": "object"
+    },
+    "ExecutionEnvironmentSelection": {
+      "additionalProperties": false,
+      "description": "``local_workspace`` (a worker-hosted profile) or ``provider_hosted`` (a published\nprovider cloud environment). ``provider`` must match the lane; a local ``path`` is\ninvalid for hosted work (SPEC-02).",
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "local_workspace"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "provider_hosted"
+            }
+          },
+          "required": [
+            "kind",
+            "provider",
+            "environment_ref"
+          ]
+        }
+      ],
+      "properties": {
+        "environment_ref": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Environment Ref"
+        },
+        "expected_revision": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected Revision"
+        },
+        "kind": {
+          "enum": [
+            "local_workspace",
+            "provider_hosted"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "profile": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9][a-z0-9._:-]{0,191}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Profile"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "enum": [
+                "cursor",
+                "anthropic",
+                "openai"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider"
+        },
+        "setup": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SetupSelection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "ExecutionEnvironmentSelection",
+      "type": "object"
+    },
+    "ExpansionTier": {
+      "enum": [
+        "inline",
+        "reference",
+        "materialize",
+        "auto"
+      ],
+      "title": "ExpansionTier",
+      "type": "string"
+    },
+    "FollowUpTurn": {
+      "additionalProperties": false,
+      "properties": {
+        "max_turns": {
+          "maximum": 10,
+          "minimum": 1,
+          "title": "Max Turns",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max_turns"
+      ],
+      "title": "FollowUpTurn",
+      "type": "object"
+    },
+    "FollowUpTurnPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "follow_up_turn": {
+          "$ref": "#/$defs/FollowUpTurn"
+        }
+      },
+      "required": [
+        "follow_up_turn"
+      ],
+      "title": "FollowUpTurnPolicy",
+      "type": "object"
+    },
+    "Goal": {
+      "additionalProperties": false,
+      "properties": {
+        "criteria": {
+          "items": {
+            "$ref": "#/$defs/SuccessCriterion"
+          },
+          "minItems": 1,
+          "title": "Criteria",
+          "type": "array"
+        },
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "importance": {
+          "default": "primary",
+          "enum": [
+            "primary",
+            "secondary",
+            "optional"
+          ],
+          "title": "Importance",
+          "type": "string"
+        },
+        "key": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+          "title": "Key",
+          "type": "string"
+        },
+        "objectives": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Objective"
+          },
+          "title": "Objectives",
+          "type": "array"
+        }
+      },
+      "required": [
+        "key",
+        "description",
+        "criteria"
+      ],
+      "title": "Goal",
+      "type": "object"
+    },
+    "GoalAcceptedCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "goal_accepted": {
+          "$ref": "#/$defs/GoalAcceptedSpec"
+        }
+      },
+      "required": [
+        "goal_accepted"
+      ],
+      "title": "GoalAcceptedCondition",
+      "type": "object"
+    },
+    "GoalAcceptedSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "goal_key": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Goal Key"
+        }
+      },
+      "title": "GoalAcceptedSpec",
+      "type": "object"
+    },
+    "GoalLoopNodeV2": {
+      "additionalProperties": false,
+      "properties": {
+        "action_space": {
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Action Space",
+          "type": "array"
+        },
+        "behavior": {
+          "const": "goal_loop",
+          "default": "goal_loop",
+          "title": "Behavior",
+          "type": "string"
+        },
+        "completion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeCompletion"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "depends_on": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "environment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EnvironmentV2"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "inputs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/InputBinding"
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "join": {
+          "anyOf": [
+            {
+              "enum": [
+                "all",
+                "any"
+              ],
+              "type": "string"
+            },
+            {
+              "$ref": "#/$defs/QuorumJoin"
+            }
+          ],
+          "default": "all",
+          "title": "Join"
+        },
+        "key": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+          "title": "Key",
+          "type": "string"
+        },
+        "objective": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+          "title": "Objective",
+          "type": "string"
+        },
+        "objectives": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "title": "Objectives",
+          "type": "array"
+        },
+        "outputs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/OutputDeclaration"
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "stop": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Acceptance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "verifier": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VerifierV2"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "key",
+        "objective",
+        "action_space"
+      ],
+      "title": "GoalLoopNodeV2",
+      "type": "object"
+    },
+    "Governors": {
+      "additionalProperties": false,
+      "properties": {
+        "depth": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Depth"
+        },
+        "fan_out": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fan Out"
+        },
+        "iterations": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Iterations"
+        },
+        "patience": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Patience"
+        },
+        "rounds": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rounds"
+        },
+        "transfers": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Transfers"
+        }
+      },
+      "title": "Governors",
+      "type": "object"
+    },
+    "HookEntry": {
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "required": [
+            "pin"
+          ]
+        },
+        {
+          "required": [
+            "search"
+          ]
+        }
+      ],
+      "properties": {
+        "as": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "As"
+        },
+        "events": {
+          "items": {
+            "$ref": "#/$defs/HookEvent"
+          },
+          "minItems": 1,
+          "title": "Events",
+          "type": "array"
+        },
+        "fail_closed": {
+          "default": false,
+          "title": "Fail Closed",
+          "type": "boolean"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CapabilityKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "matcher": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Matcher"
+        },
+        "pin": {
+          "anyOf": [
+            {
+              "pattern": "^(?P<capability_id>[a-z0-9][a-z0-9._:-]*)@(?P<version>latest|[0-9A-Za-z][0-9A-Za-z.+_-]*)(?:#(?P<digest>sha256:[0-9a-f]{64}))?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pin"
+        },
+        "require": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/LaneProfile"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Require"
+        },
+        "search": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Search"
+        }
+      },
+      "required": [
+        "events"
+      ],
+      "title": "HookEntry",
+      "type": "object"
+    },
+    "HookEvent": {
+      "description": "``mc.hook_event`` values (ADR-0026).",
+      "enum": [
+        "session_start",
+        "session_end",
+        "before_prompt",
+        "before_model",
+        "after_model",
+        "before_tool",
+        "after_tool",
+        "after_tool_failure",
+        "before_shell",
+        "after_shell",
+        "after_file_edit",
+        "before_compaction",
+        "after_compaction",
+        "subagent_start",
+        "subagent_stop",
+        "stop"
+      ],
+      "title": "HookEvent",
+      "type": "string"
+    },
+    "HumanGateNodeV2": {
+      "additionalProperties": false,
+      "properties": {
+        "behavior": {
+          "const": "human_gate",
+          "default": "human_gate",
+          "title": "Behavior",
+          "type": "string"
+        },
+        "completion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeCompletion"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "depends_on": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "environment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EnvironmentV2"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "inputs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/InputBinding"
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "join": {
+          "anyOf": [
+            {
+              "enum": [
+                "all",
+                "any"
+              ],
+              "type": "string"
+            },
+            {
+              "$ref": "#/$defs/QuorumJoin"
+            }
+          ],
+          "default": "all",
+          "title": "Join"
+        },
+        "key": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+          "title": "Key",
+          "type": "string"
+        },
+        "objectives": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "title": "Objectives",
+          "type": "array"
+        },
+        "outputs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/OutputDeclaration"
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "task": {
+          "$ref": "#/$defs/HumanTaskSpec"
+        }
+      },
+      "required": [
+        "key",
+        "task"
+      ],
+      "title": "HumanGateNodeV2",
+      "type": "object"
+    },
+    "HumanTaskSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "APPROVAL",
+            "QUESTION",
+            "SELECTION",
+            "REVIEW",
+            "POLICY_OVERRIDE"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "on_timeout": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "On Timeout"
+        },
+        "packet": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,127}\\.[a-z0-9][a-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "title": "Packet",
+          "type": "array"
+        },
+        "prompt": {
+          "minLength": 1,
+          "title": "Prompt",
+          "type": "string"
+        },
+        "reviewers": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Reviewers",
+          "type": "array"
+        },
+        "timeout": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "minLength": 2,
+                  "pattern": "^(?=[0-9])(?:[0-9]+d)?(?:[0-9]+h)?(?:[0-9]+m)?(?:[0-9]+s)?$",
+                  "type": "string"
+                }
+              ],
+              "description": "Seconds, or [Nd][Nh][Nm][Ns] such as 4h or 1h30m."
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timeout"
+        }
+      },
+      "required": [
+        "kind",
+        "prompt",
+        "reviewers"
+      ],
+      "title": "HumanTaskSpec",
+      "type": "object"
+    },
+    "InputBinding": {
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "required": [
+            "from"
+          ]
+        },
+        {
+          "required": [
+            "artifact"
+          ]
+        },
+        {
+          "required": [
+            "value"
+          ]
+        }
+      ],
+      "properties": {
+        "artifact": {
+          "anyOf": [
+            {
+              "pattern": "^artifact://\\S+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifact"
+        },
+        "expand": {
+          "$ref": "#/$defs/ExpansionTier",
+          "default": "auto"
+        },
+        "from": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,127}\\.[a-z0-9][a-z0-9_-]{0,127}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "From"
+        },
+        "name": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "required": {
+          "default": true,
+          "title": "Required",
+          "type": "boolean"
+        },
+        "schema": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_.-]*@[0-9]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Schema"
+        },
+        "value": {
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "InputBinding",
+      "type": "object"
+    },
+    "LaneProfile": {
+      "description": "The one Lane Profile vocabulary (MP-01): runtime (`domain/execution/lanes.py`),\nframes, the manifest ``lane`` field and the common SQL CHECKs derive from or are checked\nagainst it. ``claude_cloud``/``codex_cloud`` are the provider-hosted products only.",
+      "enum": [
+        "deep_agents",
+        "cursor_local",
+        "cursor_cloud",
+        "claude_agent_sdk",
+        "codex",
+        "claude_cloud",
+        "codex_cloud"
+      ],
+      "title": "LaneProfile",
+      "type": "string"
+    },
+    "MissionBlockV2": {
+      "additionalProperties": false,
+      "properties": {
+        "application": {
+          "enum": [
+            "biotech",
+            "ai-engineer"
+          ],
+          "title": "Application",
+          "type": "string"
+        },
+        "controls": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Controls"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "domain_pack": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9][a-z0-9._:-]{0,191}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Domain Pack"
+        },
+        "environment": {
+          "$ref": "#/$defs/EnvironmentV2"
+        },
+        "goals": {
+          "items": {
+            "$ref": "#/$defs/Goal"
+          },
+          "minItems": 1,
+          "title": "Goals",
+          "type": "array"
+        },
+        "key": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+          "title": "Key",
+          "type": "string"
+        },
+        "program": {
+          "discriminator": {
+            "mapping": {
+              "agent_executor": "#/$defs/AgentExecutorNodeV2",
+              "child_mission_invocation": "#/$defs/ChildMissionInvocationNodeV2",
+              "deterministic_executor": "#/$defs/DeterministicExecutorNodeV2",
+              "evaluator_optimizer": "#/$defs/EvaluatorOptimizerNodeV2",
+              "event_wait": "#/$defs/EventWaitNodeV2",
+              "goal_loop": "#/$defs/GoalLoopNodeV2",
+              "human_gate": "#/$defs/HumanGateNodeV2",
+              "parallel_swarm": "#/$defs/ParallelSwarmNodeV2",
+              "proof_gate": "#/$defs/ProofGateNodeV2",
+              "stage_graph": "#/$defs/StageGraphNodeV2",
+              "timer": "#/$defs/TimerNodeV2"
+            },
+            "propertyName": "behavior"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/StageGraphNodeV2"
+            },
+            {
+              "$ref": "#/$defs/GoalLoopNodeV2"
+            },
+            {
+              "$ref": "#/$defs/ParallelSwarmNodeV2"
+            },
+            {
+              "$ref": "#/$defs/EvaluatorOptimizerNodeV2"
+            },
+            {
+              "$ref": "#/$defs/AgentExecutorNodeV2"
+            },
+            {
+              "$ref": "#/$defs/DeterministicExecutorNodeV2"
+            },
+            {
+              "$ref": "#/$defs/HumanGateNodeV2"
+            },
+            {
+              "$ref": "#/$defs/EventWaitNodeV2"
+            },
+            {
+              "$ref": "#/$defs/TimerNodeV2"
+            },
+            {
+              "$ref": "#/$defs/ProofGateNodeV2"
+            },
+            {
+              "$ref": "#/$defs/ChildMissionInvocationNodeV2"
+            }
+          ],
+          "title": "Program"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "title",
+        "application",
+        "goals",
+        "environment",
+        "program"
+      ],
+      "title": "MissionBlockV2",
+      "type": "object"
+    },
+    "ModelSelection": {
+      "additionalProperties": false,
+      "properties": {
+        "profile": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9][a-z0-9._:-]{0,191}$",
+              "type": "string"
+            },
+            {
+              "$ref": "#/$defs/CapabilityReference"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Profile"
+        },
+        "settings": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Settings"
+        }
+      },
+      "title": "ModelSelection",
+      "type": "object"
+    },
+    "NodeCompletion": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptance": {
+          "$ref": "#/$defs/Acceptance"
+        }
+      },
+      "required": [
+        "acceptance"
+      ],
+      "title": "NodeCompletion",
+      "type": "object"
+    },
+    "NotificationDeclaration": {
+      "additionalProperties": false,
+      "properties": {
+        "channel": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+          "title": "Channel",
+          "type": "string"
+        },
+        "on": {
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "On",
+          "type": "array"
+        }
+      },
+      "required": [
+        "on",
+        "channel"
+      ],
+      "title": "NotificationDeclaration",
+      "type": "object"
+    },
+    "Objective": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "key": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+          "title": "Key",
+          "type": "string"
+        },
+        "parent": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent"
+        }
+      },
+      "required": [
+        "key",
+        "description"
+      ],
+      "title": "Objective",
+      "type": "object"
+    },
+    "OutputDeclaration": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "required": {
+          "default": true,
+          "title": "Required",
+          "type": "boolean"
+        },
+        "schema": {
+          "pattern": "^[a-z][a-z0-9_.-]*@[0-9]+$",
+          "title": "Schema",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "schema"
+      ],
+      "title": "OutputDeclaration",
+      "type": "object"
+    },
+    "ParallelSwarmNodeV2": {
+      "additionalProperties": false,
+      "properties": {
+        "action_space": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "title": "Action Space",
+          "type": "array"
+        },
+        "behavior": {
+          "const": "parallel_swarm",
+          "default": "parallel_swarm",
+          "title": "Behavior",
+          "type": "string"
+        },
+        "completion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeCompletion"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "depends_on": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "environment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EnvironmentV2"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "inputs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/InputBinding"
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "join": {
+          "anyOf": [
+            {
+              "enum": [
+                "all",
+                "any"
+              ],
+              "type": "string"
+            },
+            {
+              "$ref": "#/$defs/QuorumJoin"
+            }
+          ],
+          "default": "all",
+          "title": "Join"
+        },
+        "key": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+          "title": "Key",
+          "type": "string"
+        },
+        "objective": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Objective"
+        },
+        "objectives": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "title": "Objectives",
+          "type": "array"
+        },
+        "outputs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/OutputDeclaration"
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "params": {
+          "additionalProperties": true,
+          "title": "Params",
+          "type": "object"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "title": "ParallelSwarmNodeV2",
+      "type": "object"
+    },
+    "ProofGateNodeV2": {
+      "additionalProperties": false,
+      "properties": {
+        "behavior": {
+          "const": "proof_gate",
+          "default": "proof_gate",
+          "title": "Behavior",
+          "type": "string"
+        },
+        "completion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeCompletion"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "depends_on": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "environment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EnvironmentV2"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "evidence": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,127}\\.[a-z0-9][a-z0-9_-]{0,127}$",
+          "title": "Evidence",
+          "type": "string"
+        },
+        "inputs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/InputBinding"
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "join": {
+          "anyOf": [
+            {
+              "enum": [
+                "all",
+                "any"
+              ],
+              "type": "string"
+            },
+            {
+              "$ref": "#/$defs/QuorumJoin"
+            }
+          ],
+          "default": "all",
+          "title": "Join"
+        },
+        "key": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+          "title": "Key",
+          "type": "string"
+        },
+        "objectives": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "title": "Objectives",
+          "type": "array"
+        },
+        "on_reject": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "On Reject"
+        },
+        "outputs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/OutputDeclaration"
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "required_disposition": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+          "title": "Required Disposition",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "evidence",
+        "required_disposition"
+      ],
+      "title": "ProofGateNodeV2",
+      "type": "object"
+    },
+    "QuorumJoin": {
+      "additionalProperties": false,
+      "properties": {
+        "quorum": {
+          "minimum": 1,
+          "title": "Quorum",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "quorum"
+      ],
+      "title": "QuorumJoin",
+      "type": "object"
+    },
+    "RearmMode": {
+      "additionalProperties": false,
+      "properties": {
+        "rearm": {
+          "additionalProperties": true,
+          "title": "Rearm",
+          "type": "object"
+        }
+      },
+      "required": [
+        "rearm"
+      ],
+      "title": "RearmMode",
+      "type": "object"
+    },
+    "RepositoryWorkspace": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ref"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "pattern": "^(?:https://|ssh://|git@)\\S+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url"
+        }
+      },
+      "title": "RepositoryWorkspace",
+      "type": "object"
+    },
+    "RequiredFeatures": {
+      "additionalProperties": false,
+      "description": "What the workflow needs the lane to actually provide. Admission intersects these\nwith the lane's describe (:mod:`domain.execution.lane_requirements`); a required feature\nthe lane cannot provide is a pointed error, never a silent fallback (V01).",
+      "properties": {
+        "approvals": {
+          "default": [],
+          "items": {
+            "enum": [
+              "workflow_gate",
+              "provider_permission",
+              "provider_question",
+              "mcp_elicitation",
+              "governed_effect"
+            ],
+            "type": "string"
+          },
+          "title": "Approvals",
+          "type": "array"
+        },
+        "controls": {
+          "default": [],
+          "items": {
+            "enum": [
+              "queue_instruction",
+              "interrupt_and_inject",
+              "pause",
+              "hard_pause",
+              "resume",
+              "cancel",
+              "fork",
+              "request_continuation"
+            ],
+            "type": "string"
+          },
+          "title": "Controls",
+          "type": "array"
+        },
+        "observation": {
+          "default": [],
+          "items": {
+            "enum": [
+              "terminal_result",
+              "tool_lifecycle",
+              "subordinate_lifecycle",
+              "usage",
+              "compaction"
+            ],
+            "type": "string"
+          },
+          "title": "Observation",
+          "type": "array"
+        }
+      },
+      "title": "RequiredFeatures",
+      "type": "object"
+    },
+    "SandboxSelection": {
+      "additionalProperties": false,
+      "properties": {
+        "egress": {
+          "anyOf": [
+            {
+              "items": {
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Egress"
+        },
+        "profile": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9][a-z0-9._:-]{0,191}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Profile"
+        }
+      },
+      "title": "SandboxSelection",
+      "type": "object"
+    },
+    "SetupSelection": {
+      "additionalProperties": false,
+      "properties": {
+        "pin": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Pin",
+          "type": "string"
+        }
+      },
+      "required": [
+        "pin"
+      ],
+      "title": "SetupSelection",
+      "type": "object"
+    },
+    "SideEffect": {
+      "enum": [
+        "read_only",
+        "workspace_write",
+        "external_write_reversible",
+        "external_write_irreversible",
+        "spend"
+      ],
+      "title": "SideEffect",
+      "type": "string"
+    },
+    "StageGraphNodeV2": {
+      "additionalProperties": false,
+      "properties": {
+        "behavior": {
+          "const": "stage_graph",
+          "default": "stage_graph",
+          "title": "Behavior",
+          "type": "string"
+        },
+        "completion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeCompletion"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "concurrency": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Concurrency"
+        },
+        "depends_on": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "environment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EnvironmentV2"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fail_fast": {
+          "default": false,
+          "title": "Fail Fast",
+          "type": "boolean"
+        },
+        "inputs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/InputBinding"
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "join": {
+          "anyOf": [
+            {
+              "enum": [
+                "all",
+                "any"
+              ],
+              "type": "string"
+            },
+            {
+              "$ref": "#/$defs/QuorumJoin"
+            }
+          ],
+          "default": "all",
+          "title": "Join"
+        },
+        "key": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+          "title": "Key",
+          "type": "string"
+        },
+        "nodes": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "agent_executor": "#/$defs/AgentExecutorNodeV2",
+                "child_mission_invocation": "#/$defs/ChildMissionInvocationNodeV2",
+                "deterministic_executor": "#/$defs/DeterministicExecutorNodeV2",
+                "evaluator_optimizer": "#/$defs/EvaluatorOptimizerNodeV2",
+                "event_wait": "#/$defs/EventWaitNodeV2",
+                "goal_loop": "#/$defs/GoalLoopNodeV2",
+                "human_gate": "#/$defs/HumanGateNodeV2",
+                "parallel_swarm": "#/$defs/ParallelSwarmNodeV2",
+                "proof_gate": "#/$defs/ProofGateNodeV2",
+                "stage_graph": "#/$defs/StageGraphNodeV2",
+                "timer": "#/$defs/TimerNodeV2"
+              },
+              "propertyName": "behavior"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/StageGraphNodeV2"
+              },
+              {
+                "$ref": "#/$defs/GoalLoopNodeV2"
+              },
+              {
+                "$ref": "#/$defs/ParallelSwarmNodeV2"
+              },
+              {
+                "$ref": "#/$defs/EvaluatorOptimizerNodeV2"
+              },
+              {
+                "$ref": "#/$defs/AgentExecutorNodeV2"
+              },
+              {
+                "$ref": "#/$defs/DeterministicExecutorNodeV2"
+              },
+              {
+                "$ref": "#/$defs/HumanGateNodeV2"
+              },
+              {
+                "$ref": "#/$defs/EventWaitNodeV2"
+              },
+              {
+                "$ref": "#/$defs/TimerNodeV2"
+              },
+              {
+                "$ref": "#/$defs/ProofGateNodeV2"
+              },
+              {
+                "$ref": "#/$defs/ChildMissionInvocationNodeV2"
+              }
+            ]
+          },
+          "minItems": 1,
+          "title": "Nodes",
+          "type": "array"
+        },
+        "objectives": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "title": "Objectives",
+          "type": "array"
+        },
+        "outputs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/OutputDeclaration"
+          },
+          "title": "Outputs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "key",
+        "nodes"
+      ],
+      "title": "StageGraphNodeV2",
+      "type": "object"
+    },
+    "SubscriptionDeclaration": {
+      "additionalProperties": false,
+      "properties": {
+        "channel": {
+          "anyOf": [
+            {
+              "enum": [
+                "stream",
+                "mcp"
+              ],
+              "type": "string"
+            },
+            {
+              "$ref": "#/$defs/WebhookChannel"
+            }
+          ],
+          "title": "Channel"
+        },
+        "events": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]*(?:\\.(?:[a-z][a-z0-9_]*|\\*))*$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Events",
+          "type": "array"
+        },
+        "node_keys": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "title": "Node Keys",
+          "type": "array"
+        }
+      },
+      "required": [
+        "events",
+        "channel"
+      ],
+      "title": "SubscriptionDeclaration",
+      "type": "object"
+    },
+    "SuccessCriterion": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptance": {
+          "$ref": "#/$defs/Acceptance"
+        },
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Evidence",
+          "type": "array"
+        },
+        "key": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+          "title": "Key",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "description",
+        "evidence",
+        "acceptance"
+      ],
+      "title": "SuccessCriterion",
+      "type": "object"
+    },
+    "TimerNodeV2": {
+      "additionalProperties": false,
+      "properties": {
+        "behavior": {
+          "const": "timer",
+          "default": "timer",
+          "title": "Behavior",
+          "type": "string"
+        },
+        "completion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeCompletion"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "depends_on": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "duration": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "minLength": 2,
+                  "pattern": "^(?=[0-9])(?:[0-9]+d)?(?:[0-9]+h)?(?:[0-9]+m)?(?:[0-9]+s)?$",
+                  "type": "string"
+                }
+              ],
+              "description": "Seconds, or [Nd][Nh][Nm][Ns] such as 4h or 1h30m."
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Duration"
+        },
+        "environment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EnvironmentV2"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "inputs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/InputBinding"
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "join": {
+          "anyOf": [
+            {
+              "enum": [
+                "all",
+                "any"
+              ],
+              "type": "string"
+            },
+            {
+              "$ref": "#/$defs/QuorumJoin"
+            }
+          ],
+          "default": "all",
+          "title": "Join"
+        },
+        "key": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+          "title": "Key",
+          "type": "string"
+        },
+        "objectives": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "title": "Objectives",
+          "type": "array"
+        },
+        "outputs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/OutputDeclaration"
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "until": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Until"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "title": "TimerNodeV2",
+      "type": "object"
+    },
+    "VerifierV2": {
+      "additionalProperties": false,
+      "properties": {
+        "environment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EnvironmentV2"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "independent": {
+          "default": true,
+          "title": "Independent",
+          "type": "boolean"
+        }
+      },
+      "title": "VerifierV2",
+      "type": "object"
+    },
+    "WebhookChannel": {
+      "additionalProperties": false,
+      "properties": {
+        "secret_ref": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Secret Ref"
+        },
+        "webhook": {
+          "minLength": 1,
+          "title": "Webhook",
+          "type": "string"
+        }
+      },
+      "required": [
+        "webhook"
+      ],
+      "title": "WebhookChannel",
+      "type": "object"
+    },
+    "WorkspacePolicy": {
+      "additionalProperties": false,
+      "description": "Mission Control allocates the workspace; the agent does not choose whether isolation\nexists (SPEC-02 \"Worktrees and snapshots\").",
+      "properties": {
+        "cleanup": {
+          "default": "retain_until_artifacts_registered",
+          "enum": [
+            "retain_until_artifacts_registered",
+            "retain",
+            "immediate"
+          ],
+          "title": "Cleanup",
+          "type": "string"
+        },
+        "dirty_input": {
+          "default": "reject",
+          "enum": [
+            "reject",
+            "snapshot"
+          ],
+          "title": "Dirty Input",
+          "type": "string"
+        },
+        "mode": {
+          "default": "managed_worktree",
+          "enum": [
+            "managed_worktree",
+            "provider_workspace",
+            "shared_checkout"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "reuse": {
+          "default": "within_run",
+          "enum": [
+            "none",
+            "within_run",
+            "within_session"
+          ],
+          "title": "Reuse",
+          "type": "string"
+        }
+      },
+      "title": "WorkspacePolicy",
+      "type": "object"
+    },
+    "WorkspaceSelectionV2": {
+      "additionalProperties": false,
+      "properties": {
+        "context": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "pattern": "^[a-z0-9][a-z0-9._:-]{0,191}$",
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/ContextEntry"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Context"
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkspacePolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "repo": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RepositoryWorkspace"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "skills": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/CapabilityReference"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Skills"
+        }
+      },
+      "title": "WorkspaceSelectionV2",
+      "type": "object"
+    }
+  },
+  "$id": "https://mission-control.belllabs/schemas/mc.mission_manifest.v2.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "``mc.mission_manifest.v2``: one mission or a chain, with v2 Environments.",
+  "oneOf": [
+    {
+      "not": {
+        "required": [
+          "links"
+        ]
+      },
+      "required": [
+        "mission"
+      ]
+    },
+    {
+      "required": [
+        "missions",
+        "links"
+      ]
+    }
+  ],
+  "properties": {
+    "links": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/ChainLinkDeclaration"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Links"
+    },
+    "manifest": {
+      "const": "mission/v2",
+      "title": "Manifest",
+      "type": "string"
+    },
+    "mission": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MissionBlockV2"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "missions": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/MissionBlockV2"
+          },
+          "minItems": 2,
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Missions"
+    }
+  },
+  "required": [
+    "manifest"
+  ],
+  "title": "Mission Manifest v2",
+  "type": "object",
+  "x-mc-schema-id": "mc.mission_manifest.v2"
+}

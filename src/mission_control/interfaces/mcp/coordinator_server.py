@@ -27,6 +27,10 @@ from mission_control.interfaces.mcp.coordinator_resources import (
     RESOURCE_TEMPLATE_NAMES,
     register_resources,
 )
+from mission_control.interfaces.mcp.human_task_tools import (
+    ScopedHumanTasks,
+    register_human_task_tools,
+)
 from mission_control.interfaces.mcp.mission_tools import (
     ScopedChains,
     ScopedManifests,
@@ -269,6 +273,7 @@ def create_coordinator_server(
     chains: ScopedChains | None = None,
     manifests: ScopedManifests | None = None,
     run_control: ScopedRunControl | None = None,
+    human_tasks: ScopedHumanTasks | None = None,
 ) -> FastMCP:
     surface = getattr(
         facade,
@@ -541,6 +546,9 @@ def create_coordinator_server(
     if run_control is not None:
         # SPEC-06: run commands, forks and inspection over the same application services.
         register_run_control_tools(server, run_control, principals, call=_principal_call)
+    if human_tasks is not None:
+        # MP-10 (SPEC-03): Human Task list/get/resolve over the one HumanTaskService.
+        register_human_task_tools(server, human_tasks, principals, call=_principal_call)
     unavailable_tools = set(PRODUCTION_COORDINATOR_TOOL_NAMES) - set(surface.tools)
     if unavailable_tools:
         server.disable(names=unavailable_tools, components={"tool"})

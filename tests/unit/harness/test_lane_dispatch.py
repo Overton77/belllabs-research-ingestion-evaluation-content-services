@@ -92,10 +92,11 @@ def test_absent_lane_fields_change_no_dump_digest_or_fingerprint() -> None:
     request = operation_request()
     dumped = request.model_dump(mode="json")
     assert "lane_profile" not in dumped and "cursor_binding" not in dumped
+    assert "provider_binding" not in dumped
     legacy_fields = {
         name: getattr(request, name)
         for name in type(request).model_fields
-        if name not in {"lane_profile", "cursor_binding"}
+        if name not in {"lane_profile", "cursor_binding", "provider_binding"}
     }
     assert sha256_digest(request) == sha256_digest(legacy_fields)
     assert contract_fingerprint(request) == sha256_digest(legacy_fields)

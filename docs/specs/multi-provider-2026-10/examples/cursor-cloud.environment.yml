@@ -1,0 +1,23 @@
+# Proposed mission/v2 environment fragment. Cursor cloud gate coverage must qualify.
+environment:
+  lane: cursor_cloud
+  model: {profile: "<admitted-cursor-model-profile>"}
+  auth: {profile: "<cursor-account-profile>"}
+  execution_environment:
+    kind: provider_hosted
+    provider: cursor
+    environment_ref: "<cursor-hosted-environment-profile>"
+    expected_revision: "<attested-setup-digest>"
+    setup: {pin: "<setup-bundle-version-pin>"}
+  workspace:
+    repo: {url: "https://github.com/<owner>/<repo>", ref: "<branch>"}
+    policy:
+      mode: provider_workspace
+      reuse: within_session
+      dirty_input: reject
+      cleanup: retain_until_artifacts_registered
+  requires:
+    controls: [queue_instruction, cancel, request_continuation]
+    approvals: [workflow_gate, governed_mcp]
+    observation: [terminal_result, subordinate_lifecycle]
+  budget: {tokens: 200000, wall_clock: 1h, tool_calls: 100}

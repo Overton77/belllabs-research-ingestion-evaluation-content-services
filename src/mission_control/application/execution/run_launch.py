@@ -13,7 +13,8 @@ Nothing here is company- or fixture-specific.
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
@@ -53,6 +54,46 @@ class RunLaunchRejected(ValueError):
         self.code = code
         self.message = message
         self.retryable = retryable
+
+
+@dataclass(frozen=True)
+class TemporalClusterIdentity:
+    """The Temporal cluster a launch service submits to (MP-22, `mc.run_cluster_binding.v1`).
+
+    `cluster_id` is the operator's label (`<target>:<address>/<namespace>` by default); the
+    physical identity compared at launch is the address and namespace pair.
+    """
+
+    cluster_id: str
+    target: str
+    address: str
+    namespace: str
+    task_queue: str
+
+    def same_cluster(self, other: TemporalClusterIdentity) -> bool:
+        return (self.address, self.namespace) == (other.address, other.namespace)
+
+
+@dataclass(frozen=True)
+class RunClusterBinding:
+    run_id: str
+    workflow_id: str
+    cluster: TemporalClusterIdentity
+    recorded_at: datetime
+
+
+class RunClusterBindingPort(Protocol):
+    """Write-once: the first admitted launch binds the run; later binds return the stored row."""
+
+    async def bind(
+        self,
+        request_scope: str,
+        run_id: str,
+        *,
+        workflow_id: str,
+        cluster: TemporalClusterIdentity,
+        now: datetime,
+    ) -> RunClusterBinding: ...
 
 
 class RunLaunchRequest(BaseModel):
@@ -126,7 +167,13 @@ class RunLaunchService:
         materializations: ForkMaterializationStore | None = None,
         fork_templates: ForkTemplateDerivationPort | None = None,
         mission_ids: MissionIdResolver | None = None,
+        cluster_bindings: RunClusterBindingPort | None = None,
+        cluster: TemporalClusterIdentity | None = None,
     ) -> None:
+        if (cluster_bindings is None) != (cluster is None):
+            raise ValueError("cluster bindings and the submitting cluster are composed together")
+        self._cluster_bindings = cluster_bindings
+        self._cluster = cluster
         self._mission_ids = mission_ids
         self._run_control = run_control
         self._submitter = submitter
@@ -166,11 +213,13 @@ class RunLaunchService:
         mission_id = request.mission_id
         if mission_id is None and self._mission_ids is not None:
             mission_id = await self._mission_ids(request.request_scope, run.run_id)
+        workflow_id = f"belllabs-run/{run.run_id}"
+        await self._bind_cluster(request.request_scope, run.run_id, workflow_id)
         try:
             extra: dict[str, str] = {"mission_id": mission_id} if mission_id is not None else {}
             submission = await self._submitter.submit(
                 workflow_input,
-                workflow_id=f"belllabs-run/{run.run_id}",
+                workflow_id=workflow_id,
                 blueprint_family=family,
                 parent_run_id=parent_run_id,
                 **extra,
@@ -188,6 +237,31 @@ class RunLaunchService:
             fork_request_id=fork_request_id,
             accepted_run_version=run.version,
         )
+
+    async def _bind_cluster(self, request_scope: str, run_id: str, workflow_id: str) -> None:
+        """MP-22: a run launches only in the cluster its first admitted launch bound it to.
+
+        The binding is written before the submit (write-once, the run's tenant scope). A
+        service bound to another cluster (an outage drill, a second installation) is refused
+        instead of starting a second copy of the mission; there is no automatic replay.
+        """
+
+        if self._cluster_bindings is None or self._cluster is None:
+            return
+        bound = await self._cluster_bindings.bind(
+            request_scope,
+            run_id,
+            workflow_id=workflow_id,
+            cluster=self._cluster,
+            now=datetime.now(UTC),
+        )
+        if not bound.cluster.same_cluster(self._cluster):
+            raise RunLaunchRejected(
+                "run_bound_to_other_cluster",
+                f"run {run_id} is bound to Temporal cluster {bound.cluster.cluster_id} "
+                f"({bound.cluster.address}/{bound.cluster.namespace}); this service submits to "
+                f"{self._cluster.cluster_id} ({self._cluster.address}/{self._cluster.namespace})",
+            )
 
     def _validated_input(
         self, request: RunLaunchRequest, run: RunProjection
@@ -321,10 +395,13 @@ class RunLaunchService:
 __all__ = [
     "LAUNCH_PERMISSION",
     "ForkTemplateDerivationPort",
+    "RunClusterBinding",
+    "RunClusterBindingPort",
     "RunLaunchReceipt",
     "RunLaunchRejected",
     "RunLaunchRequest",
     "RunLaunchService",
     "RunWorkflowSubmitter",
+    "TemporalClusterIdentity",
     "fork_semantic_input_binding_ref",
 ]

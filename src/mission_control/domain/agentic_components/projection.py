@@ -117,7 +117,12 @@ class UnsupportedHookEvent(_Frozen):
 class ProjectionReport(_Frozen):
     unsupported_on_lane: tuple[UnsupportedHookEvent, ...] = ()
     requires_trust: tuple[str, ...] = ()
+    # Lost or narrowed on this host (the capability is supported but the lane cannot carry it).
     degraded: tuple[str, ...] = ()
+    # Projected with `host_support=unqualified`: nothing is lost, but no materialization proof
+    # exists for this host yet (MP-03). Kept apart from `degraded` so a release statement never
+    # reads "not yet proven" as "lost".
+    unqualified: tuple[str, ...] = ()
     overflow: tuple[str, ...] = ()
     skipped_members: tuple[str, ...] = ()
     plugin_expansions: tuple[tuple[str, tuple[str, ...]], ...] = ()

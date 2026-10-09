@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: Mission events and commands
-description: How sequenced mission events leave the ledger through the outbox, how subscriptions and SSE deliver them, the five-state command receipt vocabulary and what the command endpoints accept, separating spec from code and listing the event-name gap B7. Frames and interventions have their own concepts.
+description: How sequenced mission events leave the ledger through the outbox, how subscriptions and SSE deliver them, the public alias projection that closed the event-name gap B7, the five-state command receipt vocabulary and what the command endpoints accept, separating spec from code. Frames, interventions and the Socket.IO mission stream have their own concepts.
 tags: [mission-control, events, commands, streams, frames, subscriptions, implementation]
 ---
 
@@ -64,15 +64,17 @@ consumer running in the API process only when `MISSION_CONTROL_SUBSCRIPTION_RELA
 (`bootstrap/subscriptions.py`): at-least-once delivery in `seq` order, the cursor advances
 only after a delivery receipt, exponential backoff with full jitter, and the twelfth
 consecutive failure dead-letters the subscription and writes `subscription.dead_lettered`
-into the mission stream. SSE needs no relay. The WebSocket adapter and `POST /stream-tickets`
-are not built, and the Native Event Store has no public query beyond the transcript and tail.
+into the mission stream. SSE needs no relay. The Socket.IO `/missions` namespace (MP-14) replays
+the same ledger per connection ([mission stream](mission-stream.md)); `POST /stream-tickets` is not
+built, and the Native Event Store has no public query beyond the transcript, tail and socket.
 
-**Event-name gap (blocker B7).** Filters match exact names, `*`, or a trailing `.*` family
-(`domain/subscriptions/contracts.py`). The manifests subscribe to `activation.completed`,
-`human_task.opened` and `run.completed`, but no writer emits those names (the kernel stream
-uses `activation.lifecycle_changed`, `workflow_run.set_wait` and `workflow_run.terminalize`),
-so those subscriptions register and never deliver. Until the owner decides whether to emit
-the SPEC-06 names or alias them, subscribe with kernel names or use `events watch`.
+**Public aliases (B7 closed in code by MP-13).** Filters match exact names, `*`, or a trailing
+`.*` family (`domain/subscriptions/contracts.py`). `application/subscriptions/aliases.py` derives
+`run.completed` from `workflow_run.terminalize`, `activation.completed` from `attempt.completed`
+and `human_task.opened` from `human_task.created` (written by the Human Gate repository,
+[Human Gates](human-gates.md)); the relay, SSE and the socket select through it, at most one
+envelope per canonical event, with a stable derived `event_id` and receipts on the canonical id.
+Nothing is stored under an alias name. Retries emit one `activation.completed` per attempt.
 
 ## Command lifecycle
 
@@ -121,9 +123,9 @@ sessions, frames cursor, mailbox, delivery reports, chain, subscriptions and sto
 ## Open differences to report, not resolve
 
 `satisfy_wait` exists in code but not in the spec vocabulary; spec scopes (`mission.command`)
-versus code grants (`workflow_run.*`); the `mc.event.v1` vocabulary and the B7 names; no
-WebSocket adapter or stream tickets; the Native Event Store is queryable only through the
-transcript surfaces; `request_continuation` records but does not run. SPEC-07 names the
+versus code grants (`workflow_run.*`); the `mc.event.v1` vocabulary (aliases cover three names);
+no stream tickets; `request_continuation` records but does not run (MP-12 is in flight, not
+integrated). SPEC-07 names the
 Cursor kernel hook script `mc_hook.py`, the code writes `.mission/hooks/kernel.py`; the code
 name is current.
 
@@ -140,21 +142,17 @@ name is current.
   [0008](../adr/0008-ordered-commands-with-urgent-stop-fence.md),
   [0016](../adr/0016-required-ui-surfaces-with-fallback.md),
   [0032](../adr/0032-interventions-real-queue-inject-cancel-fork-and-subscriptions.md).
-- Code: [event append](../../src/mission_control/adapters/postgres/run_control/canonical.py),
-  [policy contracts](../../src/mission_control/domain/policies/contracts.py),
+- Code: [event append](../../src/mission_control/adapters/postgres/run_control/canonical.py), [policy contracts](../../src/mission_control/domain/policies/contracts.py),
   [boundary commands](../../src/mission_control/domain/policies/boundary_commands.py),
   [Temporal delivery](../../src/mission_control/adapters/temporal/boundary_commands.py),
   [subscription contracts](../../src/mission_control/domain/subscriptions/contracts.py),
-  [subscription relay](../../src/mission_control/application/subscriptions/relay.py),
+  [subscription relay](../../src/mission_control/application/subscriptions/relay.py), [public aliases](../../src/mission_control/application/subscriptions/aliases.py),
   [subscription store](../../src/mission_control/adapters/postgres/subscriptions/store.py),
   [subscription routes](../../src/mission_control/interfaces/http/subscriptions.py),
-  [inspection enrichment](../../src/mission_control/application/missions/inspection.py),
-  [scoped router](../../src/mission_control/interfaces/http/mission_control.py),
-  [public request contracts](../../src/mission_control/contracts/contracts.py),
-  [mission service](../../src/mission_control/application/missions/service.py).
-- Tests: [boundary commands](../../tests/unit/run_control/test_boundary_commands.py),
-  [RRM-007 API](../../tests/acceptance/control_plane/test_rrm_007_api.py),
+  [inspection enrichment](../../src/mission_control/application/missions/inspection.py), [scoped router](../../src/mission_control/interfaces/http/mission_control.py),
+  [public request contracts](../../src/mission_control/contracts/contracts.py), [mission service](../../src/mission_control/application/missions/service.py).
+- Tests: [boundary commands](../../tests/unit/run_control/test_boundary_commands.py), [RRM-007 API](../../tests/acceptance/control_plane/test_rrm_007_api.py),
   [PostgreSQL lifecycle](../../tests/integration/postgres/test_mission_control_lifecycle_postgres.py),
-  [subscriptions](../../tests/unit/subscriptions/test_subscriptions.py),
-  [subscriptions in PostgreSQL](../../tests/integration/postgres/test_subscriptions.py),
+  [subscriptions](../../tests/unit/subscriptions/test_subscriptions.py), [subscriptions in PostgreSQL](../../tests/integration/postgres/test_subscriptions.py),
+  [aliases](../../tests/unit/subscriptions/test_aliases.py), [aliases in PostgreSQL](../../tests/integration/postgres/test_provider_lineage_postgres.py),
   [inspection](../../tests/unit/run_control/test_ft_f6_inspection.py).

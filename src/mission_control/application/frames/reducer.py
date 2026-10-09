@@ -40,9 +40,11 @@ from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 from uuid import UUID
 
+from mission_control.application.frames.lineage import folds_subordinate_usage, usage_body
 from mission_control.application.frames.sink import FrameReader
 from mission_control.domain.frames.body import frame_body_object
 from mission_control.domain.frames.contracts import (
+    CLOSING_KINDS,
     FrameKind,
     HarnessExecutionHandle,
     LaneProfile,
@@ -154,6 +156,49 @@ def _error_code(body: Mapping[str, Any]) -> str:
     return ""
 
 
+def _claude_result(body: Mapping[str, Any]) -> tuple[str, str]:
+    """`ResultMessage`: `subtype` and `is_error` decide; `result` is the final text."""
+
+    subtype = str(body.get("subtype") or "").lower()
+    reason = str(body.get("terminal_reason") or "").lower()
+    api_status = body.get("api_error_status")
+    code = str(api_status) if isinstance(api_status, int) else (reason or subtype)
+    if reason in _CANCELLED:
+        return reason, code
+    if subtype == "success" and body.get("is_error") is not True:
+        return "success", ""
+    if subtype.startswith("error") or body.get("is_error") is True:
+        return "failed", code
+    return subtype or "unknown", code
+
+
+def _codex_result(body: Mapping[str, Any]) -> tuple[str, str]:
+    """App-server `turn/completed{turn:{status,error}}` or exec `turn.completed|failed`."""
+
+    if body.get("type") == "turn.completed":
+        return "completed", ""
+    if body.get("type") == "turn.failed":
+        return "failed", ""
+    turn = body.get("turn")
+    if not isinstance(turn, Mapping):
+        return "unknown", ""
+    error = turn.get("error")
+    code = ""
+    if isinstance(error, Mapping):
+        code = _error_code(error)
+    return str(turn.get("status") or "unknown").lower(), code
+
+
+def provider_result(lane: LaneProfile, body: Mapping[str, Any]) -> tuple[str, str]:
+    """(provider status, error code) of a `run_result` body under the lane's native shape."""
+
+    if lane == LaneProfile.CLAUDE_AGENT_SDK:
+        return _claude_result(body)
+    if lane == LaneProfile.CODEX:
+        return _codex_result(body)
+    return _status(body), _error_code(body)
+
+
 def map_execution_outcome(
     provider_status: str,
     *,
@@ -194,10 +239,16 @@ class _ExecutionState:
     sessions: set[str] = field(default_factory=set)
     open_turn: int | None = None
     closed_turns: int = 0
-    turn_usage: list[tuple[ProviderFrame, dict[str, Any]]] = field(default_factory=list)
+    closed_turn_refs: set[str] = field(default_factory=set)
+    turn_usage: list[tuple[ProviderFrame, Mapping[str, Any]]] = field(default_factory=list)
     settled_tools: set[str] = field(default_factory=set)
     run_result_seen: bool = False
     compactions: set[tuple[str, str | None, str, str]] = field(default_factory=set)
+
+
+# A provider subagent's own lifecycle never moves its parent: these kinds from a frame with
+# `subordinate_ref` are lineage evidence only (multi-provider SPEC-04).
+_PARENT_LIFECYCLE_KINDS = frozenset({FrameKind.TURN_ENDED, FrameKind.RUN_RESULT})
 
 
 def _evidence(frame: ProviderFrame) -> dict[str, Any]:
@@ -238,34 +289,60 @@ def derive(frames: Sequence[ProviderFrame], context: DeriveContext) -> tuple[Fra
         (
             frame
             for frame in frames
-            if frame.closing and frame.generation == context.current_generation
+            if frame.closing
+            and frame.kind in CLOSING_KINDS
+            and frame.generation == context.current_generation
         ),
         key=lambda frame: (str(frame.harness_execution_id), frame.arrival_ordinal),
     )
+    folds_children = folds_subordinate_usage(context.lane)
     states: dict[UUID, _ExecutionState] = {}
     facts: list[FrameFact] = []
     for frame in closing:
         state = states.setdefault(frame.harness_execution_id, _ExecutionState())
         body = frame_body_object(frame.body_excerpt, frame.body_bytes)
         evidence = _evidence(frame)
-        if frame.native_session_ref not in state.sessions:
+        child = frame.subordinate_ref is not None
+        if child and (
+            frame.kind in _PARENT_LIFECYCLE_KINDS
+            or (frame.kind == FrameKind.USAGE and not folds_children)
+        ):
+            continue
+        parent_evidence = {**evidence, "subordinate_ref": None}
+        if frame.native_session_ref not in state.sessions and not (child and state.sessions):
             state.sessions.add(frame.native_session_ref)
-            facts.append(SessionStartedFact(**evidence, lane_profile=context.lane))
+            facts.append(SessionStartedFact(**parent_evidence, lane_profile=context.lane))
+        if (
+            frame.kind == FrameKind.TURN_ENDED
+            and frame.native_turn_ref is not None
+            and frame.native_turn_ref in state.closed_turn_refs
+        ):
+            continue
+        if frame.kind in (FrameKind.TOOL_CALL_COMPLETED, FrameKind.TOOL_CALL_FAILED):
+            ref = _tool_ref(frame, body)
+            if ref is None or ref in state.settled_tools:
+                # A resent or reordered settlement is not new activity: no turn opens for it.
+                continue
         if frame.kind == FrameKind.USAGE and state.open_turn is None and state.closed_turns:
             facts.append(
                 UsageSettledFact(
                     **evidence,
                     turn_ordinal=state.closed_turns,
-                    usage=usage_report(context.lane, [(str(frame.frame_id), body)]),
+                    usage=usage_report(
+                        context.lane, [(str(frame.frame_id), usage_body(context.lane, body))]
+                    ),
                 )
             )
             continue
-        if frame.kind not in _TURN_NEUTRAL and state.open_turn is None:
+        # A child's activity is inside its parent's turn: it may open the first parent turn,
+        # never reopen one the parent already closed.
+        opens_turn = not child or state.closed_turns == 0
+        if opens_turn and frame.kind not in _TURN_NEUTRAL and state.open_turn is None:
             state.open_turn = state.closed_turns + 1
-            facts.append(TurnStartedFact(**evidence, turn_ordinal=state.open_turn))
+            facts.append(TurnStartedFact(**parent_evidence, turn_ordinal=state.open_turn))
         turn = state.open_turn or max(state.closed_turns, 1)
         if frame.kind == FrameKind.USAGE:
-            state.turn_usage.append((frame, body))
+            state.turn_usage.append((frame, usage_body(context.lane, body)))
         elif frame.kind in (FrameKind.TOOL_CALL_COMPLETED, FrameKind.TOOL_CALL_FAILED):
             ref = _tool_ref(frame, body)
             if ref is None or ref in state.settled_tools:
@@ -335,7 +412,9 @@ def derive(frames: Sequence[ProviderFrame], context: DeriveContext) -> tuple[Fra
             state.compactions.add(compaction)
             facts.append(CompactionObservedFact(**evidence, summary_digest=summary_digest))
         elif frame.kind == FrameKind.TURN_ENDED:
-            bodies = state.turn_usage or [(frame, body)]
+            if frame.native_turn_ref is not None:
+                state.closed_turn_refs.add(frame.native_turn_ref)
+            bodies = state.turn_usage or [(frame, usage_body(context.lane, body))]
             report = usage_report(
                 context.lane, [(str(item.frame_id), data) for item, data in bodies]
             )
@@ -358,9 +437,9 @@ def derive(frames: Sequence[ProviderFrame], context: DeriveContext) -> tuple[Fra
             if state.run_result_seen:
                 continue
             state.run_result_seen = True
-            provider_status = _status(body)
+            provider_status, error_code = provider_result(context.lane, body)
             outcome, failure, missing, policy = map_execution_outcome(
-                provider_status, error_code=_error_code(body), context=context
+                provider_status, error_code=error_code, context=context
             )
             if outcome is not None or missing:
                 facts.append(

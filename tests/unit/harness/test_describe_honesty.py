@@ -168,9 +168,9 @@ def test_the_declared_matrix_is_section_7_and_never_qualified_by_fixtures(profil
     # The workflow's constants (it cannot read the registry) say the same.
     assert LANE_PAUSE_SEMANTICS[profile] == describe.delivery_semantics["pause"]
     assert LANE_RESUME_SEMANTICS[profile] == describe.delivery_semantics["resume"]
-    assert LANE_COMMAND_SEMANTICS["cancel"] == describe.delivery_semantics["cancel"]
+    assert LANE_COMMAND_SEMANTICS["cancel"][profile] == describe.delivery_semantics["cancel"]
     assert (
-        LANE_COMMAND_SEMANTICS["interrupt_and_inject"]
+        LANE_COMMAND_SEMANTICS["interrupt_and_inject"][profile]
         == (describe.delivery_semantics["interrupt_and_inject"])
     )
     assert describe.qualified is False

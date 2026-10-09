@@ -77,6 +77,7 @@ from mission_control.domain.programs.goal_directed_runtime import (
     GoalOperationSettlement,
     GoalVerifierObservation,
 )
+from mission_control.domain.programs.human_gate import feedback_instruction
 from mission_control.domain.programs.runtime_units import (
     goal_operation_id,
     goal_runtime_unit,
@@ -857,7 +858,7 @@ def _instantiate_operation_request(
         (*template.prompt_segments, sealed.prompt_segment)
         if sealed is not None
         else _prompt_segments(template.prompt_segments, request)
-    )
+    ) + _review_feedback_segments(request)
     deep_binding = _deep_binding_for(
         template.deep_agent_binding,
         request=request,
@@ -1116,6 +1117,28 @@ def _prompt_segments(
         rendered_digest=sha256_digest(content),
     )
     return (*template, segment)
+
+
+def _review_feedback_segments(
+    request: GoalOperationPreparationRequest,
+) -> tuple[PromptSegment, ...]:
+    """MP-10: human review feedback for the executor; an instruction, never authority."""
+
+    if request.operation_role != "executor":
+        return ()
+    segments = []
+    for outcome in request.review_feedback:
+        content = feedback_instruction(outcome)
+        segments.append(
+            PromptSegment(
+                source_ref=f"human-review:{outcome.human_task_id}",
+                source_revision=outcome.review_round,
+                trust_class=PromptTrustClass.UNTRUSTED_CONTENT,
+                content=content,
+                rendered_digest=sha256_digest(content),
+            )
+        )
+    return tuple(segments)
 
 
 def _deep_binding_for(

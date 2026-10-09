@@ -78,15 +78,19 @@ Unit: `tests/unit/chains/` (compile, reducer, interfaces). `common_db`:
 workflow the first started). Acceptance: `tests/acceptance/mission_control/test_chain_two_goal_loops.py`
 runs two linked Goal Loops with a test-only launch input author.
 
-## Not wired in production
+## Production relay (MP-02)
 
 `application/chains/relay.py::ChainIntentRelay` leases the outbox intents and starts the
-consumer through a `ChainLaunchInputPort`. Nothing in `bootstrap/` composes either the relay
-or a production port, so in the configured API a released link leaves an `mc.chain.start_run`
-intent that no process delivers. The same missing author blocks `mission start` for the
-first member (blocker B1 in the [owner runbook](../specs/fast-track-2026-10/OWNER-FIXTURE-RUNBOOK.md)).
-Mission 2 of the fixtures (a Cursor Cloud research Goal Loop supplying a Deep Agents
-ingestion Goal Loop) therefore compiles and submits, with two `armed` links, but cannot run.
+consumer through a `ChainLaunchInputPort`. Since MP-02 the worker runs `ChainRelayPump` when
+`CHAIN_RELAY_ENABLED=1` (`bootstrap/worker.py`, `compose_chain_relay_pump` in
+`bootstrap/manifests.py`) over the production `ManifestChainLaunchInputs`; enabled without
+`MANIFEST_LAUNCH_BINDINGS_PATH` it refuses startup. A redelivered `mc.chain.start_run` attaches to
+the consumer's existing workflow (`tests/integration/temporal/test_manifest_launch_production.py`,
+deterministic cognition). Every launch binds the run to its Temporal cluster
+([operations](operations.md)). Members on a non-`deep_agents` lane still fail at their pointer,
+so Mission 2 of the fixtures (a Cursor Cloud research Goal Loop supplying a Deep Agents
+ingestion Goal Loop) compiles and submits but cannot start until the bindings and the Cursor
+lane allow it ([mission manifest](mission-manifest.md)).
 
 # Citations
 

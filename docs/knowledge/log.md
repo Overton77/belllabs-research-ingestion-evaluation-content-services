@@ -96,3 +96,36 @@ mission has run (I1 to I3 are owner-run).
   index exist (left for the owner; ADR bodies are not rewritten).
 - Not done here (belongs after the owner's mission runs): the three mission acceptance results for
   I1 to I3, flipping lane qualification, and applying release 1.1.0 to the live projects.
+
+## 2026-10-09 (multi-provider packet, MP-23 pass 1)
+
+Reconciled the bundle with the multi-provider packet's integrated waves 0 to 2 and the
+integrator's 2026-10-09 wiring (uncommitted on `7c9b755`). Wave 3 (MP-07, MP-08, MP-09, MP-11,
+MP-12, MP-15) is in flight and not integrated; pass 2 updates these concepts after it lands.
+Documentation only: nothing here is live proof, and no `qualified` flag or ADR status changed.
+
+- Added [human-gates](human-gates.md) (the `mc.human_gate.v1` control activation, the one
+  `HumanTaskService`, HTTP, MCP and socket resolution, the `mp10-*` patches),
+  [mission-stream](mission-stream.md) (the `/missions` Socket.IO namespace,
+  `bootstrap.realtime:create_asgi_app`, hints, error codes) and
+  [session-ownership-and-dispatch](session-ownership-and-dispatch.md) (fenced ownership, dispatch
+  journal, Stop Fence admission of dispatches, optional lane protocols, capacity waits, auth
+  routes). 33 concepts now; the existing concepts were at the 160-line cap.
+- Updated [durable-controls](durable-controls.md), [interfaces](interfaces.md),
+  [lanes-and-harness](lanes-and-harness.md) (seven profiles, v2 stubs),
+  [operations](operations.md) (worker readiness gate, preflight CLI, cluster binding, Temporal
+  fallback), [persistence](persistence.md) (0031 and 0032, fingerprint `sha256:672549cd...`,
+  locks still on the committed 1.1.0 manifest), [events-and-commands](events-and-commands.md)
+  (public aliases close B7 in code), [interventions](interventions.md),
+  [cursor-lane](cursor-lane.md), [authoring](authoring.md), [mission-chains](mission-chains.md),
+  [qualification](qualification.md) and [release-and-qualification](release-and-qualification.md)
+  (per-profile status). Published the release statement
+  `docs/qualification/release/multi-provider-2026-10.md`.
+- Spec versus code, reported not resolved: the production launch (`prepare_bound`) does not lower
+  manifest Human Gates into the run inputs; `register_human_task_tools` has no served MCP
+  caller; the manifest `HumanTaskSpec` cannot express remediation or a default answer;
+  `compose_auth_admission`, `provider_child_environment` and `capacity_policy` have no
+  production caller, so `MISSION_CONTROL_CAPACITY_*` does not change a wait; the operator guide
+  said the release locks pin 1.0.0 (they pin the committed 1.1.0 build; corrected);
+  `docs/qualification/local-profiles/README.md` still says the cluster guard is not wired into
+  `RunLaunchService` and cites the pre-0032 manifest digest (owned by MP-22, not edited).

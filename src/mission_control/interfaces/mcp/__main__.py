@@ -21,6 +21,7 @@ from mission_control.adapters.postgres.frames.transcript_projection import (
     PostgresTranscriptDocuments,
 )
 from mission_control.adapters.postgres.frames.transcript_reads import PostgresMissionEventReader
+from mission_control.adapters.postgres.human_tasks.repository import PostgresHumanTaskRepository
 from mission_control.adapters.storage.control_plane_payloads import UnavailablePayloadStore
 from mission_control.application.chains.service import ChainInspectionService
 from mission_control.application.coordinator.coordinator_facade import (
@@ -29,6 +30,7 @@ from mission_control.application.coordinator.coordinator_facade import (
 )
 from mission_control.application.frames.search import TranscriptSearchService
 from mission_control.application.frames.transcript import TranscriptService
+from mission_control.application.human_tasks.service import HumanTaskService
 from mission_control.bootstrap.catalog import compose_catalog_service
 from mission_control.bootstrap.coordinator_composition import (
     CoordinatorProductionDependencies,
@@ -45,6 +47,7 @@ from mission_control.interfaces.mcp.coordinator_server import (
     StaticPrincipalResolver,
     create_coordinator_server,
 )
+from mission_control.interfaces.mcp.human_task_tools import ScopedHumanTasks
 from mission_control.interfaces.mcp.mission_tools import ScopedChains, ScopedManifests
 from mission_control.interfaces.mcp.transcript_tools import ScopedTranscripts
 
@@ -143,6 +146,7 @@ async def _serve(args: argparse.Namespace) -> None:
             transcripts=_transcripts(application_pool, principal.request_scope),
             chains=_chains(application_pool, principal.request_scope),
             manifests=_manifests(settings, application_pool, principal.request_scope),
+            human_tasks=_human_tasks(application_pool, principal.request_scope),
         )
         await server.run_http_async(
             transport="streamable-http",
@@ -176,6 +180,20 @@ def _transcripts(application_pool: PostgresPool, request_scope: str) -> ScopedTr
             request_scope: TranscriptSearchService(service, PostgresTranscriptDocuments(pool))
         },
     )
+
+
+def _human_tasks(application_pool: PostgresPool, request_scope: str) -> ScopedHumanTasks | None:
+    """MP-10 (SPEC-03): Human Tasks of the principal's canonical tenant scope. This
+    development server has no Temporal client, so a resolution is observed by the gate's
+    bounded poll instead of the wake-up signal."""
+
+    try:
+        parse_request_scope(request_scope)
+    except ValueError:
+        return None
+    pool = cast(asyncpg.Pool, application_pool)
+    service = HumanTaskService(PostgresHumanTaskRepository(pool), request_scope=request_scope)
+    return ScopedHumanTasks({request_scope: service})
 
 
 def _chains(application_pool: PostgresPool, request_scope: str) -> ScopedChains | None:

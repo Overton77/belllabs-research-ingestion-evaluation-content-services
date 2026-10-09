@@ -41,6 +41,37 @@ _COLUMNS = """
 """
 
 
+EVENT_COLUMNS = """
+    event_id, mission_id, run_id, activation_id, seq, event_type, event_version, actor_ref,
+    happened_at, recorded_at, causation_ref, payload
+"""
+
+
+def envelope_from_row(row: asyncpg.Record, application_id: str) -> MissionEventEnvelope:
+    """The reference-only `mc.event.v1` envelope of one `mission_event` row."""
+
+    payload = mc.load(row["payload"])
+    return MissionEventEnvelope(
+        event_id=row["event_id"],
+        application_id=application_id,
+        mission_id=row["mission_id"],
+        run_id=row["run_id"],
+        activation_id=row["activation_id"],
+        seq=row["seq"],
+        event_type=row["event_type"],
+        event_version=row["event_version"],
+        actor_ref=row["actor_ref"],
+        happened_at=row["happened_at"],
+        recorded_at=row["recorded_at"],
+        causation_ref=row["causation_ref"],
+        node_key=node_key_of(payload),
+        payload_ref=(
+            f"mc://applications/{application_id}/missions/{row['mission_id']}/events/{row['seq']}"
+        ),
+        payload_digest=payload_digest(payload),
+    )
+
+
 class SubscriptionLeaseLost(RuntimeError):
     """Another relay owns this subscription now; this relay must stop writing."""
 
@@ -258,9 +289,7 @@ class PostgresSubscriptionStore:
             args = await mc.begin(connection, self._scope)
             rows = await connection.fetch(
                 f"""
-                SELECT event_id, mission_id, run_id, activation_id, seq, event_type,
-                       event_version, actor_ref, happened_at, recorded_at, causation_ref,
-                       payload
+                SELECT {EVENT_COLUMNS}
                 FROM mission_control.mission_event
                 WHERE {SCOPE} AND mission_id = $4 AND seq > $5
                   AND ($6::uuid IS NULL OR run_id = $6)
@@ -273,30 +302,7 @@ class PostgresSubscriptionStore:
                 target.run_id,
                 limit,
             )
-            application_id = args[1]
-            return tuple(
-                MissionEventEnvelope(
-                    event_id=row["event_id"],
-                    application_id=application_id,
-                    mission_id=row["mission_id"],
-                    run_id=row["run_id"],
-                    activation_id=row["activation_id"],
-                    seq=row["seq"],
-                    event_type=row["event_type"],
-                    event_version=row["event_version"],
-                    actor_ref=row["actor_ref"],
-                    happened_at=row["happened_at"],
-                    recorded_at=row["recorded_at"],
-                    causation_ref=row["causation_ref"],
-                    node_key=node_key_of(mc.load(row["payload"])),
-                    payload_ref=(
-                        f"mc://applications/{application_id}/missions/{row['mission_id']}"
-                        f"/events/{row['seq']}"
-                    ),
-                    payload_digest=payload_digest(mc.load(row["payload"])),
-                )
-                for row in rows
-            )
+            return tuple(envelope_from_row(row, args[1]) for row in rows)
 
     async def attempts(self, subscription_id: UUID, event_id: UUID) -> int:
         async with self._pool.acquire() as connection, connection.transaction():

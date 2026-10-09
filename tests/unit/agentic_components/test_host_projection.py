@@ -161,14 +161,29 @@ def test_kernel_hooks_render_first_and_fail_closed_on_cursor() -> None:
 
 
 def test_claude_hooks_exec_form_and_codex_requires_trust() -> None:
-    settings = json.loads(
-        regen.project(LaneProfile.CLAUDE_AGENT_SDK).file(".claude/settings.json").content
+    # claude_cloud: the repository settings file is the only hook route, Kernel Hooks first.
+    cloud = json.loads(
+        regen.project(LaneProfile.CLAUDE_CLOUD).file(".claude/settings.json").content
     )
-    pre_tool = settings["hooks"]["PreToolUse"]
+    pre_tool = cloud["hooks"]["PreToolUse"]
     first = pre_tool[0]["hooks"][0]
     assert first["command"] == "python" and first["args"][0] == KERNEL_HOOK_SCRIPT
     bash = [group for group in pre_tool if group.get("matcher") == "Bash"]
     assert bash and bash[-1]["hooks"][0]["args"][0] == HOOK_RUNNER_SCRIPT
+    # claude_agent_sdk: Kernel Hooks are in-process callbacks; the settings file carries
+    # only catalog hooks, and the projected project layer is the only setting source.
+    local = regen.project(LaneProfile.CLAUDE_AGENT_SDK)
+    settings = local.file(".claude/settings.json").content.decode()
+    assert KERNEL_HOOK_SCRIPT not in settings and HOOK_RUNNER_SCRIPT in settings
+    assert local.send_options["setting_sources"] == ["project"]
+    callbacks = local.send_options["hook_callbacks"]
+    assert isinstance(callbacks, list)
+    assert [item["hook_id"] for item in callbacks[:3]] == [
+        "mc.stop_fence",
+        "mc.stop_fence",
+        "mc.stop_fence",
+    ]
+    assert all(item["fail_closed"] is True for item in callbacks)
     codex = regen.project(LaneProfile.CODEX)
     codex_hooks = json.loads(codex.file(".codex/hooks.json").content)
     assert all(
@@ -183,7 +198,7 @@ def test_claude_hooks_exec_form_and_codex_requires_trust() -> None:
 
 def test_kernel_hooks_cannot_be_reordered_by_rows() -> None:
     rows = (hook_row(), hook_row().model_copy(update={}))
-    with pytest.raises(ProjectionError, match="duplicate projected path"):
+    with pytest.raises(ProjectionError, match="selected more than once"):
         render_host_files(rows, LaneProfile.CURSOR_LOCAL, INSTRUCTION)
     projection = render_host_files((hook_row(),), LaneProfile.DEEP_AGENTS, INSTRUCTION)
     assert projection.in_process is not None
@@ -279,8 +294,13 @@ def test_path_hygiene() -> None:
         render_host_files((bad_skill,), LaneProfile.CURSOR_LOCAL, INSTRUCTION)
     with pytest.raises(ValueError):
         BundleFile(path="../escape.sh", content=b"x")
-    with pytest.raises(ProjectionError, match="duplicate skill"):
+    with pytest.raises(ProjectionError, match="selected more than once"):
         render_host_files((skill_row(), skill_row()), LaneProfile.CODEX, INSTRUCTION)
+    fork = skill_row().model_copy(
+        update={"pin": skill_row().pin.model_copy(update={"capability_id": "skill.fork"})}
+    )
+    with pytest.raises(ProjectionError, match="duplicate skill"):
+        render_host_files((skill_row(), fork), LaneProfile.CODEX, INSTRUCTION)
 
 
 def test_resolved_plugin_members_must_match_the_manifest() -> None:

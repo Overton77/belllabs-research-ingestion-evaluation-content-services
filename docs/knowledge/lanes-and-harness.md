@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: Lanes and the harness protocol
-description: The provider-neutral AgentHarness protocol and lane registry, the lane.turn segment loop that drives every lane, the Deep Agents lane behind it, the lane describe matrices and qualification flag, and the Agent Host configuration generator. Cursor profiles are in cursor-lane.
+description: The provider-neutral AgentHarness protocol and lane registry, the seven lane profiles and their v1 and v2 describe matrices, the lane.turn segment loop that drives every lane, the Deep Agents lane behind it, the qualification flag, and the Agent Host configuration generator. Cursor profiles are in cursor-lane; session ownership, the dispatch journal and auth routes in session-ownership-and-dispatch.
 tags: [mission-control, harness, lanes, deep-agents, agent-host, implementation]
 ---
 
@@ -22,14 +22,20 @@ operations: `prepare`, `start`, `reattach`, `send_turn`, `cancel_turn`, `observe
 `unqualified` in its describe raises `HarnessUnsupported` for it; any other error from
 such an operation is a conformance failure. `observe` resumes from an opaque lane cursor
 (LangGraph checkpoint id, bridge offset, SSE event id). The wire contracts are in
-`domain/execution/lanes.py`: `mc.lane_describe.v1`, the request and handle contracts and
-`mc.cursor_binding.v1`. Handles carry native identity, never credentials. The values are
-`LaneName` (`deep_agents`, `cursor`) and `LaneProfileName` (`deep_agents`, `cursor_local`,
-`cursor_cloud`); the profile literal set in capability host support also names
-`claude_agent_sdk` and `codex`, which have no harness.
+`domain/execution/lanes.py`: `mc.lane_describe.v1` and `.v2`, the request and handle contracts
+and `mc.cursor_binding.v1`; `domain/execution/bindings.py` adds `mc.execution_binding.v2`,
+`mc.environment_binding.v1` and `mc.workspace_snapshot.v1`, and `domain/execution/approvals.py`
+`mc.approval_binding.v1` (MP-01, [ADR-0035](../adr/0035-seven-lane-profiles-versioned-provider-contracts-and-mission-v2.md),
+`proposed`). Handles carry native identity, never credentials. `host_support.LaneProfile` is the
+one profile vocabulary, seven values: `deep_agents`, `cursor_local`, `cursor_cloud`,
+`claude_agent_sdk`, `codex`, `claude_cloud` and `codex_cloud`.
 
-`application/execution/harness/describe.py` holds the declared matrix of each profile
-(`DEEP_AGENTS_DESCRIBE`, `CURSOR_LOCAL_DESCRIBE`, `CURSOR_CLOUD_DESCRIBE`): each control is
+`application/execution/harness/describe.py` holds the declared matrix of each profile in
+`DECLARED_LANE_MATRICES`: the three FT-G1 profiles keep their `mc.lane_describe.v1` digests; the
+four MP-01 profiles are `mc.lane_describe.v2` stubs whose every control and feature is
+`unqualified` (design intent from the research, not proof), and the two hosted stubs declare
+`unsupported` delivery semantics from the feasibility studies (`cancel`, `pause` and `fork`
+among them). Each control is
 `native`, `emulated`, `unsupported` or `unqualified`, with per-command delivery
 semantics, identity map, hook mechanism and events, instruction channels, subagent form,
 usage dispositions and placement. `GET /v1/applications/{app}/lanes[/{profile}]`
@@ -40,14 +46,19 @@ usage dispositions and placement. `GET /v1/applications/{app}/lanes[/{profile}]`
 `application/execution/harness/registry.py::LaneRegistry` maps a profile to its harness
 and caches describes. The worker composition (`adapters/temporal/deployment_composition.py`)
 registers `deep_agents` always and the two Cursor profiles only when `CURSOR_API_KEY` is
-bound; the API registers describe-only entries so `lane list` works without executing.
+bound (`registered_lane_profiles`); no harness exists for the four v2 profiles on the integrated
+base. The API registers describe-only entries (`describe_only_registry`) so `lane list` works
+without executing; a v2 stub appears only when its lane is marked bound, and `bootstrap/api.py`
+marks only Cursor (from `CURSOR_API_KEY`), so the API lists at most the three v1 profiles today.
 Admission refuses a profile whose describe is not `qualified` unless policy allows
 unqualified lanes (`MISSION_CONTROL_ALLOW_UNQUALIFIED_LANES`, a local-proof flag), and
 the refusal names that remedy. Only `deep_agents` is `qualified=True` (WP-CP-040 parity
 suite). Both Cursor profiles are `qualified=False`: nothing but a reviewed release citing a
 live-drill record under `docs/qualification/lanes/` may flip that
 ([release-and-qualification](release-and-qualification.md)). Lane profile rows live in
-`mission_control.lane_profile` (migration 0030), seeded unqualified for Cursor.
+`mission_control.lane_profile`: migration 0030 seeded three, 0031 adds the four v2 stubs
+unqualified, generated from `DECLARED_LANE_MATRICES`. Per-profile status is in
+[qualification](qualification.md).
 
 ## One lifecycle synthesis: lane.turn
 
@@ -63,7 +74,10 @@ truth and the throttled heartbeat only a hint
 ([events-and-commands](events-and-commands.md)). A segment ends at its bound or at a
 terminal frame whose closing facts end the session and settle the operation once. The
 activities are `adapters/temporal/activities/lane_turn.py`, registered on the
-`-agent-cognitive` queue beside `operation.execute` and `operation.cancel`.
+`-agent-cognitive` queue beside `operation.execute` and `operation.cancel`. Each segment also
+claims fenced session ownership, journals every native dispatch and admits it against the Stop
+Fence, and a provider capacity limit becomes a bounded wait
+([session ownership and dispatch](session-ownership-and-dispatch.md)).
 
 Cursor units always run through the segment loop (`OperationWorkflowRequest.segment_driven`,
 `adapters/temporal/workflows/operation.py`). Deep Agents units still run `operation.execute`
@@ -81,12 +95,18 @@ without changing behavior. Materialization, frames, hook middleware, compaction 
 hosted subordinates and the generated Agent Host configuration are in
 [Deep Agents lane](deep-agents-lane.md).
 
-## Specified only
+## Not integrated or specified only
 
-Claude Agent SDK, Codex and Direct Model lanes. ADR-0018 accepts the Cursor lanes through
-ADR-0030 and leaves Claude and Codex proposed, with no harness in `src/mission_control`.
-The production semantic input binding that authors lane execution templates is also not
-built, so `mission start` stays blocked (see [authoring](authoring.md)).
+- Claude Agent SDK (MP-07) and Codex app-server (MP-08) harnesses and the Cursor parity work
+  (MP-09) are in flight in their own worktrees and not integrated; the base has their projections
+  (`application/agentic_components/projections.py`), frame mappings
+  (`application/frames/provider_mapping.py`) and auth routes, all fixture-proven only.
+- `claude_cloud` and `codex_cloud` are Outcome 3: the hosted products lack documented lifecycle
+  operations ([claude_cloud](../qualification/lanes/claude_cloud/FEASIBILITY.md),
+  [codex_cloud](../qualification/lanes/codex_cloud/FEASIBILITY.md)); the environment resolver
+  (`application/environments/resolver.py`) and the workspace allocator refuse them.
+- Direct Model lanes. The production launch author binds `deep_agents` only
+  ([mission manifest](mission-manifest.md)).
 
 # Citations
 
@@ -105,12 +125,14 @@ built, so `mission start` stays blocked (see [authoring](authoring.md)).
   [registry](../../src/mission_control/application/execution/harness/registry.py),
   [lane turns](../../src/mission_control/application/execution/harness/lane_turns.py),
   [lane contracts](../../src/mission_control/domain/execution/lanes.py),
+  [binding contracts](../../src/mission_control/domain/execution/bindings.py),
   [lane turn payloads](../../src/mission_control/domain/execution/lane_turns.py),
   [lane activities](../../src/mission_control/adapters/temporal/activities/lane_turn.py),
   [lane state store](../../src/mission_control/adapters/postgres/lanes/execution_state.py),
   [lane routes](../../src/mission_control/interfaces/http/lanes.py),
   [worker lane composition](../../src/mission_control/adapters/temporal/deployment_composition.py).
 - Tests: [lane contracts](../../tests/unit/harness/test_lane_contracts.py),
+  [multi-provider contracts](../../tests/unit/harness/test_multi_provider_contracts.py),
   [registry](../../tests/unit/harness/test_lane_registry.py),
   [dispatch](../../tests/unit/harness/test_lane_dispatch.py),
   [lane turn service](../../tests/unit/harness/test_lane_turn_service.py),

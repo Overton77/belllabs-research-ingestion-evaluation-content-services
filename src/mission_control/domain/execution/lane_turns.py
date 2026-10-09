@@ -44,6 +44,9 @@ def default_lane_profile(operation: OperationExecutionRequest) -> LaneProfileNam
     if operation.execution_runtime == "cursor":
         assert operation.cursor_binding is not None
         return operation.cursor_binding.lane_profile
+    if operation.execution_runtime in {"claude", "codex"}:
+        assert operation.provider_binding is not None
+        return operation.provider_binding.lane_profile
     return "deep_agents"
 
 
@@ -100,7 +103,8 @@ class _LaneOperationPayload(Contract):
             )
         lane = LANE_OF_PROFILE[self.lane_profile]
         runtime = self.operation.execution_runtime
-        if (runtime == "cursor") != (lane == "cursor"):
+        expected_lane = "deep_agents" if runtime in {"native", "deep_agent"} else runtime
+        if lane != expected_lane:
             raise ValueError(f"a {runtime} operation cannot run on lane {lane}")
         return self
 
@@ -174,11 +178,30 @@ class LaneCancelResult(Contract):
     operation_result: dict[str, Any] | None = None
 
 
-# What a command does on every lane profile today (00-ARCHITECTURE section 6; the describe
-# honesty test holds each declared matrix to it). Workflows read it without the registry.
-LANE_COMMAND_SEMANTICS: Final[dict[str, str]] = {
-    "cancel": "turn_boundary_guaranteed",
-    "interrupt_and_inject": "cancel_and_replace",
+# What `cancel` and `interrupt_and_inject` do on every lane profile (00-ARCHITECTURE section
+# 6; the describe-honesty tests hold each declared matrix to it). Workflows read it without
+# the registry. MP-01: the hosted Claude Code and Codex products expose no cancel operation
+# (docs/qualification/lanes/{claude_cloud,codex_cloud}/FEASIBILITY.md), so their cells are
+# `unsupported` until a vendor surface exists; the kernel still fences the unit on its side.
+LANE_COMMAND_SEMANTICS: Final[dict[str, dict[str, str]]] = {
+    "cancel": {
+        "deep_agents": "turn_boundary_guaranteed",
+        "cursor_local": "turn_boundary_guaranteed",
+        "cursor_cloud": "turn_boundary_guaranteed",
+        "claude_agent_sdk": "turn_boundary_guaranteed",
+        "codex": "turn_boundary_guaranteed",
+        "claude_cloud": "unsupported",
+        "codex_cloud": "unsupported",
+    },
+    "interrupt_and_inject": {
+        "deep_agents": "cancel_and_replace",
+        "cursor_local": "cancel_and_replace",
+        "cursor_cloud": "cancel_and_replace",
+        "claude_agent_sdk": "cancel_and_replace",
+        "codex": "cancel_and_replace",
+        "claude_cloud": "cancel_and_replace",
+        "codex_cloud": "unsupported",
+    },
 }
 
 
@@ -190,11 +213,20 @@ LANE_PAUSE_SEMANTICS: Final[dict[str, str]] = {
     "deep_agents": "pause_at_tool_gate",
     "cursor_local": "unsupported",
     "cursor_cloud": "unsupported",
+    # MP-01 stubs: design intent until the harnesses land (MP-04/05/18/19).
+    "claude_agent_sdk": "pause_at_tool_gate",
+    "codex": "pause_at_tool_gate",
+    "claude_cloud": "unsupported",
+    "codex_cloud": "unsupported",
 }
 LANE_RESUME_SEMANTICS: Final[dict[str, str]] = {
     "deep_agents": "turn_boundary_guaranteed",
     "cursor_local": "wait_then_send",
     "cursor_cloud": "wait_then_send",
+    "claude_agent_sdk": "turn_boundary_guaranteed",
+    "codex": "turn_boundary_guaranteed",
+    "claude_cloud": "wait_then_send",
+    "codex_cloud": "unsupported",
 }
 UNSUPPORTED_CONTROL: Final = "unsupported_control"
 

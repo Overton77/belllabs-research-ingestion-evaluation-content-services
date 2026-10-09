@@ -25,11 +25,21 @@ from datetime import datetime
 from typing import Any, Protocol
 from uuid import UUID
 
+from mission_control.application.frames.lineage import (
+    Coverage,
+    SubordinateNode,
+    counts_usage_frame,
+    provider_subordinates,
+    usage_body,
+    usage_rule,
+)
+from mission_control.application.frames.reducer import provider_result
 from mission_control.application.frames.sink import FrameReader
 from mission_control.domain.frames.body import frame_body_object, redact_text
 from mission_control.domain.frames.contracts import (
     NATIVE_EVENT_REF_PREFIX,
     FrameKind,
+    LaneProfile,
     ProviderFrame,
     frame_id_from_native_event_ref,
 )
@@ -118,6 +128,8 @@ class SessionSummary:
     last_observed_at: datetime | None
     run_result_status: str | None
     usage: UsageReport | None
+    subordinates: tuple[SubordinateNode, ...] = ()
+    usage_coverage: Coverage = "complete"
 
 
 @dataclass
@@ -298,11 +310,33 @@ class TranscriptService:
             run_id=run_key, entries=tuple(selected), next_cursor=next_cursor, has_more=has_more
         )
 
+    @property
+    def reads_full_bodies(self) -> bool:
+        return self._artifacts is not None
+
+    def with_artifacts(self, artifacts: ArtifactBodyReader) -> TranscriptService:
+        """The same transcript view with `full=True` reading bodies through `artifacts`."""
+
+        return TranscriptService(
+            self._events,
+            self._frames,
+            request_scope=self.request_scope,
+            secret_values=self._secrets,
+            artifacts=artifacts,
+        )
+
     async def _with_full_body(self, entry: TranscriptEntry, actor: ActorContext) -> TranscriptEntry:
+        """A denied read fails the request; a missing or unadmitted body keeps the excerpt."""
+
         ref = entry.refs.artifact_ref
         if ref is None or self._artifacts is None:
             return entry
-        body = await self._artifacts.read(self.request_scope, actor, ref)
+        try:
+            body = await self._artifacts.read(self.request_scope, actor, ref)
+        except PermissionError as error:
+            raise TranscriptDenied(f"artifact read denied: {error}") from None
+        except LookupError:
+            return entry
         return entry.model_copy(update={"body_excerpt": redact_text(body, self._secrets)[0]})
 
     async def projection_entries(self, run_key: str) -> tuple[TranscriptEntry, ...]:
@@ -568,8 +602,24 @@ class RunFrameSummary:
     transcript_cursor: str | None
 
 
+def _known_usage(
+    lane: LaneProfile, bodies: Sequence[tuple[str, Mapping[str, Any]]]
+) -> UsageReport | None:
+    if not bodies:
+        return None
+    report = usage_report(lane, bodies)
+    known = any(item.value is not None for item in report.dimensions.values())
+    return report if known else None
+
+
 def summarize_sessions(frames: Sequence[ProviderFrame]) -> tuple[SessionSummary, ...]:
-    """Per harness execution: lane, generation, sessions, turns, tool calls, usage."""
+    """Per harness execution: lane, generation, sessions, turns, tool calls, usage.
+
+    Turns, tool calls and the run result are the parent's own; provider subagents are listed
+    in `subordinates` with their visibility. Usage folds a subagent's usage frames only where
+    the lane's writer reports them as separate model calls (`lineage.usage_rule`), and says
+    when the provider total excludes subagents.
+    """
 
     grouped: dict[tuple[str, int], list[ProviderFrame]] = {}
     for frame in frames:
@@ -577,32 +627,58 @@ def summarize_sessions(frames: Sequence[ProviderFrame]) -> tuple[SessionSummary,
     summaries: list[SessionSummary] = []
     for (harness, generation), items in sorted(grouped.items()):
         items.sort(key=lambda frame: frame.arrival_ordinal)
+        lane = items[0].lane_profile
+        own = [frame for frame in items if frame.subordinate_ref is None]
+        subordinates = provider_subordinates(items)
         usage_bodies = [
-            (str(frame.frame_id), frame_body_object(frame.body_excerpt, frame.body_bytes))
+            (
+                str(frame.frame_id),
+                usage_body(lane, frame_body_object(frame.body_excerpt, frame.body_bytes)),
+            )
             for frame in items
-            if frame.kind == FrameKind.USAGE
+            if frame.kind == FrameKind.USAGE and counts_usage_frame(lane, frame.subordinate_ref)
         ]
+        turn_ends = list(
+            {
+                (frame.native_turn_ref or str(frame.frame_id)): frame
+                for frame in own
+                if frame.kind == FrameKind.TURN_ENDED
+            }.values()
+        )
+        if not usage_bodies:
+            usage_bodies = [
+                (
+                    str(frame.frame_id),
+                    usage_body(lane, frame_body_object(frame.body_excerpt, frame.body_bytes)),
+                )
+                for frame in turn_ends
+            ]
+            usage_bodies = [(frame_id, body) for frame_id, body in usage_bodies if body]
         result = next(
-            (frame for frame in reversed(items) if frame.kind == FrameKind.RUN_RESULT), None
+            (frame for frame in reversed(own) if frame.kind == FrameKind.RUN_RESULT), None
         )
         status = (
-            frame_body_object(result.body_excerpt, result.body_bytes).get("status")
+            provider_result(lane, frame_body_object(result.body_excerpt, result.body_bytes))[0]
             if result is not None
             else None
         )
+        excludes = bool(subordinates) and usage_rule(lane, "provider_subagent").tokens in {
+            "unattributable",
+            "provider_inclusive",
+        }
         summaries.append(
             SessionSummary(
                 harness_execution_id=harness,
-                lane_profile=items[0].lane_profile.value,
+                lane_profile=lane.value,
                 generation=generation,
                 native_session_refs=tuple(
-                    dict.fromkeys(frame.native_session_ref for frame in items)
+                    dict.fromkeys(frame.native_session_ref for frame in own or items)
                 ),
-                turns_closed=sum(1 for frame in items if frame.kind == FrameKind.TURN_ENDED),
+                turns_closed=len(turn_ends),
                 tool_calls=len(
                     {
                         frame.tool_call_ref
-                        for frame in items
+                        for frame in own
                         if frame.tool_call_ref
                         and frame.kind
                         in (FrameKind.TOOL_CALL_COMPLETED, FrameKind.TOOL_CALL_FAILED)
@@ -610,8 +686,10 @@ def summarize_sessions(frames: Sequence[ProviderFrame]) -> tuple[SessionSummary,
                 ),
                 last_frame_kind=items[-1].kind.value,
                 last_observed_at=items[-1].observed_at,
-                run_result_status=str(status) if status else None,
-                usage=usage_report(items[0].lane_profile, usage_bodies) if usage_bodies else None,
+                run_result_status=status if status and status != "unknown" else None,
+                usage=_known_usage(lane, usage_bodies),
+                subordinates=subordinates,
+                usage_coverage="excludes_subordinates" if excludes else "complete",
             )
         )
     return tuple(summaries)

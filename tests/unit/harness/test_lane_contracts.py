@@ -1,4 +1,5 @@
-"""FT-G1: `mc.lane_describe.v1`, harness contracts and `mc.cursor_binding.v1`."""
+"""FT-G1: `mc.lane_describe.v1`, harness contracts and `mc.cursor_binding.v1`; MP-01: the
+`mc.lane_describe.v2` stubs of the four provider profiles."""
 
 from __future__ import annotations
 
@@ -12,12 +13,16 @@ from mission_control.application.execution.harness.describe import (
     CURSOR_LOCAL_DESCRIBE,
     DECLARED_LANE_MATRICES,
     DEEP_AGENTS_DESCRIBE,
+    V1_LANE_PROFILES,
+    V2_STUB_LANE_PROFILES,
     declared_matrix,
 )
 from mission_control.domain.execution.lanes import (
     DELIVERY_COMMANDS,
     LANE_CONTRACTS,
     LANE_CONTROLS,
+    LANE_FEATURES,
+    LANE_PROFILES,
     CursorExecutionBinding,
     LaneDescribe,
     UsageReport,
@@ -78,16 +83,106 @@ ARCHITECTURE_DELIVERY: dict[str, dict[str, str]] = {
 }
 
 
-@pytest.mark.parametrize("profile", sorted(DECLARED_LANE_MATRICES))
+@pytest.mark.parametrize("profile", sorted(V1_LANE_PROFILES))
 def test_declared_matrices_match_the_architecture_lane_matrix(profile: str) -> None:
     describe = declared_matrix(profile)
     # Round trip through the wire contract: the fixtures validate as mc.lane_describe.v1.
     assert LaneDescribe.model_validate_json(describe.model_dump_json()) == describe
     assert describe.schema_version == "mc.lane_describe.v1"
+    assert not describe.is_v2 and "features" not in describe.model_dump(mode="json")
     for control, support in ARCHITECTURE_MATRIX[profile].items():
         assert describe.controls[control] == support, control
     for command, semantics in ARCHITECTURE_DELIVERY[profile].items():
         assert describe.delivery_semantics[command] == semantics, command
+
+
+def test_the_seven_profiles_are_declared_and_partitioned() -> None:
+    assert set(DECLARED_LANE_MATRICES) == set(LANE_PROFILES)
+    assert set(LANE_PROFILES) == V1_LANE_PROFILES | V2_STUB_LANE_PROFILES
+    assert not (V1_LANE_PROFILES & V2_STUB_LANE_PROFILES)
+
+
+@pytest.mark.parametrize("profile", sorted(V2_STUB_LANE_PROFILES))
+def test_mp01_profiles_are_v2_stubs_with_every_cell_unqualified(profile: str) -> None:
+    """A stub states design intent, not proof: nothing native/emulated, nothing qualified."""
+
+    describe = declared_matrix(profile)
+    assert LaneDescribe.model_validate_json(describe.model_dump_json()) == describe
+    assert describe.schema_version == "mc.lane_describe.v2" and describe.is_v2
+    assert describe.qualified is False
+    assert set(describe.controls.values()) == {"unqualified"}
+    assert set(describe.features) == set(LANE_FEATURES)
+    for name, evidence in describe.features.items():
+        assert evidence.status in {"unqualified", "unsupported"}, name
+        assert not evidence.implemented and not evidence.qualified, name
+        assert not describe.feature_implemented(name), name
+    assert describe.compaction_control in {"unqualified", "unsupported"}
+    assert describe.subordinate_visibility in {"unqualified", "unavailable"}
+    assert "workflow_gate" in describe.approval_modes
+    # `unqualified()` is idempotent on a stub (the registry publishes stubs through it).
+    assert describe.unqualified() == describe
+
+
+def test_hosted_stubs_state_the_feasibility_findings() -> None:
+    claude_cloud = declared_matrix("claude_cloud")
+    codex_cloud = declared_matrix("codex_cloud")
+    assert claude_cloud.placement == codex_cloud.placement == "cloud"
+    assert not claude_cloud.hooks.fail_closed and not codex_cloud.hooks.fail_closed
+    assert codex_cloud.hooks.mechanism == "none" and codex_cloud.hooks.events_supported == ()
+    # Neither hosted product exposes a public cancel/interrupt: the Stop Fence cannot reach
+    # them, which is why admission refuses any workflow that requires `cancel` there.
+    for describe in (claude_cloud, codex_cloud):
+        assert describe.feature("cancel").status == "unsupported"
+        assert describe.delivery_semantics["cancel"] == "unsupported"
+        assert describe.feature("approval_suspension").status == "unsupported"
+    assert codex_cloud.feature("follow_up").status == "unsupported"
+    assert codex_cloud.feature("observe").status == "unsupported"
+    assert codex_cloud.feature("continuation").status == "unsupported"
+    assert claude_cloud.feature("status").status == "unsupported"
+    assert claude_cloud.feature("follow_up").status == "unqualified"
+    assert claude_cloud.approval_modes == ("workflow_gate",)
+    assert codex_cloud.approval_modes == ("workflow_gate",)
+
+
+def test_v2_describe_rules() -> None:
+    stub = declared_matrix("codex").model_dump(mode="json")
+    # v1 cannot carry v2 fields.
+    with pytest.raises(ValidationError, match="mc.lane_describe.v2"):
+        LaneDescribe.model_validate({**stub, "schema_version": "mc.lane_describe.v1"})
+    # v2 carries evidence for every feature.
+    features = dict(stub["features"])
+    features.pop("launch")
+    with pytest.raises(ValidationError, match="exactly"):
+        LaneDescribe.model_validate({**stub, "features": features})
+    # A qualified v2 lane cannot carry unqualified features.
+    native = {
+        **stub,
+        "controls": dict.fromkeys(LANE_CONTROLS, "native"),
+        "qualified": True,
+    }
+    with pytest.raises(ValidationError, match="unqualified features"):
+        LaneDescribe.model_validate(native)
+    # A qualified feature cites its evidence.
+    with pytest.raises(ValidationError, match="evidence_ref"):
+        LaneDescribe.model_validate(
+            {
+                **stub,
+                "features": {
+                    **stub["features"],
+                    "launch": {"status": "native", "implemented": True, "qualified": True},
+                },
+            }
+        )
+    with pytest.raises(ValidationError, match="cannot be implemented"):
+        LaneDescribe.model_validate(
+            {
+                **stub,
+                "features": {
+                    **stub["features"],
+                    "launch": {"status": "unsupported", "implemented": True},
+                },
+            }
+        )
 
 
 def test_cursor_profiles_are_unqualified_and_differ_where_the_spec_says() -> None:
@@ -138,7 +233,7 @@ def test_describe_digest_is_stable_and_content_bound() -> None:
     assert DEEP_AGENTS_DESCRIBE.digest == declared_matrix("deep_agents").digest
     assert CURSOR_LOCAL_DESCRIBE.digest != CURSOR_LOCAL_DESCRIBE.unqualified().digest
     with pytest.raises(ValueError, match="undeclared"):
-        declared_matrix("codex")
+        declared_matrix("gemini_cli")
 
 
 def test_every_lane_contract_exports_a_json_schema() -> None:
@@ -148,7 +243,11 @@ def test_every_lane_contract_exports_a_json_schema() -> None:
         assert schema["type"] == "object", name
         assert schema.get("additionalProperties") is False, name
     describe = schemas["lane_describe"]
-    assert describe["properties"]["schema_version"]["const"] == "mc.lane_describe.v1"
+    assert describe["properties"]["schema_version"]["enum"] == [
+        "mc.lane_describe.v1",
+        "mc.lane_describe.v2",
+    ]
+    assert describe["properties"]["schema_version"]["default"] == "mc.lane_describe.v1"
 
 
 def _local_binding(**changes: Any) -> dict[str, Any]:
@@ -200,20 +299,34 @@ def test_usage_report_never_counts_unknown_as_tokens() -> None:
     assert UsageReport(disposition="estimated", total_tokens=3).total_tokens == 3
 
 
-def test_migration_0030_seeds_exactly_the_declared_describes() -> None:
+def _seeded_describes(migration: str) -> dict[str, Any]:
     import json
     import re
     from pathlib import Path
 
     sql = (
         Path(__file__).resolve().parents[3]
-        / "packages/mission-control-db-contract/component/migrations/0030_lane_bindings.sql"
+        / "packages/mission-control-db-contract/component/migrations"
+        / migration
     ).read_text("utf-8")
-    seeded = {
+    return {
         match.group(1): json.loads(match.group(2))
         for match in re.finditer(r"\('([a-z_]+)', '[a-z_]+', '[a-z_]+',\s*'(\{.*?\})'::jsonb", sql)
     }
-    assert seeded == {
+
+
+def test_migrations_0030_and_0031_seed_exactly_the_declared_describes() -> None:
+    """0030 seeded the three FT-G1 v1 matrices (applied bytes, never edited); 0031 seeds the
+    four MP-01 v2 stubs. Together they are exactly the declared registry."""
+
+    seeded_0030 = _seeded_describes("0030_lane_bindings.sql")
+    seeded_0031 = _seeded_describes("0031_multi_provider_lanes.sql")
+    assert set(seeded_0030) == V1_LANE_PROFILES
+    assert set(seeded_0031) == V2_STUB_LANE_PROFILES
+    assert {**seeded_0030, **seeded_0031} == {
         profile: describe.model_dump(mode="json")
         for profile, describe in DECLARED_LANE_MATRICES.items()
     }
+    for document in seeded_0031.values():
+        assert document["qualified"] is False
+        assert document["schema_version"] == "mc.lane_describe.v2"

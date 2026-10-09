@@ -35,6 +35,8 @@ from pydantic import (
     model_validator,
 )
 
+from mission_control.domain.capabilities.host_support import LaneProfile
+
 MANIFEST_SCHEMA_ID = "mc.mission_manifest.v1"
 MANIFEST_LITERAL = "mission/v1"
 MANIFEST_SCHEMA_FILENAME = f"{MANIFEST_SCHEMA_ID}.json"
@@ -288,17 +290,14 @@ Duration = Annotated[
 ]
 
 
-class Lane(StrEnum):
-    DEEP_AGENTS = "deep_agents"
-    CURSOR_LOCAL = "cursor_local"
-    CURSOR_CLOUD = "cursor_cloud"
-    # Reserved names: accepted by the schema, rejected by validation in v1 (ADR-0018).
-    CLAUDE_AGENT_SDK = "claude_agent_sdk"
-    CODEX = "codex"
+# The manifest `lane` vocabulary is the one Lane Profile enum (MP-01); mission/v1 accepts
+# every name in the schema and rejects the non-Cursor provider lanes in validation
+# (ADR-0018). mission/v2 (`manifest_v2.py`) admits them.
+Lane = LaneProfile
 
-
-RESERVED_LANES = frozenset({Lane.CLAUDE_AGENT_SDK, Lane.CODEX})
+RESERVED_LANES = frozenset({Lane.CLAUDE_AGENT_SDK, Lane.CODEX, Lane.CLAUDE_CLOUD, Lane.CODEX_CLOUD})
 CURSOR_LANES = frozenset({Lane.CURSOR_LOCAL, Lane.CURSOR_CLOUD})
+HOSTED_LANES = frozenset({Lane.CURSOR_CLOUD, Lane.CLAUDE_CLOUD, Lane.CODEX_CLOUD})
 
 
 class CapabilityKind(StrEnum):
@@ -576,6 +575,24 @@ class Environment(ManifestModel):
     budget: Budget | None = None
     governors: Governors | None = None
     side_effects: tuple[SideEffect, ...] | None = None
+
+    # Lanes this manifest version refuses in validation (v1: every non-Cursor provider
+    # lane, ADR-0018). A later manifest version overrides these hooks; v1 behavior is fixed.
+    reserved_lanes: ClassVar[frozenset[LaneProfile]] = RESERVED_LANES
+
+    def version_lane_issues(
+        self, env_pointer: str, *, mission_level: bool
+    ) -> tuple[list[ManifestIssue], list[ManifestIssue]]:
+        """Version-specific lane rules beyond the shared ones (none in mission/v1)."""
+
+        return [], []
+
+    def version_narrowing_issues(
+        self, child: Environment, overlay: Environment, pointer: str
+    ) -> list[ManifestIssue]:
+        """Version-specific authority-narrowing rules (none in mission/v1)."""
+
+        return []
 
 
 # --- Goals and acceptance ---------------------------------------------------------------
@@ -1239,6 +1256,7 @@ def _narrowing_issues(
                         "widens_authority",
                     )
                 )
+    issues.extend(parent.version_narrowing_issues(child, overlay, pointer))
     return issues
 
 
@@ -1248,7 +1266,8 @@ def _overlay_environment(
     parent_document = parent.authored()
     overlay_document = overlay.authored() if overlay is not None else {}
     merged = merge_environment_documents(parent_document, overlay_document)
-    effective = Environment.model_validate(merged)
+    # The parent's class decides the manifest version (v1 Environment or a v2 subclass).
+    effective = type(parent).model_validate(merged)
     provenance = {
         ".".join(path): ("overlay" if _set_by(overlay_document, path) else "inherited")
         for path in _leaf_paths(effective.authored())
@@ -1289,7 +1308,7 @@ def _lane_issues(
     blockers: list[ManifestIssue] = []
     warnings: list[ManifestIssue] = []
     lane = environment.lane
-    if lane in RESERVED_LANES:
+    if lane is not None and lane in environment.reserved_lanes:
         blockers.append(
             _issue(
                 f"{env_pointer}/lane",
@@ -1298,6 +1317,11 @@ def _lane_issues(
                 ManifestErrorCode.UNSUPPORTED_BEHAVIOR,
             )
         )
+    version_blockers, version_warnings = environment.version_lane_issues(
+        env_pointer, mission_level=mission_level
+    )
+    blockers.extend(version_blockers)
+    warnings.extend(version_warnings)
     if lane in CURSOR_LANES and (
         environment.workspace is None or environment.workspace.repo is None
     ):
@@ -1499,7 +1523,7 @@ def _node_environments(
     resolved: list[NodeEnvironment] = []
     mission_environment = block.environment
     if mission_environment.side_effects is None:
-        mission_environment = Environment.model_validate(
+        mission_environment = type(mission_environment).model_validate(
             {**mission_environment.authored(), "side_effects": list(DEFAULT_SIDE_EFFECTS)}
         )
     effective_by_key: dict[str, Environment] = {}

@@ -17,15 +17,25 @@ One lifecycle synthesis for every protocol lane (ADR-0031). A segment of `lane.t
 The Deep Agents lane is not a Session Lane: its governed `operation.execute` body already
 synthesizes a bounded turn with checkpoint lineage, so the activity adapter runs it through
 `lane.turn` unchanged (`governed`).
+
+MP-06 (SPEC-01 runtime): each segment first claims the fenced session ownership of its
+worker's `WorkerSessionManager`; every native create/send (first turn, replacement,
+continuation) is journaled `intended` before it is issued and acknowledged with its native
+identity after it (`dispatch.py`), passes the run's Stop Fence as a governed effect, and an
+`intended` record without acknowledgement is reconciled with the lane before anything is
+sent again: found is observed, an authoritative `not_received` is sent once more under the
+same idempotency key, anything else parks `in_doubt`. Settlement asserts the owner first, so
+an owner fenced out by a takeover cannot settle. A segment that ends with the turn running
+retains the session in the manager; only settlement releases it.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import aclosing, suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Protocol
 from uuid import UUID
@@ -37,12 +47,25 @@ from mission_control.application.execution.harness.controls import (
     open_tool_calls,
     usage_from_frames,
 )
+from mission_control.application.execution.harness.dispatch import (
+    DispatchFenced,
+    DispatchKind,
+    DispatchLookup,
+    DispatchOutcome,
+    DispatchReconcilingLane,
+    DispatchRecord,
+    ProviderCapacityLimited,
+    SessionOwner,
+    StaleSessionOwner,
+    SteeringLane,
+    instruction_digest,
+)
 from mission_control.application.execution.harness.inject import (
     INJECT_KIND,
     InjectionParked,
     InterruptAndInjectService,
     cancel_and_replace_turn,
-    interrupt_semantics,
+    resolve_interrupt_mode,
     unit_boundary,
 )
 from mission_control.application.execution.harness.protocol import (
@@ -50,12 +73,15 @@ from mission_control.application.execution.harness.protocol import (
     SessionLane,
 )
 from mission_control.application.execution.harness.registry import LaneRegistry
+from mission_control.application.execution.harness.sessions import WorkerSessionManager
 from mission_control.application.execution.harness.state import (
+    LaneExecutionState,
     LaneExecutionStateStore,
     LaneExecutionUpdate,
     segment_update,
 )
 from mission_control.application.execution.mailbox import MailboxDeliveryService
+from mission_control.application.execution.stop_fence import StopFenceRepository
 from mission_control.application.frames.kinds import classify
 from mission_control.application.frames.reducer import FrameFactProjector, FrameFactTarget
 from mission_control.application.frames.sink import FrameReader, FrameStore, harness_execution_id
@@ -83,6 +109,7 @@ from mission_control.domain.execution.lanes import (
     EndSessionRequest,
     HarnessScope,
     LaneFrame,
+    LaneSegmentBounds,
     ObserveRequest,
     PrepareRequest,
     ReattachRequest,
@@ -103,8 +130,12 @@ from mission_control.domain.frames.contracts import (
     ProviderFrame,
 )
 from mission_control.domain.policies.mailbox import MailboxEntry, MailboxState
+from mission_control.domain.policies.stop_fence import EffectAdmission
 
 _LOGGER = logging.getLogger(__name__)
+# How long a cancelled activity still waits for an in-flight native call to return, so its
+# acknowledgement is journaled before the cancel proceeds (the call itself is never retried).
+DISPATCH_RECEIPT_GRACE_S = 10.0
 LANE_ACTOR = "mission-control-lane-turn"
 _RECORDED_DETAILS = frozenset(
     {"cursor_sdk_version", "bridge_state_root", "cloud_branch", "cloud_agent_url"}
@@ -266,7 +297,17 @@ class LaneTurnService:
         mailbox: MailboxDeliveryService | None = None,
         injections: InterruptAndInjectService | None = None,
         frame_reader: FrameReader | None = None,
+        sessions: WorkerSessionManager | None = None,
+        fences: StopFenceRepository | None = None,
+        receipt_grace_s: float = DISPATCH_RECEIPT_GRACE_S,
     ) -> None:
+        # MP-06: the worker-owned session manager (fenced ownership, retained sessions), the
+        # Stop Fence every new native dispatch is admitted against, and the bounded grace a
+        # dispatch receipt gets before an activity cancel lands
+        # (`MISSION_CONTROL_DISPATCH_RECEIPT_GRACE_S`).
+        self._sessions = sessions or WorkerSessionManager()
+        self._fences = fences
+        self._receipt_grace_s = receipt_grace_s
         # FT-G4: the mailbox consumes queued content at the send that carries it
         # (`wait_then_send`) and settles it with the turn; `injections` watches a running
         # turn for `interrupt_and_inject` (`cancel_and_replace`); the frame reader names the
@@ -285,6 +326,10 @@ class LaneTurnService:
         self._frame_facts = frame_facts
         self._clock = clock
         self._cap = excerpt_cap_bytes
+
+    @property
+    def sessions(self) -> WorkerSessionManager:
+        return self._sessions
 
     # --- dispatch ---------------------------------------------------------------------------
 
@@ -359,8 +404,27 @@ class LaneTurnService:
         identity = LaneExecutionIdentity.of(operation, request.lane_profile, request.generation)
         scope, heid = identity.request_scope, identity.harness_execution_id
         state = await self._states.load(scope, heid)
+        # The row exists before the claim and before any native call is journaled on it.
+        await self._open(
+            operation,
+            identity,
+            request.generation,
+            (state.native_session_ref if state is not None else None) or str(heid),
+        )
+        owner = await self._sessions.claim(
+            self._states,
+            scope,
+            heid,
+            generation=request.generation,
+            now=self._clock(),
+            heartbeat_timeout_s=request.segment.heartbeat_timeout_s,
+        )
         fields = self._fields(operation, identity, request.generation, f"turn:{request.turn_no}")
+        state = await self._acknowledged_turn(
+            identity, fields, await self._states.load(scope, heid)
+        )
         sent = state is not None and state.native_turn_ref is not None
+        journaled = state is not None and state.dispatch("send", fields["idempotency_key"])
         if request.capacity_exhausted:
             if not sent:
                 await self._turn_not_started(operation)
@@ -375,13 +439,20 @@ class LaneTurnService:
                     session_ref=state.native_session_ref if state else None,
                     turn_ref=state.native_turn_ref if state else None,
                 ),
+                owner=owner,
             )
-        if request.phase == "start" and not sent:
-            started = await self._start_and_send(request, harness, identity, fields)
+        if not sent and (request.phase == "start" or journaled):
+            started = await self._start_and_send(request, harness, identity, fields, owner)
             if isinstance(started, LaneTurnResult):
                 return started
-            session, turn = started
+            session, turn, reconciled = started
             cursor = None
+            if reconciled:
+                # A turn the provider accepted before a lost receipt: observe it from the
+                # persisted frames, never send it again.
+                cursor = await self._resume_cursor(
+                    harness, identity, request, signals.prior_cursor()
+                )
         else:
             if state is None or state.native_session_ref is None:
                 return await self._lost(request, identity, reason="native_session_unrecorded")
@@ -411,7 +482,36 @@ class LaneTurnService:
             secret_values=await self._secret_values(operation),
         )
         return await self._observe_segment(
-            request, harness, identity, fields, turn, cursor, writer, signals, attempt=attempt
+            request,
+            harness,
+            identity,
+            fields,
+            turn,
+            cursor,
+            writer,
+            signals,
+            attempt=attempt,
+            owner=owner,
+        )
+
+    async def _acknowledged_turn(
+        self,
+        identity: LaneExecutionIdentity,
+        fields: dict[str, Any],
+        state: LaneExecutionState | None,
+    ) -> LaneExecutionState | None:
+        """A send acknowledged in the journal but not yet on the row (lost between the two
+        writes) is recorded now: the journal is the receipt."""
+
+        if state is None or state.native_turn_ref is not None:
+            return state
+        record = state.dispatch("send", fields["idempotency_key"])
+        if record is None or record.phase != "acknowledged" or record.native_ref is None:
+            return state
+        return await self._states.record(
+            identity.request_scope,
+            identity.harness_execution_id,
+            LaneExecutionUpdate(native_turn_ref=record.native_ref),
         )
 
     async def _start_and_send(
@@ -420,7 +520,8 @@ class LaneTurnService:
         harness: SessionLane,
         identity: LaneExecutionIdentity,
         fields: dict[str, Any],
-    ) -> tuple[SessionHandle, TurnHandle] | LaneTurnResult:
+        owner: SessionOwner,
+    ) -> tuple[SessionHandle, TurnHandle, bool] | LaneTurnResult:
         operation = request.operation
         scope, heid = identity.request_scope, identity.harness_execution_id
         prepared = await harness.prepare(
@@ -432,35 +533,65 @@ class LaneTurnService:
             )
         )
         state = await self._states.load(scope, heid)
-        if state is not None and state.native_session_ref is not None:
-            session = await harness.reattach(
-                ReattachRequest(**fields, native_session_ref=state.native_session_ref)
-            )
-        else:
-            session = await harness.start(StartRequest(**fields, prepared=prepared))
-            if session.native_session_ref is None:
-                raise ValueError("a Session Lane start returns the native session identity")
-            # Native identity first, then observation (SPEC-07 section 5.2).
-            await self._open(operation, identity, request.generation, session.native_session_ref)
-            details = {
-                key: value
-                for key, value in session.native_details.items()
-                if key in _RECORDED_DETAILS and value
-            }
-            await self._states.record(
-                scope,
-                heid,
-                LaneExecutionUpdate(native_session_ref=session.native_session_ref, **details),
-            )
-        turn = await harness.send_turn(
-            SendTurnRequest(
+        try:
+            if state is not None and state.native_session_ref is not None:
+                session = await harness.reattach(
+                    ReattachRequest(**fields, native_session_ref=state.native_session_ref)
+                )
+            else:
+                created = await self._dispatch_once(
+                    request,
+                    harness,
+                    identity,
+                    owner,
+                    "create",
+                    fields["idempotency_key"],
+                    instruction_ref=None,
+                    turn_no=request.turn_no,
+                    session=None,
+                    issue=lambda: harness.start(StartRequest(**fields, prepared=prepared)),
+                    native_of=lambda handle: handle.native_session_ref,
+                    declined_of=lambda _handle: False,
+                )
+                if created.value is not None:
+                    session = created.value
+                else:
+                    assert created.native_ref is not None
+                    session = await harness.reattach(
+                        ReattachRequest(**fields, native_session_ref=created.native_ref)
+                    )
+                if session.native_session_ref is None:
+                    raise ValueError("a Session Lane start returns the native session identity")
+                # Native identity first, then observation (SPEC-07 section 5.2).
+                await self._open(
+                    operation, identity, request.generation, session.native_session_ref
+                )
+                details = {
+                    key: value
+                    for key, value in session.native_details.items()
+                    if key in _RECORDED_DETAILS and value
+                }
+                await self._states.record(
+                    scope,
+                    heid,
+                    LaneExecutionUpdate(native_session_ref=session.native_session_ref, **details),
+                )
+            send = SendTurnRequest(
                 **fields,
                 session=session,
                 turn_no=request.turn_no,
                 instruction_ref=request.instruction_ref
                 or f"operation:{operation.identity.semantic_key}:turn:{request.turn_no}",
             )
-        )
+            dispatched = await self._dispatch_send(request, harness, identity, owner, send)
+        except _DispatchParked as parked:
+            return await self._park(request, identity, owner, reason=parked.reason)
+        except DispatchFenced:
+            return await self._fenced_before_send(request, harness, identity, owner)
+        except ProviderCapacityLimited:
+            await self._turn_not_started(operation)
+            raise
+        turn = dispatched.handle
         if turn.status == "busy":
             # `wait_then_send`: nothing was sent; the workflow polls `lane.status` until idle.
             return LaneTurnResult(
@@ -475,7 +606,218 @@ class LaneTurnService:
             scope, heid, LaneExecutionUpdate(native_turn_ref=turn.native_turn_ref)
         )
         await self._turn_started(operation, harness, session, turn)
-        return session, turn
+        return session, turn, dispatched.reconciled
+
+    # --- MP-06 dispatch journal ---------------------------------------------------------------
+
+    async def _dispatch_send(
+        self,
+        request: LaneTurnRequest,
+        harness: SessionLane,
+        identity: LaneExecutionIdentity,
+        owner: SessionOwner,
+        send: SendTurnRequest,
+    ) -> _SentTurn:
+        """`send_turn` once through the journal; a reconciled turn is never re-sent."""
+
+        dispatched = await self._dispatch_once(
+            request,
+            harness,
+            identity,
+            owner,
+            "send",
+            send.idempotency_key,
+            instruction_ref=send.instruction_ref,
+            turn_no=send.turn_no,
+            session=send.session,
+            issue=lambda: harness.send_turn(send),
+            native_of=lambda handle: handle.native_turn_ref,
+            declined_of=lambda handle: handle.status == "busy",
+        )
+        if dispatched.value is not None:
+            return _SentTurn(dispatched.value, reconciled=False)
+        return _SentTurn(
+            TurnHandle(
+                session=send.session, turn_no=send.turn_no, native_turn_ref=dispatched.native_ref
+            ),
+            reconciled=True,
+        )
+
+    async def _dispatch_once[T](
+        self,
+        request: LaneTurnRequest,
+        harness: SessionLane,
+        identity: LaneExecutionIdentity,
+        owner: SessionOwner,
+        kind: DispatchKind,
+        idempotency_key: str,
+        *,
+        instruction_ref: str | None,
+        turn_no: int,
+        session: SessionHandle | None,
+        issue: Callable[[], Awaitable[T]],
+        native_of: Callable[[T], str | None],
+        declined_of: Callable[[T], bool],
+    ) -> _Dispatched[T]:
+        """Journal, admit and issue one native create/send (SPEC-01 steps 2-3 and 7).
+
+        Raises `_DispatchParked` when an earlier dispatch of the key cannot be reconciled
+        and `DispatchFenced` when the Stop Fence denies a new one.
+        """
+
+        scope, heid = identity.request_scope, identity.harness_execution_id
+        record = DispatchRecord(
+            kind=kind,
+            idempotency_key=idempotency_key,
+            expected_generation=request.generation,
+            instruction_digest=instruction_digest(
+                kind=kind,
+                instruction_ref=instruction_ref,
+                binding_digest=_binding_digest(request.operation),
+                turn_no=turn_no,
+            ),
+            owner_ref=owner.owner_ref,
+            owner_epoch=owner.epoch,
+            intended_at=self._clock(),
+        )
+        claim = await self._states.intend_dispatch(scope, heid, record, owner=owner)
+        if not claim.fresh:
+            stored = claim.record
+            if stored.phase == "acknowledged" and stored.native_ref is not None:
+                return _Dispatched(native_ref=stored.native_ref, reconciled=True)
+            if stored.phase != "intended":
+                raise _DispatchParked(stored.reason or f"{kind}_dispatch_in_doubt")
+            lookup = await self._lookup(harness, stored, session)
+            if lookup.outcome == "found" and lookup.native_ref is not None:
+                await self._resolve(identity, owner, stored, "acknowledged", lookup.native_ref)
+                return _Dispatched(native_ref=lookup.native_ref, reconciled=True)
+            if lookup.outcome != "not_received":
+                await self._resolve(
+                    identity, owner, stored, "in_doubt", reason=f"{kind}_dispatch_ambiguous"
+                )
+                raise _DispatchParked(f"{kind}_dispatch_ambiguous")
+            await self._resolve(identity, owner, stored, "not_received", reason="reconciled")
+            claim = await self._states.intend_dispatch(scope, heid, record, owner=owner)
+            if not claim.fresh:
+                raise _DispatchParked(f"{kind}_dispatch_contended")
+        fenced = await self._fence_denies(request, record)
+        if fenced is not None:
+            await self._resolve(identity, owner, record, "declined", reason="stop_fenced")
+            raise DispatchFenced(record.key, fenced)
+
+        async def issue_and_record() -> _Dispatched[T]:
+            try:
+                value = await issue()
+            except ProviderCapacityLimited:
+                await self._resolve(identity, owner, record, "declined", reason="capacity")
+                raise
+            if declined_of(value):
+                await self._resolve(identity, owner, record, "declined", reason="busy")
+                return _Dispatched(native_ref=None, value=value)
+            native_ref = native_of(value)
+            if native_ref is not None:
+                await self._resolve(identity, owner, record, "acknowledged", native_ref)
+            return _Dispatched(native_ref=native_ref, value=value)
+
+        # An activity cancel must not cut the receipt off from a call the provider may have
+        # accepted: the call and its journal write finish (bounded) before the cancel lands.
+        task = asyncio.ensure_future(issue_and_record())
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            await asyncio.wait({task}, timeout=self._receipt_grace_s)
+            task.add_done_callback(_late_dispatch)
+            raise
+
+    async def _lookup(
+        self, harness: SessionLane, record: DispatchRecord, session: SessionHandle | None
+    ) -> DispatchLookup:
+        if not isinstance(harness, DispatchReconcilingLane):
+            return DispatchLookup(outcome="unknown", detail="the lane cannot reconcile dispatches")
+        try:
+            return await harness.reconcile_dispatch(record, session=session)
+        except NativeTurnLost:
+            return DispatchLookup(outcome="unknown", detail="native identity is lost")
+
+    async def _resolve(
+        self,
+        identity: LaneExecutionIdentity,
+        owner: SessionOwner,
+        record: DispatchRecord,
+        outcome: DispatchOutcome,
+        native_ref: str | None = None,
+        *,
+        reason: str | None = None,
+    ) -> DispatchRecord:
+        return await self._states.resolve_dispatch(
+            identity.request_scope,
+            identity.harness_execution_id,
+            record.kind,
+            record.idempotency_key,
+            outcome=outcome,
+            owner=owner,
+            at=self._clock(),
+            native_ref=native_ref,
+            reason=reason,
+        )
+
+    async def _fence_denies(self, request: LaneTurnRequest, record: DispatchRecord) -> str | None:
+        """A new native dispatch is a governed effect: admitted against the Stop Fence
+        atomically with fence writes (admitted before the fence stays admitted)."""
+
+        if self._fences is None:
+            return None
+        operation = request.operation
+        verdict = await self._fences.admit_effect(
+            EffectAdmission(
+                request_scope=operation.request_scope,
+                run_id=operation.identity.run_id,
+                generation=request.generation,
+                effect_ref=f"dispatch:{record.key}"[:512],
+                effect_kind="model",
+                lane_profile=request.lane_profile,
+            )
+        )
+        return None if verdict.allowed else (verdict.fence_command_id or "stop_fence")
+
+    async def _park(
+        self,
+        request: LaneTurnRequest,
+        identity: LaneExecutionIdentity,
+        owner: SessionOwner,
+        *,
+        reason: str,
+    ) -> LaneTurnResult:
+        """Unrecoverable dispatch uncertainty: `in_doubt`, nothing sent, nothing replaced."""
+
+        await self._states.assert_owner(
+            identity.request_scope, identity.harness_execution_id, owner
+        )
+        return await self._lost(request, identity, reason=reason)
+
+    async def _fenced_before_send(
+        self,
+        request: LaneTurnRequest,
+        harness: SessionLane,
+        identity: LaneExecutionIdentity,
+        owner: SessionOwner,
+    ) -> LaneTurnResult:
+        """The Stop Fence landed before the first send: nothing reached the provider, so the
+        unit settles `cancelled` (the immediate cancel's own settlement)."""
+
+        await self._turn_not_started(request.operation)
+        state = await self._states.load(identity.request_scope, identity.harness_execution_id)
+        return await self._settle(
+            request,
+            harness,
+            identity,
+            None,
+            ClosingFacts(native_status="cancelled", error_code="cancelled_by_command"),
+            attempt=None,
+            native=NativeRefs(session_ref=state.native_session_ref if state else None),
+            cancelled_by_command=True,
+            owner=owner,
+        )
 
     async def _resume_cursor(
         self,
@@ -508,13 +850,17 @@ class LaneTurnService:
         signals: TurnSignals,
         *,
         attempt: OperationActivityAttempt | None,
+        owner: SessionOwner,
     ) -> LaneTurnResult:
         bounds = request.segment
-        progress = _SegmentProgress(cursor=cursor, max_frames=bounds.max_frames)
+        progress = _SegmentProgress(cursor=cursor, max_frames=bounds.max_frames, owner=owner)
         terminal: LaneFrame | None = None
         ticker = asyncio.create_task(
             _heartbeat_ticker(
-                signals, lambda: (progress.cursor, progress.persisted), bounds.heartbeat_timeout_s
+                signals,
+                lambda: (progress.cursor, progress.persisted),
+                bounds.heartbeat_timeout_s,
+                renew=lambda: self._renew(identity, progress, bounds.heartbeat_timeout_s),
             )
         )
         try:
@@ -564,9 +910,10 @@ class LaneTurnService:
             if signals.cancel_requested():
                 # A requested cancel, not a worker shutdown, pause or reset.
                 with suppress(Exception):
-                    await harness.cancel_turn(
+                    receipt = await harness.cancel_turn(
                         CancelTurnRequest(**fields, turn=turn, reason="command")
                     )
+                    await self._cancel_acknowledged(request.operation, identity, receipt)
             raise
         except NativeTurnLost:
             return await self._lost(request, identity, reason="native_turn_lost")
@@ -578,13 +925,13 @@ class LaneTurnService:
             session_ref=turn.session.native_session_ref, turn_ref=turn.native_turn_ref
         )
         now = self._clock()
-        await self._states.record(
-            identity.request_scope,
-            identity.harness_execution_id,
-            segment_update(progress.cursor, now),
-        )
+        scope, heid = identity.request_scope, identity.harness_execution_id
+        await self._states.assert_owner(scope, heid, progress.owner)
+        await self._states.record(scope, heid, segment_update(progress.cursor, now))
         if terminal is None:
             await self._project(writer.handle, identity)
+            # The segment ends, the session does not: the manager keeps it for the next one.
+            self._sessions.retain(scope, heid, progress.owner, session=turn.session, turn=turn)
             return LaneTurnResult(
                 done=False,
                 cursor=progress.cursor,
@@ -606,7 +953,28 @@ class LaneTurnService:
             persisted=progress.persisted,
             duplicates=progress.duplicates,
             handle=writer.handle,
+            owner=progress.owner,
         )
+
+    async def _renew(
+        self, identity: LaneExecutionIdentity, progress: _SegmentProgress, heartbeat_s: int
+    ) -> None:
+        """Extend the owner's lease while it observes; a takeover fences this segment out."""
+
+        if progress.fenced_out is not None:
+            return
+        try:
+            progress.owner = await self._states.renew_owner(
+                identity.request_scope,
+                identity.harness_execution_id,
+                progress.owner,
+                expires_at=self._clock() + self._sessions.lease_for(heartbeat_s),
+            )
+            self._sessions.renewed(
+                identity.request_scope, identity.harness_execution_id, progress.owner
+            )
+        except StaleSessionOwner as error:
+            progress.fenced_out = error
 
     async def _pump(
         self,
@@ -626,7 +994,7 @@ class LaneTurnService:
         stream: AsyncIterator[LaneFrame] = harness.observe(
             ObserveRequest(**fields, turn=turn, after=progress.cursor, max_frames=bounds.max_frames)
         )
-        watch = self._watch(request)
+        watch = self._watch(request, frozenset(progress.stale_steers))
         try:
             async with aclosing(stream) as frames:  # type: ignore[type-var]
                 iterator = aiter(frames)
@@ -675,6 +1043,9 @@ class LaneTurnService:
         turn: TurnHandle,
         progress: _SegmentProgress,
     ) -> _Pumped | None:
+        if progress.fenced_out is not None:
+            # Another owner took the session over: this segment stops writing here.
+            raise progress.fenced_out
         await self._persist(frame, identity, writer, turn, progress)
         # Persisted first, then the heartbeat (the resume hint).
         signals.heartbeat(progress.cursor, progress.persisted)
@@ -702,8 +1073,11 @@ class LaneTurnService:
 
     # --- FT-G4 interrupt_and_inject: cancel_and_replace on a Session Lane ---------------------
 
-    def _watch(self, request: LaneTurnRequest) -> asyncio.Task[MailboxEntry] | None:
-        """Watch the mailbox for an `interrupt_and_inject` this turn would take."""
+    def _watch(
+        self, request: LaneTurnRequest, skip: frozenset[str] = frozenset()
+    ) -> asyncio.Task[MailboxEntry] | None:
+        """Watch the mailbox for an `interrupt_and_inject` this turn would take (`skip`: the
+        commands a stale steer requeued for the next boundary, not for this turn)."""
 
         if self._injections is None or self._mailbox is None:
             return None
@@ -715,7 +1089,7 @@ class LaneTurnService:
         async def poll() -> MailboxEntry:
             while True:
                 entry = await injections.pending(request.operation, node)
-                if entry is not None:
+                if entry is not None and entry.command_id not in skip:
                     return entry
                 await asyncio.sleep(injections.settings.poll_seconds)
 
@@ -765,13 +1139,18 @@ class LaneTurnService:
         describe = harness.describe()
         lane_profile = describe.lane_profile
         node = unit_boundary(operation)
-        semantics = interrupt_semantics(describe)
+        # MP-06: the frozen per-profile semantics and the describe must agree; no fallback.
+        semantics = resolve_interrupt_mode(lane_profile, describe, harness)
         scope, run_id = operation.request_scope, operation.identity.run_id
-        if node is None or semantics != "cancel_and_replace":
+        if node is None or semantics not in {"cancel_and_replace", "cooperative_inject"}:
             await self._mailbox.inject_unsupported(scope, entry, lane_profile=lane_profile)
             return turn  # the running turn is never interrupted
+        if signals.cancel_requested():
+            return turn  # a cancel owns the turn now; nothing replaces or steers it
         old_ref = turn.native_turn_ref
         key = f"{self._inject_prefix(operation)}{entry.command_id}"
+        if semantics == "cooperative_inject":
+            return await self._steer(request, harness, identity, turn, entry, key, node, progress)
         delivered = await self._mailbox.deliver(
             scope,
             run_id,
@@ -807,6 +1186,12 @@ class LaneTurnService:
             await self._persist(frame, identity, writer, turn, progress)
             signals.heartbeat(progress.cursor, progress.persisted)
 
+        owner = progress.owner
+
+        async def send(replacing: SendTurnRequest) -> TurnHandle:
+            # The replacement is a new governed dispatch: journaled, fenced, sent once.
+            return (await self._dispatch_send(request, harness, identity, owner, replacing)).handle
+
         # The interrupted turn's Uncertain Effects, before the cancel (reported as settled).
         uncertain = await unsettled()
         try:
@@ -819,7 +1204,48 @@ class LaneTurnService:
                 after=progress.cursor,
                 on_frame=persist,
                 cancel_first=cancel_first,
+                send=send,
+                on_cancelled=lambda receipt: self._cancel_acknowledged(
+                    operation, identity, receipt
+                ),
             )
+            new_turn = replaced.handle
+            if new_turn.status == "busy" or new_turn.native_turn_ref is None:
+                new_turn = await self._send_when_idle(harness, fields, replacement, send)
+        except DispatchFenced:
+            # A Stop Fence landed while the old turn drained: no replacement, ever. The old
+            # turn is cancelled and its pre-fence effects keep their disposition.
+            await self._mailbox.turn_not_started(scope, run_id, delivery_key=key)
+            return await self._settle(
+                request,
+                harness,
+                identity,
+                turn,
+                ClosingFacts(
+                    native_status="cancelled",
+                    error_code="cancelled_by_command",
+                    usage=await self._turn_usage(identity, request.generation, old_ref),
+                ),
+                attempt=None,
+                native=NativeRefs(session_ref=turn.session.native_session_ref, turn_ref=old_ref),
+                cursor=progress.cursor,
+                persisted=progress.persisted,
+                duplicates=progress.duplicates,
+                handle=writer.handle,
+                cancelled_by_command=True,
+                owner=owner,
+            )
+        except _DispatchParked as parked:
+            # The replacement's earlier dispatch is ambiguous: never send a second one.
+            await self._mailbox.inject_parked(
+                scope,
+                run_id,
+                delivery_key=key,
+                lane_profile=lane_profile,
+                cancelled_turn_ref=old_ref,
+                pending_effect_ids=(),
+            )
+            return await self._park(request, identity, owner, reason=parked.reason)
         except InjectionParked as parked:
             await self._mailbox.inject_parked(
                 scope,
@@ -842,9 +1268,6 @@ class LaneTurnService:
                 ),
                 operation_result=result.model_dump(mode="json"),
             )
-        new_turn = replaced.handle
-        if new_turn.status == "busy" or new_turn.native_turn_ref is None:
-            new_turn = await self._send_when_idle(harness, fields, replacement)
         await self._states.record(
             identity.request_scope,
             identity.harness_execution_id,
@@ -869,7 +1292,11 @@ class LaneTurnService:
         return new_turn
 
     async def _send_when_idle(
-        self, harness: SessionLane, fields: dict[str, Any], request: SendTurnRequest
+        self,
+        harness: SessionLane,
+        fields: dict[str, Any],
+        request: SendTurnRequest,
+        send: Callable[[SendTurnRequest], Awaitable[TurnHandle]],
     ) -> TurnHandle:
         """A cancelled run can take a moment to release the agent (`409 agent_busy`)."""
 
@@ -877,11 +1304,88 @@ class LaneTurnService:
         for _attempt in range(30):
             observed = await harness.status(StatusRequest(**fields, session=session))
             if observed.idle or observed.terminal:
-                sent = await harness.send_turn(request)
+                sent = await send(request)
                 if sent.status != "busy" and sent.native_turn_ref is not None:
                     return sent
             await asyncio.sleep(0.5)
         raise NativeTurnLost("the agent never became idle for the replacement turn")
+
+    async def _steer(
+        self,
+        request: LaneTurnRequest,
+        harness: SessionLane,
+        identity: LaneExecutionIdentity,
+        turn: TurnHandle,
+        entry: MailboxEntry,
+        key: str,
+        node: tuple[Any, str],
+        progress: _SegmentProgress,
+    ) -> TurnHandle:
+        """`cooperative_inject`: steer the exact active native turn. A turn that completed
+        concurrently is a typed `stale_target`: the command is requeued (same command id) for
+        the next boundary and never lands on another turn."""
+
+        assert self._mailbox is not None and isinstance(harness, SteeringLane)
+        operation = request.operation
+        scope, run_id = operation.request_scope, operation.identity.run_id
+        lane_profile = harness.describe().lane_profile
+        delivered = await self._mailbox.deliver(
+            scope,
+            run_id,
+            delivery_key=key,
+            family=node[0],
+            node_key=node[1],
+            iteration_start=False,
+            lane_profile=lane_profile,
+            kinds=(INJECT_KIND,),
+        )
+        if not delivered:
+            return turn
+        fenced = await self._fence_denies(
+            request,
+            DispatchRecord(
+                kind="send",
+                idempotency_key=f"{key}:steer:{turn.native_turn_ref}",
+                expected_generation=request.generation,
+                instruction_digest=instruction_digest(
+                    kind="send",
+                    instruction_ref=key,
+                    binding_digest=_binding_digest(operation),
+                    turn_no=turn.turn_no,
+                ),
+                owner_ref=progress.owner.owner_ref,
+                owner_epoch=progress.owner.epoch,
+                intended_at=self._clock(),
+            ),
+        )
+        if fenced is not None:
+            await self._mailbox.turn_not_started(scope, run_id, delivery_key=key)
+            progress.stale_steers.add(entry.command_id)
+            return turn
+        steered = await harness.steer(turn, instruction_ref=key)
+        if steered.outcome != "applied" or steered.target_turn_ref not in {
+            None,
+            turn.native_turn_ref,
+        }:
+            await self._mailbox.turn_not_started(scope, run_id, delivery_key=key)
+            progress.stale_steers.add(entry.command_id)
+            _LOGGER.info(
+                "steer of %s for %s is stale_target; requeued for the next boundary",
+                turn.native_turn_ref,
+                entry.command_id,
+            )
+            return turn
+        await self._mailbox.inject_replaced(
+            scope,
+            run_id,
+            delivery_key=key,
+            lane_profile=lane_profile,
+            delivered_semantics="cooperative_inject",
+            cancelled_turn_ref=None,
+            replacement_turn_ref=turn.native_turn_ref or f"turn:{turn.turn_no}",
+            session_ref=turn.session.native_session_ref,
+        )
+        return turn
 
     async def _frames_of(
         self, identity: LaneExecutionIdentity, generation: int
@@ -981,20 +1485,29 @@ class LaneTurnService:
                 )
             ]
         )
-        sent = await harness.send_turn(
-            SendTurnRequest(
-                **{
-                    **fields,
-                    "idempotency_key": (
-                        f"{identity.harness_execution_id}:{request.generation}:"
-                        f"continuation:{handover.transfer_id}"
+        try:
+            sent = (
+                await self._dispatch_send(
+                    request,
+                    harness,
+                    identity,
+                    progress.owner,
+                    SendTurnRequest(
+                        **{
+                            **fields,
+                            "idempotency_key": (
+                                f"{identity.harness_execution_id}:{request.generation}:"
+                                f"continuation:{handover.transfer_id}"
+                            ),
+                        },
+                        session=new_session,
+                        turn_no=turn.turn_no + 1,
+                        instruction_ref=handover.instruction_ref,
                     ),
-                },
-                session=new_session,
-                turn_no=turn.turn_no + 1,
-                instruction_ref=handover.instruction_ref,
-            )
-        )
+                )
+            ).handle
+        except (_DispatchParked, DispatchFenced) as stopped:
+            raise NativeTurnLost(f"the continuation turn was not dispatched: {stopped}") from None
         if sent.native_turn_ref is None:
             raise NativeTurnLost("the continuation turn was not accepted")
         await self._states.record(
@@ -1111,8 +1624,13 @@ class LaneTurnService:
         duplicates: int = 0,
         handle: HarnessExecutionHandle | None = None,
         cancelled_by_command: bool = False,
+        owner: SessionOwner | None = None,
     ) -> LaneTurnResult:
         operation = request.operation
+        scope, heid = identity.request_scope, identity.harness_execution_id
+        if owner is not None:
+            # A stale owner or generation never ends the session or settles the attempt.
+            await self._states.assert_owner(scope, heid, owner)
         fields = self._fields(operation, identity, request.generation, "settle")
         if turn is not None:
             facts = await self._settled_usage(harness, fields, turn, facts)
@@ -1125,10 +1643,9 @@ class LaneTurnService:
             cancelled_by_command=cancelled_by_command,
         )
         await self._states.record(
-            identity.request_scope,
-            identity.harness_execution_id,
-            LaneExecutionUpdate(usage_disposition=facts.cost_disposition),
+            scope, heid, LaneExecutionUpdate(usage_disposition=facts.cost_disposition)
         )
+        self._sessions.release(scope, heid)
         if turn is not None or cancelled_by_command:
             await self._turns_settled(
                 operation, harness.describe().lane_profile, result, native.turn_ref
@@ -1237,6 +1754,12 @@ class LaneTurnService:
             request.operation, request.lane_profile, request.generation
         )
         state = await self._states.load(identity.request_scope, identity.harness_execution_id)
+        # A local session's status is readable only by the worker that owns it.
+        self._sessions.check_control(
+            state.owner if state else None,
+            placement=_placement(request.lane_profile),
+            now=self._clock(),
+        )
         session_ref = request.native.session_ref or (state.native_session_ref if state else None)
         turn_ref = request.native.turn_ref or (state.native_turn_ref if state else None)
         if session_ref is None:
@@ -1296,9 +1819,26 @@ class LaneTurnService:
                 operation_result=result.model_dump(mode="json"),
             )
         state = await self._states.load(identity.request_scope, identity.harness_execution_id)
+        owner = await self._control_owner(request.lane_profile, identity, request.generation, state)
         session_ref = request.native.session_ref or (state.native_session_ref if state else None)
         turn_ref = request.native.turn_ref or (state.native_turn_ref if state else None)
         fields = self._fields(request.operation, identity, request.generation, "cancel")
+        if turn_ref is None and state is not None:
+            ambiguous = [
+                record
+                for record in state.dispatches.values()
+                if record.phase in {"intended", "in_doubt"}
+            ]
+            if ambiguous:
+                # A send may have been accepted without a receipt: "never sent" would be a
+                # false claim, so the cancel cannot settle it; reconciliation decides.
+                result = await self._boundary.lane_in_doubt(
+                    request.operation, reason=f"{ambiguous[0].kind}_dispatch_ambiguous"
+                )
+                return LaneCancelResult(
+                    receipt=CancelReceipt(acknowledged=False, native_status="unknown"),
+                    operation_result=result.model_dump(mode="json"),
+                )
         if session_ref is None or turn_ref is None:
             # Never sent: nothing to cancel at the provider; the unit settles cancelled.
             receipt = CancelReceipt(acknowledged=True, already_terminal=True, native_status="idle")
@@ -1316,6 +1856,7 @@ class LaneTurnService:
                     **fields, turn=turn, reason=request.reason, urgency=request.urgency
                 )
             )
+            await self._cancel_acknowledged(request.operation, identity, receipt)
         if not request.settle or not (receipt.already_terminal or receipt.acknowledged):
             return LaneCancelResult(receipt=receipt)
         if turn is not None:
@@ -1345,19 +1886,95 @@ class LaneTurnService:
             attempt=attempt,
             native=NativeRefs(session_ref=session_ref, turn_ref=turn_ref),
             cancelled_by_command=True,
+            owner=owner,
         )
         return LaneCancelResult(
             receipt=receipt, settled=True, operation_result=cancelled.operation_result
         )
 
+    async def _control_owner(
+        self,
+        lane_profile: str,
+        identity: LaneExecutionIdentity,
+        generation: int,
+        state: LaneExecutionState | None,
+    ) -> SessionOwner | None:
+        """The owner a control acts as: this worker when it holds (or may take over) the
+        session; none for a hosted session another live owner holds (settlement is once at
+        the boundary). A live foreign owner of a local session refuses the control."""
+
+        current = state.owner if state is not None else None
+        now = self._clock()
+        self._sessions.check_control(current, placement=_placement(lane_profile), now=now)
+        if current is None:
+            return None
+        if current.owner_ref != self._sessions.owner_ref and not current.expired(now):
+            return None
+        # Ours, or expired: claiming it (a takeover bumps the epoch) fences the old owner.
+        return await self._sessions.claim(
+            self._states,
+            identity.request_scope,
+            identity.harness_execution_id,
+            generation=generation,
+            now=now,
+            heartbeat_timeout_s=LaneSegmentBounds().heartbeat_timeout_s,
+        )
+
+    async def _cancel_acknowledged(
+        self,
+        operation: OperationExecutionRequest,
+        identity: LaneExecutionIdentity,
+        receipt: CancelReceipt,
+    ) -> None:
+        """The provider acknowledged the cancel: its own Delivery Report timestamp, recorded
+        now and never folded into the settlement time (four independent timestamps)."""
+
+        if self._fences is None or not receipt.acknowledged:
+            return
+        try:
+            await self._fences.record_milestone(
+                operation.request_scope,
+                operation.identity.run_id,
+                None,
+                "provider_acknowledged",
+                unit_key=str(identity.harness_execution_id),
+                recorded_at=self._clock(),
+            )
+        except Exception:
+            _LOGGER.warning("provider_acknowledged milestone was not recorded", exc_info=True)
+
+
+def _late_dispatch(task: asyncio.Future[Any]) -> None:
+    """A native call that returned after its activity was cancelled: its receipt was journaled
+    if this owner still held the session, or refused (`StaleSessionOwner`) after a takeover."""
+
+    if task.cancelled():
+        return
+    error = task.exception()
+    if error is not None:
+        _LOGGER.warning("a late native dispatch receipt was not recorded: %s", error)
+
+
+def _placement(lane_profile: str) -> str:
+    return (
+        "cloud"
+        if lane_profile in {"cursor_cloud", "claude_cloud", "codex_cloud"}
+        else ("worker_hosted")
+    )
+
 
 @dataclass
 class _SegmentProgress:
+    owner: SessionOwner
     cursor: str | None = None
     max_frames: int = 0
     persisted: int = 0
     duplicates: int = 0
     observed: int = 0
+    # MP-06: set when a takeover fenced this owner out (the segment stops at the next frame)
+    # and the commands a stale steer requeued for the next boundary.
+    fenced_out: StaleSessionOwner | None = None
+    stale_steers: set[str] = field(default_factory=set)
 
 
 @dataclass(frozen=True)
@@ -1366,19 +1983,51 @@ class _Pumped:
     injection: MailboxEntry | None = None
 
 
+@dataclass(frozen=True)
+class _Dispatched[T]:
+    """A journaled create/send: the provider's return when this call issued it, or only the
+    native identity when an earlier, acknowledged or reconciled dispatch is reused."""
+
+    native_ref: str | None
+    value: T | None = None
+    reconciled: bool = False
+
+
+@dataclass(frozen=True)
+class _SentTurn:
+    handle: TurnHandle
+    reconciled: bool
+
+
+class _DispatchParked(Exception):
+    """An earlier dispatch of the key is ambiguous and cannot be reconciled: `in_doubt`."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason[:128]
+
+
 async def _heartbeat_ticker(
     signals: TurnSignals,
     progress: Callable[[], tuple[str | None, int]],
     heartbeat_timeout_s: int,
+    *,
+    renew: Callable[[], Awaitable[None]] | None = None,
 ) -> None:
     """Keep heartbeating the last persisted cursor while the provider is silent, so a long
-    tool call is not mistaken for a lost worker (the SDK throttles sends anyway)."""
+    tool call is not mistaken for a lost worker (the SDK throttles sends anyway); renew the
+    owner's session lease on the same beat."""
 
     interval = max(heartbeat_timeout_s / 3, 1.0)
     while True:
         await asyncio.sleep(interval)
         cursor, persisted = progress()
         signals.heartbeat(cursor, persisted)
+        if renew is not None:
+            try:
+                await renew()
+            except Exception:
+                _LOGGER.warning("session lease renewal failed; retried on the next beat")
 
 
 __all__ = [

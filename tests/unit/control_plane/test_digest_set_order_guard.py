@@ -575,6 +575,13 @@ KNOWN_EXTENDED_DECLARED_MODELS = {
     ("BellLabsRunKey", "SemanticOperationAttemptKey"),
     ("ExecutionEpochKey", "AgentThreadKey"),
     ("ExecutionEpochKey", "RuntimeTransportAttemptKey"),
+    # Manifest `mission/v2` (MP-01): the v2 node tree re-declares every `environment` and
+    # `workspace` field with the V2 type, so a `mission/v2` document never dumps through a
+    # v1-declared field; a `mission/v1` document never holds a V2 instance (its parser builds
+    # v1 types). The pair is pinned so a new v1 field declared as `Environment` or
+    # `WorkspaceSelection` is reviewed before it can receive a V2 instance.
+    ("Environment", "EnvironmentV2"),
+    ("WorkspaceSelection", "WorkspaceSelectionV2"),
 }
 
 

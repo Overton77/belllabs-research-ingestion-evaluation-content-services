@@ -15,6 +15,11 @@ FT-C4 adds run list and search:
 - `GET .../runs/{run_id}/transcript/search?q=&limit=` ranks the run's projected transcript
   entries (`websearch_to_tsquery` + `ts_rank_cd`) and returns entries with the cursor that
   `run transcript --since` opens.
+- `POST .../runs/{run_id}/transcript/refresh` re-projects the run's search documents.
+
+`full=true` reads referenced bodies through the tenant's artifact body reader
+(`app.state.mission_control_artifact_body_readers`, same key as the transcript services),
+which requires the artifact read grant; without a registered reader it is `501`.
 
 Authentication and the application/tenant scope are verified exactly as the Mission
 Control router does; `workflow_run.read` is required. A malformed cursor is
@@ -58,6 +63,7 @@ router = APIRouter(prefix="/v1/applications/{application_id}", tags=["mission-tr
 
 NEXT_CURSOR_HEADER = "X-Transcript-Next-Cursor"
 MAX_TAIL_SECONDS = 300.0
+ARTIFACT_BODY_READERS = "mission_control_artifact_body_readers"
 
 
 def get_transcript_service(
@@ -65,14 +71,27 @@ def get_transcript_service(
     request: Request,
     principal: Annotated[MissionPrincipal, Depends(get_mission_principal)],
 ) -> TranscriptService:
+    """The tenant's transcript service, composed with its artifact body reader when one is
+    registered (`full=true` stays `501 full_body_unavailable` otherwise)."""
+
     authorize_application(application_id, request, principal)
+    key = (principal.installation_id, application_id, principal.tenant_id)
     registry = getattr(request.app.state, "mission_control_transcript_services", {})
-    service = registry.get((principal.installation_id, application_id, principal.tenant_id))
+    service = registry.get(key)
     if not isinstance(service, TranscriptService):
         raise HTTPException(status_code=503, detail={"code": "transcript_unavailable"})
-    if service.request_scope != principal_request_scope(principal):
+    scope = principal_request_scope(principal)
+    if service.request_scope != scope:
         raise HTTPException(status_code=503, detail={"code": "service_scope_mismatch"})
-    return service
+    if service.reads_full_bodies:
+        return service
+    readers = getattr(request.app.state, ARTIFACT_BODY_READERS, {})
+    reader = readers.get(key)
+    if reader is None:
+        return service
+    if getattr(reader, "request_scope", None) != scope:
+        raise HTTPException(status_code=503, detail={"code": "service_scope_mismatch"})
+    return service.with_artifacts(reader)
 
 
 Principal = Annotated[MissionPrincipal, Depends(get_mission_principal)]
@@ -296,6 +315,17 @@ async def list_runs(
     except RunListUnavailable:
         raise HTTPException(status_code=503, detail={"code": "run_list_unavailable"}) from None
     return {"application_id": principal.application_id, **page.model_dump(mode="json")}
+
+
+@router.post("/runs/{run_id}/transcript/refresh")
+async def refresh_transcript(run_id: str, principal: Principal, service: Search) -> dict[str, Any]:
+    """Re-project the run's searchable transcript documents now; returns the receipt."""
+
+    try:
+        receipt = await service.refresh(run_id, actor=principal.actor)
+    except (TranscriptDenied, TranscriptRunNotFound) as exc:
+        raise _error(exc) from None
+    return {"application_id": principal.application_id, **receipt.model_dump(mode="json")}
 
 
 @router.get("/runs/{run_id}/transcript/search")

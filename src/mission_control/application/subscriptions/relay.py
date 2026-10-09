@@ -2,11 +2,18 @@
 
 One pass leases due subscriptions (webhook and MCP session channels; SSE stream tickets are
 pulled by the client), reads committed events after each cursor, applies the filters, and
-delivers in ``seq`` order. The cursor advances only after a delivery receipt is written, so
-a relay that dies between sending and recording sends the same event again (same
-``event_id``): delivery is at least once and never skips a ``seq``. Failures back off
-exponentially with full jitter; the twelfth consecutive failure dead-letters the
-subscription and the store emits ``subscription.dead_lettered`` into the mission stream.
+delivers in ``seq`` order (public aliases such as ``run.completed`` are derived per
+subscription by ``aliases.select``, at most one envelope per event). The cursor advances
+only after a delivery receipt is written, so a relay that dies between sending and
+recording sends the same event again (same ``event_id``): delivery is at least once and
+never skips a ``seq``. Failures back off exponentially with full jitter; the twelfth
+consecutive failure dead-letters the subscription and the store emits
+``subscription.dead_lettered`` into the mission stream.
+
+MP-15: webhook requests are signed with a timestamp and a delivery id stable across retries
+(`webhook_signing`); a destination the transport's egress policy rejects is dead-lettered on
+the first attempt (`NON_RETRYABLE_ERRORS`). Delivery state lives only in the subscription
+tables: a retry re-sends the recorded event and never touches run control or agent work.
 """
 
 from __future__ import annotations
@@ -15,16 +22,24 @@ import random
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from uuid import UUID
 
 from mission_control.application.execution.operations.operation_execution import (
     SecretResolutionPort,
 )
+from mission_control.application.subscriptions.aliases import Selected, select
 from mission_control.application.subscriptions.ports import (
     McpSessionNotifier,
     SubscriptionStore,
     WebhookResponse,
     WebhookTransport,
     WebhookTransportError,
+    error_class_of,
+)
+from mission_control.application.subscriptions.webhook_signing import (
+    NON_RETRYABLE_ERRORS,
+    event_delivery_id,
+    signed_headers,
 )
 from mission_control.domain.subscriptions.contracts import (
     DeliveryStatus,
@@ -37,7 +52,6 @@ from mission_control.domain.subscriptions.contracts import (
     WebhookChannel,
     after_failure,
     secret_ref_name,
-    sign,
 )
 
 
@@ -98,14 +112,15 @@ class SubscriptionRelay:
         current = subscription
         skipped_to = current.cursor_seq
         for event in events:
-            if not current.filters.matches(event):
+            selected = select(current.filters, event)
+            if selected is None:
                 skipped_to = event.seq
                 continue
             if skipped_to > current.cursor_seq:
                 current = await self._store.advance_cursor(
                     current, skipped_to, now=self._clock(), owner=self._owner
                 )
-            outcome = await self._deliver(current, event, report)
+            outcome = await self._deliver(current, selected, report)
             if outcome is None:
                 return
             current = outcome
@@ -116,12 +131,18 @@ class SubscriptionRelay:
             )
 
     async def _deliver(
-        self, subscription: Subscription, event: MissionEventEnvelope, report: RelayPassReport
+        self, subscription: Subscription, selected: Selected, report: RelayPassReport
     ) -> Subscription | None:
-        """Deliver one event; the updated subscription to continue with, or None to stop."""
+        """Deliver one event; the updated subscription to continue with, or None to stop.
 
+        A derived public notification is sent under its own `event_id`; its receipts are
+        keyed by the canonical event it was derived from.
+        """
+
+        event = selected.envelope
+        receipt_event_id = selected.canonical_event_id
         channel = subscription.channel
-        attempt = await self._store.attempts(subscription.subscription_id, event.event_id) + 1
+        attempt = await self._store.attempts(subscription.subscription_id, receipt_event_id) + 1
         name = str(subscription.subscription_id)
         if isinstance(channel, StreamTicketChannel):
             return None
@@ -139,18 +160,20 @@ class SubscriptionRelay:
             report.delivered.append((name, event.seq))
             return await self._store.record_success(
                 subscription,
-                self._receipt(subscription, event, attempt, DeliveryStatus.DELIVERED),
+                self._receipt(subscription, selected, attempt, DeliveryStatus.DELIVERED),
                 owner=self._owner,
             )
         assert isinstance(channel, WebhookChannel)
-        response, error_class = await self._post(channel, subscription, event)
+        response, error_class = await self._post(
+            channel, subscription, event, receipt_event_id, attempt
+        )
         if response is not None and 200 <= response.status_code < 300:
             report.delivered.append((name, event.seq))
             return await self._store.record_success(
                 subscription,
                 self._receipt(
                     subscription,
-                    event,
+                    selected,
                     attempt,
                     DeliveryStatus.DELIVERED,
                     response=response,
@@ -158,12 +181,14 @@ class SubscriptionRelay:
                 owner=self._owner,
             )
         decision = after_failure(subscription.failure_count, self._clock(), self._jitter())
+        if error_class in NON_RETRYABLE_ERRORS:
+            decision = decision.model_copy(update={"dead_letter": True})
         status = DeliveryStatus.DEAD_LETTERED if decision.dead_letter else DeliveryStatus.FAILED
         await self._store.record_failure(
             subscription,
             self._receipt(
                 subscription,
-                event,
+                selected,
                 attempt,
                 status,
                 response=response,
@@ -182,7 +207,12 @@ class SubscriptionRelay:
         return None
 
     async def _post(
-        self, channel: WebhookChannel, subscription: Subscription, event: MissionEventEnvelope
+        self,
+        channel: WebhookChannel,
+        subscription: Subscription,
+        event: MissionEventEnvelope,
+        canonical_event_id: UUID,
+        attempt: int,
     ) -> tuple[WebhookResponse | None, str | None]:
         try:
             resolved = await self._secrets.resolve((channel.secret_ref,))
@@ -190,23 +220,28 @@ class SubscriptionRelay:
         except (LookupError, KeyError):
             return None, "secret_unavailable"
         body = event.body()
-        headers = {
-            "Content-Type": "application/json",
-            channel.signature_header: sign(secret, body),
-            "X-MC-Event-Id": str(event.event_id),
-            "X-MC-Event-Seq": str(event.seq),
-            "X-MC-Subscription-Id": str(subscription.subscription_id),
-        }
+        headers = signed_headers(
+            secret,
+            body,
+            delivery=event_delivery_id(subscription.subscription_id, canonical_event_id),
+            attempt=attempt,
+            now=self._clock(),
+            extra={
+                "X-MC-Event-Id": str(event.event_id),
+                "X-MC-Event-Seq": str(event.seq),
+                "X-MC-Subscription-Id": str(subscription.subscription_id),
+            },
+        )
         try:
             response = await self._transport.post(channel.url, body, headers)
-        except WebhookTransportError:
-            return None, "transport_error"
+        except WebhookTransportError as error:
+            return None, error_class_of(error)
         return response, None
 
     def _receipt(
         self,
         subscription: Subscription,
-        event: MissionEventEnvelope,
+        selected: Selected,
         attempt: int,
         status: DeliveryStatus,
         *,
@@ -215,8 +250,8 @@ class SubscriptionRelay:
     ) -> SubscriptionDelivery:
         return SubscriptionDelivery(
             subscription_id=subscription.subscription_id,
-            event_id=event.event_id,
-            seq=event.seq,
+            event_id=selected.canonical_event_id,
+            seq=selected.envelope.seq,
             attempt=attempt,
             status=status,
             response_code=response.status_code if response is not None else None,

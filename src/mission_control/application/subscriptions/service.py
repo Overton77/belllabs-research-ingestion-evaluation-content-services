@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime
 from uuid import UUID
 
+from mission_control.application.subscriptions.aliases import select
 from mission_control.application.subscriptions.ports import (
     NewSubscription,
     SubscriptionNotFound,
@@ -181,9 +182,12 @@ class SubscriptionService:
             events = await self._store.events_after(target, cursor, batch)
             for event in events:
                 cursor = event.seq
-                if filters.matches(event):
+                selected = select(filters, event)
+                if selected is not None:
                     yield sse_frame(
-                        "mission_event", event.body().decode("utf-8"), event_id=str(event.seq)
+                        "mission_event",
+                        selected.envelope.body().decode("utf-8"),
+                        event_id=str(event.seq),
                     )
                     since_frame = 0.0
             if events:

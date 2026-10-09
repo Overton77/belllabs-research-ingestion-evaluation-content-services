@@ -260,6 +260,14 @@ verified before use. Start the corresponding worker separately. Without Temporal
 inspection and durable command admission work, but launch fails explicitly and
 boundary delivery stays pending.
 
+Local Temporal and Temporal Cloud run the same workflow code. Each run stays pinned to the
+cluster it first started on. A cloud outage never triggers an automatic cross-cluster replay:
+new runs may target the local cluster (`new_run_cluster` in the `mc.local_run_profile.v1`
+profile), and an active run either resumes on its original cluster after recovery or moves
+through an explicit, reconciled successor run. The successor gets a new run id, so it also has
+a new workflow id. The procedure and its guard are described in
+[runbook 2.9](specs/fast-track-2026-10/OWNER-FIXTURE-RUNBOOK.md).
+
 Supply accepted admission policies, extension validators, payload storage, and fork
 patch policies through the `create_application(..., runtime_options={...})` Python
 composition hook. Default empty policy/extension registries fail closed for unknown
@@ -327,6 +335,41 @@ The worker uses a Psycopg-compatible selector event loop on Windows. The configu
 entrypoint has been exercised with real PostgreSQL and Temporal, including root,
 both family and linked-run pollers, without creating schema during startup.
 
+## Multi-provider entrypoints and configuration (2026-10 packet)
+
+Names only; values come from the operator environment. See
+`docs/specs/multi-provider-2026-10/` and the ledger for evidence status.
+
+- `uvicorn mission_control.bootstrap.realtime:create_asgi_app --factory`: the public API
+  wrapped once with the `/missions` Socket.IO namespace (SPEC-04). `bootstrap.api:create_app`
+  keeps working without the socket. `MISSION_SOCKET_REDIS_FANOUT=true` relays presence and
+  commit hints between API processes over `REDIS_URL`; PostgreSQL stays the replay ledger.
+  `MISSION_SOCKET_POSTGRES_HINTS` (default true) listens on the 0032 `mc_stream_hint`
+  channel of every configured application database to wake the same pumps.
+- `GET|POST /v1/applications/{app}/human-tasks[...]` (MP-10): Human Gate tasks and the one
+  resolution path; MCP tools `mission_human_task_*` and the socket event
+  `resolve_human_task` call the same service. Both family workers register the
+  `mc.human_gate.v1` control activation and its activities.
+- Session ownership (MP-06): `MISSION_CONTROL_SESSION_LEASE_MIN_S` (10),
+  `MISSION_CONTROL_SESSION_LEASE_HEARTBEATS` (2),
+  `MISSION_CONTROL_DISPATCH_RECEIPT_GRACE_S` (10). Every new native dispatch is admitted
+  against the run's Stop Fence before it is issued.
+- Auth routes and capacity waits (MP-05): `MISSION_CONTROL_AUTH_PROFILES_PATH`,
+  `MISSION_CONTROL_ALLOW_UNQUALIFIED_AUTH_ROUTES`, `MISSION_CONTROL_AUTH_STATUS_PROBE`,
+  `MISSION_CONTROL_AUTH_STATUS_TIMEOUT_S`, `MISSION_CONTROL_CAPACITY_*`.
+- Local readiness (MP-22): `MISSION_CONTROL_LOCAL_RUN_PROFILE` (an
+  `mc.local_run_profile.v1` file) and `MISSION_CONTROL_PREFLIGHT_WORKSPACE_ROOT`. The worker
+  verifies capability pins and, with a profile, lane hosts before it polls
+  (`PIN_DRIFT` / `LANE_UNSUPPORTED_OS` refuse startup); `python -m
+  mission_control.bootstrap.preflight readiness` prints the same report. Every launch binds
+  the run to its Temporal cluster in `mission_control.run_cluster_binding` (migration 0032);
+  a launch from a service bound to another cluster is refused
+  (`run_bound_to_other_cluster`) instead of starting a second copy.
+- Release: `component/manifest.json` is rebuilt at 0032 (release 1.1.0, never installed
+  live); `deployments/*/release.lock.json` still pin the committed 1.1.0 manifest
+  (0001-0030, `0853a2c0...`) until the owner accepts the release; the live projects hold 1.0.0.
+- Per-profile status: [multi-provider release statement](qualification/release/multi-provider-2026-10.md).
+
 ## Fast-track entrypoints and configuration
 
 This section lists names only. Values come from the process environment, `mission-control/.env` or
@@ -344,8 +387,9 @@ variables (`bootstrap/settings.py`).
 | `MISSION_CONTROL_CATALOG_SCOPE` | installation catalog scope used by the projection scripts (`mc/<installation>/<app>/catalog`) |
 | `CAPABILITY_BUNDLE_BACKEND`, `CAPABILITY_BUNDLE_NAMESPACE`, `CAPABILITY_BUNDLE_LOCAL_ROOT`, `CAPABILITY_BUNDLE_PUBLISHER_TOKEN`, `CAPABILITY_BUNDLE_READER_TOKEN` | bundle custody backend (`local` or `supabase`) and its publisher or reader credentials, never the service key; the configured API does not yet expose publish routes |
 
-**Worker process** (`make worker`; Mission 3 needs WSL or Linux because `cursor_local` cannot launch
-on the Windows selector event loop):
+**Worker process** (`make worker`; `cursor_local`, `claude_agent_sdk` and `codex` need a WSL or Linux
+worker because the Windows worker runs a selector event loop that cannot spawn asyncio subprocesses;
+the readiness gate refuses them on Windows with `LANE_UNSUPPORTED_OS`):
 
 | Name | Effect |
 | --- | --- |
@@ -379,6 +423,8 @@ configured deployment until a production launch input author is composed (blocke
 | `make lane-qualify PROFILE=cursor_local\|cursor_cloud` | offline fixture, describe-honesty and replay suites; `LIVE=1` adds the paid drill (`CURSOR_API_KEY`, finite `MC_PAID_BUDGET_USD`, for cloud `MC_CURSOR_CLOUD_REPO`; optional `MC_LANE_DRILL_APPROVAL_URL`); see [lane qualification](qualification/lanes/README.md) |
 | `make skills-check` / `make skills-manifest` | fail on, or rewrite, drifted `skills/*/manifest.json` digests (LF-canonical) |
 | `make seeds-validate` | fail if a seed Capability Pin does not parse or a tools/list digest drifted |
+| `python -m mission_control.bootstrap.preflight --profile <file> readiness` | MP-22 readiness gate (`mc.local_readiness.v1`): lists every unresolved pointer of a real local run (profile, lane OS, launch bindings, auth routes, capability pins under `--workspace-root`, release lock and, with `--db-dsn-env <NAME>`, the installed release fingerprint) before any composition or paid call; exit 2 when blocked. `MISSION_CONTROL_LOCAL_RUN_PROFILE` makes `make preflight` run it first |
+| `... preflight compose-bindings`, `... preflight guard-launch` | re-seal an owner's `mc.manifest_launch_bindings.v1` from `deployments/examples/manifest-launch-bindings.deep-agents.example.json` plus a `{pointer: value}` selections file; bind a run to one Temporal cluster before its start and refuse a second copy elsewhere ([runbook 2.8–2.9](specs/fast-track-2026-10/OWNER-FIXTURE-RUNBOOK.md)) |
 | `make temporal-up`, `make temporal-search-attributes` | start the local Temporal stack and register the Search Attributes (`mc_mission_id`, `mc_run_id`, `mc_lane`, `mc_phase`, `ForkedFromRunId` among them) |
 | `scripts/rebuild_capability_search_projection.py --tenant <scope> --lexical-only` | build the capability search projection without a paid embedding batch |
 | `scripts/fast_track_dry_run.py [--with-fixture-rows]` | unpaid dry run on scratch installs (`MISSION_CONTROL_TEST_ADMIN_DSN` names the loopback admin DSN; refuses while `CAPABILITY_EMBEDDING_PROFILE` is set) |

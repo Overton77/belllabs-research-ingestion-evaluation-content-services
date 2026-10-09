@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
 from dataclasses import asdict, replace
 from datetime import timedelta
@@ -16,6 +17,10 @@ with workflow.unsafe.imports_passed_through():
         operation_workflow_search_attributes,
         phase_for_outcome,
         upsert_family_phase,
+    )
+    from mission_control.adapters.temporal.workflows.human_gate import (
+        HumanGateWorkflow,
+        HumanGateWorkflowInput,
     )
     from mission_control.adapters.temporal.workflows.operation import (
         MissionOperationWorkflow,
@@ -59,10 +64,25 @@ with workflow.unsafe.imports_passed_through():
         GoalOperationReconciliationRequest,
         GoalOperationReconciliationResult,
     )
+    from mission_control.domain.programs.human_gate import (
+        HumanGateOutcome,
+        HumanGateSpec,
+        open_activation,
+    )
+    from mission_control.domain.programs.human_review import (
+        apply_goal_review,
+        goal_review_packet,
+    )
     from mission_control.domain.programs.search_attributes import run_search_attributes
 
 
 CONTINUE_AS_NEW_ITERATIONS = 20
+# MP-10 (SPEC-03 "Explicit Human Gate"): a run whose input declares a human review opens one
+# `mc.human_gate.v1` control activation on its verified completion before terminalization.
+# `request_changes` continues the loop with the feedback for the next executor (same goal
+# revision, acceptance contract, obligations and counters); a rejection fails the run. Runs
+# without a declared review never reach the patch.
+GOAL_HUMAN_REVIEW_PATCH = "mp10-goal-human-review"
 # RRM-007 (REQ-BP-GD-011): a policy-selected pause becomes a durable paused state instead of
 # the non-retryable `goal_paused` failure. Histories recorded before the patch replay the
 # failure unchanged.
@@ -161,6 +181,9 @@ class GoalDirectedWorkflow:
         self._cancel_acks: dict[str, CancelAck] = {}
         self._cancel_command: tuple[str, str] | None = None
         self._liability_hints = 0
+        # MP-10: review rounds used and feedback the next executor must address.
+        self._review_rounds = 0
+        self._pending_feedback: tuple[HumanGateOutcome, ...] = ()
 
     @workflow.signal
     def request_cancel(self) -> None:
@@ -278,6 +301,11 @@ class GoalDirectedWorkflow:
         )
         # RRM-008 (REQ-CP-EXEC-011): a cancel delivered before Continue-As-New stays delivered.
         self._cancel_requested = self._cancel_requested or run_input.cancel_requested
+        self._review_rounds = run_input.human_review_round
+        self._pending_feedback = tuple(
+            item if isinstance(item, HumanGateOutcome) else HumanGateOutcome.model_validate(item)
+            for item in run_input.human_review_feedback
+        )
         interpreter = GoalDirectedInterpreter(blueprint)
         ensure_workflow_search_attributes(
             run_input.search_attribute_policy,
@@ -404,7 +432,9 @@ class GoalDirectedWorkflow:
                     (),
                     timeout,
                     claim,
+                    review_feedback=self._pending_feedback,
                 )
+                self._pending_feedback = ()
                 run_version = executor_dispatch.resulting_run_version
                 family_version = executor_dispatch.resulting_family_version
                 executor_result = await self._execute_operation(
@@ -549,6 +579,9 @@ class GoalDirectedWorkflow:
                         run_input, state, run_version, boundary_ref, timeout, blueprint
                     )
                     continue
+
+                if self._human_review_due(run_input, state):
+                    state = await self._human_review(run_input, blueprint, state, timeout)
 
                 if (
                     state.status == "ready"
@@ -1012,7 +1045,7 @@ class GoalDirectedWorkflow:
         run_version: int,
         family_version: int,
     ) -> GoalDirectedRunInput:
-        return replace(
+        continued = replace(
             run_input,
             cancel_requested=self._cancel_requested,
             initial_revision=state.active_revision,
@@ -1029,6 +1062,87 @@ class GoalDirectedWorkflow:
                 sorted(_join_key(key) for key in self._applied_command_ids)
             ),
             last_delivered_sequence=self._last_delivered_sequence,
+        )
+        if run_input.human_review is None:
+            return continued
+        return replace(
+            continued,
+            human_review_round=self._review_rounds,
+            human_review_feedback=self._pending_feedback,
+        )
+
+    def _human_review_due(
+        self, run_input: GoalDirectedRunInput, state: GoalDirectedExecutionState
+    ) -> bool:
+        proposal = state.terminalization_proposal
+        return (
+            run_input.human_review is not None
+            and state.status == "stopping"
+            and proposal is not None
+            and proposal.proposed_outcome == "complete"
+            and not self._cancel_requested
+            and workflow.patched(GOAL_HUMAN_REVIEW_PATCH)
+        )
+
+    async def _human_review(
+        self,
+        run_input: GoalDirectedRunInput,
+        blueprint: GoalDirectedBlueprint,
+        state: GoalDirectedExecutionState,
+        activity_timeout: timedelta,
+    ) -> GoalDirectedExecutionState:
+        """MP-10: wait durably on one review activation; apply its bound outcome."""
+
+        review = run_input.human_review
+        assert review is not None
+        spec = review if isinstance(review, HumanGateSpec) else HumanGateSpec.model_validate(review)
+        convergence = state.convergence_proposal
+        assert convergence is not None
+        if convergence.source_iteration.goal_iteration >= blueprint.max_iterations:
+            # No iteration is left to remediate in: the reviewer is not offered changes.
+            spec = spec.model_copy(update={"remediation_target": None})
+        self._review_rounds += 1
+        activation = open_activation(
+            request_scope=run_input.request_scope,
+            run_id=run_input.run_id,
+            family="GoalDirected",
+            activation_key=(
+                f"goal:epoch:{run_input.execution_epoch}:"
+                f"iteration:{convergence.source_iteration.goal_iteration}"
+            ),
+            execution_epoch=run_input.execution_epoch,
+            review_round=min(self._review_rounds, spec.max_review_rounds),
+            spec=spec,
+            packet=goal_review_packet(state),
+            opened_at=workflow.now(),
+        )
+        handle = await workflow.start_child_workflow(
+            HumanGateWorkflow.run,
+            HumanGateWorkflowInput(
+                activation=activation,
+                poll_seconds=run_input.human_gate_poll_seconds,
+                activity_timeout_seconds=min(run_input.task_timeout_seconds, 60),
+            ),
+            id=activation.workflow_id,
+            parent_close_policy=workflow.ParentClosePolicy.REQUEST_CANCEL,
+        )
+        waiting = asyncio.ensure_future(handle)
+        await workflow.wait_condition(lambda: waiting.done() or self._cancel_requested)
+        if not waiting.done():
+            # A delivered cancel: the activation cancels its open task; the family's
+            # cancellation saga then runs from the unchanged (verified) state.
+            handle.cancel()
+            with contextlib.suppress(ChildWorkflowError, asyncio.CancelledError):
+                await waiting
+            return state
+        outcome: HumanGateOutcome = waiting.result()
+        if outcome.status == "changes_requested":
+            self._pending_feedback = (outcome,)
+        return apply_goal_review(
+            state,
+            outcome,
+            max_iterations=blueprint.max_iterations,
+            fresh_workspace_per_iteration=blueprint.workspace_policy.workspace_mode != "shared",
         )
 
     async def _execute_operation(
@@ -1443,6 +1557,7 @@ class GoalDirectedWorkflow:
         activity_timeout: timedelta,
         claim: GoalExecutionClaim,
         admission_attempt: int = 1,
+        review_feedback: tuple[HumanGateOutcome, ...] = (),
     ) -> GoalOperationDispatch:
         activity_name = (
             "goaldirected.prepare_executor"
@@ -1469,6 +1584,7 @@ class GoalDirectedWorkflow:
                 activity_timeout,
                 claim,
                 admission_attempt,
+                review_feedback,
             )
         except ActivityError as error:
             stale = _admission_stale(error)
@@ -1498,6 +1614,7 @@ class GoalDirectedWorkflow:
                 activity_timeout,
                 claim,
                 admission_attempt=2,
+                review_feedback=review_feedback,
             )
 
     async def _prepare_activity(
@@ -1520,6 +1637,7 @@ class GoalDirectedWorkflow:
         activity_timeout: timedelta,
         claim: GoalExecutionClaim,
         admission_attempt: int,
+        review_feedback: tuple[HumanGateOutcome, ...] = (),
     ) -> GoalOperationDispatch:
         return await workflow.execute_activity(
             activity_name,
@@ -1550,6 +1668,7 @@ class GoalDirectedWorkflow:
                 agent_run=claim.identity.agent_run,
                 session_generation=claim.identity.session_generation,
                 admission_attempt=admission_attempt,
+                review_feedback=review_feedback,
             ),
             result_type=GoalOperationDispatch,
             start_to_close_timeout=activity_timeout,

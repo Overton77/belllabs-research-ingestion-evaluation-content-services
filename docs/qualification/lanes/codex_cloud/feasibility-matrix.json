@@ -1,0 +1,224 @@
+{
+  "profile": "codex_cloud",
+  "product": "OpenAI Codex Cloud (provider-hosted cloud tasks from published cloud environments); automation entry `codex cloud` CLI (Experimental) plus `codex apply` (Stable)",
+  "checked_at": "2026-10-08",
+  "cli_version": "0.162.0 (source tag rust-v0.162.0, released 2026-10-08T18:55:59Z; main HEAD 22ebb0fb178f at check time); docs pages state no version",
+  "evidence_kind": "documentation_and_source_only",
+  "live_drill": false,
+  "auth_mode_common": "ChatGPT account sign-in via `codex login` (OAuth or device code). API-key auth is rejected for cloud (`auth.uses_codex_backend()` check). Requests carry ChatGPT bearer token and ChatGPT-Account-Id header.",
+  "backend_note": "CLI calls private routes under https://chatgpt.com/backend-api/wham/* (tasks, tasks/list, tasks/{id}, tasks/{id}/turns/{turn}/sibling_turns, environments, environments/by-repo/...). Not a documented public API; direct use is non-qualifying.",
+  "non_qualifying_surfaces": [
+    "local codex / codex exec / codex resume",
+    "codex app-server JSON-RPC, --remote, remote-control (MP-08)",
+    "@openai/codex-sdk and openai-codex Python SDK (local)",
+    "OpenAI Agents API POST /v1/agents/sessions, Responses API, Agents SDK (distinct product)",
+    "ChatGPT web/desktop/mobile UI and Slack/Teams delegation",
+    "desktop app internal task tools, browser automation, scraped cookies",
+    "direct calls to chatgpt.com/backend-api/wham/*"
+  ],
+  "features": {
+    "launch": {
+      "disposition": "documented_partial",
+      "source": [
+        "https://developers.openai.com/codex/cli/reference",
+        "https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/cloud-tasks/src/cli.rs",
+        "https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/cloud-tasks/src/lib.rs",
+        "https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/cloud-tasks-client/src/http.rs"
+      ],
+      "invocation": "codex cloud exec --env ENV_ID [--attempts 1-4] [QUERY] (documented); --branch BRANCH and stdin query source-only. Request body {new_task:{environment_id,branch,run_environment_in_qa_mode:false},input_items:[message],metadata:{best_of_n}?}; source-only CODEX_STARTING_DIFF adds pre_apply_patch item. Stdout: task URL only.",
+      "auth_mode": "ChatGPT sign-in only",
+      "native_ids": ["task_id (parsed from https://chatgpt.com/codex/tasks/{task_id})", "environment_id"],
+      "idempotency": "none; no client request/idempotency key; retry after ambiguous failure may duplicate; readback only by scanning list",
+      "failure_retention": "exits non-zero on submission failure; unstructured error text; command labeled Experimental",
+      "observed": "not observed (no live drill)",
+      "qualified": false
+    },
+    "inspect_status": {
+      "disposition": "documented_partial",
+      "source": [
+        "https://developers.openai.com/codex/cli/reference",
+        "https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/cloud-tasks/src/lib.rs",
+        "https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/cloud-tasks-client/src/api.rs",
+        "https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/cloud-tasks-client/src/http.rs"
+      ],
+      "invocation": "codex cloud list [--env ENV_ID] [--limit 1-20] [--cursor C] --json -> {tasks:[{id,url,title,status,updated_at,environment_id,environment_label,summary,is_review,attempt_total}],cursor?} (documented); codex cloud status TASK_ID (source-only, plain text, exit 1 unless ready)",
+      "auth_mode": "ChatGPT sign-in only",
+      "native_ids": ["task_id", "environment_id", "list cursor"],
+      "idempotency": "read-only",
+      "failure_retention": "lossy status enum pending|ready|applied|error; backend cancelled and failed both map to error, in_progress maps to pending; task record retention undocumented",
+      "observed": "not observed (no live drill)",
+      "qualified": false
+    },
+    "observe_replay": {
+      "disposition": "undocumented",
+      "source": [
+        "https://developers.openai.com/codex/cli/reference",
+        "https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/cloud-tasks-client/src/http.rs"
+      ],
+      "invocation": "none; polling list/status only. Assistant messages fetched only by interactive TUI from private GET /wham/tasks/{id}; no event stream, log, tool-call or setup-log retrieval",
+      "auth_mode": "ChatGPT sign-in only",
+      "native_ids": [],
+      "idempotency": "n/a",
+      "failure_retention": "no cursor/offset; no replay after disconnect",
+      "observed": "not observed (no live drill)",
+      "qualified": false
+    },
+    "follow_up": {
+      "disposition": "undocumented",
+      "source": [
+        "https://developers.openai.com/codex/cloud",
+        "https://learn.chatgpt.com/docs/environments/cloud-environments",
+        "https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/backend-client/src/client.rs"
+      ],
+      "invocation": "UI only (web/mobile/desktop 'request follow-ups'; Slack/Teams same-account follow-up). No CLI subcommand or backend client method",
+      "auth_mode": "n/a (no automatable surface)",
+      "native_ids": [],
+      "idempotency": "n/a",
+      "failure_retention": "existing task keeps its saved files; saved VM state recoverable up to 7 days after last turn or resume",
+      "observed": "not observed (no live drill)",
+      "qualified": false
+    },
+    "cancel_interrupt": {
+      "disposition": "undocumented",
+      "source": [
+        "https://developers.openai.com/codex/cli/reference",
+        "https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/cloud-tasks-client/src/api.rs",
+        "https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/backend-client/src/client.rs"
+      ],
+      "invocation": "none; AttemptStatus::Cancelled exists only as a read-only status value",
+      "auth_mode": "n/a (no automatable surface)",
+      "native_ids": [],
+      "idempotency": "n/a",
+      "failure_retention": "cancelled surfaces as error in list/status",
+      "observed": "not observed (no live drill)",
+      "qualified": false
+    },
+    "usage": {
+      "disposition": "undocumented",
+      "source": [
+        "https://developers.openai.com/codex/cli/reference",
+        "https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/backend-client/src/client.rs"
+      ],
+      "invocation": "none per task; account-level rate-limit/profile routes exist only privately in backend client, not exposed by codex cloud",
+      "auth_mode": "n/a (no automatable surface)",
+      "native_ids": [],
+      "idempotency": "n/a",
+      "failure_retention": "no per-task cost attribution",
+      "observed": "not observed (no live drill)",
+      "qualified": false
+    },
+    "output_artifact_custody": {
+      "disposition": "documented_partial",
+      "source": [
+        "https://developers.openai.com/codex/cli/reference",
+        "https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/cloud-tasks/src/cli.rs",
+        "https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/cloud-tasks-client/src/http.rs"
+      ],
+      "invocation": "codex apply TASK_ID (documented, Stable; git apply, non-zero on conflict); codex cloud diff TASK_ID [--attempt N] and codex cloud apply TASK_ID [--attempt N] source-only; PR/commit/branch push UI-only",
+      "auth_mode": "ChatGPT sign-in only",
+      "native_ids": ["task_id", "attempt placement 1-4", "turn_id"],
+      "idempotency": "diff fetch read-only; apply local with preflight",
+      "failure_retention": "unified diff is the only retrievable artifact; no PR URL, branch or commit SHA returned",
+      "observed": "not observed (no live drill)",
+      "qualified": false
+    },
+    "environment_selection": {
+      "disposition": "documented_partial",
+      "source": [
+        "https://developers.openai.com/codex/cli/reference",
+        "https://learn.chatgpt.com/docs/environments/cloud-environments",
+        "https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/cloud-tasks/src/lib.rs",
+        "https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/cloud-tasks/src/env_detect.rs"
+      ],
+      "invocation": "--env ENV_ID on exec/list (documented; unique label also accepted in source); listing only via interactive `codex cloud` picker; create/edit/publish/republish/share UI-only",
+      "auth_mode": "ChatGPT sign-in only",
+      "native_ids": ["environment_id", "environment_label"],
+      "idempotency": "n/a",
+      "failure_retention": "no environment revision/publish id/setup digest exposed; republish affects new tasks only",
+      "observed": "not observed (no live drill)",
+      "qualified": false
+    },
+    "configuration_materialization": {
+      "disposition": "documented_partial",
+      "source": [
+        "https://learn.chatgpt.com/docs/environments/cloud-environments",
+        "https://developers.openai.com/codex/hooks",
+        "https://learn.chatgpt.com/docs/extend/mcp",
+        "https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/cloud-tasks/src/cli.rs"
+      ],
+      "invocation": "environment-level UI config only: repositories, install script, start skill, env vars, network secrets, internet allowlist, VPN, OIDC; repo AGENTS.md and repo skills read from checkout; personal skills not synced; local MCP may be unavailable in cloud; only admin-managed MCP hooks on cloud orchestrator (Work Cloud wording), command/local/plugin hooks unsupported; no per-task overrides on exec",
+      "auth_mode": "n/a for configuration (UI); ChatGPT sign-in for launch",
+      "native_ids": [],
+      "idempotency": "n/a",
+      "failure_retention": "only per-task injection is branch and source-only CODEX_STARTING_DIFF patch; applicability of Work Cloud hook rule to Codex Cloud tasks is ambiguous",
+      "observed": "not observed (no live drill)",
+      "qualified": false
+    },
+    "approval_suspension_resume": {
+      "disposition": "undocumented",
+      "source": [
+        "https://developers.openai.com/codex/cloud",
+        "https://learn.chatgpt.com/docs/environments/cloud-environments",
+        "https://learn.chatgpt.com/docs/sandboxing/auto-review"
+      ],
+      "invocation": "none programmatic; UI permission control (Do anything / Approve for me) and UI/Slack prompts only; exec has no approval-policy flag",
+      "auth_mode": "n/a (no automatable surface)",
+      "native_ids": [],
+      "idempotency": "n/a",
+      "failure_retention": "a paused hosted task cannot be answered or resumed by automation",
+      "observed": "not observed (no live drill)",
+      "qualified": false
+    },
+    "subordinate_lineage": {
+      "disposition": "undocumented",
+      "source": [
+        "https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/cloud-tasks-client/src/api.rs",
+        "https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/cloud-tasks-client/src/http.rs"
+      ],
+      "invocation": "none for subagents; best-of-N only: attempt_total in list JSON (documented), sibling_turn_ids and sibling_turns route TUI/source only",
+      "auth_mode": "ChatGPT sign-in only",
+      "native_ids": ["sibling turn_id (source only)"],
+      "idempotency": "n/a",
+      "failure_retention": "best-of-N siblings are not subagents",
+      "observed": "not observed (no live drill)",
+      "qualified": false
+    },
+    "bounded_continuation_compaction": {
+      "disposition": "undocumented",
+      "source": [
+        "https://learn.chatgpt.com/docs/environments/cloud-environments",
+        "https://developers.openai.com/codex/app-server"
+      ],
+      "invocation": "none hosted; thread/compact/start is local app-server only; continuation only via UI follow-up or new task",
+      "auth_mode": "n/a (no automatable surface)",
+      "native_ids": [],
+      "idempotency": "n/a",
+      "failure_retention": "saved VM state up to 7 days after last turn/resume; context-window behavior undocumented",
+      "observed": "not observed (no live drill)",
+      "qualified": false
+    }
+  },
+  "disposition_counts": {
+    "documented_native": 0,
+    "documented_partial": 5,
+    "undocumented": 7,
+    "explicitly_unsupported": 0
+  },
+  "outcome": "3",
+  "missing_operations": [
+    "public stable task API or non-experimental CLI contract with documented JSON schema, usable with a server-side credential",
+    "idempotent task create (client request/idempotency key or lookup by client reference)",
+    "structured launch result with task_id, environment revision, resolved branch and commit",
+    "follow-up: send a new turn to an existing hosted task, returning a turn id",
+    "cancel/interrupt the active turn with a distinct terminal cancelled state",
+    "resumable event stream or paged log (turn/item/tool/command output) with documented retention",
+    "fine-grained per-turn status including setting_up, awaiting_input, cancelled",
+    "list and answer pending approval/input requests programmatically; per-task approval-policy selector",
+    "per-task/turn usage",
+    "artifact custody: PR URL, branch, commit SHA retrieval and programmatic PR/branch push",
+    "non-interactive environment listing with revision/publish id or setup digest",
+    "per-task configuration overrides (model, instructions/AGENTS.md, MCP, hooks, network) or attestation of loaded config",
+    "subagent/child-task lineage ids and events",
+    "context usage read, compaction trigger or explicit rollover"
+  ]
+}

@@ -26,7 +26,9 @@ agent options and never in a bridge environment (`bridge.py`).
 **`cursor_local`** (`local.py::CursorLocalHarness`). `prepare` leases a detached git worktree
 at the binding's base ref, or an initialized repository with one empty commit for research
 missions (`workspace.py`, `application/execution/harness/leases.py`; leases persist in
-`mission_control.workspace_lease`, `adapters/postgres/lanes/workspace_leases.py`), places the
+`mission_control.workspace_lease`, `adapters/postgres/lanes/workspace_leases.py`; since MP-04
+`GitWorktreeLeaser` delegates to the provider-neutral `WorkspaceAllocator` in
+`application/workspaces/`), places the
 Host Projection and the Context Packet (`projection.py`: `AGENTS.md`,
 `.cursor/rules/mc-mission.mdc`, `.cursor/skills`, `.cursor/agents`, `.cursor/mcp.json`,
 `.cursor/hooks.json` with Kernel Hooks first, plus `.mission/` and `inputs/`), and refuses
@@ -85,8 +87,12 @@ and writes the qualification record is owner-run and has not run
   Windows sandbox is unverified and refused.
 - Fork restore works for `cursor_local` only. `cursor_cloud` expects a
   `branch:<branch>@<sha>` ref that nothing records yet.
-- A live run needs the production author of lane execution templates (blocker B1 in
-  [authoring](authoring.md)).
+- The production launch author binds `deep_agents` only, so a manifest node on a Cursor lane
+  fails at its pointer ([mission manifest](mission-manifest.md)).
+- Neither harness implements `DispatchReconcilingLane`, so an ambiguous send parks `in_doubt`
+  rather than being reconciled ([session ownership and dispatch](session-ownership-and-dispatch.md)).
+  `cursor_cloud` is not rewired onto `WorkspaceAllocator.allocate_provider_workspace`. MP-09
+  (parity) is in flight and not integrated.
 - Several SDK and API behaviors are `UNVERIFIED` until the drill (cloud idempotency window,
   concurrent local `send()`, rules without `setting_sources`, `run.git`, stream retention).
 
@@ -94,7 +100,7 @@ and writes the qualification record is owner-run and has not run
 
 Real recordings that replace the synthetic fixtures, the flip of `qualified` through a
 reviewed release (SPEC-07 section 12), and Windows sandbox qualification. The Claude Agent
-SDK and Codex profiles have no harness.
+SDK and Codex profiles have no harness on the integrated base ([lanes and harness](lanes-and-harness.md)).
 
 # Citations
 

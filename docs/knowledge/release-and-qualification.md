@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: Release gates and proof status
-description: The four proof statuses, the G0 to G7 release gates, the C0 to C4 compute profiles and ProofBudget, what is live today against the still-not-done list, and the 2026-10-08 fast-track position - release 1.1.0 and the Cursor lane qualification, both proven only on disposable infrastructure, with no live mission run.
+description: The four proof statuses, the G0 to G7 release gates, the C0 to C4 compute profiles and ProofBudget, what is live today against the still-not-done list, the 2026-10-08 fast-track position - release 1.1.0 and the Cursor lane qualification, both proven only on disposable infrastructure, with no live mission run - and the 2026-10-09 multi-provider position per lane profile.
 tags: [mission-control, release, qualification, gates, compute, evidence]
 ---
 
@@ -97,6 +97,21 @@ The fast-track packet is implemented and merged to `main` at `f8d325a`. Its evid
 
 The evidence by spec is in `docs/MISSION_CONTROL_IMPLEMENTATION_STATUS.md` (fast-track section).
 
+## Multi-provider position (2026-10-09)
+
+The multi-provider packet (`docs/specs/multi-provider-2026-10/`) has waves 0 to 2 integrated as an
+uncommitted working state on `7c9b755`; wave 3 is in flight and not integrated. The per-profile
+statement follows VALIDATION.md and is published as the
+[release statement](../qualification/release/multi-provider-2026-10.md); a summary table is in
+[qualification](qualification.md). In short: a local `deep_agents` baseline (production launch,
+chains, Human Gates) is proven with deterministic cognition on disposable PostgreSQL 17 and local
+Temporal, but is not account-qualified; Cursor stays unqualified (drill unrun); Claude Agent SDK
+and Codex have no harness on the base; `claude_cloud` and `codex_cloud` are Outcome 3, so hosted
+parity (MP-21) is blocked and the packet must not be called all-provider complete. Release 1.1.0
+now carries 0031 and 0032 (fingerprint `sha256:672549cd...`), unlocked and not applied live
+([persistence](persistence.md)). B1 and B7 are closed in code (the production launch author and
+the public aliases) but B1 still needs the owner's bindings file.
+
 ## A self-contradiction in the status document
 
 The header of the status document states the release is installed live in both
@@ -117,6 +132,8 @@ not edit the status document.
   [0003](../adr/0003-common-sql-owned-by-db-contract-package.md).
 - Status and evidence: `docs/MISSION_CONTROL_IMPLEMENTATION_STATUS.md`;
   [lane qualification](../qualification/lanes/README.md);
+  [multi-provider release statement](../qualification/release/multi-provider-2026-10.md);
+  [multi-provider VALIDATION](../specs/multi-provider-2026-10/VALIDATION.md);
   [owner runbook](../specs/fast-track-2026-10/OWNER-FIXTURE-RUNBOOK.md);
   `docs/qualification/two-project/LIVE_PLAN.md`;
   `docs/qualification/two-project/comparison-20261003-live-r1.json`;
