@@ -242,7 +242,7 @@ def test_live_settings_pin_workspace_npx_and_bundled_node(
     npx = Path(settings.npx_skills_executable).resolve()
 
     assert node == Path(sys.base_prefix).resolve().parent / "node" / "bin" / "node.exe"
-    assert npx == ROOT.parent / ".tools" / "node_modules" / ".bin" / "npx.CMD"
+    assert npx == (ROOT.parent / ".tools" / "node_modules" / ".bin" / "npx.CMD").resolve()
     assert (settings.npx_skills_package_version) == "1.5.20"
     assert settings.external_discovery_request_timeout_seconds == 30.0
     assert settings.external_discovery_command_timeout_seconds == 60.0
