@@ -16,9 +16,9 @@ qualification READMEs and the declared describe matrices in
 replaces pass 1 (2026-10-09), whose wave-3 "in flight" statements are now historical. The
 session handoff is [HANDOFF-2026-10-10](../../specs/multi-provider-2026-10/HANDOFF-2026-10-10.md).
 
-**Working state.** Everything below is an uncommitted working tree on the local branch
-`mp/integration-recovery-2026-10-09` (cut from `efa55f9`) in the canonical checkout. Nothing is
-committed, pushed, deployed, locked or applied to a live database; no provider login, paid or
+**Working state.** Everything below was integrated on `mp/integration-recovery-2026-10-09` (cut
+from `efa55f9`), committed as `ca67a2d` and merged into `main` on 2026-10-10 with owner
+authorization. Nothing is deployed, locked or applied to a live database; no provider login, paid or
 account-bound call was made. This document grants no deployment, migration or paid-provider
 authorization.
 
@@ -167,8 +167,7 @@ The requirement is retained, not removed or substituted.
 7. **CRLF versus LF** for `skills-lock.json` and the seeds (ledger 2026-10-08; not resolved since).
 8. **Linear.** Post evidence comments and states for OVE-63 to OVE-86 from the ledger and this
    statement; no Claude Code session updated Linear.
-9. **Decisions.** ADR-0035 to ADR-0041 remain `proposed`; commit authorization for the integration
-   branch.
+9. **Decisions.** ADR-0035 to ADR-0041 remain `proposed`.
 
 Code follow-ups that do not need the owner are listed in the
 [handoff](../../specs/multi-provider-2026-10/HANDOFF-2026-10-10.md#remaining-work).
@@ -207,7 +206,7 @@ recorded below.
 ## Final validation run (integrator)
 
 Run on 2026-10-10 against the final working tree of `mp/integration-recovery-2026-10-09`
-(uncommitted), on Windows with Docker Desktop: disposable PostgreSQL 17 on 55433 and `mcdb-a`/`mcdb-b`,
+(committed afterwards as `ca67a2d`), on Windows with Docker Desktop: disposable PostgreSQL 17 on 55433 and `mcdb-a`/`mcdb-b`,
 Temporal on 7233, Redis. The owner database on 55432 was not used. Logs are under
 `.scratch/multi-provider-2026-10-08/recovery-logs/` (not committed).
 
